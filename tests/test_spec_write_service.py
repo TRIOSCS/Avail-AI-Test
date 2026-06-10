@@ -431,3 +431,116 @@ def test_record_spec_card_no_category_skips(db_session: Session):
     # No specs_structured should be set
     db_session.refresh(card)
     assert not card.specs_structured
+
+
+# --- Losing writes never mutate the existing (ORM-aliased) JSONB entry ---
+
+
+def test_losing_write_never_mutates_existing_jsonb_entry(db_session: Session):
+    # The legacy-tier backfill for the ladder comparison happens on a COPY: a losing
+    # write must leave the in-memory specs_structured byte-identical to the DB (no
+    # hidden "tier" key materializing through the shallow-copy alias).
+    card = _make_card(db_session)
+    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    legacy = {
+        "value": "DDR4",
+        "source": "mpn_decode",
+        "confidence": 0.95,
+        "updated_at": "2026-01-01T00:00:00+00:00",
+    }
+    card.specs_structured = {"ddr_type": dict(legacy)}
+    db_session.flush()
+
+    wrote = record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.99)
+    assert wrote is False
+    assert card.specs_structured["ddr_type"] == legacy  # no side-effect 'tier' key
+
+
+# --- spec_would_write: the read-only dry-run twin ---
+
+
+def test_spec_would_write_mirrors_record_spec_gates(db_session: Session):
+    from app.services.spec_write_service import spec_would_write
+
+    card = _make_card(db_session)
+    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95)
+    existing = card.specs_structured
+
+    # No category → False (record_spec would skip).
+    assert (
+        spec_would_write(
+            db_session,
+            category=None,
+            existing_specs={},
+            spec_key="ddr_type",
+            value="DDR5",
+            source="trio_source",
+            confidence=1.0,
+        )
+        is False
+    )
+    # No schema for the key → False.
+    assert (
+        spec_would_write(
+            db_session,
+            category="dram",
+            existing_specs={},
+            spec_key="no_such_key",
+            value=1,
+            source="trio_source",
+            confidence=1.0,
+        )
+        is False
+    )
+    # Enum mismatch → False.
+    assert (
+        spec_would_write(
+            db_session,
+            category="dram",
+            existing_specs={},
+            spec_key="ddr_type",
+            value="DDR9",
+            source="trio_source",
+            confidence=1.0,
+        )
+        is False
+    )
+    # Ladder loss (60 vs existing 85) → False; ladder win (95) → True.
+    assert (
+        spec_would_write(
+            db_session,
+            category="dram",
+            existing_specs=existing,
+            spec_key="ddr_type",
+            value="DDR3",
+            source="spec_extraction",
+            confidence=0.99,
+        )
+        is False
+    )
+    assert (
+        spec_would_write(
+            db_session,
+            category="dram",
+            existing_specs=existing,
+            spec_key="ddr_type",
+            value="DDR5",
+            source="trio_source",
+            confidence=1.0,
+        )
+        is True
+    )
+    # Read-only: nothing was written by any of the calls above.
+    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
+
+
+def test_record_spec_clamps_out_of_range_confidence(db_session: Session):
+    # A percent-style confidence (95) must never be persisted: it would dominate every
+    # same-tier comparison forever. Clamped to 1.0 at the boundary.
+    card = _make_card(db_session)
+    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=95) is True
+    assert card.specs_structured["ddr_type"]["confidence"] == 1.0
+    facet = db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="ddr_type").first()
+    assert facet.confidence == 1.0

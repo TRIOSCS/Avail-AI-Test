@@ -3,7 +3,7 @@
 What: ``parse_inventory_sheet`` handles the operational inventory exports (Inventory 2.12.26 /
       Firesale / Foxconn) across .csv, .xlsx (streamed via openpyxl read-only) and the staged
       tab-delimited .txt captures — detecting the header row and the per-sheet column names.
-      ``parse_sfdc_material_master`` STREAMS the ~620 MB SFDC ``LSC1__Material__c`` CSV row by
+      ``parse_sfdc_material_master`` STREAMS the multi-hundred-MB SFDC ``LSC1__Material__c`` CSV row by
       row (never loads the whole file), mapping the load-bearing columns + deep technical facets.
 Called by: app/management/ingest_source_data.py (the parse stage). Both functions are
       generators — the CLI feeds their output through clean.py then consolidate.py.
@@ -185,6 +185,24 @@ def _iter_delimited_rows(path: Path) -> Iterator[list[str]]:
             yield [c.strip() for c in cells]
 
 
+def _xlsx_cell_to_str(c) -> str:
+    """Coerce an openpyxl cell value to its text form for the row pipeline.
+
+    openpyxl returns numeric cells as int/float; a float-typed Part Number cell would
+    str() to "5052089.0", whose dedup key (normalize_mpn_key strips the dot, KEEPING the
+    trailing zero → "50520890") would silently fail to merge with the SFDC master's
+    string MPN. Integral floats are therefore coerced through int() first. KNOWN
+    LIMITATION (inherent to the source, not fixable here): a number-typed Excel cell has
+    already lost its leading zeros inside the workbook ("005052089" stored as the number
+    5052089) — only text-formatted MPN cells preserve them.
+    """
+    if c is None:
+        return ""
+    if isinstance(c, float) and c.is_integer():
+        return str(int(c))
+    return str(c)
+
+
 def _iter_xlsx_rows(path: Path) -> Iterator[list[str]]:
     """Yield rows from an .xlsx via openpyxl read-only (streaming, never loads whole
     book)."""
@@ -194,7 +212,7 @@ def _iter_xlsx_rows(path: Path) -> Iterator[list[str]]:
     try:
         ws = wb.active
         for row in ws.iter_rows(values_only=True):
-            yield ["" if c is None else str(c) for c in row]
+            yield [_xlsx_cell_to_str(c) for c in row]
     finally:
         wb.close()
 
@@ -273,7 +291,7 @@ def parse_sfdc_material_master(
 ) -> Iterator[SourceRecord]:
     """STREAM the SFDC ``LSC1__Material__c`` CSV part-master into raw SourceRecords.
 
-    Uses csv.DictReader so the ~620 MB file is read row-by-row (never wholly in memory).
+    Uses csv.DictReader so the multi-hundred-MB file is read row-by-row (never wholly in memory).
     Maps MPN/OEM/description/category per CATALOG.md, emits only the non-empty deep facets,
     and skips rows whose ``IsDeleted`` is truthy. *manufacturer_lookup* (from
     parse_sfdc_manufacturers) resolves the ``LSC1__Manufacturer_Brand__c`` lookup IDs —

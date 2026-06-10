@@ -54,14 +54,29 @@ def test_consolidate_modal_manufacturer():
 def test_consolidate_most_common_condition_and_qty_sum():
     parts = consolidate(
         [
-            _rec(condition="Pull", quantity=10),
-            _rec(condition="Pull", quantity=5),
+            _rec(condition="Pulled", quantity=10),
+            _rec(condition="Pulled", quantity=5),
             _rec(condition="New", quantity=2),
         ]
     )
-    assert parts[0].condition == "Pull"  # most common
+    assert parts[0].condition == "Pulled"  # most common
     assert parts[0].quantity == 17  # summed
     assert parts[0].field_sources["quantity"] == "merged_sum"
+
+
+def test_sfdc_master_without_condition_never_outvotes_real_sheet_condition():
+    # The SFDC part master NEVER carries a condition (it is per-unit, not on the master) —
+    # clean_record leaves it None, so the master contributes NO vote and the inventory
+    # sheet's single real condition wins. A synthetic "Unknown" from the master would
+    # otherwise win the modal tie-break via sfdc_master priority and discard the real value.
+    parts = consolidate(
+        [
+            _rec(condition=None, kind=SOURCE_KIND_SFDC_MASTER),
+            _rec(condition="Pulled", kind=SOURCE_KIND_INVENTORY_SHEET),
+        ]
+    )
+    assert parts[0].condition == "Pulled"
+    assert parts[0].field_sources["condition"] == SOURCE_KIND_INVENTORY_SHEET
 
 
 def test_consolidate_first_canonical_category():
@@ -91,3 +106,22 @@ def test_consolidate_manufacturer_tiebreak_prefers_master():
         ]
     )
     assert parts[0].manufacturer == "Seagate"
+
+
+def test_consolidate_warns_and_counts_uncleaned_records():
+    # A record with an empty normalized_mpn bypassed clean_record (pipeline wiring bug:
+    # parse → consolidate directly). It must be skipped WITH a WARNING, never silently.
+    from loguru import logger as loguru_logger
+
+    raw = SourceRecord(raw_mpn="ST4000NM0035")  # parser-shaped: normalized_mpn == ""
+    cleaned = _rec()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        parts = consolidate([raw, cleaned])
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert len(parts) == 1  # the un-cleaned record never becomes a part
+    assert any("bypassed clean_record" in w for w in warnings), warnings

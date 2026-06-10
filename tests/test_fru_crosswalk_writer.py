@@ -175,14 +175,13 @@ def test_ladder_skips_higher_tier_prior_overwrites_lower(db_session: Session):
 
     assert stats["written"] == 2  # form_factor overwritten + usage_class fresh; capacity skipped
     specs = card.specs_structured
-    # The mpn_decode prior survives untouched, except record_spec's in-memory legacy
-    # backfill stamps the tier it derived from the source (85) onto the entry.
+    # The mpn_decode prior survives COMPLETELY untouched: record_spec backfills the legacy
+    # tier on a COPY for the comparison and never mutates a losing entry in place.
     assert specs["capacity_gb"] == {
         "value": 8000,
         "source": "mpn_decode",
         "confidence": 0.95,
         "updated_at": "x",
-        "tier": 85,
     }
     assert specs["form_factor"]["value"] == '3.5"'
     assert specs["form_factor"]["source"] == FRU_DECODE_SOURCE

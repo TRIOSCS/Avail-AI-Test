@@ -174,11 +174,15 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
     # Update card fields
     if not card.manufacturer:
         card.manufacturer = manufacturer
-    if enrichment.get("category") and not card.category:
-        from app.services.category_normalizer import normalize_category
+    if enrichment.get("category"):
+        from app.services.spec_tiers import set_category
 
-        raw_cat = enrichment["category"]
-        card.category = normalize_category(raw_cat) or raw_cat
+        # Through the F1 ladder (connector name → its registered *_api ladder source,
+        # tier 90; brokerbin is registered as-is at 65): fills an empty category and may
+        # correct a lower-tier one (decode 85, AI guess 40), but never overwrites a
+        # higher-tier value and never persists off-vocab junk.
+        ladder_source = source_name if source_name == "brokerbin" else f"{source_name}_api"
+        set_category(card, enrichment["category"], ladder_source, confidence)
 
     # Classify and tag
     result = classify_material_card(card.normalized_mpn, manufacturer, card.category)

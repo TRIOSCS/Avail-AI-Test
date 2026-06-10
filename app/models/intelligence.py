@@ -39,8 +39,10 @@ class MaterialCard(Base):
     package_type = Column(String(100))  # QFP-64, BGA-256, 0603, etc.
     category = Column(String(255))  # Microcontroller, Capacitor, Connector, etc.
     rohs_status = Column(String(50))  # compliant, non-compliant, exempt
-    # Stock condition (broker facet): New | Recertified | Refurbished | Used | Pulled | Unknown.
-    # Application-validated (no DB CHECK), like lifecycle_status. NULL until a source populates it.
+    # Stock condition (broker facet): the constants.MaterialCondition StrEnum vocabulary
+    # (New | Recertified | Refurbished | Used | Pulled | Unknown) — always write via that
+    # enum, never raw strings. Application-validated (no DB CHECK), like lifecycle_status.
+    # NULL until a source populates it ("no data" stays NULL, never "Unknown").
     condition = Column(String(20), index=True)
     pin_count = Column(Integer)
     datasheet_url = Column(String(1000))
@@ -60,11 +62,16 @@ class MaterialCard(Base):
     #                                    "fetched_at": "2026-06-04T..Z", "matched_mpn": "..."}}
     enrichment_provenance = Column(JSONB)
 
-    # Category provenance (SP2/F2 — set via spec_tiers.set_category, governed by the F1 ladder).
-    # A lower-tier source can never overwrite a category written by a higher-tier source.
+    # Category provenance (SP2/F2 — set via spec_tiers.set_category, governed by the F1
+    # ladder). Through set_category, a lower-tier source can never overwrite a category
+    # written by a higher-tier source; a category carrying a value but NULL provenance
+    # (legacy data) ranks at the legacy_backfill mid-tier (50). All in-tree category
+    # writers route through set_category; SP3 adds an @validates("category") guard so a
+    # future direct assignment cannot bypass the ladder and leave these columns stale.
     category_source = Column(String(50))  # "mpn_decode", "digikey_api", "claude_opus_inferred", ...
     category_confidence = Column(Float)
     category_tier = Column(Integer)
+    category_updated_at = Column(UTCDateTime)  # when the category was last (re)written via the ladder
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 

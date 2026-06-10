@@ -1,16 +1,17 @@
-"""Structural + SQLite round-trip tests for migration 092 (SP2 spec/category
+"""Structural + SQLite round-trip tests for migration 095 (SP2 spec/category
 provenance).
 
-Asserts the migration's revision metadata (id <=32 chars, chains off SP1's 091, single
-head) and that its six add_column / drop_column calls round-trip via the real alembic CLI
-machinery on a SQLite file DB (stamped at SP1's data-only 091, then upgrade→downgrade→upgrade
-of the 092 step). The PG-only JSONB/category backfill is NOT executed here — SQLite has no
-JSONB operators and the migration guards the data step to PostgreSQL (project rule
-feedback_sqlite_masks_postgres: SQLite masks PG JSON ops, so the backfill SQL is verified
-against live Postgres, not on SQLite).
+Asserts the migration's revision metadata (id <=32 chars, chains off 094_fru_links,
+single head), that its SQL CASE tier snapshot stays in sync with the live
+spec_tiers.SOURCE_TIER map, and that its seven add_column / drop_column calls round-trip
+via the real alembic CLI machinery on a SQLite file DB (stamped at 094, then
+upgrade→downgrade→upgrade of the 095 step). The PG-only JSONB/category backfill is NOT
+executed here — SQLite has no JSONB operators and the migration guards the data step to
+PostgreSQL (project rule feedback_sqlite_masks_postgres: SQLite masks PG JSON ops, so the
+backfill SQL is verified against live Postgres, not on SQLite).
 
 Called by: pytest
-Depends on: alembic/versions/092_spec_provenance.py
+Depends on: alembic/versions/095_spec_provenance.py
 """
 
 import importlib.util
@@ -23,43 +24,60 @@ from sqlalchemy import inspect
 
 # Load the migration module directly (alembic/versions has no __init__.py).
 _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
-_MIGRATION_PATH = os.path.join(_REPO_ROOT, "alembic", "versions", "092_spec_provenance.py")
-_spec = importlib.util.spec_from_file_location("migration_092", _MIGRATION_PATH)
+_MIGRATION_PATH = os.path.join(_REPO_ROOT, "alembic", "versions", "095_spec_provenance.py")
+_spec = importlib.util.spec_from_file_location("migration_095", _MIGRATION_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
 class TestRevisionMetadata:
     def test_revision_id(self):
-        assert _mod.revision == "092_spec_provenance"
+        assert _mod.revision == "095_spec_provenance"
 
     def test_revision_id_within_pg_version_num_limit(self):
         # alembic_version.version_num is VARCHAR(32) on Postgres (feedback_alembic_revision_id_length).
         assert len(_mod.revision) <= 32
 
-    def test_down_revision_chains_off_sp1(self):
-        assert _mod.down_revision == "091_cleanup_vague_descs"
+    def test_down_revision_chains_off_fru_links(self):
+        # Re-parented onto main's 094 head (was 091 pre-merge) — re-parenting beats a
+        # no-op merge revision for a not-yet-deployed migration.
+        assert _mod.down_revision == "094_fru_links"
 
     def test_single_head(self):
-        # The migration chain must converge to exactly one head (no unmerged branches).
-        # 092 and 093/094 chained off 091 on concurrent branches; merge_092_094 rejoins them.
+        # The migration chain must converge to exactly one head (no unmerged branches) —
+        # a second head makes `alembic upgrade head` error out at deploy time.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["merge_092_094"], f"expected single head merge_092_094, got {heads}"
+        assert list(heads) == ["095_spec_provenance"], f"expected single head 095, got {heads}"
+
+    def test_source_tier_sql_case_matches_live_ladder(self):
+        # The migration cannot import app code, so its CASE is a literal snapshot of
+        # spec_tiers.SOURCE_TIER. This parses the literal and asserts EXACT equality —
+        # a new ladder source (e.g. desc_parse, fru_matrix_decode) added without
+        # updating the migration would backfill its facet rows to tier 0 (ELSE branch),
+        # silently misranking them below ai_guess. This test makes that drift a CI failure.
+        import re as _re
+
+        from app.services.spec_tiers import SOURCE_TIER
+
+        parsed = {
+            m.group(1): int(m.group(2)) for m in _re.finditer(r"WHEN '([^']+)' THEN (\d+)", _mod._SOURCE_TIER_SQL_CASE)
+        }
+        assert parsed == SOURCE_TIER
 
 
 class TestRoundTrip:
     """Drive the migration through the real alembic CLI machinery on a SQLite file DB.
 
     The full migration chain cannot replay on SQLite (the 001 baseline issues
-    ``CREATE EXTENSION pg_trgm``), so we instead create only the two tables 092 touches,
-    ``stamp`` the DB at SP1's 091 (which is data-only PG SQL — stamping records the version
-    WITHOUT executing it), then ``upgrade``/``downgrade`` exactly the 092 step. This is a
-    genuine ``alembic upgrade → downgrade → upgrade`` of 092's DDL, not a hand-rolled op
+    ``CREATE EXTENSION pg_trgm``), so we instead create only the two tables 095 touches,
+    ``stamp`` the DB at 094_fru_links (stamping records the version
+    WITHOUT executing it), then ``upgrade``/``downgrade`` exactly the 095 step. This is a
+    genuine ``alembic upgrade → downgrade → upgrade`` of 095's DDL, not a hand-rolled op
     invocation, so it exercises the real add_column/drop_column the deploy will run. The
     PG-only JSONB/category backfill is guarded inside the migration and no-ops on SQLite.
     """
@@ -96,7 +114,7 @@ class TestRoundTrip:
         cfg.set_main_option("sqlalchemy.url", url)
         prev_url = os.environ.get("DATABASE_URL")
         os.environ["DATABASE_URL"] = url
-        # Record SP1's data-only 091 as applied WITHOUT running its PG-only SQL.
+        # Record 094_fru_links as applied WITHOUT running it (stamp never executes).
         command.stamp(cfg, _mod.down_revision)
         try:
             yield engine, cfg, command
@@ -111,21 +129,23 @@ class TestRoundTrip:
     def _columns(self, engine, table):
         return {c["name"] for c in inspect(engine).get_columns(table)}
 
-    def test_upgrade_adds_six_columns(self, alembic_on_sqlite):
+    def test_upgrade_adds_seven_columns(self, alembic_on_sqlite):
         engine, cfg, command = alembic_on_sqlite
         command.upgrade(cfg, _mod.revision)
 
         assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
-        assert {"category_source", "category_confidence", "category_tier"} <= self._columns(engine, "material_cards")
+        assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(
+            engine, "material_cards"
+        )
 
-    def test_downgrade_drops_six_columns(self, alembic_on_sqlite):
+    def test_downgrade_drops_seven_columns(self, alembic_on_sqlite):
         engine, cfg, command = alembic_on_sqlite
         command.upgrade(cfg, _mod.revision)
         command.downgrade(cfg, _mod.down_revision)
 
         assert self._columns(engine, "material_spec_facets").isdisjoint({"source", "confidence", "tier"})
         assert self._columns(engine, "material_cards").isdisjoint(
-            {"category_source", "category_confidence", "category_tier"}
+            {"category_source", "category_confidence", "category_tier", "category_updated_at"}
         )
 
     def test_upgrade_downgrade_upgrade_round_trips(self, alembic_on_sqlite):
@@ -135,4 +155,6 @@ class TestRoundTrip:
         command.upgrade(cfg, _mod.revision)
 
         assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
-        assert {"category_source", "category_confidence", "category_tier"} <= self._columns(engine, "material_cards")
+        assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(
+            engine, "material_cards"
+        )

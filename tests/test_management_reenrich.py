@@ -160,7 +160,7 @@ class TestReenrichMain:
         card = MagicMock()
         card.id = 30
         card.category = "transistor"
-        card.enrichment_source = None  # tests the "reenrich" fallback source
+        card.enrichment_source = None
         card.specs_structured = {
             "package": "TO-92",  # plain string value, not dict
             "gain": None,  # None plain value, should skip
@@ -185,12 +185,16 @@ class TestReenrichMain:
 
             await main()
 
-        # Only "package" has a non-None value
+        # Only "package" has a non-None value. A plain (non-dict) legacy value carries
+        # no per-entry provenance, so the backfill re-records it as spec_extraction —
+        # a REGISTERED ladder source (an arbitrary tag like "reenrich" would rank at
+        # tier 0 and lose to every ranked source).
         assert mock_record.call_count == 1
         call = mock_record.call_args
         assert call.args[2] == "package"
         assert call.args[3] == "TO-92"
-        assert call.kwargs.get("source") == "reenrich"
+        assert call.kwargs.get("source") == "spec_extraction"
+        assert call.kwargs.get("confidence") == 0.85
 
     @pytest.mark.asyncio
     async def test_main_db_always_closed(self):

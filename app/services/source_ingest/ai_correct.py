@@ -2,11 +2,14 @@
 inventing.
 
 What: ``ai_correct`` runs each ConsolidatedPart through Claude (smart tier) to (a) standardize
-      the description, (b) infer the canonical category from the 48 app keys ONLY when one is
-      missing, and (c) extract deep-filter specs FROM the real description text — each spec with
-      a confidence. The HARD GUARDRAIL (the SP1 lesson): transform only what the source text
-      supports and return null for anything not present — never fabricate. Outputs are tagged
-      source="trio_source_ai" downstream. Batched, with per-batch failure isolation.
+      the description, (b) infer the canonical category from the canonical commodity keys
+      (commodity_registry.get_all_commodities) ONLY when one is missing, and (c) extract
+      deep-filter specs FROM the real description text — each spec with a confidence. The HARD
+      GUARDRAIL (the SP1 lesson): transform only what the source text supports and return null
+      for anything not present — never fabricate. Outputs are tagged source="trio_source_ai"
+      downstream. One Claude call per part, with PER-PART failure isolation — a failing part
+      keeps its non-AI values; deterministic config/auth failures abort the whole run
+      immediately (fail fast — they would fail every remaining part identically).
 Called by: app/management/ingest_source_data.py — ONLY when the CLI --ai-correct flag is set.
 Depends on: app.utils.claude_client.claude_structured (model_tier="smart"), the
       ConsolidatedPart dataclass, and app.services.commodity_registry.get_all_commodities for
@@ -19,7 +22,7 @@ from loguru import logger
 
 from app.services.commodity_registry import get_all_commodities
 from app.services.source_ingest.models import ConsolidatedPart
-from app.utils.claude_client import claude_structured
+from app.utils.claude_client import ClaudeAuthError, ClaudeUnavailableError, claude_structured
 
 # The provenance tag every AI-corrected field carries through the ladder.
 AI_SOURCE = "trio_source_ai"
@@ -110,39 +113,70 @@ def _apply_result(part: ConsolidatedPart, result: dict) -> None:
         }
 
 
-async def ai_correct(parts: list[ConsolidatedPart], *, batch_size: int = 25) -> list[ConsolidatedPart]:
-    """AI-correct *parts* in place (and return them). One Claude call per part, batched.
+# Abort the run if this many parts fail back-to-back: a systematic failure (rate limits
+# exhausted, schema bug) would otherwise grind serially through the whole input emitting
+# an identical traceback per part for hours.
+_MAX_CONSECUTIVE_FAILURES = 25
+
+
+async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
+    """AI-correct *parts* in place. One Claude call per part. Returns failure-visible
+    stats.
 
     Each part is standardized/categorized/spec-extracted under the no-fabrication guardrail and
-    annotated with ``ai_*`` fields tagged ``trio_source_ai`` downstream. A failure on one batch
-    is isolated (logged) — its parts simply keep their non-AI values. Confidence-bearing specs
-    flow to ingest.py via ``part.ai_specs``.
+    annotated with ``ai_*`` fields tagged ``trio_source_ai`` downstream. Failure isolation is
+    PER PART: a failing part keeps its non-AI values (logged with traceback) and the run
+    continues — EXCEPT for deterministic config/auth errors (ClaudeUnavailableError: no API
+    key; ClaudeAuthError: 401/403), which are re-raised immediately because every remaining
+    part would fail identically, and a streak of ``_MAX_CONSECUTIVE_FAILURES`` failures, which
+    aborts the run as systematic. Confidence-bearing specs flow to ingest.py via
+    ``part.ai_specs``.
+
+    Returns ``{"corrected": N, "failed": M}`` so the CLI report can distinguish "AI corrected
+    everything" from "AI failed on 100% of parts".
     """
     canonical_keys = sorted(get_all_commodities())
     schema = _schema(canonical_keys)
     vocab_line = "Canonical category keys (choose exactly one or null): " + ", ".join(canonical_keys)
 
-    for start in range(0, len(parts), batch_size):
-        batch = parts[start : start + batch_size]
-        # Per-part call (the spec mandates PER PART), but failures are isolated per batch.
-        for part in batch:
-            try:
-                payload = _part_payload(part)
-                prompt = f"{vocab_line}\n\nSource row (clean ONLY what this text states, null otherwise):\n{payload}"
-                result = await claude_structured(
-                    prompt=prompt,
-                    schema=schema,
-                    system=_SYSTEM,
-                    model_tier="smart",
-                    max_tokens=1024,
+    stats = {"corrected": 0, "failed": 0}
+    consecutive_failures = 0
+    for part in parts:
+        try:
+            payload = _part_payload(part)
+            prompt = f"{vocab_line}\n\nSource row (clean ONLY what this text states, null otherwise):\n{payload}"
+            result = await claude_structured(
+                prompt=prompt,
+                schema=schema,
+                system=_SYSTEM,
+                model_tier="smart",
+                max_tokens=1024,
+            )
+            if result:
+                _apply_result(part, result)
+            stats["corrected"] += 1
+            consecutive_failures = 0
+        except (ClaudeUnavailableError, ClaudeAuthError):
+            # Deterministic: a missing/invalid API key fails EVERY part. Fail fast instead
+            # of grinding through the whole input logging one traceback per part.
+            logger.error(
+                "ai_correct: Claude unavailable/auth error on mpn={} — aborting the AI pass "
+                "({} corrected, {} failed so far)",
+                part.normalized_mpn,
+                stats["corrected"],
+                stats["failed"],
+            )
+            raise
+        except Exception:
+            stats["failed"] += 1
+            consecutive_failures += 1
+            logger.exception(
+                "ai_correct: failed on mpn={} — keeping non-AI values",
+                part.normalized_mpn,
+            )
+            if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
+                raise RuntimeError(
+                    f"ai_correct: {consecutive_failures} consecutive part failures — systematic "
+                    f"failure, aborting ({stats['corrected']} corrected, {stats['failed']} failed)"
                 )
-                if result:
-                    _apply_result(part, result)
-            except Exception:
-                logger.exception(
-                    "ai_correct: failed on mpn={} (batch {}–{}) — keeping non-AI values",
-                    part.normalized_mpn,
-                    start,
-                    start + len(batch),
-                )
-    return parts
+    return stats

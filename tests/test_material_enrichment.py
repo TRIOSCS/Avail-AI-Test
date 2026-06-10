@@ -65,3 +65,31 @@ def test_enrichment_rejects_invalid_lifecycle(db_session):
     _apply_enrichment_result(card, ai_result)
 
     assert card.lifecycle_status == "active"
+
+
+def test_enrichment_category_routes_through_ladder(db_session):
+    """Haiku categorization goes through spec_tiers.set_category: it stamps provenance
+    on a fill and can never overwrite a higher-tier (decode/vendor/TRIO) category."""
+    from app.services.material_enrichment_service import _apply_enrichment_result
+
+    fresh = MaterialCard(normalized_mpn="ladder1", display_mpn="LADDER1")
+    decoded = MaterialCard(
+        normalized_mpn="ladder2",
+        display_mpn="LADDER2",
+        category="dram",
+        category_source="mpn_decode",
+        category_confidence=0.95,
+        category_tier=85,
+    )
+    db_session.add_all([fresh, decoded])
+    db_session.flush()
+
+    ai_result = {"mpn": "X", "description": "d", "category": "resistors", "lifecycle_status": "active"}
+    _apply_enrichment_result(fresh, ai_result)
+    _apply_enrichment_result(decoded, ai_result)
+
+    assert fresh.category == "resistors"  # fill wins (existing None)
+    assert fresh.category_source == "claude_haiku"
+    assert fresh.category_tier == 40
+    assert decoded.category == "dram"  # tier 40 cannot flip tier 85
+    assert decoded.category_source == "mpn_decode"

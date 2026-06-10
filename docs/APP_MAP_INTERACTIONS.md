@@ -852,9 +852,14 @@ load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest
 SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
              · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
              · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
-             · spec_extraction:60 · {ai_guess,claude_opus_inferred}:40   (unknown → 0)
+             · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
+               floor for a valued category with NULL provenance) ·
+               {ai_guess,claude_opus_inferred,claude_haiku}:40
+             (unknown → 0 with a once-per-source WARNING — an unregistered writer loses
+              every conflict; migration 095 carries a CASE snapshot of this map, pinned by
+              a sync test)
 
-tier_for(source) -> int                 # SOURCE_TIER.get(source, 0)
+tier_for(source) -> int                 # SOURCE_TIER.get(source, 0); warns once on unknown
 
 resolve(existing, incoming) -> bool      # incoming wins iff its (tier, confidence, updated_at)
                                          # tuple is STRICTLY greater. existing=None → win.
@@ -862,22 +867,69 @@ resolve(existing, incoming) -> bool      # incoming wins iff its (tier, confiden
                                          # confidence; exact tie → newer updated_at; full tie → keep.
                                          # Pure function — no DB, no side effects.
 
-set_category(card, value, source, confidence) -> bool   # the ONE DB-touching helper
+set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB-touching helper
     +---> normalize_category(value); None (off-vocab/empty) → return False, no write
-    +---> build incoming{tier,confidence,now}; existing from card.category_* (None if category NULL)
-    +---> resolve(): on win set card.category + category_source/confidence/tier, return True;
-          else leave card untouched, return False  (a lower-tier source can't overwrite a
-          higher-tier category; junk can't blank a real one)
+    +---> build incoming{tier,confidence,now}; existing from card.category_* (None if category
+    |     NULL; valued-but-NULL-provenance → legacy_backfill floor tier 50, same as the
+    |     migration backfill, so an AI guess can't flip un-routed legacy data)
+    +---> resolve(): on win set card.category + category_source/confidence/tier/updated_at,
+    |     return True; else leave card untouched, return False  (a lower-tier source can't
+    |     overwrite a higher-tier category; junk can't blank a real one). Tie-breaks compare
+    |     category_updated_at (the category's OWN timestamp), never the card-wide updated_at.
+    +---> on a win that CHANGES the category: purge the OLD commodity's MaterialSpecFacet
+    |     rows + their specs_structured mirrors (logged at INFO) — a re-categorized card
+    |     must not keep matching the old commodity's deep-filters
+    +---> write=False = read-only twin (same verdict, zero mutation) — used by the
+          SP-Ingest dry run so its report can't drift from --apply
 ```
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
-`mpn_decoder/writer.py` (decode category via `set_category`, tier 85), and the SP-Ingest
-pipeline (`source_ingest/ingest.py` — TRIO part-master categories via `set_category` at
-trio_source:95 / trio_source_ai:88, specs via `record_spec`). The 4 remaining category
-writers (enrichment / authoritative / material-enrichment) route through `set_category`
-in SP3. The deterministic decode is now protected by its tier (85), not by running before
-the desc-parse (83) or AI spec (60) passes — their old per-writer confidence pre-gates
-are removed.
+`mpn_decoder/writer.py` (decode category via `set_category`, tier 85),
+`fru_crosswalk_enrich.py` (tier 84), the SP-Ingest pipeline (`source_ingest/ingest.py` —
+TRIO part-master categories via `set_category` at trio_source:95 / trio_source_ai:88,
+specs via `record_spec` + dry-run parity via `spec_would_write`), and ALL three remaining
+category writers — `enrichment.py` (connector `{name}_api` tiers), `material_enrichment_
+service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
+(claude_opus_inferred:40) — now route through `set_category` (no direct `card.category`
+assignment remains; SP3 adds the `@validates` hardening). The deterministic decode is
+protected by its tier (85), not by running before the fru-crosswalk (84) / desc-parse
+(83) / AI spec (60) passes — the old per-writer confidence pre-gates are removed.
+
+### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
+
+```
+python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]
+    |
+    v
+parsers.py     — parse_inventory_sheet (.csv/.xlsx/.txt, header auto-detect) +
+    |            parse_sfdc_material_master (streams the multi-hundred-MB
+    |            LSC1__Material__c.csv row by row) + parse_sfdc_manufacturers
+    |            (lookup-ID → name; raw Salesforce IDs are never emitted)
+    v
+clean.py       — clean_record: MPN suffix strip + dedup key (normalize_mpn_key),
+    |            _x000D_/control scrub, condition → constants.MaterialCondition
+    |            (None when the source carries none — NEVER a synthetic "Unknown"),
+    |            normalize_trio_category (TRIO-scoped codes, e.g. bare "Memory"→dram),
+    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops
+    v
+consolidate.py — group by normalized_mpn → ConsolidatedPart per MPN (longest desc,
+    |            modal manufacturer/condition, highest-priority-kind category,
+    |            qty sum, sfdc_master>inventory_sheet spec merge); un-cleaned
+    |            records (empty dedup key) are counted + WARNed, never silent
+    v
+ai_correct.py  — OPTIONAL (--ai-correct): one Claude call per part under the
+    |            no-fabrication guardrail; per-PART failure isolation, fail-fast on
+    |            ClaudeUnavailable/Auth, consecutive-failure abort; returns
+    |            {corrected, failed} for the report
+    v
+ingest.py      — AUGMENT material_cards: category via set_category (trio_source:95 /
+                 trio_source_ai:88), specs via record_spec, description/condition
+                 fill-only-when-empty ("Unknown" == empty). Per-card SAVEPOINTs;
+                 tallies merge only after a clean release; failed parts counted +
+                 sampled in the report. apply=False (DEFAULT) = dry run through the
+                 SAME gates (set_category(write=False) + spec_would_write) so the
+                 go/no-go report matches --apply exactly.
+```
 
 ```
 Startup backfill:

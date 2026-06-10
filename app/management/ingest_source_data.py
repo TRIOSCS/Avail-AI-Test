@@ -2,8 +2,9 @@
 
 What: Orchestrates parse → clean → consolidate → (ai_correct if --ai-correct) → ingest and
       prints a human report (source rows, distinct MPNs, would-create vs would-update, fields
-      filled by source/tier, and ~15 sample consolidated parts). DRY RUN by default; pass
-      --apply to write. Streams the ~620 MB ``LSC1__Material__c.csv`` part master; a
+      filled by source/tier, failure counts, and — in DRY RUN only — up to 15 sample
+      consolidated parts). DRY RUN by default; pass --apply to write. Streams the
+      multi-hundred-MB ``LSC1__Material__c.csv`` part master row by row; a
       ``LSC1__Manufacturers__c.csv`` in the same glob is auto-detected and used to resolve
       the master's manufacturer lookup IDs to names (never emitted raw).
 Usage:
@@ -115,11 +116,12 @@ async def run(*, pattern: str, ai_correct_flag: bool, apply: bool, limit: int | 
     parts = consolidate(cleaned)
     logger.info("Cleaned {}/{} rows → {} distinct MPNs", len(cleaned), raw_count, len(parts))
 
+    ai_stats = None
     if ai_correct_flag:
         from app.services.source_ingest.ai_correct import ai_correct
 
         logger.info("AI-correcting {} parts (smart tier)…", len(parts))
-        parts = await ai_correct(parts)
+        ai_stats = await ai_correct(parts)
 
     db = SessionLocal()
     try:
@@ -135,6 +137,7 @@ async def run(*, pattern: str, ai_correct_flag: bool, apply: bool, limit: int | 
         "cleaned_rows": len(cleaned),
         "distinct_mpns": len(parts),
         "ai_correct": ai_correct_flag,
+        "ai_stats": ai_stats,
         "apply": apply,
         "stats": stats,
     }
@@ -154,14 +157,22 @@ def _print_report(report: dict) -> None:
     print(f"  Raw source rows    : {report['raw_rows']}")
     print(f"  Cleaned rows       : {report['cleaned_rows']}")
     print(f"  Distinct MPNs      : {report['distinct_mpns']}")
-    print(f"  AI correction      : {'on' if report['ai_correct'] else 'off'}")
+    if report.get("ai_stats") is not None:
+        a = report["ai_stats"]
+        print(f"  AI correction      : on — {a['corrected']} ok / {a['failed']} failed")
+    else:
+        print("  AI correction      : off")
     print("-" * 72)
+    print(f"  Parts seen         : {s['parts_seen']}")
     if report["apply"]:
         print(f"  Cards created      : {s['created']}")
         print(f"  Cards updated      : {s['updated']}")
     else:
         print(f"  Would create       : {s['would_create']}")
         print(f"  Would update       : {s['would_update']}")
+    if s.get("failed"):
+        sample = ", ".join(s.get("failed_mpns", []))
+        print(f"  *** FAILED: {s['failed']} part(s) raised and were SKIPPED (see logs). Sample: {sample}")
     print(f"  Categories set     : {s['categories_set']}")
     print(f"  Descriptions filled: {s['descriptions_filled']}")
     print(f"  Conditions filled  : {s['conditions_filled']}")
@@ -169,16 +180,17 @@ def _print_report(report: dict) -> None:
     print("  Fields filled by source/tier:")
     for source, count in sorted(s["fields_by_source"].items()):
         print(f"      {source:<16}: {count}")
-    print("-" * 72)
-    print(f"  Sample consolidated parts (up to {len(s['sample'])}):")
-    for row in s["sample"]:
-        print(
-            f"    [{row['action']}] {row['display_mpn']}  cat={row['category']}"
-            f" ({row['category_source']})  cond={row['condition']}  specs={list(row['specs'])}"
-            + (f"  ai_specs={list(row['ai_specs'])}" if row["ai_specs"] else "")
-        )
-        if row["description"]:
-            print(f"        {row['description']}")
+    if not report["apply"]:
+        print("-" * 72)
+        print(f"  Sample consolidated parts (up to {len(s['sample'])}):")
+        for row in s["sample"]:
+            print(
+                f"    [{row['action']}] {row['display_mpn']}  cat={row['category']}"
+                f" ({row['category_source']})  cond={row['condition']}  specs={list(row['specs'])}"
+                + (f"  ai_specs={list(row['ai_specs'])}" if row["ai_specs"] else "")
+            )
+            if row["description"]:
+                print(f"        {row['description']}")
     print("=" * 72 + "\n")
 
 

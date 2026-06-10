@@ -110,6 +110,55 @@ def test_resolve_identical_timestamps_no_churn():
     assert resolve(_prov(60, 0.80, _T0), _prov(60, 0.80, _T0)) is False
 
 
+def test_resolve_explicit_none_values_coerce_instead_of_raising():
+    # A hand-edited / legacy JSONB entry can carry an explicit null — the key IS present,
+    # so .get(key, default) would hand None to the tuple comparison and raise TypeError.
+    # resolve must coerce (None tier→0, None confidence→0.0, None updated_at→"").
+    assert resolve({"tier": 60, "confidence": None, "updated_at": _T0}, _prov(60, 0.5, _T1)) is True
+    assert resolve(_prov(60, 0.5, _T1), {"tier": 60, "confidence": None, "updated_at": _T0}) is False
+    assert resolve({"tier": None, "confidence": None, "updated_at": None}, _prov(40, 0.1, _T0)) is True
+
+
+def test_resolve_clamps_out_of_range_confidence():
+    # A percent-style confidence (95 instead of 0.95) clamps to 1.0 — it can win a tie
+    # against a lower real confidence but can never become an unbeatable >1.0 value.
+    assert resolve(_prov(60, 1.0, _T1), {"tier": 60, "confidence": 95, "updated_at": _T0}) is False
+
+
+def test_tier_for_unknown_source_warns_once():
+    # An unregistered writer fails 100% of its writes — that must be production-visible
+    # (WARNING), but only once per source (not once per row).
+    from loguru import logger as loguru_logger
+
+    import app.services.spec_tiers as st
+
+    st._warned_unknown_sources.discard("totally_unregistered")
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert tier_for("totally_unregistered") == 0
+        assert tier_for("totally_unregistered") == 0
+    finally:
+        loguru_logger.remove(sink_id)
+    assert sum("totally_unregistered" in w for w in warnings) == 1
+
+
+def test_legacy_backfill_is_a_registered_ladder_key():
+    # Migration 095 persists category_source='legacy_backfill' — every persisted source
+    # must be a ladder key, or a future tier re-derivation would demote it to 0.
+    from app.services.spec_tiers import (
+        LEGACY_BACKFILL_CONFIDENCE,
+        LEGACY_BACKFILL_SOURCE,
+        LEGACY_BACKFILL_TIER,
+    )
+
+    assert SOURCE_TIER[LEGACY_BACKFILL_SOURCE] == LEGACY_BACKFILL_TIER == 50
+    assert tier_for("legacy_backfill") == 50
+    assert 0.0 < LEGACY_BACKFILL_CONFIDENCE < 1.0
+    # Deliberate ranking: above every AI guess, below every real source.
+    assert SOURCE_TIER["ai_guess"] < 50 < SOURCE_TIER["spec_extraction"]
+
+
 # --- set_category -----------------------------------------------------------
 
 
@@ -224,7 +273,8 @@ def test_set_category_equal_tier_lower_confidence_loses(db_session: Session):
 
 
 def test_set_category_exact_tie_newer_updated_at_wins(db_session: Session):
-    # Existing card with an old updated_at; equal tier + equal confidence → newer wins.
+    # Existing category written 2 days ago (category_updated_at — the category's OWN
+    # timestamp, NOT the card-wide updated_at); equal tier + equal confidence → newer wins.
     old = datetime.now(timezone.utc) - timedelta(days=2)
     card = _card(
         db_session,
@@ -233,9 +283,79 @@ def test_set_category_exact_tie_newer_updated_at_wins(db_session: Session):
         category_source="spec_extraction",
         category_confidence=0.80,
         category_tier=60,
+        category_updated_at=old,
     )
-    card.updated_at = old
-    db_session.flush()
     wrote = set_category(card, "flash", "spec_extraction", 0.80)
     assert wrote is True
     assert card.category == "flash"
+    assert card.category_updated_at is not None and card.category_updated_at > old
+
+
+def test_set_category_stamps_category_updated_at_on_win(db_session: Session):
+    card = _card(db_session, normalized_mpn="stamp-ts", category=None)
+    assert card.category_updated_at is None
+    assert set_category(card, "hdd", "trio_source", 1.0) is True
+    assert card.category_updated_at is not None
+
+
+def test_set_category_null_provenance_existing_ranks_at_legacy_floor(db_session: Session):
+    # A valued category with NULL provenance (pre-ladder data, or a write that bypassed
+    # set_category) ranks at the SAME mid-tier the migration backfill stamps (50): a
+    # stray AI guess (40) can NOT flip it, but a decode (85) corrects it — identical
+    # treatment whether the row existed at migration time or was written a minute later.
+    card = _card(db_session, normalized_mpn="legacy-floor", category="dram")
+    assert card.category_tier is None and card.category_source is None
+
+    assert set_category(card, "flash", "ai_guess", 0.99) is False  # 40 < legacy floor 50
+    assert card.category == "dram"
+    assert card.category_tier is None  # losing write never stamps provenance
+
+    assert set_category(card, "flash", "mpn_decode", 0.95) is True  # 85 > legacy floor 50
+    assert card.category == "flash"
+    assert card.category_source == "mpn_decode"
+    assert card.category_tier == 85
+
+
+def test_set_category_write_false_is_read_only_twin(db_session: Session):
+    # write=False runs the full ladder and returns the same verdicts as write=True but
+    # never mutates the card (dry-run parity contract).
+    card = _card(
+        db_session,
+        normalized_mpn="dry-twin",
+        category="dram",
+        category_source="claude_opus_inferred",
+        category_confidence=0.5,
+        category_tier=40,
+    )
+    assert set_category(card, "hdd", "trio_source", 1.0, write=False) is True
+    assert set_category(card, "hdd", "ai_guess", 0.4, write=False) is False  # 40/0.4 < 40/0.5
+    assert card.category == "dram"  # untouched either way
+    assert card.category_tier == 40
+
+
+def test_set_category_flip_purges_stale_commodity_facets_and_specs(db_session: Session):
+    # Re-categorization must not leave the old commodity's facet rows / JSONB entries
+    # behind: a dram→hdd card whose old ddr_type facet survived would keep matching dram
+    # deep-filters (silent cross-commodity filter corruption).
+    from app.models import MaterialSpecFacet
+    from app.services.commodity_registry import seed_commodity_schemas
+    from app.services.spec_write_service import record_spec
+
+    seed_commodity_schemas(db_session)
+    card = _card(
+        db_session,
+        normalized_mpn="flip-purge",
+        category="dram",
+        category_source="claude_opus_inferred",
+        category_confidence=0.5,
+        category_tier=40,
+    )
+    assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95) is True
+    assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 1
+
+    assert set_category(card, "hdd", "trio_source", 1.0) is True
+    db_session.flush()
+    assert card.category == "hdd"
+    # Old commodity's facet row AND its JSONB mirror are gone.
+    assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 0
+    assert "ddr_type" not in (card.specs_structured or {})

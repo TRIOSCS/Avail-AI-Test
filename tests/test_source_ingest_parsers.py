@@ -196,3 +196,49 @@ def test_parse_sfdc_master_never_emits_raw_lookup_id(tmp_path):
     )
     assert list(parse_sfdc_material_master(csv_path))[0].manufacturer is None
     assert list(parse_sfdc_material_master(csv_path, {"other": "Acme"}))[0].manufacturer is None
+
+
+# --- .xlsx path (the canonical operational sheets ARE .xlsx) -------------------------
+
+
+def test_parse_inventory_xlsx_numeric_cells_round_trip(tmp_path):
+    # openpyxl returns numeric cells as int/float: a float-typed Part Number cell must
+    # NOT become "5052089.0" (its dedup key would keep the trailing zero after the dot is
+    # stripped — "50520890" — and silently fail to merge with the SFDC master's string
+    # MPN), and int/float quantity cells must parse. Leading zeros in NUMBER-typed cells
+    # are unrecoverable (Excel already discarded them) — documented parser limitation.
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "ProductDescription", "Condition", "Commodity", "On Hand"])
+    ws.append([5052089.0, "HDD, 1.2TB 10K 2.5 Inch, IBM", "Pull", "Hard Drive", 7])  # float PN, int qty
+    ws.append(["ST4000NM0035", "HDD, 4TB 7.2K SAS, Seagate", "New", "Hard Drive", 3.0])  # float qty
+    path = tmp_path / "Inventory 2.12.26.xlsx"
+    wb.save(path)
+
+    recs = list(parse_inventory_sheet(path))
+    assert [r.raw_mpn for r in recs] == ["5052089", "ST4000NM0035"]  # no ".0" corruption
+    assert recs[0].quantity == 7
+    assert recs[1].quantity == 3
+    assert recs[0].condition == "Pull"
+    assert recs[0].source_kind == SOURCE_KIND_INVENTORY_SHEET
+
+
+def test_parse_inventory_xlsx_header_detection_and_empty_cells(tmp_path):
+    # A preamble row before the real header is skipped; None cells map to None fields.
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["TRIO firesale export — internal", None, None, None, None])
+    ws.append(["Part Number", "Description", "Condition", "Commodity", "Qty"])
+    ws.append(["00AJ141", "HDD, 4TB, IBM", None, None, None])
+    path = tmp_path / "Firesale.xlsx"
+    wb.save(path)
+
+    recs = list(parse_inventory_sheet(path))
+    assert len(recs) == 1
+    assert recs[0].raw_mpn == "00AJ141"
+    assert recs[0].condition is None
+    assert recs[0].quantity is None

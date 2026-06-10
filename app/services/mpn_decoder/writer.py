@@ -74,23 +74,30 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 # (e.g. an `M393A…` part is unambiguously a Samsung DDR4 RDIMM ⇒ dram), so it is
                 # canonical and safe to feed the ladder. set_category (tier 85) writes it iff it
                 # beats the card's existing category provenance — it corrects a lower-tier guess
-                # but never overwrites a vendor/manual category. If the category write loses, the
-                # card keeps its old category and record_spec rejects the decoded commodity's
-                # spec_keys (no schema match), so a drive's capacity never lands on a non-drive card.
+                # (purging the old commodity's stale facets) but never overwrites a vendor/manual
+                # category.
                 did_categorize = set_category(card, result.commodity, DECODE_SOURCE, result.confidence)
-                card_written = sum(
-                    1
-                    for spec_key, value in result.specs.items()
-                    if record_spec(
-                        db,
-                        card_id,
-                        spec_key,
-                        value,
-                        source=DECODE_SOURCE,
-                        confidence=result.confidence,
-                        schema_cache=cache,
+                # EXPLICIT cross-commodity guard: if the card's category (post-ladder) is not the
+                # decoded commodity, write NO specs — a drive's capacity must never land on a
+                # non-drive card. Do not rely on schema-cache keying to enforce this: the schemas
+                # overlap across commodities (capacity_gb exists for hdd/ssd/dram), so a
+                # cache-miss is an accident of plumbing, not an invariant.
+                if (card.category or "").lower().strip() != result.commodity:
+                    card_written = 0
+                else:
+                    card_written = sum(
+                        1
+                        for spec_key, value in result.specs.items()
+                        if record_spec(
+                            db,
+                            card_id,
+                            spec_key,
+                            value,
+                            source=DECODE_SOURCE,
+                            confidence=result.confidence,
+                            schema_cache=cache,
+                        )
                     )
-                )
             # Reached only on a clean savepoint release — so a rolled-back card contributes nothing.
             decoded_cards += 1
             written += card_written

@@ -142,3 +142,199 @@ def test_ai_specs_written_at_trio_source_ai(db_session: Session):
     card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
     assert card.specs_structured["rpm"]["source"] == "trio_source_ai"
     assert card.specs_structured["rpm"]["tier"] == 88
+
+
+# --- Condition: "Unknown" is treated as NULL on both sides (no synthetic occupancy) ---
+
+
+def test_unknown_condition_never_written(db_session: Session):
+    # A consolidated "Unknown" must NOT fill the column: condition has no tier ladder, so
+    # a written Unknown would permanently block a later real value.
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part(condition="Unknown")], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.condition is None
+    assert stats["conditions_filled"] == 0
+
+
+def test_real_condition_replaces_existing_unknown(db_session: Session):
+    # An existing "Unknown" on the card counts as empty — a real consolidated condition
+    # (e.g. from a later re-run with inventory-sheet data) must not be blocked by it.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category="hdd", condition="Unknown")
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(condition="Pulled")], apply=True)
+    db_session.refresh(card)
+    assert card.condition == "Pulled"
+    assert stats["conditions_filled"] == 1
+
+
+def test_real_condition_does_not_overwrite_real_condition(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category="hdd", condition="New")
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(condition="Pulled")], apply=True)
+    db_session.refresh(card)
+    assert card.condition == "New"  # fill-only-when-empty
+    assert stats["conditions_filled"] == 0
+
+
+# --- Failure isolation: per-part SAVEPOINT contract (mirrors mpn_decoder/writer.py) ---
+
+
+def test_failed_part_is_isolated_counted_and_siblings_ingest(db_session: Session, monkeypatch):
+    # One raising part must: (a) not poison the outer transaction for its siblings,
+    # (b) leave NO trace of its own card (savepoint rollback), and (c) be COUNTED in
+    # stats["failed"] + failed_mpns so the report cannot silently shrink.
+    import app.services.source_ingest.ingest as mod
+
+    seed_commodity_schemas(db_session)
+    real_record_spec = mod.record_spec
+
+    def bomb(db, card_id, key, value, **kw):
+        card = db.get(MaterialCard, card_id)
+        if card is not None and card.normalized_mpn == "badpart":
+            raise RuntimeError("flush-level boom")
+        return real_record_spec(db, card_id, key, value, **kw)
+
+    monkeypatch.setattr(mod, "record_spec", bomb)
+
+    bad = _part(normalized_mpn="badpart", raw_mpn="BADPART", specs={"capacity_gb": "1"})
+    good = _part(description="4TB HDD", condition="New", specs={"capacity_gb": "4000"})
+    stats = ingest(db_session, [bad, good], apply=True)
+
+    assert stats["parts_seen"] == 2
+    assert stats["failed"] == 1
+    assert stats["failed_mpns"] == ["badpart"]
+    assert stats["created"] == 1  # the failed part is NOT in created
+    # The bad part's card was rolled back wholesale; the good sibling persisted fully.
+    assert db_session.query(MaterialCard).filter_by(normalized_mpn="badpart").first() is None
+    good_card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert good_card is not None
+    assert good_card.condition == "New"
+    assert _facets(db_session, good_card.id)["capacity_gb"] == 4000
+
+
+def test_rolled_back_card_contributes_nothing_to_tallies(db_session: Session, monkeypatch):
+    # Counters must merge AFTER a clean savepoint release: a card whose write raises
+    # midway (category already "set" in the savepoint) must not inflate categories_set.
+    import app.services.source_ingest.ingest as mod
+
+    seed_commodity_schemas(db_session)
+
+    def bomb(db, card_id, key, value, **kw):
+        raise RuntimeError("boom after category was set in the savepoint")
+
+    monkeypatch.setattr(mod, "record_spec", bomb)
+    stats = ingest(db_session, [_part(description="x", condition="New", specs={"capacity_gb": "1"})], apply=True)
+    assert stats["failed"] == 1
+    # Everything the savepoint rolled back is absent from the report.
+    assert stats["categories_set"] == 0
+    assert stats["descriptions_filled"] == 0
+    assert stats["conditions_filled"] == 0
+    assert stats["specs_written"] == 0
+    assert stats["fields_by_source"] == {}
+
+
+# --- Dry-run / apply parity: the dry run is the operator's go/no-go gate ---
+
+
+def _parity_keys():
+    return ("categories_set", "descriptions_filled", "conditions_filled", "specs_written", "fields_by_source")
+
+
+def test_dry_run_matches_apply_on_existing_card_with_gates(db_session: Session):
+    # Existing card carrying (a) a HIGHER-tier spec the part loses to (manual=100),
+    # (b) a spec key with NO hdd schema ("cpu"), and (c) a category the part's
+    # trio_source(95) write WOULD win against (vendor 90 — same value, provenance
+    # refresh). Dry-run tallies must equal apply tallies exactly.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        category_source="digikey_api",
+        category_confidence=0.9,
+        category_tier=90,
+        specs_structured={
+            "capacity_gb": {
+                "value": 9999,
+                "source": "manual",
+                "confidence": 1.0,
+                "tier": 100,
+                "updated_at": "2026-01-01T00:00:00+00:00",
+            }
+        },
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    part = _part(
+        description="4TB Enterprise HDD",
+        condition="Pulled",
+        specs={"capacity_gb": "4000", "cpu": "Xeon 6230", "form_factor": '3.5"'},
+    )
+
+    dry = ingest(db_session, [part], apply=False)
+    # Dry run wrote nothing — same starting state for apply.
+    assert card.category_source == "digikey_api"
+    applied = ingest(db_session, [part], apply=True)
+
+    assert dry["would_update"] == applied["updated"] == 1
+    for key in _parity_keys():
+        assert dry[key] == applied[key], f"dry/apply diverged on {key}: {dry[key]} != {applied[key]}"
+    # The gates actually engaged: capacity lost to manual, cpu had no schema → only
+    # form_factor counted; category won (95 > 90); condition filled.
+    assert dry["specs_written"] == 1
+    assert dry["categories_set"] == 1
+    assert dry["conditions_filled"] == 1
+
+
+def test_dry_run_matches_apply_on_category_flip_with_purge(db_session: Session):
+    # The part re-categorizes a low-tier dram card to hdd (95 > 40): apply purges the old
+    # commodity's facet/JSONB entries (set_category) and writes the hdd specs — the dry
+    # run must predict the same tallies, and apply must actually purge.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="dram",
+        category_source="claude_opus_inferred",
+        category_confidence=0.5,
+        category_tier=40,
+    )
+    db_session.add(card)
+    db_session.flush()
+    cache = load_schema_cache(db_session, "dram")
+    assert record_spec(
+        db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95, schema_cache=cache
+    )
+    db_session.flush()
+
+    part = _part(specs={"capacity_gb": "4000"})
+
+    dry = ingest(db_session, [part], apply=False)
+    applied = ingest(db_session, [part], apply=True)
+
+    assert dry["would_update"] == applied["updated"] == 1
+    for key in _parity_keys():
+        assert dry[key] == applied[key], f"dry/apply diverged on {key}: {dry[key]} != {applied[key]}"
+    db_session.refresh(card)
+    assert card.category == "hdd"
+    assert "ddr_type" not in (card.specs_structured or {})  # old commodity purged
+    assert _facets(db_session, card.id) == {"capacity_gb": 4000}
+
+
+def test_dry_run_does_not_count_specs_without_resolvable_category(db_session: Session):
+    # A part with NO category (and no AI category) cannot write any spec on --apply
+    # (record_spec requires a category) — the dry run must count ZERO, not len(specs).
+    seed_commodity_schemas(db_session)
+    part = _part(category=None, specs={"capacity_gb": "4000", "rpm": "7200"})
+    dry = ingest(db_session, [part], apply=False)
+    applied = ingest(db_session, [part], apply=True)
+    assert dry["specs_written"] == applied["specs_written"] == 0
+    assert dry["categories_set"] == applied["categories_set"] == 0
