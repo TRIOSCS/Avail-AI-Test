@@ -75,8 +75,23 @@ change, update the relevant APP_MAP doc(s) in the same PR.**
 - Always read the actual codebase before making changes — never rely on cached assumptions
 
 ### PR Reviews
-- Run ALL pr-review-toolkit agents on every PR: comment-analyzer, pr-test-analyzer, type-design-analyzer, silent-failure-hunter, code-simplifier, code-reviewer
-- Also run feature-dev:code-reviewer
+- Saved fleet: `Workflow({name: "pr-review-fleet", args: {pr, branch, worktree, title}})`
+  (`.claude/workflows/pr-review-fleet.js`) — all 6 pr-review-toolkit + feature-dev
+  reviewers in parallel → adversarial verify per finding → fix-all → simplify, with the
+  git constraints below baked in.
+- Caveat: invoking via scriptPath+args has misfired twice — for a one-off fleet, bake the
+  pr/branch/worktree/title values inline instead of passing args.
+
+### Git Discipline
+- **Merge, don't rebase, on pushed branches** — force-push is hook-blocked, so a rebase
+  strands the branch. `git fetch origin && git merge origin/main`; resolve conflicts root-cause.
+- Already-rebased branch? Append-only recovery: (1) snapshot the rebased state to a temp
+  branch, (2) `git checkout -B <branch> origin/<branch>`, (3) merge origin/main, (4) apply
+  the snapshot as a tree diff (`git diff HEAD <temp> | git apply`, commit), (5) plain push.
+- `gh pr edit` is broken (deprecated Projects-classic GraphQL, fails silently) — use
+  `gh api -X PATCH /repos/<owner>/<repo>/pulls/<n> --input -`.
+- When docformatter rewraps a docstring, run `pre-commit` twice — the first run mutates,
+  the second verifies clean.
 
 ---
 
@@ -131,6 +146,13 @@ Permission dependencies: `require_user` (any login), `require_buyer` (search/RFQ
 - Status values: always use `StrEnum` constants from `app/constants.py`, never raw strings
   (e.g. `RequisitionStatus.OPEN`, `RequirementStatus.FOUND`).
 - Keep routers thin (HTTP only); put business logic in `app/services/`.
+- **MaterialCard category/spec writes: the F1 tier ladder (`app/services/spec_tiers.py`)
+  is the single arbitration point.** ALL such writes go through `set_category()` /
+  `record_spec()` — never assign `card.category` or facets directly. Writers MUST register
+  their source string in `SOURCE_TIER` (unknown source → tier 0 → loses every conflict).
+  Never add per-writer confidence pre-gates — the ladder owns arbitration; run order is
+  not load-bearing. Enrichment writers + evidence-source tiers table:
+  `docs/APP_MAP_INTERACTIONS.md`.
 
 ### Search & Matching
 - Vendor matching: `fuzzy_score_vendor()` from `app/vendor_utils.py` (rapidfuzz wrapper). Never inline fuzzy logic.
