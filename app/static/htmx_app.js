@@ -165,6 +165,43 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
     }
 });
 
+// ── Click-to-contact outreach logger (CDM contact panel) ────
+// Any element with [data-outreach-log] (tel:/mailto:/Teams/WeChat links in
+// customer contact panels) fires a fire-and-forget POST to
+// /api/activity/outreach-initiated when clicked, logging the touch and
+// bumping company.last_activity_at. The default link navigation is NOT
+// prevented — the native handler (dialer, mail client, Teams) still opens.
+document.body.addEventListener('click', (evt) => {
+    const el = evt.target.closest('[data-outreach-log]');
+    if (!el) return;
+    const d = el.dataset;
+    const payload = {
+        channel: d.channel,
+        contact_value: d.value,
+        company_id: d.companyId ? parseInt(d.companyId, 10) : null,
+        customer_site_id: d.siteId ? parseInt(d.siteId, 10) : null,
+        site_contact_id: d.contactId ? parseInt(d.contactId, 10) : null,
+        contact_name: d.contactName || null,
+        origin: 'cdm_workspace',
+    };
+    const headers = { 'Content-Type': 'application/json' };
+    const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+    if (csrfCookie) headers['x-csrftoken'] = csrfCookie;
+    // keepalive lets the request finish even if the click navigates away
+    fetch('/api/activity/outreach-initiated', {
+        method: 'POST',
+        headers: headers,
+        body: JSON.stringify(payload),
+        keepalive: true,
+    }).then((resp) => {
+        if (!resp.ok) return;
+        const labels = { phone: 'Call', email: 'Email', teams: 'Teams message', wechat: 'WeChat message' };
+        Alpine.store('toast').message = (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : '');
+        Alpine.store('toast').type = 'success';
+        Alpine.store('toast').show = true;
+    }).catch(() => { /* fire-and-forget: never block the call/email itself */ });
+});
+
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').message = 'Request failed. Please try again.';

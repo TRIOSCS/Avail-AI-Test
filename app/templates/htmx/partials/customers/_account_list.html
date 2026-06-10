@@ -1,0 +1,68 @@
+{# _account_list.html — CDM left-panel account list: rows + count + pagination.
+   Each row loads the account detail into #cdm-detail and highlights via the
+   workspace-level Alpine selectedId.
+   Receives: companies, total, limit, offset (filters come from #cdm-filters via hx-include).
+   Called by: list.html (initial include) and companies_account_list_partial route (refresh).
+   Depends on: workspace x-data (selectedId), brand palette, timeago filter.
+#}
+
+<div class="sticky top-0 z-10 px-3 py-1.5 text-[11px] font-medium text-gray-500 bg-gray-50 border-b border-gray-200">
+  {{ total }} account{{ "s" if total != 1 }}
+</div>
+
+{% if companies %}
+{% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
+<div class="divide-y divide-gray-100">
+  {% for c in companies %}
+  <div id="cdm-row-{{ c.id }}" role="button" tabindex="0"
+       class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2"
+       hx-get="/v2/partials/customers/{{ c.id }}"
+       hx-target="#cdm-detail"
+       hx-swap="innerHTML"
+       preload="mouseover"
+       @click="selectedId = {{ c.id }}"
+       @keydown.enter="selectedId = {{ c.id }}"
+       :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
+    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.staleness, 'bg-gray-300') }}"
+          role="img" aria-label="{{ c.staleness|replace('_', ' ')|title }}"
+          title="{{ c.staleness|replace('_', ' ')|title }}"></span>
+    <div class="flex-1 min-w-0">
+      <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
+      <p class="text-[11px] text-gray-500 truncate">
+        {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
+      </p>
+    </div>
+    <span class="flex-shrink-0 text-[11px] {% if c.staleness == 'overdue' %}text-rose-600 font-medium{% elif c.staleness == 'due_soon' %}text-amber-600{% else %}text-gray-400{% endif %}">
+      {{ c.last_activity_at|timeago if c.last_activity_at else "Never" }}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+
+{# Pagination #}
+{% if total > limit %}
+<div class="flex items-center justify-center gap-1 py-2 border-t border-gray-100">
+  {% if offset > 0 %}
+  <a hx-get="/v2/partials/customers/account-list?offset={{ offset - limit }}"
+     hx-target="#cdm-list"
+     hx-swap="innerHTML"
+     hx-include="#cdm-filters"
+     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
+  {% endif %}
+  <span class="px-2 py-1 text-xs text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+  {% if offset + limit < total %}
+  <a hx-get="/v2/partials/customers/account-list?offset={{ offset + limit }}"
+     hx-target="#cdm-list"
+     hx-swap="innerHTML"
+     hx-include="#cdm-filters"
+     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="p-8 text-center">
+  <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+  <p class="mt-2 text-sm text-gray-500">No accounts found</p>
+</div>
+{% endif %}

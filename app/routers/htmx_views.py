@@ -4345,37 +4345,79 @@ def _staleness_tier(last_activity_at: datetime | None) -> str:
     return "recent"
 
 
-@router.get("/v2/partials/customers", response_class=HTMLResponse)
-async def companies_list_partial(
-    request: Request,
-    search: str = "",
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/customers", alias="push_url_base"),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
+# Sort options for the CDM account workspace left panel. Default "oldest"
+# puts the longest-neglected accounts at the top (call-list order).
+_CDM_SORTS = {
+    "oldest": lambda: Company.last_activity_at.asc().nullsfirst(),
+    "newest": lambda: Company.last_activity_at.desc().nullslast(),
+    "name_asc": lambda: sqlfunc.lower(Company.name).asc(),
+    "name_desc": lambda: sqlfunc.lower(Company.name).desc(),
+}
+
+_CDM_ACCOUNT_TYPES = ("Customer", "Prospect", "Partner", "Competitor")
+
+
+def _cdm_company_query(
+    db: Session, user: User, *, search: str, staleness: str, account_type: str, my_only: str, sort: str
 ):
-    """Return companies list as HTML partial."""
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/customers")
+    """Build the filtered + sorted CDM account list query."""
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
     if search.strip():
         sb = SearchBuilder(search.strip())
         query = query.filter(sb.ilike_filter(Company.name))
 
-    total = query.count()
-    companies = query.order_by(Company.last_activity_at.asc().nullsfirst()).offset(offset).limit(limit).all()
+    now = datetime.now(timezone.utc)
+    overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
+    due_soon_cutoff = now - timedelta(days=STALENESS_DUE_SOON_DAYS)
+    if staleness == "overdue":
+        query = query.filter(Company.last_activity_at < overdue_cutoff)
+    elif staleness == "due_soon":
+        query = query.filter(
+            Company.last_activity_at >= overdue_cutoff,
+            Company.last_activity_at < due_soon_cutoff,
+        )
+    elif staleness == "recent":
+        query = query.filter(Company.last_activity_at >= due_soon_cutoff)
+    elif staleness == "new":
+        query = query.filter(Company.last_activity_at.is_(None))
 
+    if account_type in _CDM_ACCOUNT_TYPES:
+        query = query.filter(Company.account_type == account_type)
+    if my_only:
+        query = query.filter(Company.account_owner_id == user.id)
+
+    sort_fn = _CDM_SORTS.get(sort, _CDM_SORTS["oldest"])
+    return query.order_by(sort_fn())
+
+
+def _cdm_list_ctx(
+    db: Session,
+    user: User,
+    *,
+    search: str,
+    staleness: str,
+    account_type: str,
+    my_only: str,
+    sort: str,
+    limit: int,
+    offset: int,
+) -> dict:
+    """Shared context for the CDM workspace shell and its account-list partial."""
+    query = _cdm_company_query(
+        db, user, search=search, staleness=staleness, account_type=account_type, my_only=my_only, sort=sort
+    )
+    total = query.count()
+    companies = query.offset(offset).limit(limit).all()
     for c in companies:
         c.staleness = _staleness_tier(c.last_activity_at)
 
-    # Today's Calls — overdue accounts owned by this user (sales/trader only)
-    todays_calls: list[Company] = []
+    # Overdue chip — accounts owned by this user needing a call (sales/trader only)
+    overdue_count = 0
     if user.role in ("sales", "trader"):
         call_threshold = datetime.now(timezone.utc) - timedelta(days=STALENESS_OVERDUE_DAYS)
-        todays_calls = (
-            db.query(Company)
+        overdue_count = (
+            db.query(sqlfunc.count(Company.id))
             .filter(
                 Company.is_active.is_(True),
                 Company.account_owner_id == user.id,
@@ -4384,30 +4426,89 @@ async def companies_list_partial(
                     Company.last_activity_at.is_(None),
                 ),
             )
-            .order_by(
-                Company.is_strategic.desc().nullslast(),
-                Company.last_activity_at.asc().nullsfirst(),
-            )
-            .limit(10)
-            .all()
+            .scalar()
+            or 0
         )
-        for c in todays_calls:
-            c.staleness = _staleness_tier(c.last_activity_at)
 
+    return {
+        "companies": companies,
+        "search": search,
+        "staleness": staleness,
+        "account_type": account_type,
+        "my_only": my_only,
+        "sort": sort,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "overdue_count": overdue_count,
+        "account_types": _CDM_ACCOUNT_TYPES,
+    }
+
+
+@router.get("/v2/partials/customers", response_class=HTMLResponse)
+async def companies_list_partial(
+    request: Request,
+    search: str = "",
+    staleness: str = "",
+    account_type: str = "",
+    my_only: str = "",
+    sort: str = "oldest",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the CDM account workspace (split-panel list + detail) as HTML partial.
+
+    Legacy hx_target/push_url_base query params (still sent by the CRM shell) are
+    ignored — the workspace always swaps account detail into #cdm-detail.
+    """
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
-        {
-            "companies": companies,
-            "search": search,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "hx_target": hx_target,
-            "push_url_base": push_url_base,
-            "todays_calls": todays_calls,
-        }
+        _cdm_list_ctx(
+            db,
+            user,
+            search=search,
+            staleness=staleness,
+            account_type=account_type,
+            my_only=my_only,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
     )
     return template_response("htmx/partials/customers/list.html", ctx)
+
+
+@router.get("/v2/partials/customers/account-list", response_class=HTMLResponse)
+async def companies_account_list_partial(
+    request: Request,
+    search: str = "",
+    staleness: str = "",
+    account_type: str = "",
+    my_only: str = "",
+    sort: str = "oldest",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return only the CDM left-panel account list (filter/sort/pagination refresh)."""
+    ctx = {"request": request, "user": user}
+    ctx.update(
+        _cdm_list_ctx(
+            db,
+            user,
+            search=search,
+            staleness=staleness,
+            account_type=account_type,
+            my_only=my_only,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+    )
+    return template_response("htmx/partials/customers/_account_list.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
@@ -4522,6 +4623,29 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def _company_contact_rows(db: Session, company_id: int) -> list[dict]:
+    """All contacts for a company across its sites, plus legacy site-level contacts.
+
+    Returns [{"contact": SiteContact|None, "site": CustomerSite|None, "legacy": bool}].
+    Used by the detail panel (contacts shown inline) and the contacts tab.
+    """
+    sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()
+    site_map = {s.id: s for s in sites}
+    contacts: list[SiteContact] = []
+    if site_map:
+        contacts = (
+            db.query(SiteContact)
+            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.is_(True))
+            .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+            .all()
+        )
+    rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]
+    for s in sites:
+        if s.contact_name or s.contact_email:
+            rows.append({"contact": None, "site": s, "legacy": True})
+    return rows
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4569,6 +4693,7 @@ async def company_detail_partial(
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
+            "contact_rows": _company_contact_rows(db, company_id),
             "user": user,
         }
     )
@@ -4609,72 +4734,9 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
-        # Get all SiteContact records across all sites for this company
-        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
-        contacts = []
-        if site_ids:
-            contacts = (
-                db.query(SiteContact)
-                .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active.is_(True))
-                .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-                .all()
-            )
-        # Build a table with site name
-        site_map = {s.id: s for s in db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()}
-        rows = []
-        for c in contacts:
-            site = site_map.get(c.customer_site_id)
-            site_name = site.site_name if site else _DASH
-            phone_html = (
-                f'<a href="tel:{c.phone}" class="text-brand-500 hover:text-brand-600">{c.phone}</a>'
-                if c.phone
-                else f'<span class="text-gray-500">{_DASH}</span>'
-            )
-            primary_badge = (
-                ' <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>'
-                if c.is_primary
-                else ""
-            )
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.full_name or _DASH}{primary_badge}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.title or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{site_name}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.email or _DASH}</td>
-              <td class="px-4 py-2 text-sm">{phone_html}</td>
-            </tr>""")
-        # Also include legacy site-level contacts
-        for s in site_map.values():
-            if s.contact_name or s.contact_email:
-                phone_html = (
-                    f'<a href="tel:{s.contact_phone}" class="text-brand-500">{s.contact_phone}</a>'
-                    if s.contact_phone
-                    else f'<span class="text-gray-500">{_DASH}</span>'
-                )
-                rows.append(f"""<tr class="hover:bg-brand-50">
-                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH} <span class="text-[9px] text-gray-400">legacy</span></td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_title or _DASH}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_email or _DASH}</td>
-                  <td class="px-4 py-2 text-sm">{phone_html}</td>
-                </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found. Add contacts via the Sites tab.</p></div>'
-        return HTMLResponse(html)
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "contact_rows": _company_contact_rows(db, company_id)})
+        return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
 
     elif tab == "requisitions":
         from sqlalchemy import or_
@@ -4927,6 +4989,7 @@ async def create_site_contact(
     email: str = Form(""),
     title: str = Form(""),
     phone: str = Form(""),
+    wechat_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -4960,6 +5023,7 @@ async def create_site_contact(
                 email=email.strip() or None,
                 title=title.strip() or None,
                 phone=phone.strip() or None,
+                wechat_id=wechat_id.strip() or None,
             )
             db.add(contact)
             db.commit()
@@ -4969,6 +5033,7 @@ async def create_site_contact(
             full_name=full_name.strip(),
             title=title.strip() or None,
             phone=phone.strip() or None,
+            wechat_id=wechat_id.strip() or None,
         )
         db.add(contact)
         db.commit()

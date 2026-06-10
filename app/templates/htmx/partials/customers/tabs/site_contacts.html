@@ -17,7 +17,7 @@
         hx-target="#site-{{ site.id }}-contacts"
         hx-swap="innerHTML"
         data-loading-disable
-        class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 p-2 bg-gray-50 rounded border border-gray-200">
+        class="grid grid-cols-2 md:grid-cols-6 gap-2 mb-3 p-2 bg-gray-50 rounded border border-gray-200">
     <input aria-label="Full Name" type="text" name="full_name" required placeholder="Full Name"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
     <input aria-label="Email" type="email" name="email" placeholder="Email"
@@ -25,6 +25,8 @@
     <input aria-label="Title" type="text" name="title" placeholder="Title"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
     <input aria-label="Phone" type="text" name="phone" placeholder="Phone"
+           class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+    <input aria-label="WeChat ID" type="text" name="wechat_id" placeholder="WeChat ID"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
     <button type="submit"
             class="px-2 py-1 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
@@ -46,8 +48,15 @@
         </div>
         <div class="flex items-center gap-3 text-[11px] text-gray-500">
           {% if c.title %}<span>{{ c.title }}</span>{% endif %}
-          {% if c.email %}<a href="mailto:{{ c.email }}" class="text-brand-500">{{ c.email }}</a>{% endif %}
-          {% if c.phone %}<a href="tel:{{ c.phone }}" class="text-brand-500">{{ c.phone }}</a>{% endif %}
+          {% if c.email %}<a href="mailto:{{ c.email }}" class="text-brand-500"
+              data-outreach-log data-channel="email" data-value="{{ c.email }}"
+              data-company-id="{{ company.id }}" data-site-id="{{ site.id }}" data-contact-id="{{ c.id }}"
+              data-contact-name="{{ c.full_name }}">{{ c.email }}</a>{% endif %}
+          {% if c.phone %}<a href="tel:{{ c.phone }}" class="text-brand-500"
+              data-outreach-log data-channel="phone" data-value="{{ c.phone }}"
+              data-company-id="{{ company.id }}" data-site-id="{{ site.id }}" data-contact-id="{{ c.id }}"
+              data-contact-name="{{ c.full_name }}">{{ c.phone }}</a>{% endif %}
+          {% if c.wechat_id %}<span>WeChat: {{ c.wechat_id }}</span>{% endif %}
         </div>
       </div>
       <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

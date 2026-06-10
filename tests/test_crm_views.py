@@ -69,27 +69,56 @@ class TestVendorListEmbedding:
         assert 'hx-target="#main-content"' in resp.text
 
 
-class TestCustomerListEmbedding:
-    """Test customer list can be embedded in CRM shell."""
+class TestCustomerWorkspace:
+    """Test the CDM split-panel account workspace."""
 
-    def test_customer_list_with_custom_target(self, client: TestClient):
-        """Customer list respects hx_target query parameter."""
-        resp = client.get("/v2/partials/customers?hx_target=%23crm-tab-content")
-        assert resp.status_code == 200
-        assert 'hx-target="#crm-tab-content"' in resp.text
-
-    def test_customer_list_default_target(self, client: TestClient):
-        """Customer list defaults to #main-content when no override."""
+    def test_workspace_renders_panels(self, client: TestClient):
+        """Workspace renders the split layout: filter bar, list panel, detail panel."""
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert 'hx-target="#main-content"' in resp.text
+        assert 'id="cdm-workspace"' in resp.text
+        assert 'id="cdm-filters"' in resp.text
+        assert 'id="cdm-list"' in resp.text
+        assert 'id="cdm-detail"' in resp.text
+
+    def test_workspace_accepts_legacy_shell_params(self, client: TestClient):
+        """Legacy hx_target/push_url_base params (CRM shell URLs) are still accepted."""
+        resp = client.get("/v2/partials/customers?hx_target=%23crm-tab-content&push_url_base=/v2/crm")
+        assert resp.status_code == 200
+        assert 'id="cdm-workspace"' in resp.text
+
+    def test_account_rows_target_detail_panel(self, client: TestClient, db_session: Session, test_user: User):
+        """Clicking an account row loads its detail into the right panel."""
+        c = Company(name="Panel Target Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert f'hx-get="/v2/partials/customers/{c.id}"' in resp.text
+        assert 'hx-target="#cdm-detail"' in resp.text
+
+    def test_account_list_partial_returns_rows_only(self, client: TestClient, db_session: Session, test_user: User):
+        """The account-list partial returns the left panel only (no workspace shell)."""
+        c = Company(name="ListOnly Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers/account-list")
+        assert resp.status_code == 200
+        assert "ListOnly Co" in resp.text
+        assert 'id="cdm-workspace"' not in resp.text
 
 
-class TestTodaysCalls:
-    """Test Today's Calls section on customer list."""
+class TestOverdueChip:
+    """Test the overdue 'needs a call' chip on the CDM workspace filter bar.
 
-    def test_todays_calls_shows_overdue_accounts(self, client: TestClient, db_session: Session, test_user: User):
-        """Customer list shows Today's Calls for overdue accounts owned by user."""
+    Replaces the old "Needs Attention" banner — overdue accounts now surface via the
+    default oldest-first sort plus this one-click filter chip.
+    """
+
+    def test_chip_shows_for_overdue_accounts(self, client: TestClient, db_session: Session, test_user: User):
+        """Chip appears for sales users with overdue owned accounts."""
         test_user.role = "sales"
         db_session.flush()
 
@@ -104,11 +133,11 @@ class TestTodaysCalls:
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "Needs Attention" in resp.text
+        assert "needs a call" in resp.text
         assert "Overdue Corp" in resp.text
 
-    def test_todays_calls_hidden_for_non_sales(self, client: TestClient, db_session: Session, test_user: User):
-        """Today's Calls section is hidden for non-sales users."""
+    def test_chip_hidden_for_non_sales(self, client: TestClient, db_session: Session, test_user: User):
+        """Chip is hidden for non-sales users."""
         # test_user defaults to "buyer" role
         overdue = Company(
             name="Hidden Corp",
@@ -121,10 +150,11 @@ class TestTodaysCalls:
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "Needs Attention" not in resp.text
+        assert "need a call" not in resp.text
+        assert "needs a call" not in resp.text
 
-    def test_todays_calls_excludes_non_overdue(self, client: TestClient, db_session: Session, test_user: User):
-        """Today's Calls excludes accounts with recent activity."""
+    def test_chip_excludes_non_overdue(self, client: TestClient, db_session: Session, test_user: User):
+        """Chip does not count accounts with recent activity."""
         test_user.role = "sales"
         db_session.flush()
 
@@ -139,10 +169,11 @@ class TestTodaysCalls:
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "Needs Attention" not in resp.text
+        assert "need a call" not in resp.text
+        assert "needs a call" not in resp.text
 
-    def test_todays_calls_includes_never_contacted(self, client: TestClient, db_session: Session, test_user: User):
-        """Today's Calls includes accounts with no activity (never contacted)."""
+    def test_chip_includes_never_contacted(self, client: TestClient, db_session: Session, test_user: User):
+        """Chip counts accounts with no activity (never contacted)."""
         test_user.role = "sales"
         db_session.flush()
 
@@ -157,12 +188,11 @@ class TestTodaysCalls:
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "Needs Attention" in resp.text
+        assert "needs a call" in resp.text
         assert "NeverContacted Corp" in resp.text
-        assert "Never contacted" in resp.text
 
-    def test_todays_calls_excludes_other_owners(self, client: TestClient, db_session: Session, test_user: User):
-        """Today's Calls only shows accounts owned by the current user."""
+    def test_chip_excludes_other_owners(self, client: TestClient, db_session: Session, test_user: User):
+        """Chip only counts accounts owned by the current user."""
         test_user.role = "sales"
         db_session.flush()
 
@@ -177,7 +207,119 @@ class TestTodaysCalls:
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "Needs Attention" not in resp.text
+        assert "need a call" not in resp.text
+        assert "needs a call" not in resp.text
+
+
+class TestWorkspaceFiltersAndSort:
+    """Test CDM workspace sorting and filtering."""
+
+    def test_default_sort_oldest_first(self, client: TestClient, db_session: Session, test_user: User):
+        """Default sort: never-contacted first, then longest since activity."""
+        c_new = Company(name="AAA NeverTouched", is_active=True, last_activity_at=None)
+        c_old = Company(
+            name="ZZZ Oldest",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+        )
+        c_recent = Company(
+            name="MMM Freshest",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db_session.add_all([c_new, c_old, c_recent])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list").text
+        assert html.index("AAA NeverTouched") < html.index("ZZZ Oldest") < html.index("MMM Freshest")
+
+    def test_sort_newest_first(self, client: TestClient, db_session: Session, test_user: User):
+        """Sort=newest puts most recently touched accounts at the top."""
+        c_old = Company(
+            name="ZZZ Oldest",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
+        )
+        c_recent = Company(
+            name="MMM Freshest",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db_session.add_all([c_old, c_recent])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?sort=newest").text
+        assert html.index("MMM Freshest") < html.index("ZZZ Oldest")
+
+    def test_sort_by_name(self, client: TestClient, db_session: Session, test_user: User):
+        """sort=name_asc orders alphabetically regardless of activity."""
+        c_b = Company(name="Bravo Co", is_active=True, last_activity_at=None)
+        c_a = Company(
+            name="Alpha Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        db_session.add_all([c_b, c_a])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?sort=name_asc").text
+        assert html.index("Alpha Co") < html.index("Bravo Co")
+
+    def test_staleness_filter_overdue(self, client: TestClient, db_session: Session, test_user: User):
+        """Staleness=overdue shows only 30d+ stale accounts."""
+        stale = Company(
+            name="Stale Filter Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+        )
+        fresh = Company(
+            name="Fresh Filter Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+        db_session.add_all([stale, fresh])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?staleness=overdue").text
+        assert "Stale Filter Co" in html
+        assert "Fresh Filter Co" not in html
+
+    def test_staleness_filter_new(self, client: TestClient, db_session: Session, test_user: User):
+        """Staleness=new shows only never-contacted accounts."""
+        never = Company(name="Never Filter Co", is_active=True, last_activity_at=None)
+        touched = Company(
+            name="Touched Filter Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
+        )
+        db_session.add_all([never, touched])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?staleness=new").text
+        assert "Never Filter Co" in html
+        assert "Touched Filter Co" not in html
+
+    def test_account_type_filter(self, client: TestClient, db_session: Session, test_user: User):
+        """account_type filter narrows to that type."""
+        cust = Company(name="TypeCust Co", is_active=True, account_type="Customer")
+        prospect = Company(name="TypeProspect Co", is_active=True, account_type="Prospect")
+        db_session.add_all([cust, prospect])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?account_type=Prospect").text
+        assert "TypeProspect Co" in html
+        assert "TypeCust Co" not in html
+
+    def test_my_only_filter(self, client: TestClient, db_session: Session, test_user: User):
+        """my_only=1 shows only accounts owned by the current user."""
+        mine = Company(name="Mine Co", is_active=True, account_owner_id=test_user.id)
+        other = Company(name="Unowned Co", is_active=True, account_owner_id=None)
+        db_session.add_all([mine, other])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list?my_only=1").text
+        assert "Mine Co" in html
+        assert "Unowned Co" not in html
 
 
 class TestCustomerStaleness:
@@ -269,6 +411,113 @@ class TestCustomerStaleness:
         pos_old = html.index("ZZZ Old")
         pos_recent = html.index("MMM Recent")
         assert pos_new < pos_old < pos_recent
+
+
+class TestContactPanel:
+    """Test the contacts panel (default detail tab) with outreach actions."""
+
+    def _make_company_with_contact(self, db_session, **contact_kwargs):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Contact Panel Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Jane Contact",
+            title="Director of Procurement",
+            email="jane@contactpanel.com",
+            phone="+14155550000",
+            **contact_kwargs,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def test_detail_shows_contacts_inline(self, client: TestClient, db_session: Session, test_user: User):
+        """Account detail renders contacts (name, title, email, phone) without a tab
+        click."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "Jane Contact" in resp.text
+        assert "Director of Procurement" in resp.text
+        assert "jane@contactpanel.com" in resp.text
+        assert "+14155550000" in resp.text
+
+    def test_contact_actions_log_outreach(self, client: TestClient, db_session: Session, test_user: User):
+        """Call/Email/Teams actions carry data-outreach-log attributes and deep
+        links."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "data-outreach-log" in resp.text
+        assert 'href="tel:+14155550000"' in resp.text
+        assert 'href="mailto:jane@contactpanel.com"' in resp.text
+        assert "https://teams.microsoft.com/l/chat/0/0?users=jane%40contactpanel.com" in resp.text
+        assert f'data-company-id="{company.id}"' in resp.text
+        assert f'data-contact-id="{contact.id}"' in resp.text
+
+    def test_wechat_action_renders_when_handle_set(self, client: TestClient, db_session: Session, test_user: User):
+        """WeChat deep link renders only for contacts with a wechat_id."""
+        company, _, _ = self._make_company_with_contact(db_session, wechat_id="jane_wc")
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "weixin://dl/chat?jane_wc" in resp.text
+        assert 'data-channel="wechat"' in resp.text
+
+    def test_no_wechat_action_without_handle(self, client: TestClient, db_session: Session, test_user: User):
+        """No WeChat button when the contact has no wechat_id."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "weixin://" not in resp.text
+
+    def test_legacy_site_contact_rendered(self, client: TestClient, db_session: Session, test_user: User):
+        """Legacy site-level contacts still appear in the contacts panel."""
+        from app.models.crm import CustomerSite
+
+        company = Company(name="Legacy Contact Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(
+            company_id=company.id,
+            site_name="Plant 2",
+            is_active=True,
+            contact_name="Old Schoolson",
+            contact_email="old@legacyco.com",
+            contact_phone="+14155559999",
+        )
+        db_session.add(site)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Old Schoolson" in resp.text
+        assert "legacy" in resp.text
+
+    def test_create_site_contact_with_wechat(self, client: TestClient, db_session: Session, test_user: User):
+        """Site contact create form accepts a WeChat ID."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="WeChat Create Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts",
+            data={"full_name": "Wei Chen", "phone": "+8613800138000", "wechat_id": "wei_chen_88"},
+        )
+        assert resp.status_code == 200
+        contact = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site.id).first()
+        assert contact is not None
+        assert contact.wechat_id == "wei_chen_88"
 
 
 class TestEmailIntelligenceInActivity:

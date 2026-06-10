@@ -71,7 +71,7 @@ Response -> Caddy -> Browser -> HTMX swaps into DOM
 ```
 base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 └── base_page.html (spinner -> hx-get lazy load)
-    └── partials/ (167 HTML files across 15 feature dirs)
+    └── partials/ (170 HTML files across 15 feature dirs)
 ```
 
 - **Navigation:** HTMX `hx-get` swaps into `#main-content` (no SPA routing)
@@ -103,7 +103,7 @@ authoritative reference. Static-analysis tests in
 |---------|-------|-----------|
 | Requisitions | 32 | partials/requisitions/ |
 | Vendors | 16 | partials/vendors/ |
-| Customers | 11 | partials/customers/ |
+| Customers | 18 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
 | Excess | 10 | partials/excess/ |
 | Parts | 13 | partials/parts/ |
@@ -124,6 +124,10 @@ authoritative reference. Static-analysis tests in
 |-----------|------|---------|
 | `_mpn_chips.html` | partials/shared/ | Renders all MPNs (primary + substitutes) as equal inline pill chips with overflow toggle; clickable chips open material card modal when a `link_map` entry exists |
 | `status_badge` macro | partials/shared/_macros.html | Unified status badge rendering used by all pages (requisitions, sightings, parts, etc.) |
+| `list.html` | partials/customers/ | CDM account workspace: split-panel layout (left = scrollable account list, right = `#cdm-detail`), resizable divider via the `splitPanel` Alpine component (panel id `cdm`). Modeled on the requisitions2 workspace. |
+| `_account_list.html` | partials/customers/ | Left-panel account list only — swapped in on filter/sort/pagination refreshes by `GET /v2/partials/customers/account-list`. |
+| `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
+| `tabs/contacts_tab.html` | partials/customers/tabs/ | Contacts tab partial for company detail — default tab on `company_detail_partial`. Displays `contact_rows` (SiteContacts from all active sites + legacy site-level contacts) and renders click-to-contact links (tel:/mailto:/Teams deep link/weixin://) with `data-outreach-log` attributes. |
 
 ### Inline Editing
 
@@ -214,11 +218,11 @@ reader (>= 0.85) — see APP_MAP_INTERACTIONS "Worker second-pass ordering":
 |--------|-------|
 | Python files | ~315 |
 | Python LOC | ~75,000 |
-| HTML templates | 167 |
+| HTML templates | 170 |
 | Database tables | 50+ |
 | API endpoints | 400+ |
 | Service modules | 120 |
 | Supplier connectors | 12 |
 | Background jobs | 15 modules |
 | Test files | 100+ |
-| Alembic migrations | 81+ |
+| Alembic migrations | 95+ |

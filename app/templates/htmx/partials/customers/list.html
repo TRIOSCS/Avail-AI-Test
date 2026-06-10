@@ -1,159 +1,97 @@
-{# Companies list partial — searchable company table with brand palette.
-   Receives: companies, search, total, limit, offset.
-   Called by: companies_list_partial route.
-   Depends on: brand palette.
+{# CDM account workspace — split-panel: scrollable account list (left) + account detail (right).
+   Modeled on the requisitions2 split-screen workspace. Default sort puts the
+   longest-neglected accounts at the top (call-list order).
+   Receives: companies, search, staleness, account_type, my_only, sort, total,
+             limit, offset, overdue_count, account_types.
+   Called by: companies_list_partial route (htmx_views.py).
+   Depends on: splitPanel Alpine component (htmx_app.js), _account_list.html,
+               _detail_empty.html, brand palette.
 #}
 
-<div class="max-w-7xl mx-auto">
-  <div class="flex items-center justify-between mb-4">
-    <div>
-      <p class="text-sm text-gray-500 mt-1">{{ total }} compan{{ "ies" if total != 1 else "y" }}</p>
-    </div>
-  </div>
+<div id="cdm-workspace" class="flex flex-col min-h-[420px]"
+     x-data="{ selectedId: null }"
+     x-init="const fit = () => { $el.style.height = Math.max(420, window.innerHeight - $el.getBoundingClientRect().top - 64) + 'px' }; fit(); window.addEventListener('resize', fit)">
 
-  {# Today's Calls — overdue accounts for this salesperson #}
-  {% if todays_calls %}
-  <div class="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-4">
-    <div class="flex items-center justify-between mb-3">
-      <h3 class="text-sm font-semibold text-rose-800">
-        Needs Attention
-        <span class="ml-1 text-xs font-normal text-rose-600">({{ todays_calls|length }} account{{ "s" if todays_calls|length != 1 else "" }} overdue)</span>
-      </h3>
-    </div>
-    <div class="space-y-2">
-      {% for c in todays_calls %}
-      <div class="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-rose-100 cursor-pointer hover:bg-rose-50 transition-colors"
-           hx-get="/v2/partials/customers/{{ c.id }}"
-           hx-target="{{ hx_target|default('#main-content') }}"
-           hx-push-url="{{ push_url_base|default('/v2/customers') }}/{{ c.id }}">
-        <div class="flex items-center gap-2">
-          {% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
-          <span class="w-2.5 h-2.5 rounded-full {{ dot_colors.get(c.staleness, 'bg-rose-500') }} block"></span>
-          <span class="text-sm font-medium text-gray-900">{{ c.name }}</span>
-          {% if c.is_strategic %}
-          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-violet-50 text-violet-700">Strategic</span>
-          {% endif %}
-        </div>
-        <span class="text-xs text-rose-600">{{ c.last_activity_at|timeago if c.last_activity_at else "Never contacted" }}</span>
-      </div>
+  {# ── Filter / sort bar ─────────────────────────────────────── #}
+  <form id="cdm-filters" class="flex items-center gap-2 flex-wrap pb-3 flex-shrink-0"
+        hx-get="/v2/partials/customers/account-list"
+        hx-target="#cdm-list"
+        hx-swap="innerHTML"
+        hx-trigger="change, keyup changed delay:300ms from:#cdm-search">
+
+    <input id="cdm-search" aria-label="Search accounts" type="text" name="search" value="{{ search }}"
+           placeholder="Search accounts..."
+           class="flex-1 min-w-[160px] px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+
+    <select name="staleness" aria-label="Filter by activity staleness"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="">All activity</option>
+      <option value="overdue" {{ "selected" if staleness == "overdue" }}>Overdue (30d+)</option>
+      <option value="due_soon" {{ "selected" if staleness == "due_soon" }}>Due soon (14&ndash;30d)</option>
+      <option value="recent" {{ "selected" if staleness == "recent" }}>Recent (&lt;14d)</option>
+      <option value="new" {{ "selected" if staleness == "new" }}>Never contacted</option>
+    </select>
+
+    <select name="account_type" aria-label="Filter by account type"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="">All types</option>
+      {% for t in account_types %}
+      <option value="{{ t }}" {{ "selected" if account_type == t }}>{{ t }}</option>
       {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+    </select>
 
-  {# Search bar #}
-  <form id="customer-filters" class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-    <input type="hidden" name="hx_target" value="{{ hx_target|default('#main-content') }}">
-    <input type="hidden" name="push_url_base" value="{{ push_url_base|default('/v2/customers') }}">
-    <input aria-label="Search customers" type="text" name="search" value="{{ search }}" placeholder="Search customers..."
-           hx-get="/v2/partials/customers" hx-target="{{ hx_target|default('#main-content') }}" hx-push-url="{{ push_url_base|default('/v2/customers') }}"
-           hx-swap="morph"
-           hx-include="#customer-filters"
-           hx-trigger="keyup changed delay:300ms"
-           class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+    <select name="sort" aria-label="Sort accounts"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="oldest" {{ "selected" if sort == "oldest" }}>Longest since activity</option>
+      <option value="newest" {{ "selected" if sort == "newest" }}>Most recent activity</option>
+      <option value="name_asc" {{ "selected" if sort == "name_asc" }}>Name A&ndash;Z</option>
+      <option value="name_desc" {{ "selected" if sort == "name_desc" }}>Name Z&ndash;A</option>
+    </select>
+
+    <label class="inline-flex items-center gap-1.5 px-2 py-1.5 text-sm text-gray-600 cursor-pointer">
+      <input type="checkbox" name="my_only" value="1" {{ "checked" if my_only }}
+             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+      My accounts
+    </label>
+
+    {% if overdue_count %}
+    <button type="button"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
+            title="Show your accounts overdue for a call"
+            @click="const f = document.getElementById('cdm-filters'); f.elements.staleness.value = 'overdue'; f.elements.my_only.checked = true; f.dispatchEvent(new Event('change', { bubbles: true }))">
+      <span class="w-2 h-2 rounded-full bg-rose-500"></span>
+      {{ overdue_count }} need{{ "s" if overdue_count == 1 }} a call
+    </button>
+    {% endif %}
+
+    <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
 
-  {# Table #}
-  {% if companies %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-    <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-2 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-8"></th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industry</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sites</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Contact</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-200">
-          {% for c in companies %}
-          <tr class="hover:bg-brand-50 cursor-pointer"
-              hx-get="/v2/partials/customers/{{ c.id }}"
-              hx-target="{{ hx_target|default('#main-content') }}"
-              hx-push-url="{{ push_url_base|default('/v2/customers') }}/{{ c.id }}"
-              preload="mouseover">
-            <td class="px-2 py-3">
-              {% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
-              <span class="w-3 h-3 rounded-full {{ dot_colors.get(c.staleness, 'bg-gray-300') }} block" role="img" aria-label="{{ c.staleness|replace('_', ' ')|title }}" title="{{ c.staleness|replace('_', ' ')|title }}"></span>
-            </td>
-            <td class="px-4 py-3">
-              <div class="flex items-center">
-                <div class="h-8 w-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-medium text-brand-600">
-                  {{ c.name[0]|upper if c.name else "?" }}
-                </div>
-                <div class="ml-3">
-                  <p class="text-sm font-medium text-brand-500">{{ c.name }}</p>
-                  {% if c.domain %}<p class="text-xs text-gray-500">{{ c.domain }}</p>{% endif %}
-                </div>
-              </div>
-            </td>
-            <td class="px-4 py-3">
-              {% if c.account_type %}
-              {% set type_colors = {
-                "Customer": "bg-emerald-50 text-emerald-700",
-                "Prospect": "bg-brand-100 text-brand-600",
-                "Partner": "bg-brand-100 text-brand-300",
-                "Competitor": "bg-rose-50 text-rose-700"
-              } %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(c.account_type, 'bg-gray-100 text-gray-600') }}">
-                {{ c.account_type }}
-              </span>
-              {% else %}
-              <span class="text-xs text-gray-500">&mdash;</span>
-              {% endif %}
-            </td>
-            <td class="px-4 py-3 text-sm text-gray-500">{{ c.industry or "\u2014" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-500">{{ c.account_owner.name if c.account_owner else "\u2014" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-500 text-center">{{ c.site_count or 0 }}</td>
-            <td class="px-4 py-3 text-sm text-gray-500">
-              {% if c.last_activity_at %}
-                <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full
-                  {% if c.staleness == 'overdue' %}bg-rose-50 text-rose-700
-                  {% elif c.staleness == 'due_soon' %}bg-amber-50 text-amber-700
-                  {% elif c.staleness == 'recent' %}bg-emerald-50 text-emerald-700
-                  {% else %}bg-brand-100 text-brand-600{% endif %}">
-                  {{ c.last_activity_at|timeago }}
-                </span>
-              {% else %}
-                <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">Never</span>
-              {% endif %}
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+  {# ── Split workspace: account list (left) + detail panel (right) ── #}
+  <div id="split-cdm"
+       class="flex flex-1 overflow-hidden min-h-0 bg-white border border-gray-200 rounded-lg"
+       x-data="splitPanel('cdm', 35)">
+
+    {# Left panel: scrollable account list #}
+    <div class="border-r border-gray-200 flex flex-col bg-white flex-shrink-0 overflow-hidden"
+         :style="'width: ' + leftWidth + '%'">
+      <div id="cdm-list" class="flex-1 overflow-y-auto">
+        {% include "htmx/partials/customers/_account_list.html" %}
+      </div>
     </div>
-  </div>
 
-  {# Pagination #}
-  {% if total > limit %}
-  <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1 items-center">
-      {% if offset > 0 %}
-      <a hx-get="/v2/partials/customers?offset={{ offset - limit }}"
-         hx-target="{{ hx_target|default('#main-content') }}"
-         hx-include="#customer-filters"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
-      {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-      {% if offset + limit < total %}
-      <a hx-get="/v2/partials/customers?offset={{ offset + limit }}"
-         hx-target="{{ hx_target|default('#main-content') }}"
-         hx-include="#customer-filters"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
-      {% endif %}
-    </nav>
-  </div>
-  {% endif %}
+    {# Resizable divider #}
+    <div class="w-1 bg-gray-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 transition-colors"
+         role="separator" aria-label="Resize panels" tabindex="0"
+         @mousedown="startResize($event)"
+         @touchstart.prevent="startTouchResize($event)"
+         @keydown.left.prevent="leftWidth = Math.max(20, leftWidth - 2); localStorage.setItem('avail_split_cdm', leftWidth)"
+         @keydown.right.prevent="leftWidth = Math.min(70, leftWidth + 2); localStorage.setItem('avail_split_cdm', leftWidth)"></div>
 
-  {% else %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-    <p class="mt-2 text-sm text-gray-500">No customers found</p>
+    {# Right panel: account detail #}
+    <div id="cdm-detail" class="flex-1 overflow-y-auto bg-white min-w-0 p-4">
+      {% include "htmx/partials/customers/_detail_empty.html" %}
+    </div>
+
   </div>
-  {% endif %}
 </div>

@@ -24,7 +24,7 @@ from ..constants import ActivityType, Channel, Direction, EventType
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ActivityLog, Company, User, VendorCard
-from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest
+from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest, OutreachInitiatedRequest
 from ..utils.phone_utils import format_phone_display, format_phone_e164
 
 router = APIRouter(prefix="/api/activity", tags=["activity"])
@@ -127,6 +127,61 @@ def call_initiated(
         logger.error(f"call-initiated error: {e}")
         db.rollback()
         raise HTTPException(500, "Failed to record phone contact")
+
+
+@router.post("/outreach-initiated", status_code=201)
+def outreach_initiated(
+    body: OutreachInitiatedRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a click-to-contact event (phone / email / Teams / WeChat).
+
+    Fired from the CDM account workspace contact panel when a user clicks a tel:/
+    mailto:/Teams/WeChat
+    link. Creates an outbound ActivityLog and bumps
+    company/site last_activity_at so the staleness sort updates.
+    """
+    try:
+        contact_value = body.contact_value.strip()
+        if body.channel == "phone":
+            e164 = format_phone_e164(contact_value)
+            if not e164:
+                raise HTTPException(400, "Invalid phone number")
+            contact_value = e164
+        elif body.channel in ("email", "teams") and "@" not in contact_value:
+            raise HTTPException(400, "Invalid email address")
+        elif not contact_value:
+            raise HTTPException(400, "Contact value is required")
+
+        if not _check_rate_limit(user.id):
+            raise HTTPException(429, "Too many outreach logs — try again in a minute")
+
+        if body.company_id and not db.get(Company, body.company_id):
+            logger.warning(f"outreach-initiated: company_id={body.company_id} not found")
+
+        from ..services.activity_service import log_outreach_initiated
+
+        record = log_outreach_initiated(
+            db,
+            user_id=user.id,
+            channel=body.channel,
+            contact_value=contact_value,
+            company_id=body.company_id,
+            customer_site_id=body.customer_site_id,
+            site_contact_id=body.site_contact_id,
+            contact_name=body.contact_name,
+            origin=body.origin,
+        )
+        db.commit()
+        return {"id": record.id}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"outreach-initiated error: {e}")
+        db.rollback()
+        raise HTTPException(500, "Failed to record outreach")
 
 
 @router.get("/account/{company_id}", response_model=ActivityTimelineResponse)

@@ -170,6 +170,7 @@ class SiteContact(Base):
     title = Column(String(255))
     email = Column(String(255))
     phone = Column(String(100))
+    wechat_id = Column(String(100))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)

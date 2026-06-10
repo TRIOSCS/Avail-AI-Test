@@ -6,7 +6,7 @@
 
 - **Engine:** PostgreSQL 16
 - **ORM:** SQLAlchemy 2.0 with async support
-- **Migrations:** Alembic (81+ migration files)
+- **Migrations:** Alembic (95+ migration files)
 - **Connection:** Pool size 20, max overflow 20, pool recycle 1800s
 - **Timeouts:** Statement 30s, lock 5s
 - **Extensions:** pg_stat_statements, Full-Text Search (TSVECTOR), pg_trgm
@@ -214,6 +214,7 @@
 | enrichment_source | String 50 | explorium\|apollo\|manual |
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
+| last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -226,6 +227,7 @@
 | address fields | line1, line2, city, state, zip, country | |
 | site_type | String 50 | HQ\|Branch\|Warehouse\|Manufacturing |
 | payment_terms / shipping_terms | String 100 | |
+| last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` alongside `companies.last_activity_at`. |
 
 **`site_contacts`** — Individual people at customer sites
 | Column | Type | Notes |
@@ -234,6 +236,8 @@
 | customer_site_id | FK -> customer_sites (CASCADE) | |
 | full_name | String 255 | |
 | email | String 255 | Unique per site |
+| phone | String 100 | |
+| wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
 | contact_role | String 50 | buyer\|technical\|decision_maker\|operations |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
@@ -391,6 +395,8 @@
 - Links to: company, vendor_card, vendor_contact, requisition, requirement, quote, customer_site, site_contact, buy_plan
 - direction: inbound\|outbound
 - quality_score, quality_classification
+- New `ActivityType` values (app/constants.py): `WECHAT_MESSAGE` (written by `log_outreach_initiated()` when channel=wechat). Companion `Channel` enum adds `WECHAT` alongside existing phone\|email\|teams values.
+- Click-to-contact events (channel phone\|email\|teams\|wechat) are written by `log_outreach_initiated()` in `app/services/activity_service.py` — maps channel → activity_type (phone→call_logged, email→email_sent, teams→teams_message, wechat→wechat_message), direction=outbound, is_meaningful=True; bumps `companies.last_activity_at` and `customer_sites.last_activity_at`.
 
 **`activity_digest`** — AI-generated digest cache (one row per entity, migration `086_add_activity_digest.py`)
 | Column | Type | Notes |

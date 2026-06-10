@@ -387,6 +387,7 @@ class ActivityType(StrEnum):
     PROACTIVE_MATCH = "proactive_match"
     PART_STATUS_CHANGE = "part_status_change"
     TEAMS_MESSAGE = "teams_message"
+    WECHAT_MESSAGE = "wechat_message"
 
 
 class Channel(StrEnum):
@@ -401,6 +402,7 @@ class Channel(StrEnum):
     OUTLOOK = "outlook"
     CALENDAR = "calendar"
     AVAIL_SYSTEM = "avail_system"
+    WECHAT = "wechat"
 
 
 class EventType(StrEnum):

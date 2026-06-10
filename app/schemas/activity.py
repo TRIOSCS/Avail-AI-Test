@@ -5,6 +5,7 @@ Depends on: pydantic
 """
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -17,6 +18,22 @@ class CallInitiatedRequest(BaseModel):
     company_id: int | None = None
     customer_site_id: int | None = None
     requirement_id: int | None = None
+    origin: str | None = None
+
+
+class OutreachInitiatedRequest(BaseModel):
+    """Request body for POST /api/activity/outreach-initiated.
+
+    Logs a click-to-contact event (phone / email / Teams / WeChat) from the CDM account
+    workspace contact panel.
+    """
+
+    channel: Literal["phone", "email", "teams", "wechat"]
+    contact_value: str  # phone number, email address, or WeChat ID
+    company_id: int | None = None
+    customer_site_id: int | None = None
+    site_contact_id: int | None = None
+    contact_name: str | None = None
     origin: str | None = None
 
 

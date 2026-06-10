@@ -1,7 +1,10 @@
-{# Company detail partial — tabbed layout with enrich, quick info, stats, and click-to-call.
-   Receives: company, sites, open_req_count, user.
+{# Company detail partial — tabbed layout with enrich, quick info, stats, and click-to-contact.
+   Renders inside the CDM workspace right panel (#cdm-detail) or full-page (#main-content).
+   Contacts tab is default and inlined so phones/emails/Teams/WeChat actions are
+   immediately available for call-list workflows.
+   Receives: company, sites, open_req_count, contact_rows, user.
    Called by: company_detail_partial route in htmx_views.py.
-   Depends on: brand palette, partials/shared/enrich_button.html, partials/shared/empty_state.html.
+   Depends on: brand palette, partials/shared/enrich_button.html, tabs/contacts_tab.html.
 #}
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
@@ -74,7 +77,9 @@
         <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
         <p class="mt-1 text-sm font-medium">
           {% if company.phone %}
-            <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600">{{ company.phone }}</a>
+            <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
+               data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
+               data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
           {% else %}
             <span class="text-gray-400">—</span>
           {% endif %}
@@ -118,13 +123,13 @@
     </div>
   </div>
 
-  {# ── Tabs ────────────────────────────────────────────────── #}
-  <div x-data="{ activeTab: 'sites' }">
+  {# ── Tabs — Contacts first (CDM call-list workflow) ───────── #}
+  <div x-data="{ activeTab: 'contacts' }">
     <div class="border-b border-gray-200">
       <nav class="flex gap-6 -mb-px">
         {% for tab_id, tab_label, tab_count in [
+          ('contacts', 'Contacts', contact_rows|length if contact_rows is defined else none),
           ('sites', 'Sites', sites|length),
-          ('contacts', 'Contacts', none),
           ('requisitions', 'Requisitions', open_req_count),
           ('activity', 'Activity', none)
         ] %}
@@ -144,44 +149,9 @@
       </nav>
     </div>
 
-    {# Tab content — sites loaded inline on first load #}
+    {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
     <div id="company-tab-content" class="mt-4">
-      {% if sites %}
-      <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-gray-50">
-            <tr>
-              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Site Name</th>
-              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
-              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
-              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Country</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-200">
-            {% for s in sites %}
-            <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
-                hx-get="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
-                hx-target="#company-tab-content"
-                hx-swap="innerHTML">
-              <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
-              <td class="px-4 py-2.5 text-sm text-gray-500">
-                {% if s.site_type %}
-                  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ s.site_type }}</span>
-                {% else %}
-                  —
-                {% endif %}
-              </td>
-              <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.city or "—" }}</td>
-              <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.country or "—" }}</td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      {% set message = "No sites found for this company." %}
-      {% include "htmx/partials/shared/empty_state.html" %}
-      {% endif %}
+      {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
     </div>
   </div>
 

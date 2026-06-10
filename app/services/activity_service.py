@@ -563,6 +563,79 @@ def log_company_note(
     return record
 
 
+# Channel → (activity_type, channel, event_type, snapshot column) for
+# click-to-contact outreach logged from the CDM account workspace.
+# WeChat has no dedicated snapshot column — the handle is kept in notes.
+_OUTREACH_CHANNEL_MAP: dict[str, tuple[str, str, str, str | None]] = {
+    "phone": (ActivityType.CALL_LOGGED, Channel.PHONE, EventType.CALL, "contact_phone"),
+    "email": (ActivityType.EMAIL_SENT, Channel.EMAIL, EventType.EMAIL, "contact_email"),
+    "teams": (ActivityType.TEAMS_MESSAGE, Channel.TEAMS, EventType.MESSAGE, "contact_email"),
+    "wechat": (ActivityType.WECHAT_MESSAGE, Channel.WECHAT, EventType.MESSAGE, None),
+}
+
+_OUTREACH_SUBJECT_VERBS: dict[str, str] = {
+    "phone": "Call to",
+    "email": "Email to",
+    "teams": "Teams message to",
+    "wechat": "WeChat message to",
+}
+
+
+def log_outreach_initiated(
+    db: Session,
+    *,
+    user_id: int,
+    channel: str,
+    contact_value: str,
+    company_id: int | None = None,
+    customer_site_id: int | None = None,
+    site_contact_id: int | None = None,
+    contact_name: str | None = None,
+    origin: str | None = None,
+) -> ActivityLog:
+    """Log a click-to-contact outreach event (phone/email/teams/wechat).
+
+    Called by: POST /api/activity/outreach-initiated (CDM contact panel).
+    Creates an outbound, meaningful, auto-logged ActivityLog and bumps
+    last_activity_at on the company and site so staleness sorting reflects
+    the touch immediately. Caller commits.
+    """
+    if channel not in _OUTREACH_CHANNEL_MAP:
+        raise ValueError(f"Unknown outreach channel: {channel}")
+    activity_type, log_channel, event_type, snapshot_col = _OUTREACH_CHANNEL_MAP[channel]
+
+    target = contact_name or contact_value
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type=activity_type,
+        channel=log_channel,
+        direction=Direction.OUTBOUND,
+        event_type=event_type,
+        is_meaningful=True,
+        auto_logged=True,
+        company_id=company_id,
+        customer_site_id=customer_site_id,
+        site_contact_id=site_contact_id,
+        contact_name=contact_name,
+        subject=f"{_OUTREACH_SUBJECT_VERBS[channel]} {target}",
+        notes=f"source=click_to_contact origin={origin or 'unknown'} contact={contact_value}",
+    )
+    if snapshot_col:
+        setattr(record, snapshot_col, contact_value)
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    if company_id:
+        db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
+    if customer_site_id:
+        db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
+            {"last_activity_at": now}, synchronize_session=False
+        )
+    logger.info(f"Outreach logged: {channel} -> company {company_id} by user {user_id}")
+    return record
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  SITE-CONTACT NOTE LOGGING
 # ═══════════════════════════════════════════════════════════════════════
