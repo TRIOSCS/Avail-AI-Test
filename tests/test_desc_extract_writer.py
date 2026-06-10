@@ -150,11 +150,12 @@ def test_desc_writes_phase2_seed_extension_members(db_session: Session):
 
 
 def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Session):
-    # A vendor-API gpu memory_gb at 0.95 must survive the desc-parse pass — the
-    # writer's strictly-higher-confidence guard applies to the new commodities too.
+    # A vendor-API gpu memory_gb must survive the desc-parse pass — under the F1
+    # ladder a registered vendor source (tier 90) outranks desc_parse (tier 83),
+    # so the ladder (not a writer pre-gate) keeps the vendor value authoritative.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "900-2G500-0000-000", "gpu", "SPS-PCA, NVIDIA Tesla V100 32GB Module")
-    assert record_spec(db_session, card.id, "memory_gb", 16, source="vendor_api", confidence=0.95)
+    assert record_spec(db_session, card.id, "memory_gb", 16, source="digikey_api", confidence=0.95)
 
     written = extract_and_record(db_session, card)
     db_session.commit()
@@ -162,7 +163,7 @@ def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Sess
     assert written == 1  # gpu_family only; memory_gb skipped
     f = _facets(db_session, card.id)
     assert f["memory_gb"] == 16  # the 0.95 prior is untouched (desc said 32)
-    assert card.specs_structured["memory_gb"]["source"] == "vendor_api"
+    assert card.specs_structured["memory_gb"]["source"] == "digikey_api"
     assert f["gpu_family"] == "Tesla"
     assert card.specs_structured["gpu_family"]["source"] == "desc_parse"
 

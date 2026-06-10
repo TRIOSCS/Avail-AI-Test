@@ -15,7 +15,7 @@ Called by: app/services/spec_write_service.record_spec (spec conflict resolution
       (enrichment.py, authoritative_enrichment_service.py, material_enrichment_service.py).
 Depends on: app.services.category_normalizer.normalize_category (lazy import inside
       set_category to avoid a model↔service import cycle), MaterialCard's category
-      provenance columns (added by migration 095_spec_provenance).
+      provenance columns (added by migration 096_spec_provenance).
 
 The ladder rule (F1): incoming wins iff its ``(tier, confidence, updated_at)`` tuple is
 strictly greater than the existing one. Higher tier always overrides; equal tier → higher
@@ -46,8 +46,8 @@ if TYPE_CHECKING:
 # categorization ``claude_haiku`` ranks with the other AI guesses). ``manual`` (a human
 # edit) tops it.
 #
-# NOTE: migration 095_spec_provenance carries a SQL CASE snapshot of this map for the
-# one-shot facet-tier backfill — tests/test_migration_095_spec_provenance.py asserts the
+# NOTE: migration 096_spec_provenance carries a SQL CASE snapshot of this map for the
+# one-shot facet-tier backfill — tests/test_migration_096_spec_provenance.py asserts the
 # two stay in sync, so adding a source here requires updating the migration literal too.
 SOURCE_TIER: dict[str, int] = {
     "manual": 100,

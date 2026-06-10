@@ -23,7 +23,7 @@ What: Adds the F2 provenance columns so every spec/category write can record whe
 Called by: alembic (upgrade/downgrade).
 Depends on: 094_fru_links (current single head); material_cards, material_spec_facets tables.
 
-Revision ID: 095_spec_provenance
+Revision ID: 096_spec_provenance
 Revises: 094_fru_links
 Create Date: 2026-06-09
 """
@@ -34,8 +34,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "095_spec_provenance"
-down_revision = "094_fru_links"
+revision = "096_spec_provenance"
+down_revision = "095_wechat_id"
 branch_labels = None
 depends_on = None
 
@@ -49,7 +49,7 @@ _LEGACY_CATEGORY_TIER = 50
 # SQL CASE snapshot of app.services.spec_tiers.SOURCE_TIER (the FULL map — including
 # sources that cannot appear in pre-095 data, so the snapshot equals the dict exactly).
 # Migrations must NOT import app code (it may drift after this runs); instead
-# tests/test_migration_095_spec_provenance.py parses this literal and asserts it matches
+# tests/test_migration_096_spec_provenance.py parses this literal and asserts it matches
 # SOURCE_TIER key-for-key, so adding a ladder source without updating this CASE fails CI.
 # Unknown sources fall through the CASE to tier 0.
 _SOURCE_TIER_SQL_CASE = (
@@ -93,7 +93,7 @@ def upgrade() -> None:
     if bind.dialect.name != "postgresql":
         # SQLite (test engine) has no JSONB operators — schema columns are added above so the
         # migration round-trips, but the data backfill is PG-only.
-        logger.info("095_spec_provenance: non-PostgreSQL dialect — skipping JSONB/category backfill")
+        logger.info("096_spec_provenance: non-PostgreSQL dialect — skipping JSONB/category backfill")
         return
 
     # --- Backfill (a): facet provenance from the winning specs_structured JSONB entry ---
@@ -109,7 +109,7 @@ def upgrade() -> None:
             "  AND f.source IS NULL"
         )
     )
-    logger.info("095_spec_provenance: backfilled provenance on {} facet rows", result.rowcount)
+    logger.info("096_spec_provenance: backfilled provenance on {} facet rows", result.rowcount)
 
     # --- Backfill (b): category provenance for valued-but-unprovenanced rows ---
     result = bind.execute(
@@ -124,7 +124,7 @@ def upgrade() -> None:
             "tier": _LEGACY_CATEGORY_TIER,
         },
     )
-    logger.info("095_spec_provenance: backfilled category provenance on {} card rows", result.rowcount)
+    logger.info("096_spec_provenance: backfilled category provenance on {} card rows", result.rowcount)
 
 
 def downgrade() -> None:

@@ -61,7 +61,7 @@ class MaterialSpecFacet(Base):
 
     # Provenance (SP2/F2) — mirrors the winning specs_structured entry's source/confidence/tier
     # so a faceted query can surface (or filter on) where each value came from. All nullable:
-    # legacy facet rows pre-date provenance and are backfilled by migration 095_spec_provenance.
+    # legacy facet rows pre-date provenance and are backfilled by migration 096_spec_provenance.
     source = Column(String(50))
     confidence = Column(Float)
     tier = Column(Integer)
