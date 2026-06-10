@@ -344,7 +344,7 @@ def test_mark_unavailable_marks_sightings(client, db_session, test_user):
     ):
         resp = client.post(
             f"/v2/partials/sightings/{requirement.id}/mark-unavailable",
-            data={"vendor_name": "Arrow Electronics"},
+            data={"vendor_name": "Arrow Electronics", "reason": "sold_elsewhere"},
         )
 
     db_session.refresh(sighting)

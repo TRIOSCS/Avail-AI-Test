@@ -377,7 +377,7 @@ def test_mark_unavailable_broker_publish_called(client, db_session, test_user):
         ):
             resp = client.post(
                 f"/v2/partials/sightings/{requirement.id}/mark-unavailable",
-                data={"vendor_name": "TestVendorCov"},
+                data={"vendor_name": "TestVendorCov", "reason": "sold_elsewhere"},
             )
 
     assert resp.status_code == 200
@@ -402,7 +402,7 @@ def test_mark_unavailable_no_matching_sightings_still_succeeds(client, db_sessio
         ):
             resp = client.post(
                 f"/v2/partials/sightings/{requirement.id}/mark-unavailable",
-                data={"vendor_name": "NoSuchVendor"},
+                data={"vendor_name": "NoSuchVendor", "reason": "other"},
             )
 
     assert resp.status_code == 200

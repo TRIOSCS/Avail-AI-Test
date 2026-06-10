@@ -5,8 +5,10 @@ batch inquiry workflow, and activity timeline.
 
 Called by: main.py (router mount)
 Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
-            ActivityLog, VendorCard, Contact, Offer), sighting_status service,
-            scoring.py, search_service, email_service, template_env
+            ActivityLog, VendorCard, Contact, Offer, VendorPartUnavailability via
+            the vendor_unavailability service), sighting_status service,
+            vendor_unavailability service (mark/clear/intel/RFQ exclusion/offer-hook
+            release), scoring.py, search_service, email_service, template_env
 """
 
 import asyncio
@@ -24,7 +26,13 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..constants import ActivityType, OfferStatus, RequisitionStatus, SourcingStatus
+from ..constants import (
+    ActivityType,
+    OfferStatus,
+    RequisitionStatus,
+    SourcingStatus,
+    UnavailabilityReason,
+)
 from ..database import get_db
 from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
@@ -39,6 +47,14 @@ from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
+from ..services.vendor_unavailability import (
+    clear_unavailability,
+    excluded_vendor_norms,
+    record_unavailability,
+    release_on_offer,
+    sighting_vendor_norm,
+    unavailability_for_requirement,
+)
 from ..template_env import template_response
 from ..utils import safe_float, safe_int
 from ..utils.sql_helpers import escape_like
@@ -98,6 +114,7 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
 RFQ_SENT_HEADER = "X-RFQ-Sent"
 RFQ_TOTAL_HEADER = "X-RFQ-Total"
 RFQ_SKIPPED_HEADER = "X-RFQ-Skipped"  # vendors with no contact email (not a delivery failure)
+RFQ_UNAVAILABLE_HEADER = "X-RFQ-Unavailable"  # vendors dropped by the active-only unavailability re-check
 
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
@@ -135,6 +152,42 @@ async def _publish_if_user_source(source: str, user_id: int, requirement_id: int
 def _toast_suppressed_for_sse(source: str) -> bool:
     """Return True when the caller is an SSE-triggered request."""
     return source == "sse"
+
+
+def _annotated_unavailability(
+    db: Session, requirement: Requirement, vendor_names: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Template-facing unavailability intel: vendor display name → plain dict.
+
+    Wraps unavailability_for_requirement() with the small render-only enrichments the
+    three-state vendor-row UI needs (reason label, marker name, has_unstamped_row for
+    the rows-win state selection) so the template stays dumb and never re-derives
+    policy. Vendors with no matching record are absent.
+    """
+    raw = unavailability_for_requirement(db, requirement, vendor_names)
+    if not raw:
+        return {}
+    rows = db.query(Sighting).filter(Sighting.requirement_id == requirement.id).all()
+    unstamped_norms = {sighting_vendor_norm(s) for s in rows if not s.is_unavailable}
+    creator_ids = {i.record.created_by_id for i in raw.values() if i.record.created_by_id is not None}
+    creator_names: dict[int, str] = (
+        dict(db.query(User.id, User.name).filter(User.id.in_(creator_ids)).all()) if creator_ids else {}
+    )
+    annotated: dict[str, dict[str, Any]] = {}
+    for vendor_name, item in raw.items():
+        rec = item.record
+        annotated[vendor_name] = {
+            "is_active": item.is_active,
+            "age_days": item.age_days,
+            "release_trigger": item.release_trigger,
+            "reason": rec.reason,
+            "reason_label": UnavailabilityReason(rec.reason).label,
+            "note": rec.note,
+            "qty_at_mark": rec.qty_at_mark,
+            "marked_by": creator_names.get(rec.created_by_id),
+            "has_unstamped_row": normalize_vendor_name(vendor_name) in unstamped_norms,
+        }
+    return annotated
 
 
 @router.get("/v2/partials/sightings/workspace", response_class=HTMLResponse)
@@ -616,6 +669,9 @@ async def sightings_detail(
     for vendor_name, mpn in matched_rows:
         vendor_matched_mpns.setdefault(vendor_name, []).append(mpn)
 
+    # ── Durable vendor+part unavailability intel (three-state row UI) ───
+    unavailable_intel = _annotated_unavailability(db, requirement, [s.vendor_name for s in summaries])
+
     activities = (
         db.query(ActivityLog)
         .filter(ActivityLog.requirement_id == requirement_id)
@@ -643,6 +699,7 @@ async def sightings_detail(
         "ooo_map": ooo_map,
         "overlap_counts": overlap_counts,
         "vendor_matched_mpns": vendor_matched_mpns,
+        "unavailable_intel": unavailable_intel,
         "suggested_action": suggested_action,
         "available_statuses": available_statuses,
         "material_card": material_card,
@@ -938,6 +995,35 @@ async def sightings_batch_notes(
     return _oob_toast(msg)
 
 
+@router.get("/v2/partials/sightings/{requirement_id}/unavailable-form", response_class=HTMLResponse)
+async def sightings_unavailable_form(
+    request: Request,
+    requirement_id: int,
+    vendor_name: str = Query(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Reason modal for mark-unavailable, served through the open-modal dispatch.
+
+    Also the verify/re-arm affordance for the advisory + restock row states: when a
+    record already exists it shows "Currently marked" and carries BOTH actions — submit
+    re-arms (upsert refresh), "It's back" POSTs mark-available. There is NO separate
+    verify endpoint.
+    """
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+    current = _annotated_unavailability(db, requirement, [vendor_name]).get(vendor_name)
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "vendor_name": vendor_name,
+        "reasons": list(UnavailabilityReason),
+        "current": current,
+    }
+    return template_response("htmx/partials/sightings/unavailable_form.html", ctx)
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/mark-unavailable", response_class=HTMLResponse)
 async def sightings_mark_unavailable(
     request: Request,
@@ -946,23 +1032,65 @@ async def sightings_mark_unavailable(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Mark all sightings for a vendor on this requirement as unavailable."""
+    """Durably mark a vendor's stock of this requirement's part(s) as unavailable.
+
+    Requires a validated reason (+ optional note) and delegates entirely to
+    record_unavailability (upsert per MPN key, normalized sighting re-stamp,
+    ActivityLog). Re-POSTing for an already-marked vendor is the re-arm path. The
+    service's ValueErrors (zero derivable keys / empty vendor norm) map to a 400 JSON
+    error with nothing written.
+    """
     form = await request.form()
-    vendor_name = form.get("vendor_name", "")
+    vendor_name = str(form.get("vendor_name") or "").strip()
+    if not vendor_name:
+        raise HTTPException(status_code=400, detail="vendor_name required")
+    try:
+        reason = UnavailabilityReason(str(form.get("reason") or ""))
+    except ValueError:
+        valid = ", ".join(m.value for m in UnavailabilityReason)
+        raise HTTPException(status_code=400, detail=f"reason is required and must be one of: {valid}")
+    note = str(form.get("note") or "") or None
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    try:
+        record_unavailability(db, requirement, vendor_name, reason, note, user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+
+    await _publish_if_user_source(source, user.id, requirement_id)
+
+    return await sightings_detail(request, requirement_id, db, user)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/mark-available", response_class=HTMLResponse)
+async def sightings_mark_available(
+    request: Request,
+    requirement_id: int,
+    source: Literal["user", "sse"] = Query(default="user"),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Undo a mark: delete the vendor's unavailability records and unflag its
+    sightings (clear_unavailability), then re-render the detail panel."""
+    form = await request.form()
+    vendor_name = str(form.get("vendor_name") or "").strip()
     if not vendor_name:
         raise HTTPException(status_code=400, detail="vendor_name required")
 
-    normalized = normalize_vendor_name(vendor_name)
-    sightings = (
-        db.query(Sighting)
-        .filter(
-            Sighting.requirement_id == requirement_id,
-            sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name)) == normalized,
-        )
-        .all()
-    )
-    for s in sightings:
-        s.is_unavailable = True
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    try:
+        clear_unavailability(db, requirement, vendor_name, user)
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(exc))
     db.commit()
 
     await _publish_if_user_source(source, user.id, requirement_id)
@@ -1131,8 +1259,15 @@ async def sightings_vendor_modal(
         for r in requirements
     ]
 
-    suggested_vendors = (
-        (
+    # Active-only unavailability exclusion (alongside the blacklist filter): a vendor
+    # durably marked unavailable for ANY selected part is not suggested — deliberately
+    # conservative multi-requirement semantics. Expired/released/cleared records do
+    # not exclude (active-only is enforced inside the service).
+    excluded = excluded_vendor_norms(db, requirements) if requirements else set()
+
+    suggested_vendors: list[VendorCard] = []
+    if req_id_list:
+        vendor_query = (
             db.query(VendorCard)
             .join(
                 VendorSightingSummary,
@@ -1142,14 +1277,21 @@ async def sightings_vendor_modal(
                 VendorSightingSummary.requirement_id.in_(req_id_list),
                 VendorCard.is_blacklisted.is_(False),
             )
-            .order_by(VendorCard.engagement_score.desc().nullslast())
-            .distinct()
-            .limit(20)
-            .all()
         )
-        if req_id_list
-        else []
-    )
+        if excluded:
+            vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
+        suggested_vendors = (
+            vendor_query.order_by(VendorCard.engagement_score.desc().nullslast()).distinct().limit(20).all()
+        )
+        if excluded:
+            # Belt and braces: some legacy cards carry a normalized_name that predates
+            # normalize_vendor_name (suffix kept) — re-check through the canonical
+            # normalizer so "X, Inc." cards can't slip past the column filter.
+            suggested_vendors = [
+                v
+                for v in suggested_vendors
+                if normalize_vendor_name(v.display_name or v.normalized_name or "") not in excluded
+            ]
 
     ctx = {
         "request": request,
@@ -1180,6 +1322,14 @@ async def sightings_preview_inquiry(
         raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+
+    # Request-time re-validation against ACTIVE unavailability records (the modal
+    # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
+    # preview and reported visibly — never a silent drop.
+    excluded = excluded_vendor_norms(db, requirements)
+    unavailable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) in excluded]
+    if unavailable_vendors:
+        vendor_names = [vn for vn in vendor_names if normalize_vendor_name(vn) not in excluded]
 
     requisition_ids = {r.requisition_id for r in requirements}
     requisition_id = next(iter(requisition_ids)) if requisition_ids else None
@@ -1227,6 +1377,7 @@ async def sightings_preview_inquiry(
         "requirement_ids": requirement_ids,
         "vendor_names": vendor_names,
         "email_body": email_body,
+        "unavailable_vendors": unavailable_vendors,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
@@ -1256,11 +1407,18 @@ async def sightings_send_inquiry(
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
 
+    # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
+    # vendors with an ACTIVE unavailability record on the selected parts are dropped
+    # from the send and reported visibly below — never a silent drop.
+    excluded = excluded_vendor_norms(db, requirements)
+    unavailable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) in excluded]
+    sendable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) not in excluded]
+
     requisition_ids = {r.requisition_id for r in requirements}
     requisition_id = next(iter(requisition_ids)) if requisition_ids else None
 
     # Batch-fetch vendor cards + contacts in two queries instead of N+1
-    normalized_names = [normalize_vendor_name(vn) for vn in vendor_names]
+    normalized_names = [normalize_vendor_name(vn) for vn in sendable_vendors]
     cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all()
     card_map = {c.normalized_name: c for c in cards}
 
@@ -1269,7 +1427,7 @@ async def sightings_send_inquiry(
     contact_map = {c.vendor_card_id: c for c in contacts}
 
     vendor_groups = []
-    for vn in vendor_names:
+    for vn in sendable_vendors:
         card = card_map.get(normalize_vendor_name(vn))
         vendor_email = ""
         if card:
@@ -1292,15 +1450,18 @@ async def sightings_send_inquiry(
     failed_vendors: list[str] = []
     no_email_vendors: list[str] = []
     try:
-        from ..email_service import send_batch_rfq
+        if vendor_groups:
+            from ..email_service import send_batch_rfq
 
-        results = await send_batch_rfq(
-            token=token,
-            db=db,
-            user_id=user.id,
-            requisition_id=requisition_id,
-            vendor_groups=vendor_groups,
-        )
+            results = await send_batch_rfq(
+                token=token,
+                db=db,
+                user_id=user.id,
+                requisition_id=requisition_id,
+                vendor_groups=vendor_groups,
+            )
+        else:
+            results = []  # every requested vendor was dropped by the unavailability re-check
         # send_batch_rfq returns one record per requested vendor tagged "sent" / "failed"
         # / "skipped" (no contact email). A vendor is delivered only when status=="sent"
         # — len(results) would over-count, and a "skipped" vendor is not a delivery
@@ -1312,7 +1473,7 @@ async def sightings_send_inquiry(
 
         # Log "RFQ sent" activity only for vendors actually reached.
         for r in requirements:
-            for vn in vendor_names:
+            for vn in sendable_vendors:
                 if vn in sent_vendors:
                     log_rfq_activity(
                         db=db,
@@ -1332,7 +1493,7 @@ async def sightings_send_inquiry(
                     progressed_count += 1
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
-        failed_vendors = list(vendor_names)
+        failed_vendors = list(sendable_vendors)
         sent_count = 0
 
     db.commit()
@@ -1353,6 +1514,8 @@ async def sightings_send_inquiry(
             bits.append(f"Failed: {', '.join(v for v in failed_vendors if v)}.")
         if no_email_vendors:
             bits.append(f"No email on file: {', '.join(v for v in no_email_vendors if v)}.")
+        if unavailable_vendors:
+            bits.append(f"Skipped (marked unavailable): {', '.join(unavailable_vendors)}.")
         msg = " ".join(bits)
         level = "warning"
 
@@ -1365,6 +1528,7 @@ async def sightings_send_inquiry(
     resp.headers[RFQ_SENT_HEADER] = str(sent_count)
     resp.headers[RFQ_TOTAL_HEADER] = str(total)
     resp.headers[RFQ_SKIPPED_HEADER] = str(len(no_email_vendors))
+    resp.headers[RFQ_UNAVAILABLE_HEADER] = str(len(unavailable_vendors))
     return resp
 
 
@@ -1489,6 +1653,10 @@ async def sightings_create_offer(
         raise RequestValidationError(e.errors()) from e
 
     await create_offer(requirement.requisition_id, payload, user=user, db=db)
+    # Offer hook: an incoming offer is proof of availability — release the vendor's
+    # matching ACTIVE unavailability records ('offer_received'; never different_part).
+    release_on_offer(db, requirement, vendor_name, user)
+    db.commit()
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
 

@@ -94,7 +94,7 @@ class TestSSEPublishOnMarkUnavailable:
             mock_broker.publish = AsyncMock()
             resp = client.post(
                 f"/v2/partials/sightings/{r.id}/mark-unavailable",
-                data={"vendor_name": "SSE Vendor"},
+                data={"vendor_name": "SSE Vendor", "reason": "sold_elsewhere"},
             )
             assert resp.status_code == 200
             mock_broker.publish.assert_called_once()

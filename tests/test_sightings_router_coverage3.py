@@ -406,7 +406,7 @@ class TestMarkUnavailableCoverage:
 
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/mark-unavailable",
-            data={"vendor_name": "TestVendor"},
+            data={"vendor_name": "TestVendor", "reason": "sold_elsewhere"},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
