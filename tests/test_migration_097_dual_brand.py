@@ -1,9 +1,9 @@
 """Structural + SQLite round-trip tests for migration 097 (dual-brand columns).
 
 Asserts the migration's revision metadata (id <=32 chars — feedback_alembic_revision_id_
-length, chains off 096_spec_provenance, single head == 097_dual_brand) and that its nine
-add_column calls + ix_material_cards_brand round-trip (upgrade → downgrade → upgrade) on
-a scratch SQLite engine. The migration is purely additive, portable DDL (no data
+length, chains off 098_materials_perf_idx, on the single-head mainline) and that its
+nine add_column calls + ix_material_cards_brand round-trip (upgrade → downgrade →
+upgrade) on a scratch SQLite engine. The migration is purely additive, portable DDL (no data
 writes), so executing its upgrade()/downgrade() directly is honest coverage on both
 engines. Execution uses the hermetic MigrationContext + Operations.context pattern
 (like test_migration_094_fru_links) rather than the in-process alembic CLI: the CLI
@@ -48,21 +48,27 @@ class TestRevisionMetadata:
         # alembic_version.version_num is VARCHAR(32) on Postgres (feedback_alembic_revision_id_length).
         assert len(_mod.revision) <= 32
 
-    def test_down_revision_chains_off_096(self):
-        assert _mod.down_revision == "096_spec_provenance"
+    def test_down_revision_chains_off_098(self):
+        # 098_materials_perf_idx (PR #262) deliberately skipped the 097 number this
+        # branch had reserved — the chain runs 096 → 098 → 097 (numeric order is not
+        # chain order; same precedent as 094 chaining over the reserved 092).
+        assert _mod.down_revision == "098_materials_perf_idx"
 
-    def test_single_head_is_097(self):
-        # The migration chain must converge to exactly one head (no unmerged branches) —
-        # a second head makes `alembic upgrade head` error out at deploy time. The NEWEST
-        # migration's test owns the exact-value assertion (older tests pin len == 1 only,
-        # so they don't churn per new migration).
+    def test_on_single_head_mainline(self):
+        # The migration chain must converge to exactly one head (no unmerged branches —
+        # test_migration_chain.py owns that invariant) AND 097 must sit on the mainline
+        # walked from that head. Reachability instead of a pinned head name, so this
+        # test survives future migrations landing on top.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["097_dual_brand"], f"expected single head 097_dual_brand, got {heads}"
+        script = ScriptDirectory.from_config(cfg)
+        heads = script.get_heads()
+        assert len(heads) == 1, f"expected a single head, got {heads}"
+        mainline = {rev.revision for rev in script.iterate_revisions(heads[0], "base")}
+        assert "097_dual_brand" in mainline, "097_dual_brand fell off the mainline walked from the head"
 
 
 class TestRoundTrip:

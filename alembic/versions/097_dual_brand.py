@@ -14,10 +14,13 @@ What: Adds the dual-brand columns so a card can carry BOTH the OEM label (brand 
       The data backfill is a separate, dry-run-first operator command
       (python -m app.management.backfill_dual_brand) run post-deploy.
 Called by: alembic (upgrade/downgrade).
-Depends on: 096_spec_provenance (current single head); material_cards table.
+Depends on: 098_materials_perf_idx (the single head after PR #262 — 098 deliberately
+      skipped the 097 number this branch had reserved, so the chain runs
+      096 → 098 → 097; numeric order is not chain order, same precedent as 094
+      chaining over the reserved 092); material_cards table.
 
 Revision ID: 097_dual_brand
-Revises: 096_spec_provenance
+Revises: 098_materials_perf_idx
 Create Date: 2026-06-10
 """
 
@@ -26,7 +29,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "097_dual_brand"
-down_revision = "096_spec_provenance"
+down_revision = "098_materials_perf_idx"
 branch_labels = None
 depends_on = None
 

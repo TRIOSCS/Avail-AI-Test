@@ -312,8 +312,17 @@
 
 > **Indexes & Triggers:**
 > - `trig_material_cards_search_vector` — PostgreSQL trigger maintains `search_vector` TSVECTOR on INSERT/UPDATE (weighted: display_mpn=A, manufacturer=B, description/category=C)
-> - `ix_material_cards_search_vector` — GIN index for fast full-text search via `plainto_tsquery()` + `ts_rank()`
-> - `ix_material_cards_trgm_mpn` — pg_trgm GIN index on `display_mpn` for typo-tolerant search
+> - `ix_material_cards_search_vector` — GIN index for fast full-text search via `plainto_tsquery()` + `ts_rank()`. Owned by migration `eabe89205d07`, which is still on the active mainline and creates it on every fresh replay; migration 098 also creates it `IF NOT EXISTS` because the live DB was provisioned by stamping the revision history past `eabe89205d07` without executing it (its trigger/function are likewise absent on live — FTS there is maintained by `startup.py`'s `trg_mc_fts`), so the index was missing on live out-of-band.
+> - `ix_material_cards_trgm_mpn` — pg_trgm GIN index on `display_mpn` for typo-tolerant search. Owned by `eabe89205d07`; 098 creates it `IF NOT EXISTS` for the same live-only gap.
+> - **Migration 098 (`098_materials_perf_idx`)** — post-ingest (743k rows) faceted-page indexes, each justified by a measured `EXPLAIN (ANALYZE, BUFFERS)` seq-scan plan:
+>   - `ix_mc_order_live` — partial btree `(search_count DESC, created_at DESC) WHERE deleted_at IS NULL` (default page order/pagination)
+>   - `ix_mc_cat_order_live` — partial expression btree `(lower(btrim(category)), search_count DESC, created_at DESC) WHERE deleted_at IS NULL AND lower(btrim(category)) IS NOT NULL` (commodity-scoped pages, counts, commodity tree)
+>   - `ix_mc_trgm_norm_mpn` / `ix_mc_trgm_manufacturer` / `ix_mc_trgm_description` — pg_trgm GIN on `normalized_mpn`/`manufacturer`/`description`; together with the two `eabe89205d07` indexes above they let the OR'd ILIKE/FTS `q=` paths BitmapOr (every OR branch must be indexed)
+>   - `ix_mc_has_datasheet` — partial btree `(id) WHERE datasheet_url IS NOT NULL`
+>   - `ix_mc_has_crosses` — partial btree `(id) WHERE cross_references IS NOT NULL AND cross_references::text NOT IN ('[]','null','')`; paired with `stx_mc_crosses_text` extended statistics on `(cross_references::text)` (without expression stats the planner guesses ~98.5% selectivity for the NOT IN — every ingested row holds a non-NULL `'[]'` — and skips the index)
+>   - `ix_mc_last_searched` — partial btree `(last_searched_at) WHERE last_searched_at IS NOT NULL` (`searched_within` buckets)
+>   - Plain (non-CONCURRENT) builds per repo alembic pattern: each takes a write-blocking ShareLock on `material_cards` (~25s total for the migration on the live-size heap); reads unaffected.
+>   - Downgrade drops only the eight 098-owned indexes + the statistics object; the two `eabe89205d07`-owned names survive (only that revision's own downgrade may remove them).
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 
