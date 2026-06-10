@@ -175,9 +175,14 @@ async def run_one_batch(
     second-pass PARAMETRIC SPEC extraction (``enrich_card_specs``) for the cards that
     landed a real category this batch (verified / web_sourced / ai_inferred) — so the
     materials filter tree gets MaterialSpecFacet + specs_structured data. It runs ONCE
-    per batch (the extractor groups by category internally) and shares the same session
-    and final commit, so core attrs and specs persist together. Bounded by the worker's
-    daily_cap (≤ daily_cap cards/day receive a spec pass).
+    per batch (the extractor groups by category internally) on the same shared session.
+    NOTE: ``enrich_card_specs`` commits PER CHUNK on that shared session (load-bearing —
+    see the commit comment in spec_enrichment_service: long awaited Claude calls between
+    chunks, and three callers with no commit of their own), so the batch's pending
+    core-attr writes persist with its FIRST chunk commit; the batch-final commit below
+    is the safety net for batches where the spec pass raises early or processes zero
+    chunks. Bounded by the worker's daily_cap (≤ daily_cap cards/day receive a spec
+    pass).
 
     Returns an empty dict if the batch is empty (caller should idle-sleep).
 
@@ -374,7 +379,9 @@ async def run_one_batch(
 
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
-    # session, so specs persist together with core attrs at the commit below.
+    # session. enrich_card_specs commits PER CHUNK (load-bearing — see its commit comment),
+    # so the batch's pending writes above persist with its first chunk commit; the
+    # batch-final commit below covers an early raise / zero-chunk run.
     if enriched_ids:
         from app.services.spec_enrichment_service import enrich_card_specs
 

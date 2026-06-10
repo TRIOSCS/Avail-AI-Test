@@ -300,27 +300,134 @@ def test_fetch_nexar_called_when_not_adequate():
 # ── apply_authoritative ──────────────────────────────────────────────────────
 
 
+def _prov_entry(source: str, confidence: float = 1.0) -> dict:
+    return {"source": source, "confidence": confidence, "fetched_at": "2024-01-01"}
+
+
 def test_apply_authoritative_writes_all_fields(db_session):
-    """All merged fields, provenance, source and status are written to the card."""
-    card = _card(db_session, "LM317T")
+    """All merged fields, provenance, source and status are written to the card.
+
+    category/manufacturer route through the F1 ladder at the connector's registered
+    ``{name}_api`` source (tier 90) — provenance columns are stamped, not raw-set.
+    """
+    card = _card(db_session, "ST4000NM0035")
     merged = {
-        "description": "Adjustable Voltage Regulator",
-        "manufacturer": "Texas Instruments",
-        "category": "Analog ICs",
+        "description": "4TB 7.2K SAS Enterprise HDD",
+        "manufacturer": "Seagate Technology",
+        "category": "hdd",
         "lifecycle_status": "active",
     }
     provenance = {
-        "description": {"source": "digikey", "confidence": 1.0, "fetched_at": "2024-01-01"},
+        "description": _prov_entry("digikey"),
+        "manufacturer": _prov_entry("digikey"),
+        "category": _prov_entry("digikey"),
+        "lifecycle_status": _prov_entry("digikey"),
     }
     apply_authoritative(card, merged, provenance, ["digikey"])
-    assert card.description == "Adjustable Voltage Regulator"
-    assert card.manufacturer == "Texas Instruments"
-    assert card.category == "Analog ICs"
+    assert card.description == "4TB 7.2K SAS Enterprise HDD"
+    assert card.manufacturer == "Seagate Technology"
+    assert card.category == "hdd"
     assert card.lifecycle_status == "active"
     assert card.enrichment_status == "verified"
     assert card.enrichment_source == "digikey"
     assert card.enrichment_provenance == provenance
     assert card.enriched_at is not None
+    # F1-ladder provenance stamped on both provenanced columns (vendor APIs = tier 90).
+    assert card.category_source == "digikey_api"
+    assert card.category_tier == 90
+    assert card.category_confidence == 1.0
+    assert card.manufacturer_source == "digikey_api"
+    assert card.manufacturer_tier == 90
+
+
+def test_apply_authoritative_category_displaces_decode_85(db_session):
+    """Tier-90 vendor category evidence displaces a decode-85 category (the ladder
+    decides the overwrite, not the writer)."""
+    card = _card(db_session, "ST4000NM0035")
+    card.category = "dram"
+    card.category_source = "mpn_decode"
+    card.category_confidence = 0.95
+    card.category_tier = 85
+    card.category_updated_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    apply_authoritative(
+        card,
+        {"category": "hdd"},
+        {"category": _prov_entry("mouser")},
+        ["mouser"],
+    )
+    assert card.category == "hdd"
+    assert card.category_source == "mouser_api"
+    assert card.category_tier == 90
+    assert "category" in card.enrichment_provenance
+
+
+def test_apply_authoritative_category_loses_to_trio_and_manual(db_session):
+    """Tier-90 vendor category never overwrites trio_source (95) or manual (100); the
+    rejected write's provenance entry is dropped so enrichment_provenance never claims a
+    write that didn't land."""
+    for source, tier in (("trio_source", 95), ("manual", 100)):
+        card = _card(db_session, f"PIN-{source}")
+        card.category = "dram"
+        card.category_source = source
+        card.category_confidence = 1.0
+        card.category_tier = tier
+        card.category_updated_at = datetime.now(timezone.utc)
+        db_session.flush()
+
+        apply_authoritative(
+            card,
+            {"category": "hdd", "description": "desc"},
+            {"category": _prov_entry("digikey"), "description": _prov_entry("digikey")},
+            ["digikey"],
+        )
+        assert card.category == "dram", source
+        assert card.category_source == source
+        assert "category" not in card.enrichment_provenance
+        assert card.enrichment_provenance["description"]["source"] == "digikey"
+
+
+def test_apply_authoritative_off_vocab_category_rejected(db_session):
+    """An off-vocab connector category is rejected by the ladder's normalizer — never
+    persisted as junk, and dropped from the persisted provenance."""
+    card = _card(db_session, "LM317T")
+    apply_authoritative(
+        card,
+        {"category": "Analog ICs", "description": "Adjustable Voltage Regulator"},
+        {"category": _prov_entry("digikey"), "description": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert card.category is None
+    assert "category" not in card.enrichment_provenance
+    assert card.description == "Adjustable Voltage Regulator"
+    assert card.enrichment_status == "verified"
+
+
+def test_apply_authoritative_manufacturer_loses_to_manual_records_conflict(db_session):
+    """A vendor maker (90) reporting a DIFFERENT value than a manual maker (100) loses
+    arbitration AND records a validation conflict for human review (tier >= 80 band)."""
+    card = _card(db_session, "ST8000NM0055")
+    card.manufacturer = "Western Digital"
+    card.manufacturer_source = "manual"
+    card.manufacturer_confidence = 1.0
+    card.manufacturer_tier = 100
+    card.manufacturer_updated_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    apply_authoritative(
+        card,
+        {"manufacturer": "Seagate Technology"},
+        {"manufacturer": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert card.manufacturer == "Western Digital"  # manual kept
+    assert "manufacturer" not in card.enrichment_provenance
+    assert card.has_validation_conflict is True
+    assert any(
+        c.get("key") == "manufacturer" and (c.get("evidence") or {}).get("source") == "digikey_api"
+        for c in card.validation_conflicts
+    )
 
 
 def test_apply_authoritative_empty_contributors_preserves_source(db_session):
@@ -508,6 +615,12 @@ async def test_crossref_double_verify_to_verified(db_session):
     assert card.description == "16GB DDR4 RDIMM"
     assert any(x.get("mpn") == "M393A2K40EB3-CWE" for x in (card.cross_references or []))
     assert card.enrichment_provenance["cross_ref"]["resolved_mpn"] == "M393A2K40EB3-CWE"
+    # The resolved MPN's distributor manufacturer routes through the F1 ladder at the
+    # confirming connector's registered source (mouser_api, tier 90) — same contract
+    # as apply_authoritative.
+    assert card.manufacturer == "Samsung"
+    assert card.manufacturer_source == "mouser_api"
+    assert card.manufacturer_tier == 90
     assert meter.claude_ok is True and meter.web_calls >= 2
 
 

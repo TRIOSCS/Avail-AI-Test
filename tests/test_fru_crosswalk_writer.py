@@ -149,7 +149,9 @@ def test_commodity_conflict_skips_card(db_session: Session):
     stats = crosswalk_and_record_specs(db_session, [card.id])
 
     assert stats["matched"] == 1
-    assert stats["decoded"] == 1
+    # NOT counted as decoded: contradicting substitutes never produced a decoded
+    # verdict — `decoded` counts truly-decoded cards only.
+    assert stats["decoded"] == 0
     assert stats["commodity_conflict"] == 1
     assert stats["written"] == 0
     assert stats["categorized"] == 0
@@ -729,7 +731,8 @@ def test_decode_commodity_conflict_skips_desc_channel_too(db_session: Session):
 
     stats = crosswalk_and_record_specs(db_session, [card.id])
 
-    assert stats == dict(ZERO_STATS, matched=1, decoded=1, commodity_conflict=1)
+    # decoded stays 0 — a commodity conflict is not a decoded verdict.
+    assert stats == dict(ZERO_STATS, matched=1, commodity_conflict=1)
     assert card.category is None
     assert _facets(db_session, card.id) == {}
 

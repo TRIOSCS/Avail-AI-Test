@@ -194,8 +194,13 @@ class TestEnrichMaterial:
     """Enrich endpoint (lines 271-294)."""
 
     def test_enrich_updates_fields_and_sets_timestamp(self, client, db_session, test_material_card):
-        """POST /api/materials/{id}/enrich applies enrichment data and sets
-        enriched_at."""
+        """POST /api/materials/{id}/enrich applies enrichment data and sets enriched_at.
+
+        manufacturer routes through the F1 ladder: an unregistered pusher source
+        ("test_source") ranks as ai_guess (40), which LOSES to the fixture card's
+        existing valued-but-unprovenanced manufacturer (legacy floor, 50) — the write
+        is rejected and updated_fields honestly omits it.
+        """
         resp = client.post(
             f"/api/materials/{test_material_card.id}/enrich",
             json={
@@ -210,18 +215,38 @@ class TestEnrichMaterial:
         data = resp.json()
         assert data["ok"] is True
         assert "lifecycle_status" in data["updated_fields"]
-        assert "manufacturer" in data["updated_fields"]
+        assert "manufacturer" not in data["updated_fields"]  # ladder kept the existing maker
         assert data["card_id"] == test_material_card.id
+        db_session.refresh(test_material_card)
+        assert test_material_card.manufacturer == "Texas Instruments"
 
     def test_enrich_sets_enriched_at_timestamp(self, client, db_session, test_material_card):
-        """Enrichment sets enriched_at timestamp."""
+        """Enrichment sets enriched_at; a canonical category on an empty card lands via
+        the ladder with ai_guess provenance (an unregistered source never raw-
+        writes)."""
+        resp = client.post(
+            f"/api/materials/{test_material_card.id}/enrich",
+            json={"category": "hdd"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(test_material_card)
+        assert test_material_card.enriched_at is not None
+        assert test_material_card.category == "hdd"
+        assert test_material_card.category_source == "ai_guess"
+        assert test_material_card.category_tier == 40
+
+    def test_enrich_off_vocab_category_rejected(self, client, db_session, test_material_card):
+        """Off-vocab free text never persists — the ladder's normalizer rejects it and
+        updated_fields omits it (a 200 with the field listed would be a silent lie)."""
         resp = client.post(
             f"/api/materials/{test_material_card.id}/enrich",
             json={"category": "Voltage Regulator"},
         )
         assert resp.status_code == 200
+        assert resp.json()["updated_fields"] == []
         db_session.refresh(test_material_card)
-        assert test_material_card.enriched_at is not None
+        assert test_material_card.category is None
+        assert test_material_card.enriched_at is None  # nothing landed
 
     def test_enrich_empty_body_updates_nothing(self, client, db_session, test_material_card):
         """POST /api/materials/{id}/enrich with empty body updates nothing."""

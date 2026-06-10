@@ -154,10 +154,12 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     desc_category_mismatch}:
 
     - matched: cards with ≥1 mfg_model or drive_pn link.
-    - decoded: matched cards whose substitutes produced ≥1 decode AND that were not
-      lost to a failure/rollback (conflict-/mismatch-skipped cards count — their
-      decode reached a verdict; rolled-back cards do not). Desc-only evidence does
-      NOT count as decoded.
+    - decoded: matched cards whose substitutes produced ≥1 decode that AGREED on a
+      commodity AND that were not lost to a failure/rollback — truly-decoded cards
+      only. Mismatch-skipped cards count (the substitutes reached an agreed verdict;
+      the card's existing category blocked the writes); commodity-conflict cards do
+      NOT (contradicting substitutes never produced a decoded verdict); rolled-back
+      cards do not. Desc-only evidence does NOT count as decoded.
     - written: fru_matrix_decode specs persisted.
     - categorized: NULL-category cards categorized from the agreed decode commodity
       (the desc channel never categorizes).
@@ -183,7 +185,7 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
       write failure after the intersection does not uncount).
     - commodity_conflict: cards skipped entirely on decode commodity disagreement
       (the desc channel is skipped for them too — substitutes that can't agree on
-      what the part IS poison both channels).
+      what the part IS poison both channels; never counted in ``decoded``).
     - desc_commodity_conflict: cards whose desc channel was skipped because their
       linked descriptions disagree among THEMSELVES on the commodity (per card,
       like every desc-side counter).
@@ -281,8 +283,9 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             if commodity is None:
                 # Substitutes disagree on what the part IS — assert nothing, from
                 # EITHER channel (the linked descriptions describe those same
-                # contradicting substitutes).
-                stats["decoded"] += len(fru_card_ids)
+                # contradicting substitutes). NOT counted in `decoded`: contradicting
+                # substitutes never produced a decoded verdict, and counting them
+                # would make a fully-conflicted batch read as healthily decoded.
                 stats["commodity_conflict"] += len(fru_card_ids)
                 continue
         elif not descriptions:

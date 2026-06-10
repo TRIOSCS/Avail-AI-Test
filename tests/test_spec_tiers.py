@@ -586,3 +586,46 @@ def test_set_brand_on_detached_card_warns_and_writes_verbatim(db_session: Sessio
     finally:
         loguru_logger.remove(sink_id)
     assert not any("not session-attached" in w for w in warnings2), warnings2
+
+
+def test_set_category_non_manual_rejection_logs_at_info(db_session: Session):
+    # Visibility rule (mirrors record_spec): a NON-manual category writer that loses
+    # arbitration must be visible at production log levels (INFO) — a systematically
+    # losing writer (e.g. a connector whose taxonomy always loses to trio_source) would
+    # otherwise be invisible. Manual category rejections and brand/manufacturer
+    # rejections stay at DEBUG (the human gets endpoint feedback; the maker writers
+    # surface aggregate conflict WARNINGs instead).
+    from loguru import logger as loguru_logger
+
+    card = _card(
+        db_session,
+        normalized_mpn="info-loss",
+        category="dram",
+        category_source="trio_source",
+        category_confidence=1.0,
+        category_tier=95,
+        manufacturer="Seagate",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+
+    infos: list[str] = []
+    sink_id = loguru_logger.add(lambda message: infos.append(str(message)), level="INFO")
+    try:
+        # Non-manual category loss → INFO.
+        assert set_category(card, "hdd", "digikey_api", 1.0) is False
+        info_lines = [m for m in infos if "set_category" in m and "kept existing" in m]
+        assert info_lines, infos
+        # Manual category loss (same-value no-op path is guarded by callers; force a
+        # genuine manual lose via write=False dry-run semantics is not possible — a
+        # manual incoming always wins on the newer timestamp — so only the non-manual
+        # branch is reachable here, which is exactly the rule's scope.)
+        # Manufacturer loss (manual existing beats decode) stays OUT of INFO.
+        infos.clear()
+        from app.services.spec_tiers import set_manufacturer
+
+        assert set_manufacturer(card, "Samsung", "mpn_decode", 0.9) is False
+        assert not any("set_manufacturer" in m and "kept existing" in m for m in infos), infos
+    finally:
+        loguru_logger.remove(sink_id)

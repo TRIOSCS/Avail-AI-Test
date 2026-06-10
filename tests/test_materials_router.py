@@ -216,7 +216,10 @@ class TestEnrichMaterial:
         data = resp.json()
         assert data["ok"] is True
         assert "lifecycle_status" in data["updated_fields"]
-        assert "manufacturer" in data["updated_fields"]
+        # manufacturer routes through the F1 ladder: "claude_agent" is unregistered →
+        # ai_guess (40), which loses to the card's existing valued-but-unprovenanced
+        # maker (legacy floor, 50) — updated_fields honestly omits the rejected write.
+        assert "manufacturer" not in data["updated_fields"]
 
     def test_enrich_not_found(self, client: TestClient):
         resp = client.post("/api/materials/99999/enrich", json={"lifecycle_status": "eol"})

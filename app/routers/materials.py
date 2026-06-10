@@ -473,21 +473,33 @@ async def enrich_material(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Apply AI-generated enrichment data to a material card."""
+    """Apply AI-generated enrichment data to a material card.
+
+    ``category``/``manufacturer`` are PROVENANCED columns and go through the F1 ladder
+    (never raw setattr): the body's ``source`` is honored when it is a registered
+    SOURCE_TIER key; an unregistered pusher (the default ``claude_agent``) ranks as an
+    AI guess (tier 40) — un-vouched external AI data fills empty columns but never
+    displaces decode / vendor / trio / manual provenance, and off-vocab categories are
+    rejected, never persisted. ``updated_fields`` reports only writes that actually
+    landed.
+    """
+    from ..services.spec_tiers import SOURCE_TIER, set_category, set_manufacturer
+
     card = db.get(MaterialCard, card_id)
     if not card:
         raise HTTPException(404, "Material not found")
     body = await request.json()
+    source = body.get("source", "claude_agent")
+    ladder_source = source if source in SOURCE_TIER else "ai_guess"
+    confidence = min(max(float(body.get("confidence") or 0.5), 0.0), 1.0)
     enrichment_fields = (
         "lifecycle_status",
         "package_type",
-        "category",
         "rohs_status",
         "pin_count",
         "datasheet_url",
         "cross_references",
         "specs_summary",
-        "manufacturer",
         "description",
     )
     updated = []
@@ -496,8 +508,12 @@ async def enrich_material(
         if val is not None:
             setattr(card, field, val)
             updated.append(field)
+    if body.get("category") is not None and set_category(card, body["category"], ladder_source, confidence):
+        updated.append("category")
+    if body.get("manufacturer") is not None and set_manufacturer(card, body["manufacturer"], ladder_source, confidence):
+        updated.append("manufacturer")
     if updated:
-        card.enrichment_source = body.get("source", "claude_agent")
+        card.enrichment_source = source
         card.enriched_at = datetime.now(timezone.utc)
     db.commit()
     invalidate_prefix("material_list")

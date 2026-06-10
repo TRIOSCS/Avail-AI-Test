@@ -1,5 +1,5 @@
-"""Manual category edits on PUT /v2/partials/materials/{card_id} route through the F1
-ladder.
+"""Manual category AND manufacturer edits on PUT /v2/partials/materials/{card_id} route
+through the F1 ladder.
 
 Covers: app/routers/htmx_views.py::update_material_card — the category field must go
 through spec_tiers.set_category (source="manual", tier 100), never raw setattr. Pins the
@@ -8,7 +8,10 @@ later enrichment passes cannot silently revert it; (2) a commodity flip purges t
 commodity's MaterialSpecFacet rows + specs_structured mirrors; (3) off-vocab free text is
 rejected with a user-visible showToast HX-Trigger instead of persisting raw. Also pins
 that an UNCHANGED submitted category is not re-stamped as manual, and that blanking is
-rejected (set_category never blanks an existing category).
+rejected (set_category never blanks an existing category). The manufacturer field
+carries the same contract (set_manufacturer at manual/100, conflict-clearing on
+re-assertion, no re-stamp on unchanged, never blanked) — same semantics as
+routers/materials.py::update_material.
 
 Called by: pytest
 Depends on: conftest client/db_session fixtures, app/services/spec_tiers.py,
@@ -187,3 +190,115 @@ def test_unchanged_category_not_restamped_as_manual(client, db_session: Session)
     assert card.category_source == "digikey_api"  # untouched — no manual re-stamp
     assert card.category_tier == 90
     assert _toast(resp) is None
+
+
+# ── Manufacturer (dual-brand provenanced column — same manual/100 contract) ──────────
+
+
+def _manufacturer_conflict(value: str = "Western Digital") -> list[dict]:
+    return [
+        {
+            "key": "manufacturer",
+            "manual": {"value": "Seagate", "updated_at": "2026-01-01T00:00:00+00:00"},
+            "evidence": {
+                "source": "mpn_decode",
+                "tier": 85,
+                "confidence": 0.9,
+                "value": value,
+                "observed_at": "2026-01-02T00:00:00+00:00",
+            },
+        }
+    ]
+
+
+def test_manual_manufacturer_change_stamps_manual_and_clears_conflict(client, db_session: Session):
+    """A deliberate maker change routes through set_manufacturer at manual/100 (never
+    raw setattr — that would leave NULL provenance at the legacy floor and be reverted
+    by the next decode), and a manual (re-)assertion resolves any recorded manufacturer
+    conflict — same contract as routers/materials.py::update_material."""
+    card = _card(
+        db_session,
+        "ST4000NM0036",
+        manufacturer="Seagate",
+        manufacturer_source="digikey_api",
+        manufacturer_tier=90,
+        manufacturer_confidence=0.9,
+        manufacturer_updated_at=datetime.now(timezone.utc),
+        validation_conflicts=_manufacturer_conflict(),
+        has_validation_conflict=True,
+    )
+
+    resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": "Western Digital"})
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "Western Digital"
+    assert card.manufacturer_source == "manual"
+    assert card.manufacturer_tier == 100
+    assert card.manufacturer_confidence == 1.0
+    assert card.validation_conflicts in (None, [])
+    assert card.has_validation_conflict is False
+
+
+def test_manual_manufacturer_edit_survives_subsequent_enrichment(client, db_session: Session):
+    """After a manual maker edit, a later vendor-tier (90) write must LOSE the ladder —
+    the human's correction sticks."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _card(db_session, "HUS728T8TALE", manufacturer="HGST")
+    resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": "Western Digital"})
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "Western Digital"
+
+    assert set_manufacturer(card, "HGST", "digikey_api", 0.99) is False
+    assert card.manufacturer == "Western Digital"
+    assert card.manufacturer_source == "manual"
+
+
+def test_unchanged_manufacturer_not_restamped_but_clears_conflict(client, db_session: Session):
+    """The edit form always re-submits the pre-filled maker: saving with it untouched
+    must NOT convert its provenance to manual/100 (that would lock out future
+    enrichment corrections) — but the re-assertion still resolves a recorded conflict
+    (the human looked and confirmed the value)."""
+    card = _card(
+        db_session,
+        "MG08ACA16TEY",
+        manufacturer="Seagate",
+        manufacturer_source="digikey_api",
+        manufacturer_tier=90,
+        manufacturer_confidence=0.9,
+        manufacturer_updated_at=datetime.now(timezone.utc),
+        validation_conflicts=_manufacturer_conflict(),
+        has_validation_conflict=True,
+    )
+
+    resp = client.put(
+        f"/v2/partials/materials/{card.id}",
+        data={"manufacturer": "Seagate", "description": "16TB 7.2K SATA HDD"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "Seagate"
+    assert card.manufacturer_source == "digikey_api"  # untouched — no manual re-stamp
+    assert card.manufacturer_tier == 90
+    assert card.has_validation_conflict is False  # re-assertion resolved the conflict
+
+
+def test_blank_manufacturer_never_blanks_existing(client, db_session: Session):
+    """The ladder never blanks a value (set_manufacturer contract) — the old raw write
+    could silently blank the maker here."""
+    card = _card(
+        db_session,
+        "ST2000NM0018",
+        manufacturer="Seagate",
+        manufacturer_source="manual",
+        manufacturer_tier=100,
+        manufacturer_confidence=1.0,
+        manufacturer_updated_at=datetime.now(timezone.utc),
+    )
+
+    resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": ""})
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "Seagate"
+    assert card.manufacturer_source == "manual"

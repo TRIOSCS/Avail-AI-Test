@@ -15,9 +15,14 @@ Called by: app/services/spec_write_service.record_spec (spec conflict resolution
       app/services/fru_crosswalk_enrich.py (decode category writes),
       app/services/source_ingest/ingest.py (TRIO part-master ingest: category at
       trio_source/trio_source_ai; brand/manufacturer at trio_source),
-      app/management/backfill_dual_brand.py (B1-B3 dual-brand backfill), and the
-      enrichment category writers (enrichment.py, authoritative_enrichment_service.py,
-      material_enrichment_service.py).
+      app/management/backfill_dual_brand.py (B1-B3 dual-brand backfill), the
+      enrichment category writers (enrichment.py, authoritative_enrichment_service.py —
+      whose apply_* writers route BOTH category and manufacturer through the ladder at
+      {connector}_api/90, oem_official/80 and web_search/70 —
+      material_enrichment_service.py), and the manual edit endpoints
+      (routers/materials.py update_material/add_material,
+      routers/htmx_views.py update_material_card — category + manufacturer at
+      manual/100).
 Depends on: app.services.category_normalizer.normalize_category and
       app.services.manufacturer_normalizer.normalize_brand_name (lazy imports inside
       the setters to avoid model↔service import cycles), MaterialCard's category
@@ -437,7 +442,15 @@ def _set_provenanced_column(
                 {"source": source, **incoming},
                 value,
             )
-        logger.debug(
+        # Visibility rule (mirrors record_spec._incoming_loses): a category writer
+        # that systematically loses arbitration must be visible at production log
+        # levels, so NON-manual category rejections log at INFO. Manual category
+        # submissions stay at DEBUG (the human gets endpoint feedback — toast/422 —
+        # and the no-op re-assert paths are deliberate), as do brand/manufacturer
+        # rejections (their going-forward writers surface aggregate conflict
+        # WARNINGs instead: skipped_maker_conflict, ingest conflict tallies).
+        log = logger.info if (attr == "category" and source != "manual") else logger.debug
+        log(
             "set_{}: card={} kept existing {}={!r} (incoming {!r}@{} lost)",
             attr,
             getattr(card, "id", None),

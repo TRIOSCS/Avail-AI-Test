@@ -7741,7 +7741,6 @@ async def update_material_card(
 
     form = await request.form()
     updatable = [
-        "manufacturer",
         "description",
         "package_type",
         "lifecycle_status",
@@ -7757,6 +7756,29 @@ async def update_material_card(
                 except (ValueError, TypeError):
                     val = None
             setattr(card, field, val or None)
+
+    # Manufacturer is a PROVENANCED column (dual-brand, migration 097) — NEVER raw
+    # setattr: a raw write leaves NULL provenance, ranks at the legacy floor (50), and
+    # the next decode (85) / trio re-ingest (95) silently reverts the human's edit.
+    # Same contract as routers/materials.py::update_material — through the F1 ladder
+    # at manual/100 (canonicalized via the alias table), with the same conflict-
+    # clearing semantics as the category path below.
+    if "manufacturer" in form:
+        from ..services.manufacturer_normalizer import normalize_brand_name
+        from ..services.spec_tiers import clear_validation_conflicts, set_manufacturer
+
+        raw_manufacturer = (str(form["manufacturer"]) if form["manufacturer"] else "").strip()
+        if raw_manufacturer:
+            # A PUT carrying a non-empty maker is a re-assertion — clear any recorded
+            # validation conflict for it (even unchanged: the human looked and
+            # confirmed their value), mirroring the category path below.
+            clear_validation_conflicts(card, "manufacturer")
+            if normalize_brand_name(db, raw_manufacturer) != card.manufacturer:
+                set_manufacturer(card, raw_manufacturer, "manual", 1.0)
+            # Canonical-equal → no-op: an unchanged value must NOT be re-stamped as a
+            # manual (tier 100) edit just because the user saved another field.
+        # Empty/whitespace → no-op: the ladder never blanks a value (set_manufacturer
+        # contract — the old raw write could silently blank the maker here).
 
     # Category NEVER goes through raw setattr: a raw write would leave the OLD
     # provenance columns attached to the NEW value (the next enrichment pass would

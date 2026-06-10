@@ -66,6 +66,7 @@ def test_decode_writes_ssd_and_categorizes_null_category(db_session: Session):
         "written": 3,
         "categorized": 1,
         "manufacturers_set": 1,  # dual-brand W4: decode vendor → manufacturer ladder
+        "failed": 0,
         "skipped_category_conflict": 0,
         "skipped_maker_conflict": 0,
     }
@@ -188,6 +189,7 @@ def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
         "written": 0,
         "categorized": 0,
         "manufacturers_set": 0,  # maker write skipped — it rides the same suspect match
+        "failed": 0,
         "skipped_category_conflict": 1,
         "skipped_maker_conflict": 0,  # skipped by the guard, not lost in arbitration
     }
@@ -307,6 +309,7 @@ def test_decode_skips_unrecognized_mpn(db_session: Session):
         "written": 0,
         "categorized": 0,
         "manufacturers_set": 0,
+        "failed": 0,
         "skipped_category_conflict": 0,
         "skipped_maker_conflict": 0,
     }
@@ -366,10 +369,22 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
     monkeypatch.setattr(writer_mod, "record_spec", flaky)
 
-    stats = decode_and_record_specs(db_session, [bad.id, good.id])
+    from loguru import logger as loguru_logger
+
+    infos: list[str] = []
+    sink_id = loguru_logger.add(lambda message: infos.append(str(message)), level="INFO")
+    try:
+        stats = decode_and_record_specs(db_session, [bad.id, good.id])
+    finally:
+        loguru_logger.remove(sink_id)
     db_session.commit()  # must NOT raise — the bad card's savepoint kept the transaction clean
 
+    # The batch summary log surfaces the failure count (ops vocabulary mirrors the
+    # desc/crosswalk writers) — a crashed card must not hide inside a healthy-looking line.
+    assert any("mpn-decode: wrote" in m and "1 cards failed" in m for m in infos), infos
+
     assert stats["decoded"] == 1  # only the good card
+    assert stats["failed"] == 1  # the bad card is COUNTED, mirroring desc/crosswalk writers
     assert stats["categorized"] == 0
     assert stats["written"] >= 3
     assert _facets(db_session, good.id)["capacity_gb"] == 8000

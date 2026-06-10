@@ -250,21 +250,29 @@ class TestEnrichMaterial:
         assert data["updated_fields"] == []
 
     def test_enrich_sets_custom_source(self, client, db_session):
-        card = _make_card(db_session)
+        # Manufacturer-less card: the maker write goes through the F1 ladder (an
+        # unregistered "octopart" pusher ranks as ai_guess/40) and FILLS the empty
+        # column, so the body's source is recorded as enrichment_source.
+        card = _make_card(db_session, manufacturer=None)
         resp = client.post(
             f"/api/materials/{card.id}/enrich",
             json={"manufacturer": "NXP", "source": "octopart"},
         )
         assert resp.status_code == 200
         db_session.refresh(card)
+        assert card.manufacturer == "NXP"
+        assert card.manufacturer_source == "ai_guess"  # ladder provenance, tier 40
         assert card.enrichment_source == "octopart"
 
     def test_enrich_all_fields(self, client, db_session):
-        card = _make_card(db_session)
+        # category/manufacturer route through the F1 ladder: the canonical category
+        # ("transistors") and the maker land on this empty-column card at ai_guess/40;
+        # the other 8 fields keep their direct writes.
+        card = _make_card(db_session, manufacturer=None)
         payload = {
             "lifecycle_status": "nrnd",
             "package_type": "SOT-23",
-            "category": "transistor",
+            "category": "transistors",
             "rohs_status": "compliant",
             "pin_count": 3,
             "datasheet_url": "https://example.com/ds.pdf",
@@ -277,6 +285,9 @@ class TestEnrichMaterial:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["updated_fields"]) == 10
+        db_session.refresh(card)
+        assert card.category == "transistors"
+        assert card.category_source == "ai_guess"
 
 
 # -- DELETE /api/materials/{card_id} ------------------------------------------
@@ -596,10 +607,12 @@ class TestDirectHandlerCoverage:
     async def test_enrich_material_direct_updates_fields(self, db_session):
         from app.routers.materials import enrich_material
 
+        # Manufacturer-less card: the F1-ladder maker write (ai_guess/40 for an
+        # unregistered pusher) fills the empty column and reports in updated_fields.
         card = MaterialCard(
             normalized_mpn="direct001",
             display_mpn="DIRECT001",
-            manufacturer="TI",
+            manufacturer=None,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(card)
@@ -612,6 +625,7 @@ class TestDirectHandlerCoverage:
         result = await enrich_material(card.id, req, user=user, db=db_session)
         assert result["ok"] is True
         assert "manufacturer" in result["updated_fields"]
+        assert card.manufacturer == "Microchip"
 
     async def test_enrich_material_direct_not_found(self, db_session):
         from app.routers.materials import enrich_material

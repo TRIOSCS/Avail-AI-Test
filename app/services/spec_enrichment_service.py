@@ -217,6 +217,22 @@ async def enrich_card_specs(
                     stats["cards_with_specs"] += 1
                 c.specs_enriched_at = now
 
+            # Per-chunk commit — LOAD-BEARING, do not lift to the callers:
+            # (1) every chunk is preceded by an awaited Claude call (timeout 120s), so
+            #     one end-of-run commit would hold the transaction open (idle in
+            #     transaction on PG) across the entire multi-minute extraction and
+            #     lose EVERY earlier chunk's specs to a single late failure —
+            #     committing per chunk bounds both the open-transaction window and the
+            #     blast radius (the except below rolls back just the failed chunk and
+            #     keeps going);
+            # (2) three of the four callers (the 2h scheduler job _job_spec_enrichment,
+            #     the htmx Enrich button, app/management/enrich_specs.py) have NO
+            #     commit of their own — this commit IS their persistence;
+            # (3) the enrichment worker (run_one_batch) shares its batch session, so
+            #     the FIRST chunk commit here also persists the batch's pending
+            #     core-attr/decode/crosswalk writes; the worker's batch-final commit
+            #     remains the safety net for batches where this function raises before
+            #     committing or processes zero chunks (see the matching comment there).
             try:
                 db.commit()
             except Exception as e:  # noqa: BLE001

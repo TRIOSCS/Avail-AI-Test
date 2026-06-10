@@ -814,11 +814,14 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
 authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |
     +---> Tier 1: distributor connector fanout (fetch_authoritative → merge_authoritative)
-    |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle.
+    |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle;
+    |              category + manufacturer route through the F1 ladder at {connector}_api/90
+    |              (ladder-rejected writes are dropped from enrichment_provenance).
     |       MISS → fall through.
     |
     +---> Tier 2: distributor/manufacturer web search (extract_part_from_web, web_meter +1)
-    |       HIT (web_sourced)  → apply_web_sourced(); done.
+    |       HIT (web_sourced)  → apply_web_sourced(); category + manufacturer through the
+    |              F1 ladder at web_search/70; done.
     |       MISS → fall through.
     |
     +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call.
@@ -831,9 +834,11 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         (3) resolved_mpn != original (no echo)
     |         (4) confidence ≥ 0.90
     |       RESOLVED → fetch_authoritative(resolved_mpn) double-verify against distributors
-    |         CONFIRMED → apply_cross_ref_verified(): writes distributor data onto card,
-    |                     records FRU→MPN linkage in cross_references JSONB +
-    |                     cross_ref provenance block; status=verified.
+    |         CONFIRMED → apply_cross_ref_verified(): writes distributor data onto card
+    |                     (category + manufacturer through the F1 ladder at
+    |                     {connector}_api/90, same as Tier 1), records FRU→MPN linkage in
+    |                     cross_references JSONB + cross_ref provenance block;
+    |                     status=verified.
     |         UNCONFIRMED → discard candidate, fall through.
     |       FAILED → fall through.
     |
@@ -844,7 +849,8 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         (3) confidence ≥ 0.90
     |         (4) description ≥ 10 chars + manufacturer present
     |       HIT → apply_oem_sourced(): writes description/category/datasheet + oem_sourced
-    |             provenance; status=oem_sourced.
+    |             provenance (category + manufacturer through the F1 ladder at
+    |             oem_official/80); status=oem_sourced.
     |       MISS → fall through.
     |
     +---> Tier 5: AI inference fallback (infer_part via ai_inference_fallback,
@@ -875,8 +881,13 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> search_vector trigger auto-updates TSVECTOR with new description/category
     +---> Stamps material_cards.enriched_at
 
-Worker second-pass ordering (run_one_batch, same shared post-await session, one
-commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
+Worker second-pass ordering (run_one_batch, same shared post-await session; passes 1-3
+persist at the batch-final commit — pass 4, enrich_card_specs, commits PER CHUNK on
+that shared session because its chunks are separated by long awaited Claude calls and
+three of its callers have no commit of their own — see the load-bearing commit comment
+in spec_enrichment_service.py — so the batch's pending writes persist with its first
+chunk commit and the batch-final commit is the safety net). As of SP2 the run ORDER is
+no longer load-bearing: record_spec arbitrates
 every write through the F1 source-tier ladder (app/services/spec_tiers.py —
 mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > fru_desc_parse 82 >
 spec_extraction 60; vendor APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
@@ -894,7 +905,9 @@ owns arbitration in one place:
        the decode contributes NOTHING (no specs, no maker). A maker write that loses
        arbitration against a DIFFERENT existing value is counted
        (skipped_maker_conflict) and WARNed after the batch, mirroring
-       skipped_category_conflict.
+       skipped_category_conflict. Per-card exceptions are counted in `failed` and
+       surfaced in the batch summary log (same ops vocabulary as the desc/crosswalk
+       writers — a crashed card never hides inside a healthy-looking line).
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
        crosswalk enrichment: ONE pass, TWO evidence channels over the same single
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
@@ -993,8 +1006,9 @@ After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
   OR
 enrichment_worker/worker.py::run_one_batch -> enrich_card_specs(<this batch's
-    newly core-enriched card ids>)  [paced, once per batch, same session + commit;
-    only verified/web_sourced/ai_inferred cards — never not_found]
+    newly core-enriched card ids>)  [paced, once per batch, same session; commits per
+    chunk (load-bearing — see above); only verified/web_sourced/ai_inferred cards —
+    never not_found]
   OR
 POST /v2/partials/materials/{id}/enrich (Enrich button) -> enrich_card_specs([id], force=True)
   OR
@@ -1117,7 +1131,8 @@ Dual-brand writers (W1-W7 — every write regex-gated or source-backed, never gu
 | W4 | Deterministic MPN decode vendor (skipped when the decode's commodity LOSES the category ladder — shared cross-commodity guard) | manufacturer | `mpn_decode`/85 | 0.9 | `mpn_decoder/writer.py` going-forward |
 | W5 | Legacy `manufacturer` value ∈ `OEM_BRANDS` | copy → brand (manufacturer NOT cleared) | `legacy_backfill`/50 | 0.5 | backfill B1 |
 | W6 | TRIO ingest sheet columns | both | `trio_source`/95 | 0.9 | `source_ingest/ingest.py` |
-| W7 | Manual edit (PUT `/api/materials/{id}`, Add-part modal) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` + `add_material` (wins also clear the key's validation conflicts — a manual re-assert resolves the flag) |
+| W7 | Manual edit (PUT `/api/materials/{id}`, PUT `/v2/partials/materials/{id}`, Add-part modal) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` + `add_material`, `routers/htmx_views.py::update_material_card` (wins also clear the key's validation conflicts — a manual re-assert resolves the flag; the htmx PUT clears on any non-empty re-assertion, mirrors its category path, and never re-stamps an unchanged value) |
+| W8 | Authoritative enrichment — exact-MPN distributor match (incl. cross-ref re-verification), OEM-official page, web extraction | manufacturer (+ category, same writers) | `{connector}_api`/90 · `oem_official`/80 · `web_search`/70 | 1.0 / result confidence | `authoritative_enrichment_service.py` apply_authoritative / apply_cross_ref_verified / apply_oem_sourced / apply_web_sourced — ladder-rejected writes are dropped from `enrichment_provenance` (it never claims a write that didn't land) |
 
 Ladder losses are NOT silent for the going-forward writers: W4 surfaces
 `skipped_maker_conflict` (writer stats + batch WARNING) and W6 surfaces
@@ -1156,16 +1171,28 @@ Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `
 `fru_crosswalk_enrich.py` (tier 84), the SP-Ingest pipeline (`source_ingest/ingest.py` —
 TRIO part-master categories via `set_category` at trio_source:95 / trio_source_ai:88,
 specs via `record_spec` + dry-run parity via `spec_would_write`), the manual edit
-endpoint `routers/htmx_views.py::update_material_card` (manual:100 — a deliberate human
-change always wins and purges the old commodity's facets; an UNCHANGED re-submitted value
-is NOT re-stamped manual, and off-vocab/blank values are rejected with a `showToast`
-warning instead of persisting), and ALL three remaining
-category writers — `enrichment.py` (connector `{name}_api` tiers), `material_enrichment_
-service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
-(claude_opus_inferred:40) — now route through `set_category` (no direct `card.category`
-assignment remains; SP3 adds the `@validates` hardening). The deterministic decode is
-protected by its tier (85), not by running before the fru-crosswalk (84) / desc-parse
-(83) / AI spec (60) passes — the old per-writer confidence pre-gates are removed.
+endpoint `routers/htmx_views.py::update_material_card` (manual:100 for category AND
+manufacturer — a deliberate human change always wins, a category flip purges the old
+commodity's facets, a non-empty maker re-assertion clears its validation conflicts; an
+UNCHANGED re-submitted value is NOT re-stamped manual, off-vocab/blank categories are
+rejected with a `showToast` warning instead of persisting, and a blank maker can never
+blank the column), and ALL the enrichment category writers — `enrichment.py` (connector
+`{name}_api` tiers), `material_enrichment_service.py` (claude_haiku:40), and
+`authoritative_enrichment_service.py` (apply_authoritative + apply_cross_ref_verified
+at `{connector}_api`:90, apply_oem_sourced at oem_official:80, apply_web_sourced at
+web_search:70 — for BOTH category and manufacturer, with ladder-rejected writes dropped
+from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
+ladder monopoly is complete: every category/manufacturer writer routes through
+`set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
+`card.manufacturer` remains** (the only direct maker assignments left are
+fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
+at the legacy floor until a routed writer stamps real provenance; SP3 adds the
+`@validates` hardening). Visibility: a NON-manual `set_category` rejection logs at INFO
+(mirrors `record_spec` — a systematically losing category writer must be visible);
+maker rejections stay DEBUG, surfaced instead by the writers' aggregate conflict
+counters/WARNINGs. The deterministic decode is protected by its tier (85), not by
+running before the fru-crosswalk (84) / desc-parse (83) / AI spec (60) passes — the old
+per-writer confidence pre-gates are removed.
 
 ### On-add auto-enrichment (single-add modal, inline passes, priority lane, validation conflicts)
 
