@@ -8,7 +8,7 @@ What: reads drive type / interface / form factor out of compact human tape-drive
       keys. The drift guard in tests/test_desc_extractor_routing.py pins the
       vocabularies against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - Media/supplies rows emit NOTHING: a CARTRIDGE / CLEANING / MEDIA / LABEL / WORM
@@ -30,7 +30,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical tape_drives enum strings — MUST match the tape_drives entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -90,17 +90,17 @@ def _drive_type(text: str) -> str | None:
         members.add(DAT)
     if _AIT.search(text):
         members.add(AIT)
-    return members.pop() if len(members) == 1 else None
+    return unique_or_none(members)
 
 
 def _interface(text: str) -> str | None:
     hits = {name for name, pattern in _IFACE_PATTERNS if pattern.search(text)}
-    return hits.pop() if len(hits) == 1 else None
+    return unique_or_none(hits)
 
 
 def _form_factor(text: str) -> str | None:
     hits = {name for name, pattern in _FORM_PATTERNS if pattern.search(text)}
-    return hits.pop() if len(hits) == 1 else None
+    return unique_or_none(hits)
 
 
 def extract_tape(text: str) -> SpecDict:

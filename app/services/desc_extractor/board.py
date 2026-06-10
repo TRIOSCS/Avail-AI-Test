@@ -7,7 +7,7 @@ What: reads the board type out of compact human board descriptions like
       re-validates enum members and skips unseeded keys. The drift guard in
       tests/test_desc_extractor_routing.py pins the vocabulary against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - board_type is a closed token→member map; multiple DISTINCT members ⇒ omit
@@ -24,7 +24,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical board_type enum strings — MUST match the motherboards entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -47,7 +47,7 @@ _BOARD_PATTERNS = (
 def _board_type(text: str) -> str | None:
     """Seeded board_type member, or None (no token / conflicting members)."""
     members = {member for member, pattern in _BOARD_PATTERNS if pattern.search(text)}
-    return members.pop() if len(members) == 1 else None
+    return unique_or_none(members)
 
 
 def extract_board(text: str) -> SpecDict:

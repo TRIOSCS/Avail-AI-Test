@@ -8,7 +8,7 @@ What: reads capacity / DDR generation / speed / ECC / module form / rank out of
       enforced ONLY here (record_spec performs no numeric_range check) — the drift
       guard in tests/test_desc_extractor_routing.py pins both against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - capacity_gb requires an explicit GB/G token and the seeded 1-512 range (MB-era
@@ -30,7 +30,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical dram enum strings — MUST match the dram entry in app/data/commodity_seeds.json.
 RDIMM, LRDIMM, UDIMM, SODIMM, DIMM = "RDIMM", "LRDIMM", "UDIMM", "SO-DIMM", "DIMM"
@@ -70,7 +70,7 @@ def _capacity_gb(text: str) -> int | None:
         value = int(m.group(1))
         if _CAP_MIN <= value <= _CAP_MAX:
             values.add(value)
-    return values.pop() if len(values) == 1 else None
+    return unique_or_none(values)
 
 
 def _ddr_type(text: str) -> str | None:
@@ -78,7 +78,7 @@ def _ddr_type(text: str) -> str | None:
     generations |= {_PC_GEN[m.group(1)] for m in _PC_PREFIX.finditer(text)}
     if not generations and _DDR_BARE.search(text):
         generations.add("DDR")  # generation-less legacy "DDR-333MHz" grammar
-    return generations.pop() if len(generations) == 1 else None
+    return unique_or_none(generations)
 
 
 def _speed_mhz(text: str) -> int | None:
@@ -88,7 +88,7 @@ def _speed_mhz(text: str) -> int | None:
         if _SPEED_MIN <= value <= _SPEED_MAX:
             speeds.add(value)
     speeds |= {_PC4_SPEED[m.group(1)] for m in _PC4_SPEED_GRADE.finditer(text)}
-    return speeds.pop() if len(speeds) == 1 else None
+    return unique_or_none(speeds)
 
 
 def _form_factor(text: str) -> str | None:
@@ -108,13 +108,13 @@ def _ecc(text: str, form_factor: str | None) -> bool | None:
         signals.add(True)
     if form_factor in (RDIMM, LRDIMM):
         signals.add(True)  # registered / load-reduced modules are always ECC
-    return signals.pop() if len(signals) == 1 else None
+    return unique_or_none(signals)
 
 
 def _rank(text: str) -> str | None:
     ranks = {f"{m.group(1)}Rx{m.group(2)}" for m in _RANK.finditer(text)}
     ranks &= _RANK_VALID
-    return ranks.pop() if len(ranks) == 1 else None
+    return unique_or_none(ranks)
 
 
 def extract_memory(text: str) -> SpecDict:

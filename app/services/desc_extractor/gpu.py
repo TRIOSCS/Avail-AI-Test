@@ -9,7 +9,7 @@ What: reads GPU family / memory size out of compact human graphics-card
       drift guard in tests/test_desc_extractor_routing.py pins both against the
       seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - gpu_family collects all marketing/chip tokens (Quadro, GeForce, GTX⇒GeForce,
@@ -41,7 +41,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical gpu_family enum strings — MUST match the gpu entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -108,7 +108,7 @@ def _memory_gb(text: str) -> int | None:
         values.add(int(m.group(1)))
     values |= {int(m.group(1)) for m in _MEM_GLUED.finditer(text)}
     values = {v for v in values if _MEM_MIN <= v <= _MEM_MAX}
-    return values.pop() if len(values) == 1 else None
+    return unique_or_none(values)
 
 
 def extract_gpu(text: str) -> SpecDict:

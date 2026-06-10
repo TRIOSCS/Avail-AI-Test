@@ -9,7 +9,7 @@ What: reads wattage / supply class out of compact human PSU descriptions like
       drift guard in tests/test_desc_extractor_routing.py pins both against the
       seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - wattage requires an explicit W/WATT(S) unit token with word boundaries, so
@@ -27,7 +27,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical psu_class enum strings — MUST match the power_supplies entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -57,13 +57,13 @@ def _wattage(text: str) -> int | None:
     """Distinct surviving wattage candidate in the seeded range, or None."""
     values = {int(m.group(1)) for m in _WATTS.finditer(text)}
     values = {v for v in values if _WATT_MIN <= v <= _WATT_MAX}
-    return values.pop() if len(values) == 1 else None
+    return unique_or_none(values)
 
 
 def _psu_class(text: str) -> str | None:
     """Seeded psu_class member, or None (no token / conflicting members)."""
     members = {member for member, pattern in _CLASS_PATTERNS if pattern.search(text)}
-    return members.pop() if len(members) == 1 else None
+    return unique_or_none(members)
 
 
 def extract_psu(text: str) -> SpecDict:

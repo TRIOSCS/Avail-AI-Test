@@ -8,7 +8,22 @@ Called by: app/services/desc_extractor/{__init__,storage,memory,power,display,
 Depends on: nothing (pure).
 """
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from typing import TypeVar
+
+_T = TypeVar("_T")
+
+
+def unique_or_none(values: AbstractSet[_T]) -> _T | None:
+    """The single member of *values*, or None when it is empty or holds a conflict.
+
+    The shared "unique-or-omit" rule every extractor applies: a facet is emitted only
+    when exactly one candidate survives, so conflicting signals omit the key rather than
+    guess (a wrong facet value is worse than a missing one).
+    """
+    return next(iter(values)) if len(values) == 1 else None
+
 
 # Canonical specs mapping — EVERY per-commodity extractor returns exactly this type.
 # dict is invariant in its value type, so a module returning a narrower union (e.g.

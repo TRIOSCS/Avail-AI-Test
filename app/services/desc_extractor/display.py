@@ -8,7 +8,7 @@ What: reads resolution / diagonal size / backlight out of compact human panel
       keys, but numeric ranges are enforced ONLY here — the drift guard in
       tests/test_desc_extractor_routing.py pins both against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - resolution from named classes (HD/FHD/QHD/WUXGA/UHD/4K) and explicit WxH pixel
@@ -36,7 +36,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical displays enum strings — MUST match the displays entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -89,7 +89,7 @@ def _resolution(text: str) -> str | None:
         explicit = f"{m.group(1)}x{m.group(2)}"
         if explicit in _RES_SEEDED:
             values.add(explicit)
-    return values.pop() if len(values) == 1 else None
+    return unique_or_none(values)
 
 
 def _diagonal_size(text: str) -> int | float | None:

@@ -8,7 +8,7 @@ What: reads capacity / rpm / form factor / interface out of compact human drive
       skips unseeded keys (it performs no numeric_range check — capacity sanity
       lives in the link-speed exclusions here).
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (SpecDict alias only) — pure functions.
+Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - Capacity requires an explicit unit token (GB/G/TB). Link-speed tokens are excluded
@@ -30,7 +30,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict
+from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical enum strings — MUST match the hdd/ssd entries in app/data/commodity_seeds.json.
 _FF_BY_VALUE = {"2.5": '2.5"', "3.5": '3.5"', "1.8": '1.8"'}
@@ -89,7 +89,7 @@ def _rpm(text: str) -> str | None:
     # Non-seeded values (a "20K" token, a stray numeric) are dropped, never emitted;
     # two DIFFERENT seeded values would be a conflict — omit.
     seeded = {_RPM_VOCAB[c] for c in candidates if c in _RPM_VOCAB}
-    return seeded.pop() if len(seeded) == 1 else None
+    return unique_or_none(seeded)
 
 
 def _form_factor(text: str, commodity: str) -> str | None:
