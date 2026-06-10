@@ -1,34 +1,44 @@
 """Ingest the IBM/Lenovo "FRU_PN_TRAY matrix" workbook into the fru_links table.
 
-Usage: python -m app.management.ingest_fru_matrix <xlsx> [--apply]
+Usage: python -m app.management.ingest_fru_matrix <xlsx> [--apply] [--allow-missing-sheets]
 
-DEFAULT is a dry run: parses every mapped sheet and reports per-sheet parsed/skipped
-row counts, per-kind link counts, and 10 sample links — writes nothing. With --apply
-it upserts in chunks (insert new edges, refresh context attributes on existing ones,
-keyed on fru_norm + related_norm + rel_kind + source_sheet).
+DEFAULT is a dry run: parses every mapped sheet and reports sheet coverage
+("sheets parsed X/Y"), per-sheet parsed/skipped/unparsed-cell counts, per-kind link
+counts, and 10 sample links — writes nothing. A mapped sheet missing from the
+workbook is FATAL unless --allow-missing-sheets is passed; workbook sheets that are
+neither mapped nor in KNOWN_SKIPPED_SHEETS are reported as unexpected and block
+--apply (a renamed date-stamped sheet must be re-mapped in PARSERS, not silently
+dropped). With --apply it upserts in chunks inside a single transaction (insert new
+edges, refresh context attributes on existing ones, keyed on fru_norm +
+related_norm + rel_kind + source_sheet). Upserts are additive-only: edges absent
+from a newer workbook are never deleted, and attributes cleared in the source never
+null existing values.
 
 Sheet → relationship mapping (kinds are FruLinkKind values):
   Main:               Part Number→ibm_11s, Option→option, Opt-PN→option_pn,
                       Model→mfg_model, Assembly→assembly,
                       Additional Sourcing Numbers→sourcing_pn (split),
                       Carrier→tray, Alternate Carrier→tray_alt
-  Qlot/Gabor/CZ:      Drivepn→drive_pn (+qual status/date), Tray→tray,
+  Qlot:               Drivepn→drive_pn (+qual status)
+  Gabor/CZ:           Drivepn→drive_pn (+qual status/date), Tray→tray,
                       Drive Model→mfg_model
-  CDC NOT yet AP:     Drivepn→drive_pn with qual_status="cdc_pending"
+  CDC NOT yet AP:     Drivepn→drive_pn with qual_status=CDC_PENDING
   Lenovo-HDD:         Part Number→ibm_11s, Lenovo/Idea PN→lenovo_pn,
-                      Model→mfg_model, Carrier→tray (FW → note)
-  Lenovo FRU-PN:      PPN→lenovo_ppn (FRU de-padded: _Exx suffix + zero padding)
+                      Model→mfg_model (FW → note), Carrier→tray
+  Lenovo FRU-PN:      PPN→lenovo_ppn (FRU de-padded: trailing _<letter><digits>
+                      revision suffix, e.g. _E00, + zero padding)
   LVN VPD Mapping:    Option P/N→option, MFG Model→mfg_model,
                       Make-to-Label→sourcing_pn, Tray P/N→tray
   Series:             partno→ibm_11s, idmodelo→mfg_model, bracket(+alt)→bracket,
                       board(+alt)→board, screws→screws
   NSeries(NetApp):    per-vendor MFG P/N→mfg_model, Shuttle→shuttle, Dongle→dongle,
                       Dongle Screw→screws (FRU forward-filled down blank rows)
-Skipped sheets: "11s Sub Check", "HD Matrix Template", "Lenovo HD-SD Template"
-(lookup tools/templates) and "Key Table" (test/disposition codes, no part links).
+Skipped sheets (KNOWN_SKIPPED_SHEETS): "11s Sub Check", "HD Matrix Template",
+"Lenovo HD-SD Template" (lookup tools/templates) and "Key Table" (test/disposition
+codes, no part links).
 
 Called by: admin manually after receiving an updated FRU matrix workbook
-Depends on: openpyxl, app.models.FruLink, app.constants.FruLinkKind,
+Depends on: openpyxl, app.models.FruLink, app.constants.FruLinkKind/CDC_PENDING,
             app.utils.normalization.normalize_mpn_key
 """
 
@@ -37,12 +47,13 @@ import re
 from collections import Counter
 from dataclasses import dataclass, field, fields, replace
 from datetime import date, datetime
-from typing import Iterable
+from functools import lru_cache
+from typing import Callable, Iterable
 
 import sqlalchemy as sa
 from loguru import logger
 
-from app.constants import FruLinkKind
+from app.constants import CDC_PENDING, FruLinkKind
 from app.utils.normalization import normalize_mpn_key
 
 # ── Cell hygiene ──────────────────────────────────────────────────────
@@ -72,23 +83,31 @@ def _clean(value) -> str | None:
     return s
 
 
-def _pn(value) -> str | None:
-    """A single plausible part number, or None (sentinels, prose, blanks)."""
+def _pn(value, on_reject: Callable[[str], None] | None = None) -> str | None:
+    """A single plausible part number, or None (sentinels, prose, blanks).
+
+    ``on_reject`` is called with the cleaned value when a NON-EMPTY cell fails the
+    plausibility check (so callers can count dropped cells; sentinels don't count).
+    """
     s = _clean(value)
-    if not s or not _PN_RE.match(s):
+    if not s:
+        return None
+    if not _PN_RE.match(s):
+        if on_reject is not None:
+            on_reject(s)
         return None
     return s
 
 
-def _split_pns(value, seps: str = r"[,;\n]") -> list[str]:
+def _split_pns(value, seps: str = r"[,;\n]", on_reject: Callable[[str], None] | None = None) -> list[str]:
     """Split a multi-value cell and keep only plausible part numbers."""
     s = _clean(value)
     if not s:
         return []
-    return [p for p in (_pn(tok) for tok in re.split(seps, s)) if p]
+    return [p for p in (_pn(tok, on_reject) for tok in re.split(seps, s)) if p]
 
 
-def _parse_carrier(value) -> tuple[list[str], str | None]:
+def _parse_carrier(value, on_reject: Callable[[str], None] | None = None) -> tuple[list[str], str | None]:
     """Carrier cells: split on '/' (and , ; newline), parentheticals become the note.
 
     "SM10G01157 / 00FC544 (Blue hot-swap)" → (["SM10G01157", "00FC544"], "Blue hot-swap")
@@ -98,16 +117,16 @@ def _parse_carrier(value) -> tuple[list[str], str | None]:
         return [], None
     notes = [n.strip() for n in _PAREN_RE.findall(s) if n.strip()]
     bare = _PAREN_RE.sub(" ", s)
-    pns = [p for p in (_pn(tok) for tok in re.split(r"[/,;\n]", bare)) if p]
+    pns = [p for p in (_pn(tok, on_reject) for tok in re.split(r"[/,;\n]", bare)) if p]
     return pns, ("; ".join(notes) or None)
 
 
 def _lenovo_fru(value) -> tuple[str, str] | None:
     """Lenovo FRU-PN FRU cell → (raw, norm). "0000000NV340_E00" → norm of "00NV340".
 
-    Strips the ``_Exx`` revision suffix, then the zero-padding group down to the
-    7-char FRU (only when everything before the last 7 chars is zeros — 10-char PNs
-    like "SB17B49754" are left alone).
+    Strips the trailing ``_<letter><digits>`` revision suffix (e.g. ``_E00``), then
+    the zero-padding group down to the 7-char FRU (only when everything before the
+    last 7 chars is zeros — 10-char PNs like "SB17B49754" are left alone).
     """
     s = _clean(value)
     if not s:
@@ -184,20 +203,41 @@ class SheetStats:
     """Dry-run/apply report numbers for one sheet."""
 
     sheet: str
-    rows: int = 0  # data rows scanned
+    rows: int = 0  # rows below the header scanned (incl. blank)
     empty_rows: int = 0  # fully blank rows (sheet formatting padding)
     skipped_rows: int = 0  # rows with data but no usable FRU
     duplicate_links: int = 0  # parsed edges collapsed into an existing key
     kinds: Counter = field(default_factory=Counter)  # unique links per rel_kind
+    # Non-empty cells/tokens dropped by validation (failed _PN_RE, normalized to
+    # nothing, self-edge) or truncated to a column limit — keyed per kind/column.
+    # Distinguishes "column was empty" from "column format changed" in the report.
+    unparsed_cells: Counter = field(default_factory=Counter)
 
 
 _IDENTITY_FIELDS = {"fru_raw", "fru_norm", "related_raw", "related_norm", "rel_kind", "source_sheet"}
+
+
+@lru_cache(maxsize=1)
+def _context_limits() -> dict[str, int]:
+    """Length caps for bounded String context columns, derived from the FruLink model.
+
+    description/note are Text (unbounded). Keeping these in sync with the model means a
+    workbook cell can never blow a VARCHAR limit on PostgreSQL at --apply time (SQLite
+    ignores lengths, so tests alone would never catch it).
+    """
+    from app.models.fru_link import FruLink
+
+    return {
+        name: FruLink.__table__.columns[name].type.length
+        for name in ("manufacturer", "series", "machine", "qual_status")
+    }
 
 
 class _Emitter:
     """Per-sheet link collector: validates, dedups on the unique key, coalesces."""
 
     _CONTEXT_FIELDS = [f.name for f in fields(ParsedLink) if f.name not in _IDENTITY_FIELDS]
+    _DEBUG_SAMPLES = 8  # max rejected raw values logged per sheet (audit trail)
 
     def __init__(self, sheet: str):
         self.sheet = sheet
@@ -212,6 +252,24 @@ class _Emitter:
             return False
         return True
 
+    def _reject(self, column: str, raw: str, reason: str = "unparsable") -> None:
+        """Count a dropped/altered non-empty value so the report can surface it."""
+        self.stats.unparsed_cells[column] += 1
+        if sum(self.stats.unparsed_cells.values()) <= self._DEBUG_SAMPLES:
+            logger.debug("[{}] {} {} value: {!r}", self.sheet, reason, column, raw)
+
+    def pn(self, value, column: str) -> str | None:
+        """_pn() that counts non-empty cells failing the plausibility check."""
+        return _pn(value, on_reject=lambda raw: self._reject(column, raw))
+
+    def split_pns(self, value, column: str, seps: str = r"[,;\n]") -> list[str]:
+        """_split_pns() that counts non-conforming tokens."""
+        return _split_pns(value, seps, on_reject=lambda raw: self._reject(column, raw))
+
+    def parse_carrier(self, value, column: str) -> tuple[list[str], str | None]:
+        """_parse_carrier() that counts non-conforming tokens."""
+        return _parse_carrier(value, on_reject=lambda raw: self._reject(column, raw))
+
     def add(
         self,
         fru_raw: str,
@@ -225,7 +283,16 @@ class _Emitter:
             return
         related_norm = related_norm_override or normalize_mpn_key(related)
         if not related_norm or related_norm == fru_norm:
+            reason = "self-edge" if related_norm else "empty-norm"
+            self._reject(kind.value, related, reason=reason)
             return  # unusable or self-edge
+        # Cap bounded context columns so --apply can never hit a Postgres
+        # StringDataRightTruncation (truncate with an ellipsis, count it).
+        for name, limit in _context_limits().items():
+            val = context.get(name)
+            if isinstance(val, str) and len(val) > limit:
+                context[name] = val[: limit - 1] + "…"
+                self._reject(f"{name}:truncated", val, reason="overlength")
         link = ParsedLink(
             fru_raw=fru_raw,
             fru_norm=fru_norm,
@@ -277,15 +344,22 @@ def parse_main(ws, sheet: str) -> _Emitter:
             "series": _clean(row[13]),
             "note": _join_notes(f"FC {_clean(row[11])}" if _clean(row[11]) else None, _clean(row[12])),
         }
-        em.add(fru, fru_norm, _pn(row[1]), FruLinkKind.IBM_11S, **ctx)
-        em.add(fru, fru_norm, _pn(row[2]), FruLinkKind.OPTION, **ctx)
-        em.add(fru, fru_norm, _pn(row[3]), FruLinkKind.OPTION_PN, **ctx)
-        em.add(fru, fru_norm, _pn(row[4]), FruLinkKind.MFG_MODEL, manufacturer=manufacturer, **ctx)
-        em.add(fru, fru_norm, _pn(row[5]), FruLinkKind.ASSEMBLY, **ctx)
-        for pn in _split_pns(row[6]):
+        em.add(fru, fru_norm, em.pn(row[1], FruLinkKind.IBM_11S.value), FruLinkKind.IBM_11S, **ctx)
+        em.add(fru, fru_norm, em.pn(row[2], FruLinkKind.OPTION.value), FruLinkKind.OPTION, **ctx)
+        em.add(fru, fru_norm, em.pn(row[3], FruLinkKind.OPTION_PN.value), FruLinkKind.OPTION_PN, **ctx)
+        em.add(
+            fru,
+            fru_norm,
+            em.pn(row[4], FruLinkKind.MFG_MODEL.value),
+            FruLinkKind.MFG_MODEL,
+            manufacturer=manufacturer,
+            **ctx,
+        )
+        em.add(fru, fru_norm, em.pn(row[5], FruLinkKind.ASSEMBLY.value), FruLinkKind.ASSEMBLY, **ctx)
+        for pn in em.split_pns(row[6], FruLinkKind.SOURCING_PN.value):
             em.add(fru, fru_norm, pn, FruLinkKind.SOURCING_PN, **ctx)
         for col, kind in ((8, FruLinkKind.TRAY), (9, FruLinkKind.TRAY_ALT)):
-            pns, carrier_note = _parse_carrier(row[col])
+            pns, carrier_note = em.parse_carrier(row[col], kind.value)
             for pn in pns:
                 em.add(fru, fru_norm, pn, kind, **{**ctx, "note": _join_notes(ctx["note"], carrier_note)})
     return em
@@ -322,7 +396,7 @@ def _parse_qual_sheet(ws, sheet: str, cols: dict[str, int | None], qual_override
         em.add(
             fru,
             fru_norm,
-            _pn(col(row, "drive_pn")),
+            em.pn(col(row, "drive_pn"), FruLinkKind.DRIVE_PN.value),
             FruLinkKind.DRIVE_PN,
             manufacturer=oem,
             description=fru_desc,
@@ -334,7 +408,7 @@ def _parse_qual_sheet(ws, sheet: str, cols: dict[str, int | None], qual_override
         em.add(
             fru,
             fru_norm,
-            _pn(col(row, "model")),
+            em.pn(col(row, "model"), FruLinkKind.MFG_MODEL.value),
             FruLinkKind.MFG_MODEL,
             manufacturer=oem,
             description=bare_desc,
@@ -342,7 +416,7 @@ def _parse_qual_sheet(ws, sheet: str, cols: dict[str, int | None], qual_override
             qual_status=qual,
             qual_date=qual_date,
         )
-        em.add(fru, fru_norm, _pn(col(row, "tray")), FruLinkKind.TRAY, machine=machine)
+        em.add(fru, fru_norm, em.pn(col(row, "tray"), FruLinkKind.TRAY.value), FruLinkKind.TRAY, machine=machine)
     return em
 
 
@@ -378,7 +452,12 @@ def parse_gabor(ws, sheet: str) -> _Emitter:
 
 
 def parse_cz(ws, sheet: str) -> _Emitter:
-    """CZ ONLY Testing: like Gabor without Brand (qual is 'qlot approved - Only EMEA')."""
+    """CZ ONLY Testing: FRU/DRIVE | FRU | Drivepn | Type | qual | date | OEM |
+    Bare desc | FRU desc | Tray | Model.
+
+    Like Gabor but with no Brand column and OEM moved before Bare desc (qual is
+    'qlot approved - Only EMEA'); machine falls back to Type.
+    """
     return _parse_qual_sheet(
         ws,
         sheet,
@@ -398,9 +477,10 @@ def parse_cz(ws, sheet: str) -> _Emitter:
 
 
 def parse_cdc(ws, sheet: str) -> _Emitter:
-    """CDC NOT yet AP Article Required: FRU | Drivepn | model(prose) | BRAND | CDC Platform.
+    """CDC NOT yet AP Article Required: FRU/DRIVE | FRU | Drivepn | model(prose) |
+    BRAND | CDC Platform (leading FRU/DRIVE concat column like the other qual sheets).
 
-    Rows are pending-qualification → qual_status "cdc_pending"; the prose model text
+    Rows are pending-qualification → qual_status CDC_PENDING; the prose model text
     becomes the description.
     """
     em = _Emitter(sheet)
@@ -416,11 +496,11 @@ def parse_cdc(ws, sheet: str) -> _Emitter:
         em.add(
             fru,
             normalize_mpn_key(fru),
-            _pn(row[2]),
+            em.pn(row[2], FruLinkKind.DRIVE_PN.value),
             FruLinkKind.DRIVE_PN,
             description=_clean(row[3]),
             machine=_clean(row[4]),
-            qual_status="cdc_pending",
+            qual_status=CDC_PENDING,
             note=f"CDC platform: {platform}" if platform else None,
         )
     return em
@@ -441,18 +521,18 @@ def parse_lenovo_hdd(ws, sheet: str) -> _Emitter:
         fru_norm = normalize_mpn_key(fru)
         ctx = {"description": _clean(row[8]), "machine": _clean(row[10]), "series": _clean(row[14])}
         fw = _clean(row[11])
-        em.add(fru, fru_norm, _pn(row[1]), FruLinkKind.IBM_11S, **ctx)
-        em.add(fru, fru_norm, _pn(row[2]), FruLinkKind.LENOVO_PN, **ctx)
+        em.add(fru, fru_norm, em.pn(row[1], FruLinkKind.IBM_11S.value), FruLinkKind.IBM_11S, **ctx)
+        em.add(fru, fru_norm, em.pn(row[2], FruLinkKind.LENOVO_PN.value), FruLinkKind.LENOVO_PN, **ctx)
         em.add(
             fru,
             fru_norm,
-            _pn(row[4]),
+            em.pn(row[4], FruLinkKind.MFG_MODEL.value),
             FruLinkKind.MFG_MODEL,
             manufacturer=_clean(row[7]),
             note=f"FW {fw}" if fw else None,
             **ctx,
         )
-        pns, carrier_note = _parse_carrier(row[9])
+        pns, carrier_note = em.parse_carrier(row[9], FruLinkKind.TRAY.value)
         for pn in pns:
             em.add(fru, fru_norm, pn, FruLinkKind.TRAY, note=carrier_note, **ctx)
     return em
@@ -463,19 +543,22 @@ def parse_lenovo_fru_pn(ws, sheet: str) -> _Emitter:
 
     PPN values use the same SAP zero-padding as the FRU column ("0000000WG788" is
     "00WG788"), so the related side is de-padded for its norm too — raw keeps the
-    original padded value.
+    original padded value. Both sides are gated through _pn() first (the padded
+    "0000000NV340_E00" form passes _PN_RE), so prose cells are rejected exactly
+    like every other sheet's PN columns.
     """
     em = _Emitter(sheet)
     for row in ws.iter_rows(min_row=2, values_only=True):
         row = _pad(row, 6)
         if not em.scan(row):
             continue
-        fru_pair = _lenovo_fru(row[3])
+        fru_pair = _lenovo_fru(row[3]) if _pn(row[3]) else None
         if not fru_pair:
             em.stats.skipped_rows += 1
             continue
         fru_raw, fru_norm = fru_pair
-        ppn_pair = _lenovo_fru(row[5]) if _pn(row[5]) else None
+        ppn_cell = em.pn(row[5], FruLinkKind.LENOVO_PPN.value)
+        ppn_pair = _lenovo_fru(ppn_cell) if ppn_cell else None
         if ppn_pair:
             ppn_raw, ppn_norm = ppn_pair
             em.add(
@@ -508,18 +591,25 @@ def parse_lvn_vpd(ws, sheet: str) -> _Emitter:
             "description": _clean(row[10]),
             "note": f"Brand: {brand}" if is_platform else None,
         }
-        em.add(fru, fru_norm, _pn(row[4]), FruLinkKind.OPTION, **ctx)
-        em.add(fru, fru_norm, _pn(row[6]), FruLinkKind.OPTION, **ctx)
-        em.add(fru, fru_norm, _pn(row[7]), FruLinkKind.MFG_MODEL, manufacturer=manufacturer, **ctx)
+        em.add(fru, fru_norm, em.pn(row[4], FruLinkKind.OPTION.value), FruLinkKind.OPTION, **ctx)
+        em.add(fru, fru_norm, em.pn(row[6], FruLinkKind.OPTION.value), FruLinkKind.OPTION, **ctx)
         em.add(
             fru,
             fru_norm,
-            _pn(row[8]),
+            em.pn(row[7], FruLinkKind.MFG_MODEL.value),
+            FruLinkKind.MFG_MODEL,
+            manufacturer=manufacturer,
+            **ctx,
+        )
+        em.add(
+            fru,
+            fru_norm,
+            em.pn(row[8], FruLinkKind.SOURCING_PN.value),
             FruLinkKind.SOURCING_PN,
             description=ctx["description"],
             note=_join_notes("make-to-label", ctx["note"]),
         )
-        em.add(fru, fru_norm, _pn(row[9]), FruLinkKind.TRAY, **ctx)
+        em.add(fru, fru_norm, em.pn(row[9], FruLinkKind.TRAY.value), FruLinkKind.TRAY, **ctx)
     return em
 
 
@@ -543,8 +633,15 @@ def parse_series(ws, sheet: str) -> _Emitter:
             f"{_num(row[7])}pin" if _num(row[7]) else None,
         ]
         ctx = {"series": _clean(row[17]), "note": " ".join(b for b in size_bits if b) or None}
-        em.add(fru, fru_norm, _pn(row[1]), FruLinkKind.IBM_11S, **ctx)
-        em.add(fru, fru_norm, _pn(row[2]), FruLinkKind.MFG_MODEL, manufacturer=_clean(row[3]), **ctx)
+        em.add(fru, fru_norm, em.pn(row[1], FruLinkKind.IBM_11S.value), FruLinkKind.IBM_11S, **ctx)
+        em.add(
+            fru,
+            fru_norm,
+            em.pn(row[2], FruLinkKind.MFG_MODEL.value),
+            FruLinkKind.MFG_MODEL,
+            manufacturer=_clean(row[3]),
+            **ctx,
+        )
         for col, kind in (
             (9, FruLinkKind.BRACKET),
             (10, FruLinkKind.BRACKET),
@@ -552,7 +649,7 @@ def parse_series(ws, sheet: str) -> _Emitter:
             (12, FruLinkKind.BOARD),
             (13, FruLinkKind.SCREWS),
         ):
-            for pn in _split_pns(row[col]):
+            for pn in em.split_pns(row[col], kind.value):
                 em.add(fru, fru_norm, pn, kind, **ctx)
     return em
 
@@ -578,7 +675,7 @@ def parse_nseries(ws, sheet: str) -> _Emitter:
             em.stats.skipped_rows += 1
             continue
         shuttle_type = _clean(row[3])
-        for pn in _split_pns(row[4], seps=r"[/,;\n]"):
+        for pn in em.split_pns(row[4], FruLinkKind.SHUTTLE.value, seps=r"[/,;\n]"):
             em.add(
                 fru,
                 fru_norm,
@@ -587,13 +684,13 @@ def parse_nseries(ws, sheet: str) -> _Emitter:
                 description=description,
                 note=f"Shuttle type: {shuttle_type}" if shuttle_type else None,
             )
-        for pn in _split_pns(row[5], seps=r"[/,;\n]"):
+        for pn in em.split_pns(row[5], FruLinkKind.DONGLE.value, seps=r"[/,;\n]"):
             em.add(fru, fru_norm, pn, FruLinkKind.DONGLE, description=description)
-        for pn in _split_pns(row[6], seps=r"[/,;\n]"):
+        for pn in em.split_pns(row[6], FruLinkKind.SCREWS.value, seps=r"[/,;\n]"):
             em.add(fru, fru_norm, pn, FruLinkKind.SCREWS, description=description)
         for pn_col, fw_col, mfr in ((7, 8, "Seagate"), (9, 10, "Hitachi"), (11, 12, "Western Digital")):
             fw = _clean(row[fw_col])
-            for pn in _split_pns(row[pn_col], seps=r"[/,;\n]"):
+            for pn in em.split_pns(row[pn_col], FruLinkKind.MFG_MODEL.value, seps=r"[/,;\n]"):
                 em.add(
                     fru,
                     fru_norm,
@@ -619,25 +716,54 @@ PARSERS = [
     ("NSeries(NetApp)", parse_nseries),
 ]
 
+# Workbook sheets that are deliberately NOT ingested (lookup tools, templates,
+# disposition-code tables). Anything else not in PARSERS is unexpected and blocks
+# --apply — a renamed date-stamped sheet must be re-mapped, never silently dropped.
+KNOWN_SKIPPED_SHEETS = {"11s Sub Check", "HD Matrix Template", "Lenovo HD-SD Template", "Key Table"}
 
-def parse_workbook(path: str) -> tuple[list[ParsedLink], list[SheetStats]]:
-    """Parse every mapped sheet of the workbook into deduplicated links + stats."""
+
+@dataclass
+class WorkbookParse:
+    """parse_workbook() result: links + per-sheet stats + sheet-coverage accounting."""
+
+    links: list[ParsedLink]
+    stats: list[SheetStats]
+    missing_sheets: list[str]  # mapped sheets absent from the workbook (allow_missing_sheets only)
+    unexpected_sheets: list[str]  # workbook sheets neither mapped nor known-skipped
+
+
+def parse_workbook(path: str, allow_missing_sheets: bool = False) -> WorkbookParse:
+    """Parse every mapped sheet of the workbook into deduplicated links + stats.
+
+    Raises ValueError when a mapped sheet is missing (the four date-stamped sheet
+    names WILL change in future workbook revisions — silently skipping one would
+    drop a whole relationship class), unless ``allow_missing_sheets`` is set for
+    deliberately partial workbooks.
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
     links: list[ParsedLink] = []
     stats: list[SheetStats] = []
     try:
+        sheetnames = set(wb.sheetnames)
+        missing = [name for name, _ in PARSERS if name not in sheetnames]
+        if missing and not allow_missing_sheets:
+            raise ValueError(
+                f"Mapped sheet(s) missing from workbook: {missing} — if a sheet was renamed, "
+                "update PARSERS; for a deliberately partial workbook pass --allow-missing-sheets"
+            )
+        unexpected = sorted(sheetnames - {name for name, _ in PARSERS} - KNOWN_SKIPPED_SHEETS)
         for sheet_name, parser in PARSERS:
-            if sheet_name not in wb.sheetnames:
-                logger.warning("Sheet {!r} not found in workbook — skipping", sheet_name)
+            if sheet_name not in sheetnames:
+                logger.warning("Sheet {!r} not found in workbook — skipping (--allow-missing-sheets)", sheet_name)
                 continue
             emitter = parser(wb[sheet_name], sheet_name)
             links.extend(emitter.links)
             stats.append(emitter.stats)
     finally:
         wb.close()
-    return links, stats
+    return WorkbookParse(links=links, stats=stats, missing_sheets=missing, unexpected_sheets=unexpected)
 
 
 # ── Apply (chunked upsert) ────────────────────────────────────────────
@@ -656,7 +782,16 @@ _UPDATABLE = [
 
 
 def upsert_links(db, links: Iterable[ParsedLink], chunk_size: int = 1000) -> tuple[int, int]:
-    """Insert new edges / refresh attributes on existing ones.
+    """Insert new edges / refresh attributes on existing ones, in ONE transaction.
+
+    A single commit at the end makes --apply all-or-nothing: a mid-run failure
+    (IntegrityError, connection drop) rolls everything back instead of leaving an
+    unreported half-applied state. Additive-only by design: edges absent from the
+    parsed links are never deleted, and attributes cleared in the source (None)
+    never null existing values — withdrawn qual statuses survive re-ingest.
+
+    The bulk insert is a Core statement that bypasses the FruLink @validates hook,
+    so rel_kind is re-validated here against FruLinkKind (raises ValueError).
 
     Returns (inserted, updated).
     """
@@ -664,12 +799,13 @@ def upsert_links(db, links: Iterable[ParsedLink], chunk_size: int = 1000) -> tup
 
     links = list(links)
     inserted = updated = 0
-    for start in range(0, len(links), chunk_size):
+    chunk_count = -(-len(links) // chunk_size) if links else 0
+    for chunk_idx, start in enumerate(range(0, len(links), chunk_size), start=1):
         chunk = links[start : start + chunk_size]
         fru_norms = {link.fru_norm for link in chunk}
         existing = {
             (r.fru_norm, r.related_norm, r.rel_kind, r.source_sheet): r
-            for r in db.query(FruLink).filter(FruLink.fru_norm.in_(fru_norms)).all()
+            for r in db.execute(sa.select(FruLink).where(FruLink.fru_norm.in_(fru_norms))).scalars().all()
         }
         to_insert = []
         for link in chunk:
@@ -681,7 +817,7 @@ def upsert_links(db, links: Iterable[ParsedLink], chunk_size: int = 1000) -> tup
                         "fru_norm": link.fru_norm,
                         "related_raw": link.related_raw,
                         "related_norm": link.related_norm,
-                        "rel_kind": link.rel_kind,
+                        "rel_kind": FruLinkKind(link.rel_kind).value,  # Core insert skips @validates
                         "source_sheet": link.source_sheet,
                         "manufacturer": link.manufacturer,
                         "description": link.description,
@@ -704,14 +840,24 @@ def upsert_links(db, links: Iterable[ParsedLink], chunk_size: int = 1000) -> tup
         if to_insert:
             db.execute(sa.insert(FruLink), to_insert)
             inserted += len(to_insert)
-        db.commit()
+        logger.debug("chunk {}/{} staged: {} inserted, {} updated so far", chunk_idx, chunk_count, inserted, updated)
+    db.commit()
     return inserted, updated
 
 
 # ── CLI ───────────────────────────────────────────────────────────────
 
 
-def _report(links: list[ParsedLink], stats: list[SheetStats]) -> None:
+def _report(parsed: WorkbookParse) -> None:
+    links, stats = parsed.links, parsed.stats
+    logger.info("Sheets parsed: {}/{} mapped", len(stats), len(PARSERS))
+    if parsed.missing_sheets:
+        logger.warning("Missing mapped sheets (allowed): {}", parsed.missing_sheets)
+    if parsed.unexpected_sheets:
+        logger.error(
+            "Unexpected sheets (not mapped, not in KNOWN_SKIPPED_SHEETS — renamed sheet? --apply refused): {}",
+            parsed.unexpected_sheets,
+        )
     for s in stats:
         kind_summary = ", ".join(f"{k}={n}" for k, n in sorted(s.kinds.items())) or "none"
         logger.info(
@@ -724,6 +870,10 @@ def _report(links: list[ParsedLink], stats: list[SheetStats]) -> None:
             sum(s.kinds.values()),
             kind_summary,
         )
+        if s.unparsed_cells:
+            logger.info(
+                "[{}] unparsed cells: {}", s.sheet, ", ".join(f"{k}={n}" for k, n in sorted(s.unparsed_cells.items()))
+            )
     totals: Counter = Counter()
     for s in stats:
         totals.update(s.kinds)
@@ -741,13 +891,19 @@ def _report(links: list[ParsedLink], stats: list[SheetStats]) -> None:
         )
 
 
-def main(path: str, apply: bool) -> None:
+def main(path: str, apply: bool, allow_missing_sheets: bool = False) -> None:
     logger.info("Parsing FRU matrix workbook: {} (mode={})", path, "APPLY" if apply else "dry-run")
-    links, stats = parse_workbook(path)
-    _report(links, stats)
+    parsed = parse_workbook(path, allow_missing_sheets=allow_missing_sheets)
+    _report(parsed)
+    links = parsed.links
     if not apply:
         logger.info("Dry run — nothing written. Re-run with --apply to upsert {} links.", len(links))
         return
+    if parsed.unexpected_sheets:
+        raise SystemExit(
+            f"Refusing --apply: unexpected sheet(s) {parsed.unexpected_sheets} — map them in PARSERS "
+            "or add them to KNOWN_SKIPPED_SHEETS first"
+        )
     from app.database import SessionLocal
 
     db = SessionLocal()
@@ -764,5 +920,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Ingest the FRU_PN_TRAY matrix workbook into fru_links")
     parser.add_argument("xlsx", help="Path to the FRU matrix .xlsx workbook")
     parser.add_argument("--apply", action="store_true", help="Write to the database (default: dry run)")
+    parser.add_argument(
+        "--allow-missing-sheets",
+        action="store_true",
+        help="Tolerate mapped sheets missing from the workbook (deliberately partial workbooks only)",
+    )
     args = parser.parse_args()
-    main(args.xlsx, apply=args.apply)
+    main(args.xlsx, apply=args.apply, allow_missing_sheets=args.allow_missing_sheets)

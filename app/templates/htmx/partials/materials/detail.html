@@ -1,7 +1,8 @@
 {#
   materials/detail.html — Material card detail with hero header, collapsible specs, and tabbed content.
   Receives: card (MaterialCard), sightings (list), offers (list),
-            fru_view (FruView | None), fru_usages (list[FruUsage]).
+            fru_view (FruView | None), fru_usages (sequence[FruUsage], capped),
+            fru_usages_total (int).
   Called by: htmx_views.py material_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}

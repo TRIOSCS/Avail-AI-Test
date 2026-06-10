@@ -2,7 +2,8 @@
   materials/fru_section.html — FRU crosswalk panels for the material detail surface.
   Panel 1 "FRU matrix": forward view (this part IS a FRU) — sectioned related parts.
   Panel 2 "Used in FRUs": reverse view (this part appears under FRUs) — usage table.
-  Receives: fru_view (FruView | None), fru_usages (list[FruUsage]),
+  Receives: fru_view (FruView | None), fru_usages (sequence[FruUsage], capped),
+            fru_usages_total (int, uncapped reverse-view count),
             fru_query (str | None, set by the fru-lookup endpoint),
             show_empty (bool, lookup mode renders an empty state when nothing matches).
   Called by: materials/detail.html (include), htmx_views.py fru_lookup_partial (HTMX swap).
@@ -13,7 +14,7 @@
   {% if fru_view %}
   {# ── FRU matrix (forward view) ── #}
   <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ fruOpen: true }">
-    <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="fruOpen = !fruOpen" @keydown.enter="fruOpen = !fruOpen" @keydown.space.prevent="fruOpen = !fruOpen" aria-expanded="fruOpen">
+    <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="fruOpen = !fruOpen" @keydown.enter="fruOpen = !fruOpen" @keydown.space.prevent="fruOpen = !fruOpen" :aria-expanded="fruOpen">
       <div class="flex items-center gap-2.5">
         <div class="flex items-center justify-center w-7 h-7 rounded-md bg-brand-50">
           <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -61,8 +62,8 @@
               </span>
               {% if item.qual_status %}
               <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border mt-0.5
-                {{ 'bg-amber-50 text-amber-700 border-amber-200' if item.qual_status == 'cdc_pending' else 'bg-emerald-50 text-emerald-700 border-emerald-200' }}">
-                {{ 'CDC pending' if item.qual_status == 'cdc_pending' else item.qual_status }}{% if item.qual_date %} · {{ item.qual_date.strftime('%b %Y') }}{% endif %}
+                {{ 'bg-amber-50 text-amber-700 border-amber-200' if item.qual_is_pending else 'bg-emerald-50 text-emerald-700 border-emerald-200' }}">
+                {{ item.qual_label }}{% if item.qual_date %} · {{ item.qual_date.strftime('%b %Y') }}{% endif %}
               </span>
               {% endif %}
             </div>
@@ -80,8 +81,9 @@
 
   {% if fru_usages %}
   {# ── Used in FRUs (reverse view) ── #}
+  {% set fru_usages_total = fru_usages_total|default(fru_usages|length) %}
   <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ usagesOpen: true }">
-    <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="usagesOpen = !usagesOpen" @keydown.enter="usagesOpen = !usagesOpen" @keydown.space.prevent="usagesOpen = !usagesOpen" aria-expanded="usagesOpen">
+    <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="usagesOpen = !usagesOpen" @keydown.enter="usagesOpen = !usagesOpen" @keydown.space.prevent="usagesOpen = !usagesOpen" :aria-expanded="usagesOpen">
       <div class="flex items-center gap-2.5">
         <div class="flex items-center justify-center w-7 h-7 rounded-md bg-brand-50">
           <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -90,7 +92,7 @@
         </div>
         <h2 class="text-sm font-semibold text-gray-900 tracking-tight">Used in FRUs</h2>
         <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">
-          {{ fru_usages|length }}
+          {{ fru_usages_total }}
         </span>
       </div>
       <span class="text-gray-400 text-sm" x-text="usagesOpen ? '▾' : '▸'"></span>
@@ -111,14 +113,15 @@
               <a hx-get="/v2/partials/materials/fru-lookup?q={{ u.fru_raw|urlencode }}"
                  hx-target="#fru-crosswalk"
                  hx-swap="outerHTML"
+                 hx-push-url="/v2/materials?q={{ u.fru_raw|urlencode }}"
                  class="font-semibold text-brand-600 hover:text-brand-700 cursor-pointer transition-colors">{{ u.fru_raw }}</a>
             </td>
             <td class="py-2 px-3">{{ u.kind_label }}</td>
             <td class="py-2 px-3">
               {% if u.qual_status %}
               <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border
-                {{ 'bg-amber-50 text-amber-700 border-amber-200' if u.qual_status == 'cdc_pending' else 'bg-emerald-50 text-emerald-700 border-emerald-200' }}">
-                {{ 'CDC pending' if u.qual_status == 'cdc_pending' else u.qual_status }}
+                {{ 'bg-amber-50 text-amber-700 border-amber-200' if u.qual_is_pending else 'bg-emerald-50 text-emerald-700 border-emerald-200' }}">
+                {{ u.qual_label }}
               </span>
               {% else %}<span class="text-gray-400">-</span>{% endif %}
             </td>
@@ -129,6 +132,9 @@
           {% endfor %}
         </tbody>
       </table>
+      {% if fru_usages_total > fru_usages|length %}
+      <p class="pt-2 text-[11px] text-gray-400">Showing first {{ fru_usages|length }} of {{ fru_usages_total }} FRUs.</p>
+      {% endif %}
     </div>
   </div>
   {% endif %}

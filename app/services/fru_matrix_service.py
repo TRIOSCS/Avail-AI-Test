@@ -3,21 +3,27 @@ views.
 
 Backs the materials detail "FRU matrix" / "Used in FRUs" panels and the
 /v2/partials/materials/fru-lookup endpoint. Both entry points accept raw user/MPN
-input and normalize it internally with normalize_mpn_key.
+input and normalize it internally with normalize_mpn_key. The reverse view is
+capped at REVERSE_VIEW_LIMIT usages (shared hardware PNs like screws can sit under
+thousands of FRUs); ReverseView.total carries the uncapped count for display.
 
 Called by: app/routers/htmx_views.py (material detail + fru-lookup partials)
-Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind,
+Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
             app/utils/normalization.normalize_mpn_key
 """
 
 from dataclasses import dataclass
 from datetime import date
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from ..constants import FruLinkKind
+from ..constants import CDC_PENDING, FruLinkKind
 from ..models.fru_link import FruLink
 from ..utils.normalization import normalize_mpn_key
+
+# Max usages rendered in the "Used in FRUs" table (response/render size guard).
+REVERSE_VIEW_LIMIT = 200
 
 # Display labels per relationship kind (template-facing).
 KIND_LABELS: dict[str, str] = {
@@ -60,6 +66,11 @@ _SECTIONS: list[tuple[str, list[FruLinkKind]]] = [
     ("Sourcing & assembly", [FruLinkKind.SOURCING_PN, FruLinkKind.ASSEMBLY]),
 ]
 
+# A kind missing from either mapping would silently vanish from the forward view
+# (links are grouped strictly by _SECTIONS); fail at import instead.
+assert {k for _, kinds in _SECTIONS for k in kinds} == set(FruLinkKind), "_SECTIONS must cover every FruLinkKind"
+assert set(KIND_LABELS) == set(FruLinkKind), "KIND_LABELS must cover every FruLinkKind"
+
 
 @dataclass(frozen=True)
 class FruLinkItem:
@@ -75,6 +86,16 @@ class FruLinkItem:
     qual_date: date | None
     note: str | None
     source_sheets: tuple[str, ...]
+
+    @property
+    def qual_is_pending(self) -> bool:
+        return self.qual_status == CDC_PENDING
+
+    @property
+    def qual_label(self) -> str | None:
+        if self.qual_status is None:
+            return None
+        return "CDC pending" if self.qual_is_pending else self.qual_status
 
 
 @dataclass(frozen=True)
@@ -94,7 +115,11 @@ class FruView:
     sections: tuple[FruSection, ...]
     series: tuple[str, ...]  # distinct series context across links
     machines: tuple[str, ...]  # distinct machine/platform context across links
-    total_links: int
+
+    @property
+    def total_links(self) -> int:
+        """Count of sectioned (kind-mapped, deduplicated) items on display."""
+        return sum(len(s.items) for s in self.sections)
 
 
 @dataclass(frozen=True)
@@ -112,13 +137,36 @@ class FruUsage:
     machine: str | None
     source_sheet: str
 
+    @property
+    def qual_is_pending(self) -> bool:
+        return self.qual_status == CDC_PENDING
 
-def _richness(link: FruLink) -> tuple[int, int, int]:
-    """Sort key: rows with qual_status, then manufacturer, then description first."""
+    @property
+    def qual_label(self) -> str | None:
+        if self.qual_status is None:
+            return None
+        return "CDC pending" if self.qual_is_pending else self.qual_status
+
+
+@dataclass(frozen=True)
+class ReverseView:
+    """Reverse-lookup result: capped usages + the uncapped total for display."""
+
+    usages: tuple[FruUsage, ...]
+    total: int  # distinct (FRU, role) usages before the display cap
+
+
+def _richness(link: FruLink) -> tuple[int, int, int, int]:
+    """Sort key: rows with qual_status, then manufacturer, then description first.
+
+    link.id is the final tiebreaker so the chosen representative row is
+    deterministic regardless of database row order.
+    """
     return (
         0 if link.qual_status else 1,
         0 if link.manufacturer else 1,
         0 if link.description else 1,
+        link.id,
     )
 
 
@@ -169,7 +217,7 @@ def get_fru_view(db: Session, mpn: str) -> FruView | None:
     norm = normalize_mpn_key(mpn)
     if not norm:
         return None
-    links = db.query(FruLink).filter(FruLink.fru_norm == norm).all()
+    links = db.execute(select(FruLink).where(FruLink.fru_norm == norm).order_by(FruLink.id)).scalars().all()
     if not links:
         return None
 
@@ -187,28 +235,33 @@ def get_fru_view(db: Session, mpn: str) -> FruView | None:
 
     series = tuple(dict.fromkeys(link.series for link in links if link.series))
     machines = tuple(dict.fromkeys(link.machine for link in links if link.machine))
+    # Sheets disagree on the raw spelling of the same FRU (Lenovo FRU-PN stores the
+    # SAP-padded "0000000NV340_E00", Main stores "00NV340") — display the shortest
+    # (canonical de-padded) form deterministically.
+    fru_raw = min((link.fru_raw for link in links), key=lambda r: (len(r), r))
     return FruView(
-        fru_raw=links[0].fru_raw,
+        fru_raw=fru_raw,
         fru_norm=norm,
         sections=tuple(sections),
         series=series,
         machines=machines,
-        total_links=sum(len(s.items) for s in sections),
     )
 
 
-def get_reverse_view(db: Session, mpn: str) -> list[FruUsage]:
+def get_reverse_view(db: Session, mpn: str, limit: int = REVERSE_VIEW_LIMIT) -> ReverseView:
     """FRUs a part number appears under, with the role it plays in each.
 
     Deduplicates on (fru_norm, rel_kind) across sheets, preferring rows that carry
-    qual_status/manufacturer context. Returns [] when nothing matches.
+    qual_status/manufacturer context. Usages are capped at ``limit`` after a
+    deterministic sort; ``total`` is the uncapped count. Returns an empty view when
+    nothing matches.
     """
     norm = normalize_mpn_key(mpn)
     if not norm:
-        return []
-    links = db.query(FruLink).filter(FruLink.related_norm == norm).all()
+        return ReverseView(usages=(), total=0)
+    links = db.execute(select(FruLink).where(FruLink.related_norm == norm).order_by(FruLink.id)).scalars().all()
     if not links:
-        return []
+        return ReverseView(usages=(), total=0)
 
     by_key: dict[tuple[str, str], list[FruLink]] = {}
     for link in links:
@@ -233,4 +286,4 @@ def get_reverse_view(db: Session, mpn: str) -> list[FruUsage]:
             )
         )
     usages.sort(key=lambda u: (u.fru_raw, u.rel_kind))
-    return usages
+    return ReverseView(usages=tuple(usages[:limit]), total=len(usages))

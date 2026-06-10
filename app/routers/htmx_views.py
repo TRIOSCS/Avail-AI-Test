@@ -7431,13 +7431,15 @@ async def fru_lookup_partial(
     """
     from ..services.fru_matrix_service import get_fru_view, get_reverse_view
 
+    reverse = get_reverse_view(db, q) if q else None
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
             "fru_view": get_fru_view(db, q) if q else None,
-            "fru_usages": get_reverse_view(db, q) if q else [],
+            "fru_usages": reverse.usages if reverse else (),
+            "fru_usages_total": reverse.total if reverse else 0,
             "fru_query": q,
-            "show_empty": True,
+            "show_empty": bool(q),
         }
     )
     return template_response("htmx/partials/materials/fru_section.html", ctx)
@@ -7468,6 +7470,7 @@ async def material_detail_partial(
     sightings = sightings_for_card(db, card_id, limit=50)
     offers = offers_for_card(db, card_id, limit=50)
     mpn = card.display_mpn or card.normalized_mpn
+    reverse = get_reverse_view(db, mpn)
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
@@ -7475,7 +7478,8 @@ async def material_detail_partial(
             "sightings": sightings,
             "offers": offers,
             "fru_view": get_fru_view(db, mpn),
-            "fru_usages": get_reverse_view(db, mpn),
+            "fru_usages": reverse.usages,
+            "fru_usages_total": reverse.total,
         }
     )
     return template_response("htmx/partials/materials/detail.html", ctx)

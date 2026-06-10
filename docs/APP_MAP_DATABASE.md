@@ -322,7 +322,7 @@
 | manufacturer | String 128, nullable | Maker of the related part (mfg_model/drive_pn rows) |
 | description / note | Text, nullable | Part description / free-text context (feature codes, FW, carrier notes) |
 | series / machine | String 64 / 128, nullable | Platform context (xSeries, Storwize, POWER 8, ...) |
-| qual_status / qual_date | String 64 / Date, nullable | `qlot approved`, `qlot approved - Only EMEA`, `cdc_pending` + date when known |
+| qual_status / qual_date | String 64 / Date, nullable | Free text from the workbook qual column (e.g. `qlot approved`, `qlot approved - Only EMEA`) or the app-synthesized `CDC_PENDING` sentinel (constants.py); date when known |
 | source_sheet | String 64, NOT NULL | Workbook sheet the edge came from |
 | created_at / updated_at | UTCDateTime | |
 

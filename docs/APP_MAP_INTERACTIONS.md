@@ -864,19 +864,29 @@ find_crosses() endpoint
 
 ```
 Ingest (one-off, admin CLI):
-python -m app.management.ingest_fru_matrix <FRU_PN_TRAY matrix .xlsx> [--apply]
+python -m app.management.ingest_fru_matrix <FRU_PN_TRAY matrix .xlsx> [--apply] [--allow-missing-sheets]
     |
+    +---> sheet-coverage guard: a mapped sheet missing from the workbook is FATAL
+    |       (date-stamped names get renamed in new revisions) unless
+    |       --allow-missing-sheets; sheets neither mapped (PARSERS) nor in
+    |       KNOWN_SKIPPED_SHEETS are reported as unexpected and block --apply
     +---> per-sheet parsers (openpyxl read_only): Main, Qlot, Gabor, CZ, CDC,
     |       Lenovo-HDD, Lenovo FRU-PN, LVN VPD Mapping, Series, NSeries(NetApp)
     |       - hygiene: nbsp strip, sentinel→NULL (N/A, #N/A, PENDIENTE, ...),
     |         comma/slash multi-value split, carrier parentheticals→note,
-    |         Lenovo SAP zero-padding/_Exx de-pad, NSeries FRU forward-fill,
-    |         prose cells rejected by PN-plausibility regex
+    |         Lenovo SAP zero-padding/_<letter><digits> suffix de-pad (FRU and PPN
+    |         cells both gated by the PN-plausibility regex), NSeries FRU
+    |         forward-fill, prose cells rejected by PN-plausibility regex
     |       - normalization: fru_norm/related_norm via normalize_mpn_key
+    |       - bounded context columns (manufacturer/series/machine/qual_status)
+    |         truncated to model column lengths at parse time (PG-safe)
     |
-    +---> DEFAULT dry run: per-sheet parsed/skipped/kind counts + samples, no writes
-    +---> --apply: chunked upsert into fru_links
-            (insert new edges; refresh context attrs on existing unique key)
+    +---> DEFAULT dry run: "sheets parsed X/Y", per-sheet parsed/skipped counts,
+    |       per-kind link counts, unparsed-cell counters (per kind/column, so a
+    |       column-wide format change is visible), samples — no writes
+    +---> --apply: chunked upsert into fru_links in ONE transaction (all-or-nothing;
+            insert new edges; refresh context attrs on existing unique key;
+            additive-only — absent edges are never deleted, None never nulls)
 
 Lookup (read path):
 GET /v2/partials/materials/{card_id}          (material detail surface)
@@ -891,10 +901,13 @@ fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears u
 htmx/partials/materials/fru_section.html
     +---> "FRU matrix" panel: sections (Approved drives & models / 11S part numbers /
     |       Options / Trays & hardware / Lenovo PNs / Sourcing & assembly), count
-    |       badges, qual pills (emerald=qlot approved, amber=cdc_pending),
+    |       badges, qual pills (amber=cdc_pending sentinel, emerald=ANY other
+    |       non-empty qual_status — free workbook text, no closed vocabulary),
     |       series/machine context chips; items link to materials search
-    +---> "Used in FRUs" panel: FRU | role | qualification | context table; each FRU
-            links to its own fru-lookup (swaps #fru-crosswalk in place)
+    +---> "Used in FRUs" panel: FRU | role | qualification | context table, capped
+            at REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
+            screws/tray PNs can sit under thousands of FRUs); each FRU links to its
+            own fru-lookup (swaps #fru-crosswalk in place, pushes the materials URL)
 ```
 
 ---

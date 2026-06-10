@@ -468,8 +468,9 @@ class MaterialEnrichmentStatus(StrEnum):
 class FruLinkKind(StrEnum):
     """Relationship kind for FruLink rows (IBM/Lenovo FRU crosswalk).
 
-    Single source of truth for the valid fru_links.rel_kind values. Enforced at the ORM
-    layer via @validates on FruLink.
+    Single source of truth for the valid fru_links.rel_kind values. Enforced via
+    @validates on FruLink for ORM construction AND re-validated by the ingest's bulk
+    upsert path (a Core insert, which bypasses ORM events).
     """
 
     IBM_11S = "ibm_11s"  # IBM 11S part number stamped on the part
@@ -488,3 +489,10 @@ class FruLinkKind(StrEnum):
     DONGLE = "dongle"  # NetApp dongle
     DRIVE_PN = "drive_pn"  # Bare drive part number (qual lists)
     ASSEMBLY = "assembly"  # Assembly part number
+
+
+# fru_links.qual_status is otherwise free text from the workbook's qual column
+# ("qlot approved", "qlot approved - Only EMEA", ...). CDC_PENDING is the single
+# app-synthesized sentinel (CDC pending-qualification sheet); the FRU panels render
+# it as the amber "CDC pending" pill — keep ingest and display on this constant.
+CDC_PENDING = "cdc_pending"

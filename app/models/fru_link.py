@@ -23,10 +23,13 @@ class FruLink(Base):
 
     id = Column(Integer, primary_key=True)
 
+    # norms are normalize_mpn_key of the CANONICALIZED part number, not of the raw
+    # column verbatim: Lenovo FRU-PN rows keep the SAP-padded raw ("0000000NV340_E00")
+    # with the norm of the de-padded FRU ("00nv340") — see ingest_fru_matrix._lenovo_fru.
     fru_raw = Column(String(64), nullable=False)  # FRU as it appears in the source
-    fru_norm = Column(String(64), nullable=False)  # normalize_mpn_key(fru_raw)
+    fru_norm = Column(String(64), nullable=False)  # normalize_mpn_key of the canonical (de-padded) FRU
     related_raw = Column(String(64), nullable=False)  # related PN as it appears
-    related_norm = Column(String(64), nullable=False)  # normalize_mpn_key(related_raw)
+    related_norm = Column(String(64), nullable=False)  # normalize_mpn_key of the canonical related PN
     rel_kind = Column(String(24), nullable=False)  # FruLinkKind value
 
     manufacturer = Column(String(128))  # maker of the related part (mfg_model/drive_pn)

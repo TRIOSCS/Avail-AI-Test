@@ -3,7 +3,8 @@
 What: Asserts the material detail surface renders the "FRU matrix" panel (forward
       view), the "Used in FRUs" panel (reverse view), and stays clean for parts with
       no crosswalk data; and that /v2/partials/materials/fru-lookup serves both views
-      plus an empty state, and is not shadowed by the {card_id} route.
+      plus an empty state (only for a non-empty query), rejects unauthenticated
+      callers, and is not shadowed by the {card_id} route.
 Called by: pytest
 Depends on: conftest client fixture, app.models (MaterialCard, FruLink),
             app/templates/htmx/partials/materials/fru_section.html
@@ -108,7 +109,21 @@ class TestFruLookupEndpoint:
         assert resp.status_code == 200
         assert "No FRU crosswalk data" in resp.text
 
+    def test_no_empty_state_for_blank_query(self, client, db_session):
+        # show_empty=bool(q): a blank lookup must not render the confusing
+        # "No FRU crosswalk data for ." empty state.
+        resp = client.get("/v2/partials/materials/fru-lookup?q=")
+        assert resp.status_code == 200
+        assert "No FRU crosswalk data" not in resp.text
+
     def test_not_shadowed_by_card_id_route(self, client, db_session):
         # If the {card_id} route captured this path it would 422 on int coercion.
         resp = client.get("/v2/partials/materials/fru-lookup?q=")
         assert resp.status_code == 200
+
+    def test_unauthenticated_rejected(self, unauthenticated_client):
+        # require_user must stay on the endpoint — the crosswalk is sourcing
+        # intelligence; the authed `client` fixture overrides it, so this is the
+        # only test exercising the dependency.
+        resp = unauthenticated_client.get("/v2/partials/materials/fru-lookup?q=00AJ001")
+        assert resp.status_code in (401, 403)
