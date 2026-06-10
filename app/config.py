@@ -10,7 +10,7 @@ Depends on: pydantic-settings.
 
 import os
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 APP_VERSION = "3.1.0"
@@ -196,6 +196,18 @@ class Settings(BaseSettings):
     buyplan_nudge_ops_hours: int = 2
     buyplan_favoritism_threshold_pct: float = 60
     buyplan_better_offer_pct: float = 5
+
+    # --- Vendor-part unavailability ("Two Windows, Real Proof" temporal policy) ---
+    # Read-time suppression windows (stateless predicate, sighting_stale_days
+    # precedent): changing a knob re-evaluates EXISTING marks at the next render —
+    # there is no stored expiry. different_part never expires by design (identity
+    # knowledge, not stock state) — deliberately a hard-coded constant, not a knob.
+    unavailability_suppress_days: int = Field(30, ge=1)  # LOT: bought_by_us/sold_elsewhere/broken/other
+    unavailability_listing_suppress_days: int = Field(180, ge=1)  # LISTING: not_really_there
+    # O2 restock override: fresh qty must be >= factor x qty_at_mark AND strictly
+    # greater — strict-greater holds even at factor 1.0, so an identical echo can
+    # never release regardless of misconfiguration.
+    unavailability_qty_jump_factor: float = Field(2.0, ge=1.0)
 
     # --- Search ---
     search_concurrency_limit: int = 10

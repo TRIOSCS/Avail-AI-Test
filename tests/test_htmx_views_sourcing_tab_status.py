@@ -1,8 +1,16 @@
 """Tests for derived vendor status in the sightings tab.
 
+Includes the Batch 4 reader-authority rule: a vendor is "unavailable" iff
+(an active VendorPartUnavailability record matches AND the vendor has NO
+unstamped sighting row) OR (no matching record at all AND all rows flagged —
+true legacy). Rows win; expired/released records never pin the pill.
+
 Called by: pytest
-Depends on: conftest.py fixtures, app models
+Depends on: conftest.py fixtures, app models, app/services/sighting_status.py,
+            app/services/vendor_unavailability.py (is_active authority)
 """
+
+from datetime import datetime, timedelta, timezone
 
 from app.constants import UnavailabilityReason
 from app.models.auth import User
@@ -216,7 +224,12 @@ class TestDurableUnavailabilityStatus:
 
     def test_durable_record_via_sighting_matched_mpn_key(self, db_session):
         """A record keyed on a sighting's matched MPN (not the primary) also marks the
-        vendor — keys are matched-MPN keys ∪ primary key."""
+        vendor — keys are matched-MPN keys ∪ primary key.
+
+        The row is stamped here:
+        under the reader-authority rule an unstamped row would flip the pill off
+        (rows-win), so this pins purely the matched-key record matching.
+        """
         from app.services.sighting_status import compute_vendor_statuses
 
         req = _make_requisition(db_session)
@@ -228,7 +241,7 @@ class TestDurableUnavailabilityStatus:
                 vendor_name="Acme Corp",
                 vendor_name_normalized=normalize_vendor_name("Acme Corp"),
                 mpn_matched="ALT-123",
-                is_unavailable=False,
+                is_unavailable=True,
             )
         )
         db_session.add(
@@ -288,3 +301,143 @@ class TestDurableUnavailabilityStatus:
         db_session.commit()
         statuses = compute_vendor_statuses(r.id, req.id, db_session)
         assert statuses["ACME CORP"] == "unavailable"
+
+
+def _add_sighting(db_session, req_id: int, vendor: str, stamped: bool) -> Sighting:
+    s = Sighting(
+        requirement_id=req_id,
+        vendor_name=vendor,
+        vendor_name_normalized=normalize_vendor_name(vendor),
+        mpn_matched="TEST-MPN-001",
+        is_unavailable=stamped,
+    )
+    db_session.add(s)
+    db_session.flush()
+    return s
+
+
+def _add_record(db_session, vendor: str, key: str, age_days: int = 0, reason=UnavailabilityReason.SOLD_ELSEWHERE):
+    rec = VendorPartUnavailability(
+        vendor_name_normalized=normalize_vendor_name(vendor),
+        normalized_mpn=key,
+        reason=reason,
+        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+    )
+    db_session.add(rec)
+    db_session.flush()
+    return rec
+
+
+class TestReaderAuthorityRule:
+    """Batch 4 rewrite: the record predicate is the authority; rows win."""
+
+    def test_rows_win_unstamped_row_flips_pill_off(self, db_session):
+        """One unstamped (e.g. override-surfaced) row + an active record → NOT
+        unavailable."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=False)
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "sighting"
+
+    def test_active_record_all_rows_stamped_is_unavailable(self, db_session):
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "unavailable"
+
+    def test_expired_record_stale_stamped_rows_do_not_pin_pill(self, db_session):
+        """All rows still carry the stale stamp, but the record's 30d LOT window has
+        lapsed → NOT unavailable (RFQ and pill agree again)."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=31)
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "sighting"
+
+    def test_released_record_stale_stamped_rows_do_not_pin_pill(self, db_session):
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        rec = _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
+        rec.released_at = datetime.now(timezone.utc)
+        rec.release_trigger = "offer_received"
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "sighting"
+
+    def test_mixed_variant_legacy_pin_not_unavailable(self, db_session):
+        """MINOR-9 pin: vendor with a record + a MIX of stamped and unstamped rows is
+        NOT unavailable — the legacy all-rows-flagged branch is restricted to vendors
+        with NO record (deliberate strictening of the v1 OR-semantics)."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=False)
+        # Expired record — even a non-active record disables the legacy branch.
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=31)
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "sighting"
+
+    def test_no_record_all_rows_flagged_legacy_unavailable(self, db_session):
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        db_session.commit()
+
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "unavailable"
+
+    def test_missing_requirement_logs_warning(self, db_session):
+        """MINOR-8: a status computation against a missing requirement row warns
+        instead of silently treating it as key-less."""
+        from loguru import logger as loguru_logger
+
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        db_session.commit()
+
+        messages: list[str] = []
+        sink_id = loguru_logger.add(lambda m: messages.append(str(m)), level="WARNING")
+        try:
+            statuses = compute_vendor_statuses(99999999, req.id, db_session, vendor_names=["Acme Corp"])
+        finally:
+            loguru_logger.remove(sink_id)
+
+        assert statuses["Acme Corp"] == "sighting"
+        assert any("99999999" in m for m in messages)

@@ -4,18 +4,25 @@ Computes a status per vendor for a given requirement by checking:
 - VendorCard.is_blacklisted -> "blacklisted"
 - Offer exists for requirement + vendor -> "offer-in"
 - Contact sent to vendor for requisition -> "contacted"
-- All sighting rows flagged is_unavailable (legacy row flag, anchored on
-  Sighting.vendor_name_normalized) OR a durable VendorPartUnavailability record
-  matches (vendor norm, any of that vendor's sighting MPN keys ∪ the
-  requirement's primary-MPN key) -> "unavailable"
+- Reader-authority rule (the record predicate is the only authority;
+  Sighting.is_unavailable is a render cache): vendor is "unavailable" iff
+  (an ACTIVE VendorPartUnavailability record matches — vendor norm × any of
+  that vendor's sighting MPN keys ∪ the requirement's primary-MPN key — AND the
+  vendor has NO unstamped sighting row) OR (no matching record at all AND all
+  rows flagged — true legacy). Rows win: one override-surfaced row flips the
+  pill off; an expired/released record's stale stamped rows never pin it.
 - Default -> "sighting"
 
 Called by: htmx_views.part_tab_sourcing
 Depends on: models (VendorCard, Offer, Contact, Sighting, VendorSightingSummary,
             VendorPartUnavailability, Requirement), normalize_vendor_name,
-            normalize_mpn_key
+            normalize_mpn_key, vendor_unavailability (is_active authority +
+            sighting_vendor_norm shared matching helper)
 """
 
+from datetime import datetime, timezone
+
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..constants import ContactStatus
@@ -26,6 +33,7 @@ from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard
 from ..utils.normalization import normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
+from .vendor_unavailability import is_active, sighting_vendor_norm
 
 
 def compute_vendor_statuses(
@@ -77,53 +85,61 @@ def compute_vendor_statuses(
         .all()
     )
 
-    # Batch 4: unavailable — legacy all-rows-flagged (grouped by normalized vendor
-    # name) OR a durable VendorPartUnavailability record on any of the vendor's
-    # MPN keys (sighting matched-MPN keys ∪ requirement primary-MPN key).
-    sight_rows = (
-        db.query(
-            Sighting.vendor_name,
-            Sighting.vendor_name_normalized,
-            Sighting.mpn_matched,
-            Sighting.is_unavailable,
+    # Batch 4: unavailable — reader-authority rule. The is_active record predicate
+    # is the only authority; row flags are a render cache. A vendor is unavailable
+    # iff (an active record matches AND it has NO unstamped row) OR (no matching
+    # record at all AND all rows flagged — true legacy, restricted to vendors with
+    # no record). Vendor matching goes through the shared sighting_vendor_norm
+    # helper (legacy NULL-norm rows included).
+    sight_rows = db.query(Sighting).filter(Sighting.requirement_id == requirement_id).all()
+    requirement = db.get(Requirement, requirement_id)
+    if requirement is None:
+        logger.warning(
+            "compute_vendor_statuses: requirement {} not found — treating it as key-less",
+            requirement_id,
         )
-        .filter(Sighting.requirement_id == requirement_id)
-        .all()
-    )
-    primary_mpn = db.query(Requirement.primary_mpn).filter(Requirement.id == requirement_id).scalar()
-    primary_key = normalize_mpn_key(primary_mpn)
+        primary_key = ""
+    else:
+        primary_key = normalize_mpn_key(requirement.primary_mpn)
 
     keys_by_norm: dict[str, set[str]] = {n: ({primary_key} if primary_key else set()) for n in norm_set}
     vendor_flags: dict[str, list[bool]] = {}
-    for vn, vn_norm, mpn_matched, is_u in sight_rows:
-        norm = vn_norm or normalize_vendor_name(vn or "")
+    for s in sight_rows:
+        norm = sighting_vendor_norm(s)
         if not norm:
             continue
-        vendor_flags.setdefault(norm, []).append(bool(is_u))
+        vendor_flags.setdefault(norm, []).append(bool(s.is_unavailable))
         if norm in keys_by_norm:
-            key = normalize_mpn_key(mpn_matched)
+            key = normalize_mpn_key(s.mpn_matched)
             if key:
                 keys_by_norm[norm].add(key)
 
-    unavail_norms = {norm for norm, flags in vendor_flags.items() if all(flags)}
-
+    records_by_norm: dict[str, list[VendorPartUnavailability]] = {}
     all_keys = set().union(*keys_by_norm.values()) if keys_by_norm else set()
     if all_keys:
-        record_pairs = {
-            (v, m)
-            for v, m in db.query(
-                VendorPartUnavailability.vendor_name_normalized,
-                VendorPartUnavailability.normalized_mpn,
-            )
+        matching_records = (
+            db.query(VendorPartUnavailability)
             .filter(
                 VendorPartUnavailability.vendor_name_normalized.in_(norm_set),
                 VendorPartUnavailability.normalized_mpn.in_(all_keys),
             )
             .all()
-        }
-        unavail_norms |= {
-            norm for norm, keys in keys_by_norm.items() if any((norm, key) in record_pairs for key in keys)
-        }
+        )
+        for rec in matching_records:
+            if rec.normalized_mpn in keys_by_norm.get(rec.vendor_name_normalized, set()):
+                records_by_norm.setdefault(rec.vendor_name_normalized, []).append(rec)
+
+    now = datetime.now(timezone.utc)
+    unavail_norms: set[str] = set()
+    for norm in norm_set:
+        matching = records_by_norm.get(norm, [])
+        flags = vendor_flags.get(norm, [])
+        if matching:
+            # Rows-win: any unstamped row flips the pill off "unavailable".
+            if any(is_active(rec, now) for rec in matching) and all(flags):
+                unavail_norms.add(norm)
+        elif flags and all(flags):
+            unavail_norms.add(norm)  # true legacy: flagged rows, no record at all
 
     # Resolve statuses with priority: blacklisted > offer-in > contacted > unavailable > sighting
     result: dict[str, str] = {}
