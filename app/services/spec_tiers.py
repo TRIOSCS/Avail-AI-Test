@@ -39,7 +39,9 @@ if TYPE_CHECKING:
 # (``fru_matrix_decode`` — a one-hop workbook mapping plus decode, weaker than a
 # first-party decode) is 84; the deterministic description→spec grammar (``desc_parse``)
 # is 83 — preserving the relative order mpn_decode > fru_matrix_decode > desc_parse >
-# spec_extraction the worker's run-order + writer pre-gates used to enforce by hand; OEM
+# spec_extraction the worker's run-order + writer pre-gates used to enforce by hand; the
+# same grammar run over a FRU's LINKED qual-sheet descriptions (``fru_desc_parse`` — a
+# one-hop fru_links row's prose, weaker than the card's OWN description) is 82; OEM
 # scrapers (PartSurfer/PSREF) map to 80; ``legacy_backfill`` (50) marks pre-ladder data
 # whose true source is unknown — above the AI guesses (a stray guess can't flip legacy
 # data) but below every real source; AI free-text mining sits at the bottom (Haiku batch
@@ -61,6 +63,7 @@ SOURCE_TIER: dict[str, int] = {
     "mpn_decode": 85,
     "fru_matrix_decode": 84,
     "desc_parse": 83,
+    "fru_desc_parse": 82,
     "partsurfer": 80,
     "psref": 80,
     "web_search": 70,

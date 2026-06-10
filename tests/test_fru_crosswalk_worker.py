@@ -17,6 +17,8 @@ _FRU_ZERO = {
     "decoded": 0,
     "written": 0,
     "categorized": 0,
+    "desc_parsed": 0,
+    "desc_written": 0,
     "failed": 0,
     "dropped_conflict": 0,
     "commodity_conflict": 0,
@@ -136,3 +138,28 @@ def test_crosswalk_failure_does_not_crash_batch(db_session):
     desc_mock.assert_called_once()
     spec_mock.assert_awaited_once()
     assert counts.get(MaterialEnrichmentStatus.VERIFIED, 0) == 1
+
+
+def test_desc_channel_shares_the_single_crosswalk_stage(db_session):
+    # Wave 3A folded the linked-description parse (fru_desc_parse, tier 82) INTO the
+    # crosswalk pass: same stage, same fru_crosswalk_enrich_enabled flag, ONE call
+    # over the full batch — the worker grew NO new pass and the second-pass order is
+    # unchanged (decode → crosswalk → desc → ai).
+    card = _seed_card(db_session, "00AJ141")
+    order: list[str] = []
+    decode_mock = Mock(
+        side_effect=lambda *a, **k: order.append("decode") or {"decoded": 0, "written": 0, "categorized": 0}
+    )
+    fru_stats = dict(_FRU_ZERO, matched=1, desc_parsed=1, desc_written=2)
+    fru_mock = Mock(side_effect=lambda *a, **k: order.append("crosswalk") or fru_stats)
+    desc_mock = Mock(side_effect=lambda *a, **k: order.append("desc") or {"parsed": 0, "written": 0, "failed": 0})
+
+    async def ai(*a, **k):
+        order.append("ai")
+        return {"cards_processed": 0, "specs_written": 0}
+
+    _run(db_session, fru_mock, decode_mock=decode_mock, desc_mock=desc_mock, spec_mock=ai)
+
+    assert order == ["decode", "crosswalk", "desc", "ai"]
+    fru_mock.assert_called_once()
+    assert fru_mock.call_args.args[1] == [card.id]
