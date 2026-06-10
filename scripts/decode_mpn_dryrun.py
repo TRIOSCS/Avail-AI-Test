@@ -42,7 +42,8 @@ def _report(rows, samples_n: int) -> None:
         if result is None:
             continue
         decoded += 1
-        by_vendor[result.vendor] += 1
+        # vendor/commodity pairs: WD HDD vs WD SSD, Samsung DRAM vs Samsung SSD, … stay distinct
+        by_vendor[f"{result.vendor}/{result.commodity}"] += 1
         by_commodity[result.commodity] += 1
         for key in result.specs:
             spec_coverage[key] += 1

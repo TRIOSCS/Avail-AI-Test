@@ -5,6 +5,8 @@ spec extractor, so the deterministic 0.95-confidence decode is the baseline the 
 description-mined pass cannot overwrite. Does not commit — the caller manages the txn.
 """
 
+from collections import Counter
+
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,10 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     written = 0
     categorized = 0
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
+    # "commodity.spec_key" -> count of decoder-emitted values with NO schema row. record_spec
+    # drops those at DEBUG only (invisible at the production INFO level), so the discard of
+    # decoder output is surfaced here as an aggregate WARNING after the batch.
+    dropped_no_schema: Counter = Counter()
     for card_id in card_ids:
         # Per-card isolation: a single bad card must never abort decode for the rest of the batch.
         try:
@@ -41,6 +47,9 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             cache = schema_caches.get(result.commodity)
             if cache is None:
                 cache = schema_caches[result.commodity] = load_schema_cache(db, result.commodity)
+            for spec_key in result.specs:
+                if (result.commodity, spec_key) not in cache:
+                    dropped_no_schema[f"{result.commodity}.{spec_key}"] += 1
             # SAVEPOINT per card: record_spec flushes, so a DB-level failure (constraint, type)
             # would otherwise poison the shared transaction — swallowed here, it would surface
             # later as a failed/rolled-back commit with the counters still claiming success. The
@@ -73,6 +82,13 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 categorized += 1
         except Exception:
             logger.exception("mpn-decode: failed on card_id={}", card_id)
+    if dropped_no_schema:
+        logger.warning(
+            "mpn-decode: {} decoded spec values dropped — no commodity_spec_schemas row for {} "
+            "(decoder and commodity_seeds.json have drifted; see tests/test_mpn_decoder_seed_sync.py)",
+            sum(dropped_no_schema.values()),
+            dict(dropped_no_schema),
+        )
     if written or categorized:
         logger.info(
             "mpn-decode: wrote {} specs across {} cards ({} newly categorized)",
