@@ -978,6 +978,43 @@ htmx/partials/materials/fru_section.html
 
 ---
 
+## Enrichment Coverage Telemetry (Ops / Observability)
+
+```
+python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
+    |   (read-only — single session, no writes; intended as a daily ops cron)
+    v
+collect_metrics(db) — a handful of aggregate queries over active cards
+    |   (deleted_at IS NULL everywhere, incl. the facet joins)
+    |
+    +---> Cards: total, category coverage (non-blank %, 'other' count,
+    |       top-15 lower(trim(category)) by count), description coverage
+    +---> Facets: distinct cards with >=1 material_spec_facets row (+% of cards),
+    |       facet rows total, per-commodity rows + distinct spec_keys (top-15;
+    |       facet.category IS the commodity)
+    +---> Sources: specs_structured entries grouped by each entry's recorded
+    |       "source" (mpn_decode / desc_parse / fru_matrix_decode /
+    |       spec_extraction / vendor APIs / "(none)" for legacy non-dict entries).
+    |       ONE query: PG iterates the JSONB in SQL (CROSS JOIN LATERAL
+    |       jsonb_each), SQLite uses json_each (tests), other dialects fall back
+    |       to one streamed Python pass — keep both SQL branches in sync and
+    |       verify the PG one against live PG when changing it
+    +---> enrichment_status distribution; fru_links totals (rows + distinct
+            fru_norm) only if the table exists
+    |
+    v
+Output: one compact human-readable block, or the structured metrics dict with
+--json. With --log-file it appends one JSONL line {ts, metrics} per run and, when
+a previous line exists, prints "Δ since last run" for the headline numbers
+(cards / with-category / with-description / faceted-cards / facet-rows /
+spec-entries / fru-rows).
+
+Tests: tests/test_enrichment_coverage_report.py (seeded fixture set; metrics,
+delta math, --json shape, log-file behavior).
+```
+
+---
+
 ## Faceted Search (Full-Text Search)
 
 ```
