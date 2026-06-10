@@ -20,9 +20,13 @@ _FRU_ZERO = {
     "desc_parsed": 0,
     "desc_written": 0,
     "failed": 0,
+    "desc_failed": 0,
     "dropped_conflict": 0,
+    "desc_dropped_conflict": 0,
     "commodity_conflict": 0,
+    "desc_commodity_conflict": 0,
     "category_mismatch": 0,
+    "desc_category_mismatch": 0,
 }
 
 

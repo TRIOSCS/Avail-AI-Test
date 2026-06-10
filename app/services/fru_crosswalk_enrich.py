@@ -19,15 +19,30 @@ settings.fru_crosswalk_enrich_enabled:
    like ``18TB 3.5 HDD 7.2K 12 Gb/s SAS``, mfg_model rows carry bare-drive prose like
    ``SSD; 2.5; 1.92 TB Samsung PM1733``). Every non-null description on the FRU's
    mfg_model/drive_pn links runs through the deterministic desc_extractor grammar
-   (``extract_desc(description, commodity_hint=card.category or None)``) and the
-   DescResults are intersected with the SAME ``intersect_decodes`` contract: a
-   commodity disagreement among the descriptions skips the desc channel for the card,
-   conflicting values are dropped and counted, a single extracting description passes
-   all its specs. Runs INSIDE the per-card SAVEPOINT after the decode channel, so a
-   category the decode just filled routes the extraction in the same batch. The desc
-   channel NEVER writes a category (linked prose is not a regex-gated commodity
-   proof) — a card with no category after the decode channel gets nothing from it
-   (record_spec requires a category anyway).
+   (``extract_desc(description, commodity_hint=card.category)`` — the channel is
+   pre-gated on the category being a SPEC_COMMODITIES member, so the hint is ALWAYS a
+   SPEC_COMMODITIES member and extract_desc's hint-less path is unreachable from this
+   module). Commodity agreement is judged over ALL extractions — a spec-less result
+   (bare ``HDD, Hot Swap`` prose extracts commodity-only) is still commodity
+   evidence: a commodity disagreement among the descriptions skips the desc channel
+   for the card (counted in desc_commodity_conflict), and a UNANIMOUS commodity that
+   contradicts the card's category skips it too (desc_category_mismatch — reachable
+   only as hdd<->ssd via extract_desc's same-family lead refinement; the decode
+   channel's "an existing category is authoritative, never written-around" rule
+   applies to desc evidence identically). Spec-less extractions are then EXCLUDED
+   from the per-key intersection (under intersect_decodes' absence-is-not-agreement
+   rule one barren qual-sheet row would otherwise veto every key of its rich
+   siblings; the first-party writer treats ``not result.specs`` as a no-op
+   contribution for the same reason) and the survivors intersect with the SAME
+   ``intersect_decodes`` contract: conflicting values are dropped and counted
+   (desc_dropped_conflict, per card), a single extracting description passes all its
+   specs. Runs in its OWN per-card SAVEPOINT after the decode channel's savepoint has
+   RELEASED — a desc-side failure (counted in desc_failed, never in failed) can not
+   take the card's decode writes or category fill with it, while a category the
+   decode just filled still routes the extraction in the same batch. The desc channel
+   NEVER writes a category (linked prose is not a regex-gated commodity proof) — a
+   card with no category after the decode channel gets nothing from it (record_spec
+   requires a category anyway).
 
 record_spec's F1 source-tier ladder (app/services/spec_tiers.py) arbitrates every
 write — fru_matrix_decode 84 sits between mpn_decode (85) and desc_parse (83);
@@ -101,6 +116,14 @@ def intersect_decodes(
     FRUs (zero decodable substitutes / zero extracting descriptions) BEFORE calling,
     so a ``None`` commodity here always means contradicting evidence, never missing
     evidence.
+
+    Shared contract: every member must carry NON-EMPTY ``specs``. A spec-less member
+    makes the strict intersection vacuously empty (absence is not agreement — it
+    would silently veto every key of its rich siblings with dropped_count 0). The
+    decoders uphold this themselves (they return None instead of an empty result),
+    but desc_extractor returns commodity-only DescResults for spec-less prose, so
+    the desc caller filters those out of the key intersection (keeping them in its
+    own commodity-agreement check) before calling.
     """
     if not results:
         raise ValueError("intersect_decodes requires at least one result")
@@ -126,7 +149,9 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     parse their linked qual-sheet descriptions; write the agreed specs.
 
     Returns {matched, decoded, written, categorized, desc_parsed, desc_written,
-    failed, dropped_conflict, commodity_conflict, category_mismatch}:
+    failed, desc_failed, dropped_conflict, desc_dropped_conflict,
+    commodity_conflict, desc_commodity_conflict, category_mismatch,
+    desc_category_mismatch}:
 
     - matched: cards with ≥1 mfg_model or drive_pn link.
     - decoded: matched cards whose substitutes produced ≥1 decode AND that were not
@@ -139,20 +164,35 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     - desc_parsed: cards that landed ≥1 fru_desc_parse spec from their linked
       descriptions.
     - desc_written: fru_desc_parse specs persisted.
-    - failed: cards lost to an exception — a raising decode fails every card on its
-      FRU, a write/extract failure only its own card. Per-failure tracebacks are
-      logged below, but the aggregate must surface failures too, so the worker's
-      one-line stats can distinguish a healthy no-op batch from a crashed one.
-    - dropped_conflict: spec keys discarded by the value intersections — the decode
-      intersection counts ONCE per FRU (computed once, before the card loop); the
-      desc intersection counts per card (its extraction hint is the card's category,
-      so it runs inside the card loop).
+    - failed: cards LOST to an exception — a raising decode fails every card on its
+      FRU, a decode-channel write failure only its own card; either way the card
+      gets nothing from EITHER channel. Per-failure tracebacks are logged below,
+      but the aggregate must surface failures too, so the worker's one-line stats
+      can distinguish a healthy no-op batch from a crashed one.
+    - desc_failed: cards whose desc channel raised (extract/write). NEVER counted in
+      failed — the desc channel runs in its own SAVEPOINT after the decode
+      channel's has released, so the card keeps its decode writes and category
+      fill; only the desc contribution is lost.
+    - dropped_conflict: spec keys discarded by the DECODE value intersection —
+      counted ONCE per FRU (computed once, before the card loop), independent of
+      card outcomes.
+    - desc_dropped_conflict: spec keys discarded by the DESC value intersection —
+      counted per CARD (its extraction hint is the card's category, so it runs
+      inside the card loop: the same conflicting description pair counts once for
+      EACH card sharing the fru_norm), independent of the write outcome (a desc
+      write failure after the intersection does not uncount).
     - commodity_conflict: cards skipped entirely on decode commodity disagreement
       (the desc channel is skipped for them too — substitutes that can't agree on
-      what the part IS poison both channels). A desc-only commodity disagreement
-      skips just the desc channel and is not counted here.
+      what the part IS poison both channels).
+    - desc_commodity_conflict: cards whose desc channel was skipped because their
+      linked descriptions disagree among THEMSELVES on the commodity (per card,
+      like every desc-side counter).
     - category_mismatch: cards skipped because their existing category contradicts
       the agreed decode commodity.
+    - desc_category_mismatch: cards whose desc channel was skipped because the
+      descriptions' UNANIMOUS commodity contradicts the card's category (hdd<->ssd
+      same-family lead refinement — the decode channel's category-mismatch rule
+      applied to desc evidence).
     """
     stats = {
         "matched": 0,
@@ -162,9 +202,13 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
         "desc_parsed": 0,
         "desc_written": 0,
         "failed": 0,
+        "desc_failed": 0,
         "dropped_conflict": 0,
+        "desc_dropped_conflict": 0,
         "commodity_conflict": 0,
+        "desc_commodity_conflict": 0,
         "category_mismatch": 0,
+        "desc_category_mismatch": 0,
     }
 
     # db.get per id is an identity-map hit (the worker loaded the batch on this
@@ -268,15 +312,13 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                             dropped_no_schema[f"{commodity}.{spec_key}"] += 1
                         elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
                             dropped_out_of_enum[f"{commodity}.{spec_key}={value}"] += 1
-                card_written = 0
-                card_desc_written = 0
-                desc_dropped = 0
-                # SAVEPOINT per card: record_spec flushes, so a DB-level failure would
-                # otherwise poison the shared batch transaction. The nested txn rolls back
-                # ONLY this card (including a categorize-from-null); counters increment
-                # after a clean release so a rolled-back card contributes nothing.
-                with db.begin_nested():
-                    if commodity is not None:
+                    card_written = 0
+                    # SAVEPOINT 1 — decode channel: record_spec flushes, so a DB-level
+                    # failure would otherwise poison the shared batch transaction. The
+                    # nested txn rolls back ONLY this card's decode writes (including a
+                    # categorize-from-null); counters increment after a clean release
+                    # so a rolled-back card contributes nothing.
+                    with db.begin_nested():
                         if not card_cat:
                             # The agreed commodity is regex-gated against strict manufacturer
                             # schemes AND agreed across ALL decoded substitutes — a safe FILL
@@ -298,68 +340,114 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                                 schema_cache=cache,
                             ):
                                 card_written += 1
-                    # --- Linked-description channel (fru_desc_parse, tier 82) ---
-                    # Reads card.category AFTER the decode channel so a category the
-                    # decode just filled routes the extraction (commodity_hint).
-                    # Pre-gated on SPEC_COMMODITIES exactly like the first-party desc
-                    # writer; a category-less card gets nothing (the desc channel
-                    # NEVER categorizes, and record_spec requires a category).
-                    desc_cat = (card.category or "").lower().strip()
-                    if descriptions and desc_cat in SPEC_COMMODITIES:
-                        desc_results = [
-                            r for d in descriptions if (r := extract_desc(d, commodity_hint=desc_cat)) is not None
-                        ]
-                        if desc_results:
-                            d_commodity, d_agreed, desc_dropped = intersect_decodes(desc_results)
-                            if d_commodity is None:
-                                # The linked descriptions disagree on what the part IS
-                                # (e.g. an HDD-prose row next to an SSD-prose row) —
-                                # the desc channel asserts nothing for this card.
-                                logger.debug(
-                                    "fru-crosswalk: desc commodity conflict for card_id={} (fru_norm={})",
-                                    card_id,
-                                    fru_norm,
-                                )
-                            elif d_agreed:
-                                d_cache = schema_caches.get(desc_cat)
-                                if d_cache is None:
-                                    d_cache = schema_caches[desc_cat] = load_schema_cache(db, desc_cat)
-                                for spec_key, value in d_agreed.items():
-                                    schema = d_cache.get((desc_cat, spec_key))
-                                    if schema is None:
-                                        dropped_no_schema[f"{desc_cat}.{spec_key}"] += 1
-                                    elif (
-                                        schema.data_type == "enum"
-                                        and schema.enum_values
-                                        and str(value) not in schema.enum_values
-                                    ):
-                                        dropped_out_of_enum[f"{desc_cat}.{spec_key}={value}"] += 1
-                                    # Same no-pre-gate rule: the ladder rejects any write
-                                    # losing to a desc_parse 83 / mpn_decode 85 / vendor
-                                    # 90 prior (fru_desc_parse is tier 82).
-                                    if record_spec(
-                                        db,
-                                        card_id,
-                                        spec_key,
-                                        value,
-                                        source=FRU_DESC_SOURCE,
-                                        confidence=FRU_DESC_CONFIDENCE,
-                                        schema_cache=d_cache,
-                                    ):
-                                        card_desc_written += 1
-                # Reached only on a clean savepoint release.
-                if commodity is not None:
+                    # Reached only on a clean savepoint release.
                     stats["decoded"] += 1
                     stats["written"] += card_written
                     if not card_cat:
                         stats["categorized"] += 1
-                if card_desc_written:
-                    stats["desc_parsed"] += 1
-                stats["desc_written"] += card_desc_written
-                stats["dropped_conflict"] += desc_dropped
             except Exception:
                 stats["failed"] += 1
                 logger.exception("fru-crosswalk: failed on card_id={}", card_id)
+                continue  # the card is lost — the desc channel must not run on it
+
+            # --- Linked-description channel (fru_desc_parse, tier 82) ---
+            # Reads card.category AFTER the decode channel's savepoint RELEASED, so a
+            # category the decode just filled routes the extraction (commodity_hint).
+            # Pre-gated on SPEC_COMMODITIES exactly like the first-party desc writer
+            # — the gate guarantees extract_desc always receives a SPEC_COMMODITIES
+            # member as its hint here; a category-less card gets nothing (the desc
+            # channel NEVER categorizes, and record_spec requires a category).
+            # Failures count in desc_failed, NOT failed: the decode writes above are
+            # already released and survive, so the card is not "lost".
+            try:
+                desc_cat = (card.category or "").lower().strip()
+                if not descriptions or desc_cat not in SPEC_COMMODITIES:
+                    continue
+                desc_results = [r for d in descriptions if (r := extract_desc(d, commodity_hint=desc_cat)) is not None]
+                if not desc_results:
+                    continue
+                # Commodity agreement is judged over ALL extractions — a spec-less
+                # result (bare "HDD, Hot Swap" prose) is still commodity evidence.
+                d_commodities = {r.commodity for r in desc_results}
+                if len(d_commodities) > 1:
+                    # The linked descriptions disagree on what the part IS (e.g. an
+                    # HDD-prose row next to an SSD-prose row) — the desc channel
+                    # asserts nothing for this card.
+                    stats["desc_commodity_conflict"] += 1
+                    logger.debug(
+                        "fru-crosswalk: desc commodity conflict for card_id={} (fru_norm={})",
+                        card_id,
+                        fru_norm,
+                    )
+                    continue
+                d_commodity = next(iter(d_commodities))
+                if d_commodity != desc_cat:
+                    # Unanimous prose that CONTRADICTS the card's category — reachable
+                    # only as hdd<->ssd, via extract_desc's same-family lead refinement
+                    # (an SSD-lead description on an hdd-hinted card returns
+                    # commodity='ssd'). Mirror the decode channel's category_mismatch
+                    # rule: the existing category is authoritative, never
+                    # written-around — which also keeps the desc_cat-keyed schema
+                    # lookups below correct by construction.
+                    stats["desc_category_mismatch"] += 1
+                    logger.debug(
+                        "fru-crosswalk: desc category mismatch for card_id={} (fru_norm={}, {} prose on a {} card)",
+                        card_id,
+                        fru_norm,
+                        d_commodity,
+                        desc_cat,
+                    )
+                    continue
+                # Spec-less extractions joined the commodity check above but must NOT
+                # join the per-key intersection: under the absence-is-not-agreement
+                # rule one barren row would silently veto EVERY key of its rich
+                # siblings (the first-party writer treats `not result.specs` as a
+                # no-op contribution for the same reason — desc_extractor/writer.py).
+                spec_results = [r for r in desc_results if r.specs]
+                if not spec_results:
+                    continue
+                _, d_agreed, desc_dropped = intersect_decodes(spec_results)
+                # Counted before the write savepoint — like the decode channel's
+                # per-FRU count, the intersection's verdict stands independent of the
+                # write outcome below.
+                stats["desc_dropped_conflict"] += desc_dropped
+                if not d_agreed:
+                    continue
+                d_cache = schema_caches.get(desc_cat)
+                if d_cache is None:
+                    d_cache = schema_caches[desc_cat] = load_schema_cache(db, desc_cat)
+                card_desc_written = 0
+                # SAVEPOINT 2 — desc channel, isolated from the decode savepoint that
+                # already RELEASED above (released-savepoint changes stay in the
+                # enclosing transaction): a desc-side rollback can not take the card's
+                # decode writes or category fill with it.
+                with db.begin_nested():
+                    for spec_key, value in d_agreed.items():
+                        schema = d_cache.get((desc_cat, spec_key))
+                        if schema is None:
+                            dropped_no_schema[f"{desc_cat}.{spec_key}"] += 1
+                        elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
+                            dropped_out_of_enum[f"{desc_cat}.{spec_key}={value}"] += 1
+                        # Same no-pre-gate rule: the ladder rejects any write
+                        # losing to a desc_parse 83 / mpn_decode 85 / vendor
+                        # 90 prior (fru_desc_parse is tier 82).
+                        if record_spec(
+                            db,
+                            card_id,
+                            spec_key,
+                            value,
+                            source=FRU_DESC_SOURCE,
+                            confidence=FRU_DESC_CONFIDENCE,
+                            schema_cache=d_cache,
+                        ):
+                            card_desc_written += 1
+                # Reached only on a clean savepoint release.
+                if card_desc_written:
+                    stats["desc_parsed"] += 1
+                stats["desc_written"] += card_desc_written
+            except Exception:
+                stats["desc_failed"] += 1
+                logger.exception("fru-crosswalk: desc channel failed on card_id={} (decode writes kept)", card_id)
 
     if dropped_no_schema or dropped_out_of_enum:
         logger.warning(
@@ -370,17 +458,32 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             dict(dropped_no_schema),
             dict(dropped_out_of_enum),
         )
-    if stats["written"] or stats["categorized"] or stats["desc_written"] or stats["failed"]:
+    # desc-side conflict/mismatch skips fire the summary too — systematic desc
+    # conflicts after a FRU matrix re-ingest must not silently zero the channel.
+    if (
+        stats["written"]
+        or stats["categorized"]
+        or stats["desc_written"]
+        or stats["failed"]
+        or stats["desc_failed"]
+        or stats["desc_commodity_conflict"]
+        or stats["desc_category_mismatch"]
+    ):
         logger.info(
             "fru-crosswalk: wrote {} decode specs across {} decoded cards "
             "({} newly categorized) + {} linked-desc specs across {} desc-parsed cards "
-            "({} keys dropped by intersection, {} cards failed)",
+            "({}/{} decode/desc keys dropped by intersection, {} desc commodity conflicts, "
+            "{} desc category mismatches, {} cards failed, {} desc channels failed)",
             stats["written"],
             stats["decoded"],
             stats["categorized"],
             stats["desc_written"],
             stats["desc_parsed"],
             stats["dropped_conflict"],
+            stats["desc_dropped_conflict"],
+            stats["desc_commodity_conflict"],
+            stats["desc_category_mismatch"],
             stats["failed"],
+            stats["desc_failed"],
         )
     return stats

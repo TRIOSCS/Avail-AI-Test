@@ -892,15 +892,25 @@ owns arbitration in one place:
        (wave 3A): the qual-sheet prose stored on the FRU's mfg_model + drive_pn rows
        (e.g. drive_pn `18TB 3.5 HDD 7.2K 12 Gb/s SAS`, mfg_model `SSD; 2.5; 1.92 TB
        Samsung PM1733`) runs through desc_extractor.extract_desc(description,
-       commodity_hint=card.category) and the DescResults intersect under the SAME
-       intersect_decodes contract (desc-side commodity disagreement skips just the
-       desc channel; conflicting values dropped + counted; a single extracting
-       description passes all its specs) — source="fru_desc_parse" (tier 82),
-       confidence 0.88. The desc channel runs INSIDE the per-card SAVEPOINT after
-       the decode channel, so a category the decode just filled routes the
-       extraction in the same batch; it NEVER writes a category (linked prose is not
-       a regex-gated commodity proof — a still-category-less card gets nothing from
-       it) and mirrors the desc-parse writer's SPEC_COMMODITIES eligibility gate.
+       commodity_hint=card.category) — the SPEC_COMMODITIES eligibility gate
+       guarantees the hint is always set. Commodity agreement is judged over ALL
+       extractions (a spec-less result like bare "HDD, Hot Swap" prose is still
+       commodity evidence): a desc-side commodity disagreement skips just the desc
+       channel (counted in desc_commodity_conflict), and a UNANIMOUS commodity
+       contradicting the card's category skips it too (desc_category_mismatch —
+       the decode channel's existing-category-is-authoritative rule applied to
+       desc evidence; reachable only as hdd<->ssd via extract_desc's same-family
+       lead refinement). Spec-less extractions are then EXCLUDED from the per-key
+       intersection (one barren row must not veto rich siblings under
+       absence-is-not-agreement) and the survivors intersect under the SAME
+       intersect_decodes contract (conflicting values dropped + counted per card
+       in desc_dropped_conflict — the decode channel's dropped_conflict counts per
+       FRU; a single extracting description passes all its specs) — source=
+       "fru_desc_parse" (tier 82), confidence 0.88. The desc channel runs in its
+       OWN per-card SAVEPOINT after the decode channel's savepoint has RELEASED,
+       so a category the decode just filled still routes the extraction in the
+       same batch; it NEVER writes a category (linked prose is not a regex-gated
+       commodity proof — a still-category-less card gets nothing from it).
        Zero LLM/network; ONE fru_links query per batch. Scope is the FULL batch ids,
        NOT enriched_ids — FRU spares finish not_found, and the pass never touches
        enrichment_status. Fills a NULL category from the agreed DECODE commodity via
@@ -910,11 +920,15 @@ owns arbitration in one place:
        desc-parses its own description at tier 83). The ladder (82 < 83 desc_parse <
        84 < 85, < vendor 90) guarantees neither channel overwrites
        mpn_decode/desc_parse/vendor values — no per-writer pre-gate. Isolation is
-       two-level: decode/intersect failures are caught per FRU, write/extract
-       failures per card (one shared SAVEPOINT — a desc-channel failure rolls back
-       the card's decode writes too) — both surface in the returned `failed` count
-       so the worker's stats line distinguishes a no-op batch from a crashed one
-       (desc channel adds `desc_parsed`/`desc_written` counters). Schema-drift drops
+       three-level: decode/intersect failures are caught per FRU, decode-channel
+       write failures per card (SAVEPOINT 1 — the card is lost, counted in
+       `failed`, and the desc channel does not run on it), and desc-channel
+       failures per channel (SAVEPOINT 2, sequential after SAVEPOINT 1's release —
+       a desc failure rolls back ONLY the desc writes, the card keeps its decode
+       writes + category fill, counted in `desc_failed`, never `failed`). The
+       worker's stats line distinguishes a no-op batch from a crashed one (desc
+       channel adds desc_parsed/desc_written/desc_failed/desc_dropped_conflict/
+       desc_commodity_conflict/desc_category_mismatch counters). Schema-drift drops
        (no schema row / out-of-enum value) from BOTH channels emit the same
        aggregate WARNING as the mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
