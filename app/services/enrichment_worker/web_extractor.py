@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from app.services.commodity_registry import get_all_commodities
 from app.utils.claude_client import claude_json
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
@@ -16,6 +17,11 @@ from .trusted_domains import is_trusted_domain
 
 _MIN_WEB_CONFIDENCE = 0.92
 
+# category routes through the F1 ladder's normalize_category (off-vocab → dropped, never
+# persisted), so the prompt constrains Claude to the canonical commodity vocabulary —
+# free-text taxonomy strings ("Internal Hard Drives") would be rejected at write time.
+_CATEGORY_VOCAB = ", ".join(sorted(get_all_commodities()))
+
 _SYSTEM = (
     "You are an electronic component data extraction assistant. Use web search to find "
     "AUTHORITATIVE manufacturer or authorized-distributor pages for the given MPN. "
@@ -23,9 +29,10 @@ _SYSTEM = (
 )
 _PROMPT = (
     "Find the exact electronic component MPN {mpn} on a manufacturer or authorized distributor "
-    'page. Return JSON: {{"description": str, "manufacturer": str, "category": str, '
+    'page. Return JSON: {{"description": str, "manufacturer": str, "category": str|null, '
     '"datasheet_url": str|null, "confidence": float, "exact_mpn_found": str, '
-    '"source_urls": [str]}}. exact_mpn_found must be the MPN exactly as printed on the page.'
+    '"source_urls": [str]}}. exact_mpn_found must be the MPN exactly as printed on the page. '
+    "category MUST be one of: " + _CATEGORY_VOCAB + " — pick the closest match, or null if none fits."
 )
 
 

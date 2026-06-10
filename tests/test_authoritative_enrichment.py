@@ -300,27 +300,160 @@ def test_fetch_nexar_called_when_not_adequate():
 # ── apply_authoritative ──────────────────────────────────────────────────────
 
 
+def _prov_entry(source: str, confidence: float = 1.0) -> dict:
+    return {"source": source, "confidence": confidence, "fetched_at": "2024-01-01"}
+
+
 def test_apply_authoritative_writes_all_fields(db_session):
-    """All merged fields, provenance, source and status are written to the card."""
-    card = _card(db_session, "LM317T")
+    """All merged fields, provenance, source and status are written to the card.
+
+    category/manufacturer route through the F1 ladder at the connector's registered
+    ``{name}_api`` source (tier 90) — provenance columns are stamped, not raw-set.
+    """
+    card = _card(db_session, "ST4000NM0035")
     merged = {
-        "description": "Adjustable Voltage Regulator",
-        "manufacturer": "Texas Instruments",
-        "category": "Analog ICs",
+        "description": "4TB 7.2K SAS Enterprise HDD",
+        "manufacturer": "Seagate Technology",
+        "category": "hdd",
         "lifecycle_status": "active",
     }
     provenance = {
-        "description": {"source": "digikey", "confidence": 1.0, "fetched_at": "2024-01-01"},
+        "description": _prov_entry("digikey"),
+        "manufacturer": _prov_entry("digikey"),
+        "category": _prov_entry("digikey"),
+        "lifecycle_status": _prov_entry("digikey"),
     }
     apply_authoritative(card, merged, provenance, ["digikey"])
-    assert card.description == "Adjustable Voltage Regulator"
-    assert card.manufacturer == "Texas Instruments"
-    assert card.category == "Analog ICs"
+    assert card.description == "4TB 7.2K SAS Enterprise HDD"
+    assert card.manufacturer == "Seagate Technology"
+    assert card.category == "hdd"
     assert card.lifecycle_status == "active"
     assert card.enrichment_status == "verified"
     assert card.enrichment_source == "digikey"
     assert card.enrichment_provenance == provenance
     assert card.enriched_at is not None
+    # F1-ladder provenance stamped on both provenanced columns (vendor APIs = tier 90).
+    assert card.category_source == "digikey_api"
+    assert card.category_tier == 90
+    assert card.category_confidence == 1.0
+    assert card.manufacturer_source == "digikey_api"
+    assert card.manufacturer_tier == 90
+
+
+def test_apply_authoritative_category_displaces_decode_85(db_session):
+    """Tier-90 vendor category evidence displaces a decode-85 category (the ladder
+    decides the overwrite, not the writer)."""
+    card = _card(db_session, "ST4000NM0035")
+    card.category = "dram"
+    card.category_source = "mpn_decode"
+    card.category_confidence = 0.95
+    card.category_tier = 85
+    card.category_updated_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    apply_authoritative(
+        card,
+        {"category": "hdd"},
+        {"category": _prov_entry("mouser")},
+        ["mouser"],
+    )
+    assert card.category == "hdd"
+    assert card.category_source == "mouser_api"
+    assert card.category_tier == 90
+    assert "category" in card.enrichment_provenance
+
+
+def test_apply_authoritative_category_loses_to_trio_and_manual(db_session):
+    """Tier-90 vendor category never overwrites trio_source (95) or manual (100); the
+    rejected write's provenance entry is dropped so enrichment_provenance never claims a
+    write that didn't land."""
+    for source, tier in (("trio_source", 95), ("manual", 100)):
+        card = _card(db_session, f"PIN-{source}")
+        card.category = "dram"
+        card.category_source = source
+        card.category_confidence = 1.0
+        card.category_tier = tier
+        card.category_updated_at = datetime.now(timezone.utc)
+        db_session.flush()
+
+        apply_authoritative(
+            card,
+            {"category": "hdd", "description": "desc"},
+            {"category": _prov_entry("digikey"), "description": _prov_entry("digikey")},
+            ["digikey"],
+        )
+        assert card.category == "dram", source
+        assert card.category_source == source
+        assert "category" not in card.enrichment_provenance
+        assert card.enrichment_provenance["description"]["source"] == "digikey"
+
+
+def test_apply_authoritative_off_vocab_category_rejected(db_session):
+    """An off-vocab connector category is rejected by the ladder's normalizer — never
+    persisted as junk, and dropped from the persisted provenance."""
+    card = _card(db_session, "LM317T")
+    apply_authoritative(
+        card,
+        {"category": "Analog ICs", "description": "Adjustable Voltage Regulator"},
+        {"category": _prov_entry("digikey"), "description": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert card.category is None
+    assert "category" not in card.enrichment_provenance
+    assert card.description == "Adjustable Voltage Regulator"
+    assert card.enrichment_status == "verified"
+
+
+def test_apply_authoritative_displaces_legacy_unprovenanced_value(db_session):
+    """The dominant real-world population: a pre-ladder card with valued category/
+    manufacturer and NULL provenance columns ranks at the legacy_backfill floor (50) —
+    tier-90 connector evidence must still displace it (the stale-data fix this routing
+    exists for), stamping ``{connector}_api``/90 provenance."""
+    card = _card(db_session, "ST4000NM0035-LEG")
+    card.category = "dram"  # stale legacy value — NULL category_* provenance
+    card.manufacturer = "Segate"  # typo'd legacy maker — NULL manufacturer_* provenance
+    db_session.flush()
+
+    apply_authoritative(
+        card,
+        {"category": "hdd", "manufacturer": "Seagate Technology"},
+        {"category": _prov_entry("digikey"), "manufacturer": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert card.category == "hdd"
+    assert card.category_source == "digikey_api"
+    assert card.category_tier == 90
+    assert card.manufacturer == "Seagate Technology"
+    assert card.manufacturer_source == "digikey_api"
+    assert card.manufacturer_tier == 90
+    assert card.enrichment_provenance["category"]["source"] == "digikey"
+    assert card.enrichment_provenance["manufacturer"]["source"] == "digikey"
+
+
+def test_apply_authoritative_manufacturer_loses_to_manual_records_conflict(db_session):
+    """A vendor maker (90) reporting a DIFFERENT value than a manual maker (100) loses
+    arbitration AND records a validation conflict for human review (tier >= 80 band)."""
+    card = _card(db_session, "ST8000NM0055")
+    card.manufacturer = "Western Digital"
+    card.manufacturer_source = "manual"
+    card.manufacturer_confidence = 1.0
+    card.manufacturer_tier = 100
+    card.manufacturer_updated_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    apply_authoritative(
+        card,
+        {"manufacturer": "Seagate Technology"},
+        {"manufacturer": _prov_entry("digikey")},
+        ["digikey"],
+    )
+    assert card.manufacturer == "Western Digital"  # manual kept
+    assert "manufacturer" not in card.enrichment_provenance
+    assert card.has_validation_conflict is True
+    assert any(
+        c.get("key") == "manufacturer" and (c.get("evidence") or {}).get("source") == "digikey_api"
+        for c in card.validation_conflicts
+    )
 
 
 def test_apply_authoritative_empty_contributors_preserves_source(db_session):
@@ -508,6 +641,12 @@ async def test_crossref_double_verify_to_verified(db_session):
     assert card.description == "16GB DDR4 RDIMM"
     assert any(x.get("mpn") == "M393A2K40EB3-CWE" for x in (card.cross_references or []))
     assert card.enrichment_provenance["cross_ref"]["resolved_mpn"] == "M393A2K40EB3-CWE"
+    # The resolved MPN's distributor manufacturer routes through the F1 ladder at the
+    # confirming connector's registered source (mouser_api, tier 90) — same contract
+    # as apply_authoritative.
+    assert card.manufacturer == "Samsung"
+    assert card.manufacturer_source == "mouser_api"
+    assert card.manufacturer_tier == 90
     assert meter.claude_ok is True and meter.web_calls >= 2
 
 
@@ -541,7 +680,7 @@ async def test_oem_description_path(db_session):
         status="oem_sourced",
         description="ThinkSystem 16GB RDIMM",
         manufacturer="Lenovo",
-        category="Memory Module",
+        category="Memory Module",  # known distributor/OEM taxonomy alias → dram
         confidence=0.95,
         source_urls=["https://support.lenovo.com/x"],
         source_domains=["support.lenovo.com"],
@@ -556,6 +695,98 @@ async def test_oem_description_path(db_session):
     assert status == MaterialEnrichmentStatus.OEM_SOURCED
     assert card.description == "ThinkSystem 16GB RDIMM"
     assert card.enrichment_provenance["oem_sourced"] is True
+    # The category WRITE still lands through the integration path: the alias map
+    # canonicalizes the OEM-page taxonomy string and the ladder stamps oem_official/80.
+    assert card.category == "dram"
+    assert card.category_source == "oem_official"
+    assert card.enrichment_provenance["category"]["source"] == "oem_official"
+
+
+# ── apply_oem_sourced ladder matrix (same contract as the web/authoritative suites —
+# apply_oem_sourced duplicates the routing block, so those tests do NOT protect it) ──
+
+
+def test_apply_oem_sourced_lands_with_oem_official_provenance(db_session):
+    """Happy path on an empty card: category + manufacturer land through the F1 ladder
+    at ``oem_official``/80 with per-field provenance; the other fields raw-write."""
+    card = _card(db_session, "01HW917")
+    oem = OemExtractResult(
+        status="oem_sourced",
+        description="ThinkSystem 16GB RDIMM",
+        manufacturer="Lenovo",
+        category="dram",
+        datasheet_url="https://support.lenovo.com/x.pdf",
+        confidence=0.95,
+        source_urls=["https://support.lenovo.com/x"],
+        source_domains=["support.lenovo.com"],
+    )
+    aes.apply_oem_sourced(card, oem)
+
+    assert card.category == "dram"
+    assert card.category_source == "oem_official"
+    assert card.category_tier == 80
+    assert card.category_confidence == 0.95
+    assert card.manufacturer == "Lenovo"
+    assert card.manufacturer_source == "oem_official"
+    assert card.manufacturer_tier == 80
+    assert card.description == "ThinkSystem 16GB RDIMM"
+    assert card.datasheet_url == "https://support.lenovo.com/x.pdf"
+    assert card.enrichment_status == "oem_sourced"
+    assert card.enrichment_source == "oem_official"
+    prov = card.enrichment_provenance
+    assert prov["oem_sourced"] is True
+    assert prov["category"]["source"] == "oem_official"
+    assert prov["manufacturer"]["source"] == "oem_official"
+    assert prov["description"]["source"] == "oem_official"
+
+
+def test_apply_oem_sourced_off_vocab_category_rejected(db_session):
+    """An off-vocab OEM-page category is rejected by the ladder's normalizer — never
+    persisted verbatim (the pre-ladder behavior), and dropped from the per-field
+    provenance — while the description still lands and the status stays oem_sourced."""
+    card = _card(db_session, "01HW918")
+    oem = OemExtractResult(
+        status="oem_sourced",
+        description="Adjustable voltage regulator module",
+        category="Voltage Regulator",  # free text — off-vocab
+        confidence=0.95,
+        source_urls=["https://support.lenovo.com/y"],
+        source_domains=["support.lenovo.com"],
+    )
+    aes.apply_oem_sourced(card, oem)
+
+    assert card.category is None
+    assert "category" not in card.enrichment_provenance
+    assert card.description == "Adjustable voltage regulator module"
+    assert card.enrichment_status == "oem_sourced"
+
+
+def test_apply_oem_sourced_category_loses_to_decode_85(db_session):
+    """oem_official (80) can never overwrite a decode-85 category — the ladder keeps the
+    prior and the rejected write gets NO per-field provenance entry (the persisted
+    provenance never claims a write that didn't land)."""
+    card = _card(db_session, "01HW919")
+    card.category = "hdd"
+    card.category_source = "mpn_decode"
+    card.category_confidence = 0.95
+    card.category_tier = 85
+    card.category_updated_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    oem = OemExtractResult(
+        status="oem_sourced",
+        description="some OEM prose",
+        category="dram",
+        confidence=0.95,
+        source_urls=["https://support.lenovo.com/z"],
+        source_domains=["support.lenovo.com"],
+    )
+    aes.apply_oem_sourced(card, oem)
+
+    assert card.category == "hdd"  # decode kept
+    assert card.category_source == "mpn_decode"
+    assert "category" not in card.enrichment_provenance
+    assert card.enrichment_provenance["description"]["source"] == "oem_official"
 
 
 @pytest.mark.asyncio

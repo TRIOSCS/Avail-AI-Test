@@ -483,7 +483,12 @@ def test_update_material_sets_manual_enrichment_source(client, db_session):
 
 
 def test_enrich_material(client, db_session, test_material_card):
-    """POST /api/materials/{id}/enrich applies enrichment data."""
+    """POST /api/materials/{id}/enrich applies enrichment data.
+
+    manufacturer routes through the F1 ladder: "claude_agent" is unregistered →
+    ai_guess (40), which loses to the fixture card's existing valued-but-unprovenanced
+    maker (legacy floor, 50) — updated_fields honestly omits the rejected write.
+    """
     resp = client.post(
         f"/api/materials/{test_material_card.id}/enrich",
         json={
@@ -498,7 +503,9 @@ def test_enrich_material(client, db_session, test_material_card):
     assert data["ok"] is True
     assert "lifecycle_status" in data["updated_fields"]
     assert "package_type" in data["updated_fields"]
-    assert "manufacturer" in data["updated_fields"]
+    assert "manufacturer" not in data["updated_fields"]  # ladder kept the existing maker
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Texas Instruments"
 
 
 def test_enrich_material_no_fields(client, db_session, test_material_card):

@@ -42,6 +42,15 @@ CATEGORY_ALIASES: dict[str, str] = {
     "office & computer & networking products > computer products > drives > disk drives": "hdd",
     "emmc": "flash",
     "memory - modules, cards": "dram",
+    # High-frequency distributor/OEM taxonomy strings (unambiguous in every taxonomy).
+    # Since the F1 ladder routed ALL enrichment category writes through
+    # normalize_category, an off-map connector string is DROPPED instead of persisted —
+    # these entries keep the authoritative tier's category fill-rate from silently
+    # regressing (bare "memory" stays out: ambiguous, see TRIO_SFDC_COMMODITY_CODES).
+    "hard drives": "hdd",
+    "internal hard drives": "hdd",
+    "memory module": "dram",
+    "memory modules": "dram",
     "linear voltage regulators": "voltage_regulators",
     "switching voltage regulators": "voltage_regulators",
     "inductors, coils, chokes": "inductors",

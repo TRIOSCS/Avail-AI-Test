@@ -71,6 +71,28 @@ def test_legacy_generic_ic_bucket_maps_to_ics_other():
     assert normalize_category("integrated circuits (ics)") == "ics_other"
 
 
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("Hard Drives", "hdd"),
+        ("Internal Hard Drives", "hdd"),
+        ("Memory Module", "dram"),
+        ("Memory Modules", "dram"),
+        ("Solid State Drives - SSD", "ssd"),
+        ("Memory - Modules, Cards", "dram"),
+    ],
+)
+def test_distributor_taxonomy_strings_normalize(raw, expected):
+    """High-frequency distributor/OEM taxonomy strings land on canonical keys.
+
+    Since the F1 ladder routed EVERY enrichment category write through
+    normalize_category, an off-map connector/extractor string is silently DROPPED
+    instead of persisted — alias-map drift here would suppress the authoritative tier's
+    category fill-rate, so the common vocabulary is pinned.
+    """
+    assert normalize_category(raw) == expected
+
+
 def test_legacy_capitalized_canonical_variants_resolve():
     """Capitalized variants of canonical keys (live-DB legacy rows) resolve to
     lowercase."""
@@ -134,6 +156,10 @@ def test_every_alias_target_is_a_tree_key():
 # so "did we forget a backfill?" fails CI instead of waiting for code-review archaeology.
 POST_093_ALIASES: dict[str, str] = {
     # "new alias key": "backfill reference (e.g. migration 09X / script run YYYY-MM-DD)",
+    "hard drives": "migration 100_taxonomy_alias_backfill",
+    "internal hard drives": "migration 100_taxonomy_alias_backfill",
+    "memory module": "migration 100_taxonomy_alias_backfill",
+    "memory modules": "migration 100_taxonomy_alias_backfill",
 }
 
 

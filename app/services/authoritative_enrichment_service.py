@@ -29,6 +29,7 @@ from app.services.enrichment_worker.oem_extractor import (
     extract_oem_description,
 )
 from app.services.enrichment_worker.web_extractor import WebExtractResult, extract_part_from_web
+from app.services.spec_tiers import set_category, set_manufacturer
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
 
@@ -38,6 +39,16 @@ _RATE_COOLDOWN_SECONDS = 300  # 5 min
 SOURCE_ORDER = ["digikey", "mouser", "element14", "oemsecrets", "nexar"]
 # Nexar source_type is reported as "octopart" by its connector.
 _SOURCE_TYPE_ALIASES = {"octopart": "nexar"}
+
+
+def _vendor_ladder_source(connector_name: str) -> str:
+    """Map a connector name to its registered F1-ladder source string.
+
+    The five distributor APIs are registered in spec_tiers.SOURCE_TIER as ``{name}_api``
+    (all tier 90) — same mapping enrichment.py uses for its connector category writes.
+    """
+    return f"{connector_name}_api"
+
 
 CORE_FIELDS = [
     "description",
@@ -158,16 +169,49 @@ async def fetch_authoritative(
     return results
 
 
+def _apply_merged_core_fields(card: MaterialCard, merged: dict, provenance: dict) -> dict:
+    """Write the merged connector fields onto *card*; return the provenance to persist.
+
+    ``category`` and ``manufacturer`` are PROVENANCED columns — they NEVER go through
+    raw setattr (a raw write leaves the old ``category_*``/``manufacturer_*`` columns
+    attached to the new value and bypasses arbitration). They route through the F1
+    ladder (``set_category`` / ``set_manufacturer``) at the contributing connector's
+    registered ``{name}_api`` source (tier 90) with the merge confidence (1.0 — exact
+    normalized-MPN match). The ladder decides how aggressively this tier overwrites:
+    90 displaces decode (85) / OEM pages (80) / web (70) / AI guesses (40) but never
+    trio_source (95) or a manual edit (100). A write the ladder rejects has its
+    per-field provenance entry DROPPED so ``enrichment_provenance`` never claims a
+    write that did not land (the LOSE branch still records a validation conflict when
+    it contradicts a manual value). All other core fields keep their direct writes —
+    they are not provenanced columns.
+    """
+    prov = dict(provenance)
+    for field, value in merged.items():
+        if field in ("category", "manufacturer"):
+            entry = prov.get(field) or {}
+            source = _vendor_ladder_source(entry.get("source", ""))
+            confidence = float(entry.get("confidence") or 1.0)
+            setter = set_category if field == "category" else set_manufacturer
+            if not setter(card, value, source, confidence):
+                prov.pop(field, None)
+        else:
+            setattr(card, field, value)
+    return prov
+
+
 def apply_authoritative(
     card: MaterialCard,
     merged: dict,
     provenance: dict,
     contributors: list[str],
 ) -> None:
-    """Write merged authoritative fields + provenance onto the card."""
-    for field, value in merged.items():
-        setattr(card, field, value)
-    card.enrichment_provenance = provenance
+    """Write merged authoritative fields + provenance onto the card.
+
+    category/manufacturer route through the F1 ladder at ``{connector}_api``/90 — see
+    ``_apply_merged_core_fields`` (ladder-rejected writes are dropped from the persisted
+    provenance).
+    """
+    card.enrichment_provenance = _apply_merged_core_fields(card, merged, provenance)
     card.enrichment_source = contributors[0] if contributors else card.enrichment_source
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
     card.enriched_at = datetime.now(timezone.utc)
@@ -178,7 +222,11 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
 
     Only sets non-empty fields. Records per-field provenance entries for every field
     that was written, plus top-level metadata (web_sourced, confidence, source_urls,
-    source_domains, fetched_at).
+    source_domains, fetched_at). category/manufacturer route through the F1 ladder at
+    ``web_search``/70 (the ladder decides — web evidence fills empty cards and
+    displaces AI guesses (40) but never decode (85) / vendor-API (90) / trio (95) /
+    manual (100) provenance, and off-vocab categories are rejected, never persisted);
+    a ladder-rejected write gets NO per-field provenance entry.
     """
     now = datetime.now(timezone.utc)
     fields = {
@@ -195,13 +243,21 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
         "fetched_at": now.isoformat(),
     }
     for f, v in fields.items():
-        if v:
+        if not v:
+            continue
+        if f == "category":
+            if not set_category(card, v, "web_search", result.confidence):
+                continue
+        elif f == "manufacturer":
+            if not set_manufacturer(card, v, "web_search", result.confidence):
+                continue
+        else:
             setattr(card, f, v)
-            prov[f] = {
-                "source": "web_search",
-                "confidence": result.confidence,
-                "fetched_at": now.isoformat(),
-            }
+        prov[f] = {
+            "source": "web_search",
+            "confidence": result.confidence,
+            "fetched_at": now.isoformat(),
+        }
     card.enrichment_source = "web_search"
     card.enrichment_status = MaterialEnrichmentStatus.WEB_SOURCED
     card.enrichment_provenance = prov
@@ -219,11 +275,14 @@ def apply_cross_ref_verified(
 
     Status becomes ``verified`` (the resolved MPN was independently confirmed against a
     distributor). Records the FRU<->MPN linkage in ``cross_references`` and a top-level
-    ``cross_ref`` provenance block so the whole chain is auditable.
+    ``cross_ref`` provenance block so the whole chain is auditable. The merged dict is
+    the same distributor evidence apply_authoritative consumes, so category/manufacturer
+    route through the F1 ladder identically (``{connector}_api``/90 — see
+    ``_apply_merged_core_fields``; ladder-rejected writes are dropped from the persisted
+    provenance).
     """
     now = datetime.now(timezone.utc)
-    for field_name, value in merged.items():
-        setattr(card, field_name, value)
+    provenance = _apply_merged_core_fields(card, merged, provenance)
     xrefs = list(card.cross_references or [])
     xrefs.append({"mpn": xr.resolved_mpn, "manufacturer": xr.manufacturer})
     card.cross_references = xrefs
@@ -247,6 +306,11 @@ def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
     """Write OEM-official description/category onto the card (status ``oem_sourced``).
 
     Description + category + datasheet only — never structured specs.
+    category/manufacturer route through the F1 ladder at ``oem_official``/80 (the
+    ladder decides — OEM-page evidence displaces web (70) / AI (40) provenance but
+    never decode (85) / vendor-API (90) / trio (95) / manual (100), and off-vocab
+    categories are rejected); a ladder-rejected write gets NO per-field provenance
+    entry.
     """
     now = datetime.now(timezone.utc)
     iso = now.isoformat()
@@ -264,9 +328,17 @@ def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
         "manufacturer": result.manufacturer,
     }
     for f, v in fields.items():
-        if v:
+        if not v:
+            continue
+        if f == "category":
+            if not set_category(card, v, "oem_official", result.confidence):
+                continue
+        elif f == "manufacturer":
+            if not set_manufacturer(card, v, "oem_official", result.confidence):
+                continue
+        else:
             setattr(card, f, v)
-            prov[f] = {"source": "oem_official", "confidence": result.confidence, "fetched_at": iso}
+        prov[f] = {"source": "oem_official", "confidence": result.confidence, "fetched_at": iso}
     card.enrichment_source = "oem_official"
     card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
     card.enrichment_provenance = prov
@@ -299,14 +371,21 @@ async def enrich_card(
     breaker. Default None = no metering.
 
     CONCURRENCY INVARIANT: safe to run over a shared Session via asyncio.gather
-    because, after its first ``await``, this function performs NO DB query/flush —
-    only in-memory attribute writes on ``card`` — so synchronous session ops never
-    interleave across awaits on the single-threaded event loop. Do NOT add a
-    db.query()/db.flush() after the await without switching callers to per-card
-    sessions, or concurrent runs (import script, enrichment worker) will corrupt
-    the identity map. The cross-ref re-verification (``fetch_authoritative`` on the
-    resolved MPN) is pure async connector I/O — no DB query/flush — so the invariant
-    holds.
+    because, after its first ``await``, every session op this function performs is
+    SYNCHRONOUS (it contains no await), so it runs atomically between awaits on the
+    single-threaded event loop and can never interleave mid-operation with another
+    card's enrichment. The post-await session ops are the F1-ladder setters
+    (``set_category``/``set_manufacturer``) called from the apply_* helpers AND from
+    the ai_inferred branch's ``set_category`` below: ``set_manufacturer``'s
+    alias-table SELECT (cached per-process after the first non-empty load) and
+    ``set_category``'s stale-facet purge SELECT/DELETE, which fires only on a win
+    that CHANGES an existing category.
+    Do NOT add AWAITED DB work, a flush-and-read-back sequence, or anything that
+    expires/refreshes shared ORM state after the first await without switching
+    callers to per-card sessions — concurrent runs (import script, enrich_cards)
+    would corrupt the identity map. The cross-ref re-verification
+    (``fetch_authoritative`` on the resolved MPN) is pure async connector I/O — no
+    DB query/flush — so the invariant holds.
     """
     if (
         card.enrichment_status in (MaterialEnrichmentStatus.VERIFIED, MaterialEnrichmentStatus.OEM_SOURCED)
@@ -325,8 +404,10 @@ async def enrich_card(
     web_enabled = not (disabled and "web_search" in disabled)
 
     # Distributor / manufacturer web tier.
-    # CONCURRENCY INVARIANT: this await is pure async (no DB) — no DB query/flush follows it;
-    # see the docstring above for the full invariant.
+    # CONCURRENCY INVARIANT: this await is pure async (no DB); the apply_web_sourced
+    # that follows performs only SYNCHRONOUS F1-ladder session ops (set_manufacturer's
+    # alias-table SELECT, set_category's stale-facet purge SELECT/DELETE) — see the
+    # docstring above for the full invariant.
     if web_enabled:
         if web_meter is not None:
             web_meter.reserve_web_call()
@@ -374,8 +455,6 @@ async def enrich_card(
     now = datetime.now(timezone.utc)
     card.enriched_at = now
     if inf.status == "ai_inferred":
-        from app.services.spec_tiers import set_category
-
         card.description = inf.description
         # Through the F1 ladder: an Opus inference (claude_opus_inferred, tier 40) fills
         # an empty category but can never overwrite decode/vendor/TRIO provenance, and

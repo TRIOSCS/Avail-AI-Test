@@ -124,3 +124,14 @@ async def test_desc_claude_error_propagates():
     with patch.object(oem_extractor, "claude_json", new=AsyncMock(side_effect=ClaudeError("down"))):
         with pytest.raises(ClaudeError):
             await extract_oem_description("01HW917", "01hw917", "lenovo")
+
+
+def test_oem_prompt_constrains_category_to_canonical_vocabulary():
+    """Same contract as the web extractor: the OEM-description category routes through
+    normalize_category (off-vocab → dropped), so the prompt must solicit
+    ladder-admissible canonical commodity keys."""
+    from app.services.commodity_registry import get_all_commodities
+    from app.services.enrichment_worker.oem_extractor import _OEM_PROMPT
+
+    assert "category MUST be one of" in _OEM_PROMPT
+    assert all(key in _OEM_PROMPT for key in get_all_commodities())

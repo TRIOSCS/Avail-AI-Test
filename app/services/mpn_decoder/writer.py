@@ -29,13 +29,18 @@ MAKER_CONFIDENCE = 0.9
 def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     """Decode the MPNs of *card_ids* and write decoded specs.
 
-    Returns {decoded, written, categorized, manufacturers_set,
-    skipped_category_conflict, skipped_maker_conflict}.
+    Returns {decoded, written, categorized, manufacturers_set, failed,
+    skipped_category_conflict, skipped_maker_conflict}. ``failed`` counts cards LOST
+    to an exception (the per-card isolation below — rolled back, contributing
+    nothing); mirroring the desc/crosswalk writers, it is surfaced in the summary log
+    so the worker's one-line stats can distinguish a healthy no-op batch from a
+    crashed one.
     """
     decoded_cards = 0
     written = 0
     categorized = 0
     manufacturers_set = 0
+    failed = 0
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
     # record_spec drops BOTH vocabulary-drift cases at DEBUG only (invisible at the
     # production INFO level), so the discard of decoder output is surfaced here as an
@@ -108,10 +113,10 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                     # Dual-brand W4: the decode's vendor IS the actual maker (the regex gate
                     # is manufacturer-scheme-specific), so write it through the maker ladder
                     # at mpn_decode/0.9 — it corrects a legacy OEM label sitting in
-                    # `manufacturer` (tier 50, incl. today's unprovenanced direct vendor-API
-                    # writes, which rank 50 until that out-of-scope follow-up routes them)
-                    # but never overwrites a LADDER-ROUTED vendor-API (90) / trio_source (95)
-                    # / manual (100) value.
+                    # `manufacturer` (unprovenanced pre-ladder data, tier 50) but never
+                    # overwrites a vendor-API (90 — authoritative_enrichment_service routes
+                    # its maker writes through the ladder) / trio_source (95) / manual (100)
+                    # value.
                     existing_maker = card.manufacturer
                     did_set_maker = set_manufacturer(card, result.vendor, DECODE_SOURCE, MAKER_CONFIDENCE)
                     if not did_set_maker and existing_maker:
@@ -149,6 +154,7 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 # cross-commodity guard), so surface the pair.
                 skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
         except Exception:
+            failed += 1
             logger.exception("mpn-decode: failed on card_id={}", card_id)
     if dropped_no_schema or dropped_out_of_enum:
         logger.warning(
@@ -175,18 +181,20 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             sum(skipped_maker_conflict.values()),
             dict(skipped_maker_conflict),
         )
-    if written or categorized:
+    if written or categorized or failed:
         logger.info(
-            "mpn-decode: wrote {} specs across {} cards ({} newly categorized)",
+            "mpn-decode: wrote {} specs across {} cards ({} newly categorized, {} cards failed)",
             written,
             decoded_cards,
             categorized,
+            failed,
         )
     return {
         "decoded": decoded_cards,
         "written": written,
         "categorized": categorized,
         "manufacturers_set": manufacturers_set,
+        "failed": failed,
         "skipped_category_conflict": sum(skipped_category_conflict.values()),
         "skipped_maker_conflict": sum(skipped_maker_conflict.values()),
     }
