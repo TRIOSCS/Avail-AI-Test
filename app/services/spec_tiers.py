@@ -6,16 +6,23 @@ What: Defines the single authoritative rule for "which data source wins" so that
       string here — ``tier_for`` maps unknown sources to tier 0 with a WARNING, so an
       unregistered writer loses every conflict); ``tier_for`` looks a source up;
       ``resolve`` decides whether an incoming provenance tuple beats an existing one;
-      ``set_category`` applies that ladder to a MaterialCard's category column (the one
-      DB-touching helper).
+      ``set_category`` / ``set_brand`` / ``set_manufacturer`` apply that ladder to a
+      MaterialCard's category / brand (OEM label) / manufacturer (actual maker) columns
+      (the DB-touching helpers — all three delegate to the generic
+      ``_set_provenanced_column``).
 Called by: app/services/spec_write_service.record_spec (spec conflict resolution),
-      app/services/mpn_decoder/writer.py + app/services/fru_crosswalk_enrich.py (decode
-      category writes), app/services/source_ingest/ingest.py (TRIO part-master ingest:
-      category at trio_source/trio_source_ai), and the enrichment category writers
-      (enrichment.py, authoritative_enrichment_service.py, material_enrichment_service.py).
-Depends on: app.services.category_normalizer.normalize_category (lazy import inside
-      set_category to avoid a model↔service import cycle), MaterialCard's category
-      provenance columns (added by migration 096_spec_provenance).
+      app/services/mpn_decoder/writer.py (decode category + maker writes) +
+      app/services/fru_crosswalk_enrich.py (decode category writes),
+      app/services/source_ingest/ingest.py (TRIO part-master ingest: category at
+      trio_source/trio_source_ai; brand/manufacturer at trio_source),
+      app/management/backfill_dual_brand.py (B1-B3 dual-brand backfill), and the
+      enrichment category writers (enrichment.py, authoritative_enrichment_service.py,
+      material_enrichment_service.py).
+Depends on: app.services.category_normalizer.normalize_category and
+      app.services.manufacturer_normalizer.normalize_brand_name (lazy imports inside
+      the setters to avoid model↔service import cycles), MaterialCard's category
+      provenance columns (migration 096_spec_provenance) and brand/manufacturer
+      provenance columns (migration 097_dual_brand).
 
 The ladder rule (F1): incoming wins iff its ``(tier, confidence, updated_at)`` tuple is
 strictly greater than the existing one. Higher tier always overrides; equal tier → higher
@@ -91,6 +98,11 @@ LEGACY_BACKFILL_CONFIDENCE = 0.5
 # writes — that must be visible at production log levels, but not once per row).
 _warned_unknown_sources: set[str] = set()
 
+# Detached-card brand/maker writes are warned ONCE per process (same rationale): a writer
+# operating on a session-less card skips alias canonicalization for EVERY row it touches,
+# so the first occurrence must be visible at production log levels without per-row spam.
+_warned_detached_normalize = False
+
 
 def tier_for(source: str) -> int:
     """Return the ladder tier for *source*.
@@ -161,8 +173,9 @@ def record_validation_conflict(
     point.
 
     Called from the LOSE branches of ``record_spec`` (spec_write_service) and
-    ``set_category`` — i.e. after the F1 ladder already KEPT the existing value. Gates
-    (all enforced here so call sites stay dumb):
+    ``_set_provenanced_column`` (category, brand, manufacturer) — i.e. after the F1
+    ladder already KEPT the existing value. Gates (all enforced here so call sites
+    stay dumb):
       - the existing entry is a ``manual`` (tier 100) value;
       - the incoming source ranks in the authoritative band (tier >= 80);
       - the two values actually differ after normalization (corroboration is not stored).
@@ -330,6 +343,125 @@ def _purge_stale_commodity_data(card: "MaterialCard", new_category: str, source:
     )
 
 
+def _set_provenanced_column(
+    card: "MaterialCard",
+    attr: str,
+    value: str,
+    source: str,
+    confidence: float,
+    *,
+    write: bool = True,
+    on_change=None,
+) -> bool:
+    """Set ``card.<attr>`` (+ its four ``<attr>_*`` provenance columns) through the F1
+    ladder. Return ``True`` iff the incoming write wins.
+
+    Generic over the column-name prefix: ``attr`` ∈ {"category", "brand",
+    "manufacturer"}, provenance columns are ``f"{attr}_source"`` / ``_confidence`` /
+    ``_tier`` / ``_updated_at``. *value* must already be canonical — the public setters
+    own normalization (set_category via normalize_category, set_brand/set_manufacturer
+    via normalize_brand_name).
+
+    Ladder semantics (identical for all three columns): incoming provenance is
+    ``(tier_for(source), clamped confidence, now)``; an existing VALUE with NULL
+    provenance columns (pre-ladder data, or a write that bypassed these helpers) ranks
+    at the migration-backfill mid-tier (``LEGACY_BACKFILL_TIER`` = 50, logged at INFO),
+    so it cannot be flipped by an AI guess but yields to decode/vendor sources. The
+    existing timestamp for the tie-break is ``<attr>_updated_at`` ("" when NULL).
+
+    ``on_change`` (optional) is called as ``on_change(card, new_value, source)`` just
+    before a win that CHANGES an existing value is written — set_category uses it to
+    purge the old commodity's stale facet data. ``write=False`` is the read-only twin
+    for dry-run accounting: every check runs, the same bool returns, nothing is mutated.
+
+    LOSE branch (write=True only): when the kept value is a ``manual`` edit and the
+    losing source is authoritative (tier >= ``CONFLICT_EVIDENCE_MIN_TIER``) reporting a
+    DIFFERENT value, the contradiction is persisted via ``record_validation_conflict``
+    for human review. The hook lives here because this is where ladder losses for ALL
+    provenanced columns (category, brand, manufacturer) are decided.
+    """
+    confidence = min(max(float(confidence or 0.0), 0.0), 1.0)
+    now = datetime.now(timezone.utc)
+    incoming = {"tier": tier_for(source), "confidence": confidence, "updated_at": now.isoformat()}
+
+    current = getattr(card, attr)
+    existing_tier = getattr(card, f"{attr}_tier")
+    existing_source = getattr(card, f"{attr}_source")
+    if current is None:
+        existing = None
+    elif existing_tier is None and existing_source is None:
+        # Valued but unprovenanced — written before the ladder or by an un-routed writer.
+        # Rank it exactly like the migration backfill (legacy_backfill / 0.5 / 50) so the
+        # same data doesn't rank 50 if it existed at migration time but 0 a minute later.
+        logger.info(
+            "set_{}: card={} existing {}={!r} has no provenance — treating as {} (tier {}); an un-routed writer set it",
+            attr,
+            getattr(card, "id", None),
+            attr,
+            current,
+            LEGACY_BACKFILL_SOURCE,
+            LEGACY_BACKFILL_TIER,
+        )
+        existing = {
+            "tier": LEGACY_BACKFILL_TIER,
+            "confidence": LEGACY_BACKFILL_CONFIDENCE,
+            "updated_at": "",
+        }
+    else:
+        existing_conf = getattr(card, f"{attr}_confidence")
+        existing_ts = getattr(card, f"{attr}_updated_at")
+        existing = {
+            "tier": existing_tier if existing_tier is not None else 0,
+            "confidence": existing_conf if existing_conf is not None else 0.0,
+            "updated_at": existing_ts.isoformat() if existing_ts is not None else "",
+        }
+
+    if not resolve(existing, incoming):
+        if write:
+            # The ladder kept the existing value. If that value is a manual edit and
+            # the loser is an authoritative source reporting something ELSE, persist
+            # the contradiction for human review (the helper gates manual/tier>=80/
+            # value-differs). This hook lives HERE — the single point where ladder
+            # losses for provenanced columns are decided — so it fires for category
+            # AND brand/manufacturer: manual maker edits exist (update_material routes
+            # them through set_brand/set_manufacturer with source="manual"), so they
+            # carry the same contradiction-flagging contract as category and spec keys.
+            record_validation_conflict(
+                card,
+                attr,
+                {
+                    "source": existing_source,
+                    "value": current,
+                    "updated_at": existing["updated_at"] if existing else "",
+                },
+                {"source": source, **incoming},
+                value,
+            )
+        logger.debug(
+            "set_{}: card={} kept existing {}={!r} (incoming {!r}@{} lost)",
+            attr,
+            getattr(card, "id", None),
+            attr,
+            current,
+            value,
+            source,
+        )
+        return False
+
+    if not write:
+        return True
+
+    if on_change is not None and current is not None and current != value:
+        on_change(card, value, source)
+
+    setattr(card, attr, value)
+    setattr(card, f"{attr}_source", source)
+    setattr(card, f"{attr}_confidence", confidence)
+    setattr(card, f"{attr}_tier", incoming["tier"])
+    setattr(card, f"{attr}_updated_at", now)
+    return True
+
+
 def set_category(
     card: "MaterialCard",
     value: str | None,
@@ -342,14 +474,10 @@ def set_category(
     written.
 
     Normalizes *value* to a canonical commodity key (off-vocab → ``None``, never persisted
-    as junk). If it normalizes to ``None`` the call is a no-op and returns ``False``. Builds
-    the incoming provenance from *source*/*confidence* and compares it (via ``resolve``)
-    against the card's existing category provenance — a lower-tier source can never
-    overwrite a higher-tier category. An existing category with NULL provenance columns
-    (pre-ladder data, or a write that bypassed this helper) ranks at the same mid-tier the
-    migration backfill uses (``LEGACY_BACKFILL_TIER`` = 50), so it cannot be flipped by an
-    AI guess but yields to decode/vendor sources. The existing timestamp for the
-    tie-break is ``category_updated_at`` (stamped on every win; "" when NULL).
+    as junk). If it normalizes to ``None`` the call is a no-op and returns ``False``. The
+    ladder compare + write is delegated to ``_set_provenanced_column`` — a lower-tier
+    source can never overwrite a higher-tier category; an existing category with NULL
+    provenance ranks at the legacy_backfill mid-tier (50).
 
     On a win it sets ``category`` and the four ``category_*`` provenance columns and
     returns ``True``; when the win CHANGES an existing category it also purges the old
@@ -369,70 +497,101 @@ def set_category(
             logger.warning("set_category: off-vocab value {!r} (source={}) — not writing", value, source)
         return False
 
-    confidence = min(max(float(confidence or 0.0), 0.0), 1.0)
-    now = datetime.now(timezone.utc)
-    incoming = {"tier": tier_for(source), "confidence": confidence, "updated_at": now.isoformat()}
+    # value is already canonical here; SP3's @validates("category") hardens other paths.
+    return _set_provenanced_column(
+        card,
+        "category",
+        canonical,
+        source,
+        confidence,
+        write=write,
+        on_change=_purge_stale_commodity_data,
+    )
 
-    if card.category is None:
-        existing = None
-    elif card.category_tier is None and card.category_source is None:
-        # Valued but unprovenanced — written before the ladder or by an un-routed writer.
-        # Rank it exactly like the migration backfill (legacy_backfill / 0.5 / 50) so the
-        # same data doesn't rank 50 if it existed at migration time but 0 a minute later.
-        logger.info(
-            "set_category: card={} existing category={!r} has no provenance — treating as "
-            "{} (tier {}); an un-routed writer set it",
-            getattr(card, "id", None),
-            card.category,
-            LEGACY_BACKFILL_SOURCE,
-            LEGACY_BACKFILL_TIER,
-        )
-        existing = {
-            "tier": LEGACY_BACKFILL_TIER,
-            "confidence": LEGACY_BACKFILL_CONFIDENCE,
-            "updated_at": "",
-        }
-    else:
-        existing = {
-            "tier": card.category_tier if card.category_tier is not None else 0,
-            "confidence": card.category_confidence if card.category_confidence is not None else 0.0,
-            "updated_at": (card.category_updated_at.isoformat() if card.category_updated_at is not None else ""),
-        }
 
-    if not resolve(existing, incoming):
-        if write:
-            # The ladder kept the existing category. If that category is a manual value
-            # and the loser is an authoritative source reporting something ELSE, persist
-            # the contradiction for human review (the helper gates manual/tier>=80/diff).
-            record_validation_conflict(
-                card,
-                "category",
-                {
-                    "source": card.category_source,
-                    "value": card.category,
-                    "updated_at": existing["updated_at"] if existing else "",
-                },
-                {"source": source, **incoming},
-                canonical,
-            )
-        logger.debug(
-            "set_category: card={} kept existing category={!r} (incoming {!r}@{} lost)",
-            getattr(card, "id", None),
-            card.category,
-            canonical,
-            source,
-        )
+def _set_brand_or_maker(
+    card: "MaterialCard",
+    attr: str,
+    value: str | None,
+    source: str,
+    confidence: float,
+    *,
+    write: bool,
+) -> bool:
+    """Shared body of set_brand/set_manufacturer: reject empties, normalize, ladder.
+
+    PRECONDITION: *card* should be session-attached — the alias lookup derives its DB
+    session via ``Session.object_session(card)``. A detached/transient card cannot be
+    canonicalized, so the verbatim strip is written instead (full provenance, ladder-
+    protected) — that fragments the brand facet ("Seagate" vs "Seagate Technology"),
+    so the first such write per process is logged at WARNING.
+    """
+    if value is None or not str(value).strip():
+        # A write can never blank a value — None/empty/whitespace is a no-op.
         return False
 
-    if not write:
-        return True
+    from sqlalchemy.orm import Session
 
-    if card.category is not None and card.category != canonical:
-        _purge_stale_commodity_data(card, canonical, source)
+    from app.services.manufacturer_normalizer import normalize_brand_name
 
-    card.category = canonical  # already canonical; SP3's @validates("category") hardens other paths
-    card.category_source = source
-    card.category_confidence = confidence
-    card.category_tier = incoming["tier"]
-    card.category_updated_at = now
-    return True
+    db = Session.object_session(card)
+    if db is None:
+        global _warned_detached_normalize
+        if not _warned_detached_normalize:
+            _warned_detached_normalize = True
+            logger.warning(
+                "set_{}: card={} is not session-attached — alias canonicalization SKIPPED, "
+                "writing the verbatim strip of {!r}. A detached-card writer fragments the "
+                "brand facet; attach (add+flush) the card before calling set_brand/"
+                "set_manufacturer (warned once per process).",
+                attr,
+                getattr(card, "id", None),
+                value,
+            )
+    normalized = normalize_brand_name(db, str(value))
+    return _set_provenanced_column(card, attr, normalized, source, confidence, write=write)
+
+
+def set_brand(
+    card: "MaterialCard",
+    value: str | None,
+    source: str,
+    confidence: float,
+    *,
+    write: bool = True,
+) -> bool:
+    """Set ``card.brand`` (the OEM LABEL — IBM, Dell Technologies, Lenovo) through the
+    F1 ladder. Return ``True`` if written.
+
+    ``None``/empty/whitespace input is rejected (no-op, returns ``False`` — a write can
+    never blank a value). The value is canonicalized via ``normalize_brand_name``
+    (manufacturers-table aliases; miss → verbatim strip) before the ladder compare. An
+    existing brand with NULL provenance ranks at the legacy_backfill mid-tier (50).
+    ``write=False`` is the read-only dry-run twin. *card* must be session-attached
+    (add+flush first) — a detached card skips canonicalization, with a once-per-process
+    WARNING (see ``_set_brand_or_maker``).
+    """
+    return _set_brand_or_maker(card, "brand", value, source, confidence, write=write)
+
+
+def set_manufacturer(
+    card: "MaterialCard",
+    value: str | None,
+    source: str,
+    confidence: float,
+    *,
+    write: bool = True,
+) -> bool:
+    """Set ``card.manufacturer`` (the ACTUAL MAKER — Seagate Technology, Kingston
+    Technology, Hitachi/IBM) through the F1 ladder. Return ``True`` if written.
+
+    ``None``/empty/whitespace input is rejected (no-op, returns ``False`` — a write can
+    never blank a value). The value is canonicalized via ``normalize_brand_name``
+    (manufacturers-table aliases; miss → verbatim strip) before the ladder compare. An
+    existing manufacturer with NULL provenance (all legacy data) ranks at the
+    legacy_backfill mid-tier (50) — so trio_source (95) maker evidence displaces a
+    legacy OEM name, but a stray AI guess (40) cannot. ``write=False`` is the read-only
+    dry-run twin. *card* must be session-attached (add+flush first) — a detached card
+    skips canonicalization, with a once-per-process WARNING (see ``_set_brand_or_maker``).
+    """
+    return _set_brand_or_maker(card, "manufacturer", value, source, confidence, write=write)

@@ -14,20 +14,28 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
+from app.services.manufacturer_normalizer import normalize_brand_name
 from app.services.mpn_decoder import decode_mpn
 from app.services.mpn_decoder._common import DECODE_SOURCE
-from app.services.spec_tiers import set_category
+from app.services.spec_tiers import set_category, set_manufacturer
 from app.services.spec_write_service import load_schema_cache, record_spec
+
+# Confidence for the decode's MAKER write (dual-brand W4 — the vendor gate is the same
+# deterministic regex as the specs, but the maker claim is one notch below the per-spec
+# decode confidence by design: spec'd at 0.9, tier mpn_decode/85).
+MAKER_CONFIDENCE = 0.9
 
 
 def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     """Decode the MPNs of *card_ids* and write decoded specs.
 
-    Returns {decoded, written, categorized, skipped_category_conflict}.
+    Returns {decoded, written, categorized, manufacturers_set,
+    skipped_category_conflict, skipped_maker_conflict}.
     """
     decoded_cards = 0
     written = 0
     categorized = 0
+    manufacturers_set = 0
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
     # record_spec drops BOTH vocabulary-drift cases at DEBUG only (invisible at the
     # production INFO level), so the discard of decoder output is surfaced here as an
@@ -41,10 +49,17 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     dropped_out_of_enum: Counter = Counter()
     # "card_category->decoded_commodity" -> cards whose decoded commodity LOST the category
     # ladder (set_category) against a different existing category — the decoded specs are then
-    # rejected by record_spec's schema lookup, so the decode contributes nothing. A recurring
-    # pair is the signal that the category alias map (app/services/category_normalizer.py)
-    # needs another entry.
+    # rejected by record_spec's schema lookup AND the maker write is skipped (same cross-
+    # commodity guard), so the decode contributes nothing. A recurring pair is the signal
+    # that the category alias map (app/services/category_normalizer.py) needs another entry.
     skipped_category_conflict: Counter = Counter()
+    # "existing_maker->decoded_vendor" -> cards whose decode maker LOST the manufacturer
+    # ladder against a DIFFERENT existing value (e.g. decode says Samsung, card holds Hynix
+    # at vendor tier). set_manufacturer's losing path logs at DEBUG only (invisible at the
+    # production INFO level), so — exactly like skipped_category_conflict — the loss is
+    # surfaced here as an aggregate WARNING after the batch. Same-value losses (existing
+    # higher tier already agrees) are NOT conflicts and are not counted.
+    skipped_maker_conflict: Counter = Counter()
     for card_id in card_ids:
         # Per-card isolation: a single bad card must never abort decode for the rest of the batch.
         try:
@@ -77,12 +92,33 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 # (purging the old commodity's stale facets) but never overwrites a vendor/manual
                 # category.
                 did_categorize = set_category(card, result.commodity, DECODE_SOURCE, result.confidence)
-                # EXPLICIT cross-commodity guard: if the card's category (post-ladder) is not the
-                # decoded commodity, write NO specs — a drive's capacity must never land on a
-                # non-drive card. Do not rely on schema-cache keying to enforce this: the schemas
-                # overlap across commodities (capacity_gb exists for hdd/ssd/dram), so a
-                # cache-miss is an accident of plumbing, not an invariant.
-                if (card.category or "").lower().strip() != result.commodity:
+                # EXPLICIT cross-commodity guard, shared by the specs AND the W4 maker write:
+                # if the card's category (post-ladder) is not the decoded commodity, the decode's
+                # commodity claim LOST arbitration — which means the regex match itself is suspect
+                # (a false-positive scheme hit on a higher-tier-categorized card), so the decode
+                # contributes NOTHING: no specs (a drive's capacity must never land on a non-drive
+                # card) and no maker (the maker claim rides the same suspect match). Do not rely
+                # on schema-cache keying to enforce the spec half: the schemas overlap across
+                # commodities (capacity_gb exists for hdd/ssd/dram), so a cache-miss is an
+                # accident of plumbing, not an invariant.
+                category_agrees = (card.category or "").lower().strip() == result.commodity
+                did_set_maker = False
+                maker_conflict_pair = None
+                if category_agrees:
+                    # Dual-brand W4: the decode's vendor IS the actual maker (the regex gate
+                    # is manufacturer-scheme-specific), so write it through the maker ladder
+                    # at mpn_decode/0.9 — it corrects a legacy OEM label sitting in
+                    # `manufacturer` (tier 50, incl. today's unprovenanced direct vendor-API
+                    # writes, which rank 50 until that out-of-scope follow-up routes them)
+                    # but never overwrites a LADDER-ROUTED vendor-API (90) / trio_source (95)
+                    # / manual (100) value.
+                    existing_maker = card.manufacturer
+                    did_set_maker = set_manufacturer(card, result.vendor, DECODE_SOURCE, MAKER_CONFIDENCE)
+                    if not did_set_maker and existing_maker:
+                        incoming_maker = normalize_brand_name(db, result.vendor)
+                        if existing_maker != incoming_maker:
+                            maker_conflict_pair = f"{existing_maker}->{incoming_maker}"
+                if not category_agrees:
                     card_written = 0
                 else:
                     card_written = sum(
@@ -101,11 +137,16 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             # Reached only on a clean savepoint release — so a rolled-back card contributes nothing.
             decoded_cards += 1
             written += card_written
+            if did_set_maker:
+                manufacturers_set += 1
+            if maker_conflict_pair:
+                skipped_maker_conflict[maker_conflict_pair] += 1
             if did_categorize:
                 categorized += 1
             elif card_cat and card_cat != result.commodity:
                 # The category write lost the ladder against a DIFFERENT existing category —
-                # the decoded specs were rejected too (schema mismatch), so surface the pair.
+                # the decoded specs AND the W4 maker write were skipped too (shared
+                # cross-commodity guard), so surface the pair.
                 skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
         except Exception:
             logger.exception("mpn-decode: failed on card_id={}", card_id)
@@ -126,6 +167,14 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             sum(skipped_category_conflict.values()),
             dict(skipped_category_conflict),
         )
+    if skipped_maker_conflict:
+        logger.warning(
+            "mpn-decode: {} cards kept their existing manufacturer — the decode maker lost the "
+            "ladder against a DIFFERENT existing value for {} (a recurring pair is a genuine "
+            "data-conflict signal: check the card's higher-tier maker evidence vs the MPN scheme)",
+            sum(skipped_maker_conflict.values()),
+            dict(skipped_maker_conflict),
+        )
     if written or categorized:
         logger.info(
             "mpn-decode: wrote {} specs across {} cards ({} newly categorized)",
@@ -137,5 +186,7 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
         "decoded": decoded_cards,
         "written": written,
         "categorized": categorized,
+        "manufacturers_set": manufacturers_set,
         "skipped_category_conflict": sum(skipped_category_conflict.values()),
+        "skipped_maker_conflict": sum(skipped_maker_conflict.values()),
     }

@@ -931,3 +931,75 @@ def test_faceted_q_without_crosswalk_hit_renders_no_fru_section(client, db_sessi
     assert resp.status_code == 200
     assert "fru-crosswalk" not in resp.text
     assert "FRU matrix" not in resp.text
+
+
+def test_faceted_route_manufacturers_param_matches_brand_or_maker(client, db_session):
+    """Back-compat round-trip (dual-brand): the WIRE param keeps its legacy name —
+    sub_filters={"manufacturers":[...]} — and the route's OR predicate now matches a
+    value sitting in EITHER column.
+
+    Old bookmarks are a strict superset match.
+    """
+    import json
+
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="st300mp0016",
+            display_mpn="ST300MP0016",
+            brand="IBM",
+            manufacturer="Seagate Technology",
+            category="hdd",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="other-dram",
+            display_mpn="OTHER-DRAM",
+            manufacturer="Samsung",
+            category="dram",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    # Filtering by the OEM label finds the card (brand column)...
+    resp_label = client.get("/v2/partials/materials/faceted?sub_filters=" + json.dumps({"manufacturers": ["IBM"]}))
+    assert resp_label.status_code == 200
+    assert "ST300MP0016" in resp_label.text
+    assert "OTHER-DRAM" not in resp_label.text
+
+    # ...and filtering by the actual maker finds the SAME card (manufacturer column).
+    resp_maker = client.get(
+        "/v2/partials/materials/faceted?sub_filters=" + json.dumps({"manufacturers": ["Seagate Technology"]})
+    )
+    assert resp_maker.status_code == 200
+    assert "ST300MP0016" in resp_maker.text
+
+    # Result row renders the dual display: label · maker.
+    assert "IBM · Seagate Technology" in resp_maker.text
+
+
+def test_faceted_row_suppresses_tautological_alias_dual_display(client, db_session):
+    """B1 leaves the raw alias in manufacturer while brand holds the canonical OEM — the
+    dual cell compares NORMALIZED forms, so the same company in two forms renders once
+    ("Hewlett Packard Enterprise"), never "Hewlett Packard Enterprise · HP"."""
+    from app.models import Manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Hewlett Packard Enterprise", aliases=["HP", "HPE"]))
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="hp-alias-card",
+            display_mpn="HP-ALIAS-CARD",
+            brand="Hewlett Packard Enterprise",  # B1 wrote the normalized OEM label
+            manufacturer="HP",  # raw legacy alias, lossless by design
+            category="hdd",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    assert "Hewlett Packard Enterprise" in resp.text
+    assert "Hewlett Packard Enterprise · HP" not in resp.text

@@ -886,7 +886,15 @@ owns arbitration in one place:
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode" (tier 85), confidence 0.95
-       (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
+       (settings.mpn_decode_enabled). Category via spec_tiers.set_category; the
+       decode's vendor (the actual MAKER — the regex gate is manufacturer-scheme-
+       specific) via spec_tiers.set_manufacturer at mpn_decode/0.9 (dual-brand W4).
+       The maker write shares the specs' cross-commodity guard: when the decoded
+       commodity LOSES the category ladder, the regex match itself is suspect, so
+       the decode contributes NOTHING (no specs, no maker). A maker write that loses
+       arbitration against a DIFFERENT existing value is counted
+       (skipped_maker_conflict) and WARNed after the batch, mirroring
+       skipped_category_conflict.
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
        crosswalk enrichment: ONE pass, TWO evidence channels over the same single
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
@@ -1051,29 +1059,91 @@ set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB
     +---> write=False = read-only twin (same verdict, zero mutation) — used by the
           SP-Ingest dry run so its report can't drift from --apply
 
+set_brand(card, value, source, confidence, write=True) -> bool        # dual-brand, mig 097
+set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-brand, mig 097
+    +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
+    |     manufacturer = the ACTUAL MAKER (Seagate Technology, Hitachi/IBM verbatim)
+    +---> None/empty/whitespace → no-op False (a write can never blank a value)
+    +---> normalize_brand_name(db, value) (manufacturer_normalizer.py — manufacturers-
+    |     table canonical_name+aliases, per-process cache, miss → verbatim strip;
+    |     writers NEVER normalize themselves)
+    +---> identical F1 ladder via the shared _set_provenanced_column (generic over the
+          column prefix — set_category delegates to it too, behavior unchanged incl.
+          the stale-commodity purge); valued-but-NULL-provenance existing ranks at the
+          legacy floor 50; write=False dry-run twins. No new SOURCE_TIER entries —
+          all dual-brand writers use already-registered sources.
+
 record_validation_conflict(card, key, existing_prov, incoming_prov, incoming_value) -> bool
     # The validation-contract choke point (on-add enrichment, migration 099). Called from
-    # the LOSE branches of record_spec (spec_write_service) and set_category (write=True
-    # only) — i.e. AFTER the ladder already kept the existing value. Gates (all here, so
-    # call sites stay dumb): existing source == "manual"; incoming tier >= 80 (the
-    # authoritative band — web 70 / brokerbin 65 / ai 40 never challenge a human);
-    # normalized values differ (numerics as float, strings casefolded — corroboration is
-    # never stored, and a same-source observation that now AGREES with the manual value
-    # REMOVES that source's stale entry: deterministic sources re-fire every pass, so a
-    # fixed decoder/corrected description unflags the card). Appends to
+    # the LOSE branches of record_spec (spec_write_service) and _set_provenanced_column
+    # (write=True only) — i.e. AFTER the ladder already kept the existing value. The hook
+    # lives in _set_provenanced_column because that is where ladder losses for ALL
+    # provenanced columns are decided, so it covers category AND brand/manufacturer
+    # (manual maker edits exist — update_material/add_material route them through
+    # set_manufacturer at manual/100 — so they carry the same flagging contract).
+    # Gates (all here, so call sites stay dumb): existing source == "manual"; incoming
+    # tier >= 80 (the authoritative band — web 70 / brokerbin 65 / ai 40 never challenge
+    # a human); normalized values differ (numerics as float, strings casefolded —
+    # corroboration is never stored, and a same-source observation that now AGREES with
+    # the manual value REMOVES that source's stale entry: deterministic sources re-fire
+    # every pass, so a fixed decoder/corrected description unflags the card). Appends to
     # card.validation_conflicts (de-dupe per (key, evidence.source), newest replaces) +
     # sets has_validation_conflict. Arbitration is UNCHANGED — the manual value always
     # survives; this only persists the contradiction.
 
 clear_validation_conflicts(card, key) -> bool
     # Drops every entry for *key* and recomputes has_validation_conflict. Called by the
-    # PUT updates when the field is re-asserted (routers/materials.py::update_material,
-    # htmx_views::update_material_card — category), by POST /api/materials/add when an
-    # existing card's category is manually re-asserted through the modal, and by the
-    # conflict-accept route (only after a SUCCESSFUL write — see below). A commodity
-    # flip's _purge_stale_commodity_data also drops entries keyed by the purged spec
-    # keys (orphans — their manual values were just removed) and recomputes the flag.
+    # PUT updates when the field is re-asserted (routers/materials.py::update_material —
+    # category + manufacturer, htmx_views::update_material_card — category), by POST
+    # /api/materials/add when an existing card's category or manufacturer is manually
+    # re-asserted through the modal, and by the conflict-accept route (only after a
+    # SUCCESSFUL write — see below). A commodity flip's _purge_stale_commodity_data also
+    # drops entries keyed by the purged spec keys (orphans — their manual values were
+    # just removed) and recomputes the flag.
 ```
+
+Dual-brand writers (W1-W7 — every write regex-gated or source-backed, never guessed):
+| # | Evidence | Field | Source/tier | Conf | Where |
+|---|---|---|---|---|---|
+| W1 | `fru_links` `rel_kind='mfg_model'` rows with a manufacturer, joined on `normalized_mpn = related_norm` | manufacturer | `trio_source`/95 | 0.9 | backfill B2 + ingest |
+| W2 | Description trailing token ∈ `OEM_TRAILING_RE` (IBM\|Dell\|HP\|HPE\|Lenovo) | brand | `desc_parse`/83 | 0.85 | backfill B3 + clean.py routing |
+| W3 | Description trailing token ∈ `MAKER_TRAILING_RE` (Seagate\|Kingston\|Samsung) | manufacturer | `desc_parse`/83 | 0.85 | backfill B3 |
+| W4 | Deterministic MPN decode vendor (skipped when the decode's commodity LOSES the category ladder — shared cross-commodity guard) | manufacturer | `mpn_decode`/85 | 0.9 | `mpn_decoder/writer.py` going-forward |
+| W5 | Legacy `manufacturer` value ∈ `OEM_BRANDS` | copy → brand (manufacturer NOT cleared) | `legacy_backfill`/50 | 0.5 | backfill B1 |
+| W6 | TRIO ingest sheet columns | both | `trio_source`/95 | 0.9 | `source_ingest/ingest.py` |
+| W7 | Manual edit (PUT `/api/materials/{id}`, Add-part modal) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` + `add_material` (wins also clear the key's validation conflicts — a manual re-assert resolves the flag) |
+
+Ladder losses are NOT silent for the going-forward writers: W4 surfaces
+`skipped_maker_conflict` (writer stats + batch WARNING) and W6 surfaces
+`brand_conflicts`/`manufacturer_conflicts` (ingest stats + batch WARNING) whenever a
+non-empty incoming value loses to a DIFFERENT existing value (same-value losses are
+agreement, not conflict). Card MERGE (`material_card_service.merge_material_cards`)
+carries the source card's brand + manufacturer through `set_brand`/`set_manufacturer`
+with the source card's STORED provenance (legacy floor when unprovenanced) — the ladder
+arbitrates target-vs-source and the outcome is logged at INFO (the losing value is
+destroyed with the merged-away card).
+
+Backfill command: `python -m app.management.backfill_dual_brand [--apply]` — dry-run by
+DEFAULT (write=False twins + an overlay mirroring apply's sequential writes, so dry
+tallies == apply tallies); four ordered passes B1→B2→B3→B4 with SAVEPOINT-per-card;
+soft-deleted cards are excluded from every pass; B2 reports winning link rows
+(`links_won`) AND distinct cards (`manufacturers_set`); B3's `matched` ==
+brands_set+manufacturers_set+skipped+missing_cards+failed; B4 prints the 9 known
+dual-coverage cards and exits non-zero unless ST300MP0016 ends brand=IBM ∧
+manufacturer=Seagate Technology. Run post-merge-deploy, never at startup.
+
+Facet flow (combined "Brand" facet — heading-only rename of the manufacturers partial):
+`get_manufacturer_options()` = UNION ALL over brand+manufacturer, COUNT(DISTINCT id)
+(a card with brand == manufacturer counts once; commodity scope applies inside BOTH
+branches); `search_materials_faceted(manufacturers=[...])` ORs
+`manufacturer.in_() | brand.in_()` — OR-within-facet, AND-across-facets. Wire format
+unchanged (`sub_filters={"manufacturers":[...]}`; the router pop and Alpine
+`subFilters.manufacturers` are untouched — old bookmarks are a strict superset match).
+Result rows render `brand · manufacturer` ("IBM · Seagate Technology") when both set
+and DIFFERENT COMPANIES — the view (htmx_views materials list) compares NORMALIZED
+forms (`normalize_brand_name`) and annotates `_show_maker_suffix`, so a B1 alias pair
+("Hewlett Packard Enterprise" in brand, raw "HP" in manufacturer) renders once, never
+as a tautological dual display (materials/list.html).
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
 `mpn_decoder/writer.py` (decode category via `set_category`, tier 85),
@@ -1167,20 +1237,24 @@ Validation conflicts (storage: material_cards.validation_conflicts JSONB +
   has_validation_conflict + partial index, migration 099; write hook:
   spec_tiers.record_validation_conflict — see the spec_tiers contract above):
   V1 decode-vs-manual spec keys (the decoder writes, the ladder rejects, the hook
-  records); V2 manual category vs regex-gated decoded commodity (set_category hook;
-  the decoder's cross-commodity guard is unchanged); V3 = the intake rejections above.
+  records); V2 manual category/brand/manufacturer vs an authoritative writer
+  (_set_provenanced_column hook — covers every provenanced column, so manual maker
+  edits carry the same contract; the decoder's cross-commodity guard is unchanged);
+  V3 = the intake rejections above.
   Surfacing: amber "Needs review — N conflict(s)" hero badge + per-key warning rows in
   the detail Specifications panel with tooltip ("Manual value kept. <source> reported
   <value> (conf <c>) on <date>") and an "Use this value" button →
   POST /v2/partials/materials/{id}/conflicts/{key}/accept (writes the evidence value at
-  manual/100 — a human decision — and clears the key's entries ONLY when the write
-  succeeded; a no-op write — off-vocab category, schema gone after a commodity flip,
+  manual/100 — a human decision — via set_category / set_brand / set_manufacturer /
+  record_spec per key, and clears the key's entries ONLY when the write succeeded; a
+  no-op write — off-vocab category, schema gone after a commodity flip,
   enum/numeric rejection — keeps the entry and surfaces a showToast warning instead of
   silently destroying the only record of the contradiction). Clearing: any PUT
   re-assertion of a conflicted field clears that key (the JSON PUT rejects off-vocab /
-  blank categories with 422 — never a silent drop); a re-add through the modal clears
-  the category key the same way; a commodity flip purges entries keyed by the purged
-  spec keys; empty list → flag false.
+  blank categories with 422 — never a silent drop; a manufacturer carried by the PUT
+  or the Add-part modal clears its key on a ladder win the same way); a re-add through
+  the modal clears the category key the same way; a commodity flip purges entries
+  keyed by the purged spec keys; empty list → flag false.
   Review queue: "Needs review" checkbox in filters/global.html →
   `has_validation_conflict=true` validated in the faceted route → query branch in
   faceted_search_service (backed by the partial index).
@@ -1201,10 +1275,14 @@ clean.py       — clean_record: MPN suffix strip + dedup key (normalize_mpn_key
     |            _x000D_/control scrub, condition → constants.MaterialCondition
     |            (None when the source carries none — NEVER a synthetic "Unknown"),
     |            normalize_trio_category (TRIO-scoped codes, e.g. bare "Memory"→dram),
-    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops
+    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops.
+    |            Dual-brand routing: a trailing description token matching
+    |            OEM_TRAILING_RE → record.brand (OEM label, never a maker); any other
+    |            plausible trailing token fills manufacturer when absent (legacy
+    |            behavior). Brand is never inferred beyond that literal regex.
     v
 consolidate.py — group by normalized_mpn → ConsolidatedPart per MPN (longest desc,
-    |            modal manufacturer/condition, highest-priority-kind category,
+    |            modal manufacturer/brand/condition, highest-priority-kind category,
     |            qty sum, sfdc_master>inventory_sheet spec merge); un-cleaned
     |            records (empty dedup key) are counted + WARNed, never silent
     v
@@ -1216,12 +1294,15 @@ ai_correct.py  — OPTIONAL (--ai-correct): one Claude call per part under the
     |            toward the abort streak; corrected counts only applied results
     v
 ingest.py      — AUGMENT material_cards: category via set_category (trio_source:95 /
-                 trio_source_ai:88), specs via record_spec, description/condition
-                 fill-only-when-empty ("Unknown" == empty). Per-card SAVEPOINTs;
-                 tallies merge only after a clean release; failed parts counted +
-                 sampled in the report. apply=False (DEFAULT) = dry run through the
-                 SAME gates (set_category(write=False) + spec_would_write) so the
-                 go/no-go report matches --apply exactly.
+                 trio_source_ai:88), manufacturer + brand via set_manufacturer/
+                 set_brand (trio_source:95, conf 0.9 — dual-brand W6; the new-card
+                 constructor no longer writes manufacturer directly), specs via
+                 record_spec, description/condition fill-only-when-empty ("Unknown"
+                 == empty). Per-card SAVEPOINTs; tallies merge only after a clean
+                 release; failed parts counted + sampled in the report. apply=False
+                 (DEFAULT) = dry run through the SAME gates (set_category/set_brand/
+                 set_manufacturer write=False + spec_would_write) so the go/no-go
+                 report matches --apply exactly.
 ```
 
 ```

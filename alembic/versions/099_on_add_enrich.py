@@ -18,12 +18,12 @@ What: Adds the three material_cards columns the on-add enrichment feature needs:
           a tiny minority, so a full index would be ~all-false dead weight.
       Rollback drops both indexes and all three columns.
 Called by: alembic (upgrade/downgrade).
-Depends on: 098_materials_perf_idx (current main head — re-chained from
-      096_spec_provenance when #262 merged mid-build; the unmerged wave-4 sibling
-      holding 097_dual_brand re-chains onto this when it merges).
+Depends on: 097_dual_brand (current main head — re-chained from 098_materials_perf_idx
+      when #263 merged; before that from 096_spec_provenance when #262 merged
+      mid-build).
 
 Revision ID: 099_on_add_enrich
-Revises: 098_materials_perf_idx
+Revises: 097_dual_brand
 Create Date: 2026-06-10
 """
 
@@ -33,7 +33,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from alembic import op
 
 revision = "099_on_add_enrich"
-down_revision = "098_materials_perf_idx"
+down_revision = "097_dual_brand"
 branch_labels = None
 depends_on = None
 

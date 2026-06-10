@@ -2,7 +2,8 @@
 enrichment).
 
 Covers: spec_tiers.record_validation_conflict / clear_validation_conflicts, the
-record_spec lose-branch hook, the set_category lose-branch hook, manual/100 apex
+record_spec lose-branch hook, the _set_provenanced_column lose-branch hook (category
+AND brand/manufacturer — the hook covers every provenanced column), manual/100 apex
 survival across every lower tier, (key, source) de-dupe, equal-value no-op, and
 clearing via the PUT update + conflict-accept routes.
 Depends on: conftest.py (db_session, client), spec_write_service, spec_tiers.
@@ -414,3 +415,130 @@ def test_category_flip_purges_orphaned_spec_conflicts(db_session: Session):
     # And when the purge removes the LAST entry, the flag drops too.
     clear_validation_conflicts(card, "category")
     assert not card.has_validation_conflict
+
+
+# --- Brand / manufacturer (the hook lives in _set_provenanced_column, so the same
+# --- contract covers every provenanced column, not just category) ---------------
+
+
+def test_set_manufacturer_conflict_on_manual_vs_decode(db_session: Session):
+    """An authoritative decode maker that loses to a manual manufacturer records a
+    conflict on key='manufacturer' — same contract as category."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)
+    assert set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    assert not set_manufacturer(card, "Samsung", "mpn_decode", 0.95)
+
+    assert card.manufacturer == "Seagate Technology"
+    (entry,) = card.validation_conflicts
+    assert entry["key"] == "manufacturer"
+    assert entry["manual"]["value"] == "Seagate Technology"
+    assert entry["evidence"] == {
+        **entry["evidence"],
+        "source": "mpn_decode",
+        "tier": 85,
+        "value": "Samsung",
+    }
+    assert card.has_validation_conflict
+
+
+def test_set_brand_conflict_on_manual_vs_desc_parse(db_session: Session):
+    """A desc_parse (tier 83, authoritative band) brand that loses to a manual brand
+    records a conflict on key='brand'."""
+    from app.services.spec_tiers import set_brand
+
+    card = _make_card(db_session)
+    assert set_brand(card, "IBM", "manual", 1.0)
+    assert not set_brand(card, "Dell", "desc_parse", 0.85)
+
+    assert card.brand == "IBM"
+    (entry,) = card.validation_conflicts
+    assert entry["key"] == "brand"
+    assert entry["manual"]["value"] == "IBM"
+    assert entry["evidence"]["source"] == "desc_parse"
+    assert card.has_validation_conflict
+
+
+def test_set_manufacturer_low_tier_loss_never_flags(db_session: Session):
+    """An ai_guess (tier 40) losing to a manual manufacturer does NOT flag."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)
+    set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    set_manufacturer(card, "Samsung", "ai_guess", 0.99)
+
+    assert card.manufacturer == "Seagate Technology"
+    assert not (card.validation_conflicts or [])
+    assert not card.has_validation_conflict
+
+
+def test_set_manufacturer_dry_run_never_mutates_conflicts(db_session: Session):
+    """Write=False is the read-only twin — no conflict entries either."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)
+    set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    set_manufacturer(card, "Samsung", "mpn_decode", 0.95, write=False)
+
+    assert not (card.validation_conflicts or [])
+    assert not card.has_validation_conflict
+
+
+def test_legacy_unprovenanced_manufacturer_never_flags(db_session: Session):
+    """_make_card's direct manufacturer write has NULL provenance (legacy floor 50,
+    source NULL ≠ 'manual') — a write that loses against it must NOT flag.
+
+    (Only low-tier writes can lose to the floor; both gates reject here.)
+    """
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)  # manufacturer="TestCo", no provenance
+    set_manufacturer(card, "Samsung", "ai_guess", 0.2)  # loses to the legacy floor
+
+    assert card.manufacturer == "TestCo"
+    assert not (card.validation_conflicts or [])
+    assert not card.has_validation_conflict
+
+
+def test_put_update_clears_manufacturer_conflict(client, db_session: Session):
+    """A PUT carrying the manufacturer re-asserts it — the conflict clears even when the
+    value is unchanged (same clearing contract as category)."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)
+    set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    set_manufacturer(card, "Samsung", "mpn_decode", 0.95)  # loses, records the conflict
+    db_session.commit()
+    assert card.has_validation_conflict
+
+    resp = client.put(f"/api/materials/{card.id}", json={"manufacturer": "Seagate Technology"})
+    assert resp.status_code == 200
+    db_session.flush()
+    assert card.manufacturer == "Seagate Technology"
+    assert not card.has_validation_conflict
+    assert card.validation_conflicts == []
+
+
+def test_accept_route_writes_manual_manufacturer_and_clears(client, db_session: Session):
+    """POST .../conflicts/manufacturer/accept adopts the evidence maker at manual/100
+    via set_manufacturer (NOT record_spec — there is no spec schema for the dual-brand
+    columns) and clears the key's entries."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _make_card(db_session)
+    set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    set_manufacturer(card, "Samsung", "mpn_decode", 0.95)  # loses, records the conflict
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/materials/{card.id}/conflicts/manufacturer/accept",
+        data={"source": "mpn_decode"},
+    )
+    assert resp.status_code == 200
+    db_session.flush()
+    assert card.manufacturer == "Samsung"
+    assert card.manufacturer_source == "manual"  # a human decision
+    assert card.manufacturer_tier == 100
+    assert not card.has_validation_conflict
+    assert card.validation_conflicts == []

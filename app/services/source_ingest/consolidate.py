@@ -2,8 +2,9 @@
 ConsolidatedPart.
 
 What: ``consolidate`` groups cleaned SourceRecords by ``normalized_mpn`` and picks the best
-      value per field with provenance — description = longest non-empty; manufacturer = modal
-      (most common) non-empty; category = the highest-priority source-kind's non-empty value
+      value per field with provenance — description = longest non-empty; manufacturer and
+      brand (OEM label) = modal (most common) non-empty; category = the highest-priority
+      source-kind's non-empty value
       (sfdc_master > inventory_sheet unconditionally, first-seen within a kind); condition =
       most common; quantity = sum; specs = merged with SFDC-master values winning over
       inventory-sheet values. For the modal/longest fields, source-kind priority
@@ -105,6 +106,13 @@ def _consolidate_group(records: list[SourceRecord]) -> ConsolidatedPart:
     if mfr_kind:
         field_sources["manufacturer"] = mfr_kind
 
+    # Brand (OEM label) — picked exactly like manufacturer: modal non-empty, source-kind
+    # priority tie-break. Records only ever carry a brand from an explicit source column
+    # or an OEM_TRAILING_RE description match (clean.py) — never inferred.
+    brand, brand_kind = _modal_nonempty([(r.brand or "", r.source_kind) for r in records])
+    if brand_kind:
+        field_sources["brand"] = brand_kind
+
     cat, cat_kind = _first_nonempty([(r.category or "", r.source_kind) for r in records])
     if cat_kind:
         field_sources["category"] = cat_kind
@@ -134,6 +142,7 @@ def _consolidate_group(records: list[SourceRecord]) -> ConsolidatedPart:
         normalized_mpn=records[0].normalized_mpn,
         raw_mpn=display or records[0].raw_mpn,
         manufacturer=mfr,
+        brand=brand,
         description=desc,
         condition=cond,
         quantity=quantity,

@@ -54,6 +54,10 @@ def test_add_part_creates_card_runs_passes_and_stamps(client, db_session: Sessio
     assert card.category == "dram"
     assert card.category_source == "manual"
     assert card.category_tier == 100
+    # Manufacturer entered the F1 ladder too (set_manufacturer — durable column
+    # provenance, not just the enrichment_provenance JSONB mirror).
+    assert card.manufacturer_source == "manual"
+    assert card.manufacturer_tier == 100
     # manual/100 provenance stamped for every supplied field.
     for field in ("manufacturer", "description", "condition", "category"):
         entry = card.enrichment_provenance[field]
@@ -201,6 +205,37 @@ def test_readd_with_category_clears_conflict(client, db_session: Session):
     assert resp.status_code == 200
     db_session.refresh(card)
     assert card.category == "dram"
+    assert not card.has_validation_conflict
+    assert (card.validation_conflicts or []) == []
+
+
+def test_readd_with_manufacturer_clears_conflict(client, db_session: Session):
+    """Re-adding an existing conflicted card with a manufacturer is a manual re-
+    assertion — same clearing contract as category (the hook lives in
+    _set_provenanced_column, so manufacturer carries the full conflict contract)."""
+    from app.services.spec_tiers import set_manufacturer
+
+    card = MaterialCard(
+        normalized_mpn="zztestpart56",
+        display_mpn="ZZTESTPART-56",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.flush()
+    set_manufacturer(card, "Seagate Technology", "manual", 1.0)
+    set_manufacturer(card, "Samsung", "mpn_decode", 0.95)  # loses, records the conflict
+    db_session.commit()
+    assert card.has_validation_conflict
+
+    resp = client.post(
+        "/api/materials/add",
+        data={"mpn": "ZZTESTPART-56", "manufacturer": "Seagate Technology"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "Seagate Technology"
+    assert card.manufacturer_source == "manual"
+    assert card.manufacturer_tier == 100
     assert not card.has_validation_conflict
     assert (card.validation_conflicts or []) == []
 

@@ -311,6 +311,49 @@ def test_update_material(client, db_session, test_material_card):
     assert data["manufacturer"] == "STMicroelectronics"
 
 
+def test_update_material_manufacturer_is_manual_tier_and_durable(client, db_session, test_material_card):
+    """The manual edit routes through the F1 ladder at manual/100: provenance is
+    stamped, so a later background writer (decode 85 / trio re-ingest 95) can never
+    silently revert the human's correction — the durability regression a direct
+    `card.manufacturer = ...` write would reintroduce."""
+    from app.services.spec_tiers import set_manufacturer
+
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "Seagate Technology"},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Seagate Technology"
+    assert test_material_card.manufacturer_source == "manual"
+    assert test_material_card.manufacturer_tier == 100
+    assert test_material_card.manufacturer_confidence == 1.0
+
+    # A trio re-ingest (95) and a decode (85) both LOSE against the manual edit.
+    assert set_manufacturer(test_material_card, "IBM", "trio_source", 0.9) is False
+    assert set_manufacturer(test_material_card, "Samsung", "mpn_decode", 0.9) is False
+    assert test_material_card.manufacturer == "Seagate Technology"
+
+
+def test_update_material_empty_manufacturer_never_blanks(client, db_session, test_material_card):
+    """A write can never blank a value: an empty/whitespace manufacturer in the manual
+    edit is a no-op (set_manufacturer rejects it), never a silent blanking."""
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "Seagate Technology"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "   "},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Seagate Technology"  # unchanged
+
+
 def test_update_material_not_found(client):
     """PUT /api/materials/99999 returns 404."""
     resp = client.put(

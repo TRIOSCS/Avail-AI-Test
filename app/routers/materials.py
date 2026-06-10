@@ -40,6 +40,7 @@ from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
 )
 from ..services.price_snapshot_service import record_price_snapshot
+from ..services.spec_tiers import set_manufacturer
 from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 from ..utils.search_builder import SearchBuilder
@@ -171,8 +172,14 @@ async def add_material(
     # Manual/100 writes — blank = blank (never default, suggest, or copy values).
     written: list[str] = []
     if manufacturer:
-        card.manufacturer = manufacturer
-        written.append("manufacturer")
+        # Through the F1 ladder at manual/100 — same durability contract as the PUT
+        # path: a direct write would leave NULL provenance (legacy floor 50) and be
+        # silently reverted by the next decode/ingest. Canonicalizes via the alias table.
+        if set_manufacturer(card, manufacturer, "manual", 1.0):
+            written.append("manufacturer")
+            # A manual (re-)assertion resolves any recorded manufacturer conflict —
+            # same clearing semantics as category below.
+            clear_validation_conflicts(card, "manufacturer")
     if description:
         card.description = description
         written.append("description")
@@ -397,8 +404,16 @@ async def update_material(
         raise HTTPException(404, "Material not found")
     written: list[str] = []
     if data.manufacturer is not None:
-        card.manufacturer = data.manufacturer
-        written.append("manufacturer")
+        # Through the F1 ladder at manual/100 (the top tier): a human correction must be
+        # DURABLE — a direct `card.manufacturer = ...` write would leave NULL provenance,
+        # rank at the legacy floor (50), and be silently reverted by the next decode (85)
+        # or trio re-ingest (95). set_manufacturer also canonicalizes via the alias table
+        # and rejects empty/whitespace (a write can never blank a value).
+        if set_manufacturer(card, data.manufacturer, "manual", 1.0):
+            written.append("manufacturer")
+            # A manual (re-)assertion resolves any recorded manufacturer conflict —
+            # same clearing contract as category below.
+            clear_validation_conflicts(card, "manufacturer")
     if data.description is not None:
         card.description = data.description
         written.append("description")
