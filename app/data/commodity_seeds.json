@@ -3428,6 +3428,20 @@
       "spec_key": "socket",
       "display_name": "Socket",
       "data_type": "enum",
+      "enum_values": [
+        "LGA1150",
+        "LGA1151",
+        "LGA1155",
+        "LGA1200",
+        "LGA2011",
+        "LGA2011-3",
+        "LGA3647",
+        "LGA4189",
+        "SP3",
+        "SP5",
+        "AM4",
+        "AM5"
+      ],
       "sort_order": 1,
       "is_primary": true
     },
@@ -3437,6 +3451,10 @@
       "data_type": "numeric",
       "unit": "cores",
       "canonical_unit": "cores",
+      "numeric_range": {
+        "min": 1,
+        "max": 256
+      },
       "sort_order": 2,
       "is_primary": true
     },
@@ -3446,6 +3464,10 @@
       "data_type": "numeric",
       "unit": "GHz",
       "canonical_unit": "GHz",
+      "numeric_range": {
+        "min": 0.5,
+        "max": 6.0
+      },
       "sort_order": 3
     },
     {
@@ -3454,12 +3476,32 @@
       "data_type": "numeric",
       "unit": "W",
       "canonical_unit": "W",
+      "numeric_range": {
+        "min": 10,
+        "max": 500
+      },
       "sort_order": 4
     },
     {
       "spec_key": "architecture",
       "display_name": "Architecture",
       "data_type": "enum",
+      "enum_values": [
+        "Sandy Bridge",
+        "Ivy Bridge",
+        "Haswell",
+        "Broadwell",
+        "Skylake",
+        "Kaby Lake",
+        "Coffee Lake",
+        "Cascade Lake",
+        "Comet Lake",
+        "Ice Lake",
+        "Zen",
+        "Zen 2",
+        "Zen 3",
+        "Zen 4"
+      ],
       "sort_order": 5
     },
     {
