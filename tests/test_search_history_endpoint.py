@@ -2,8 +2,10 @@
 
 Covers the part-history states (found / empty / error / unauthenticated) and the
 compact FRU-crosswalk context card: forward hit (searched MPN is a FRU — summary
-counts + top mfg models), reverse hit ("Used in N FRUs" + top FRU numbers), the
-materials-surface deep link, and silence when fru_links has no match.
+counts + top mfg models), reverse hit ("Used in N FRUs" distinct count + top FRU
+numbers), both-direction hits, the materials-surface deep link, silence when
+fru_links has no match, scoped degradation when only the FRU lookups fail, and
+the softened empty-history copy for crosswalk-known parts.
 
 Called by: pytest.
 Depends on: part_history_service, fru_matrix_service, the search_history_panel
@@ -13,6 +15,7 @@ Depends on: part_history_service, fru_matrix_service, the search_history_panel
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -90,6 +93,29 @@ def test_service_failure_renders_error_panel_not_500(client: TestClient, db_sess
     assert "FRU crosswalk" not in resp.text  # error panel carries no crosswalk context
 
 
+@pytest.mark.parametrize("failing_fn", ["get_fru_view", "get_reverse_context"])
+def test_fru_context_failure_keeps_history_card(client: TestClient, db_session: Session, monkeypatch, failing_fn: str):
+    """The FRU crosswalk card is ADDITIVE: a crosswalk lookup failure degrades to
+    'no crosswalk card' — it must never discard a successfully loaded history or
+    render the amber history-error panel."""
+    import app.services.fru_matrix_service as fru_svc
+
+    card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="TI", search_count=0)
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("fru_links exploded")
+
+    monkeypatch.setattr(fru_svc, failing_fn, _boom)
+    resp = client.get("/v2/partials/search/history?mpn=LM317T", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert f"/v2/materials/{card.id}" in resp.text  # history card still renders
+    assert "could not be loaded" not in resp.text.lower()  # no false error panel
+    assert "FRU crosswalk" not in resp.text  # crosswalk card silently degrades
+
+
 class TestFruCrosswalkContext:
     """Compact FRU-crosswalk card in the 'What we know' panel."""
 
@@ -105,7 +131,7 @@ class TestFruCrosswalkContext:
         assert resp.status_code == 200
         assert "FRU crosswalk" in resp.text
         assert "is a FRU" in resp.text
-        assert "2 approved drives · 1 11S number · 1 tray" in resp.text
+        assert "1 drive PN · 1 model · 1 11S number · 1 tray" in resp.text
         # Top mfg-model chip with its manufacturer.
         assert "ST9300603SS" in resp.text
         assert "Seagate" in resp.text
@@ -146,11 +172,47 @@ class TestFruCrosswalkContext:
 
         resp = client.get("/v2/partials/search/history?mpn=44T2216", headers={"HX-Request": "true"})
         assert resp.status_code == 200
-        assert ">5</span>" in resp.text  # uncapped total
+        assert ">5</span>" in resp.text  # uncapped distinct-FRU count
         for fru in ("00AJ001", "00AJ002", "00AJ003"):
             assert fru in resp.text
         assert "00AJ004" not in resp.text
         assert "00AJ005" not in resp.text
+
+    def test_reverse_hit_counts_distinct_frus_not_roles(self, client: TestClient, db_session: Session):
+        """One FRU under two roles + one other FRU = 'Used in 2 FRUs', matching the FRU-
+        deduplicated chips (NOT 3, the (FRU, role) usage count)."""
+        _seed_fru_link(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY)
+        _seed_fru_link(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY_ALT)
+        _seed_fru_link(db_session, fru="00AJ002", related="44T2216", kind=FruLinkKind.TRAY)
+
+        resp = client.get("/v2/partials/search/history?mpn=44T2216", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert ">2</span>" in resp.text
+        assert ">3</span>" not in resp.text
+
+    def test_both_direction_hit_renders_forward_and_reverse_sections(self, client: TestClient, db_session: Session):
+        """A part that IS a FRU and ALSO appears under other FRUs (e.g. a nested
+        assembly) renders both sections in the one crosswalk card."""
+        _seed_fru_link(db_session, fru="00AJ001", related="ST9300603SS")
+        _seed_fru_link(db_session, fru="42D0638", related="00AJ001", kind=FruLinkKind.ASSEMBLY)
+
+        resp = client.get("/v2/partials/search/history?mpn=00AJ001", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "FRU crosswalk" in resp.text
+        assert "is a FRU" in resp.text  # forward section
+        assert "Used in" in resp.text  # reverse section
+        assert "42D0638" in resp.text
+
+    def test_crosswalk_only_part_softens_empty_history_copy(self, client: TestClient, db_session: Session):
+        """A crosswalk-known part without trading history must not claim to 'look new to
+        us' directly above a card proving we know it."""
+        _seed_fru_link(db_session, fru="00AJ001", related="ST9300603SS")
+
+        resp = client.get("/v2/partials/search/history?mpn=00AJ001", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        assert "FRU crosswalk" in resp.text
+        assert "No trading history yet" in resp.text
+        assert "looks new" not in resp.text.lower()
 
     def test_no_hit_renders_nothing(self, client: TestClient, db_session: Session):
         """No fru_links match → the panel stays silent (no FRU card at all)."""

@@ -3014,30 +3014,38 @@ async def search_history_panel(
 
     Called by: results_shell.html right column (hx-get).
     Depends on: part_history_service.get_part_history, normalize_mpn_key,
-                fru_matrix_service.get_fru_view/get_reverse_view (compact FRU
-                crosswalk context — both views are capped/cheap reads).
+                fru_matrix_service.get_fru_view/get_reverse_context (compact FRU
+                crosswalk context — both are capped/cheap reads).
     """
-    from ..services.fru_matrix_service import get_fru_view, get_reverse_view
+    from ..services.fru_matrix_service import get_fru_view, get_reverse_context
     from ..services.part_history_service import PartHistory, get_part_history
     from ..utils.normalization import normalize_mpn_key
 
     key = normalize_mpn_key(mpn)  # pure/cheap; outside try so it can be logged on failure
-    fru_view = None
-    fru_reverse = None
     try:
         history = get_part_history(db, key)
-        if key:
-            # FRU crosswalk context, only for a concrete searched MPN: forward
-            # (the MPN is a FRU) and reverse (the MPN appears under FRUs).
-            fru_view = get_fru_view(db, mpn)
-            fru_reverse = get_reverse_view(db, mpn)
         error = False
     except Exception:
         logger.exception("search_history_panel failed mpn={} key={} user={}", mpn, key, user.id)
         history = PartHistory(found=False)
-        fru_view = None
-        fru_reverse = None
         error = True
+
+    # FRU crosswalk context, only for a concrete searched MPN: forward (the MPN is a
+    # FRU) and reverse (the MPN appears under FRUs). The card is ADDITIVE, so its
+    # lookups get their own scoped try/except — a crosswalk failure degrades to "no
+    # crosswalk card" and must never discard a successfully loaded history or flip
+    # the panel into the history-error state. (A history failure already suppresses
+    # the card via the template's `not error` guard, so the lookups are skipped.)
+    fru_view = None
+    fru_reverse = None
+    if key and not error:
+        try:
+            fru_view = get_fru_view(db, mpn)
+            fru_reverse = get_reverse_context(db, mpn)
+        except Exception:
+            logger.exception("search_history_panel FRU context failed mpn={} key={} user={}", mpn, key, user.id)
+            fru_view = None
+            fru_reverse = None
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
@@ -7435,6 +7443,21 @@ async def materials_faceted_partial(
     if total == 0 and parametric_active:
         spec_coverage = get_commodity_spec_coverage(db, commodity)
 
+    # FRU crosswalk: when the query hits fru_links (either direction), render the
+    # full matrix / "Used in FRUs" section above the card results. This is the
+    # destination every "/v2/materials?q=<pn>" FRU deep link promises (the search
+    # panel's "View full FRU matrix" CTA and fru_section's part-navigation links) —
+    # a crosswalk-only PN matches no material card, so the section must not depend
+    # on card results. Both lookups are indexed point reads; non-MPN text queries
+    # simply miss and render nothing.
+    fru_view = None
+    fru_reverse = None
+    if q:
+        from ..services.fru_matrix_service import get_fru_view, get_reverse_view
+
+        fru_view = get_fru_view(db, q)
+        fru_reverse = get_reverse_view(db, q)
+
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
@@ -7451,6 +7474,10 @@ async def materials_faceted_partial(
             "faceted": True,
             "parametric_active": parametric_active,
             "spec_coverage": spec_coverage,
+            "fru_view": fru_view,
+            "fru_usages": fru_reverse.usages if fru_reverse else (),
+            "fru_usages_total": fru_reverse.total if fru_reverse else 0,
+            "fru_query": q,
         }
     )
     return template_response("htmx/partials/materials/list.html", ctx)

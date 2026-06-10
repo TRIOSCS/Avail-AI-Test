@@ -2,13 +2,17 @@
 views.
 
 Backs the materials detail "FRU matrix" / "Used in FRUs" panels and the
-/v2/partials/materials/fru-lookup endpoint. Both entry points accept raw user/MPN
+/v2/partials/materials/fru-lookup endpoint. All entry points accept raw user/MPN
 input and normalize it internally with normalize_mpn_key. The reverse view is
 capped at REVERSE_VIEW_LIMIT usages (shared hardware PNs like screws can sit under
 thousands of FRUs); ReverseView.total carries the uncapped count for display.
+get_reverse_context is the lightweight companion for the search page's compact
+card: a COUNT(DISTINCT fru_norm) aggregate + column-tuple fetch, no FruLink
+entity hydration.
 
-Called by: app/routers/htmx_views.py (material detail + fru-lookup partials, and the
-           search-page "What we know" panel's compact FRU-crosswalk context)
+Called by: app/routers/htmx_views.py (material detail + fru-lookup + faceted-list
+           partials, and the search-page "What we know" panel's compact
+           FRU-crosswalk context)
 Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
             app/utils/normalization.normalize_mpn_key
 """
@@ -16,7 +20,7 @@ Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from ..constants import CDC_PENDING, FruLinkKind
@@ -131,9 +135,12 @@ class FruView:
         return sum(1 for s in self.sections for i in s.items if i.rel_kind in kinds)
 
     @property
-    def drive_count(self) -> int:
-        """Items in the 'Approved drives & models' section (drive PNs + mfg models)."""
-        return self._count_kinds({FruLinkKind.DRIVE_PN, FruLinkKind.MFG_MODEL})
+    def drive_pn_count(self) -> int:
+        return self._count_kinds({FruLinkKind.DRIVE_PN})
+
+    @property
+    def model_count(self) -> int:
+        return self._count_kinds({FruLinkKind.MFG_MODEL})
 
     @property
     def ibm_11s_count(self) -> int:
@@ -155,12 +162,16 @@ class FruView:
         """One-line count summary for the search-page 'What we know' FRU context.
 
         Non-zero headline groups joined with '·'; falls back to the total link count
-        when the FRU carries none of the headline kinds (e.g. Lenovo PNs only).
+        when the FRU carries none of the headline kinds (e.g. Lenovo PNs only). Drive
+        PNs and manufacturer models are counted separately and kind-neutrally — neither
+        implies qualification ("approved" is a qual_status claim the items may not
+        carry).
         """
         segments = [
             _plural(n, noun)
             for n, noun in (
-                (self.drive_count, "approved drive"),
+                (self.drive_pn_count, "drive PN"),
+                (self.model_count, "model"),
                 (self.ibm_11s_count, "11S number"),
                 (self.tray_count, "tray"),
             )
@@ -204,10 +215,20 @@ class ReverseView:
     usages: tuple[FruUsage, ...]
     total: int  # distinct (FRU, role) usages before the display cap
 
-    @property
-    def top_frus(self) -> tuple[str, ...]:
-        """First 3 distinct FRU numbers (display spelling) for compact context."""
-        return tuple(dict.fromkeys(u.fru_raw for u in self.usages))[:3]
+
+@dataclass(frozen=True)
+class ReverseContext:
+    """Compact reverse context for the search-page 'What we know' crosswalk card.
+
+    distinct_frus counts DISTINCT FRUs (by fru_norm — a part playing two roles under one
+    FRU is still one FRU, unlike ReverseView.total's (FRU, role) usages) via a SQL
+    aggregate, so it is exact even past any fetch cap. top_frus holds up to 3 distinct
+    FRUs in their canonical display spelling (shortest raw per fru_norm — sheets
+    disagree on SAP zero-padding of the same FRU).
+    """
+
+    distinct_frus: int
+    top_frus: tuple[str, ...]
 
 
 def _richness(link: FruLink) -> tuple[int, int, int, int]:
@@ -348,3 +369,37 @@ def get_reverse_view(db: Session, mpn: str, limit: int = REVERSE_VIEW_LIMIT) -> 
         )
     usages.sort(key=lambda u: (u.fru_raw, u.rel_kind))
     return ReverseView(usages=tuple(usages[:limit]), total=len(usages))
+
+
+def get_reverse_context(db: Session, mpn: str) -> ReverseContext:
+    """Lightweight reverse crosswalk context: distinct-FRU count + top-3 FRU numbers.
+
+    Search-hot-path companion to get_reverse_view (which hydrates full FruLink rows
+    to build the usage table): a COUNT(DISTINCT fru_norm) aggregate plus a capped
+    (fru_norm, fru_raw) column fetch — no entity hydration, no role grouping — so
+    shared-hardware PNs (trays/screws under thousands of FRUs) stay cheap on every
+    search render. Per-norm display spelling is the shortest raw form (matching
+    get_fru_view's canonical de-padded choice); chips are the first 3 alphabetically.
+    """
+    norm = normalize_mpn_key(mpn)
+    if not norm:
+        return ReverseContext(distinct_frus=0, top_frus=())
+    distinct = db.execute(
+        select(func.count(func.distinct(FruLink.fru_norm))).where(FruLink.related_norm == norm)
+    ).scalar_one()
+    if not distinct:
+        return ReverseContext(distinct_frus=0, top_frus=())
+    # Cap bounds the canonicalization work on pathological PNs; ordering by fru_raw
+    # keeps the kept window (and therefore the chips) deterministic.
+    rows = db.execute(
+        select(FruLink.fru_norm, FruLink.fru_raw)
+        .where(FruLink.related_norm == norm)
+        .order_by(FruLink.fru_raw)
+        .limit(2000)
+    ).all()
+    best_raw: dict[str, str] = {}
+    for fru_norm, fru_raw in rows:
+        current = best_raw.get(fru_norm)
+        if current is None or (len(fru_raw), fru_raw) < (len(current), current):
+            best_raw[fru_norm] = fru_raw
+    return ReverseContext(distinct_frus=distinct, top_frus=tuple(sorted(best_raw.values())[:3]))

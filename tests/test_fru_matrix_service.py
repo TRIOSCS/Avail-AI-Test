@@ -5,8 +5,9 @@ What: Seeds fru_links rows and asserts get_fru_view section grouping, cross-shee
       ordering, deterministic fru_raw selection, raw-input normalization,
       get_reverse_view dedup/context/cap (ReverseView), KIND_LABELS/_SECTIONS
       completeness against FruLinkKind, the qual pill helpers, and the compact
-      summary helpers (FruView.summary/top_models, ReverseView.top_frus) behind
-      the search-page "What we know" FRU-crosswalk context.
+      context helpers (FruView.summary/top_models, get_reverse_context's
+      distinct-FRU count + canonical top_frus) behind the search-page
+      "What we know" FRU-crosswalk context.
 Called by: pytest
 Depends on: app.models.FruLink, app.services.fru_matrix_service
 """
@@ -22,6 +23,7 @@ from app.services.fru_matrix_service import (
     KIND_LABELS,
     REVERSE_VIEW_LIMIT,
     get_fru_view,
+    get_reverse_context,
     get_reverse_view,
 )
 
@@ -196,16 +198,19 @@ class TestGetReverseView:
 
 
 class TestCompactSummaries:
-    """FruView.summary/top_models + ReverseView.top_frus — the search-page 'What we
-    know' FRU-crosswalk context helpers."""
+    """FruView.summary/top_models + get_reverse_context — the search-page 'What we know'
+    FRU-crosswalk context helpers."""
 
     def test_summary_counts_headline_kinds(self, db_session):
+        # Drive PNs and mfg models count separately and kind-neutrally — an
+        # unqualified model must NOT be summarized as an "approved drive".
         _add(db_session, related="ST9300603SS", kind=FruLinkKind.MFG_MODEL)
         _add(db_session, related="00VN562", kind=FruLinkKind.DRIVE_PN)
         _add(db_session, related="68Y7789", kind=FruLinkKind.IBM_11S)
         _add(db_session, related="44T2216", kind=FruLinkKind.TRAY)
         view = get_fru_view(db_session, "00AJ001")
-        assert view.summary == "2 approved drives · 1 11S number · 1 tray"
+        assert view.summary == "1 drive PN · 1 model · 1 11S number · 1 tray"
+        assert "approved" not in view.summary
 
     def test_summary_falls_back_to_total_links(self, db_session):
         _add(db_session, related="01GR331", kind=FruLinkKind.LENOVO_PN)
@@ -228,14 +233,56 @@ class TestCompactSummaries:
         assert all(m.rel_kind == FruLinkKind.MFG_MODEL.value for m in view.top_models)
         assert view.top_models[0].manufacturer == "Seagate"
 
+
+class TestGetReverseContext:
+    """Compact search-card context: distinct-FRU count + canonical top-FRU chips."""
+
+    def test_empty_for_unknown_or_blank(self, db_session):
+        assert get_reverse_context(db_session, "NOPE123").distinct_frus == 0
+        assert get_reverse_context(db_session, "NOPE123").top_frus == ()
+        assert get_reverse_context(db_session, "").top_frus == ()
+
     def test_top_frus_distinct_and_capped_at_three(self, db_session):
-        # Same FRU twice (two roles) must appear once; 4 distinct FRUs cap at 3.
+        # Same FRU twice (two roles) must appear once; 4 distinct FRUs cap at 3 chips
+        # while distinct_frus reports all 4.
         _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY)
         _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY_ALT)
         for i in range(2, 5):
             _add(db_session, fru=f"00AJ00{i}", related="44T2216", kind=FruLinkKind.TRAY)
-        view = get_reverse_view(db_session, "44T2216")
-        assert view.top_frus == ("00AJ001", "00AJ002", "00AJ003")
+        ctx = get_reverse_context(db_session, "44T2216")
+        assert ctx.top_frus == ("00AJ001", "00AJ002", "00AJ003")
+        assert ctx.distinct_frus == 4
+
+    def test_distinct_frus_counts_frus_not_roles(self, db_session):
+        # ReverseView.total counts (FRU, role) usages — 3 here — but the card's
+        # number must count FRUs: 2.
+        _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY)
+        _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY_ALT)
+        _add(db_session, fru="00AJ002", related="44T2216", kind=FruLinkKind.TRAY)
+        assert get_reverse_view(db_session, "44T2216").total == 3
+        assert get_reverse_context(db_session, "44T2216").distinct_frus == 2
+
+    def test_top_frus_dedup_by_norm_with_canonical_spelling(self, db_session):
+        # The same FRU appears SAP-padded in Lenovo FRU-PN and clean in Main under
+        # two roles: one chip, de-padded spelling (mirrors get_fru_view.fru_raw).
+        _add(
+            db_session,
+            fru="0000000NV340_E00",
+            fru_norm="00nv340",
+            related="ESG0017964",
+            kind=FruLinkKind.LENOVO_PPN,
+            sheet="Lenovo FRU-PN",
+        )
+        _add(db_session, fru="00NV340", fru_norm="00nv340", related="ESG0017964", kind=FruLinkKind.TRAY, sheet="Main")
+        ctx = get_reverse_context(db_session, "ESG0017964")
+        assert ctx.top_frus == ("00NV340",)
+        assert ctx.distinct_frus == 1
+
+    def test_normalizes_raw_input(self, db_session):
+        _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY)
+        ctx = get_reverse_context(db_session, " 44-t2216 ")
+        assert ctx.distinct_frus == 1
+        assert ctx.top_frus == ("00AJ001",)
 
 
 class TestModelValidation:
