@@ -3,7 +3,9 @@
 What: Orchestrates parse → clean → consolidate → (ai_correct if --ai-correct) → ingest and
       prints a human report (source rows, distinct MPNs, would-create vs would-update, fields
       filled by source/tier, and ~15 sample consolidated parts). DRY RUN by default; pass
-      --apply to write. Ready to point at the ~620 MB ``LSC1__Material__c.csv`` once it lands.
+      --apply to write. Streams the ~620 MB ``LSC1__Material__c.csv`` part master; a
+      ``LSC1__Manufacturers__c.csv`` in the same glob is auto-detected and used to resolve
+      the master's manufacturer lookup IDs to names (never emitted raw).
 Usage:
       python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]
 Called by: an operator (manually). Depends on: app.database.SessionLocal, the source_ingest
@@ -23,6 +25,9 @@ from loguru import logger
 DEFAULT_GLOB = "/root/source_ingest/*"
 # File-name fragments that mark the SFDC part master (streamed differently from sheets).
 _SFDC_NAME_HINTS = ("material__c", "lsc1__material")
+# File-name fragment that marks the SFDC manufacturers lookup (resolves the part master's
+# LSC1__Manufacturer_Brand__c Salesforce IDs → names; CATALOG.md "manufacturer-lookup").
+_MANUFACTURERS_NAME_HINT = "manufacturers__c"
 # Suffixes we know how to parse as operational sheets.
 _SHEET_SUFFIXES = (".csv", ".xlsx", ".xlsm", ".txt")
 
@@ -31,21 +36,32 @@ def _is_sfdc_master(path: Path) -> bool:
     return any(hint in path.name.lower() for hint in _SFDC_NAME_HINTS)
 
 
-def _discover_files(pattern: str) -> list[Path]:
-    """Expand the glob to the parseable source files (skips docs/markdown/binaries)."""
+def _is_manufacturers_lookup(path: Path) -> bool:
+    return _MANUFACTURERS_NAME_HINT in path.name.lower()
+
+
+def _discover_files(pattern: str) -> tuple[list[Path], Path | None]:
+    """Expand the glob to (parseable source files, manufacturers-lookup CSV or None).
+
+    Skips docs/markdown/binaries; the manufacturers CSV is returned separately — it is a
+    lookup table, not a part source.
+    """
     paths = []
+    manufacturers: Path | None = None
     for raw in sorted(globmod.glob(pattern)):
         p = Path(raw)
         if not p.is_file():
             continue
-        if _is_sfdc_master(p) and p.suffix.lower() == ".csv":
+        if _is_manufacturers_lookup(p) and p.suffix.lower() == ".csv":
+            manufacturers = p
+        elif _is_sfdc_master(p) and p.suffix.lower() == ".csv":
             paths.append(p)
         elif p.suffix.lower() in _SHEET_SUFFIXES and not p.name.lower().endswith(".md"):
             paths.append(p)
-    return paths
+    return paths, manufacturers
 
 
-def _parse_all(files: list[Path], limit: int | None):
+def _parse_all(files: list[Path], limit: int | None, manufacturer_lookup: dict[str, str] | None):
     """Yield raw SourceRecords across all files (SFDC master streamed, others as
     sheets)."""
     from app.services.source_ingest.parsers import (
@@ -55,8 +71,11 @@ def _parse_all(files: list[Path], limit: int | None):
 
     emitted = 0
     for path in files:
-        parser = parse_sfdc_material_master if _is_sfdc_master(path) else parse_inventory_sheet
-        for rec in parser(path):
+        if _is_sfdc_master(path):
+            rows = parse_sfdc_material_master(path, manufacturer_lookup)
+        else:
+            rows = parse_inventory_sheet(path)
+        for rec in rows:
             yield rec
             emitted += 1
             if limit is not None and emitted >= limit:
@@ -71,12 +90,23 @@ async def run(*, pattern: str, ai_correct_flag: bool, apply: bool, limit: int | 
     from app.services.source_ingest.clean import clean_record
     from app.services.source_ingest.consolidate import consolidate
 
-    files = _discover_files(pattern)
-    logger.info("SP-Ingest: {} source file(s) matched {!r}", len(files), pattern)
+    files, manufacturers_path = _discover_files(pattern)
+    logger.info(
+        "SP-Ingest: {} source file(s) matched {!r} (manufacturers lookup: {})",
+        len(files),
+        pattern,
+        manufacturers_path.name if manufacturers_path else "none",
+    )
+
+    manufacturer_lookup: dict[str, str] | None = None
+    if manufacturers_path is not None:
+        from app.services.source_ingest.parsers import parse_sfdc_manufacturers
+
+        manufacturer_lookup = parse_sfdc_manufacturers(manufacturers_path)
 
     raw_count = 0
     cleaned = []
-    for rec in _parse_all(files, limit):
+    for rec in _parse_all(files, limit, manufacturer_lookup):
         raw_count += 1
         c = clean_record(rec)
         if c is not None:

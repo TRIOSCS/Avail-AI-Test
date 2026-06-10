@@ -15,6 +15,7 @@ from app.services.source_ingest.models import (
 )
 from app.services.source_ingest.parsers import (
     parse_inventory_sheet,
+    parse_sfdc_manufacturers,
     parse_sfdc_material_master,
 )
 
@@ -137,3 +138,47 @@ def test_parse_sfdc_oem_and_description_fallbacks(tmp_path):
     assert r.manufacturer == "DellBrand"
     assert r.description == "Detail desc here"
     assert r.category == "memory"
+
+
+def test_parse_sfdc_manufacturers_builds_id_to_name_map(tmp_path):
+    csv_path = _write(
+        tmp_path / "LSC1__Manufacturers__c.csv",
+        [
+            "Id,IsDeleted,Name,LSC1__Short_Name__c",
+            "a2F1U0000009rIvUAI,0,3M,",
+            "a2F1U0000009rIwUAI,0,Seagate,STX",
+            "a2F1U0000009rIxUAI,1,DeletedCo,",  # IsDeleted → skipped
+            "a2F1U0000009rIyUAI,0,,",  # blank name → skipped
+        ],
+    )
+    lookup = parse_sfdc_manufacturers(csv_path)
+    assert lookup == {"a2F1U0000009rIvUAI": "3M", "a2F1U0000009rIwUAI": "Seagate"}
+
+
+def test_parse_sfdc_master_resolves_manufacturer_lookup_id(tmp_path):
+    # LSC1__OEM__c / Brand__c are ~0% filled in this org (CATALOG.md profile): the real
+    # signal is the LSC1__Manufacturer_Brand__c Salesforce ID, resolved via the lookup.
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,false,LOOKUP-001,,,a2F1U0000009rIwUAI,Drive with looked-up OEM,,,,hdd,,,,,",
+        ],
+    )
+    lookup = {"a2F1U0000009rIwUAI": "Seagate"}
+    r = list(parse_sfdc_material_master(csv_path, lookup))[0]
+    assert r.manufacturer == "Seagate"
+
+
+def test_parse_sfdc_master_never_emits_raw_lookup_id(tmp_path):
+    # An unresolvable lookup ID (no lookup table / unknown id) must yield manufacturer=None
+    # — a raw Salesforce ID must never land in material_cards.manufacturer.
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,false,LOOKUP-002,,,a2F1U0000009rMISSING,No lookup hit,,,,hdd,,,,,",
+        ],
+    )
+    assert list(parse_sfdc_material_master(csv_path))[0].manufacturer is None
+    assert list(parse_sfdc_material_master(csv_path, {"other": "Acme"}))[0].manufacturer is None

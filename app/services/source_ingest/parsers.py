@@ -61,8 +61,13 @@ _SFDC_DESCRIPTION_COLUMNS = (
     "LSC1__Material_Short_Description__c",
     "LSC1__Common_Name__c",
 )
-# SFDC OEM/manufacturer columns, in preference order.
-_SFDC_OEM_COLUMNS = ("LSC1__OEM__c", "Brand__c", "LSC1__Manufacturer_Brand__c")
+# SFDC OEM/manufacturer NAME columns, in preference order. NOTE: per CATALOG.md's profile,
+# LSC1__OEM__c / Brand__c are ~0% filled in this org — the real manufacturer signal is
+# LSC1__Manufacturer_Brand__c, which holds Salesforce LOOKUP IDs that must resolve through
+# LSC1__Manufacturers__c (parse_sfdc_manufacturers below); it is handled separately, never
+# emitted verbatim.
+_SFDC_OEM_COLUMNS = ("LSC1__OEM__c", "Brand__c")
+_SFDC_MANUFACTURER_LOOKUP_COLUMN = "LSC1__Manufacturer_Brand__c"
 # SFDC category columns, in preference order.
 _SFDC_CATEGORY_COLUMNS = ("LSC1__Category__c", "Commodity_Code__c")
 
@@ -204,12 +209,55 @@ def parse_inventory_sheet(path: str | Path) -> Iterator[SourceRecord]:
         logger.info("parse_inventory_sheet: {} → {} raw rows", source_file, yielded)
 
 
-def parse_sfdc_material_master(path: str | Path) -> Iterator[SourceRecord]:
+def parse_sfdc_manufacturers(path: str | Path) -> dict[str, str]:
+    """Parse ``LSC1__Manufacturers__c.csv`` into a {salesforce_id: manufacturer_name}
+    map.
+
+    Resolves the ``LSC1__Manufacturer_Brand__c`` lookup IDs on the part master to real
+    manufacturer names (CATALOG.md "manufacturer-lookup resolution"). Skips deleted rows
+    and rows without a name.
+    """
+    lookup: dict[str, str] = {}
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        for row in csv.DictReader(fh):
+            if _is_truthy(row.get("IsDeleted")):
+                continue
+            sfdc_id = (row.get("Id") or "").strip()
+            name = (row.get("Name") or "").strip()
+            if sfdc_id and name:
+                lookup[sfdc_id] = name
+    logger.info("parse_sfdc_manufacturers: {} → {} manufacturer names", Path(path).name, len(lookup))
+    return lookup
+
+
+def _resolve_sfdc_manufacturer(row: dict, manufacturer_lookup: dict[str, str] | None) -> str | None:
+    """Resolve the manufacturer for one master row.
+
+    Name columns (LSC1__OEM__c / Brand__c) win verbatim when filled; otherwise the
+    ``LSC1__Manufacturer_Brand__c`` lookup ID resolves through *manufacturer_lookup*. An
+    unresolvable lookup ID yields None — a raw Salesforce ID must NEVER be emitted as a
+    manufacturer name.
+    """
+    name = _first_nonempty(row, _SFDC_OEM_COLUMNS)
+    if name:
+        return name
+    lookup_id = (row.get(_SFDC_MANUFACTURER_LOOKUP_COLUMN) or "").strip()
+    if lookup_id and manufacturer_lookup:
+        return manufacturer_lookup.get(lookup_id)
+    return None
+
+
+def parse_sfdc_material_master(
+    path: str | Path, manufacturer_lookup: dict[str, str] | None = None
+) -> Iterator[SourceRecord]:
     """STREAM the SFDC ``LSC1__Material__c`` CSV part-master into raw SourceRecords.
 
     Uses csv.DictReader so the ~620 MB file is read row-by-row (never wholly in memory).
     Maps MPN/OEM/description/category per CATALOG.md, emits only the non-empty deep facets,
-    and skips rows whose ``IsDeleted`` is truthy. Yields one raw SourceRecord per kept row.
+    and skips rows whose ``IsDeleted`` is truthy. *manufacturer_lookup* (from
+    parse_sfdc_manufacturers) resolves the ``LSC1__Manufacturer_Brand__c`` lookup IDs —
+    without it those rows simply carry no manufacturer (an unresolved Salesforce ID is
+    never emitted). Yields one raw SourceRecord per kept row.
     """
     path = Path(path)
     source_file = path.name
@@ -232,7 +280,7 @@ def parse_sfdc_material_master(path: str | Path) -> Iterator[SourceRecord]:
             kept += 1
             yield SourceRecord(
                 raw_mpn=raw_mpn,
-                manufacturer=_first_nonempty(row, _SFDC_OEM_COLUMNS),
+                manufacturer=_resolve_sfdc_manufacturer(row, manufacturer_lookup),
                 description=_first_nonempty(row, _SFDC_DESCRIPTION_COLUMNS),
                 condition=None,  # condition is per-unit, not on the master (CATALOG.md §1)
                 quantity=normalize_quantity(row.get("LSC1__Total_Available_Inventory__c")),

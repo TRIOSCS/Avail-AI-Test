@@ -4,9 +4,11 @@ it).
 What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and normalizes the
       MPN to its dedup key; scrubs ``_x000D_`` / control chars and collapses whitespace in the
       free-text fields; canonicalizes ``condition`` to a small enum; maps the source commodity
-      to an app-canonical category (None if unmappable); and DROPS the record when the MPN is
-      too short / falsy or the description says "DO NOT USE". ``extract_trailing_oem`` pulls the
-      embedded ", IBM"/", EMC"/", HP" manufacturer token out of a sheet description.
+      to an app-canonical category (None if unmappable) with a CPU-bucket pollution deny-list
+      (the SFDC master's 'CPU' code is ~14% non-CPU parts — see _CPU_POLLUTION_RE); and DROPS
+      the record when the MPN is too short / falsy or the description says "DO NOT USE".
+      ``extract_trailing_oem`` pulls the embedded ", IBM"/", EMC"/", HP" manufacturer token out
+      of a sheet description.
 Called by: app/management/ingest_source_data.py (between parse and consolidate).
 Depends on: app.utils.normalization.normalize_mpn_key (the dedup-key normalizer the app uses
       for material_cards.normalized_mpn) + normalize_mpn (display form); app.services.
@@ -50,6 +52,27 @@ _MPN_SUFFIX_RE = re.compile(r"\s*-\s*(?:pull|new)\s*$|-[xX]\s*$", re.IGNORECASE)
 _X000D_RE = re.compile(r"_x000[dD]_")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WS_RE = re.compile(r"\s+")
+
+# CPU-bucket pollution guard (CATALOG.md ingest warning + analysis/CPU_DECODE_FEASIBILITY.md
+# step 0): ~14% of the SFDC master's Commodity_Code__c='CPU' rows are NON-CPU parts. A
+# tier-95 ``set_category("cpu")`` on a Murata MLCC would be near-unoverridable (only
+# manual=100 beats trio_source), so MPNs matching the empirically-found false-positive
+# shapes get their category BLANKED (the card stays uncategorizable from this source —
+# never miscategorized). Deny-list, anchored at the start of the MPN:
+#   GRM…            Murata MLCC chip caps           EEE…/EEU…  Panasonic aluminum caps
+#   SN74…           TI logic ICs                    SMAJ…      TVS diodes
+#   B72…            EPCOS/TDK varistors             C0603/C0805/C1206… chip-cap shapes
+#   #####A###XAT…   AVX chip caps (06035A101JAT2A)
+#   ######-# / #-######-#  TE Connectivity connector PNs (640456-9, 1-640456-0) — single
+#   trailing digit, distinct from HP spares' three-char dash suffix (732505-001).
+_CPU_POLLUTION_RE = re.compile(
+    r"^(?:"
+    r"GRM\d|EEE[A-Z0-9]|EEU[A-Z0-9]|SN74|SMAJ|B72\d|C0603|C0805|C1206"
+    r"|\d{5}A\d{3}[A-Z]AT"
+    r"|\d{6}-\d$|\d-\d{6}-\d$"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def _scrub_text(value: str | None) -> str | None:
@@ -127,6 +150,13 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     if not manufacturer:
         manufacturer = extract_trailing_oem(description)
 
+    # All source_ingest data is TRIO's own export, so the TRIO-scoped vocabulary
+    # (e.g. bare "Memory" → dram) applies before the global alias map.
+    category = normalize_trio_category(rec.category)
+    if category == "cpu" and _CPU_POLLUTION_RE.match(display_mpn):
+        # Known non-CPU MPN shape inside the polluted CPU bucket — blank, never write.
+        category = None
+
     return SourceRecord(
         raw_mpn=normalize_mpn(display_mpn) or display_mpn,
         normalized_mpn=norm_key,
@@ -134,9 +164,7 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
         description=description,
         condition=canonicalize_condition(rec.condition),
         quantity=rec.quantity,
-        # All source_ingest data is TRIO's own export, so the TRIO-scoped vocabulary
-        # (e.g. bare "Memory" → dram) applies before the global alias map.
-        category=normalize_trio_category(rec.category),
+        category=category,
         specs=dict(rec.specs),
         source_file=rec.source_file,
         source_kind=rec.source_kind,

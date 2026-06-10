@@ -107,3 +107,30 @@ def test_clean_resolves_trio_scoped_commodity_codes():
     assert clean_record(_rec(raw_mpn="REAL123", category="Memory")).category == "dram"
     assert clean_record(_rec(raw_mpn="REAL123", category="Hard Drive")).category == "hdd"
     assert clean_record(_rec(raw_mpn="REAL123", category="Main Board")).category == "motherboards"
+
+
+def test_clean_blanks_cpu_category_for_polluted_mpn_shapes():
+    # CATALOG.md ingest warning: ~14% of the SFDC 'CPU' bucket is passives/connectors/logic.
+    # Known non-CPU MPN shapes must get their category BLANKED (None — never a tier-95 'cpu'),
+    # because only manual (100) outranks trio_source (95) on the ladder.
+    polluted = [
+        "GRM155R71C104MA88D",  # Murata MLCC
+        "EEEFK1E471GP",  # Panasonic cap
+        "SN74ALVC244PWR",  # TI logic
+        "SMAJ24CA-13-F",  # TVS diode
+        "B72220P3232S260",  # EPCOS varistor
+        "06035A101JAT2A",  # AVX chip cap
+        "640456-9",  # TE connector (single trailing digit)
+        "1-640456-0",  # TE connector (prefixed form)
+    ]
+    for mpn in polluted:
+        rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
+        assert rec is not None and rec.category is None, mpn
+
+
+def test_clean_keeps_cpu_category_for_plausible_cpu_mpns():
+    # Real CPU-shaped MPNs keep the category: Intel s-spec, Intel ordering code, HP spare
+    # (three-char dash suffix — distinct from TE's single trailing digit), IBM FRU.
+    for mpn in ["SR3QS", "CM8068403358316", "732505-001", "01EF243"]:
+        rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
+        assert rec is not None and rec.category == "cpu", mpn
