@@ -6,6 +6,7 @@ contract that every child key is a real, seeded, display-named commodity.
 
 from app.services.commodity_registry import (
     _DISPLAY_NAMES,
+    COARSE_BUCKETS_WITHOUT_SEEDS,
     COMMODITY_SPEC_SEEDS,
     COMMODITY_TREE,
     get_all_commodities,
@@ -18,7 +19,7 @@ def test_memory_and_storage_are_separate_groups():
     assert "Storage & Drives" in COMMODITY_TREE
     assert "Memory & Storage" not in COMMODITY_TREE
     assert set(COMMODITY_TREE["Memory"]) == {"dram", "flash"}
-    assert set(COMMODITY_TREE["Storage & Drives"]) == {"ssd", "hdd"}
+    assert set(COMMODITY_TREE["Storage & Drives"]) == {"ssd", "hdd", "tape_drives"}
 
 
 def test_connectors_and_electromechanical_are_separate_groups():
@@ -45,7 +46,13 @@ def test_every_child_key_has_display_name():
 
 
 def test_every_child_key_is_seeded():
+    """Every tree child carries parametric seeds, except declared coarse buckets
+    (ics_other, oem_assemblies) which intentionally have no honest parametric
+    vocabulary."""
     for child in get_all_commodities():
+        if child in COARSE_BUCKETS_WITHOUT_SEEDS:
+            assert child not in COMMODITY_SPEC_SEEDS, f"{child} declared coarse but HAS seeds"
+            continue
         assert child in COMMODITY_SPEC_SEEDS, f"{child} missing a seed block"
 
 
