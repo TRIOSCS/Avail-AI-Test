@@ -44,6 +44,7 @@ async def main(limit: int = 500, batch_size: int = 30):
 
         enriched_cards = db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()
         facet_count = 0
+        skipped_count = 0
         for card in enriched_cards:
             if not card.specs_structured or not card.category:
                 continue
@@ -64,17 +65,28 @@ async def main(limit: int = 500, batch_size: int = 30):
                     entry_source = "spec_extraction"
                     entry_confidence = 0.85
                 if value is not None:
-                    record_spec(
+                    # Count only PERSISTED writes — record_spec returns False on
+                    # no-schema (entries written under a category the card no longer
+                    # has), enum drift, unparseable numerics, and F1 ladder rejection.
+                    # Counting attempts would let "Backfilled N facet rows" claim
+                    # writes the gates silently skipped.
+                    if record_spec(
                         db,
                         int(card.id),
                         spec_key,
                         value,
                         source=entry_source,
                         confidence=entry_confidence,
-                    )
-                    facet_count += 1
+                    ):
+                        facet_count += 1
+                    else:
+                        skipped_count += 1
         db.commit()
-        logger.info("Backfilled {} facet rows", facet_count)
+        logger.info(
+            "Backfilled {} facet rows ({} entries skipped by schema/enum/ladder gates)",
+            facet_count,
+            skipped_count,
+        )
     finally:
         db.close()
 

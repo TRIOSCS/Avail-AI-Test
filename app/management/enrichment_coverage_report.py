@@ -2,14 +2,19 @@
 
 What: Aggregates material-card enrichment coverage into one compact human-readable
       block (or a structured dict with --json): card/category coverage, facet-table
-      coverage per commodity, specs_structured source mix, enrichment_status
-      distribution, description coverage, and fru_links totals. With --log-file it
-      appends a JSONL history line ({ts, metrics}) and prints run-over-run deltas
-      for the headline numbers.
+      coverage per commodity, specs_structured source mix, category provenance
+      (category_source counts incl. the "(none)" no-provenance bucket), facet
+      provenance (facet source counts incl. "(none)" for rows the 096 backfill
+      could not match), an unregistered-source callout (any observed source string
+      missing from spec_tiers.SOURCE_TIER ranks at tier 0 and loses every conflict),
+      enrichment_status distribution, description coverage, and fru_links totals.
+      With --log-file it appends a JSONL history line ({ts, metrics}) and prints
+      run-over-run deltas for the headline numbers.
 Usage: python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
-Called by: admin manually; intended for a daily ops cron (host-side — not yet
-      registered anywhere in this repo).
-Depends on: MaterialCard, MaterialSpecFacet, FruLink models; app.database.SessionLocal
+Called by: admin manually; daily ops cron via scripts/enrichment_coverage_cron.sh
+      (host crontab — see that script's header for the install line).
+Depends on: MaterialCard, MaterialSpecFacet, FruLink models; spec_tiers.SOURCE_TIER
+      (the unregistered-source cross-check); app.database.SessionLocal
       (single read-only session — performs no writes; on PostgreSQL all queries share
       one REPEATABLE READ snapshot so concurrent enrichment-worker writes cannot skew
       cross-metric ratios).
@@ -29,6 +34,7 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialSpecFacet
 from app.models.fru_link import FruLink
+from app.services.spec_tiers import SOURCE_TIER
 
 TOP_N = 15
 
@@ -85,6 +91,12 @@ _SQLITE_SOURCES_SQL = text(
 
 def _pct(part: int, total: int) -> float:
     return round(100.0 * part / total, 1) if total else 0.0
+
+
+def _source_bucket(src: object) -> str:
+    """NULL provenance buckets as "(none)" — same convention as the spec-source
+    counter."""
+    return str(src) if src is not None else "(none)"
 
 
 def _spec_source_counts(db: Session) -> dict[str, int]:
@@ -190,6 +202,41 @@ def collect_metrics(db: Session) -> dict[str, Any]:
     # 3. Sources: specs_structured entries per recorded source.
     spec_sources = _spec_source_counts(db)
 
+    # 3b. Category provenance: categorized cards per category_source. Spec-entry counts
+    # alone are WINS-only and spec-only — a card categorized by an ingest that wrote no
+    # specs (or whose spec writes all lost the ladder) is invisible in spec_sources, so
+    # "trio_source: 0 spec entries" after an ingest does NOT mean the ingest wrote
+    # nothing. "(none)" = categorized rows with NULL category_source (a writer
+    # bypassing set_category, or pre-096 data the backfill should have stamped).
+    category_source_rows = (
+        db.query(MaterialCard.category_source, func.count(MaterialCard.id))
+        .filter(active, has_category)
+        .group_by(MaterialCard.category_source)
+        .order_by(func.count(MaterialCard.id).desc())
+        .all()
+    )
+    category_sources = {_source_bucket(src): int(n) for src, n in category_source_rows}
+
+    # 3c. Facet provenance: facet rows per source. "(none)" = rows with NULL provenance —
+    # the 096 backfill only stamped rows whose spec_key still existed in the card's
+    # specs_structured JSONB, so orphans stay NULL and would otherwise be invisible.
+    facet_source_rows = (
+        db.query(MaterialSpecFacet.source, func.count(MaterialSpecFacet.id))
+        .join(MaterialCard, facet_join)
+        .filter(active)
+        .group_by(MaterialSpecFacet.source)
+        .order_by(func.count(MaterialSpecFacet.id).desc())
+        .all()
+    )
+    facet_sources = {_source_bucket(src): int(n) for src, n in facet_source_rows}
+
+    # 3d. Unregistered-source callout: any observed source string missing from the F1
+    # ladder maps to tier 0 (spec_tiers.tier_for) and loses EVERY conflict — a
+    # misregistered writer is otherwise visible only as a once-per-process WARNING
+    # plus DEBUG per-row logs. Surfacing it here makes it trend in the daily report.
+    observed = set(spec_sources) | set(category_sources) | set(facet_sources)
+    unregistered_sources = sorted(observed - set(SOURCE_TIER) - {"(none)"})
+
     # 4. enrichment_status distribution.
     status_rows = (
         db.query(MaterialCard.enrichment_status, func.count(MaterialCard.id))
@@ -228,6 +275,9 @@ def collect_metrics(db: Session) -> dict[str, Any]:
         },
         "spec_sources": spec_sources,
         "spec_entries_total": sum(spec_sources.values()),
+        "category_sources": category_sources,
+        "facet_sources": facet_sources,
+        "unregistered_sources": unregistered_sources,
         "enrichment_status": {str(status): int(n) for status, n in status_rows},
         "fru_links": fru_links,
     }
@@ -319,8 +369,15 @@ def format_report(metrics: dict[str, Any], deltas: dict[str, int] | None = None,
         + _join([(c["commodity"], f"{c['rows']} rows/{c['spec_keys']} keys") for c in facets["by_commodity"]]),
         f"Spec sources ({metrics['spec_entries_total']} entries): "
         + _join([(k, str(v)) for k, v in metrics["spec_sources"].items()]),
+        "Category sources: " + _join([(k, str(v)) for k, v in metrics["category_sources"].items()]),
+        "Facet sources: " + _join([(k, str(v)) for k, v in metrics["facet_sources"].items()]),
         "Status: " + _join([(k, str(v)) for k, v in metrics["enrichment_status"].items()]),
     ]
+    if metrics["unregistered_sources"]:
+        lines.append(
+            "WARNING unregistered sources (tier 0 — every write loses conflicts): "
+            + ", ".join(metrics["unregistered_sources"])
+        )
     fru = metrics["fru_links"]
     if fru is not None:
         lines.append(f"FRU links: {fru['rows']} rows · {fru['distinct_frus']} distinct FRUs")

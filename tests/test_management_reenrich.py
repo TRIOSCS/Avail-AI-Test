@@ -95,6 +95,53 @@ class TestReenrichMain:
         assert "voltage" in spec_keys
 
     @pytest.mark.asyncio
+    async def test_backfill_counts_only_persisted_writes(self):
+        """A record_spec rejection (no-schema / enum drift / ladder loss) counts as
+        skipped, never as backfilled — the closing log must not overstate what the facet
+        projection actually holds."""
+        mock_db = MagicMock()
+        card = MagicMock()
+        card.id = 42
+        card.category = "dram"
+        card.specs_structured = {
+            "ddr_type": {"value": "DDR4"},  # persists
+            "bogus_key": {"value": "x"},  # rejected by the gates → skipped
+            "speed_mhz": {"value": "junk"},  # rejected → skipped
+        }
+        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            (42,)
+        ]
+        mock_db.query.return_value.filter.return_value.all.return_value = [card]
+
+        from loguru import logger
+
+        messages: list[str] = []
+        sink_id = logger.add(lambda m: messages.append(str(m)), level="INFO")
+        try:
+            with (
+                patch("app.database.SessionLocal", MagicMock(return_value=mock_db)),
+                patch(
+                    "app.services.material_enrichment_service.enrich_material_cards",
+                    new_callable=AsyncMock,
+                    return_value={"enriched": 1},
+                ),
+                patch(
+                    "app.services.spec_write_service.record_spec",
+                    side_effect=[True, False, False],
+                ) as mock_record,
+            ):
+                from app.management.reenrich import main
+
+                await main(limit=10, batch_size=5)
+        finally:
+            logger.remove(sink_id)
+
+        assert mock_record.call_count == 3
+        assert any("Backfilled 1 facet rows (2 entries skipped by schema/enum/ladder gates)" in m for m in messages), (
+            messages
+        )
+
+    @pytest.mark.asyncio
     async def test_main_skips_card_without_specs_structured(self):
         """Main() skips record_spec for cards with None specs_structured."""
         mock_db = MagicMock()

@@ -48,6 +48,13 @@ suffix (`feat/spec-resolver-1-migration`, `-2-models`, …) and merges bottom-up
 Do not let branches accumulate. A branch with no open PR and no active work is a
 cleanup candidate.
 
+**Alembic migration numbers:** numbered migrations are claimed manually, so a branch
+adding one MUST follow the protocol in `MIGRATION_NUMBERS_IN_FLIGHT.txt` (repo root):
+take the lowest number neither listed there nor present in `alembic/versions/`, and
+append a claim line in the same PR. `tests/test_migration_numbers_in_flight.py`
+enforces uniqueness + registry completeness; `tests/test_migration_chain.py` still
+guards the single-head invariant when chains collide anyway.
+
 ## 3. Quarantine before delete — nothing is lost
 
 Unmerged work and stashes are **archived as tags before deletion**, never just
