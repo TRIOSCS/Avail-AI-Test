@@ -3,13 +3,17 @@
 What: ``ingest`` walks each ConsolidatedPart, finds its MaterialCard by ``normalized_mpn`` and
       AUGMENTS — creating the card when absent (never clobbering an existing description, since
       we have no description-tier yet). Category goes through ``set_category`` (tier
-      ``trio_source``=95, or ``trio_source_ai``=88 when AI-inferred); each spec through the
+      ``trio_source``=95, or ``trio_source_ai``=88 when AI-inferred); manufacturer (actual
+      maker) and brand (OEM label) go through ``set_manufacturer``/``set_brand`` at
+      trio_source/0.9 (dual-brand W6 — each no-ops on None); each spec through the
       ``record_spec`` tier ladder so TRIO ground truth (95) beats vendor (90) / decode (85) and
       a later lower-tier write can never overwrite it. Per-card ``begin_nested()`` SAVEPOINTs
       mirror mpn_decoder/writer.py so one bad card never poisons the batch — and, like that
       writer, per-card tallies merge into the stats ONLY after a clean savepoint release, so a
       rolled-back card contributes nothing (the counters stay honest). Failed parts are counted
-      (``stats["failed"]`` + a capped mpn sample) so the operator report surfaces them.
+      (``stats["failed"]`` + a capped mpn sample) so the operator report surfaces them; a
+      trio_source brand/maker value that LOSES arbitration against a different existing value
+      is counted (``brand_conflicts``/``manufacturer_conflicts``) and WARNed after the batch.
       apply=False (DEFAULT) is a true DRY RUN: NO writes — it runs the SAME gates apply-mode
       runs (set_category with write=False; record_spec's schema/enum/ladder checks via
       spec_would_write) so the would-create / would-update / fields-filled tallies cannot drift
@@ -32,11 +36,13 @@ from app.constants import MaterialCondition
 from app.models import MaterialCard
 from app.services.source_ingest.ai_correct import AI_SOURCE
 from app.services.source_ingest.models import ConsolidatedPart
-from app.services.spec_tiers import set_category, tier_for
+from app.services.spec_tiers import set_brand, set_category, set_manufacturer, tier_for
 from app.services.spec_write_service import load_schema_cache, record_spec, spec_would_write
 
 # Raw-source provenance tag (top of the ladder, tier 95).
 RAW_SOURCE = "trio_source"
+# Confidence for the ladder-routed brand/manufacturer writes (dual-brand W6).
+BRAND_CONFIDENCE = 0.9
 _COMMIT_CHUNK = 500
 _SAMPLE_LIMIT = 15
 _FAILED_SAMPLE_LIMIT = 10
@@ -55,6 +61,14 @@ def _empty_stats() -> dict:
         "failed": 0,
         "failed_mpns": [],
         "categories_set": 0,
+        "brands_set": 0,
+        "manufacturers_set": 0,
+        # trio_source(95) brand/maker values that LOST arbitration against a DIFFERENT
+        # existing value — trio ground truth should essentially only lose to manual (100),
+        # so a non-zero count is a genuine data-conflict signal, WARNed after the batch
+        # (the ladder's losing path logs at DEBUG only). Same-value losses are not counted.
+        "brand_conflicts": 0,
+        "manufacturer_conflicts": 0,
         "descriptions_filled": 0,
         "conditions_filled": 0,
         "specs_written": 0,
@@ -82,6 +96,20 @@ def _description_for(part: ConsolidatedPart) -> str | None:
     """The description to fill an EMPTY card with — AI-standardized if present, else
     raw."""
     return part.ai_description or part.description
+
+
+def _lost_brand_conflict(db: Session, existing: str | None, incoming: str | None, won: bool) -> bool:
+    """True when a non-empty incoming brand/maker LOST arbitration to a DIFFERENT value.
+
+    The ladder's losing path logs at DEBUG only, so callers count these losses and WARN
+    after the batch. Empty incoming is a no-op (not a loss); a same-value loss (a
+    higher-tier existing already agrees after normalization) is agreement, not conflict.
+    """
+    if won or not existing or incoming is None or not str(incoming).strip():
+        return False
+    from app.services.manufacturer_normalizer import normalize_brand_name
+
+    return normalize_brand_name(db, str(incoming)) != existing
 
 
 def _condition_fillable(part_condition: str | None, card_condition: str | None) -> bool:
@@ -113,14 +141,24 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
     # this card, keeping the outer transaction usable. The per-card tallies accumulate in
     # LOCALS and merge into stats only after a clean savepoint release — a rolled-back card
     # must contribute nothing, or the report would claim writes that were undone.
-    tally = {"categories_set": 0, "descriptions_filled": 0, "conditions_filled": 0, "specs_written": 0}
+    tally = {
+        "categories_set": 0,
+        "brands_set": 0,
+        "manufacturers_set": 0,
+        "brand_conflicts": 0,
+        "manufacturer_conflicts": 0,
+        "descriptions_filled": 0,
+        "conditions_filled": 0,
+        "specs_written": 0,
+    }
     by_source: dict[str, int] = defaultdict(int)
     with db.begin_nested():
         if card is None:
+            # Manufacturer is NOT written in the constructor — it goes through the
+            # set_manufacturer ladder below so its provenance columns are stamped.
             card = MaterialCard(
                 normalized_mpn=part.normalized_mpn,
                 display_mpn=part.raw_mpn,
-                manufacturer=part.manufacturer,
             )
             db.add(card)
             db.flush()  # assign card.id before record_spec needs it
@@ -129,6 +167,23 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
         if cat_value and set_category(card, cat_value, source=cat_source, confidence=cat_conf):
             tally["categories_set"] += 1
             by_source[cat_source] += 1
+
+        # Dual-brand W6: maker + OEM label through the ladder at trio_source/0.9.
+        # Each no-ops on None/empty; a lower-tier value can never displace a higher one.
+        # A tier-95 loss to a DIFFERENT value is a data-conflict signal — counted, not silent.
+        existing_mfr, existing_brand = card.manufacturer, card.brand
+        mfr_won = set_manufacturer(card, part.manufacturer, RAW_SOURCE, BRAND_CONFIDENCE)
+        if mfr_won:
+            tally["manufacturers_set"] += 1
+            by_source[RAW_SOURCE] += 1
+        elif _lost_brand_conflict(db, existing_mfr, part.manufacturer, mfr_won):
+            tally["manufacturer_conflicts"] += 1
+        brand_won = set_brand(card, part.brand, RAW_SOURCE, BRAND_CONFIDENCE)
+        if brand_won:
+            tally["brands_set"] += 1
+            by_source[RAW_SOURCE] += 1
+        elif _lost_brand_conflict(db, existing_brand, part.brand, brand_won):
+            tally["brand_conflicts"] += 1
 
         # Description: fill ONLY when empty — there is no description-tier yet, so we must not
         # clobber an existing description (documented design choice; see module docstring).
@@ -216,9 +271,21 @@ def _tally_dry_run(
         existing_specs: dict = {}
         desc_would = bool(desc)
         cond_would = _condition_fillable(part.condition, None)
+        # Brand/manufacturer: on a fresh card any non-empty value wins (existing=None);
+        # set_brand/set_manufacturer reject empties, mirrored by the bool() gate here.
+        mfr_would = bool(part.manufacturer and str(part.manufacturer).strip())
+        brand_would = bool(part.brand and str(part.brand).strip())
     else:
         stats["would_update"] += 1
         category_would = bool(cat_value) and set_category(card, cat_value, cat_source, cat_conf, write=False)
+        mfr_would = set_manufacturer(card, part.manufacturer, RAW_SOURCE, BRAND_CONFIDENCE, write=False)
+        brand_would = set_brand(card, part.brand, RAW_SOURCE, BRAND_CONFIDENCE, write=False)
+        # Conflict accounting mirrors apply mode (write=False mutates nothing, so the
+        # card's columns are still the pre-write existing values).
+        if _lost_brand_conflict(db, card.manufacturer, part.manufacturer, mfr_would):
+            stats["manufacturer_conflicts"] += 1
+        if _lost_brand_conflict(db, card.brand, part.brand, brand_would):
+            stats["brand_conflicts"] += 1
         # Specs are validated against the category the card WOULD have after --apply.
         effective_category = cat_value if category_would else card.category
         existing_specs = dict(card.specs_structured or {})
@@ -244,6 +311,12 @@ def _tally_dry_run(
     if category_would:
         stats["categories_set"] += 1
         stats["fields_by_source"][cat_source] += 1
+    if mfr_would:
+        stats["manufacturers_set"] += 1
+        stats["fields_by_source"][RAW_SOURCE] += 1
+    if brand_would:
+        stats["brands_set"] += 1
+        stats["fields_by_source"][RAW_SOURCE] += 1
     if desc_would:
         stats["descriptions_filled"] += 1
         # Mirror apply-mode's attribution: an AI-standardized description credits AI_SOURCE.
@@ -304,6 +377,7 @@ def _tally_dry_run(
                 "display_mpn": part.raw_mpn,
                 "action": "create" if card is None else "update",
                 "manufacturer": part.manufacturer,
+                "brand": part.brand,
                 "category": cat_value,
                 "category_source": cat_source if cat_value else None,
                 "description": (desc[:80] + "…") if desc and len(desc) > 80 else desc,
@@ -342,6 +416,18 @@ def ingest(db: Session, parts: list[ConsolidatedPart], *, apply: bool) -> dict:
     if apply:
         db.commit()
     stats["fields_by_source"] = dict(stats["fields_by_source"])
+    if stats["manufacturer_conflicts"] or stats["brand_conflicts"]:
+        # set_brand/set_manufacturer log their losing path at DEBUG only — surface the
+        # aggregate here: trio_source (95) should essentially only lose to manual (100),
+        # so these are genuine data conflicts the operator must see.
+        logger.warning(
+            "ingest(apply={}): trio_source brand/maker values lost ladder arbitration against "
+            "DIFFERENT existing values — manufacturer_conflicts={} brand_conflicts={} "
+            "(per-card detail at DEBUG)",
+            apply,
+            stats["manufacturer_conflicts"],
+            stats["brand_conflicts"],
+        )
     logger.info(
         "ingest(apply={}): seen={} create={} update={} failed={} specs={}",
         apply,

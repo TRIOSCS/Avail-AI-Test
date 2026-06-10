@@ -1,10 +1,11 @@
-{# Manufacturer type-ahead multi-select filter.
+{# Brand type-ahead multi-select filter (combined dual-brand facet: matches OEM label
+   OR actual maker — options + counts span both columns via get_manufacturer_options).
    Called by: workspace.html manufacturer-filter-container
    Depends on: manufacturer_options from htmx_views
 #}
 {% if manufacturer_options %}
 <div class="mb-3" x-data="{mfgSearch: '', mfgExpanded: false}">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Manufacturer</h4>
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Brand</h4>
   <input aria-label="Search manufacturers" type="text" x-model="mfgSearch"
          @focus="mfgExpanded = true"
          placeholder="Search manufacturers..."

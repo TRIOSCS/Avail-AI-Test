@@ -38,11 +38,15 @@ class SourceRecord:
     ``raw_mpn`` is the verbatim part number (suffixes intact); ``normalized_mpn`` is the
     dedup key (``normalize_mpn_key``) and is populated by clean.py — parsers leave it "".
     ``specs`` holds source-supplied deep facets keyed by app spec_key (only non-empty).
+    ``brand`` is the OEM label (IBM/Dell/HP/HPE/Lenovo) — populated ONLY from an explicit
+    source column or an OEM_TRAILING_RE description match (clean.py routes the trailing
+    token), never inferred; ``manufacturer`` is the actual maker.
     """
 
     raw_mpn: str
     normalized_mpn: str = ""
     manufacturer: str | None = None
+    brand: str | None = None
     description: str | None = None
     condition: str | None = None
     quantity: int | None = None
@@ -66,6 +70,7 @@ class ConsolidatedPart:
     normalized_mpn: str
     raw_mpn: str
     manufacturer: str | None = None
+    brand: str | None = None
     description: str | None = None
     condition: str | None = None
     quantity: int | None = None

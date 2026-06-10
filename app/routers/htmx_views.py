@@ -7359,11 +7359,23 @@ async def materials_faceted_partial(
             for s in schema_rows:
                 primary_by_cat.setdefault(s.commodity, {})[s.spec_key] = s.display_name
 
+    # Dual-brand cell: the " · maker" suffix renders only when brand (OEM label) and
+    # manufacturer (actual maker) are DIFFERENT COMPANIES. Compare NORMALIZED forms, not
+    # raw strings — B1 writes the canonical OEM into brand while manufacturer keeps the
+    # raw alias (lossless by design), so an exact-string compare renders tautologies like
+    # "Hewlett Packard Enterprise · HP" (the same company twice).
+    from ..services.manufacturer_normalizer import normalize_brand_name
+
     for m in materials:
         vc, bp, cur = vendor_stats.get(m.id, (0, None, None))
         m._vendor_count = vc
         m._best_price = bp
         m._best_currency = cur
+        m._show_maker_suffix = bool(
+            m.brand
+            and m.manufacturer
+            and normalize_brand_name(db, m.brand).lower() != normalize_brand_name(db, m.manufacturer).lower()
+        )
         specs = m.specs_structured or {}
         card_cat = commodity.lower().strip() if commodity else (m.category or "").lower().strip()
         primary_keys = primary_by_cat.get(card_cat, {})

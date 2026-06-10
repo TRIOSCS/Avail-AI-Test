@@ -166,27 +166,33 @@ def get_manufacturer_options(
     commodity: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
-    """Return distinct manufacturers sorted by card count (descending).
+    """Return distinct brand/maker names sorted by card count (descending).
+
+    Dual-brand (migration 097): the "Brand" facet is ONE combined facet over BOTH
+    columns — ``brand`` (OEM label: IBM, Dell Technologies) and ``manufacturer``
+    (actual maker: Seagate Technology). UNION ALL over the two columns, deduped by
+    card (a card with ``brand == manufacturer`` counts once via COUNT(DISTINCT id)).
 
     Args:
-        commodity: If set, scope to this commodity only.
+        commodity: If set, scope to this commodity only (applied inside BOTH branches).
         limit: Max results to return (default 20 per spec).
 
     Returns: [{"name": str, "count": int}, ...]
     """
-    query = db.query(
-        MaterialCard.manufacturer,
-        func.count(MaterialCard.id).label("cnt"),
-    ).filter(
-        MaterialCard.deleted_at.is_(None),
-        MaterialCard.manufacturer.isnot(None),
-        MaterialCard.manufacturer != "",
-    )
 
-    if commodity:
-        query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+    def _branch(column):
+        q = db.query(MaterialCard.id.label("card_id"), column.label("name")).filter(
+            MaterialCard.deleted_at.is_(None),
+            column.isnot(None),
+            column != "",
+        )
+        if commodity:
+            q = q.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+        return q
 
-    rows = query.group_by(MaterialCard.manufacturer).order_by(func.count(MaterialCard.id).desc()).limit(limit).all()
+    union = _branch(MaterialCard.brand).union_all(_branch(MaterialCard.manufacturer)).subquery()
+    cnt = func.count(func.distinct(union.c.card_id))
+    rows = db.query(union.c.name, cnt.label("cnt")).group_by(union.c.name).order_by(cnt.desc()).limit(limit).all()
     return [{"name": name, "count": count} for name, count in rows]
 
 
@@ -254,7 +260,9 @@ def search_materials_faceted(
         commodity: Filter by commodity category (lowercased)
         q: Text search on MPN/manufacturer/description
         sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
-        manufacturers: Restrict to these manufacturer names
+        manufacturers: Restrict to cards whose manufacturer OR brand is in this list
+            (the combined dual-brand facet — OR-within, AND-across-facets; the wire
+            param keeps its legacy "manufacturers" name for back-compat)
         verified_only: Legacy boolean — when True (and ``statuses`` is empty), return only
             cards with enrichment_status == "verified"
         statuses: When provided, restrict to cards whose enrichment_status is in this list.
@@ -318,7 +326,16 @@ def search_materials_faceted(
             )
 
     if manufacturers:
-        query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
+        # Dual-brand: the combined "Brand" facet ORs across both columns — a buyer
+        # filtering "IBM" matches an IBM-labeled drive made by Seagate (brand=IBM) AND
+        # filtering "Seagate Technology" matches the same card (manufacturer). Strict
+        # superset of the old single-column match, so old bookmarks keep working.
+        query = query.filter(
+            or_(
+                MaterialCard.manufacturer.in_(manufacturers),
+                MaterialCard.brand.in_(manufacturers),
+            )
+        )
 
     # `statuses` (multi-select) takes precedence over the legacy `verified_only` boolean.
     # ANDing both would yield an impossible filter (e.g. status==verified AND status IN

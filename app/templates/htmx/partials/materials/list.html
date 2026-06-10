@@ -103,7 +103,16 @@
             {% endif %}
           </td>
           <td class="td-label text-gray-500 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
-          <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
+          {# Dual-brand cell: "IBM · Seagate Technology" when brand (OEM label) and
+             manufacturer (actual maker) are both set and DIFFERENT COMPANIES
+             (m._show_maker_suffix — the view compares NORMALIZED forms, so an alias
+             pair like "Hewlett Packard Enterprise"/"HP" renders once, never as a
+             tautological "label · maker"); one value when equal or single; "--" when
+             neither. "·" is the existing codebase idiom (workspace.html,
+             sourcing/results.html). #}
+          <td class="td-label text-gray-600 truncate max-w-[160px]"
+              title="{{ m.brand or m.manufacturer or '' }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}">
+            {{ m.brand or m.manufacturer or "--" }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}</td>
           <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
           <td>
             <div class="flex flex-wrap items-center gap-1">

@@ -21,5 +21,5 @@
 #   appended line, or the duplicate-number test) instead of at deploy time.
 #
 # Format: <3-digit number> <branch> <notes...>  — lines starting with '#' are ignored.
-097 feat/dual-brand-filters dual-brand columns (PR #263, open — must re-chain down_revision onto 098 before merge: both currently chain off 096)
+097 feat/dual-brand-filters dual-brand columns (PR #263, open — RE-CHAINED: down_revision now 098_materials_perf_idx, chain runs 096 -> 098 -> 097; number kept per protocol)
 098 perf/materials-post-ingest materials perf indexes (PR #262, MERGED to main)
