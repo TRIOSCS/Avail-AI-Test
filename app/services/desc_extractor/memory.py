@@ -15,11 +15,12 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   modules and bandwidth-per-second tokens never match). GigaBIT component-density
   tokens ("2Gb, 128*16" — lowercase b) are neutralized to "2GBIT" by extract_desc's
   pre-uppercase _BIT_UNITS rewrite, so bits can never be recorded as bytes. Under
-  NAND-die context (_common.nand_die_context: NAND/SLC/MLC/TLC/QLC tokens, MT29
-  die MPNs, x8/x16 org strings) a BARE "<n>G" token is the die-density gigaBIT
-  convention ("Nand, 512G, MLC" = 512 Gbit = 64 GB — re-audit card 74115, which
-  the casing guard can't see) and is skipped: a deliberate NO-WRITE, never a ÷8
-  conversion. Such cards are usually also miscategorized dram (they are NAND
+  NAND-die context (_common.nand_die_context: the NAND word or an MT29-series die
+  MPN — DIE-SPECIFIC signals only, so module descs with spaced rank/org tokens
+  like "16G, 2R X8, DDR4" keep their bare-G capacity) a BARE "<n>G" token is the
+  die-density gigaBIT convention ("Nand, 512G, MLC" = 512 Gbit = 64 GB — re-audit
+  card 74115, which the casing guard can't see) and is skipped: a deliberate
+  NO-WRITE, never a ÷8 conversion. Such cards are usually also miscategorized dram (they are NAND
   flash) — that reclassification is a separate, out-of-scope fix; this guard
   only stops the wrong capacity write.
 - ddr_type from explicit DDR/DDR2/DDR3/DDR3L/DDR4/DDR5 tokens, or the PC3-/PC3L-/

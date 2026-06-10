@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import MaterialCard
 from app.services.manufacturer_normalizer import normalize_brand_name
 from app.services.mpn_decoder import decode_mpn
-from app.services.mpn_decoder._common import DECODE_SOURCE
+from app.services.mpn_decoder._common import DECODE_SOURCE, DROP_OUT_OF_ENVELOPE
 from app.services.spec_tiers import set_category, set_manufacturer
 from app.services.spec_write_service import load_schema_cache, record_spec
 
@@ -46,13 +46,21 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     #                       but the worker decodes against live DB rows, which can lag a
     #                       deploy's reseed or drift after a failed/manual reseed).
     #   dropped_off_grid    "commodity.spec_key=value" -> value the DECODER itself refused
-    #                       to emit (DecodeResult.dropped — today the hdd shipped-capacity
-    #                       grid in storage.decode_storage). The decoder drop is silent by
-    #                       construction (pure function), so it is surfaced here alongside
-    #                       record_spec's vocabulary drops.
+    #                       to emit (DecodeResult.dropped, reason off_grid — the hdd
+    #                       shipped-capacity grid in storage.decode_storage). The decoder
+    #                       drop is silent by construction (pure function), so it is
+    #                       surfaced here alongside record_spec's vocabulary drops.
+    #   dropped_out_of_envelope  same channel, reason out_of_envelope — a modern-shaped
+    #                       Seagate capacity outside its family envelope (or an unlisted
+    #                       family). Counted separately from off_grid so an over-tight
+    #                       envelope is distinguishable from an incomplete grid.
+    # Both decoder-drop counters are tallied EVEN when the drop emptied result.specs
+    # (capacity-only decodes: legacy WD, family-unmapped Seagate) — that empty-specs
+    # path writes nothing but must never be silent.
     dropped_no_schema: Counter = Counter()
     dropped_out_of_enum: Counter = Counter()
     dropped_off_grid: Counter = Counter()
+    dropped_out_of_envelope: Counter = Counter()
     # "card_category->decoded_commodity" -> cards whose decoded commodity LOST the category
     # ladder (set_category) against a different existing category — the decoded specs are then
     # rejected by record_spec's schema lookup AND the maker write is skipped (same cross-
@@ -75,6 +83,18 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             result = decode_mpn(card.display_mpn, card.manufacturer)
             if result is None:
                 continue
+            for spec_key, value in result.dropped.items():
+                counter = (
+                    dropped_out_of_envelope
+                    if result.drop_reasons.get(spec_key) == DROP_OUT_OF_ENVELOPE
+                    else dropped_off_grid
+                )
+                counter[f"{result.commodity}.{spec_key}={value}"] += 1
+            if not result.specs:
+                # Every decoded value failed its plausibility gate (counted above):
+                # nothing trustworthy remains — no category/maker/spec writes, and the
+                # card is not counted as decoded (the decode contributed nothing).
+                continue
             card_cat = (card.category or "").lower().strip()
             cache = schema_caches.get(result.commodity)
             if cache is None:
@@ -85,8 +105,6 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                     dropped_no_schema[f"{result.commodity}.{spec_key}"] += 1
                 elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
                     dropped_out_of_enum[f"{result.commodity}.{spec_key}={value}"] += 1
-            for spec_key, value in result.dropped.items():
-                dropped_off_grid[f"{result.commodity}.{spec_key}={value}"] += 1
             # SAVEPOINT per card: record_spec flushes, so a DB-level failure (constraint, type)
             # would otherwise poison the shared transaction — swallowed here, it would surface
             # later as a failed/rolled-back commit with the counters still claiming success. The
@@ -158,17 +176,22 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
         except Exception:
             logger.exception("mpn-decode: failed on card_id={}", card_id)
-    if dropped_no_schema or dropped_out_of_enum or dropped_off_grid:
+    if dropped_no_schema or dropped_out_of_enum or dropped_off_grid or dropped_out_of_envelope:
         logger.warning(
             "mpn-decode: {} decoded spec values dropped — no commodity_spec_schemas row for {}; "
             "value outside the live enum_values for {} "
             "(decoder and seeded schemas have drifted; see tests/test_mpn_decoder_seed_sync.py); "
             "off the shipped-capacity grid for {} (the decoder refused an implausible value — "
-            "see storage.HDD_SHIPPED_CAPACITY_GB)",
-            sum(dropped_no_schema.values()) + sum(dropped_out_of_enum.values()) + sum(dropped_off_grid.values()),
+            "see storage.HDD_SHIPPED_CAPACITY_GB); outside the Seagate family envelope for {} "
+            "(truncated/malformed string or unlisted family — see storage._SEAGATE_ENVELOPE)",
+            sum(dropped_no_schema.values())
+            + sum(dropped_out_of_enum.values())
+            + sum(dropped_off_grid.values())
+            + sum(dropped_out_of_envelope.values()),
             dict(dropped_no_schema),
             dict(dropped_out_of_enum),
             dict(dropped_off_grid),
+            dict(dropped_out_of_envelope),
         )
     if skipped_category_conflict:
         logger.warning(

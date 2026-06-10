@@ -37,7 +37,7 @@ from app.models import MaterialCard, MaterialSpecFacet
 from app.services.desc_extractor import extract_desc
 from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES, nand_die_context
 from app.services.mpn_decoder import decode_mpn
-from app.services.mpn_decoder._common import DECODE_CONFIDENCE, DECODE_SOURCE
+from app.services.mpn_decoder._common import DECODE_CONFIDENCE, DECODE_SOURCE, DROP_OUT_OF_ENVELOPE
 from app.services.mpn_decoder.storage import _SEAGATE, _STMICRO_DENY, _WD_MODERN
 from app.services.spec_write_service import load_schema_cache, record_spec, spec_would_write
 from app.utils.normalization import normalize_mpn
@@ -59,12 +59,15 @@ _BIT_TOKEN = re.compile(r"\b\d+(?:\.\d+)?\s?[KMGT]b(?![A-Za-z])")
 def _classify(facet: MaterialSpecFacet, card: MaterialCard) -> str:
     """Audit failure-class bucket for a targeted facet row (tally key, not behavior).
 
-    Round-2 buckets (re-audit 2026-06-10): capacity_grid (the fixed decoder DROPS the
-    key as off the shipped-capacity grid — checked first, it is the most specific
-    signal), wd_revision_digit / seagate_envelope (the row sits in the modern WD /
-    modern Seagate grammar branch that the round-2 fixes re-gated — the legacy_* buckets
-    keep covering the round-1 legacy shapes), and nand_density (bare-"G" gigaBIT die
-    densities on a capacity_gb row).
+    Round-2 buckets (re-audit 2026-06-10): capacity_grid / seagate_envelope via the
+    decoder's own dropped channel when it carries the key — checked first, it is the
+    most specific signal, and DecodeResult.drop_reasons splits the two gates so a grid-
+    emptied capacity-only decode (legacy WD, family-unmapped Seagate) tallies as
+    capacity_grid and an envelope rejection as seagate_envelope, never misattributed to
+    a shape-regex bucket. wd_revision_digit / seagate_envelope also cover rows in the
+    modern WD / modern Seagate grammar branch that the round-2 fixes re-gated (the
+    legacy_* buckets keep covering the round-1 legacy shapes), and nand_density covers
+    bare-"G" gigaBIT die densities on a capacity_gb row.
     """
     if facet.source == DECODE_SOURCE:
         mpn = normalize_mpn(card.display_mpn) or ""
@@ -72,6 +75,8 @@ def _classify(facet: MaterialSpecFacet, card: MaterialCard) -> str:
             return "stmicro_gate"
         result = decode_mpn(card.display_mpn, card.manufacturer)
         if result is not None and facet.spec_key in result.dropped:
+            if result.drop_reasons.get(facet.spec_key) == DROP_OUT_OF_ENVELOPE:
+                return "seagate_envelope"
             return "capacity_grid"
         if mpn.startswith("WD"):
             return "wd_revision_digit" if _WD_MODERN.match(mpn) else "legacy_wd"

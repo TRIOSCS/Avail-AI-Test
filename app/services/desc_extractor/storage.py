@@ -17,12 +17,14 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   link-generation values (SAS/SATA/FC: 1/1.5/2/3/4/6/8/12/16/22.5/24/32) are
   discarded outright — so tiny legacy capacities in that set are deliberately missed
   rather than ever mistaking a link speed for a capacity.
-- Under NAND-die context (_common.nand_die_context: NAND/SLC/MLC/TLC/QLC tokens, MT29
-  die MPNs, x8/x16 org strings) a BARE ``<n>G`` token is the die-density gigaBIT
-  convention ("Nand, 512G, MLC" = 512 Gbit), never bytes — skipped, deliberately not
-  ÷8-converted (re-audit 2026-06-10 class 3; same rule as desc_extractor/memory.py).
-  Explicit ``GB``/``TB`` tokens are unaffected, so real drive descriptions that merely
-  name their flash type ("SSD, 960GB, TLC, SATA") still extract.
+- Under NAND-die context (_common.nand_die_context: the NAND word or an MT29-series
+  die MPN — DIE-SPECIFIC signals only) a BARE ``<n>G`` token is the die-density
+  gigaBIT convention ("Nand, 512G, MLC" = 512 Gbit), never bytes — skipped,
+  deliberately not ÷8-converted (re-audit 2026-06-10 class 3; same rule as
+  desc_extractor/memory.py). Cell-type tokens (TLC/MLC/…) alone do NOT trigger the
+  guard: real SSD listings name their flash type while abbreviating capacity as bare
+  G ("SSD, 480G, TLC, SATA" = 480 GB), so both that form and the explicit-unit form
+  ("SSD, 960GB, TLC, SATA") still extract.
 - Conflicting signals for a key (two different capacities, 2.5" + 3.5", SAS + SATA)
   ⇒ that key is omitted, the rest still extract.
 - Speed-qualified interfaces ("6Gbps SAS") collapse to the bare seeded enum member

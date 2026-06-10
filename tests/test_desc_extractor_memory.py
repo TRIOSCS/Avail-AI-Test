@@ -124,6 +124,14 @@ CASES = [
         "Mem, 16G DDR4 RDIMM",  # bare G WITHOUT NAND context stays gigaBYTES
         {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
     ),
+    (
+        # A SPACED rank/org token ("2R X8") is module grammar, not NAND-die context —
+        # the die guard requires the NAND word or an MT29 die MPN, so the bare-G module
+        # capacity survives. (The spaced form doesn't match the contiguous 2RX8 rank
+        # grammar, so rank itself is simply absent, never guessed.)
+        "Mem, 16G, 2R X8, DDR4, RDIMM",
+        {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
+    ),
 ]
 
 

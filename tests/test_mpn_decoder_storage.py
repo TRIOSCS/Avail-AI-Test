@@ -16,6 +16,10 @@ CASES = [
     # so capacity still decodes even when the 2-letter family is not in the usage map.
     ("ST300MM0006", {"capacity_gb": 300}, "hdd"),
     ("ST1200MM0088", {"capacity_gb": 1200}, "hdd"),
+    # Round-2 re-review pins: real shipped points the first grid/envelope cut missed.
+    ("ST1600MM0129", {"capacity_gb": 1600}, "hdd"),  # Exos 10E2400 1.6 TB 2.5" SAS
+    ("ST4000NC001", {"capacity_gb": 4000}, "hdd"),  # Terascale (NC = Constellation CS family)
+    ("ST160LT000", {"capacity_gb": 160}, "hdd"),  # Momentus Thin 7mm 160 GB (LT floor)
     # Western Digital modern (revision-digit scheme: leading digits = TB, final digit =
     # revision marker; family from suffix)
     ("WD40EFRX", {"capacity_gb": 4000, "form_factor": '3.5"', "usage_class": "NAS"}, "hdd"),
@@ -46,6 +50,12 @@ CASES = [
     ("WD360GD", {"capacity_gb": 36}, "hdd"),  # Raptor
     ("WD64AA", {"capacity_gb": 6.4}, "hdd"),  # very-old Caviar: implied decimal survives
     ("WD800BB-00JHC0", {"capacity_gb": 80}, "hdd"),  # dash revision after the 2-letter code
+    # Round-2 re-review pins: attested legacy WD points the first grid cut dropped —
+    # the grid must never false-delete a real Caviar SKU's correct decode.
+    ("WD900BB", {"capacity_gb": 90}, "hdd"),  # Caviar 90 GB
+    ("WD1400BB", {"capacity_gb": 140}, "hdd"),  # Caviar 140 GB
+    ("WD153BA", {"capacity_gb": 15.3}, "hdd"),  # Caviar 15.3 GB (decimal ladder)
+    ("WD273BA", {"capacity_gb": 27.3}, "hdd"),  # Caviar 27.3 GB (decimal ladder)
     # Toshiba — MG enterprise 3.5" with explicit TB token; MQ 2.5" form only
     ("MG08ACA16TE", {"capacity_gb": 16000, "form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
     ("MQ01ABD100", {"form_factor": '2.5"'}, "hdd"),
@@ -155,28 +165,40 @@ def test_wd_mobile_drive_capacity_only_no_guessed_form_factor():
 
 
 @pytest.mark.parametrize(
-    "mpn",
+    "mpn,refused_gb",
     [
-        "ST120MM0198",  # re-audit card 120169: digit-dropped truncation of the 1.2 TB ST1200MM0198
-        "ST200NM0055",  # same class: truncation of the 2 TB ST2000NM0055 (NM floor is 500 GB)
-        "ST30000MM0006",  # envelope ceiling: no 30 TB 2.5" SAS MM drive exists (max 2.4 TB)
+        ("ST120MM0198", 120),  # re-audit card 120169: digit-dropped truncation of the 1.2 TB ST1200MM0198
+        ("ST200NM0055", 200),  # same class: truncation of the 2 TB ST2000NM0055 (NM floor is 500 GB)
+        ("ST30000MM0006", 30000),  # envelope ceiling: no 30 TB 2.5" SAS MM drive exists (max 2.4 TB)
     ],
 )
-def test_out_of_envelope_seagate_shapes_return_none(mpn):
+def test_out_of_envelope_seagate_shapes_emit_no_specs(mpn, refused_gb):
     # Residual class 2: a truncated/malformed string can pass the structured-tail SHAPE
     # gate, so the decoded capacity must also sit inside the family's shipped envelope
-    # (_SEAGATE_ENVELOPE). Out-of-envelope ⇒ NO decode at all — never a best-effort
-    # capacity (and never the form/usage of a string we distrust).
-    assert decode_mpn(mpn) is None, f"{mpn} must not decode (out of family envelope)"
+    # (_SEAGATE_ENVELOPE). Out-of-envelope ⇒ NO specs — never a best-effort capacity
+    # (and never the form/usage of a string we distrust) — but the refused value must
+    # ride the dropped channel (reason-tagged) so writer.py's WARNING surfaces it: an
+    # over-tight envelope must be observable, never a silent coverage kill.
+    result = decode_mpn(mpn)
+    assert result is not None, f"{mpn} must carry its envelope rejection on dropped"
+    assert result.specs == {}, f"{mpn} must not emit any spec (out of family envelope)"
+    assert result.dropped == {"capacity_gb": refused_gb}
+    assert result.drop_reasons == {"capacity_gb": "out_of_envelope"}
 
 
-def test_unknown_seagate_family_returns_none():
+def test_unknown_seagate_family_emits_no_specs():
     # A modern-shaped string whose 2-letter family has no vetted envelope cannot be
-    # range-checked — emitting its capacity would be a best-effort guess.
-    assert decode_mpn("ST4000ZZ0011") is None
+    # range-checked — emitting its capacity would be a best-effort guess. The refusal
+    # still rides the observability channel (specs stay empty ⇒ nothing persists).
+    result = decode_mpn("ST4000ZZ0011")
+    assert result is not None and result.specs == {}
+    assert result.dropped == {"capacity_gb": 4000}
+    assert result.drop_reasons == {"capacity_gb": "out_of_envelope"}
     # The closed family table also excludes Seagate's modern-shaped SAS SSD lines
     # (Nytro FM) — an hdd decode for an SSD would be wrong twice over.
-    assert decode_mpn("ST400FM0233") is None
+    result = decode_mpn("ST400FM0233")
+    assert result is not None and result.specs == {}
+    assert result.dropped == {"capacity_gb": 400}
 
 
 def test_six_digit_seagate_capacity_group_never_matches():
@@ -206,6 +228,11 @@ def test_shipped_capacity_grid_boundaries():
     assert 2200 not in HDD_SHIPPED_CAPACITY_GB  # WD22… ghost (2.2 TB)
     # Legacy decimal-GB and fractional-TB points the round-1 pins rely on stay on-grid.
     assert {6.4, 36, 60, 80, 250, 1500, 2500} <= HDD_SHIPPED_CAPACITY_GB
+    # Round-2 re-review: attested points the first cut missed — legacy WD Caviar
+    # 15.3/27.3/90/140 (WD153xx/WD273xx/WD900BB/WD1400BB), 1.6 TB enterprise SAS
+    # (ST1600MM*), and the 36 TB Exos M (2025 HAMR ceiling, paired with the NM
+    # envelope). 27.2 stays under the include-when-uncertain bias (see the grid).
+    assert {15.3, 27.2, 27.3, 90, 140, 1600, 36000} <= HDD_SHIPPED_CAPACITY_GB
 
 
 def test_off_grid_capacity_is_dropped_to_the_dropped_channel():
@@ -216,14 +243,22 @@ def test_off_grid_capacity_is_dropped_to_the_dropped_channel():
     assert result is not None
     assert "capacity_gb" not in result.specs
     assert result.dropped == {"capacity_gb": 17000}
+    assert result.drop_reasons == {"capacity_gb": "off_grid"}
     assert result.specs["form_factor"] == '3.5"'
     assert result.specs["usage_class"] == "Enterprise / Datacenter"
 
 
-def test_grid_emptied_decode_returns_none():
+def test_grid_emptied_decode_still_carries_the_drop():
     # When the off-grid capacity was the decode's ONLY spec (legacy WD emits capacity
-    # only), dropping it empties the decode — that is no decode at all.
-    assert decode_mpn("WD555AB") is None  # 55.5 GB was never a shipped point
+    # only), dropping it empties specs — nothing may be persisted, but the result must
+    # still carry the refusal on the dropped channel: a capacity-only decode killed by
+    # the grid is exactly the path that used to vanish as a bare None, contradicting
+    # the "a plausibility rejection must never be silent" invariant.
+    result = decode_mpn("WD555AB")  # 55.5 GB was never a shipped point
+    assert result is not None
+    assert result.specs == {}
+    assert result.dropped == {"capacity_gb": 55.5}
+    assert result.drop_reasons == {"capacity_gb": "off_grid"}
 
 
 def test_on_grid_decodes_keep_an_empty_dropped_channel():

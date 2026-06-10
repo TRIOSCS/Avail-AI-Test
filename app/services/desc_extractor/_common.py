@@ -19,19 +19,24 @@ _T = TypeVar("_T")
 # descriptions write their die density under the gigaBIT convention with a BARE "G"
 # ("Nand, 512G, MLC" = 512 Gbit = 64 GB), which the round-1 Gb-guard (lowercase-b
 # _BIT_UNITS rewrite in __init__.py) cannot see. Signals, on the upper-cased text:
-# the NAND word itself, a cell-level token (SLC/MLC/TLC/QLC), a Micron MT29-series
-# die MPN echoed into the description, or a standalone x8/x16 organization token
-# (the \b guards keep DRAM rank tokens like "2RX8" and org strings like "256MX16"
-# from matching — no boundary between the letter and the X).
-_NAND_DIE_CONTEXT = re.compile(r"\bNAND\b|\b[SMTQ]LC\b|\bMT29[A-Z0-9]|\bX0?8\b|\bX16\b")
+# DIE-SPECIFIC only — the NAND word itself or a Micron MT29-series die MPN echoed
+# into the description. Cell-level tokens (SLC/MLC/TLC/QLC) and standalone x8/x16
+# organization tokens are deliberately NOT signals: flash-type tokens appear on
+# ordinary SSD listings where a bare "<n>G" IS gigabytes of drive capacity
+# ("SSD, 480G, TLC, SATA"), and spaced "X8" collides with PCIe lane widths
+# ("PCIE X8") and spaced DRAM rank/org tokens ("2R X8") — treating those as die
+# context suppressed real capacities corpus-wide. The audit's actual die cards
+# carry the NAND word and/or the MT29 MPN, so the die-specific gate still catches
+# them while real drive/module descriptions keep extracting.
+_NAND_DIE_CONTEXT = re.compile(r"\bNAND\b|\bMT29[A-Z0-9]")
 
 
 def nand_die_context(text: str) -> bool:
-    """True when the upper-cased description carries NAND-die signals — bare ``<n>G``
-    tokens then denote gigaBITS of die density, never gigabytes of capacity, so the
-    capacity extractors must skip them (deliberate NO-WRITE: densities are not a seeded
-    spec and are never ÷8-converted — a wrong facet value is worse than a missing
-    one)."""
+    """True when the upper-cased description carries die-specific NAND signals (the NAND
+    word or an MT29-series die MPN) — bare ``<n>G`` tokens then denote gigaBITS of die
+    density, never gigabytes of capacity, so the capacity extractors must skip them
+    (deliberate NO-WRITE: densities are not a seeded spec and are never ÷8-converted — a
+    wrong facet value is worse than a missing one)."""
     return bool(_NAND_DIE_CONTEXT.search(text))
 
 

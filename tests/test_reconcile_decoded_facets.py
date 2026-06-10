@@ -184,6 +184,29 @@ def test_delete_skipped_when_jsonb_provenance_drifted(db_session: Session):
     assert card.specs_structured["capacity_gb"]["source"] == "manual"
 
 
+def test_grid_emptied_capacity_only_rows_classify_as_capacity_grid(db_session: Session):
+    # Misattribution fix: when the grid kills a capacity-ONLY decode (all legacy WD;
+    # family-unmapped Seagate like ST800MM0006, which PASSES the MM envelope), the
+    # decode used to return None and the row fell through to the shape-regex buckets
+    # (legacy_wd / seagate_envelope). The dropped channel now carries the grid refusal,
+    # so these tally under capacity_grid — the bucket of the gate that actually fired.
+    seed_commodity_schemas(db_session)
+    wd = _card(db_session, "WD555AB", "hdd")  # legacy WD shape, 55.5 GB off-grid
+    st = _card(db_session, "ST800MM0006", "hdd")  # within MM envelope, 800 GB off-grid
+    _seed_wrong(db_session, wd, "capacity_gb", 55.5, "mpn_decode")
+    _seed_wrong(db_session, st, "capacity_gb", 800, "mpn_decode")
+    db_session.commit()
+
+    summary = reconcile(db_session, apply=True)
+
+    assert summary["by_class"]["capacity_grid"] == {"deleted": 2}
+    assert "legacy_wd" not in summary["by_class"]
+    assert "seagate_envelope" not in summary["by_class"]
+    db_session.expire_all()
+    for card in (wd, st):
+        assert "capacity_gb" not in _facets(db_session, card.id)
+
+
 def test_untargeted_sources_and_keys_are_never_selected(db_session: Session):
     seed_commodity_schemas(db_session)
     card = _card(db_session, "WD800BB", "hdd")

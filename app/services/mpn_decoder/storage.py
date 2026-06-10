@@ -17,15 +17,18 @@ Re-audit round 2 (2026-06-10): three more deterministic gates on top of the abov
     generation marker, never fractional capacity (WD42PURZ = 4 TB rev 2, WD101EFBX =
     10 TB rev 1 — the round-1 TB×10 read produced 4.2/10.1 TB ghosts);
 (2) every Seagate modern-family capacity must sit inside a per-family envelope
-    (_SEAGATE_ENVELOPE) — out-of-envelope means a truncated/malformed string, NO decode;
+    (_SEAGATE_ENVELOPE) — out-of-envelope means a truncated/malformed string, NO specs;
 (3) every hdd capacity any decoder here emits must land on the discrete grid of
     capacities vendors actually shipped (HDD_SHIPPED_CAPACITY_GB) — an off-grid value
     is moved to DecodeResult.dropped (never specs) so writer.py can WARN about it.
+Both gates route the refused capacity through DecodeResult.dropped (tagged with a
+DROP_* reason) even when that leaves specs empty — a plausibility rejection must never
+be silent, including on capacity-only decodes (all legacy WD, family-unmapped Seagate).
 """
 
 import re
 
-from app.services.mpn_decoder._common import DecodeResult
+from app.services.mpn_decoder._common import DROP_OFF_GRID, DROP_OUT_OF_ENVELOPE, DecodeResult
 
 # Canonical enum strings — MUST match commodity_seeds.json exactly.
 FF_35 = '3.5"'
@@ -82,14 +85,16 @@ _SEAGATE_FAMILY = {
 # deliberately WIDE (their job is catching the ≥10× truncation class, not enumerating
 # SKUs — the discrete HDD_SHIPPED_CAPACITY_GB grid below handles off-ladder points), but
 # every bound is anchored to real launch/EOL SKUs. A family WITHOUT a vetted envelope
-# returns None outright: a capacity we cannot range-check is a best-effort guess, and a
-# wrong capacity is worse than a missing one. The closed table also keeps Seagate's
+# emits NO specs: a capacity we cannot range-check is a best-effort guess, and a wrong
+# capacity is worse than a missing one (the refused value still rides the dropped
+# channel so the rejection is observable). The closed table also keeps Seagate's
 # modern-shaped SAS *SSD* families (FM Nytro, FP Pulsar — e.g. ST400FM0233) from ever
 # taking an hdd decode: they are deliberately NOT listed.
 _SEAGATE_ENVELOPE = {
-    "NM": (500, 32000),  # Constellation ES 500 GB → Exos X (incl. 28-32 TB HAMR/SMR)
+    "NM": (500, 36000),  # Constellation ES 500 GB → Exos X/M (incl. 28-36 TB HAMR/SMR — 36 TB Exos M, 2025)
     "MM": (300, 2400),  # Savvio / Enterprise Performance 10K-15K 2.5" SAS: 300 GB-2.4 TB
     "MP": (300, 900),  # Enterprise Performance 15K 2.5" SAS: 300/600/900 GB
+    "NC": (1000, 4000),  # Constellation CS 1-3 TB (ST1000NC001…ST3000NC002) + Terascale 4 TB (ST4000NC001)
     "NX": (500, 4000),  # Exos 7E 2.5" nearline
     "NE": (1000, 32000),  # IronWolf Pro
     "NT": (1000, 32000),  # IronWolf Pro (20 TB+ NT tails)
@@ -103,7 +108,7 @@ _SEAGATE_ENVELOPE = {
     "DL": (500, 3000),  # Barracuda Green
     "LM": (160, 5000),  # 2.5" Momentus/BarraCuda (ST160LM003 → ST5000LM000)
     "LX": (250, 4000),  # FireCuda 2.5" SSHD
-    "LT": (250, 1000),  # Laptop Thin 2.5"
+    "LT": (160, 1000),  # Laptop / Momentus Thin 2.5" (ST160LT000 7mm 160 GB is the floor)
     "AS": (5000, 8000),  # Archive SMR (modern 0-led-tail AS only; legacy ...AS never matches)
 }
 
@@ -118,9 +123,17 @@ def _seagate(mpn: str) -> DecodeResult | None:
     envelope = _SEAGATE_ENVELOPE.get(family)
     if envelope is None or not envelope[0] <= capacity <= envelope[1]:
         # Unknown family (no vetted range) or out-of-envelope capacity (truncated/
-        # malformed string): NO decode at all — never a best-effort capacity, and the
-        # form/usage of a string we distrust is equally untrustworthy.
-        return None
+        # malformed string): NO specs at all — never a best-effort capacity, and the
+        # form/usage of a string we distrust is equally untrustworthy. The refused
+        # capacity rides the dropped channel (specs stay empty, so nothing can be
+        # persisted) so writer.py's aggregate WARNING surfaces the rejection — an
+        # over-tight envelope must be visible, never silently zero Seagate coverage.
+        return DecodeResult(
+            commodity="hdd",
+            vendor="Seagate",
+            dropped={"capacity_gb": capacity},
+            drop_reasons={"capacity_gb": DROP_OUT_OF_ENVELOPE},
+        )
     specs: dict = {"capacity_gb": capacity}
     fam = _SEAGATE_FAMILY.get(family)
     if fam:
@@ -319,17 +332,24 @@ HDD_SHIPPED_CAPACITY_GB = frozenset(
         6.4,
         8.4,
         # 2000s IDE/early-SATA + mobile ladder (WD decimal-GB 2-letter era: WD102AA =
-        # 10.2, WD136AA = 13.6, WD172AA = 17.2, WD205BB = 20.5, WD307AA = 30.7,
-        # WD450BB = 45; Protégé WD100/150EB = 10/15; Raptor WD360GD = 36, WD740GD = 74,
-        # Raptor-X 150; round-GB Caviar/Scorpio 20…500; perpendicular-era 640/750)
+        # 10.2, WD136AA = 13.6, WD153AA/BA = 15.3, WD172AA = 17.2, WD205BB = 20.5,
+        # WD273AA/BA = 27.3, WD307AA = 30.7, WD450BB = 45; Protégé WD100/150EB = 10/15;
+        # Raptor WD360GD = 36, WD740GD = 74, Raptor-X 150; round-GB Caviar/Scorpio
+        # 20…500 incl. WD900BB = 90 and WD1400BB = 140; perpendicular-era 640/750.
+        # 27.2 carries no WD model (no WD272xx exists) but is RETAINED under the grid's
+        # include-when-uncertain bias: a false-accept of a possibly-real point (Maxtor
+        # DiamondMax-era 27.2 GB SKUs) costs nothing — no decoder currently reaches it —
+        # while a false-delete of a real point destroys correct decodes.)
         10,
         10.2,
         13.6,
         15,
+        15.3,
         17.2,
         20,
         20.5,
         27.2,
+        27.3,
         30,
         30.7,
         32,
@@ -339,8 +359,10 @@ HDD_SHIPPED_CAPACITY_GB = frozenset(
         60,
         74,
         80,
+        90,
         100,
         120,
+        140,
         150,
         160,
         180,
@@ -359,16 +381,18 @@ HDD_SHIPPED_CAPACITY_GB = frozenset(
         73.4,
         146,
         # SAS enterprise 2.5"/3.5" ladder (Savvio / Enterprise Performance / MM-series;
-        # 300/600 shared with the lists above)
+        # 300/600 shared with the lists above; 1600 = 1.6 TB Exos 10E2400
+        # ST1600MM0129/ST1600MM0009 + Toshiba AL15SEB16EQ)
         450,
         600,
         900,
         1200,
+        1600,
         1800,
         2400,
         # TB-era 3.5" CMR/SMR/He grid; 1500/2500 are the shipped Caviar-Green fractional
         # points (WD15EADS/EARS, WD25EZRS); 7/9/11/13/15/17/19/21/23/25 TB never shipped;
-        # 28000-32000 cover the 2024+ UltraSMR/HAMR ships (WD 28/32 TB, Exos M 30/32 TB)
+        # 28000-36000 cover the 2024+ UltraSMR/HAMR ships (WD 28/32 TB, Exos M 30/32/36 TB)
         1000,
         1500,
         2000,
@@ -390,15 +414,24 @@ HDD_SHIPPED_CAPACITY_GB = frozenset(
         28000,
         30000,
         32000,
+        36000,
     }
 )
 
 
 def decode_storage(mpn: str, manufacturer: str | None = None) -> DecodeResult | None:
-    """Decode a storage-drive MPN (already upper-cased) or return None."""
+    """Decode a storage-drive MPN (already upper-cased) or return None.
+
+    A returned result may carry EMPTY specs with a populated `dropped` dict: the shape
+    gates matched but every decoded value failed a plausibility gate (shipped-capacity
+    grid here, Seagate envelope inside _seagate). Such a result writes nothing — but it
+    keeps the rejection observable in writer.py's aggregate drop-WARNING, honoring the
+    DecodeResult invariant that a plausibility rejection must never be silent (the
+    capacity-only legacy WD and family-unmapped Seagate decodes hit exactly this path).
+    """
     for decoder in _STORAGE_DECODERS:
         result = decoder(mpn)
-        if result is None or not result.specs:
+        if result is None or not (result.specs or result.dropped):
             continue
         capacity = result.specs.get("capacity_gb")
         if capacity is not None and capacity not in HDD_SHIPPED_CAPACITY_GB:
@@ -406,9 +439,9 @@ def decode_storage(mpn: str, manufacturer: str | None = None) -> DecodeResult | 
             # the shape gates passed. Move it to `dropped` (never specs) so writer.py
             # surfaces it in the aggregate drop-WARNING instead of persisting it.
             result.dropped["capacity_gb"] = result.specs.pop("capacity_gb")
-        if result.specs:
-            return result
-        # The grid emptied the decode (capacity was its only spec): treat as no decode
-        # — the vendor gates are mutually exclusive, so no later decoder can match.
-        return None
+            result.drop_reasons["capacity_gb"] = DROP_OFF_GRID
+        # Returned even when the gate emptied specs (dropped keeps the rejection
+        # observable); the vendor gates are mutually exclusive, so no later decoder
+        # could match this MPN anyway.
+        return result
     return None
