@@ -526,3 +526,17 @@ class FruLinkKind(StrEnum):
 # app-synthesized sentinel (CDC pending-qualification sheet); the FRU panels render
 # it as the amber "CDC pending" pill — keep ingest and display on this constant.
 CDC_PENDING = "cdc_pending"
+
+
+class OemCrosswalkStatus(StrEnum):
+    """Status of an ``oem_crosswalk`` cache row (OEM web resolution, migration 100).
+
+    Single source of truth for the only two valid states — a resolver trust-gate
+    failure IS ``no_match`` (there is no separate "gate_failed" state). ``resolved``
+    rows are permanent (never re-fetched); ``no_match`` rows block re-resolution for
+    90 days from ``looked_up_at`` and are updated in place on retry. Enforced via
+    @validates on OemCrosswalk.
+    """
+
+    RESOLVED = "resolved"
+    NO_MATCH = "no_match"

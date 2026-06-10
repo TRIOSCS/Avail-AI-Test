@@ -8,6 +8,15 @@ def test_official_oem_hosts_accepted():
     assert is_oem_domain("https://parts.hp.com/x")  # dot-suffix of hp.com root
 
 
+def test_partsurfer_hp_com_is_explicit_official_host():
+    # The canonical HP PartSurfer host (the oem-web-resolution lookup surface) must be
+    # an EXPLICIT allowlist member, not just a dot-suffix accident of the hp.com root.
+    from app.services.enrichment_worker.oem_domains import OEM_OFFICIAL_HOSTS
+
+    assert "partsurfer.hp.com" in OEM_OFFICIAL_HOSTS
+    assert is_oem_domain("https://partsurfer.hp.com/Search.aspx?SearchText=875942-001")
+
+
 def test_lookalike_and_bad_schemes_rejected():
     assert not is_oem_domain("https://evil-lenovo.com/x")
     assert not is_oem_domain("https://lenovo.com.evil.com/x")

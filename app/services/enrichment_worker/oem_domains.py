@@ -25,6 +25,7 @@ OEM_OFFICIAL_HOSTS: frozenset[str] = frozenset(
         "support.lenovo.com",
         "pcsupport.lenovo.com",
         "partsurfer.hpe.com",
+        "partsurfer.hp.com",  # canonical HP PartSurfer host (also covered by the hp.com root)
         "partsurfer.com",
         "support.hpe.com",
         "support.hp.com",

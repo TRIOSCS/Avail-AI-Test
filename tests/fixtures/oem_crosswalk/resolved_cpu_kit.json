@@ -1,0 +1,9 @@
+{
+  "_comment": "Recorded-style PartSurfer resolution (scrubbed): HP DL380 Gen10 Xeon-Gold 6130 spare -> Intel tray MPN. Drives the resolver happy path + the writer CPU-title test.",
+  "canonical_mpn": "CD8067303409000",
+  "manufacturer": "Intel",
+  "title": "Intel Xeon-Gold 6130 (2.1GHz/16-core/125W) FIO processor kit",
+  "quote": "875942-001 SPS-CPU Intel Xeon-Gold 6130 (2.1GHz/16-core/125W) FIO processor kit CD8067303409000",
+  "confidence": 0.96,
+  "source_urls": ["https://partsurfer.hp.com/Search.aspx?SearchText=875942-001"]
+}

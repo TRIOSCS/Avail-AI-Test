@@ -1,0 +1,9 @@
+{
+  "_comment": "Gate 2 failure: the verbatim quote shows the canonical MPN but not the spare.",
+  "canonical_mpn": "CD8067303409000",
+  "manufacturer": "Intel",
+  "title": "Intel Xeon-Gold 6130 (2.1GHz/16-core/125W) FIO processor kit",
+  "quote": "Intel Xeon-Gold 6130 (2.1GHz/16-core/125W) processor CD8067303409000",
+  "confidence": 0.96,
+  "source_urls": ["https://partsurfer.hp.com/Search.aspx?SearchText=875942-001"]
+}
