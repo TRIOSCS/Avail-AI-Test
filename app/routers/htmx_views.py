@@ -7245,10 +7245,10 @@ async def materials_faceted_partial(
     lifecycle: str = Query(""),
     rohs: str = Query(""),
     condition: str = Query(""),
-    has_datasheet: bool = Query(False),
-    has_stock: bool = Query(False),
-    has_price: bool = Query(False),
-    has_crosses: bool = Query(False),
+    has_datasheet: str = Query("false"),
+    has_stock: str = Query("false"),
+    has_price: str = Query("false"),
+    has_crosses: str = Query("false"),
     internal: str = Query("all"),
     searched_within: str = Query("any"),
     min_searches: str = Query("0"),
@@ -7273,11 +7273,25 @@ async def materials_faceted_partial(
     parsed_lifecycle = _csv_list(lifecycle)
     parsed_rohs = _csv_list(rohs)
     parsed_condition = _csv_list(condition)
-    # Unknown/invalid operational values (incl. non-numeric/negative min_searches)
-    # degrade to the no-op default — hand-edited URLs must not 500/422 — but each
-    # degrade is LOGGED so frontend/backend vocabulary drift (e.g. a bucket added to
-    # the UI but not the backend constants) surfaces in logs instead of silently
-    # no-op'ing the filter while the active-filter chip claims it is applied.
+
+    # Unknown/invalid operational values (incl. non-numeric/negative min_searches and
+    # the boolean flags) degrade to the no-op default — hand-edited URLs must not
+    # 500/422 (a 422 partial never swaps, htmx shows only the generic error toast) —
+    # but each degrade is LOGGED so frontend/backend vocabulary drift (e.g. a bucket
+    # added to the UI but not the backend constants) surfaces in logs instead of
+    # silently no-op'ing the filter while the active-filter chip claims it is applied.
+    def _flag(name: str, raw: str) -> bool:
+        val = raw.strip().lower()
+        if val in {"true", "1", "yes", "on"}:
+            return True
+        if val not in {"false", "0", "", "no", "off"}:
+            logger.warning("materials faceted: invalid {}={!r}, degrading to false", name, raw)
+        return False
+
+    has_datasheet_flag = _flag("has_datasheet", has_datasheet)
+    has_stock_flag = _flag("has_stock", has_stock)
+    has_price_flag = _flag("has_price", has_price)
+    has_crosses_flag = _flag("has_crosses", has_crosses)
     if internal not in INTERNAL_FILTER_VALUES:
         logger.warning("materials faceted: unknown internal={!r}, degrading to 'all'", internal)
         internal = "all"
@@ -7303,10 +7317,10 @@ async def materials_faceted_partial(
         lifecycle=parsed_lifecycle,
         rohs=parsed_rohs,
         condition=parsed_condition,
-        has_datasheet=has_datasheet,
-        has_stock=has_stock,
-        has_price=has_price,
-        has_crosses=has_crosses,
+        has_datasheet=has_datasheet_flag,
+        has_stock=has_stock_flag,
+        has_price=has_price_flag,
+        has_crosses=has_crosses_flag,
         internal=internal,
         searched_within=searched_within,
         min_searches=min_searches_n,

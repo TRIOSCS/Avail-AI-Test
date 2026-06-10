@@ -837,8 +837,14 @@ KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 ra
 never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
 `commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
 `tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
-aggregate WARNING if a decoded key ever has no schema row, so a drift can never silently
-zero the feature (`record_spec` drops schema-less keys at DEBUG only).
+aggregate WARNING for BOTH of `record_spec`'s silent vocabulary drops — a decoded key with
+no schema row AND an enum value outside the LIVE row's enum_values (the worker decodes
+against live DB rows, which can lag a deploy's reseed) — so a drift can never silently
+zero the feature (`record_spec` drops both cases at DEBUG only). Cards skipped because
+their existing category conflicts with the decoded commodity are counted too
+(`skipped_category_conflict` in the per-batch stats, plus a WARNING with the
+`card_category->decoded_commodity` pairs — the number that says whether the
+category-alias map needs another entry).
 
 ## Cross-Reference Caching
 
@@ -915,9 +921,15 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |                    silently drops rows)
     |       searched_within (7d|30d|90d|any chips on last_searched_at)
     |       min_searches    (int ≥ 0 on search_count)
-    |     Unknown/invalid values (incl. non-numeric or negative min_searches) degrade
-    |     to the no-op default with a WARNING log (hand-edited URLs never 500/422; the
-    |     log surfaces frontend/backend vocabulary drift). Vocabularies are owned by
+    |     Unknown/invalid values degrade to the no-op default with a WARNING log
+    |     (hand-edited URLs never 500/422; the log surfaces frontend/backend
+    |     vocabulary drift). This covers ALL the operational params: the enum-ish
+    |     ones (internal / searched_within), non-numeric or negative min_searches,
+    |     AND the boolean flags (has_stock / has_price / has_crosses /
+    |     has_datasheet) — declared as lenient strings, truthy {true,1,yes,on} /
+    |     falsy {false,0,'',no,off}, anything else WARNs and degrades to False
+    |     (a bool Query would 422 on ?has_stock=bogus and htmx would silently
+    |     refuse to swap, leaving stale results with only the generic error toast). Vocabularies are owned by
     |     faceted_search_service (INTERNAL_FILTER_VALUES / SEARCHED_WITHIN_VALUES,
     |     derived from the maps that drive the query branches); the JS twin is
     |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
