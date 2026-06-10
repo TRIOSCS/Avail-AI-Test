@@ -4,8 +4,11 @@ Holds quote numbering (used by proactive_service) and the CDM account-workspace
 business rules: staleness tiers, account-list query building/sorting, and the
 contact-row assembly for the company detail panel.
 
-Called by: app/routers/htmx_views.py (CDM workspace routes), app/services/proactive_service.py
-Depends on: app/models (Company, CustomerSite, SiteContact, Quote), app/utils/search_builder
+Called by: app/routers/htmx_views.py (CDM workspace routes),
+    app/routers/crm/quotes.py + app/routers/crm/__init__.py (next_quote_number),
+    app/services/proactive_service.py, app/services/quote_builder_service.py
+Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
+    app/models/auth (User), app/utils/search_builder
 """
 
 from datetime import datetime, timedelta, timezone
@@ -77,6 +80,18 @@ CDM_SORTS = {
 CDM_ACCOUNT_TYPES = ("Customer", "Prospect", "Partner", "Competitor")
 
 
+def _needs_call_filter(now: datetime):
+    """Predicate for accounts needing a call: overdue (30d+) OR never contacted.
+
+    Single source of truth shared by the "needs a call" chip COUNT
+    (cdm_overdue_count) and the chip's click-through filter (cdm_company_query
+    staleness="needs_call") — the two must never disagree on NULL
+    last_activity_at semantics, or the chip promises rows the list won't show.
+    """
+    cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
+    return or_(Company.last_activity_at < cutoff, Company.last_activity_at.is_(None))
+
+
 def cdm_company_query(
     db: Session,
     user: User,
@@ -88,7 +103,11 @@ def cdm_company_query(
     sort: str,
     now: datetime | None = None,
 ):
-    """Build the filtered + sorted CDM account list query."""
+    """Build the filtered + sorted CDM account list query.
+
+    staleness: "" (all) | "overdue" | "due_soon" | "recent" | "new" — one band each —
+    or "needs_call" (overdue OR never contacted), the "needs a call" chip's filter.
+    """
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
     if search.strip():
@@ -100,6 +119,9 @@ def cdm_company_query(
     due_soon_cutoff = now - timedelta(days=STALENESS_DUE_SOON_DAYS)
     if staleness == "overdue":
         query = query.filter(Company.last_activity_at < overdue_cutoff)
+    elif staleness == "needs_call":
+        # The "N need a call" chip — must match cdm_overdue_count exactly.
+        query = query.filter(_needs_call_filter(now))
     elif staleness == "due_soon":
         query = query.filter(
             Company.last_activity_at >= overdue_cutoff,
@@ -121,21 +143,19 @@ def cdm_company_query(
 def cdm_overdue_count(db: Session, user: User, now: datetime | None = None) -> int:
     """Count this user's accounts needing a call (overdue or never contacted).
 
-    Sales/trader only — others get 0 (no chip rendered).
+    Sales/trader only — others get 0 (no chip rendered). Uses the same
+    _needs_call_filter predicate as the chip's click-through query
+    (staleness="needs_call") so count and list never diverge.
     """
     if user.role not in ("sales", "trader"):
         return 0
     now = now or datetime.now(timezone.utc)
-    call_threshold = now - timedelta(days=STALENESS_OVERDUE_DAYS)
     return (
         db.query(func.count(Company.id))
         .filter(
             Company.is_active.is_(True),
             Company.account_owner_id == user.id,
-            or_(
-                Company.last_activity_at < call_threshold,
-                Company.last_activity_at.is_(None),
-            ),
+            _needs_call_filter(now),
         )
         .scalar()
         or 0
@@ -157,8 +177,10 @@ def cdm_list_ctx(
 ) -> dict:
     """Shared context for the CDM workspace shell and its account-list partial.
 
-    include_overdue: the overdue chip lives in the filter bar (workspace shell
-    only), so the account-list refresh route skips that COUNT query.
+    include_overdue: adds the filter-bar-only context — overdue_count (the
+    "needs a call" chip, an extra COUNT query) AND account_types (the type
+    dropdown options). The account-list refresh route re-renders neither, so
+    it omits both and skips the COUNT query.
     """
     now = datetime.now(timezone.utc)
     query = cdm_company_query(
@@ -187,13 +209,24 @@ def cdm_list_ctx(
 
 
 def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite] | None = None) -> list[dict]:
-    """All contacts for a company across its sites, plus legacy site-level contacts.
+    """Active contacts for a company across its ACTIVE sites, plus legacy site-level
+    contacts.
+
+    Both is_active filters apply: deactivated SiteContacts are excluded, and contacts
+    (real or legacy) on deactivated sites are excluded — outreach must never be logged
+    against, or bump last_activity_at on, a deactivated entity. Pass pre-loaded ACTIVE
+    sites (e.g. the filtered list from company_detail_partial) to skip the sites query.
 
     Returns [{"contact": SiteContact|None, "site": CustomerSite|None, "legacy": bool}].
-    Pass pre-loaded sites (e.g. from joinedload) to skip the sites query.
+    Invariant: legacy=True <=> contact is None <=> the contact fields live on
+    site.contact_* (contacts_tab.html branches on row.legacy and relies on this).
+    For legacy rows site is always set; for contact rows site is the contact's site
+    (None only if the lookup misses).
     """
     if sites is None:
-        sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()
+        sites = (
+            db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
+        )
     site_map = {s.id: s for s in sites}
     contacts: list[SiteContact] = []
     if site_map:

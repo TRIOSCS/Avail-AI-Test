@@ -186,6 +186,52 @@ class TestOutreachInitiated:
         )
         assert count == 1
 
+    def test_dedup_stops_after_window_expires(self, client, db_session, cdm_company):
+        """The same click AFTER the dedup window is a NEW touch, not a dup.
+
+        Guards the dedup-miss direction: an over-widened window (unit typo,
+        timezone bug, inverted comparison) would silently drop every repeat
+        touch forever while the dedup-hit tests stay green.
+        """
+        from app.services.activity_service import OUTREACH_DEDUP_SECONDS
+
+        first = self._post(client, cdm_company, "phone", "+14155551234")
+        assert first.status_code == 201
+        record = db_session.get(ActivityLog, first.json()["id"])
+        record.created_at = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS + 60)
+        db_session.commit()
+
+        second = self._post(client, cdm_company, "phone", "+14155551234")
+        assert second.status_code == 201
+        assert second.json()["id"] != first.json()["id"]
+        count = (
+            db_session.query(ActivityLog)
+            .filter(ActivityLog.activity_type == "call_logged", ActivityLog.company_id == cdm_company["company"].id)
+            .count()
+        )
+        assert count == 2
+
+    def test_dedup_does_not_collapse_distinct_contacts(self, client, db_session, cdm_company):
+        """Back-to-back calls to two DIFFERENT contacts at one company are two touches.
+
+        Worst case exercised: same display name AND same phone (shared
+        switchboard) — only site_contact_id distinguishes them, so this pins
+        the entity ids (not the display subject) as the dedup identity.
+        """
+        twin = SiteContact(
+            customer_site_id=cdm_company["site"].id,
+            full_name="Pat Buyer",
+            phone="+14155551234",
+        )
+        db_session.add(twin)
+        db_session.commit()
+
+        first = self._post(client, cdm_company, "phone", "+14155551234")
+        second = self._post(client, cdm_company, "phone", "+14155551234", site_contact_id=twin.id)
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["id"] != second.json()["id"]
+
     def test_nonexistent_entity_ids_dropped_not_500(self, client, db_session):
         """Stale DOM ids (deleted company/site/contact) must not FK-crash the log."""
         resp = client.post(
@@ -203,6 +249,69 @@ class TestOutreachInitiated:
         assert record.company_id is None
         assert record.customer_site_id is None
         assert record.site_contact_id is None
+        # The degradation is surfaced to the client, not silently swallowed.
+        assert sorted(resp.json()["dropped_links"]) == ["company", "contact", "site"]
+
+    def test_valid_entity_ids_report_no_dropped_links(self, client, cdm_company):
+        """Fully-linked logs report an empty dropped_links (frontend shows success)."""
+        resp = self._post(client, cdm_company, "phone", "+14155551234")
+        assert resp.status_code == 201
+        assert resp.json()["dropped_links"] == []
+
+    def test_site_from_other_company_link_dropped(self, client, db_session, cdm_company):
+        """A site that doesn't belong to the company must not be linked or bumped."""
+        other_co = Company(name="Unrelated Co", is_active=True)
+        db_session.add(other_co)
+        db_session.flush()
+        other_site = CustomerSite(company_id=other_co.id, site_name="Elsewhere", is_active=True)
+        db_session.add(other_site)
+        db_session.commit()
+
+        resp = self._post(
+            client, cdm_company, "phone", "+14155551234", customer_site_id=other_site.id, site_contact_id=None
+        )
+        assert resp.status_code == 201
+        record = db_session.get(ActivityLog, resp.json()["id"])
+        assert record.company_id == cdm_company["company"].id
+        assert record.customer_site_id is None
+        assert "site" in resp.json()["dropped_links"]
+        # The unrelated site's staleness data must stay untouched.
+        db_session.expire_all()
+        assert db_session.get(CustomerSite, other_site.id).last_activity_at is None
+
+    def test_contact_from_other_site_link_dropped(self, client, db_session, cdm_company):
+        """A contact that doesn't belong to the claimed site must not be linked."""
+        other_site = CustomerSite(company_id=cdm_company["company"].id, site_name="Plant 2", is_active=True)
+        db_session.add(other_site)
+        db_session.flush()
+        other_contact = SiteContact(customer_site_id=other_site.id, full_name="Sam Elsewhere")
+        db_session.add(other_contact)
+        db_session.commit()
+
+        # Payload claims the HQ site but the contact lives at Plant 2.
+        resp = self._post(client, cdm_company, "phone", "+14155551234", site_contact_id=other_contact.id)
+        assert resp.status_code == 201
+        record = db_session.get(ActivityLog, resp.json()["id"])
+        assert record.site_contact_id is None
+        assert record.customer_site_id == cdm_company["site"].id
+        assert "contact" in resp.json()["dropped_links"]
+
+    def test_wechat_whitespace_value_returns_400(self, client, cdm_company):
+        """An all-whitespace WeChat handle must 400, not log 'WeChat message to '."""
+        resp = self._post(client, cdm_company, "wechat", "   ")
+        assert resp.status_code == 400
+        assert "error" in resp.json()
+
+    def test_oversized_contact_value_returns_422(self, client, cdm_company):
+        """contact_value beyond the String(255) snapshot columns is a 422 at the
+        boundary (Postgres would DataError-500; SQLite tests mask that)."""
+        resp = self._post(client, cdm_company, "email", "x" * 290 + "@example.com")
+        assert resp.status_code == 422
+
+    def test_oversized_phone_returns_400(self, client, cdm_company):
+        """A digit string beyond the E.164 15-digit cap is rejected as a phone."""
+        resp = self._post(client, cdm_company, "phone", "1" * 60)
+        assert resp.status_code == 400
 
     def test_call_initiated_bumps_last_activity(self, client, db_session, cdm_company):
         """Click-to-call (legacy endpoint) also feeds the staleness sort now."""

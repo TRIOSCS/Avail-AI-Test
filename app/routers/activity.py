@@ -59,23 +59,50 @@ def _validated_entity_ids(
     company_id: int | None,
     customer_site_id: int | None,
     site_contact_id: int | None = None,
-) -> tuple[int | None, int | None, int | None]:
-    """Null out entity ids that don't exist (warn, don't reject).
+) -> tuple[int | None, int | None, int | None, list[str]]:
+    """Drop entity links that don't exist or don't belong together (warn, don't reject).
 
-    The DOM can carry stale ids (e.g. a coworker deleted the contact while the panel was
-    open); inserting them raises FK IntegrityError → opaque 500. Keep the activity, drop
-    the dangling link.
+    The DOM can carry stale ids (e.g. a coworker deleted or moved the contact while the
+    panel was open). Nonexistent ids would raise FK IntegrityError → opaque 500, and
+    ActivityLog has no DB constraint tying company/site/contact together, so a
+    mismatched triple would persist an inconsistent link and bump last_activity_at on an
+    unrelated site. Keep the activity, drop the dangling/mismatched links, and report
+    what was dropped so the caller can surface the degradation instead of claiming full
+    success.
+
+    Returns (company_id, customer_site_id, site_contact_id, dropped) — dropped is a
+    subset of ["company", "site", "contact"] naming the links removed.
     """
+    dropped: list[str] = []
     if company_id and not db.get(Company, company_id):
         logger.warning(f"activity log: company_id={company_id} not found — dropping link")
         company_id = None
-    if customer_site_id and not db.get(CustomerSite, customer_site_id):
+        dropped.append("company")
+    site = db.get(CustomerSite, customer_site_id) if customer_site_id else None
+    if customer_site_id and not site:
         logger.warning(f"activity log: customer_site_id={customer_site_id} not found — dropping link")
         customer_site_id = None
-    if site_contact_id and not db.get(SiteContact, site_contact_id):
+        dropped.append("site")
+    elif site and site.company_id != company_id:
+        logger.warning(
+            f"activity log: customer_site_id={customer_site_id} belongs to company "
+            f"{site.company_id}, not {company_id} — dropping link"
+        )
+        customer_site_id = None
+        dropped.append("site")
+    contact = db.get(SiteContact, site_contact_id) if site_contact_id else None
+    if site_contact_id and not contact:
         logger.warning(f"activity log: site_contact_id={site_contact_id} not found — dropping link")
         site_contact_id = None
-    return company_id, customer_site_id, site_contact_id
+        dropped.append("contact")
+    elif contact and contact.customer_site_id != customer_site_id:
+        logger.warning(
+            f"activity log: site_contact_id={site_contact_id} belongs to site "
+            f"{contact.customer_site_id}, not {customer_site_id} — dropping link"
+        )
+        site_contact_id = None
+        dropped.append("contact")
+    return company_id, customer_site_id, site_contact_id, dropped
 
 
 @router.post("/call-initiated", status_code=201)
@@ -101,7 +128,7 @@ def call_initiated(
         phone_display = format_phone_display(body.phone_number)
 
         # Resolve company from vendor if not provided
-        company_id, customer_site_id, _ = _validated_entity_ids(db, body.company_id, body.customer_site_id)
+        company_id, customer_site_id, _, _ = _validated_entity_ids(db, body.company_id, body.customer_site_id)
         vendor_card_id = body.vendor_card_id
         vendor_name = None
 
@@ -192,7 +219,7 @@ def outreach_initiated(
         if not _check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
             raise HTTPException(429, "Too many outreach logs — try again in a minute")
 
-        company_id, customer_site_id, site_contact_id = _validated_entity_ids(
+        company_id, customer_site_id, site_contact_id, dropped = _validated_entity_ids(
             db, body.company_id, body.customer_site_id, body.site_contact_id
         )
 
@@ -208,7 +235,10 @@ def outreach_initiated(
             origin=body.origin,
         )
         db.commit()
-        return {"id": record.id}
+        # dropped_links tells the client which stale entity links were removed —
+        # the touch IS logged, but it won't appear on the account it was clicked
+        # from, so the frontend downgrades its success toast to a warning.
+        return {"id": record.id, "dropped_links": dropped}
 
     except HTTPException:
         raise

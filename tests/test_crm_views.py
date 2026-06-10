@@ -191,6 +191,42 @@ class TestOverdueChip:
         assert "needs a call" in resp.text
         assert "NeverContacted Corp" in resp.text
 
+    def test_chip_click_filter_matches_chip_count(self, client: TestClient, db_session: Session, test_user: User):
+        """The chip's click-through filter (staleness=needs_call) returns every account
+        the chip counted — overdue AND never-contacted share one predicate.
+
+        Consistency guard: counting and filtering used to encode 'needs a call' twice
+        with different NULL semantics, so a rep could see '1 needs a call', click the
+        chip, and get 'No accounts found'.
+        """
+        test_user.role = "sales"
+        db_session.flush()
+
+        never = Company(
+            name="NeverCalled Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=None,
+        )
+        overdue = Company(
+            name="LongOverdue Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+        )
+        db_session.add_all([never, overdue])
+        db_session.commit()
+
+        shell = client.get("/v2/partials/customers")
+        assert shell.status_code == 200
+        assert "2 need a call" in shell.text
+        # The chip targets the shared needs_call predicate, not plain overdue.
+        assert "staleness.value = 'needs_call'" in shell.text
+
+        html = client.get("/v2/partials/customers/account-list?staleness=needs_call&my_only=1").text
+        assert "NeverCalled Corp" in html
+        assert "LongOverdue Corp" in html
+
     def test_chip_excludes_other_owners(self, client: TestClient, db_session: Session, test_user: User):
         """Chip only counts accounts owned by the current user."""
         test_user.role = "sales"
@@ -298,6 +334,52 @@ class TestWorkspaceFiltersAndSort:
         html = client.get("/v2/partials/customers/account-list?staleness=new").text
         assert "Never Filter Co" in html
         assert "Touched Filter Co" not in html
+
+    def test_staleness_filter_due_soon_and_recent(self, client: TestClient, db_session: Session, test_user: User):
+        """due_soon is the two-cutoff 14-30d band; recent is <14d.
+
+        Seeds 5d/20d/45d accounts so a swapped-cutoff or sign-flip regression
+        (due_soon_cutoff is the NEWER timestamp) can't slip through.
+        """
+        c5 = Company(
+            name="Band5d Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        c20 = Company(
+            name="Band20d Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=20),
+        )
+        c45 = Company(
+            name="Band45d Co",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+        )
+        db_session.add_all([c5, c20, c45])
+        db_session.commit()
+
+        due_soon = client.get("/v2/partials/customers/account-list?staleness=due_soon").text
+        assert "Band20d Co" in due_soon
+        assert "Band5d Co" not in due_soon
+        assert "Band45d Co" not in due_soon
+
+        recent = client.get("/v2/partials/customers/account-list?staleness=recent").text
+        assert "Band5d Co" in recent
+        assert "Band20d Co" not in recent
+        assert "Band45d Co" not in recent
+
+    def test_inactive_companies_excluded(self, client: TestClient, db_session: Session, test_user: User):
+        """Archived/merged (is_active=False) companies never appear in the account
+        list."""
+        active = Company(name="ActiveList Co", is_active=True)
+        archived = Company(name="ArchivedGone Co", is_active=False)
+        db_session.add_all([active, archived])
+        db_session.commit()
+
+        html = client.get("/v2/partials/customers/account-list").text
+        assert "ActiveList Co" in html
+        assert "ArchivedGone Co" not in html
 
     def test_account_type_filter(self, client: TestClient, db_session: Session, test_user: User):
         """account_type filter narrows to that type."""
@@ -460,6 +542,8 @@ class TestContactPanel:
         assert "https://teams.microsoft.com/l/chat/0/0?users=jane%40contactpanel.com" in resp.text
         assert f'data-company-id="{company.id}"' in resp.text
         assert f'data-contact-id="{contact.id}"' in resp.text
+        # The site-level last_activity_at bump depends on this attribute.
+        assert f'data-site-id="{site.id}"' in resp.text
 
     def test_wechat_action_renders_when_handle_set(self, client: TestClient, db_session: Session, test_user: User):
         """WeChat deep link renders only for contacts with a wechat_id."""
@@ -518,6 +602,65 @@ class TestContactPanel:
         contact = db_session.query(SiteContact).filter(SiteContact.customer_site_id == site.id).first()
         assert contact is not None
         assert contact.wechat_id == "wei_chen_88"
+
+    def test_create_site_contact_wechat_too_long_rejected(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """WeChat IDs beyond the String(100) column are rejected server-side (the SQLite
+        test engine ignores VARCHAR lengths; Postgres would 500)."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="WeChat Long Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts",
+            data={"full_name": "Wei Chen", "wechat_id": "x" * 150},
+        )
+        assert resp.status_code == 200
+        assert "100 characters" in resp.text
+        assert db_session.query(SiteContact).filter(SiteContact.customer_site_id == site.id).count() == 0
+
+    def test_inactive_site_contacts_excluded(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts (real + legacy) on deactivated sites never render — clicking them
+        would log outreach against, and bump, a deactivated entity."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company, _, _ = self._make_company_with_contact(db_session)
+        dead_site = CustomerSite(
+            company_id=company.id,
+            site_name="Closed Plant",
+            is_active=False,
+            contact_name="Ghost Legacy",
+            contact_email="ghost-legacy@contactpanel.com",
+        )
+        db_session.add(dead_site)
+        db_session.flush()
+        ghost = SiteContact(
+            customer_site_id=dead_site.id,
+            full_name="Ghost Contact",
+            email="ghost-contact@contactpanel.com",
+        )
+        db_session.add(ghost)
+        db_session.commit()
+
+        # Detail panel (inline default tab) — uses the preloaded sites list.
+        detail = client.get(f"/v2/partials/customers/{company.id}")
+        assert detail.status_code == 200
+        assert "Jane Contact" in detail.text
+        assert "Ghost Contact" not in detail.text
+        assert "Ghost Legacy" not in detail.text
+
+        # Contacts tab refresh — uses the service-layer sites query.
+        tab = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert tab.status_code == 200
+        assert "Jane Contact" in tab.text
+        assert "Ghost Contact" not in tab.text
+        assert "Ghost Legacy" not in tab.text
 
 
 class TestEmailIntelligenceInActivity:

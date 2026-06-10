@@ -4313,10 +4313,12 @@ async def partials_companies_redirect(request: Request, path: str = ""):
     return RedirectResponse(url=new_url, status_code=301)
 
 
-# CDM staleness rules + account-list query building live in the service layer.
-# Re-exported here under their historical names for callers/tests that import
-# them from this module (noqa F401 keeps ruff from stripping the aliases).
-from ..services.crm_service import STALENESS_DUE_SOON_DAYS, STALENESS_OVERDUE_DAYS  # noqa: E402, F401
+# CDM staleness rules + account-list query building live in the service layer
+# (app/services/crm_service.py). _cdm_list_ctx and _company_contact_rows are
+# plain service imports used by the CDM routes below. _staleness_tier is
+# additionally re-exported under its historical name because tests
+# (tests/test_htmx_views_nightly28.py) import it from this module — the F401
+# keeps ruff from stripping that alias.
 from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
 from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
 from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
@@ -4560,7 +4562,10 @@ async def company_detail_partial(
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
-            "contact_rows": _company_contact_rows(db, company_id, sites=list(company.sites or [])),
+            # Pass the active-only sites list — contacts on deactivated sites must
+            # not be shown (clicking them would log outreach against, and bump,
+            # a deactivated entity).
+            "contact_rows": _company_contact_rows(db, company_id, sites=sites),
             "user": user,
         }
     )
@@ -4867,6 +4872,11 @@ async def create_site_contact(
 
     if not full_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Name is required.</div>')
+
+    # SiteContact.wechat_id is String(100) — reject over-length input here (the
+    # in-memory SQLite test engine ignores VARCHAR lengths, but Postgres 500s).
+    if len(wechat_id.strip()) > 100:
+        return HTMLResponse('<div class="p-2 text-xs text-rose-600">WeChat ID must be 100 characters or fewer.</div>')
 
     # Dedup by email
     if email:

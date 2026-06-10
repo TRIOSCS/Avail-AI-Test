@@ -169,7 +169,7 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
 // Any element with [data-outreach-log] (tel:/mailto:/Teams/WeChat links in
 // customer contact panels) fires a fire-and-forget POST to
 // /api/activity/outreach-initiated when clicked, logging the touch and
-// bumping company.last_activity_at. The default link navigation is NOT
+// bumping company/site last_activity_at. The default link navigation is NOT
 // prevented — the native handler (dialer, mail client, Teams) still opens.
 document.body.addEventListener('click', (evt) => {
     const el = evt.target.closest('[data-outreach-log]');
@@ -192,6 +192,26 @@ document.body.addEventListener('click', (evt) => {
         Alpine.store('toast').type = type;
         Alpine.store('toast').show = true;
     };
+    // Refresh the CDM account list (if on the workspace) so the logged touch
+    // is immediately visible in the staleness sort/labels. This refresh is
+    // SYSTEM-initiated mid-workflow: unlike a user filter change it must not
+    // reset pagination, so the current offset/limit (rendered as data-* on
+    // the _account_list.html header — the filter form intentionally carries
+    // no offset field) is passed through explicitly. source: #cdm-filters
+    // includes the current filter values, like the pagination links do.
+    const refreshAccountList = () => {
+        const cdmFilters = document.getElementById('cdm-filters');
+        const cdmList = document.getElementById('cdm-list');
+        if (!cdmFilters || !cdmList) return;
+        const meta = cdmList.querySelector('[data-offset]');
+        const page = meta ? '?offset=' + meta.dataset.offset + '&limit=' + meta.dataset.limit : '';
+        htmx.ajax('GET', '/v2/partials/customers/account-list' + page, {
+            source: '#cdm-filters',
+            target: '#cdm-list',
+            swap: 'innerHTML',
+            indicator: '#cdm-filters .htmx-indicator',
+        });
+    };
     // keepalive lets the request finish even if the click navigates away.
     // The fetch is never awaited before the default link action, so the
     // call/email/Teams handler always opens — but failures must still be
@@ -202,7 +222,7 @@ document.body.addEventListener('click', (evt) => {
         headers: headers,
         body: JSON.stringify(payload),
         keepalive: true,
-    }).then((resp) => {
+    }).then(async (resp) => {
         if (!resp.ok) {
             showOutreachToast(
                 resp.status === 429
@@ -212,19 +232,39 @@ document.body.addEventListener('click', (evt) => {
             );
             return;
         }
-        const labels = { phone: 'Call', email: 'Email', teams: 'Teams message', wechat: 'WeChat message' };
-        showOutreachToast(
-            (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
-            'success'
-        );
-        // Refresh the CDM account list (if on the workspace) so the logged
-        // touch is immediately visible in the staleness sort/labels. Reuses
-        // the filter form's own hx-get (current filters included).
-        const cdmFilters = document.getElementById('cdm-filters');
-        if (cdmFilters && document.getElementById('cdm-list')) {
-            htmx.trigger(cdmFilters, 'change');
+        // The POST committed — from here on any failure is a RENDERING
+        // problem, not a transport one. Contain it so the .catch below (the
+        // rep-facing "NOT logged" message) only ever reports genuine fetch
+        // rejections; a false "NOT logged" toast invites a duplicate re-click.
+        let droppedLinks = [];
+        try {
+            droppedLinks = (await resp.json()).dropped_links || [];
+        } catch (err) {
+            console.error('[outreach-log] could not parse response body', err);
         }
-    }).catch(() => {
+        try {
+            if (droppedLinks.length) {
+                // Logged, but the server dropped stale entity links — the touch
+                // exists yet won't show on this account, so don't claim success
+                // (and skip the list refresh: nothing changed for this view).
+                showOutreachToast(
+                    'Outreach logged, but the ' + droppedLinks.join('/') +
+                    ' link no longer exists — refresh the page',
+                    'warning'
+                );
+                return;
+            }
+            const labels = { phone: 'Call', email: 'Email', teams: 'Teams message', wechat: 'WeChat message' };
+            showOutreachToast(
+                (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
+                'success'
+            );
+            refreshAccountList();
+        } catch (err) {
+            console.error('[outreach-log] post-success UI update failed', err);
+        }
+    }).catch((err) => {
+        console.error('[outreach-log] failed', err);
         showOutreachToast('Outreach NOT logged — network error', 'error');
     });
 });

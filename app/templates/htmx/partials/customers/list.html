@@ -36,6 +36,10 @@
       <option value="due_soon" {{ "selected" if staleness == "due_soon" }}>Due soon (14&ndash;30d)</option>
       <option value="recent" {{ "selected" if staleness == "recent" }}>Recent (&lt;14d)</option>
       <option value="new" {{ "selected" if staleness == "new" }}>Never contacted</option>
+      {# Chip-only value (hidden from the dropdown list): overdue OR never
+         contacted — must exist as an option so the chip's @click can set it
+         and the form round-trips it. Matches cdm_overdue_count exactly. #}
+      <option value="needs_call" {{ "selected" if staleness == "needs_call" }} hidden>Needs a call</option>
     </select>
 
     <select name="account_type" aria-label="Filter by account type"
@@ -63,8 +67,8 @@
     {% if overdue_count %}
     <button type="button"
             class="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors"
-            title="Show your accounts overdue for a call"
-            @click="const f = document.getElementById('cdm-filters'); f.elements.staleness.value = 'overdue'; f.elements.my_only.checked = true; f.dispatchEvent(new Event('change', { bubbles: true }))">
+            title="Show your accounts overdue for a call or never contacted"
+            @click="const f = document.getElementById('cdm-filters'); f.elements.staleness.value = 'needs_call'; f.elements.my_only.checked = true; f.dispatchEvent(new Event('change', { bubbles: true }))">
       <span class="w-2 h-2 rounded-full bg-rose-500"></span>
       {{ overdue_count }} need{{ "s" if overdue_count == 1 }} a call
     </button>

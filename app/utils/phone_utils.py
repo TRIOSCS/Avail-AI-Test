@@ -35,6 +35,11 @@ def format_phone_e164(raw: str) -> str | None:
     if not digits or len(digits) < 7:
         return None
 
+    # E.164 caps phone numbers at 15 digits — anything longer is not a phone
+    # number (and would overflow the String(100) phone snapshot columns).
+    if len(digits) > 15:
+        return None
+
     # US: 10 digits → +1XXXXXXXXXX
     if len(digits) == 10:
         return f"+1{digits}"

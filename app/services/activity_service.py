@@ -566,14 +566,14 @@ def log_company_note(
 # Channel → (activity_type, channel, event_type, snapshot column) for
 # click-to-contact outreach logged from the CDM account workspace.
 # WeChat has no dedicated snapshot column — the handle is kept in notes.
-_OUTREACH_CHANNEL_MAP: dict[str, tuple[str, str, str, str | None]] = {
+_OUTREACH_CHANNEL_MAP: dict[OutreachChannel, tuple[str, str, str, str | None]] = {
     OutreachChannel.PHONE: (ActivityType.CALL_LOGGED, Channel.PHONE, EventType.CALL, "contact_phone"),
     OutreachChannel.EMAIL: (ActivityType.EMAIL_SENT, Channel.EMAIL, EventType.EMAIL, "contact_email"),
     OutreachChannel.TEAMS: (ActivityType.TEAMS_MESSAGE, Channel.TEAMS, EventType.MESSAGE, "contact_email"),
     OutreachChannel.WECHAT: (ActivityType.WECHAT_MESSAGE, Channel.WECHAT, EventType.MESSAGE, None),
 }
 
-_OUTREACH_SUBJECT_VERBS: dict[str, str] = {
+_OUTREACH_SUBJECT_VERBS: dict[OutreachChannel, str] = {
     OutreachChannel.PHONE: "Call to",
     OutreachChannel.EMAIL: "Email to",
     OutreachChannel.TEAMS: "Teams message to",
@@ -600,7 +600,7 @@ def log_outreach_initiated(
     db: Session,
     *,
     user_id: int,
-    channel: str,
+    channel: OutreachChannel,
     contact_value: str,
     company_id: int | None = None,
     customer_site_id: int | None = None,
@@ -623,17 +623,29 @@ def log_outreach_initiated(
     target = contact_name or contact_value
     subject = f"{_OUTREACH_SUBJECT_VERBS[channel]} {target}"
 
-    # Dedup window — same user, channel, target, and entity within the window
-    # is the same click (double-click / retry), not a second touch.
+    # Dedup window — the same user re-clicking the same target within the
+    # window is the same click (double-click / retry), not a second touch.
+    # The key is the stable identity of the click: entity links
+    # (company/site/contact, NULL-safe via SQLAlchemy `==`) plus the channel's
+    # snapshot of the contacted value — NOT the display subject, so two
+    # same-named contacts at one company never collapse into one log and the
+    # subject wording can change without altering dedup semantics. WeChat has
+    # no snapshot column; its subject embeds the handle and is deterministic
+    # for an identical re-click, so it stands in as the value match.
     dedup_cutoff = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
+    value_match = (
+        getattr(ActivityLog, snapshot_col) == contact_value if snapshot_col else ActivityLog.subject == subject
+    )
     existing = (
         db.query(ActivityLog)
         .filter(
             ActivityLog.user_id == user_id,
             ActivityLog.activity_type == activity_type,
             ActivityLog.channel == log_channel,
-            ActivityLog.subject == subject,
             ActivityLog.company_id == company_id,
+            ActivityLog.customer_site_id == customer_site_id,
+            ActivityLog.site_contact_id == site_contact_id,
+            value_match,
             ActivityLog.created_at >= dedup_cutoff,
         )
         .order_by(ActivityLog.created_at.desc())

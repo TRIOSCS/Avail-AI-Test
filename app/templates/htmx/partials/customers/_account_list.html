@@ -6,7 +6,11 @@
    Depends on: workspace x-data (selectedId), brand palette, timeago filter.
 #}
 
-<div class="sticky top-0 z-10 px-3 py-1.5 text-[11px] font-medium text-gray-500 bg-gray-50 border-b border-gray-200">
+{# data-offset/data-limit: read by the outreach logger's system-initiated list
+   refresh (htmx_app.js) so logging a touch doesn't snap a paginated list back
+   to page 1 — the filter form itself intentionally carries no offset field. #}
+<div class="sticky top-0 z-10 px-3 py-1.5 text-[11px] font-medium text-gray-500 bg-gray-50 border-b border-gray-200"
+     data-offset="{{ offset }}" data-limit="{{ limit }}">
   {{ total }} account{{ "s" if total != 1 }}
 </div>
 

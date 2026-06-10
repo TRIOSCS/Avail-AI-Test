@@ -657,23 +657,33 @@ Delegated click listener in app/static/htmx_app.js
     |        app/schemas/activity.py)
     |
     +---> On success: $store.toast success flash + #cdm-list refresh
-    |       (re-sorts the account list so the touch is visible immediately)
+    |       (re-sorts the account list so the touch is visible immediately;
+    |        the refresh preserves the current pagination offset/limit, read
+    |        from data-* attrs on the _account_list.html header)
+    +---> On success WITH dropped_links (server removed stale entity links):
+    |       $store.toast WARNING flash instead — the touch is logged but
+    |       invisible on this account; the list refresh is skipped
     +---> On failure (429/5xx/network): $store.toast ERROR flash — outreach
     |       logging failures are never silent
     |
     v
-activity.py router -> log_outreach_initiated(db, user, request)
+activity.py router -> log_outreach_initiated(db, user_id=..., channel=...,
+    |                                          contact_value=..., ...)
     |   - rate limit: per-user "outreach" bucket (30/min), separate from the
     |     click-to-call bucket (10/min) so channels never starve each other
-    |   - nonexistent company/site/contact ids are nulled out with a warning
-    |     (stale DOM ids must not FK-crash the insert)
+    |   - nonexistent OR mismatched company/site/contact ids (site not under
+    |     the company, contact not under the site) are nulled out with a
+    |     warning (stale DOM ids must not FK-crash the insert or bump an
+    |     unrelated entity) and reported back as dropped_links in the 201 body
     |
     v
 app/services/activity_service.log_outreach_initiated()
     |
-    +---> Dedup: same user+channel+subject+company within 120s
+    +---> Dedup: same user + channel + company/site/contact links + contacted
+    |       value (channel snapshot column; subject for WeChat) within 120s
     |       (OUTREACH_DEDUP_SECONDS) returns the existing row — double-clicks
-    |       do not create duplicate activities or double bumps
+    |       do not create duplicate activities or double bumps, while distinct
+    |       same-named contacts never collapse into one log
     |
     +---> Maps channel to ActivityType:
     |       phone   -> ActivityType.CALL_LOGGED   (direction=outbound)
@@ -698,7 +708,8 @@ assembly) live in `app/services/crm_service.py` (`staleness_tier`,
 `cdm_company_query`, `cdm_list_ctx`, `company_contact_rows`); the
 `htmx_views.py` routes are thin wrappers.
 `company_detail_partial` builds `contact_rows` via the `company_contact_rows` helper
-(SiteContacts across all active sites + legacy site-level contacts) and passes it to
+(active SiteContacts across the company's active sites + legacy site-level
+contacts on active sites) and passes it to
 `tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
 
 ---
