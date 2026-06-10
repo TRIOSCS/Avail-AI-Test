@@ -26,16 +26,21 @@ from loguru import logger
 if TYPE_CHECKING:
     from app.models import MaterialCard
 
-# Source → tier ranking. Higher tier always overrides a lower one (F1). Vendor distributor
-# APIs share tier 90; the deterministic MPN decode is 85; OEM scrapers (PartSurfer/PSREF)
-# map to 80; AI free-text mining sits at the bottom. ``manual`` (a human edit) tops it.
+# Source → tier ranking. Higher tier always overrides a lower one (F1). ``trio_source`` is
+# TRIO's own authoritative inventory/part-master data (ground truth) so it sits ABOVE the
+# vendor distributor APIs (tier 90); its AI-corrected variant ``trio_source_ai`` sits just
+# below vendor APIs but above the deterministic MPN decode (85). Vendor distributor APIs
+# share tier 90; the deterministic MPN decode is 85; OEM scrapers (PartSurfer/PSREF) map to
+# 80; AI free-text mining sits at the bottom. ``manual`` (a human edit) tops it.
 SOURCE_TIER: dict[str, int] = {
     "manual": 100,
+    "trio_source": 95,
     "digikey_api": 90,
     "mouser_api": 90,
     "nexar_api": 90,
     "element14_api": 90,
     "oemsecrets_api": 90,
+    "trio_source_ai": 88,
     "mpn_decode": 85,
     "partsurfer": 80,
     "psref": 80,

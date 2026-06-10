@@ -19,11 +19,13 @@ from app.services.spec_tiers import SOURCE_TIER, resolve, set_category, tier_for
 
 def test_tier_for_known_sources():
     assert tier_for("manual") == 100
+    assert tier_for("trio_source") == 95  # TRIO ground truth — above vendor APIs
     assert tier_for("digikey_api") == 90
     assert tier_for("mouser_api") == 90
     assert tier_for("nexar_api") == 90
     assert tier_for("element14_api") == 90
     assert tier_for("oemsecrets_api") == 90
+    assert tier_for("trio_source_ai") == 88  # AI-corrected TRIO — below vendor, above decode
     assert tier_for("mpn_decode") == 85
     assert tier_for("partsurfer") == 80
     assert tier_for("psref") == 80
@@ -44,6 +46,16 @@ def test_source_tier_map_has_expected_keys():
     assert SOURCE_TIER["manual"] == 100
     assert SOURCE_TIER["partsurfer"] == 80  # oem_scrape mapped to 80
     assert SOURCE_TIER["psref"] == 80
+
+
+def test_trio_source_tiers_rank_correctly():
+    # SP-Ingest: TRIO ground truth beats every vendor API; the AI-corrected variant beats
+    # the deterministic decode but loses to vendor APIs.
+    assert SOURCE_TIER["trio_source"] == 95
+    assert SOURCE_TIER["trio_source_ai"] == 88
+    assert SOURCE_TIER["trio_source"] > SOURCE_TIER["digikey_api"]  # 95 > 90
+    assert SOURCE_TIER["trio_source_ai"] < SOURCE_TIER["digikey_api"]  # 88 < 90
+    assert SOURCE_TIER["trio_source_ai"] > SOURCE_TIER["mpn_decode"]  # 88 > 85
 
 
 # --- resolve ----------------------------------------------------------------
