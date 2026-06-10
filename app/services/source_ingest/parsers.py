@@ -72,6 +72,27 @@ _SFDC_MANUFACTURER_LOOKUP_COLUMN = "LSC1__Manufacturer_Brand__c"
 _SFDC_CATEGORY_COLUMNS = ("LSC1__Category__c", "Commodity_Code__c")
 
 
+def _detect_text_encoding(path: Path) -> str:
+    """Detect a source file's text encoding: UTF-8 (usual) or cp1252 fallback.
+
+    SFDC/Excel exports are usually UTF-8 but sometimes carry stray cp1252 bytes (NBSP
+    0xa0, smart quotes) that crash a strict UTF-8 stream mid-file. Streams the bytes
+    through an incremental UTF-8 decoder; the first invalid byte switches the whole file
+    to cp1252 (which decodes every byte, so parsing never crashes).
+    """
+    import codecs
+
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    with open(path, "rb") as fh:
+        while chunk := fh.read(1 << 20):
+            try:
+                decoder.decode(chunk)
+            except UnicodeDecodeError:
+                logger.info("_detect_text_encoding: {} is not valid UTF-8 — falling back to cp1252", path.name)
+                return "cp1252"
+    return "utf-8-sig"
+
+
 def _first_nonempty(row: dict, columns: tuple[str, ...]) -> str | None:
     """Return the first non-empty/non-whitespace value across *columns* in *row*."""
     for col in columns:
@@ -150,14 +171,14 @@ def _iter_delimited_rows(path: Path) -> Iterator[list[str]]:
     prose line collapses to a single cell and is skipped by the header/row logic).
     """
     if path.suffix.lower() == ".txt":
-        with open(path, encoding="utf-8-sig", newline="") as fh:
+        with open(path, encoding=_detect_text_encoding(path), newline="") as fh:
             for line in fh:
                 line = line.rstrip("\n").rstrip("\r")
                 if not line:
                     continue
                 yield [c.strip() for c in line.split("\t")]
         return
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    with open(path, encoding=_detect_text_encoding(path), newline="") as fh:
         for cells in csv.reader(fh):
             if not cells:
                 continue
@@ -218,7 +239,7 @@ def parse_sfdc_manufacturers(path: str | Path) -> dict[str, str]:
     and rows without a name.
     """
     lookup: dict[str, str] = {}
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    with open(path, encoding=_detect_text_encoding(path), newline="") as fh:
         for row in csv.DictReader(fh):
             if _is_truthy(row.get("IsDeleted")):
                 continue
@@ -263,7 +284,7 @@ def parse_sfdc_material_master(
     source_file = path.name
     kept = 0
     skipped_deleted = 0
-    with open(path, encoding="utf-8-sig", newline="") as fh:
+    with open(path, encoding=_detect_text_encoding(path), newline="") as fh:
         reader = csv.DictReader(fh)
         for row in reader:
             if _is_truthy(row.get("IsDeleted")):

@@ -140,6 +140,20 @@ def test_parse_sfdc_oem_and_description_fallbacks(tmp_path):
     assert r.category == "memory"
 
 
+def test_parse_sfdc_handles_cp1252_bytes(tmp_path):
+    # The real SFDC exports carry stray cp1252 bytes (NBSP 0xa0, smart quotes) that crash
+    # a strict UTF-8 stream — the parsers must detect and fall back, never raise.
+    csv_path = tmp_path / "LSC1__Manufacturers__c.csv"
+    csv_path.write_bytes(
+        b"Id,IsDeleted,Name\n"
+        b"a2F001,0,Acme\xa0Corp\n"  # cp1252 NBSP inside the name
+        b"a2F002,0,Seagate\n"
+    )
+    lookup = parse_sfdc_manufacturers(csv_path)
+    assert lookup["a2F002"] == "Seagate"
+    assert lookup["a2F001"].startswith("Acme")  # decoded via cp1252, not crashed
+
+
 def test_parse_sfdc_manufacturers_builds_id_to_name_map(tmp_path):
     csv_path = _write(
         tmp_path / "LSC1__Manufacturers__c.csv",

@@ -768,8 +768,8 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
 commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
 every write through the F1 source-tier ladder (app/services/spec_tiers.py —
-mpn_decode 85 > desc_parse 83 > spec_extraction 60; vendor APIs 90, trio_source 95,
-manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
+mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > spec_extraction 60; vendor
+APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
 of the confidence it claims or which pass ran first, so the old per-writer
 "skip keys already held at higher confidence" pre-gates are REMOVED — the ladder
 owns arbitration in one place:
@@ -777,7 +777,25 @@ owns arbitration in one place:
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode" (tier 85), confidence 0.95
        (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
-    2. desc_extractor/writer.py::extract_and_record_specs — deterministic
+    2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
+       crosswalk decode (IBM/Lenovo FRU spare PNs inherit the STRICT-INTERSECTED
+       decode of their fru_links rel_kind='mfg_model' models — only spec keys present
+       in every decode with equal values write; a commodity disagreement skips the
+       card), source="fru_matrix_decode" (tier 84), confidence 0.93
+       (settings.fru_crosswalk_enrich_enabled). Zero LLM/network; ONE fru_links query
+       per batch. Scope is the FULL batch ids, NOT enriched_ids — FRU spares finish
+       not_found, and the pass never touches enrichment_status. Fills a NULL category
+       from the agreed commodity via spec_tiers.set_category (an existing DIFFERENT
+       category skips the card before any write); never writes manufacturer; never
+       writes the reverse direction (a card that IS a mfg_model already decodes
+       first-party at tier 85). The ladder (84 < 85, < vendor 90) guarantees it never
+       overwrites mpn_decode/vendor values — no per-writer pre-gate. Isolation is
+       two-level: decode/intersect failures are caught per FRU, write failures per
+       card (SAVEPOINT) — both surface in the returned `failed` count so the worker's
+       stats line distinguishes a no-op batch from a crashed one. Schema-drift drops
+       (no schema row / out-of-enum value) emit the same aggregate WARNING as the
+       mpn-decode writer.
+    3. desc_extractor/writer.py::extract_and_record_specs — deterministic
        description→spec token grammar (storage + DRAM; TRIO part-master/inventory
        descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
        "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled).
@@ -785,11 +803,12 @@ owns arbitration in one place:
        ("Other,"/"Tray,"…) and conflicting tokens; only already-categorized
        hdd/ssd/dram cards are written (NEVER categorizes — a description is not
        a regex-gated commodity proof).
-    3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
+    4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
        arbitration). The ladder guarantees it never clobbers an
-       mpn_decode/desc_parse/vendor key, even when it self-reports 0.95+.
+       mpn_decode/fru_matrix_decode/desc_parse/vendor key, even when it
+       self-reports 0.95+.
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
@@ -831,7 +850,7 @@ load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest
 
 ```
 SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
-             · trio_source_ai:88 · mpn_decode:85 · desc_parse:83
+             · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
              · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
              · spec_extraction:60 · {ai_guess,claude_opus_inferred}:40   (unknown → 0)
 

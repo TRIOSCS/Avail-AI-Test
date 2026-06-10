@@ -193,6 +193,10 @@ async def run_one_batch(
     batch = select_batch(db, config)
     if not batch:
         return {}
+    # Captured BEFORE the per-card loop: the FRU crosswalk pass below runs over the FULL
+    # batch (not enriched_ids) — FRU spare PNs are precisely the population connectors
+    # miss, so they finish not_found and never reach enriched_ids.
+    batch_ids = [int(c.id) for c in batch]
 
     if disabled is None:
         disabled = set()
@@ -302,6 +306,27 @@ async def run_one_batch(
                 logger.info("ENRICH_WORKER: mpn-decode {}", decode_and_record_specs(db, enriched_ids))
             except Exception:
                 logger.exception("ENRICH_WORKER: mpn-decode failed over {} cards", len(enriched_ids))
+
+    # Deterministic FRU crosswalk decode: FRU spare PNs (IBM/Lenovo) inherit the
+    # strict-intersected decode of their approved mfg_model links, source=
+    # "fru_matrix_decode" at 0.93 — between mpn-decode (0.95, first-party decode is
+    # stronger evidence) and desc-parse (0.90; for cards in enriched_ids, a missing
+    # category the crosswalk fills lets desc-parse pick them up in the SAME batch —
+    # not_found FRU spares are NOT in enriched_ids, so they only benefit from the
+    # crosswalk itself this batch). Scope is the
+    # FULL batch (batch_ids, not enriched_ids): not_found/quarantined cards are safe to
+    # include — the pass is deterministic and free, and it never touches
+    # enrichment_status. Same session, committed together below.
+    if batch_ids:
+        from app.config import settings
+
+        if settings.fru_crosswalk_enrich_enabled:
+            from app.services.fru_crosswalk_enrich import crosswalk_and_record_specs
+
+            try:
+                logger.info("ENRICH_WORKER: fru-crosswalk {}", crosswalk_and_record_specs(db, batch_ids))
+            except Exception:
+                logger.exception("ENRICH_WORKER: fru-crosswalk failed over {} cards", len(batch_ids))
 
     # Deterministic description→spec extraction (storage/DRAM token grammar): zero-LLM,
     # enum-validated by record_spec. Runs AFTER mpn-decode (its 0.95 values outrank this

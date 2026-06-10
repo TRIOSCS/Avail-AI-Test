@@ -59,10 +59,12 @@ def test_trio_source_tiers_rank_correctly():
 
 
 def test_desc_parse_tier_sits_between_decode_and_ai_extraction():
-    # The deterministic description grammar replaces the old run-order + writer pre-gate
-    # protection: the ladder itself must pin mpn_decode > desc_parse > spec_extraction.
+    # The deterministic decoders replace the old run-order + writer pre-gate protection:
+    # the ladder itself must pin mpn_decode > fru_matrix_decode > desc_parse > spec_extraction.
+    assert SOURCE_TIER["fru_matrix_decode"] == 84
     assert SOURCE_TIER["desc_parse"] == 83
-    assert SOURCE_TIER["mpn_decode"] > SOURCE_TIER["desc_parse"]  # 85 > 83
+    assert SOURCE_TIER["mpn_decode"] > SOURCE_TIER["fru_matrix_decode"]  # 85 > 84
+    assert SOURCE_TIER["fru_matrix_decode"] > SOURCE_TIER["desc_parse"]  # 84 > 83
     assert SOURCE_TIER["desc_parse"] > SOURCE_TIER["spec_extraction"]  # 83 > 60
 
 
