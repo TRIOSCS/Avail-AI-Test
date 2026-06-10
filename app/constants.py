@@ -388,6 +388,9 @@ class ActivityType(StrEnum):
     PART_STATUS_CHANGE = "part_status_change"
     TEAMS_MESSAGE = "teams_message"
     WECHAT_MESSAGE = "wechat_message"
+    # Vendor+part unavailability knowledge (vendor_unavailability service)
+    VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
+    VENDOR_AVAILABLE = "vendor_available"
 
 
 class Channel(StrEnum):

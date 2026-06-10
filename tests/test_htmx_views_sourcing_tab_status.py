@@ -4,11 +4,15 @@ Called by: pytest
 Depends on: conftest.py fixtures, app models
 """
 
+from app.constants import UnavailabilityReason
 from app.models.auth import User
 from app.models.offers import Contact, Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
+from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard
+from app.utils.normalization import normalize_mpn_key
+from app.vendor_utils import normalize_vendor_name
 
 
 def _make_user(db_session) -> User:
@@ -186,3 +190,101 @@ class TestDeriveVendorStatus:
         # Pass vendor_names directly (no summaries in DB)
         statuses = compute_vendor_statuses(r.id, req.id, db_session, vendor_names=["My Vendor"])
         assert statuses["My Vendor"] == "sighting"
+
+
+class TestDurableUnavailabilityStatus:
+    """Batch 4 ORs durable VendorPartUnavailability records into 'unavailable'."""
+
+    def test_durable_record_alone_is_unavailable(self, db_session):
+        """A record on the requirement's primary-MPN key marks the vendor unavailable
+        even with no sighting rows flagged (or none at all)."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized=normalize_vendor_name("Acme Corp"),
+                normalized_mpn=normalize_mpn_key(r.primary_mpn),
+                reason=UnavailabilityReason.BOUGHT_BY_US,
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "unavailable"
+
+    def test_durable_record_via_sighting_matched_mpn_key(self, db_session):
+        """A record keyed on a sighting's matched MPN (not the primary) also marks the
+        vendor — keys are matched-MPN keys ∪ primary key."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Acme Corp",
+                vendor_name_normalized=normalize_vendor_name("Acme Corp"),
+                mpn_matched="ALT-123",
+                is_unavailable=False,
+            )
+        )
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized=normalize_vendor_name("Acme Corp"),
+                normalized_mpn=normalize_mpn_key("ALT-123"),
+                reason=UnavailabilityReason.DIFFERENT_PART,
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "unavailable"
+
+    def test_offer_dominates_durable_record(self, db_session):
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        db_session.add(
+            VendorPartUnavailability(
+                vendor_name_normalized=normalize_vendor_name("Acme Corp"),
+                normalized_mpn=normalize_mpn_key(r.primary_mpn),
+                reason=UnavailabilityReason.BOUGHT_BY_US,
+            )
+        )
+        db_session.add(
+            Offer(
+                requisition_id=req.id,
+                requirement_id=r.id,
+                vendor_name="Acme Corp",
+                mpn="TEST-MPN-001",
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "offer-in"
+
+    def test_legacy_row_flag_matches_despite_case_drift(self, db_session):
+        """Summary says 'ACME CORP', sighting rows say 'Acme Corp' — the legacy all-
+        rows-flagged branch is anchored on normalized names, so the drift no longer
+        silently misses (architect finding 2)."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "ACME CORP")
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Acme Corp",
+                vendor_name_normalized=normalize_vendor_name("Acme Corp"),
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["ACME CORP"] == "unavailable"

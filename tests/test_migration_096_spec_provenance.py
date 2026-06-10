@@ -52,7 +52,7 @@ class TestRevisionMetadata:
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["096_spec_provenance"], f"expected single head 096_spec_provenance, got {heads}"
+        assert len(heads) == 1, f"expected a single migration head, got {heads}"
 
     def test_source_tier_sql_case_matches_live_ladder(self):
         # The migration cannot import app code, so its CASE is a literal snapshot of

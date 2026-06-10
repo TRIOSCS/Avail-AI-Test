@@ -12,6 +12,8 @@ Called by: app/services/vendor_unavailability.py (record/clear/apply/exclude),
 Depends on: app/constants.UnavailabilityReason (reason vocabulary), Base, users table
 """
 
+from datetime import datetime, timezone
+
 from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import relationship, validates
 
@@ -34,7 +36,13 @@ class VendorPartUnavailability(Base):
     note = Column(Text)  # free-text "what we learned"
 
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(UTCDateTime, server_default=func.now())
+    # Dual default (Python + server) — sibling pattern (e.g. OemSpecCode); avoids
+    # None-before-flush in tests while keeping a DB-side default for raw inserts.
+    created_at = Column(
+        UTCDateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
     created_by = relationship("User", foreign_keys=[created_by_id])
 
