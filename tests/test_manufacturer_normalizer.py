@@ -113,3 +113,44 @@ def test_maker_trailing_re_rejects_everything_else():
     assert MAKER_TRAILING_RE.search("HDD, 4TB, Foobar") is None
     assert MAKER_TRAILING_RE.search("HDD, 4TB, IBM") is None  # OEM label, not maker
     assert MAKER_TRAILING_RE.search("Seagate, 4TB HDD") is None  # not trailing
+
+
+# --- Per-process memoization (the NON-TESTING path) -----------------------------
+# These tests drop TESTING from the environment (monkeypatch auto-restores) and reset
+# the module cache, so they exercise the real memoization branch the worker/CLI runs.
+
+
+def test_empty_alias_map_is_never_memoized(db_session: Session, monkeypatch):
+    # Pre-seed race: the enrichment worker's first decode can run before the app
+    # container's _seed_manufacturers lands. An EMPTY load must be a cache MISS — not
+    # frozen for the process lifetime (which would split the facet into "Kingston" and
+    # "Kingston Technology" until a restart).
+    import app.services.manufacturer_normalizer as mod
+
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.setattr(mod, "_canonical_by_lower", None)
+
+    assert normalize_brand_name(db_session, "Kingston") == "Kingston"  # table empty → verbatim
+    assert mod._canonical_by_lower is None  # the empty result was NOT memoized
+
+    _seed(db_session, ("Kingston Technology", ["Kingston"]))
+    # Self-healed: the next call reloads and sees the seeds.
+    assert normalize_brand_name(db_session, "Kingston") == "Kingston Technology"
+    assert mod._canonical_by_lower is not None
+
+
+def test_populated_alias_map_is_memoized(db_session: Session, monkeypatch):
+    # Steady state: a NON-EMPTY map is cached forever (table is seed-only; restart
+    # refreshes) — rows added after the first load are invisible until then.
+    import app.services.manufacturer_normalizer as mod
+
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.setattr(mod, "_canonical_by_lower", None)
+
+    _seed(db_session, ("Kingston Technology", ["Kingston"]))
+    assert normalize_brand_name(db_session, "Kingston") == "Kingston Technology"
+    assert mod._canonical_by_lower is not None
+
+    _seed(db_session, ("Seagate Technology", ["Seagate"]))
+    # Memoized: the post-load row is NOT visible (documented restart-refreshes contract).
+    assert normalize_brand_name(db_session, "Seagate") == "Seagate"

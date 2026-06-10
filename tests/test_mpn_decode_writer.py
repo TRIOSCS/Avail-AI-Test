@@ -67,6 +67,7 @@ def test_decode_writes_ssd_and_categorizes_null_category(db_session: Session):
         "categorized": 1,
         "manufacturers_set": 1,  # dual-brand W4: decode vendor → manufacturer ladder
         "skipped_category_conflict": 0,
+        "skipped_maker_conflict": 0,
     }
     assert card.category == "ssd"
     assert card.manufacturer == "Samsung"  # verbatim — manufacturers table unseeded here
@@ -154,11 +155,14 @@ def test_decode_writes_ecc_false(db_session: Session):
 def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
     # A drive MPN on a card whose "dram" category came from a HIGHER tier (vendor, tier 90)
     # must NOT be re-categorized by the decode (tier 85). The ladder rejects the decode's
-    # category write, so set_category returns False, categorized stays 0, and no drive specs
-    # are written onto the DRAM card (record_spec rejects the cross-commodity capacity_gb).
-    # The ladder loss is NOT silent: it is counted in the returned stats and WARNed with the
-    # (card_category -> decoded_commodity) pair, because a recurring pair is exactly the
-    # signal that the category alias map needs another entry.
+    # category write, so set_category returns False, categorized stays 0, and the decode
+    # contributes NOTHING: no drive specs land on the DRAM card AND the W4 maker write is
+    # skipped (shared cross-commodity guard) — a decode whose commodity claim lost the
+    # ladder is precisely the case where the regex match itself is suspect, so its maker
+    # claim must not mutate the card either. The ladder loss is NOT silent: it is counted
+    # in the returned stats and WARNed with the (card_category -> decoded_commodity) pair,
+    # because a recurring pair is exactly the signal that the category alias map needs
+    # another entry.
     from loguru import logger as loguru_logger
 
     seed_commodity_schemas(db_session)
@@ -183,15 +187,84 @@ def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
         "decoded": 1,
         "written": 0,
         "categorized": 0,
-        "manufacturers_set": 1,  # the maker claim comes from the MPN, not the commodity
+        "manufacturers_set": 0,  # maker write skipped — it rides the same suspect match
         "skipped_category_conflict": 1,
+        "skipped_maker_conflict": 0,  # skipped by the guard, not lost in arbitration
     }
     assert any("dram->hdd" in w for w in warnings), warnings
     assert card.category == "dram"  # higher-tier category preserved
-    assert card.manufacturer == "Seagate"  # W4 maker write still lands (ladder-gated)
+    assert card.manufacturer is None  # W4 maker write skipped on the conflicted decode
     # The card's category is still "dram", so a drive's capacity_gb has no dram schema match
     # and is rejected — nothing drive-specific lands on the DRAM card.
     assert "capacity_gb" not in _facets(db_session, card.id)
+
+
+def test_decode_maker_ladder_loss_is_counted_and_warned(db_session: Session):
+    # The decode's commodity AGREES with the card (so the W4 maker write runs), but the
+    # card already holds a DIFFERENT maker at a higher tier (vendor, 90): the decode's
+    # maker (85) loses arbitration. set_manufacturer's losing path logs at DEBUG only,
+    # so — mirroring skipped_category_conflict — the loss must be counted in the stats
+    # and WARNed with the (existing -> incoming) pair.
+    from loguru import logger as loguru_logger
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Western Digital",  # conflicting maker, vendor-API tier
+        manufacturer_source="digikey_api",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=90,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert stats["manufacturers_set"] == 0
+    assert stats["skipped_maker_conflict"] == 1
+    assert any("Western Digital->Seagate" in w for w in warnings), warnings
+    assert card.manufacturer == "Western Digital"  # higher-tier maker preserved
+    assert stats["written"] >= 3  # the specs still land — only the maker claim lost
+
+
+def test_decode_maker_agreement_is_not_a_conflict(db_session: Session):
+    # A higher-tier existing maker that AGREES with the decode is not a conflict: the
+    # decode's write returns False (tier 85 < 90) but no counter increments and no
+    # WARNING fires — skipped_maker_conflict must stay a pure data-conflict signal.
+    from loguru import logger as loguru_logger
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate",  # same maker the decode yields (verbatim, no alias seeds)
+        manufacturer_source="digikey_api",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=90,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert stats["manufacturers_set"] == 0
+    assert stats["skipped_maker_conflict"] == 0
+    assert not any("Seagate->Seagate" in w for w in warnings), warnings
+    assert card.manufacturer_tier == 90  # untouched
 
 
 def test_decode_recategorizes_low_tier_category(db_session: Session):
@@ -235,6 +308,7 @@ def test_decode_skips_unrecognized_mpn(db_session: Session):
         "categorized": 0,
         "manufacturers_set": 0,
         "skipped_category_conflict": 0,
+        "skipped_maker_conflict": 0,
     }
 
 

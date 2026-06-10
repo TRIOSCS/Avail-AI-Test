@@ -98,6 +98,11 @@ LEGACY_BACKFILL_CONFIDENCE = 0.5
 # writes — that must be visible at production log levels, but not once per row).
 _warned_unknown_sources: set[str] = set()
 
+# Detached-card brand/maker writes are warned ONCE per process (same rationale): a writer
+# operating on a session-less card skips alias canonicalization for EVERY row it touches,
+# so the first occurrence must be visible at production log levels without per-row spam.
+_warned_detached_normalize = False
+
 
 def tier_for(source: str) -> int:
     """Return the ladder tier for *source*.
@@ -347,7 +352,14 @@ def _set_brand_or_maker(
     *,
     write: bool,
 ) -> bool:
-    """Shared body of set_brand/set_manufacturer: reject empties, normalize, ladder."""
+    """Shared body of set_brand/set_manufacturer: reject empties, normalize, ladder.
+
+    PRECONDITION: *card* should be session-attached — the alias lookup derives its DB
+    session via ``Session.object_session(card)``. A detached/transient card cannot be
+    canonicalized, so the verbatim strip is written instead (full provenance, ladder-
+    protected) — that fragments the brand facet ("Seagate" vs "Seagate Technology"),
+    so the first such write per process is logged at WARNING.
+    """
     if value is None or not str(value).strip():
         # A write can never blank a value — None/empty/whitespace is a no-op.
         return False
@@ -356,7 +368,21 @@ def _set_brand_or_maker(
 
     from app.services.manufacturer_normalizer import normalize_brand_name
 
-    normalized = normalize_brand_name(Session.object_session(card), str(value))
+    db = Session.object_session(card)
+    if db is None:
+        global _warned_detached_normalize
+        if not _warned_detached_normalize:
+            _warned_detached_normalize = True
+            logger.warning(
+                "set_{}: card={} is not session-attached — alias canonicalization SKIPPED, "
+                "writing the verbatim strip of {!r}. A detached-card writer fragments the "
+                "brand facet; attach (add+flush) the card before calling set_brand/"
+                "set_manufacturer (warned once per process).",
+                attr,
+                getattr(card, "id", None),
+                value,
+            )
+    normalized = normalize_brand_name(db, str(value))
     return _set_provenanced_column(card, attr, normalized, source, confidence, write=write)
 
 
@@ -375,7 +401,9 @@ def set_brand(
     never blank a value). The value is canonicalized via ``normalize_brand_name``
     (manufacturers-table aliases; miss → verbatim strip) before the ladder compare. An
     existing brand with NULL provenance ranks at the legacy_backfill mid-tier (50).
-    ``write=False`` is the read-only dry-run twin.
+    ``write=False`` is the read-only dry-run twin. *card* must be session-attached
+    (add+flush first) — a detached card skips canonicalization, with a once-per-process
+    WARNING (see ``_set_brand_or_maker``).
     """
     return _set_brand_or_maker(card, "brand", value, source, confidence, write=write)
 
@@ -397,6 +425,7 @@ def set_manufacturer(
     existing manufacturer with NULL provenance (all legacy data) ranks at the
     legacy_backfill mid-tier (50) — so trio_source (95) maker evidence displaces a
     legacy OEM name, but a stray AI guess (40) cannot. ``write=False`` is the read-only
-    dry-run twin.
+    dry-run twin. *card* must be session-attached (add+flush first) — a detached card
+    skips canonicalization, with a once-per-process WARNING (see ``_set_brand_or_maker``).
     """
     return _set_brand_or_maker(card, "manufacturer", value, source, confidence, write=write)

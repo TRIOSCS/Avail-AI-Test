@@ -21,9 +21,13 @@ contributes nothing to the tallies):
   B3 — trailing-description tokens: OEM_TRAILING_RE → set_brand ("desc_parse", 0.85);
        MAKER_TRAILING_RE → set_manufacturer ("desc_parse", 0.85). Regex-gated to the
        literal lists only; anything else is never written.
-  B4 — verification report: prints the known dual-coverage cards with final
+  B4 — verification report: prints the 9 known dual-coverage cards with final
        brand/manufacturer + provenance; exits non-zero unless ST300MP0016 ends
        brand=IBM ∧ manufacturer=Seagate Technology.
+
+Soft-deleted cards are EXCLUDED from every pass (deleted_at IS NULL): the facet queries
+exclude them, so writing/tallying them would pad the operator's dry-run go/no-go report
+with rows that contribute nothing to the live facets.
 
 Called by: an operator (manually, post-deploy of migration 097 — NOT at startup).
 Depends on: app.database.SessionLocal, spec_tiers.set_brand/set_manufacturer/resolve/
@@ -54,14 +58,28 @@ from app.utils.normalization import normalize_mpn_key
 
 _COMMIT_CHUNK = 500
 
-# Known dual-coverage cards (brand evidence in the description AND maker evidence in
-# fru_links) from the source_ingest analysis — printed in the B4 report when present.
+# The 9 known dual-coverage cards (SPEC_DUAL_BRAND_FILTERS §2 B4) — printed in the B4
+# report when present. Derivation (re-validated against live PG 2026-06-10): cards with
+# OEM evidence (manufacturer ∈ OEM_BRANDS for B1, or an OEM_TRAILING_RE description
+# token for B3) AND maker evidence (a fru_links mfg_model row with a manufacturer, for
+# B2), excluding the two whose "description" is a bare-MPN placeholder
+# (SSDSC2BB120G4I / SSDSC2BB240G6N — no description evidence).
 # The first entry is the GATE: the command exits non-zero unless it ends
 # brand=IBM ∧ manufacturer=Seagate Technology.
 _GATE_MPN = "ST300MP0016"
 _GATE_BRAND = "IBM"
 _GATE_MANUFACTURER = "Seagate Technology"
-_VERIFICATION_MPNS = [_GATE_MPN, "SSDSC2BW180A3L", "HTS721080G9AT00"]
+_VERIFICATION_MPNS = [
+    _GATE_MPN,
+    "SSDSC2BW180A3L",
+    "HTS721080G9AT00",
+    "00L4617",
+    "HUSMM1640ASS200",
+    "ST1200MM0039",
+    "ST400FM0053",
+    "ST800FM0043",
+    "Z16IZD2B-73UC-IBM-A",
+]
 
 # Overlay key: (card_id, attr) → simulated winning provenance + normalized value.
 # Dry-run only — mirrors apply-mode's sequential writes so a pass-B1 win is the
@@ -108,11 +126,20 @@ def _ladder_set(
 
 
 def _pass_b1(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
-    """B1 — copy a legacy OEM label out of `manufacturer` into `brand` (lossless)."""
+    """B1 — copy a legacy OEM label out of `manufacturer` into `brand` (lossless).
+
+    lower(trim()) mirrors the commodity-scoping idiom: a legacy value with stray
+    whitespace ("IBM ") must not escape the one-shot reclassification. Soft-deleted
+    cards are excluded — the facet queries exclude them, so writing/tallying them would
+    inflate the operator's go/no-go numbers with rows that affect nothing.
+    """
     tally = {"scanned": 0, "brands_set": 0, "skipped": 0, "failed": 0}
     cards = (
         db.query(MaterialCard)
-        .filter(func.lower(MaterialCard.manufacturer).in_(sorted(OEM_BRANDS)))
+        .filter(
+            MaterialCard.deleted_at.is_(None),
+            func.lower(func.trim(MaterialCard.manufacturer)).in_(sorted(OEM_BRANDS)),
+        )
         .order_by(MaterialCard.id)
         .all()
     )
@@ -141,12 +168,20 @@ def _pass_b1(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
 
 
 def _pass_b2(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
-    """B2 — maker from TRIO master (fru_links mfg_model rows), trio_source/0.9."""
-    tally = {"links_scanned": 0, "manufacturers_set": 0, "skipped": 0, "failed": 0}
+    """B2 — maker from TRIO master (fru_links mfg_model rows), trio_source/0.9.
+
+    Tally semantics: ``links_won`` counts winning fru_link ROWS (duplicate mfg_model
+    rows for one MPN each count); ``manufacturers_set`` counts DISTINCT cards whose
+    manufacturer was (or, dry-run, would be) set — the number the operator's go/no-go
+    report must not overstate. Soft-deleted cards are excluded (see _pass_b1).
+    """
+    tally = {"links_scanned": 0, "links_won": 0, "manufacturers_set": 0, "skipped": 0, "failed": 0}
+    won_card_ids: set[int] = set()
     rows = (
         db.query(FruLink, MaterialCard)
         .join(MaterialCard, MaterialCard.normalized_mpn == FruLink.related_norm)
         .filter(
+            MaterialCard.deleted_at.is_(None),
             FruLink.rel_kind == FruLinkKind.MFG_MODEL.value,
             FruLink.manufacturer.isnot(None),
             FruLink.manufacturer != "",
@@ -170,23 +205,38 @@ def _pass_b2(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
             tally["failed"] += 1
             logger.exception("backfill_dual_brand B2: failed on card id={} (fru_link id={})", card.id, link.id)
             continue
-        tally["manufacturers_set" if won else "skipped"] += 1
-        if apply and won and tally["manufacturers_set"] % _COMMIT_CHUNK == 0:
-            db.commit()
+        if won:
+            tally["links_won"] += 1
+            won_card_ids.add(card.id)
+            if apply and tally["links_won"] % _COMMIT_CHUNK == 0:
+                db.commit()
+        else:
+            tally["skipped"] += 1
+    tally["manufacturers_set"] = len(won_card_ids)
     if apply:
         db.commit()
     return tally
 
 
 def _pass_b3(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
-    """B3 — trailing-description tokens: OEM list → brand, maker list → manufacturer."""
-    tally = {"scanned": 0, "brands_set": 0, "manufacturers_set": 0, "skipped": 0, "failed": 0}
+    """B3 — trailing-description tokens: OEM list → brand, maker list → manufacturer.
+
+    Tally semantics: ``matched`` counts regex MATCHES (not descriptions scanned), and
+    every matched row lands in exactly one bucket — matched == brands_set +
+    manufacturers_set + skipped + missing_cards + failed, so the report cannot drift
+    silently. Soft-deleted cards are excluded (see _pass_b1).
+    """
+    tally = {"matched": 0, "brands_set": 0, "manufacturers_set": 0, "skipped": 0, "missing_cards": 0, "failed": 0}
     # Two-step to keep the scan cheap and the mutation isolated: stream (id, description)
     # tuples, regex-gate in Python (portable across PG/SQLite), then load matching cards.
     matches: list[tuple[int, str, str]] = []  # (card_id, attr, token)
     rows = (
         db.query(MaterialCard.id, MaterialCard.description)
-        .filter(MaterialCard.description.isnot(None), MaterialCard.description.like("%,%"))
+        .filter(
+            MaterialCard.deleted_at.is_(None),
+            MaterialCard.description.isnot(None),
+            MaterialCard.description.like("%,%"),
+        )
         .yield_per(1000)
     )
     for card_id, description in rows:
@@ -200,9 +250,12 @@ def _pass_b3(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
 
     written = 0
     for card_id, attr, token in matches:
-        tally["scanned"] += 1
+        tally["matched"] += 1
         card = db.get(MaterialCard, card_id)
         if card is None:
+            # Vanished between the scan and the load (concurrent delete) — bucketed so
+            # the matched == sum(buckets) invariant holds.
+            tally["missing_cards"] += 1
             continue
         try:
             if apply:

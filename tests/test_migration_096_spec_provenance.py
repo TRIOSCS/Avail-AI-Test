@@ -4,9 +4,9 @@ provenance).
 Asserts the migration's revision metadata (id <=32 chars, chains off 095_wechat_id,
 single head), that its SQL CASE tier snapshot stays in sync with the live
 spec_tiers.SOURCE_TIER map, and that its seven add_column / drop_column calls round-trip
-(upgrade→downgrade→upgrade) on a scratch SQLite engine via the hermetic
-MigrationContext + Operations.context pattern (see TestRoundTrip docstring for why the
-in-process alembic CLI was dropped). The PG-only JSONB/category backfill is NOT
+(upgrade→downgrade→upgrade) on a scratch SQLite engine via the shared hermetic harness
+(tests/migration_harness.run_ops — see TestRoundTrip docstring for why the in-process
+alembic CLI was dropped). The PG-only JSONB/category backfill is NOT
 executed here — SQLite has no JSONB operators and the migration guards the data step to
 PostgreSQL (project rule feedback_sqlite_masks_postgres: SQLite masks PG JSON ops, so the
 backfill SQL is verified against live Postgres, not on SQLite).
@@ -21,6 +21,8 @@ import os
 import sqlalchemy as sa
 from sqlalchemy import inspect
 from sqlalchemy.pool import StaticPool
+
+from tests.migration_harness import run_ops
 
 # Load the migration module directly (alembic/versions has no __init__.py).
 _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -81,14 +83,14 @@ class TestRoundTrip:
 
     The full migration chain cannot replay on SQLite (the 001 baseline issues
     ``CREATE EXTENSION pg_trgm``), so we create only the two tables 096 touches and
-    execute the migration module's upgrade()/downgrade() directly through the hermetic
-    MigrationContext + Operations.context pattern (like test_migration_094_fru_links).
-    Previously this drove the in-process alembic CLI (command.stamp/upgrade), but that
-    path routes through alembic/env.py + the alembic.op module's PROCESS-GLOBAL proxy
-    and an os.environ DATABASE_URL channel, which proved load-flaky under xdist
-    (intermittent "table missing" skips from env.py's idempotent wrappers while the
-    full suite runs in parallel). The PG-only JSONB/category backfill is guarded inside
-    the migration and no-ops on SQLite.
+    execute the migration module's upgrade()/downgrade() directly through the shared
+    hermetic harness (tests/migration_harness.run_ops). Previously this drove the
+    in-process alembic CLI (command.stamp/upgrade), but that path routes through
+    alembic/env.py + the alembic.op module's PROCESS-GLOBAL proxy and an os.environ
+    DATABASE_URL channel, which proved load-flaky under xdist (intermittent "table
+    missing" skips from env.py's idempotent wrappers while the full suite runs in
+    parallel). The PG-only JSONB/category backfill is guarded inside the migration and
+    no-ops on SQLite.
     """
 
     @staticmethod
@@ -112,15 +114,7 @@ class TestRoundTrip:
         meta.create_all(engine)
         return engine
 
-    @staticmethod
-    def _run(engine, fn):
-        from alembic.migration import MigrationContext
-        from alembic.operations import Operations
-
-        with engine.begin() as conn:
-            ctx = MigrationContext.configure(conn)
-            with Operations.context(ctx):
-                fn()
+    _run = staticmethod(run_ops)
 
     def _columns(self, engine, table):
         return {c["name"] for c in inspect(engine).get_columns(table)}

@@ -410,6 +410,8 @@ def test_higher_tier_manufacturer_not_overwritten_by_ingest(db_session: Session)
     db_session.refresh(card)
     assert card.manufacturer == "Seagate Technology"  # manual(100) resists trio(95)
     assert stats["manufacturers_set"] == 0
+    # The tier-95 loss to a DIFFERENT value is a data-conflict signal — counted, not silent.
+    assert stats["manufacturer_conflicts"] == 1
 
 
 def test_dual_brand_dry_run_parity(db_session: Session):
@@ -439,3 +441,58 @@ def test_dual_brand_dry_run_parity(db_session: Session):
         assert dry[key] == applied[key], f"dry/apply diverged on {key}: {dry[key]} != {applied[key]}"
     assert applied["manufacturers_set"] == 1  # only the fresh card's maker landed
     assert applied["brands_set"] == 2  # both brands landed (no existing brand anywhere)
+    # Conflict counters share the parity contract: the manual-100 card's WrongCo loss
+    # counts in BOTH modes.
+    assert dry["manufacturer_conflicts"] == applied["manufacturer_conflicts"] == 1
+    assert dry["brand_conflicts"] == applied["brand_conflicts"] == 0
+
+
+def test_trio_brand_maker_ladder_losses_are_warned(db_session: Session):
+    # The ladder's losing path logs at DEBUG only — the batch must surface trio_source
+    # losses as an aggregate WARNING (a tier-95 value losing to a different value is a
+    # genuine data-conflict signal: trio should essentially only lose to manual/100).
+    from loguru import logger as loguru_logger
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        ingest(db_session, [_part(manufacturer="WrongCo")], apply=True)
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert any("manufacturer_conflicts=1" in w for w in warnings), warnings
+
+
+def test_trio_same_value_loss_is_agreement_not_conflict(db_session: Session):
+    # A manual-100 manufacturer that AGREES with the incoming trio value: the write
+    # returns False (95 < 100) but no conflict is counted — the counter must stay a
+    # pure data-conflict signal.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(manufacturer="Seagate Technology")], apply=True)
+    assert stats["manufacturers_set"] == 0
+    assert stats["manufacturer_conflicts"] == 0

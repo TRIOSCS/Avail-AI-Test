@@ -141,6 +141,65 @@ def test_b1_normalizes_the_copied_label(db_session: Session):
     assert card.manufacturer == "Dell"  # untouched
 
 
+def test_b1_trims_whitespace_before_the_oem_membership_test(db_session: Session):
+    # lower(trim()) — a legacy value with stray whitespace ("IBM ") must not escape the
+    # one-shot reclassification (mirrors the lower(trim(category)) idiom elsewhere).
+    _seed_manufacturers(db_session)
+    card = _card(db_session, "0Y5678", manufacturer="IBM ")
+
+    stats = run_backfill(db_session, apply=True)
+    db_session.refresh(card)
+
+    assert stats["b1"]["scanned"] == 1
+    assert card.brand == "IBM"  # set_brand strips before the alias lookup
+
+
+def test_backfill_skips_soft_deleted_cards(db_session: Session):
+    # Facet queries exclude deleted cards, so the backfill must neither write to them
+    # nor count them in the operator's go/no-go tallies — across all three passes.
+    from datetime import datetime, timezone
+
+    _seed_manufacturers(db_session)
+    card = _card(
+        db_session,
+        "DEL0001",
+        manufacturer="IBM",
+        description="HDD, 4TB 7.2K SAS, Seagate",
+        deleted_at=datetime.now(timezone.utc),
+    )
+    _mfg_link(db_session, "del0001", "Seagate")
+
+    stats = run_backfill(db_session, apply=True)
+    db_session.refresh(card)
+
+    assert stats["b1"]["scanned"] == 0
+    assert stats["b2"]["links_scanned"] == 0
+    assert stats["b3"]["matched"] == 0
+    assert card.brand is None
+    assert card.manufacturer == "IBM"  # untouched
+
+
+def test_b2_reports_links_won_and_distinct_cards(db_session: Session):
+    # 3 duplicate mfg_model rows for ONE card: links_won counts winning link rows,
+    # manufacturers_set counts DISTINCT cards — the go/no-go report must not claim
+    # 3 cards updated when 1 card was.
+    _seed_manufacturers(db_session)
+    card = _card(db_session, "DUP0001")
+    _mfg_link(db_session, "dup0001", "Seagate", sheet="sheet_a")
+    _mfg_link(db_session, "dup0001", "Seagate", sheet="sheet_b")
+    _mfg_link(db_session, "dup0001", "Seagate", sheet="sheet_c")
+
+    dry = run_backfill(db_session, apply=False)
+    applied = run_backfill(db_session, apply=True)
+    db_session.refresh(card)
+
+    for stats in (dry, applied):
+        assert stats["b2"]["links_scanned"] == 3
+        assert stats["b2"]["links_won"] == 3  # ladder tie-break: each later dup wins
+        assert stats["b2"]["manufacturers_set"] == 1  # ONE distinct card
+    assert card.manufacturer == "Seagate Technology"
+
+
 # --- B3 ------------------------------------------------------------------------
 
 
@@ -167,7 +226,7 @@ def test_b3_never_writes_outside_the_literal_lists(db_session: Session):
 
     assert card.brand is None  # EMC is in NEITHER trailing list — never written
     assert card.manufacturer is None
-    assert stats["b3"]["scanned"] == 0
+    assert stats["b3"]["matched"] == 0
 
 
 # --- Dry-run parity (the operator's go/no-go gate) -------------------------------

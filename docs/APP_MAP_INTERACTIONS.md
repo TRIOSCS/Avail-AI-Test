@@ -888,8 +888,13 @@ owns arbitration in one place:
        decode, source="mpn_decode" (tier 85), confidence 0.95
        (settings.mpn_decode_enabled). Category via spec_tiers.set_category; the
        decode's vendor (the actual MAKER — the regex gate is manufacturer-scheme-
-       specific) via spec_tiers.set_manufacturer at mpn_decode/0.9 (dual-brand W4 —
-       unconditional on the category outcome, ladder-gated).
+       specific) via spec_tiers.set_manufacturer at mpn_decode/0.9 (dual-brand W4).
+       The maker write shares the specs' cross-commodity guard: when the decoded
+       commodity LOSES the category ladder, the regex match itself is suspect, so
+       the decode contributes NOTHING (no specs, no maker). A maker write that loses
+       arbitration against a DIFFERENT existing value is counted
+       (skipped_maker_conflict) and WARNed after the batch, mirroring
+       skipped_category_conflict.
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
        crosswalk enrichment: ONE pass, TWO evidence channels over the same single
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
@@ -1069,21 +1074,35 @@ set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-bra
           all dual-brand writers use already-registered sources.
 ```
 
-Dual-brand writers (W1-W6 — every write regex-gated or source-backed, never guessed):
+Dual-brand writers (W1-W7 — every write regex-gated or source-backed, never guessed):
 | # | Evidence | Field | Source/tier | Conf | Where |
 |---|---|---|---|---|---|
 | W1 | `fru_links` `rel_kind='mfg_model'` rows with a manufacturer, joined on `normalized_mpn = related_norm` | manufacturer | `trio_source`/95 | 0.9 | backfill B2 + ingest |
 | W2 | Description trailing token ∈ `OEM_TRAILING_RE` (IBM\|Dell\|HP\|HPE\|Lenovo) | brand | `desc_parse`/83 | 0.85 | backfill B3 + clean.py routing |
 | W3 | Description trailing token ∈ `MAKER_TRAILING_RE` (Seagate\|Kingston\|Samsung) | manufacturer | `desc_parse`/83 | 0.85 | backfill B3 |
-| W4 | Deterministic MPN decode vendor | manufacturer | `mpn_decode`/85 | 0.9 | `mpn_decoder/writer.py` going-forward |
+| W4 | Deterministic MPN decode vendor (skipped when the decode's commodity LOSES the category ladder — shared cross-commodity guard) | manufacturer | `mpn_decode`/85 | 0.9 | `mpn_decoder/writer.py` going-forward |
 | W5 | Legacy `manufacturer` value ∈ `OEM_BRANDS` | copy → brand (manufacturer NOT cleared) | `legacy_backfill`/50 | 0.5 | backfill B1 |
 | W6 | TRIO ingest sheet columns | both | `trio_source`/95 | 0.9 | `source_ingest/ingest.py` |
+| W7 | Manual edit (PUT `/api/materials/{id}`) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` |
+
+Ladder losses are NOT silent for the going-forward writers: W4 surfaces
+`skipped_maker_conflict` (writer stats + batch WARNING) and W6 surfaces
+`brand_conflicts`/`manufacturer_conflicts` (ingest stats + batch WARNING) whenever a
+non-empty incoming value loses to a DIFFERENT existing value (same-value losses are
+agreement, not conflict). Card MERGE (`material_card_service.merge_material_cards`)
+carries the source card's brand + manufacturer through `set_brand`/`set_manufacturer`
+with the source card's STORED provenance (legacy floor when unprovenanced) — the ladder
+arbitrates target-vs-source and the outcome is logged at INFO (the losing value is
+destroyed with the merged-away card).
 
 Backfill command: `python -m app.management.backfill_dual_brand [--apply]` — dry-run by
 DEFAULT (write=False twins + an overlay mirroring apply's sequential writes, so dry
 tallies == apply tallies); four ordered passes B1→B2→B3→B4 with SAVEPOINT-per-card;
-B4 prints the known dual-coverage cards and exits non-zero unless ST300MP0016 ends
-brand=IBM ∧ manufacturer=Seagate Technology. Run post-merge-deploy, never at startup.
+soft-deleted cards are excluded from every pass; B2 reports winning link rows
+(`links_won`) AND distinct cards (`manufacturers_set`); B3's `matched` ==
+brands_set+manufacturers_set+skipped+missing_cards+failed; B4 prints the 9 known
+dual-coverage cards and exits non-zero unless ST300MP0016 ends brand=IBM ∧
+manufacturer=Seagate Technology. Run post-merge-deploy, never at startup.
 
 Facet flow (combined "Brand" facet — heading-only rename of the manufacturers partial):
 `get_manufacturer_options()` = UNION ALL over brand+manufacturer, COUNT(DISTINCT id)
@@ -1093,7 +1112,10 @@ branches); `search_materials_faceted(manufacturers=[...])` ORs
 unchanged (`sub_filters={"manufacturers":[...]}`; the router pop and Alpine
 `subFilters.manufacturers` are untouched — old bookmarks are a strict superset match).
 Result rows render `brand · manufacturer` ("IBM · Seagate Technology") when both set
-and distinct (materials/list.html).
+and DIFFERENT COMPANIES — the view (htmx_views materials list) compares NORMALIZED
+forms (`normalize_brand_name`) and annotates `_show_maker_suffix`, so a B1 alias pair
+("Hewlett Packard Enterprise" in brand, raw "HP" in manufacturer) renders once, never
+as a tautological dual display (materials/list.html).
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
 `mpn_decoder/writer.py` (decode category via `set_category`, tier 85),

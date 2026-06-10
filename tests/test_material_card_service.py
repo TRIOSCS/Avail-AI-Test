@@ -328,8 +328,60 @@ class TestMergeMaterialCards:
 
         db_session.refresh(target)
         assert target.manufacturer == "TI"
+        # The carried value arrives WITH provenance (the source card's stored
+        # provenance — legacy floor here) — never provenance-less.
+        assert target.manufacturer_source == "legacy_backfill"
+        assert target.manufacturer_tier == 50
         assert target.description == "Voltage regulator"
         assert target.search_count == 8  # 5 + 3
+
+    @patch("app.services.audit_service.log_audit")
+    def test_merge_carries_brand_and_ladders_manufacturer_with_source_provenance(self, mock_audit, db_session: Session):
+        # The source card holds tier-95 trio maker evidence + a brand; the target holds
+        # an unprovenanced legacy OEM value (floor 50). The merge must arbitrate through
+        # the F1 ladder with the SOURCE card's STORED provenance — a fill-when-empty copy
+        # would silently destroy the trio evidence (the source card is deleted below it).
+        source = _make_material_card(db_session, "prov-src", manufacturer="Seagate Technology")
+        source.manufacturer_source = "trio_source"
+        source.manufacturer_confidence = 0.9
+        source.manufacturer_tier = 95
+        source.brand = "IBM"
+        source.brand_source = "desc_parse"
+        source.brand_confidence = 0.85
+        source.brand_tier = 83
+        target = _make_material_card(db_session, "prov-tgt", manufacturer="IBM")  # legacy, NULL provenance
+        db_session.flush()
+
+        merge_material_cards(db_session, source.id, target.id, "admin@test.com")
+        db_session.commit()
+
+        db_session.refresh(target)
+        assert target.manufacturer == "Seagate Technology"  # 95 beat the legacy-50 OEM value
+        assert target.manufacturer_source == "trio_source"
+        assert target.manufacturer_tier == 95
+        assert target.manufacturer_confidence == 0.9
+        assert target.brand == "IBM"  # brand is carried, not dropped with the card
+        assert target.brand_source == "desc_parse"
+        assert target.brand_tier == 83
+
+    @patch("app.services.audit_service.log_audit")
+    def test_merge_does_not_let_legacy_source_clobber_higher_tier_target(self, mock_audit, db_session: Session):
+        # Reverse arbitration: the TARGET holds a manual (100) correction; the source's
+        # unprovenanced value (floor 50) must lose — the ladder owns the decision in
+        # both directions, not fill-when-empty semantics.
+        source = _make_material_card(db_session, "rev-src", manufacturer="IBM")
+        target = _make_material_card(db_session, "rev-tgt", manufacturer="Kingston Technology")
+        target.manufacturer_source = "manual"
+        target.manufacturer_confidence = 1.0
+        target.manufacturer_tier = 100
+        db_session.flush()
+
+        merge_material_cards(db_session, source.id, target.id, "admin@test.com")
+        db_session.commit()
+
+        db_session.refresh(target)
+        assert target.manufacturer == "Kingston Technology"  # manual-100 resisted
+        assert target.manufacturer_source == "manual"
 
     @patch("app.services.audit_service.log_audit")
     def test_merge_deletes_source_card(self, mock_audit, db_session: Session):

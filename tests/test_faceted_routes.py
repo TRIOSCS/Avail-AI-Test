@@ -978,3 +978,28 @@ def test_faceted_route_manufacturers_param_matches_brand_or_maker(client, db_ses
 
     # Result row renders the dual display: label · maker.
     assert "IBM · Seagate Technology" in resp_maker.text
+
+
+def test_faceted_row_suppresses_tautological_alias_dual_display(client, db_session):
+    """B1 leaves the raw alias in manufacturer while brand holds the canonical OEM — the
+    dual cell compares NORMALIZED forms, so the same company in two forms renders once
+    ("Hewlett Packard Enterprise"), never "Hewlett Packard Enterprise · HP"."""
+    from app.models import Manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Hewlett Packard Enterprise", aliases=["HP", "HPE"]))
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="hp-alias-card",
+            display_mpn="HP-ALIAS-CARD",
+            brand="Hewlett Packard Enterprise",  # B1 wrote the normalized OEM label
+            manufacturer="HP",  # raw legacy alias, lossless by design
+            category="hdd",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    assert "Hewlett Packard Enterprise" in resp.text
+    assert "Hewlett Packard Enterprise · HP" not in resp.text

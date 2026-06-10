@@ -5,12 +5,11 @@ length, chains off 098_materials_perf_idx, on the single-head mainline) and that
 nine add_column calls + ix_material_cards_brand round-trip (upgrade → downgrade →
 upgrade) on a scratch SQLite engine. The migration is purely additive, portable DDL (no data
 writes), so executing its upgrade()/downgrade() directly is honest coverage on both
-engines. Execution uses the hermetic MigrationContext + Operations.context pattern
-(like test_migration_094_fru_links) rather than the in-process alembic CLI: the CLI
-path routes through alembic/env.py + the alembic.op module's PROCESS-GLOBAL proxy and
-an os.environ DATABASE_URL channel, which proved load-flaky under xdist (intermittent
-"table missing" skips from the env.py idempotent wrappers when the full suite runs in
-parallel).
+engines. Execution uses the shared hermetic harness (tests/migration_harness.run_ops)
+rather than the in-process alembic CLI: the CLI path routes through alembic/env.py +
+the alembic.op module's PROCESS-GLOBAL proxy and an os.environ DATABASE_URL channel,
+which proved load-flaky under xdist (intermittent "table missing" skips from the
+env.py idempotent wrappers when the full suite runs in parallel).
 
 Called by: pytest
 Depends on: alembic/versions/097_dual_brand.py
@@ -20,9 +19,9 @@ import importlib.util
 import os
 
 import sqlalchemy as sa
-from alembic.migration import MigrationContext
-from alembic.operations import Operations
 from sqlalchemy.pool import StaticPool
+
+from tests.migration_harness import run_ops
 
 # Load the migration module directly (alembic/versions has no __init__.py).
 _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -88,12 +87,7 @@ class TestRoundTrip:
         meta.create_all(engine)
         return engine
 
-    @staticmethod
-    def _run(engine, fn):
-        with engine.begin() as conn:
-            ctx = MigrationContext.configure(conn)
-            with Operations.context(ctx):
-                fn()
+    _run = staticmethod(run_ops)
 
     @staticmethod
     def _columns(engine):

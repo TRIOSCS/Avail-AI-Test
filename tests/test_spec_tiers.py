@@ -548,3 +548,41 @@ def test_set_category_unchanged_behavior_through_shared_helper(db_session: Sessi
     assert card.category_tier == 85
     assert set_category(card, "VPD Card", "manual", 1.0) is False  # off-vocab still rejected
     assert card.category == "microprocessors"
+
+
+def test_set_brand_on_detached_card_warns_and_writes_verbatim(db_session: Session, monkeypatch):
+    # A detached/transient card has no session, so alias canonicalization is SKIPPED —
+    # the verbatim strip is written with full provenance (documented behavior), and the
+    # first occurrence per process fires a WARNING so a detached-card writer is never
+    # silent (it would fragment the brand facet: "HP" vs "Hewlett Packard Enterprise").
+    from loguru import logger as loguru_logger
+
+    import app.services.spec_tiers as spec_tiers_mod
+    from app.models import Manufacturer
+    from app.services.spec_tiers import set_brand
+
+    db_session.add(Manufacturer(canonical_name="Hewlett Packard Enterprise", aliases=["HP"]))
+    db_session.flush()
+
+    monkeypatch.setattr(spec_tiers_mod, "_warned_detached_normalize", False)
+    detached = MaterialCard(normalized_mpn="detached-001", display_mpn="DETACHED-001")  # never added
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        assert set_brand(detached, "HP", "trio_source", 0.9) is True
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert detached.brand == "HP"  # verbatim — canonicalization skipped without a session
+    assert detached.brand_source == "trio_source"
+    assert any("not session-attached" in w for w in warnings), warnings
+
+    # Once per process: a second detached write does not warn again.
+    warnings2: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings2.append(str(message)), level="WARNING")
+    try:
+        assert set_brand(detached, "HPE", "manual", 1.0) is True
+    finally:
+        loguru_logger.remove(sink_id)
+    assert not any("not session-attached" in w for w in warnings2), warnings2
