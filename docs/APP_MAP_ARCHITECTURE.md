@@ -188,6 +188,20 @@ Key modules added for OEM/FRU enrichment:
 | `oem_domains.py` | Security allowlists (`is_oem_domain`, `is_crossref_domain`) for OEM-official and distributor/manufacturer pages; mirrors `trusted_domains.py`. All domain checks enforced in Python — LLM claims are never trusted. |
 | `oem_extractor.py` | Grounded-web-search extractors: `cross_reference_mpn` resolves an OEM/FRU code to a candidate commodity MPN (four Python gates); `extract_oem_description` fetches an official OEM description (four Python gates). Both raise `ClaudeError` on backend failure. |
 
+## Description→Spec Extractor (`app/services/desc_extractor/`)
+
+Deterministic description→spec token grammar (zero LLM/network) run by the
+enrichment worker's second pass between the MPN decode (0.95) and the AI spec
+reader (>= 0.85) — see APP_MAP_INTERACTIONS "Worker second-pass ordering":
+
+| Module | Purpose |
+|--------|---------|
+| `__init__.py` | `extract_desc` pure router: TRIO `<Label>,` lead / comma-less first token / whole-word body tokens route to a commodity; foreign labels ("Other,"/"Tray,"…), cross-family conflicts, and degenerate descriptions return None. |
+| `_common.py` | `DescResult` dataclass + `DESC_SOURCE`/`DESC_CONFIDENCE`/`SPEC_COMMODITIES` constants shared by the router and the writer. |
+| `storage.py` | hdd/ssd token grammar: capacity (link-speed tokens excluded), rpm (hdd-only), form factor, interface — per-commodity seeded vocabularies. |
+| `memory.py` | DRAM token grammar: capacity, ddr_type, speed_mhz, ecc (incl. Non-ECC negation), form_factor, rank — seeded enums + the only numeric_range gate. |
+| `writer.py` | Worker adapter `extract_and_record_specs`: writes via `record_spec(source="desc_parse", confidence=0.90)`, gated by `settings.desc_parse_enabled`; skips keys held at strictly higher confidence; never categorizes; per-card SAVEPOINT isolation; returns `{parsed, written, failed}`. |
+
 ## Scripts (`scripts/`)
 
 | Script | Purpose |
@@ -203,7 +217,7 @@ Key modules added for OEM/FRU enrichment:
 | HTML templates | 167 |
 | Database tables | 50+ |
 | API endpoints | 400+ |
-| Service modules | 119 |
+| Service modules | 120 |
 | Supplier connectors | 12 |
 | Background jobs | 15 modules |
 | Test files | 100+ |

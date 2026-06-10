@@ -126,6 +126,10 @@ class Settings(BaseSettings):
     # Deterministic MPN→spec decoders (storage/DRAM): zero-network, zero-LLM, regex-gated.
     # Safe to leave on — values are enum-validated by record_spec. See app/services/mpn_decoder.
     mpn_decode_enabled: bool = True
+    # Deterministic description→spec extraction (storage/DRAM token grammar): zero-network,
+    # zero-LLM. Runs between mpn-decode (0.95) and the AI spec reader (0.85). Safe to leave
+    # on — values are enum-validated by record_spec. See app/services/desc_extractor.
+    desc_parse_enabled: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90
