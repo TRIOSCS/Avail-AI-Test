@@ -956,11 +956,21 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
-    |       value no longer collapses its siblings to 0).
-    +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
-    |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
-    |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
-    +---> "Sourcing signals" (collapsed, $persist sourcingOpen; active-count badge) —
+    |       value no longer collapses its siblings to 0). With NO commodity selected the
+    |       route renders the server-side placeholder "Select a category to unlock spec
+    |       filters" (subfilters.html commodity_selected=False branch; no service calls)
+    |       instead of an empty response.
+    +---> Data confidence (FIRST filter fold, EXPANDED by default — $persist
+    |     confidenceOpen defaults true under the ROTATED key mat_confidence_open2;
+    |     the legacy mat_confidence_open key held a persisted `false` for every
+    |     prior visitor — persist writes the current value on init — and is removed
+    |     on load so the new default reaches returning users): 3 groups —
+    |     Trusted / AI-inferred / No data;
+    |     default all-on; `statuses[]` → `?statuses=` CSV → search_materials_faceted
+    |     (IN-filters enrichment_status; precedence over the legacy verified_only).
+    |     Collapse policy: navigation sections open, trust fold open, heavy folds
+    |     below closed.
+    +---> "Sourcing signals" (2nd fold, collapsed, $persist sourcingOpen; active-count badge) —
     |     Layer-3 operational filters, all top-level params on
     |     /v2/partials/materials/faceted → search_materials_faceted():
     |       has_stock   (EXISTS MaterialVendorHistory row)
@@ -979,10 +989,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     derived from the maps that drive the query branches); the JS twin is
     |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
     |     Static section (no per-value counts → no HTMX reload).
-    +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
-    |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
-    |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
-    |     legacy verified_only).
+    +---> "More attributes" (LAST fold, collapsed, $persist moreAttrsOpen; active-count
+    |     badge): Manufacturer (search + top-N) + Global facets (lifecycle / rohs /
+    |     condition / has_datasheet) via get_global_facet_counts(). Containers load
+    |     while hidden.
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
@@ -996,10 +1006,14 @@ SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
 Result-row upgrades (list.html, server-side in materials_faceted_partial):
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
-    |     3 scalar specs_structured entries, formatted "label: value".
+    |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
+    |     title="label: value" so the value-only commodity rendering keeps its label
+    |     on hover.
     +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
-    |     "N alternates" badge when cross_references is non-empty; condition badge
-    |     styled like the lifecycle palette.
+    |     "N alternates" chip when cross_references is non-empty (neutral gray — count
+    |     metadata, not a status; indigo is reserved for OEM-SOURCED); condition badge
+    |     styled like the lifecycle palette, with Refurbished/Used sharing violet
+    |     (second-life family) so amber stays exclusively caution/reconfirm.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for
