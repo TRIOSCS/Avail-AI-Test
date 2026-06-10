@@ -30,6 +30,8 @@ def test_decode_writes_facets_for_known_hdd(db_session: Session):
 
 
 def test_decode_writes_dram(db_session: Session):
+    # Full write path for a known-rank RDIMM: the round-2 keys (rank/registered/voltage)
+    # must SURVIVE record_spec — i.e. their dram schemas are seeded — not just decode.
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="m393a2k43db3-cwe", display_mpn="M393A2K43DB3-CWE", category="dram")
     db_session.add(card)
@@ -41,6 +43,59 @@ def test_decode_writes_dram(db_session: Session):
     assert f["ddr_type"] == "DDR4"
     assert f["form_factor"] == "RDIMM"
     assert f["ecc"] == "true"
+    assert f["rank"] == "2Rx8"
+    assert f["registered"] == "Registered"
+    assert f["voltage"] == 1.2
+    assert f["capacity_gb"] == 16
+
+
+def test_decode_writes_ssd_and_categorizes_null_category(db_session: Session):
+    # SSD commodity through the FULL write path on a NULL-category card: categorize from the
+    # decode, then persist facets. Also implicitly pins decoder↔seed enum agreement for the
+    # ssd vocabulary — an out-of-enum value would be dropped by record_spec and fail here.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="mzql21t9hcjr", display_mpn="MZQL21T9HCJR", category=None)
+    db_session.add(card)
+    db_session.flush()
+
+    stats = decode_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == {"decoded": 1, "written": 3, "categorized": 1}
+    assert card.category == "ssd"
+    f = _facets(db_session, card.id)
+    assert f["form_factor"] == "U.2"
+    assert f["interface"] == "NVMe PCIe 4.0"
+    assert f["capacity_gb"] == 1920
+
+
+def test_writer_warns_when_decoded_key_has_no_schema(db_session: Session):
+    # If a decoder emits a key with no commodity_spec_schemas row, record_spec drops it at
+    # DEBUG (invisible at the production INFO level) — the writer must surface the discard
+    # as an aggregate WARNING so a decoder↔seed drift is never silent.
+    from loguru import logger as loguru_logger
+
+    from app.models import CommoditySpecSchema
+
+    seed_commodity_schemas(db_session)
+    db_session.query(CommoditySpecSchema).filter_by(commodity="dram", spec_key="rank").delete()
+    db_session.flush()
+    card = MaterialCard(normalized_mpn="m393a2k43db3-cwe", display_mpn="M393A2K43DB3-CWE", category="dram")
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any("dram.rank" in w and "dropped" in w for w in warnings), warnings
+    f = _facets(db_session, card.id)
+    assert "rank" not in f  # dropped (no schema)
+    assert f["registered"] == "Registered"  # sibling keys still written
 
 
 def test_decode_writes_ecc_false(db_session: Session):

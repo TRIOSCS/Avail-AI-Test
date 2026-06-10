@@ -19,8 +19,12 @@ CASES = [
     # Toshiba — MG enterprise 3.5" with explicit TB token; MQ 2.5" form only
     ("MG08ACA16TE", {"capacity_gb": 16000, "form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
     ("MQ01ABD100", {"form_factor": '2.5"'}, "hdd"),
-    # HGST/Hitachi — prefix → form + usage (capacity not in a clean token here)
+    # HGST/Hitachi — prefix → form + usage (capacity not in a clean token here).
+    # HUS<digit> Ultrastar HDDs pin the positive side of the HUS(?=\d) lookahead — the
+    # HUSMM/HUSSL SAS-SSD exclusion below must never regress into dropping these.
     ("HUH721212ALN604", {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
+    ("HUS726T4TALA6L4", {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
+    ("HUS156030VLS600", {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
     ("HTS721010A9E630", {"form_factor": '2.5"'}, "hdd"),
     ("HMS5C4040ALE640", {"form_factor": '3.5"', "usage_class": "Desktop / Client"}, "hdd"),
 ]
@@ -53,6 +57,14 @@ def test_short_oem_spare_not_misdecoded_as_toshiba(mpn):
     # (prefix + 2 digits + 3-letter code). The tightened gate must reject them, NOT emit a
     # bogus 3.5"/Enterprise drive. Regression for the dry-run's MGK50/MGJN9/DT10171 hits.
     assert decode_mpn(mpn) is None, f"{mpn} should not decode as a Toshiba drive"
+
+
+@pytest.mark.parametrize("mpn", ["HUSMM1640ASS204", "HUSSL4010BSS600", "HUSMR1650ASS204"])
+def test_hgst_sas_ssd_families_not_misdecoded_as_hdd(mpn):
+    # HUSMM/HUSSL/HUSMR are Ultrastar SAS *SSDs* (2.5"), not Ultrastar HDDs — the HUS gate
+    # requires a digit next (HUS72…, HUS156…) so these return None instead of a wrong
+    # 3.5"/Enterprise HDD decode.
+    assert decode_mpn(mpn) is None, f"{mpn} must not decode as an HDD"
 
 
 def test_wd_mobile_drive_capacity_only_no_guessed_form_factor():
