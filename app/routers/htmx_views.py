@@ -3013,8 +3013,11 @@ async def search_history_panel(
     """Render the 'What we know' history panel for the searched MPN.
 
     Called by: results_shell.html right column (hx-get).
-    Depends on: part_history_service.get_part_history, normalize_mpn_key.
+    Depends on: part_history_service.get_part_history, normalize_mpn_key,
+                fru_matrix_service.get_fru_view/get_reverse_context (compact FRU
+                crosswalk context — both are capped/cheap reads).
     """
+    from ..services.fru_matrix_service import get_fru_view, get_reverse_context
     from ..services.part_history_service import PartHistory, get_part_history
     from ..utils.normalization import normalize_mpn_key
 
@@ -3027,8 +3030,33 @@ async def search_history_panel(
         history = PartHistory(found=False)
         error = True
 
+    # FRU crosswalk context, only for a concrete searched MPN: forward (the MPN is a
+    # FRU) and reverse (the MPN appears under FRUs). The card is ADDITIVE, so its
+    # lookups get their own scoped try/except — a crosswalk failure degrades to "no
+    # crosswalk card" and must never discard a successfully loaded history or flip
+    # the panel into the history-error state. (A history failure already suppresses
+    # the card via the template's `not error` guard, so the lookups are skipped.)
+    fru_view = None
+    fru_reverse = None
+    if key and not error:
+        try:
+            fru_view = get_fru_view(db, mpn)
+            fru_reverse = get_reverse_context(db, mpn)
+        except Exception:
+            logger.exception("search_history_panel FRU context failed mpn={} key={} user={}", mpn, key, user.id)
+            fru_view = None
+            fru_reverse = None
+
     ctx = _base_ctx(request, user, "search")
-    ctx.update({"history": history, "error": error})
+    ctx.update(
+        {
+            "history": history,
+            "error": error,
+            "fru_view": fru_view,
+            "fru_reverse": fru_reverse,
+            "fru_query": mpn,
+        }
+    )
     return template_response("htmx/partials/search/history_panel.html", ctx)
 
 
@@ -4313,9 +4341,15 @@ async def partials_companies_redirect(request: Request, path: str = ""):
     return RedirectResponse(url=new_url, status_code=301)
 
 
-STALENESS_OVERDUE_DAYS = 30
-STALENESS_DUE_SOON_DAYS = 14
-
+# CDM staleness rules + account-list query building live in the service layer
+# (app/services/crm_service.py). _cdm_list_ctx and _company_contact_rows are
+# plain service imports used by the CDM routes below. _staleness_tier is
+# additionally re-exported under its historical name because tests
+# (tests/test_htmx_views_nightly28.py) import it from this module — the F401
+# keeps ruff from stripping that alias.
+from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
+from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
+from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
 _ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
@@ -4330,84 +4364,71 @@ def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -
     return hx_target, push_url_base
 
 
-def _staleness_tier(last_activity_at: datetime | None) -> str:
-    """Compute staleness tier from last_activity_at timestamp."""
-    if last_activity_at is None:
-        return "new"
-    ts = last_activity_at
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    days = (datetime.now(timezone.utc) - ts).days
-    if days >= STALENESS_OVERDUE_DAYS:
-        return "overdue"
-    if days >= STALENESS_DUE_SOON_DAYS:
-        return "due_soon"
-    return "recent"
-
-
 @router.get("/v2/partials/customers", response_class=HTMLResponse)
 async def companies_list_partial(
     request: Request,
     search: str = "",
+    staleness: str = "",
+    account_type: str = "",
+    my_only: bool = False,
+    sort: str = "oldest",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    hx_target: str = Query("#main-content", alias="hx_target"),
-    push_url_base: str = Query("/v2/customers", alias="push_url_base"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return companies list as HTML partial."""
-    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/customers")
-    query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
-
-    if search.strip():
-        sb = SearchBuilder(search.strip())
-        query = query.filter(sb.ilike_filter(Company.name))
-
-    total = query.count()
-    companies = query.order_by(Company.last_activity_at.asc().nullsfirst()).offset(offset).limit(limit).all()
-
-    for c in companies:
-        c.staleness = _staleness_tier(c.last_activity_at)
-
-    # Today's Calls — overdue accounts owned by this user (sales/trader only)
-    todays_calls: list[Company] = []
-    if user.role in ("sales", "trader"):
-        call_threshold = datetime.now(timezone.utc) - timedelta(days=STALENESS_OVERDUE_DAYS)
-        todays_calls = (
-            db.query(Company)
-            .filter(
-                Company.is_active.is_(True),
-                Company.account_owner_id == user.id,
-                or_(
-                    Company.last_activity_at < call_threshold,
-                    Company.last_activity_at.is_(None),
-                ),
-            )
-            .order_by(
-                Company.is_strategic.desc().nullslast(),
-                Company.last_activity_at.asc().nullsfirst(),
-            )
-            .limit(10)
-            .all()
-        )
-        for c in todays_calls:
-            c.staleness = _staleness_tier(c.last_activity_at)
-
+    """Return the CDM account workspace (split-panel list + detail) as HTML partial."""
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
-        {
-            "companies": companies,
-            "search": search,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "hx_target": hx_target,
-            "push_url_base": push_url_base,
-            "todays_calls": todays_calls,
-        }
+        _cdm_list_ctx(
+            db,
+            user,
+            search=search,
+            staleness=staleness,
+            account_type=account_type,
+            my_only=my_only,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+            include_overdue=True,
+        )
     )
     return template_response("htmx/partials/customers/list.html", ctx)
+
+
+@router.get("/v2/partials/customers/account-list", response_class=HTMLResponse)
+async def companies_account_list_partial(
+    request: Request,
+    search: str = "",
+    staleness: str = "",
+    account_type: str = "",
+    my_only: bool = False,
+    sort: str = "oldest",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return only the CDM left-panel account list (filter/sort/pagination refresh).
+
+    The overdue chip lives in the filter bar (not re-rendered here), so this route skips
+    the overdue COUNT query.
+    """
+    ctx = {"request": request, "user": user}
+    ctx.update(
+        _cdm_list_ctx(
+            db,
+            user,
+            search=search,
+            staleness=staleness,
+            account_type=account_type,
+            my_only=my_only,
+            sort=sort,
+            limit=limit,
+            offset=offset,
+        )
+    )
+    return template_response("htmx/partials/customers/_account_list.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
@@ -4569,6 +4590,10 @@ async def company_detail_partial(
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
+            # Pass the active-only sites list — contacts on deactivated sites must
+            # not be shown (clicking them would log outreach against, and bump,
+            # a deactivated entity).
+            "contact_rows": _company_contact_rows(db, company_id, sites=sites),
             "user": user,
         }
     )
@@ -4609,72 +4634,9 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
-        # Get all SiteContact records across all sites for this company
-        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
-        contacts = []
-        if site_ids:
-            contacts = (
-                db.query(SiteContact)
-                .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active.is_(True))
-                .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-                .all()
-            )
-        # Build a table with site name
-        site_map = {s.id: s for s in db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()}
-        rows = []
-        for c in contacts:
-            site = site_map.get(c.customer_site_id)
-            site_name = site.site_name if site else _DASH
-            phone_html = (
-                f'<a href="tel:{c.phone}" class="text-brand-500 hover:text-brand-600">{c.phone}</a>'
-                if c.phone
-                else f'<span class="text-gray-500">{_DASH}</span>'
-            )
-            primary_badge = (
-                ' <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>'
-                if c.is_primary
-                else ""
-            )
-            rows.append(f"""<tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.full_name or _DASH}{primary_badge}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.title or _DASH}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{site_name}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{c.email or _DASH}</td>
-              <td class="px-4 py-2 text-sm">{phone_html}</td>
-            </tr>""")
-        # Also include legacy site-level contacts
-        for s in site_map.values():
-            if s.contact_name or s.contact_email:
-                phone_html = (
-                    f'<a href="tel:{s.contact_phone}" class="text-brand-500">{s.contact_phone}</a>'
-                    if s.contact_phone
-                    else f'<span class="text-gray-500">{_DASH}</span>'
-                )
-                rows.append(f"""<tr class="hover:bg-brand-50">
-                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH} <span class="text-[9px] text-gray-400">legacy</span></td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_title or _DASH}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_email or _DASH}</td>
-                  <td class="px-4 py-2 text-sm">{phone_html}</td>
-                </tr>""")
-        if rows:
-            html = f"""<div class="overflow-x-auto">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-200">{"".join(rows)}</tbody>
-              </table>
-            </div>"""
-        else:
-            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found. Add contacts via the Sites tab.</p></div>'
-        return HTMLResponse(html)
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "contact_rows": _company_contact_rows(db, company_id)})
+        return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
 
     elif tab == "requisitions":
         from sqlalchemy import or_
@@ -4927,6 +4889,7 @@ async def create_site_contact(
     email: str = Form(""),
     title: str = Form(""),
     phone: str = Form(""),
+    wechat_id: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -4937,6 +4900,11 @@ async def create_site_contact(
 
     if not full_name.strip():
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Name is required.</div>')
+
+    # SiteContact.wechat_id is String(100) — reject over-length input here (the
+    # in-memory SQLite test engine ignores VARCHAR lengths, but Postgres 500s).
+    if len(wechat_id.strip()) > 100:
+        return HTMLResponse('<div class="p-2 text-xs text-rose-600">WeChat ID must be 100 characters or fewer.</div>')
 
     # Dedup by email
     if email:
@@ -4960,6 +4928,7 @@ async def create_site_contact(
                 email=email.strip() or None,
                 title=title.strip() or None,
                 phone=phone.strip() or None,
+                wechat_id=wechat_id.strip() or None,
             )
             db.add(contact)
             db.commit()
@@ -4969,6 +4938,7 @@ async def create_site_contact(
             full_name=full_name.strip(),
             title=title.strip() or None,
             phone=phone.strip() or None,
+            wechat_id=wechat_id.strip() or None,
         )
         db.add(contact)
         db.commit()
@@ -5024,6 +4994,15 @@ async def set_primary_contact(
     db: Session = Depends(get_db),
 ):
     """Set a contact as primary for the site (unsets others)."""
+    # Validate the site belongs to the company BEFORE mutating — a mismatched
+    # URL must not flip the primary flag and then 500 on render.
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -5046,8 +5025,6 @@ async def set_primary_contact(
         .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
         .all()
     )
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
-    company = db.query(Company).filter(Company.id == company_id).first()
     ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts
@@ -7415,6 +7392,21 @@ async def materials_faceted_partial(
     if total == 0 and parametric_active:
         spec_coverage = get_commodity_spec_coverage(db, commodity)
 
+    # FRU crosswalk: when the query hits fru_links (either direction), render the
+    # full matrix / "Used in FRUs" section above the card results. This is the
+    # destination every "/v2/materials?q=<pn>" FRU deep link promises (the search
+    # panel's "View full FRU matrix" CTA and fru_section's part-navigation links) —
+    # a crosswalk-only PN matches no material card, so the section must not depend
+    # on card results. Both lookups are indexed point reads; non-MPN text queries
+    # simply miss and render nothing.
+    fru_view = None
+    fru_reverse = None
+    if q:
+        from ..services.fru_matrix_service import get_fru_view, get_reverse_view
+
+        fru_view = get_fru_view(db, q)
+        fru_reverse = get_reverse_view(db, q)
+
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
@@ -7431,6 +7423,10 @@ async def materials_faceted_partial(
             "faceted": True,
             "parametric_active": parametric_active,
             "spec_coverage": spec_coverage,
+            "fru_view": fru_view,
+            "fru_usages": fru_reverse.usages if fru_reverse else (),
+            "fru_usages_total": fru_reverse.total if fru_reverse else 0,
+            "fru_query": q,
         }
     )
     return template_response("htmx/partials/materials/list.html", ctx)

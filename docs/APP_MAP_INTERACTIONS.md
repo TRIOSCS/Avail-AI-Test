@@ -139,6 +139,11 @@ results_shell.html (right column)
               |        BY material_card_id: offers, distinct buyers, confirmed/won
               |        (won/sold offers + won requisitions + customer purchases),
               |        sightings, requirements, and a min/max/last price trend.
+              +---> fru_matrix_service.get_fru_view / get_reverse_context(db, mpn)
+              |        FRU-crosswalk context (capped/cheap reads, only for a
+              |        concrete searched MPN — see "FRU crosswalk context" below).
+              |        Own scoped try/except: a crosswalk failure logs and degrades
+              |        to "no crosswalk card", never touching the loaded history.
               +---> renders history_panel.html (or empty state if no card)
 ```
 
@@ -147,6 +152,30 @@ materials detail router (`material_detail_partial`, `material_tab_partial`)
 consumes the same `*_for_card` helpers, so the search panel and the full part
 page can never drift. The endpoint is wrapped in try/except (logged via
 Loguru) and degrades to an empty/error panel rather than failing the page.
+
+**FRU crosswalk context.** When the searched MPN matches `fru_links` in either
+direction, the panel appends a compact "FRU crosswalk" card (silent on no hit,
+matching the materials-detail decision):
+
+- **Forward hit** (the MPN is a FRU): one-line counts via `FruView.summary`
+  ("N drive PNs · M models · K 11S numbers · J trays", kind-neutral — no
+  qualification claim — falling back to "N linked parts"), plus up to 3
+  manufacturer-model chips (`FruView.top_models`).
+- **Reverse hit** (the MPN appears under FRUs): "Used in N FRUs" — N is the
+  DISTINCT-FRU count (`ReverseContext.distinct_frus`, SQL aggregate; NOT the
+  (FRU, role) usage count `ReverseView.total`) — plus up to 3 distinct FRUs in
+  canonical (shortest, de-padded) spelling (`ReverseContext.top_frus`).
+  `get_reverse_context` is a lightweight column-fetch read path; the search
+  panel never hydrates full `FruLink` rows.
+- A crosswalk-known part with no trading history renders "No trading history
+  yet" instead of the "looks new to us" empty state.
+- Both cases share a "View full FRU matrix →" deep link to the materials
+  surface (`/v2/materials?q=<mpn>`, the same URL pattern the fru-lookup
+  partial pushes). The faceted results (`materials_faceted_partial` →
+  `list.html`) render the full `fru_section.html` above the card list whenever
+  `q` hits `fru_links`, so the deep link delivers the matrix even for a
+  crosswalk-only PN that matches no material card; the full matrix is never
+  duplicated on the search page itself.
 
 ```
 Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
@@ -639,6 +668,81 @@ not requisition-scoped.
 
 ---
 
+## 10. Click-to-Contact Outreach Logging (CDM Workspace)
+
+```
+User clicks a contact link (tel:/mailto:/Teams deep link/weixin://) in
+tabs/contacts_tab.html inside the CDM account workspace
+    |
+    v
+Delegated click listener in app/static/htmx_app.js
+    |
+    +---> Reads data-* attributes from the [data-outreach-log] element
+    |       (data-channel phone|email|teams|wechat, data-value,
+    |        data-company-id, data-site-id, data-contact-id, data-contact-name)
+    |
+    +---> Fire-and-forget fetch POST /api/activity/outreach-initiated
+    |       (app/routers/activity.py, schema OutreachInitiatedRequest in
+    |        app/schemas/activity.py)
+    |
+    +---> On success: $store.toast success flash + #cdm-list refresh
+    |       (re-sorts the account list so the touch is visible immediately;
+    |        the refresh preserves the current pagination offset/limit, read
+    |        from data-* attrs on the _account_list.html header)
+    +---> On success WITH dropped_links (server removed stale entity links):
+    |       $store.toast WARNING flash instead — the touch is logged but
+    |       invisible on this account; the list refresh is skipped
+    +---> On failure (429/5xx/network): $store.toast ERROR flash — outreach
+    |       logging failures are never silent
+    |
+    v
+activity.py router -> log_outreach_initiated(db, user_id=..., channel=...,
+    |                                          contact_value=..., ...)
+    |   - rate limit: per-user "outreach" bucket (30/min), separate from the
+    |     click-to-call bucket (10/min) so channels never starve each other
+    |   - nonexistent OR mismatched company/site/contact ids (site not under
+    |     the company, contact not under the site) are nulled out with a
+    |     warning (stale DOM ids must not FK-crash the insert or bump an
+    |     unrelated entity) and reported back as dropped_links in the 201 body
+    |
+    v
+app/services/activity_service.log_outreach_initiated()
+    |
+    +---> Dedup: same user + channel + company/site/contact links + contacted
+    |       value (channel snapshot column; subject for WeChat) within 120s
+    |       (OUTREACH_DEDUP_SECONDS) returns the existing row — double-clicks
+    |       do not create duplicate activities or double bumps, while distinct
+    |       same-named contacts never collapse into one log
+    |
+    +---> Maps channel to ActivityType:
+    |       phone   -> ActivityType.CALL_LOGGED   (direction=outbound)
+    |       email   -> ActivityType.EMAIL_SENT
+    |       teams   -> ActivityType.TEAMS_MESSAGE
+    |       wechat  -> ActivityType.WECHAT_MESSAGE  (new, constants.py)
+    |
+    +---> DB: INSERT activity_log (is_meaningful=True, direction=outbound,
+    |       linked to company_id + site_contact_id)
+    |
+    +---> DB: UPDATE companies.last_activity_at = now()
+    +---> DB: UPDATE customer_sites.last_activity_at = now()
+    |       (both bumps feed the CDM workspace staleness sort:
+    |        oldest = longest since activity first)
+
+Channel enum (app/constants.py):
+    Channel.PHONE | Channel.EMAIL | Channel.TEAMS | Channel.WECHAT (new)
+```
+
+CDM business rules (staleness tiers, account-list query/sort, contact-row
+assembly) live in `app/services/crm_service.py` (`staleness_tier`,
+`cdm_company_query`, `cdm_list_ctx`, `company_contact_rows`); the
+`htmx_views.py` routes are thin wrappers.
+`company_detail_partial` builds `contact_rows` via the `company_contact_rows` helper
+(active SiteContacts across the company's active sites + legacy site-level
+contacts on active sites) and passes it to
+`tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
+
+---
+
 ## Enrichment Pipeline
 
 ```
@@ -796,13 +900,24 @@ owns arbitration in one place:
        (no schema row / out-of-enum value) emit the same aggregate WARNING as the
        mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
-       description→spec token grammar (storage + DRAM; TRIO part-master/inventory
-       descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
-       "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled).
-       Zero LLM/network; extraction is suppressed on foreign commodity labels
-       ("Other,"/"Tray,"…) and conflicting tokens; only already-categorized
-       hdd/ssd/dram cards are written (NEVER categorizes — a description is not
-       a regex-gated commodity proof).
+       description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
+       dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
+       part-master/inventory descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre
+       Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `Tape, JAG 7`), source=
+       "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
+       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"/
+       "Card,"/"Library,"…) and conflicting tokens, while NEUTRAL leads (packaging
+       words/brands/SPS- prefixes: "ASSY,"/"MSI,"/"SPS-PCA,"…) fall through to
+       body-token + category-hint arbitration instead of dying foreign. Per-module
+       structural guards: wattage exists only on the power_supplies route (CPU "135W"
+       TDP unreachable — cpu stays hint-only) and gpu memory_gb requires a GPU-context
+       token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
+       Only cards already categorized to one of the eight commodities are written
+       (NEVER categorizes — a description is not a regex-gated commodity proof).
+       The writer skips keys already held at higher confidence, so mpn_decode 0.95,
+       fru_matrix_decode 0.93 and vendor-API values stay authoritative. The five
+       phase-2 commodities have no MPN decoders, so desc_parse is their top
+       non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -1037,9 +1152,19 @@ Lookup (read path):
 GET /v2/partials/materials/{card_id}          (material detail surface)
 GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
     |                                          registered BEFORE the {card_id} route)
+GET /v2/partials/materials/faceted?q=<pn>     (faceted results — renders the
+    |                                          fru_section above the card list on a
+    |                                          crosswalk hit, so /v2/materials?q=
+    |                                          deep links land on the matrix)
+GET /v2/partials/search/history?mpn=<pn>      (search-page "What we know" panel —
+    |                                          compact context card only, via the
+    |                                          lightweight get_reverse_context;
+    |                                          see §2a)
     v
 fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
 fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under
+fru_matrix_service.get_reverse_context(db, mpn) — reverse, compact: COUNT(DISTINCT
+    |    fru_norm) + top-3 canonical FRU spellings, no row hydration (search panel)
     |   (raw input normalized internally; cross-sheet dedup prefers rows with
     |    qual_status/manufacturer and coalesces missing attributes)
     v
@@ -1058,6 +1183,51 @@ htmx/partials/materials/fru_section.html
             REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
             screws/tray PNs can sit under thousands of FRUs); each FRU links to its
             own fru-lookup (swaps #fru-crosswalk in place, pushes the materials URL)
+```
+
+---
+
+## Enrichment Coverage Telemetry (Ops / Observability)
+
+```
+python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
+    |   (read-only — single session, no writes; on PG all queries share one
+    |    REPEATABLE READ snapshot so concurrent enrichment-worker writes can't
+    |    skew cross-metric ratios; intended as a daily ops cron — host-side,
+    |    not yet registered anywhere in this repo)
+    v
+collect_metrics(db) — a handful of aggregate queries over active cards
+    |   (deleted_at IS NULL everywhere, incl. the facet joins)
+    |
+    +---> Cards: total, category coverage (non-blank %, 'other' count,
+    |       top-15 lower(trim(category)) by count), description coverage
+    +---> Facets: distinct cards with >=1 material_spec_facets row (+% of cards),
+    |       facet rows total, per-commodity rows + distinct spec_keys (top-15;
+    |       facet.category IS the commodity)
+    +---> Sources: specs_structured entries grouped by each entry's recorded
+    |       "source" (mpn_decode / desc_parse / fru_matrix_decode /
+    |       spec_extraction / vendor APIs / "(none)" for legacy non-dict entries
+    |       or entries with a missing/null source).
+    |       ONE query: PG iterates the JSONB in SQL (CROSS JOIN LATERAL
+    |       jsonb_each), SQLite uses json_each (tests), other dialects fall back
+    |       to one streamed Python pass — keep all three branches in sync; when
+    |       changing the PG SQL, run the opt-in parity test (set PG_TEST_DSN to
+    |       a Postgres DSN) or verify against live PG
+    +---> enrichment_status distribution; fru_links totals (rows + distinct
+            fru_norm) only if the table exists
+    |
+    v
+Output: one compact human-readable block, or the structured metrics dict with
+--json. With --log-file it appends one JSONL line {ts, metrics} per run and, when
+a previous line exists, prints "Δ since last run" for the headline numbers
+(cards / with-category / with-description / faceted-cards / facet-rows /
+spec-entries / fru-rows). The history reader scans backwards past corrupt or
+wrong-shape trailing lines (each logged as a warning), and appends heal a
+missing trailing newline first, so a torn write from a crashed run never merges
+with — or suppresses deltas beyond — its own entry.
+
+Tests: tests/test_enrichment_coverage_report.py (seeded fixture set; metrics,
+delta math, --json shape, log-file behavior).
 ```
 
 ---
@@ -1540,7 +1710,7 @@ the current implementation.
 | Requisitions | 45 | CRUD, search, bulk archive/assign, claim |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
-| Companies/CRM | 40 | CRUD, sites, contacts, enrichment, import |
+| Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
 | Buy Plans | 6 | CRUD, external approval via token |

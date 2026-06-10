@@ -1,12 +1,14 @@
 """Pydantic schemas for activity endpoints (click-to-call logging + timeline).
 
 Called by: app/routers/activity.py, app/routers/v13_features/activity.py
-Depends on: pydantic
+Depends on: pydantic, app/constants (OutreachChannel)
 """
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from ..constants import OutreachChannel
 
 
 class CallInitiatedRequest(BaseModel):
@@ -18,6 +20,26 @@ class CallInitiatedRequest(BaseModel):
     customer_site_id: int | None = None
     requirement_id: int | None = None
     origin: str | None = None
+
+
+class OutreachInitiatedRequest(BaseModel):
+    """Request body for POST /api/activity/outreach-initiated.
+
+    Logs a click-to-contact event (phone / email / Teams / WeChat) from the CDM account
+    workspace contact panel. channel validates against the OutreachChannel StrEnum (the
+    single source of truth — the service channel maps are keyed by the same enum), and
+    the free-text fields carry max_length bounds matching the ActivityLog snapshot
+    columns (contact_email/contact_name String(255)) so over-length input is a 422 at
+    the boundary instead of a Postgres DataError 500.
+    """
+
+    channel: OutreachChannel
+    contact_value: str = Field(max_length=255)  # phone number, email address, or WeChat ID
+    company_id: int | None = None
+    customer_site_id: int | None = None
+    site_contact_id: int | None = None
+    contact_name: str | None = Field(default=None, max_length=255)
+    origin: str | None = Field(default=None, max_length=100)
 
 
 # ── Timeline filter / response schemas ────────────────────────────────

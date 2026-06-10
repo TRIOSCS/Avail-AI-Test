@@ -1882,6 +1882,10 @@
       "data_type": "numeric",
       "unit": "in",
       "canonical_unit": "in",
+      "numeric_range": {
+        "min": 7,
+        "max": 86
+      },
       "sort_order": 2,
       "is_primary": true
     },
@@ -1900,7 +1904,11 @@
         "800x480",
         "1024x600",
         "1280x800",
-        "1920x1080"
+        "1920x1080",
+        "1366x768",
+        "1920x1200",
+        "2560x1440",
+        "3840x2160"
       ],
       "sort_order": 3
     },
@@ -1943,7 +1951,8 @@
         "LED RGB",
         "EL",
         "None",
-        "Reflective"
+        "Reflective",
+        "LED"
       ],
       "sort_order": 6
     },
@@ -3399,6 +3408,19 @@
         "8"
       ],
       "sort_order": 8
+    },
+    {
+      "spec_key": "board_type",
+      "display_name": "Board Type",
+      "data_type": "enum",
+      "enum_values": [
+        "System Board",
+        "Backplane",
+        "Riser",
+        "Daughter Board"
+      ],
+      "sort_order": 9,
+      "is_primary": true
     }
   ],
   "cpu": [
@@ -3463,6 +3485,10 @@
       "data_type": "numeric",
       "unit": "W",
       "canonical_unit": "W",
+      "numeric_range": {
+        "min": 30,
+        "max": 5000
+      },
       "sort_order": 1,
       "is_primary": true
     },
@@ -3577,6 +3603,10 @@
       "data_type": "numeric",
       "unit": "GB",
       "canonical_unit": "GB",
+      "numeric_range": {
+        "min": 1,
+        "max": 96
+      },
       "sort_order": 1,
       "is_primary": true
     },
@@ -4006,7 +4036,10 @@
         "TS1155",
         "TS1160",
         "DAT",
-        "AIT"
+        "AIT",
+        "LTO-3",
+        "LTO-4",
+        "TS1170"
       ],
       "sort_order": 1,
       "is_primary": true
@@ -4018,7 +4051,8 @@
       "enum_values": [
         "FC",
         "SAS",
-        "SCSI"
+        "SCSI",
+        "USB"
       ],
       "sort_order": 2,
       "is_primary": true

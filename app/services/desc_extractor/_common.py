@@ -1,12 +1,35 @@
 """Shared types + constants for the deterministic description→spec extractors.
 
-What: DescResult dataclass plus the source tag / confidence every desc-parsed spec is
-      written with (see record_spec).
-Called by: app/services/desc_extractor/{__init__,storage,memory,writer}.py.
+What: DescResult dataclass, the canonical SpecDict specs type every extractor
+      returns, plus the source tag / confidence every desc-parsed spec is written
+      with (see record_spec).
+Called by: app/services/desc_extractor/{__init__,storage,memory,power,display,
+      tape,gpu,board,writer}.py.
 Depends on: nothing (pure).
 """
 
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
+from typing import TypeVar
+
+_T = TypeVar("_T")
+
+
+def unique_or_none(values: AbstractSet[_T]) -> _T | None:
+    """The single member of *values*, or None when it is empty or holds a conflict.
+
+    The shared "unique-or-omit" rule every extractor applies: a facet is emitted only
+    when exactly one candidate survives, so conflicting signals omit the key rather than
+    guess (a wrong facet value is worse than a missing one).
+    """
+    return next(iter(values)) if len(values) == 1 else None
+
+
+# Canonical specs mapping — EVERY per-commodity extractor returns exactly this type.
+# dict is invariant in its value type, so a module returning a narrower union (e.g.
+# dict[str, str]) would fail the extract_desc dispatch under mypy; the shared alias
+# keeps all seven extractors and DescResult.specs in lockstep.
+SpecDict = dict[str, str | int | float | bool]
 
 # Source tag + confidence for everything this extractor writes (see record_spec).
 DESC_SOURCE = "desc_parse"
@@ -16,9 +39,11 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar. Arbitration is by the F1 
 # confidence is provenance metadata, not the cross-source conflict rule.
 
 # The only commodities the extractor fills specs for — single source of truth shared
-# by extract_desc (routing) and writer.py (card eligibility). Other inferred
-# commodities (motherboards/power_supplies/cpu) come back as a bare hint, empty specs.
-SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram"})
+# by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
+# set). cpu stays hint-only (empty specs): keeping it OUT of this set is the
+# PSU-vs-CPU wattage guard — a `wattage` key can only ever be emitted on the
+# power_supplies route, so CPU "135W" TDP text is structurally unreachable.
+SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram", "power_supplies", "displays", "tape_drives", "gpu", "motherboards"})
 
 
 @dataclass
@@ -26,13 +51,14 @@ class DescResult:
     """Outcome of extracting one description string.
 
     ``commodity`` is the inferred commodity KEY hint (e.g. "hdd", "ssd", "dram",
-    "motherboards", "power_supplies", "cpu") for CALLERS to use — the extractor and
-    its writer never set a card's category from it. It is always set: when no
-    commodity can be established, extract_desc returns None instead of a DescResult.
+    "power_supplies", "displays", "tape_drives", "gpu", "motherboards", "cpu") for
+    CALLERS to use — the extractor and its writer never set a card's category from
+    it. It is always set: when no commodity can be established, extract_desc
+    returns None instead of a DescResult.
     ``specs`` maps seeded spec_key -> value (enum string / int / float / bool — bool
     only for boolean schemas like dram.ecc, exactly like mpn_decoder.DecodeResult).
     """
 
     commodity: str
-    specs: dict[str, str | int | float | bool] = field(default_factory=dict)
+    specs: SpecDict = field(default_factory=dict)
     confidence: float = DESC_CONFIDENCE

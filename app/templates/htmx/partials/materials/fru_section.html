@@ -6,7 +6,8 @@
             fru_usages_total (int, uncapped reverse-view count),
             fru_query (str | None, set by the fru-lookup endpoint),
             show_empty (bool, lookup mode renders an empty state when nothing matches).
-  Called by: materials/detail.html (include), htmx_views.py fru_lookup_partial (HTMX swap).
+  Called by: materials/detail.html (include), materials/list.html (include, when the
+             faceted q hits fru_links), htmx_views.py fru_lookup_partial (HTMX swap).
   Depends on: app/services/fru_matrix_service.py view dataclasses.
   Caps: matrix sections show 12 items, usages table 10 rows; the rest render hidden
   behind inline "Show all (N)" / "Show less" expanders (Alpine, client-side).

@@ -636,6 +636,27 @@ class TestSiteContactCRUD:
         )
         assert resp.status_code == 404
 
+    def test_set_primary_contact_site_from_other_company_404_no_mutation(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+    ):
+        """A mismatched URL (site belonging to a different company) must 404 BEFORE
+        mutating — the primary flag must not flip."""
+        contact = _site_contact(db_session, test_customer_site)
+        other_company = Company(name="Other Primary Co", is_active=True)
+        db_session.add(other_company)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{other_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}/primary"
+        )
+        assert resp.status_code == 404
+        db_session.refresh(contact)
+        assert contact.is_primary is False
+
     def test_add_site_contact_note_success(
         self,
         client: TestClient,

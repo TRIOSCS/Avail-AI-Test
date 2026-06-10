@@ -7,9 +7,12 @@ tier 83, so it can never overwrite an mpn_decode (85) / vendor-API (90) / trio_s
 (95) value and always beats AI spec_extraction (60), regardless of which pass ran
 first. (The old per-writer confidence pre-gate is gone — the ladder owns arbitration.)
 Unlike mpn_decoder/writer.py this NEVER writes a category: descriptions are not a
-regex-gated commodity proof, so only already-categorized hdd/ssd/dram cards are
-processed (record_spec requires a category anyway). Does not commit — the caller
-manages the txn.
+regex-gated commodity proof, so only cards already categorized to a handled
+commodity (SPEC_COMMODITIES: hdd/ssd/dram/power_supplies/displays/tape_drives/gpu/
+motherboards — the spec'd _HANDLED set) are processed (record_spec requires a
+category anyway). The five phase-2 commodities have no MPN decoders, so desc_parse
+is their top non-vendor source by confidence. Does not commit — the caller manages
+the txn.
 
 Called by: app/services/enrichment_worker/worker.py (run_one_batch, second pass,
            gated by settings.desc_parse_enabled).

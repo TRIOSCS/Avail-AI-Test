@@ -108,6 +108,65 @@ def test_desc_rerun_is_idempotent_and_rewrites_corrected_descriptions(db_session
     assert _facets(db_session, card.id)["capacity_gb"] == 32
 
 
+def test_desc_writes_facets_for_phase2_commodity(db_session: Session):
+    # A power_supplies card (no MPN decoder exists for PSUs — desc_parse is its top
+    # non-vendor source) writes both the numeric wattage and the enum psu_class
+    # through record_spec, with desc_parse provenance at 0.90.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01KL563", "power_supplies", "PSU, 1460W 240V/200V AC Hot Swap for EN 62368-1")
+
+    stats = extract_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == {"parsed": 1, "written": 2, "failed": 0}
+    f = _facets(db_session, card.id)
+    assert f["wattage"] == 1460
+    assert f["psu_class"] == "Server/Redundant"
+    for key in ("wattage", "psu_class"):
+        entry = card.specs_structured[key]
+        assert entry["source"] == "desc_parse"
+        assert entry["confidence"] == 0.90
+
+
+def test_desc_writes_phase2_seed_extension_members(db_session: Session):
+    # The phase-2 seed APPENDS must actually round-trip through record_spec's enum
+    # validation: tape LTO-3 + USB and the motherboards board_type spec are all new.
+    seed_commodity_schemas(db_session)
+    tape = _card(db_session, "AA928A", "tape_drives", "Tape Drive, 400/800gb Ultrium Lto-3 HH SCSI LVD External")
+    usb_tape = _card(db_session, "Q1581SB", "tape_drives", "DAT160 INTERNAL USB TAPE DRIVE 80/160GB MFG REF")
+    board = _card(db_session, "5B20T04908", "motherboards", "5B20T04908:MB WHL I7 DIS 4G 8G WIN")
+
+    stats = extract_and_record_specs(db_session, [tape.id, usb_tape.id, board.id])
+    db_session.commit()
+
+    assert stats == {"parsed": 3, "written": 6, "failed": 0}
+    assert _facets(db_session, tape.id) == {
+        "drive_type": "LTO-3",
+        "interface": "SCSI",
+        "form_factor": "Half-Height",
+    }
+    assert _facets(db_session, usb_tape.id) == {"drive_type": "DAT", "interface": "USB"}
+    assert _facets(db_session, board.id) == {"board_type": "System Board"}
+
+
+def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Session):
+    # A vendor-API gpu memory_gb at 0.95 must survive the desc-parse pass — the
+    # writer's strictly-higher-confidence guard applies to the new commodities too.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "900-2G500-0000-000", "gpu", "SPS-PCA, NVIDIA Tesla V100 32GB Module")
+    assert record_spec(db_session, card.id, "memory_gb", 16, source="vendor_api", confidence=0.95)
+
+    written = extract_and_record(db_session, card)
+    db_session.commit()
+
+    assert written == 1  # gpu_family only; memory_gb skipped
+    f = _facets(db_session, card.id)
+    assert f["memory_gb"] == 16  # the 0.95 prior is untouched (desc said 32)
+    assert card.specs_structured["memory_gb"]["source"] == "vendor_api"
+    assert f["gpu_family"] == "Tesla"
+    assert card.specs_structured["gpu_family"]["source"] == "desc_parse"
+
+
 def test_desc_skips_uncategorized_card(db_session: Session):
     # Unlike the MPN decoder, a description is not a regex-gated commodity proof — the
     # writer never categorizes, and an uncategorized card cannot take facets anyway.

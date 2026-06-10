@@ -20,31 +20,89 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, Channel, Direction, EventType
+from ..constants import ActivityType, Channel, Direction, EventType, OutreachChannel
 from ..database import get_db
 from ..dependencies import require_user
-from ..models import ActivityLog, Company, User, VendorCard
-from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest
+from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
+from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest, OutreachInitiatedRequest
+from ..services.activity_service import bump_company_site_activity, log_outreach_initiated
 from ..utils.phone_utils import format_phone_display, format_phone_e164
 
 router = APIRouter(prefix="/api/activity", tags=["activity"])
 
 # ── In-memory rate limiter ─────────────────────────────────────────────
-_call_log: dict[int, list[float]] = defaultdict(list)
-_RATE_LIMIT = 10  # max calls per user per minute
+# Buckets are keyed per user AND per endpoint family so a rep's heavy phone
+# use never silently blocks their email/Teams outreach logging (and vice
+# versa). Outreach gets a higher budget: the CDM call-list workflow can
+# legitimately produce several logs per contact per minute.
+_call_log: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT = 10  # max click-to-call logs per user per minute
+_OUTREACH_RATE_LIMIT = 30  # max outreach logs per user per minute
 
 
-def _check_rate_limit(user_id: int) -> bool:
+def _check_rate_limit(user_id: int, bucket: str = "call", limit: int = _RATE_LIMIT) -> bool:
     """Return True if user is within rate limit, False if exceeded."""
+    key = f"{user_id}:{bucket}"
     now = time.time()
     window = now - 60
-    timestamps = _call_log[user_id]
+    timestamps = _call_log[key]
     # Prune old entries
-    _call_log[user_id] = [t for t in timestamps if t > window]
-    if len(_call_log[user_id]) >= _RATE_LIMIT:
+    _call_log[key] = [t for t in timestamps if t > window]
+    if len(_call_log[key]) >= limit:
         return False
-    _call_log[user_id].append(now)
+    _call_log[key].append(now)
     return True
+
+
+def _validated_entity_ids(
+    db: Session,
+    company_id: int | None,
+    customer_site_id: int | None,
+    site_contact_id: int | None = None,
+) -> tuple[int | None, int | None, int | None, list[str]]:
+    """Drop entity links that don't exist or don't belong together (warn, don't reject).
+
+    The DOM can carry stale ids (e.g. a coworker deleted or moved the contact while the
+    panel was open). Nonexistent ids would raise FK IntegrityError → opaque 500, and
+    ActivityLog has no DB constraint tying company/site/contact together, so a
+    mismatched triple would persist an inconsistent link and bump last_activity_at on an
+    unrelated site. Keep the activity, drop the dangling/mismatched links, and report
+    what was dropped so the caller can surface the degradation instead of claiming full
+    success.
+
+    Returns (company_id, customer_site_id, site_contact_id, dropped) — dropped is a
+    subset of ["company", "site", "contact"] naming the links removed.
+    """
+    dropped: list[str] = []
+    if company_id and not db.get(Company, company_id):
+        logger.warning(f"activity log: company_id={company_id} not found — dropping link")
+        company_id = None
+        dropped.append("company")
+    site = db.get(CustomerSite, customer_site_id) if customer_site_id else None
+    if customer_site_id and not site:
+        logger.warning(f"activity log: customer_site_id={customer_site_id} not found — dropping link")
+        customer_site_id = None
+        dropped.append("site")
+    elif site and site.company_id != company_id:
+        logger.warning(
+            f"activity log: customer_site_id={customer_site_id} belongs to company "
+            f"{site.company_id}, not {company_id} — dropping link"
+        )
+        customer_site_id = None
+        dropped.append("site")
+    contact = db.get(SiteContact, site_contact_id) if site_contact_id else None
+    if site_contact_id and not contact:
+        logger.warning(f"activity log: site_contact_id={site_contact_id} not found — dropping link")
+        site_contact_id = None
+        dropped.append("contact")
+    elif contact and contact.customer_site_id != customer_site_id:
+        logger.warning(
+            f"activity log: site_contact_id={site_contact_id} belongs to site "
+            f"{contact.customer_site_id}, not {customer_site_id} — dropping link"
+        )
+        site_contact_id = None
+        dropped.append("contact")
+    return company_id, customer_site_id, site_contact_id, dropped
 
 
 @router.post("/call-initiated", status_code=201)
@@ -70,7 +128,7 @@ def call_initiated(
         phone_display = format_phone_display(body.phone_number)
 
         # Resolve company from vendor if not provided
-        company_id = body.company_id
+        company_id, customer_site_id, _, _ = _validated_entity_ids(db, body.company_id, body.customer_site_id)
         vendor_card_id = body.vendor_card_id
         vendor_name = None
 
@@ -109,7 +167,7 @@ def call_initiated(
             is_meaningful=True,
             vendor_card_id=vendor_card_id,
             company_id=company_id,
-            customer_site_id=body.customer_site_id,
+            customer_site_id=customer_site_id,
             requisition_id=requisition_id,
             contact_phone=e164,
             subject=subject,
@@ -117,16 +175,77 @@ def call_initiated(
             notes=f"source=click_to_call origin={body.origin or 'unknown'} phone_display={phone_display}",
         )
         db.add(record)
+        # A logged call is a touch — keep the CDM staleness sort honest.
+        bump_company_site_activity(db, company_id, customer_site_id)
         db.commit()
 
         return {"id": record.id}
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"call-initiated error: {e}")
+    except Exception:
+        logger.exception("call-initiated error")
         db.rollback()
         raise HTTPException(500, "Failed to record phone contact")
+
+
+@router.post("/outreach-initiated", status_code=201)
+def outreach_initiated(
+    body: OutreachInitiatedRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a click-to-contact event (phone / email / Teams / WeChat).
+
+    Fired from the CDM contact panel on tel:/mailto:/Teams/WeChat link clicks.
+    Creates an outbound ActivityLog and bumps company/site last_activity_at so
+    the staleness sort updates. Re-clicks within the dedup window return the
+    existing record.
+    """
+    try:
+        contact_value = body.contact_value.strip()
+        if body.channel == OutreachChannel.PHONE:
+            e164 = format_phone_e164(contact_value)
+            if not e164:
+                raise HTTPException(400, "Invalid phone number")
+            contact_value = e164
+        elif body.channel in (OutreachChannel.EMAIL, OutreachChannel.TEAMS):
+            local, _, domain = contact_value.partition("@")
+            if not local or "." not in domain:
+                raise HTTPException(400, "Invalid email address")
+        elif not contact_value:
+            raise HTTPException(400, "Contact value is required")
+
+        if not _check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
+            raise HTTPException(429, "Too many outreach logs — try again in a minute")
+
+        company_id, customer_site_id, site_contact_id, dropped = _validated_entity_ids(
+            db, body.company_id, body.customer_site_id, body.site_contact_id
+        )
+
+        record = log_outreach_initiated(
+            db,
+            user_id=user.id,
+            channel=body.channel,
+            contact_value=contact_value,
+            company_id=company_id,
+            customer_site_id=customer_site_id,
+            site_contact_id=site_contact_id,
+            contact_name=body.contact_name,
+            origin=body.origin,
+        )
+        db.commit()
+        # dropped_links tells the client which stale entity links were removed —
+        # the touch IS logged, but it won't appear on the account it was clicked
+        # from, so the frontend downgrades its success toast to a warning.
+        return {"id": record.id, "dropped_links": dropped}
+
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("outreach-initiated error")
+        db.rollback()
+        raise HTTPException(500, "Failed to record outreach")
 
 
 @router.get("/account/{company_id}", response_model=ActivityTimelineResponse)
