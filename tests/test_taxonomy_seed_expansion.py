@@ -31,14 +31,17 @@ def test_tape_drives_spec_set():
 
     drive_type = _spec("tape_drives", "drive_type")
     assert drive_type["is_primary"] is True
+    # LTO-3/LTO-4/TS1170 are desc-grammar phase-2 extensions, appended at the END
+    # (the sidebar renders enum order).
     assert drive_type["enum_values"] == [
         "LTO-5", "LTO-6", "LTO-7", "LTO-8", "LTO-9",
         "TS1140", "TS1150", "TS1155", "TS1160", "DAT", "AIT",
+        "LTO-3", "LTO-4", "TS1170",
     ]  # fmt: skip
 
     interface = _spec("tape_drives", "interface")
     assert interface["is_primary"] is True
-    assert interface["enum_values"] == ["FC", "SAS", "SCSI"]
+    assert interface["enum_values"] == ["FC", "SAS", "SCSI", "USB"]  # USB: phase-2 append
 
     assert _spec("tape_drives", "form_factor")["enum_values"] == ["Full-Height", "Half-Height", "Library Module"]
 

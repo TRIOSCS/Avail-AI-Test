@@ -296,7 +296,7 @@
 | condition | String 20, nullable, indexed | Broker stock condition: `New`\|`Recertified`\|`Refurbished`\|`Used`\|`Pulled`\|`Unknown`. Application-validated (no DB CHECK). Powers the Condition global facet; NULL until a source (offer/sighting provenance) populates it — the facet renders only values with data. Migration 091. |
 | enrichment_status | String 20 | `unenriched` \| `verified` \| `web_sourced` \| `oem_sourced` \| `ai_inferred` \| `not_found` \| `not_catalogued`. Validated on write against `MaterialEnrichmentStatus` (constants.py). `oem_sourced` = single official OEM page; `not_catalogued` = recognised OEM/FRU part with no public specs (retries on 30-day backoff). No migration — varchar column. |
 | cross_references | JSONB | Alternative MPNs; also records OEM FRU→commodity-MPN linkages written by the cross-ref enrichment tier (`[{"mpn": <resolved>, "manufacturer": <mfr>}]`). |
-| specs_structured | JSONB | Parametric data |
+| specs_structured | JSONB | Parametric data — `{spec_key: {value, source, confidence, updated_at}}`. Source vocabulary: vendor APIs (`digikey_api` \| `nexar_api` \| `mouser_api` — authoritative), `mpn_decode` (0.95), `fru_matrix_decode` (0.93, FRU crosswalk intersection), `desc_parse` (0.90), `spec_extraction` (AI, ≥ 0.85) |
 | enriched_at | UTCDateTime, nullable | When the first-pass card enrichment (description/category/lifecycle) ran; NULL = not yet run |
 | specs_enriched_at | UTCDateTime, nullable, indexed | When the second-pass structured-spec extraction ran; NULL = spec pass not yet run |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |

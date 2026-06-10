@@ -840,20 +840,49 @@ ladder lands in record_spec):
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
-    2. desc_extractor/writer.py::extract_and_record_specs — deterministic
-       description→spec token grammar (storage + DRAM; TRIO part-master/inventory
-       descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
+    2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
+       crosswalk decode (IBM/Lenovo FRU spare PNs inherit the STRICT-INTERSECTED
+       decode of their fru_links rel_kind='mfg_model' models — only spec keys present
+       in every decode with equal values write; a commodity disagreement skips the
+       card), source="fru_matrix_decode", confidence 0.93
+       (settings.fru_crosswalk_enrich_enabled). Zero LLM/network; ONE fru_links query
+       per batch. Scope is the FULL batch ids, NOT enriched_ids — FRU spares finish
+       not_found, and the pass never touches enrichment_status. Fills a NULL category
+       from the agreed commodity (mirroring mpn_decode; an existing category is
+       authoritative — a mismatch skips the card); never writes manufacturer; never
+       writes the reverse direction (a card that IS a mfg_model already decodes
+       first-party at 0.95). Pre-gates each key on the prior entry's confidence
+       (> 0.93 skipped) like desc_parse, so mpn_decode/vendor-API values stay
+       authoritative. Isolation is two-level: decode/intersect failures are caught
+       per FRU, write failures per card (SAVEPOINT) — both surface in the returned
+       `failed` count so the worker's stats line distinguishes a no-op batch from a
+       crashed one. Schema-drift drops (no schema row / out-of-enum value) emit the
+       same aggregate WARNING as the mpn-decode writer.
+    3. desc_extractor/writer.py::extract_and_record_specs — deterministic
+       description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
+       dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
+       part-master/inventory descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre
+       Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `Tape, JAG 7`), source=
        "desc_parse", confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
-       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"…) and
-       conflicting tokens; only already-categorized hdd/ssd/dram cards are written
+       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"/
+       "Card,"/"Library,"…) and conflicting tokens, while NEUTRAL leads (packaging
+       words/brands/SPS- prefixes: "ASSY,"/"MSI,"/"SPS-PCA,"…) fall through to
+       body-token + category-hint arbitration instead of dying foreign. Per-module
+       structural guards: wattage exists only on the power_supplies route (CPU "135W"
+       TDP unreachable — cpu stays hint-only) and gpu memory_gb requires a GPU-context
+       token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
+       Only cards already categorized to one of the eight commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The writer skips keys already held at higher confidence, so mpn_decode 0.95
-       and vendor-API values stay authoritative.
-    3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
+       The writer skips keys already held at higher confidence, so mpn_decode 0.95,
+       fru_matrix_decode 0.93 and vendor-API values stay authoritative. The five
+       phase-2 commodities have no MPN decoders, so desc_parse is their top
+       non-vendor deterministic source.
+    4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction", facets gated at confidence >= 0.85. Applies the
        same strictly-higher-confidence skip guard, so it never clobbers an
-       mpn_decode/desc_parse key it under-claims against (an AI confidence >= the
-       deterministic prior still wins — see the tiering caveat above).
+       mpn_decode/fru_matrix_decode/desc_parse key it under-claims against (an AI
+       confidence >= the deterministic prior still wins — see the tiering caveat
+       above).
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
