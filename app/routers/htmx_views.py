@@ -88,6 +88,7 @@ from ..services.part_history_service import (
     sightings_for_card,
 )
 from ..services.status_machine import require_valid_transition
+from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..template_env import template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
@@ -3434,6 +3435,7 @@ async def add_to_requisition(
         db.flush()
 
     # Create Sighting rows
+    created_rows: list[Sighting] = []
     for item in items:
         sighting = Sighting(
             requirement_id=requirement.id,
@@ -3463,6 +3465,12 @@ async def add_to_requisition(
             },
         )
         db.add(sighting)
+        created_rows.append(sighting)
+
+    # Re-apply durable vendor+part unavailability knowledge — a manually added
+    # sighting for a known-dead vendor+part renders flagged with its reason; the
+    # user can Mark available to override.
+    apply_to_fresh_sightings(db, requirement, created_rows)
 
     db.commit()
 

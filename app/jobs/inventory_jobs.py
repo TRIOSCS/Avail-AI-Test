@@ -407,6 +407,7 @@ async def _download_and_import_stock_list(
             }
 
             created_sightings = 0
+            created_by_req: dict[int, list[Sighting]] = {}
             now = datetime.now(timezone.utc)
             for item in imported_for_matching:
                 reqs = req_map.get(item["display_mpn"].upper(), [])
@@ -461,9 +462,19 @@ async def _download_and_import_stock_list(
                         created_at=now,
                     )
                     db.add(s)
+                    created_by_req.setdefault(req.id, []).append(s)
                     created_sightings += 1
 
             if created_sightings:
+                # Re-apply durable vendor+part unavailability knowledge per
+                # requirement before the commit — imported stock lines must not
+                # resurrect a dead vendor (listing-class rows: O2 restock check,
+                # else stamp).
+                from app.services.vendor_unavailability import apply_to_fresh_sightings
+
+                req_rows = db.query(Requirement).filter(Requirement.id.in_(created_by_req)).all()
+                for req_row in req_rows:
+                    apply_to_fresh_sightings(db, req_row, created_by_req[req_row.id])
                 db.commit()
                 logger.info(
                     "Auto-created {} stock sightings from {} ({})",

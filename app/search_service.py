@@ -44,6 +44,7 @@ from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
 from .services.vendor_affinity_service import find_vendor_affinity
+from .services.vendor_unavailability import apply_to_fresh_sightings
 from .utils.async_helpers import safe_background_task
 from .utils.normalization import (
     detect_currency,
@@ -1599,6 +1600,11 @@ def _save_sightings(
         )
         s.score = v2_total
         s.score_components = v2_comp
+
+    # Re-apply durable vendor+part unavailability knowledge before the rows
+    # commit — a re-search (delete + recreate) must never resurrect a dead
+    # vendor. Policy overrides O1/O2 are evaluated per row inside the service.
+    apply_to_fresh_sightings(db, req, sightings)
 
     try:
         db.commit()

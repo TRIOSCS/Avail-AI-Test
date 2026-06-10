@@ -1447,3 +1447,245 @@ class TestSilentFailureHardening:
 
         assert cleared == 0
         assert db_session.get(VendorPartUnavailability, survivor.id) is not None
+
+
+# ── Re-application at every sighting-persistence path (Task 3) ───────────────
+
+
+class TestSearchPathReapplication:
+    """app/search_service.py _save_sightings — the synchronous resurrection hole:
+
+    the connector-aware delete + recreate must re-stamp fresh rows while the record is
+    active, and leave them unstamped once it has expired.
+    """
+
+    def test_search_resurrection_stamps_fresh_listing_rows(self, db_session: Session, test_user: User):
+        from app.search_service import _save_sightings
+
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS", source_type="brokerbin")
+        record_unavailability(
+            db_session,
+            requirement,
+            "Acme Components",
+            UnavailabilityReason.SOLD_ELSEWHERE,
+            None,
+            test_user,
+        )
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Acme Components",
+                "mpn_matched": "ST3300657SS",
+                "qty_available": 40,
+                "unit_price": 1.25,
+                "source_type": "brokerbin",
+            },
+            {
+                "vendor_name": "Globex Parts",
+                "mpn_matched": "ST3300657SS",
+                "qty_available": 40,
+                "unit_price": 1.10,
+                "source_type": "brokerbin",
+            },
+        ]
+        saved = _save_sightings(fresh, requirement, db_session, succeeded_sources={"brokerbin"})
+
+        by_vendor = {s.vendor_name: s for s in saved}
+        assert by_vendor["Acme Components"].is_unavailable is True
+        assert bool(by_vendor["Globex Parts"].is_unavailable) is False
+
+    def test_search_expired_record_rows_not_stamped(self, db_session: Session, test_user: User):
+        from app.search_service import _save_sightings
+
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(
+            db_session,
+            key="st3300657ss",
+            reason=UnavailabilityReason.SOLD_ELSEWHERE,  # LOT — 30d window
+            age_days=31,
+            requirement_id=requirement.id,
+        )
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Acme Components",
+                "mpn_matched": "ST3300657SS",
+                "qty_available": 40,
+                "unit_price": 1.25,
+                "source_type": "brokerbin",
+            }
+        ]
+        saved = _save_sightings(fresh, requirement, db_session, succeeded_sources={"brokerbin"})
+
+        assert len(saved) == 1
+        assert bool(saved[0].is_unavailable) is False
+
+
+class TestAsyncWriterReapplication:
+    """ICS/NC browser-worker sighting writers — without re-application their results re-
+    open the hole minutes after a search."""
+
+    def test_nc_writer_stamps_fresh_rows(self, db_session: Session, test_user: User):
+        from types import SimpleNamespace
+
+        from app.services.nc_worker.result_parser import NcSighting
+        from app.services.nc_worker.sighting_writer import save_nc_sightings
+
+        requirement = _make_requirement(db_session, primary_mpn="LM317T")
+        _make_record(db_session, vendor_norm="arrow electronics", key="lm317t", requirement_id=requirement.id)
+        db_session.commit()
+
+        queue_item = SimpleNamespace(requirement_id=requirement.id)
+        created = save_nc_sightings(
+            db_session,
+            queue_item,
+            [NcSighting(part_number="LM317T", quantity=5000, vendor_name="Arrow Electronics")],
+        )
+
+        assert created == 1
+        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="netcomponents").one()
+        assert row.is_unavailable is True
+
+    def test_ics_writer_stamps_fresh_rows(self, db_session: Session, test_user: User):
+        from types import SimpleNamespace
+
+        from app.services.ics_worker.result_parser import IcsSighting
+        from app.services.ics_worker.sighting_writer import save_ics_sightings
+
+        requirement = _make_requirement(db_session, primary_mpn="LM317T")
+        _make_record(db_session, vendor_norm="arrow electronics", key="lm317t", requirement_id=requirement.id)
+        db_session.commit()
+
+        queue_item = SimpleNamespace(requirement_id=requirement.id)
+        created = save_ics_sightings(
+            db_session,
+            queue_item,
+            [IcsSighting(part_number="LM317T", quantity=100, vendor_name="Arrow Electronics", in_stock=True)],
+        )
+
+        assert created == 1
+        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="icsource").one()
+        assert row.is_unavailable is True
+
+
+class TestEmailAttachmentReapplication:
+    """app/routers/sources.py email-attachment import — the HUMAN_DIRECT/O3 path:
+
+    a buyer-routed attachment row with qty>0 RELEASES the record instead of stamping the
+    row.
+    """
+
+    def test_routed_attachment_qty_releases_record_row_unstamped(self, db_session: Session, test_user: User):
+        from app.models import VendorResponse
+        from app.routers.sources import _create_sightings_from_attachment
+
+        requirement = _make_requirement(db_session, primary_mpn="LM358N")
+        rec = _make_record(
+            db_session,
+            vendor_norm="acme components",
+            key="lm358n",
+            reason=UnavailabilityReason.SOLD_ELSEWHERE,
+            qty_at_mark=50,
+            requirement_id=requirement.id,
+        )
+        vr = VendorResponse(
+            requisition_id=requirement.requisition_id,
+            vendor_name="Acme Components",
+            vendor_email="sales@acme.example",
+        )
+        db_session.add(vr)
+        db_session.commit()
+
+        created = _create_sightings_from_attachment(
+            db_session,
+            vr,
+            [{"mpn": "LM358N", "qty": 100, "unit_price": 0.50}],
+        )
+        db_session.commit()
+
+        assert created == 1
+        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="email_attachment").one()
+        assert bool(row.is_unavailable) is False  # O3 surfaces, never stamps
+        db_session.refresh(rec)
+        assert rec.released_at is not None
+        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert not is_active(rec)
+
+
+class TestPickerReapplication:
+    """app/routers/htmx_views.py add-to-requisition picker — a manually added sighting
+    for a known-dead vendor+part is surfaced flagged (user can Mark available to
+    override)."""
+
+    def test_manually_added_sighting_stamped(self, client, db_session: Session):
+        requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
+        _make_record(db_session, key="st3300657ss", requirement_id=requirement.id)
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/search/add-to-requisition",
+            headers={"HX-Request": "true", "Content-Type": "application/json"},
+            json={
+                "requisition_id": requirement.requisition_id,
+                "mpn": "ST3300657SS",
+                "items": [
+                    {
+                        "vendor_name": "Acme Components",
+                        "mpn_matched": "ST3300657SS",
+                        "qty_available": 10,
+                        "source_type": "nexar",
+                        "score": 50,
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 200
+
+        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id).one()
+        assert row.is_unavailable is True
+
+
+class TestInventoryJobReapplication:
+    """app/jobs/inventory_jobs.py stock-list import — created sightings are grouped per
+    requirement and re-stamped before the commit."""
+
+    def test_stock_import_rows_stamped(self, db_session: Session, test_user: User):
+        import asyncio
+        import base64
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        requirement = _make_requirement(db_session, primary_mpn="LM317T")
+        _make_record(db_session, vendor_norm="arrow", key="lm317t", requirement_id=requirement.id)
+        test_user.access_token = "tok"
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
+        rows = [{"mpn": "LM317T", "qty": 100, "unit_price": 0.50}]
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+            patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+            patch("app.services.activity_service.match_email_to_entity", return_value=None),
+        ):
+            from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+            asyncio.run(
+                _download_and_import_stock_list(
+                    test_user,
+                    db_session,
+                    message_id="m1",
+                    attachment_id="a1",
+                    filename="stock.csv",
+                    vendor_name="Arrow",
+                    vendor_email="sales@arrow.example",
+                )
+            )
+
+        row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="email_auto_import").one()
+        assert row.is_unavailable is True
