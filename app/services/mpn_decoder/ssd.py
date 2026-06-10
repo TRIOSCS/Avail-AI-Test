@@ -101,6 +101,10 @@ _SAMSUNG_OEM_FORM = {  # family char 1 -> (form_factor, interface-or-None)
     "I": (FF_25, IF_SAS),
     "1": (FF_M2_22110, None),
 }
+_SAMSUNG_RETAIL_SATA_FORM = {  # retail family char 1 -> form factor (both lines are SATA)
+    "7": FF_25,  # 2.5" SATA (e.g. 870 EVO/QVO)
+    "N": FF_M2_2280,  # M.2 SATA 2280 (e.g. 860 EVO M.2)
+}
 
 
 def _samsung_retail_nand(family: str) -> str | None:
@@ -119,13 +123,9 @@ def _samsung(mpn: str) -> DecodeResult | None:
         cap = _cap3(m.group(2))
         if cap:
             specs["capacity_gb"] = cap
-        if family[0] == "7":
-            specs["form_factor"], specs["interface"] = FF_25, IF_SATA
-            nand = _samsung_retail_nand(family)
-            if nand:
-                specs["nand_type"] = nand
-        elif family[0] == "N":
-            specs["form_factor"], specs["interface"] = FF_M2_2280, IF_SATA
+        sata_form = _SAMSUNG_RETAIL_SATA_FORM.get(family[0])
+        if sata_form:  # 7 = 2.5" SATA, N = M.2 SATA 2280
+            specs["form_factor"], specs["interface"] = sata_form, IF_SATA
             nand = _samsung_retail_nand(family)
             if nand:
                 specs["nand_type"] = nand
