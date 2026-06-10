@@ -368,3 +368,34 @@ def test_requisitions2_js_is_published_under_public():
         "Stale copy at app/static/js/requisitions2.js — that path is never published to "
         "the served static tree. Keep a single copy under app/static/public/js/."
     )
+
+
+def test_materials_fold_state_defaults_pinned():
+    """The materials rail collapse policy is a set of JS defaults, not template markup:
+    the Data-confidence (trust) fold opens by default; the heavy folds (sourcing / more
+    attributes) stay closed. The template tests only pin that the folds exist and their
+    order — without this guard a fold-state refactor could flip the booleans back with
+    zero test failure, silently undoing the expanded-by-default trust filter.
+
+    The confidence key is the ROTATED 'mat_confidence_open2': @alpinejs/persist writes
+    the CURRENT value to storage on init, so every browser that loaded the page under
+    the old `persistOr(false, 'mat_confidence_open')` carries a persisted `false` that
+    would override a new `true` default on the same key. htmx_app.js must keep removing
+    the legacy key so a revert can't resurrect those stale values.
+    """
+    src = Path("app/static/htmx_app.js").read_text()
+    assert re.search(r"confidenceOpen:\s*persistOr\(true,\s*'mat_confidence_open2'\)", src), (
+        "Data-confidence fold must default OPEN under the rotated key "
+        "'mat_confidence_open2' — trust is the headline filter, expanded by default."
+    )
+    assert re.search(r"sourcingOpen:\s*persistOr\(false,\s*'mat_sourcing_open'\)", src), (
+        "Sourcing-signals fold must default CLOSED per the collapse policy."
+    )
+    assert re.search(r"moreAttrsOpen:\s*persistOr\(false,\s*'mat_more_attrs_open'\)", src), (
+        "More-attributes fold must default CLOSED per the collapse policy."
+    )
+    assert "localStorage.removeItem('mat_confidence_open')" in src, (
+        "htmx_app.js must drop the legacy 'mat_confidence_open' localStorage key — "
+        "prior visitors carry a persisted `false` under it that would re-collapse the "
+        "trust fold if the key were ever reused."
+    )

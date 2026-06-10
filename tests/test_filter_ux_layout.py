@@ -30,7 +30,9 @@ def test_workspace_commodity_first_structure(client):
 
 
 def test_workspace_confidence_still_three_groups(client):
-    # The 3-group confidence filter survives the reorg (first fold, expanded by default).
+    # The 3-group confidence filter survives the reorg. (Fold order is asserted above;
+    # the expanded-by-default JS default is pinned in
+    # test_static_analysis.py::test_materials_fold_state_defaults_pinned.)
     resp = client.get("/v2/partials/materials/workspace")
     assert resp.status_code == 200
     assert "toggleConfidenceGroup(" in resp.text

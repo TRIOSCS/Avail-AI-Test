@@ -16,8 +16,10 @@
        class="fixed inset-0 bg-gray-900/40 z-40 lg:hidden"></div>
 
   {# -- Sidebar (desktop: static, mobile: slide-over drawer) --
-     Mobile drawer offsets top-[52px] bottom-[48px] assume a 52px app header + 48px
-     bottom nav — update them if the app chrome changes. #}
+     Mobile drawer offsets top-[52px] bottom-[48px] clear the fixed chrome with ~4px
+     slack: the topbar is h-12 = 48px (shared/topbar.html) and the bottom nav computes
+     to ~44px + safe-area inset (shared/mobile_nav.html; #main-content clears it with
+     pb-[52px]) — update these offsets if either changes. #}
   <div :class="drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
        x-trap.noscroll="drawerOpen"
        @keydown.escape.window="drawerOpen = false"

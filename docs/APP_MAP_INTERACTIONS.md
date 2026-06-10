@@ -904,7 +904,11 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       filters" (subfilters.html commodity_selected=False branch; no service calls)
     |       instead of an empty response.
     +---> Data confidence (FIRST filter fold, EXPANDED by default — $persist
-    |     confidenceOpen defaults true): 3 groups — Trusted / AI-inferred / No data;
+    |     confidenceOpen defaults true under the ROTATED key mat_confidence_open2;
+    |     the legacy mat_confidence_open key held a persisted `false` for every
+    |     prior visitor — persist writes the current value on init — and is removed
+    |     on load so the new default reaches returning users): 3 groups —
+    |     Trusted / AI-inferred / No data;
     |     default all-on; `statuses[]` → `?statuses=` CSV → search_materials_faceted
     |     (IN-filters enrichment_status; precedence over the legacy verified_only).
     |     Collapse policy: navigation sections open, trust fold open, heavy folds
