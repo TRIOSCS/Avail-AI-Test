@@ -139,6 +139,11 @@ results_shell.html (right column)
               |        BY material_card_id: offers, distinct buyers, confirmed/won
               |        (won/sold offers + won requisitions + customer purchases),
               |        sightings, requirements, and a min/max/last price trend.
+              +---> fru_matrix_service.get_fru_view / get_reverse_context(db, mpn)
+              |        FRU-crosswalk context (capped/cheap reads, only for a
+              |        concrete searched MPN — see "FRU crosswalk context" below).
+              |        Own scoped try/except: a crosswalk failure logs and degrades
+              |        to "no crosswalk card", never touching the loaded history.
               +---> renders history_panel.html (or empty state if no card)
 ```
 
@@ -147,6 +152,30 @@ materials detail router (`material_detail_partial`, `material_tab_partial`)
 consumes the same `*_for_card` helpers, so the search panel and the full part
 page can never drift. The endpoint is wrapped in try/except (logged via
 Loguru) and degrades to an empty/error panel rather than failing the page.
+
+**FRU crosswalk context.** When the searched MPN matches `fru_links` in either
+direction, the panel appends a compact "FRU crosswalk" card (silent on no hit,
+matching the materials-detail decision):
+
+- **Forward hit** (the MPN is a FRU): one-line counts via `FruView.summary`
+  ("N drive PNs · M models · K 11S numbers · J trays", kind-neutral — no
+  qualification claim — falling back to "N linked parts"), plus up to 3
+  manufacturer-model chips (`FruView.top_models`).
+- **Reverse hit** (the MPN appears under FRUs): "Used in N FRUs" — N is the
+  DISTINCT-FRU count (`ReverseContext.distinct_frus`, SQL aggregate; NOT the
+  (FRU, role) usage count `ReverseView.total`) — plus up to 3 distinct FRUs in
+  canonical (shortest, de-padded) spelling (`ReverseContext.top_frus`).
+  `get_reverse_context` is a lightweight column-fetch read path; the search
+  panel never hydrates full `FruLink` rows.
+- A crosswalk-known part with no trading history renders "No trading history
+  yet" instead of the "looks new to us" empty state.
+- Both cases share a "View full FRU matrix →" deep link to the materials
+  surface (`/v2/materials?q=<mpn>`, the same URL pattern the fru-lookup
+  partial pushes). The faceted results (`materials_faceted_partial` →
+  `list.html`) render the full `fru_section.html` above the card list whenever
+  `q` hits `fru_links`, so the deep link delivers the matrix even for a
+  crosswalk-only PN that matches no material card; the full matrix is never
+  duplicated on the search page itself.
 
 ```
 Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
@@ -1028,9 +1057,19 @@ Lookup (read path):
 GET /v2/partials/materials/{card_id}          (material detail surface)
 GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
     |                                          registered BEFORE the {card_id} route)
+GET /v2/partials/materials/faceted?q=<pn>     (faceted results — renders the
+    |                                          fru_section above the card list on a
+    |                                          crosswalk hit, so /v2/materials?q=
+    |                                          deep links land on the matrix)
+GET /v2/partials/search/history?mpn=<pn>      (search-page "What we know" panel —
+    |                                          compact context card only, via the
+    |                                          lightweight get_reverse_context;
+    |                                          see §2a)
     v
 fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
 fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under
+fru_matrix_service.get_reverse_context(db, mpn) — reverse, compact: COUNT(DISTINCT
+    |    fru_norm) + top-3 canonical FRU spellings, no row hydration (search panel)
     |   (raw input normalized internally; cross-sheet dedup prefers rows with
     |    qual_status/manufacturer and coalesces missing attributes)
     v

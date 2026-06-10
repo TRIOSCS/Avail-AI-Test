@@ -1,10 +1,20 @@
 {#
   materials/list.html — Material card results table (rendered inside workspace).
   Receives: materials (list of MaterialCard), q (str), commodity (str),
-            commodity_display (str), total (int), limit (int), offset (int).
+            commodity_display (str), total (int), limit (int), offset (int);
+            fru_view / fru_usages / fru_usages_total / fru_query (FRU crosswalk
+            section — set when q matches fru_links, see fru_section.html).
   Called by: htmx_views.py materials_faceted_partial endpoint.
   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js materialsFilter().
 #}
+
+{# FRU crosswalk — renders only when q hits fru_links (forward matrix and/or
+   "Used in FRUs" usages). Every "/v2/materials?q=<pn>" FRU deep link (the search
+   panel's "View full FRU matrix" CTA, fru_section part-navigation) lands here, so
+   the matrix must render even when no material card matches the PN. #}
+{% if fru_view or fru_usages %}
+{% include "htmx/partials/materials/fru_section.html" %}
+{% endif %}
 
 {# Live result count — re-renders every filters-changed cycle (the feedback loop). #}
 <div class="flex items-baseline gap-2 mb-2 px-1">

@@ -878,3 +878,56 @@ def test_faceted_spec_chips_in_commodity_context_unchanged(client, db_session: S
     assert ">Capacity(GB):64<" not in compact
     # …but the label survives on hover via the title attribute.
     assert 'title="Capacity (GB): 64"' in resp.text
+
+
+# ── FRU crosswalk in faceted results ──────────────────────────────────────
+# Every "/v2/materials?q=<pn>" FRU deep link (the search panel's "View full FRU
+# matrix" CTA, fru_section part-navigation links) lands on the faceted results,
+# so the matrix must render there even when no material card matches the PN.
+
+
+def _fru_link(db, fru="00AJ001", related="ST9300603SS", kind=None):
+    from app.constants import FruLinkKind
+    from app.models import FruLink
+
+    link = FruLink(
+        fru_raw=fru,
+        fru_norm=fru.lower(),
+        related_raw=related,
+        related_norm=related.lower(),
+        rel_kind=(kind or FruLinkKind.MFG_MODEL).value,
+        source_sheet="Main",
+    )
+    db.add(link)
+    db.commit()
+    return link
+
+
+def test_faceted_q_renders_fru_matrix_for_crosswalk_only_pn(client, db_session: Session):
+    """A FRU with no material card: the deep-link destination still shows the
+    forward matrix (no dead end on an empty card list)."""
+    _fru_link(db_session, fru="00AJ001", related="ST9300603SS")
+
+    resp = client.get("/v2/partials/materials/faceted?q=00AJ001")
+    assert resp.status_code == 200
+    assert "FRU matrix" in resp.text
+    assert "00AJ001" in resp.text
+    assert 'id="fru-crosswalk"' in resp.text
+
+
+def test_faceted_q_renders_used_in_frus_for_reverse_hit(client, db_session: Session):
+    _fru_link(db_session, fru="00AJ001", related="ST9300603SS")
+
+    resp = client.get("/v2/partials/materials/faceted?q=ST9300603SS")
+    assert resp.status_code == 200
+    assert "Used in FRUs" in resp.text
+    assert "00AJ001" in resp.text
+
+
+def test_faceted_q_without_crosswalk_hit_renders_no_fru_section(client, db_session: Session):
+    _fru_link(db_session, fru="00AJ001", related="ST9300603SS")
+
+    resp = client.get("/v2/partials/materials/faceted?q=NOMATCH999")
+    assert resp.status_code == 200
+    assert "fru-crosswalk" not in resp.text
+    assert "FRU matrix" not in resp.text
