@@ -12,7 +12,9 @@ Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - capacity_gb requires an explicit GB/G token and the seeded 1-512 range (MB-era
-  modules and bandwidth-per-second tokens never match).
+  modules and bandwidth-per-second tokens never match). GigaBIT component-density
+  tokens ("2Gb, 128*16" — lowercase b) are neutralized to "2GBIT" by extract_desc's
+  pre-uppercase _BIT_UNITS rewrite, so bits can never be recorded as bytes.
 - ddr_type from explicit DDR/DDR2/DDR3/DDR3L/DDR4/DDR5 tokens, or the PC3-/PC3L-/
   PC4-<digits> prefixes (PC3→DDR3, PC3L→DDR3L, PC4→DDR4). Mixed generations ⇒ omit.
 - speed_mhz only from an explicit MHz token (seed range 800-8400, so "DDR-333MHz"

@@ -20,11 +20,21 @@ CASES = [
         {"gpu_family": "Tesla", "memory_gb": 32},
     ),
     (
+        # Consumer RTX model ⇒ GeForce (audit class 5): "RTX" is a tier, not the family —
+        # storing RTX here fragmented the GeForce RTX 30-series across two facet values.
         "MSI, RTX3080, 10G/D6X/3DP/H",  # neutral brand lead; glued 10G/D6X memory grammar
         "gpu",
-        {"gpu_family": "RTX", "memory_gb": 10},
+        {"gpu_family": "GeForce", "memory_gb": 10},
     ),
-    ("BLD RTX3060 12GB G6 3DP+H", "gpu", {"gpu_family": "RTX", "memory_gb": 12}),
+    ("BLD RTX3060 12GB G6 3DP+H", "gpu", {"gpu_family": "GeForce", "memory_gb": 12}),
+    # Audit card 583761: comma-tokenized consumer RTX row must land in the SAME family
+    # as the catalog's "GeForce RTX 3080" rows (card 560385) — GeForce, never "RTX".
+    ("NVIDIA, RTX, 3070", "gpu", {"gpu_family": "GeForce"}),  # audit card 583761
+    ("NVIDIA, RTX, 3080", "gpu", {"gpu_family": "GeForce"}),  # audit card 560385's family
+    # The professional Quadro-successor line keeps the seeded "RTX" member: A-prefixed
+    # and x000-shaped models never match the consumer x050–x090 shape.
+    ("NVIDIA RTX A2000 6GB", "gpu", {"gpu_family": "RTX", "memory_gb": 6}),
+    ("SPS-PCA NVIDIA RTX 4000 ADA 20GB", "gpu", {"gpu_family": "RTX", "memory_gb": 20}),
     (
         "GTX1660Super@6G/D6/DP/H/DVI",  # GTX is definitionally GeForce
         "gpu",

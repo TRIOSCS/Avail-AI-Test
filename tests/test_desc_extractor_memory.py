@@ -97,6 +97,21 @@ CASES = [
         "Mem, 16GB DDR4 RDIMM 19.2GB/S",  # bandwidth-per-second token is not a 2nd capacity
         {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
     ),
+    (
+        # Audit card 74143 (Samsung K4B2G1646F): "2Gb, 128*16" is a COMPONENT density in
+        # gigaBITS (lowercase b) — never capacity_gb=2 (an 8× error). Bit tokens are
+        # neutralized before upper-casing; component densities are skipped, not ÷8'd.
+        "Mem, DDR3, 2Gb, 128*16, Samsung",
+        {"ddr_type": "DDR3"},
+    ),
+    (
+        "Mem, 4Gb DDR4 256Mx16 component",  # same bit-unit class, different density
+        {"ddr_type": "DDR4"},
+    ),
+    (
+        "Mem, 2GB DDR3 UDIMM",  # uppercase GB is gigaBYTES — capacity records normally
+        {"capacity_gb": 2, "ddr_type": "DDR3", "form_factor": "UDIMM"},
+    ),
 ]
 
 

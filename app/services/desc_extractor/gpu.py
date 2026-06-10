@@ -16,7 +16,10 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   RTX, Tesla + datacenter chip list incl. T4, Radeon (Pro), A-/H-series) and
   emits a unique member or omits. Subsumption: an explicit GEFORCE token absorbs
   its own GTX/RTX sub-brand tokens ("GeForce RTX/GTX …" is one family, not a
-  conflict). A-/H-series chip tokens reject hyphen-glued silicon steppings
+  conflict). An RTX token adjacent to a consumer x050–x090 model ("RTX 3070",
+  "RTX3080", comma-tokenized "RTX, 3070") maps to GeForce — RTX is a tier, not
+  the family — while "RTX" itself is reserved for the professional
+  Quadro-successor line (RTX A2000 etc.) and bare context-less RTX tokens. A-/H-series chip tokens reject hyphen-glued silicon steppings
   ("N17M-Q3-A2", "GK104-400-A2") via a lookbehind — those mark a chip revision,
   never an Ampere/Hopper card. Architecture names (PASCAL spans Tesla AND
   Quadro) and bare models ("2080TI") are deliberately unmapped.
@@ -65,6 +68,14 @@ _GEFORCE = re.compile(r"\bGEFORCE\b")
 # lookahead accepts a glued digit OR a plain word boundary.
 _GTX = re.compile(r"\bGTX(?=\d|\b)")
 _RTX = re.compile(r"\bRTX(?=\d|\b)")
+# Consumer GeForce-RTX model adjacent to the RTX token: "RTX 3070", "RTX3080",
+# "NVIDIA, RTX, 3070" (comma-tokenized corpus rows; glued "RTX3080TI" passes via
+# the (?!\d) tail, which only forbids a FOURTH model digit). The x050–x090 shape
+# ([2-5]0[5-9]0) covers the consumer 2060…5090 lines and can never match the
+# professional Quadro-successor models — RTX A2000/A4000/… are "A"-prefixed and
+# RTX 4000/5000/6000 Ada / Quadro RTX 8000 are x000-shaped, so neither fits
+# [5-9] in the third digit.
+_RTX_CONSUMER = re.compile(r"\bRTX[,\s-]{0,2}[2-5]0[5-9]0(?!\d)")
 
 _CONTEXT = re.compile(r"\bNVIDIA\b|\bNVD\b|\bGDDR\dX?\b|\bHBM\d?\b")
 _MEM_GB = re.compile(r"\b(\d{1,3})\s?GB\b")
@@ -95,7 +106,13 @@ def _family_members(text: str) -> set[str]:
         if _GTX.search(text):
             members.add(GEFORCE)  # GTX is definitionally GeForce
         if _RTX.search(text):
-            members.add(RTX)
+            # The seeded enum carries BOTH "GeForce" and "RTX". Consumer RTX models
+            # (GeForce RTX 2060…5090) ARE the GeForce family — storing them under
+            # "RTX" fragments one physical family across two facet values (audit
+            # cards 583761 vs 560385). "RTX" is reserved for the professional
+            # Quadro-successor line (RTX A2000/A4000, RTX 4000 Ada, Quadro RTX
+            # 8000) and bare context-less RTX tokens.
+            members.add(GEFORCE if _RTX_CONSUMER.search(text) else RTX)
     return members
 
 
