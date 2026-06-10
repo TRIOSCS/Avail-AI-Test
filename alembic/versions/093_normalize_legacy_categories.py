@@ -31,7 +31,9 @@ Revision ID: 093_normalize_legacy_categories
 Revises: 091_cleanup_vague_descs
 Create Date: 2026-06-09
 
-NOTE: 092 is intentionally skipped — that number is reserved by a concurrent branch.
+NOTE: 092 is not used — the concurrent desc_extractor branch turned out to introduce no
+schema change (no migration), so the numeric gap at 092 is permanent and intentional.
+The chain runs 091 → 093; do not fill 092.
 """
 
 from loguru import logger

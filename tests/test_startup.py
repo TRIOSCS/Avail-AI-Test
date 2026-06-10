@@ -1175,3 +1175,54 @@ class TestBackfillMaterialCards:
 
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
+
+
+class TestWarnNonCanonicalCategories:
+    """Boot residue observability: categories no commodity filter can bucket are LOGGED.
+
+    Migration 093 normalized the known legacy aliases; anything outside both the
+    canonical tree keys and that cut line silently vanishes from commodity browsing —
+    the boot warning is the only place that number is visible (covers DBs already past
+    093 and any post-093 vendor-taxonomy drift).
+    """
+
+    @staticmethod
+    def _capture_warnings(fn):
+        from loguru import logger as loguru_logger
+
+        records: list[str] = []
+        sink_id = loguru_logger.add(lambda message: records.append(str(message)), level="WARNING")
+        try:
+            fn()
+        finally:
+            loguru_logger.remove(sink_id)
+        return records
+
+    def test_warns_with_count_and_samples(self, db_session):
+        from app.models import MaterialCard
+        from app.startup import _warn_non_canonical_categories
+
+        db_session.add_all(
+            [
+                MaterialCard(normalized_mpn="res-1", display_mpn="RES-1", category="Totally Unknown Category"),
+                MaterialCard(normalized_mpn="res-2", display_mpn="RES-2", category="  Totally Unknown Category "),
+                MaterialCard(normalized_mpn="res-3", display_mpn="RES-3", category="ssd"),  # canonical — not residue
+                MaterialCard(normalized_mpn="res-4", display_mpn="RES-4", category=None),  # NULL — not residue
+            ]
+        )
+        db_session.flush()
+
+        warnings = self._capture_warnings(lambda: _warn_non_canonical_categories(db_session))
+        assert any(
+            "2 material_cards" in w and "totally unknown category" in w and "non-canonical" in w for w in warnings
+        ), warnings
+
+    def test_silent_when_every_category_is_canonical(self, db_session):
+        from app.models import MaterialCard
+        from app.startup import _warn_non_canonical_categories
+
+        db_session.add(MaterialCard(normalized_mpn="ok-1", display_mpn="OK-1", category="dram"))
+        db_session.flush()
+
+        warnings = self._capture_warnings(lambda: _warn_non_canonical_categories(db_session))
+        assert not any("non-canonical" in w for w in warnings), warnings

@@ -72,6 +72,7 @@ def run_startup_migrations() -> None:
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_commodity_schemas()
+    _warn_non_canonical_categories()
     logger.info("Startup migrations complete")
 
 
@@ -861,6 +862,51 @@ def _seed_commodity_schemas() -> None:
         raise
     finally:
         db.close()
+
+
+def _warn_non_canonical_categories(db=None) -> None:
+    """Surface material_cards rows whose category no commodity filter can bucket.
+
+    Observability only — never mutates. The faceted sidebar matches
+    ``lower(trim(category))`` against canonical COMMODITY_TREE keys, so any card whose
+    category falls outside both the canonical keys and the alias cut line defined by
+    migration 093 silently vanishes from commodity browsing. That residue is logged on
+    every boot (count + worst offenders) so it stays a visible number instead of a
+    "why doesn't this part show under any commodity?" archaeology question — and so a
+    new vendor taxonomy string surfaces as a CATEGORY_ALIASES + backfill TODO.
+
+    Called by: run_startup_migrations
+    Depends on: material_cards, commodity_registry.get_all_commodities
+    """
+    from .services.commodity_registry import get_all_commodities
+
+    canonical = set(get_all_commodities())
+    session = db if db is not None else SessionLocal()
+    try:
+        rows = session.execute(
+            sqltext(
+                "SELECT LOWER(TRIM(category)) AS cat, COUNT(*) AS n FROM material_cards "
+                "WHERE category IS NOT NULL AND TRIM(category) != '' "
+                "GROUP BY LOWER(TRIM(category))"
+            )
+        ).fetchall()
+    except SQLAlchemyError:
+        logger.exception("Non-canonical category residue check failed")
+        return
+    finally:
+        if db is None:
+            session.close()
+    residue = {cat: n for cat, n in rows if cat not in canonical}
+    if residue:
+        top = dict(sorted(residue.items(), key=lambda kv: (-kv[1], kv[0]))[:10])
+        logger.warning(
+            "materials: {} material_cards across {} non-canonical categories are invisible to "
+            "commodity filters — top: {} (extend category_normalizer.CATEGORY_ALIASES and ship "
+            "a backfill; migration 093 defined the current cut line)",
+            sum(residue.values()),
+            len(residue),
+            top,
+        )
 
 
 def _backfill_material_cards() -> None:

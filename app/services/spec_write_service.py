@@ -46,6 +46,18 @@ def record_spec(
     Returns True if the spec was persisted, False if it was skipped for any reason (card
     not found, no category, no schema, enum mismatch, unparseable numeric, vendor-API
     conflict, or same-source lower-confidence).
+
+    ARBITRATION MODEL — currently split across TWO sites. This function is deliberately
+    2-tier: vendor-API sources are authoritative, otherwise latest-write-wins across
+    sources. The desc_extractor writer (app/services/desc_extractor/writer.py, lands
+    from its own branch) adds a third tier ABOVE this call: it pre-gates on the prior
+    entry's confidence so the 0.95 mpn_decode baseline is never overwritten by its 0.90
+    description parse — record_spec alone would let it win via latest-write-wins. Until
+    the SP2 source-tier ladder moves that pre-gate in here (as a per-source
+    {source: min_confidence_to_overwrite} floor map, making the writer's pre-gate
+    redundant and deletable), any change to the arbitration model must update BOTH
+    sites, and any NEW non-vendor-API writer needs the same pre-gate or it will
+    overwrite decoded values.
     """
     card = db.get(MaterialCard, card_id)
     if card is None:
@@ -119,7 +131,9 @@ def record_spec(
         new_entry["original_value"] = value
         new_entry["original_unit"] = unit
 
-    # Conflict resolution: 2-tier — vendor API sources are authoritative, otherwise latest wins
+    # Conflict resolution: 2-tier — vendor API sources are authoritative, otherwise latest
+    # wins. NOTE: desc_extractor's writer pre-gates on confidence BEFORE calling record_spec
+    # (third tier above this one) — see the ARBITRATION MODEL note in the docstring.
     specs = dict(card.specs_structured or {})
     existing = specs.get(spec_key)
 

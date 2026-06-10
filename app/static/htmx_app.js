@@ -901,7 +901,10 @@ Alpine.data('materialsFilter', () => ({
 
   // Sourcing-signal boolean toggle (hasStock / hasPrice / hasCrosses).
   toggleSourcingFlag(flag) {
-    if (!['hasStock', 'hasPrice', 'hasCrosses'].includes(flag)) return;
+    if (!['hasStock', 'hasPrice', 'hasCrosses'].includes(flag)) {
+      console.warn(`materialsFilter: unknown sourcing flag ${flag}`);
+      return;
+    }
     this[flag] = !this[flag];
     if (window.innerWidth >= 1024) this.applyFilters();
   },

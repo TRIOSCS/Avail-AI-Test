@@ -593,6 +593,18 @@ def test_faceted_bogus_operational_params_degrade(client, db_session: Session):
         assert resp.status_code == 200
         assert "DEG-1" in resp.text and "DEG-2" in resp.text
 
+    # The boolean operational flags share the contract too: a bogus value degrades to
+    # the no-op False (logged), never a FastAPI 422 (which would leave stale results in
+    # place with only the generic error toast).
+    resp = client.get("/v2/partials/materials/faceted?has_stock=bogus&has_price=maybe&has_crosses=2&has_datasheet=nope")
+    assert resp.status_code == 200
+    assert "DEG-1" in resp.text and "DEG-2" in resp.text
+
+    # And the valid spellings still coerce — uppercase TRUE filters like true.
+    resp = client.get("/v2/partials/materials/faceted?has_stock=TRUE")
+    assert resp.status_code == 200
+    assert "DEG-1" not in resp.text and "DEG-2" not in resp.text  # no vendor rows seeded
+
 
 def test_workspace_renders_sourcing_signals_section(client):
     """The rail's Sourcing-signals section renders with all Layer-3 controls wired."""

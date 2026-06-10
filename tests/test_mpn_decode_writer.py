@@ -61,7 +61,7 @@ def test_decode_writes_ssd_and_categorizes_null_category(db_session: Session):
     stats = decode_and_record_specs(db_session, [card.id])
     db_session.commit()
 
-    assert stats == {"decoded": 1, "written": 3, "categorized": 1}
+    assert stats == {"decoded": 1, "written": 3, "categorized": 1, "skipped_category_conflict": 0}
     assert card.category == "ssd"
     f = _facets(db_session, card.id)
     assert f["form_factor"] == "U.2"
@@ -98,6 +98,37 @@ def test_writer_warns_when_decoded_key_has_no_schema(db_session: Session):
     assert f["registered"] == "Registered"  # sibling keys still written
 
 
+def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
+    # record_spec's OTHER silent vocabulary drop: a schema row exists but the decoded value is
+    # not in its LIVE enum_values (a stale DB row after a failed/lagging reseed — CI only pins
+    # the decoder against the JSON seeds, the worker decodes against live rows). The writer
+    # must surface this drop in the same aggregate WARNING as the no-schema case.
+    from loguru import logger as loguru_logger
+
+    from app.models import CommoditySpecSchema
+
+    seed_commodity_schemas(db_session)
+    schema = db_session.query(CommoditySpecSchema).filter_by(commodity="dram", spec_key="registered").one()
+    schema.enum_values = ["Unbuffered"]  # simulate live-DB enum drift: "Registered" removed
+    db_session.flush()
+    card = MaterialCard(normalized_mpn="m393a2k43db3-cwe", display_mpn="M393A2K43DB3-CWE", category="dram")
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any("dram.registered=Registered" in w and "dropped" in w for w in warnings), warnings
+    f = _facets(db_session, card.id)
+    assert "registered" not in f  # dropped (out-of-enum), exactly mirroring record_spec
+    assert f["form_factor"] == "RDIMM"  # sibling keys still written
+
+
 def test_decode_writes_ecc_false(db_session: Session):
     # Regression: a non-ECC module must persist ecc="false" (the string→bool corruption bug).
     seed_commodity_schemas(db_session)
@@ -113,14 +144,25 @@ def test_decode_writes_ecc_false(db_session: Session):
 def test_decode_skips_on_category_mismatch(db_session: Session):
     # A drive MPN on a card mis-categorized as dram must NOT write (commodity guard prevents
     # writing a drive's capacity onto a DRAM card via the shared capacity_gb key). An EXISTING
-    # category is authoritative — it is never overwritten by the decode.
+    # category is authoritative — it is never overwritten by the decode. The skip is NOT
+    # silent: it is counted in the returned stats (the worker INFO-logs them every batch) and
+    # WARNed with the (card_category -> decoded_commodity) pair, because a recurring pair is
+    # exactly the signal that the category alias map needs another entry.
+    from loguru import logger as loguru_logger
+
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category="dram")
     db_session.add(card)
     db_session.flush()
 
-    stats = decode_and_record_specs(db_session, [card.id])
-    assert stats == {"decoded": 0, "written": 0, "categorized": 0}
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    assert stats == {"decoded": 0, "written": 0, "categorized": 0, "skipped_category_conflict": 1}
+    assert any("dram->hdd" in w for w in warnings), warnings
     assert _facets(db_session, card.id) == {}
     assert card.category == "dram"  # untouched
 
@@ -133,7 +175,7 @@ def test_decode_skips_unrecognized_mpn(db_session: Session):
     db_session.flush()
 
     stats = decode_and_record_specs(db_session, [card.id])
-    assert stats == {"decoded": 0, "written": 0, "categorized": 0}
+    assert stats == {"decoded": 0, "written": 0, "categorized": 0, "skipped_category_conflict": 0}
 
 
 def test_decode_categorizes_uncategorized_card(db_session: Session):

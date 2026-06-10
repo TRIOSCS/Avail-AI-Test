@@ -43,8 +43,9 @@ class TestRevisionMetadata:
         assert len(_mod.revision) <= 32
 
     def test_down_revision(self):
-        # 092 is reserved by a concurrent branch — this revision deliberately chains
-        # onto 091 and skips the number.
+        # 092 is permanently unused — the concurrent desc_extractor branch introduced no
+        # schema change, so this revision chains straight onto 091 (gap is intentional;
+        # never fill 092).
         assert _mod.down_revision == "091_cleanup_vague_descs"
 
 
