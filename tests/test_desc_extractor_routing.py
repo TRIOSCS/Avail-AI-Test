@@ -3,15 +3,16 @@
 Covers: commodity-hint routing, foreign-lead suppression (the "Other,"/"Tray,"
 part-master labels), NEUTRAL leads (packaging words / brands / SPS- prefixes fall
 through to body+hint arbitration), lead-label dot-strip normalization, cross-family
-conflicts, degenerate MPN-as-description, the cpu hint-only commodity, and a drift
-guard that re-validates every emittable enum member and numeric-range constant
+conflicts, degenerate MPN-as-description, and a drift guard that re-validates every
+emittable enum member, numeric-range constant AND the curated cpu model→spec table
 against app/data/commodity_seeds.json.
 
 Phase-2 migrations: the motherboards entries and "Power Supply, V7000 …" moved out
 of HINT_ONLY_CASES (they now emit board_type / wattage — see
 test_desc_extractor_board.py / test_desc_extractor_power.py), and 'LCD, 21.5", LG'
 moved out of NONE_CASES (now displays, diagonal_size 21.5 — see
-test_desc_extractor_display.py).
+test_desc_extractor_display.py). Wave 3B promoted cpu from hint-only to extracting
+(HINT_ONLY_CASES dissolved into test_desc_extractor_cpu.py).
 """
 
 import json
@@ -21,32 +22,18 @@ import pytest
 
 from app.services.desc_extractor import extract_desc
 
-# ── cpu stays hint-only (callers may use the commodity; specs stay empty) ──
-HINT_ONLY_CASES = [
-    ("CPU 6 Core E5-2640 15M Cache - 2.50 GHZ 00D0017, IBM", "cpu"),
-    ("SPS-CPU BDW E5-2673v4 20C 2.3Gz 50M 135W", "cpu"),  # hyphenated body token
-    ("CPU, I5-6500T, 6M 3.1G, SR2BZ, CM8066201920600, Intel", "cpu"),
-]
 
-
-@pytest.mark.parametrize("description,commodity", HINT_ONLY_CASES)
-def test_non_spec_commodity_hint(description, commodity):
-    result = extract_desc(description)
-    assert result is not None, f"{description!r} did not extract"
-    assert result.commodity == commodity
-    assert result.specs == {}
-
-
-def test_cpu_wattage_is_structurally_unreachable():
-    # "135W" is a CPU TDP, not a PSU rating: cpu routes to the empty-specs branch and
-    # the wattage key only exists on the power_supplies route — no extractor can leak
-    # it ("SPS-CPU BDW E5-2673v4 20C 2.3Gz 50M 135W" stays specs={}).
+def test_cpu_wattage_key_is_structurally_unreachable():
+    # "135W" on the cpu route is a TDP: extract_cpu emits tdp_watts and the wattage
+    # key only exists on the power_supplies route — no extractor can leak it.
     result = extract_desc("SPS-CPU BDW E5-2673v4 20C 2.3Gz 50M 135W")
     assert result is not None
     assert result.commodity == "cpu"
-    assert "wattage" not in result.specs and result.specs == {}
-    # And a cpu HINT never routes anywhere (cpu is outside SPEC_COMMODITIES).
-    assert extract_desc("SPS-CPU BDW E5-2673v4 20C 2.3Gz 50M 135W", commodity_hint="cpu") is None
+    assert "wattage" not in result.specs
+    assert result.specs["tdp_watts"] == 135
+    # A cpu HINT routes the cpu vocabulary (cpu joined SPEC_COMMODITIES in wave 3B).
+    hinted = extract_desc("SPS-CPU BDW E5-2673v4 20C 2.3Gz 50M 135W", commodity_hint="cpu")
+    assert hinted is not None and hinted.specs == result.specs
 
 
 # ── none-of-the-above: foreign labels, prose lines, degenerate descriptions ──
@@ -94,7 +81,7 @@ def test_empty_and_blank_return_none():
 
 
 def test_hint_outside_spec_commodities_returns_none():
-    # The extractor only speaks the eight SPEC_COMMODITIES — a capacitor-categorized
+    # The extractor only speaks the nine SPEC_COMMODITIES — a capacitor-categorized
     # card never gets drive facets, no matter what its description says.
     assert extract_desc('HD, 450GB, 15KRPM, 3.5", Fibre Channel', commodity_hint="capacitors") is None
     assert extract_desc("PSU, 1460W 240V/200V AC Hot Swap for EN 62368-1", commodity_hint="networking") is None
@@ -115,6 +102,24 @@ def test_hint_contradicted_by_other_family_lead_returns_none():
     # gpu-hinted card / an "MB," lead on a motherboards-vs-dram mismatch ⇒ None.
     assert extract_desc("Mem, 16GB DDR4 RDIMM", commodity_hint="gpu") is None
     assert extract_desc("Mem, 16GB DDR4 RDIMM", commodity_hint="motherboards") is None
+
+
+def test_hint_contradicted_by_other_family_body_tokens_returns_none():
+    # Verbatim CPU-bucket rows L67388-601/L69297-601: a motherboard FRU whose card
+    # sits in the SFDC CPU bucket. The \bMB\b body token is the row's ONLY strong
+    # signal and it contradicts the cpu hint — extraction must return None instead
+    # of writing a cpu family facet onto a motherboard (same contradiction class
+    # as the lead guard above, mirrored onto body tokens).
+    assert extract_desc("SPS-MB UMA I5-8265U 8GB W/HEATSINK WIN", commodity_hint="cpu") is None
+    # A same-family token alongside the foreign one still extracts: the hinted
+    # "PROCESSOR + MB L3 cache" row keeps decoding (pinned in
+    # test_desc_extractor_cpu.py::test_spaced_mb_cache_is_a_known_conservative_loss).
+    # SUBORDINATE-vocabulary exemption: cpu descriptions state their supported
+    # memory, so a dram body token under a cpu hint refines, never contradicts
+    # (verbatim corpus row — the full table merge must survive).
+    result = extract_desc("Intel i5-9400 2.9GHz/6C/9M 65W DDR4 2666", commodity_hint="cpu")
+    assert result is not None and result.commodity == "cpu"
+    assert result.specs["core_count"] == 6 and result.specs["family"] == "Core i-series"
 
 
 def test_neutral_leads_fall_through_to_body_and_hint():
@@ -275,3 +280,47 @@ def test_emittable_vocabulary_matches_commodity_seeds():
     assert (gpu._MEM_MIN, gpu._MEM_MAX) == numeric_range("gpu", "memory_gb")
 
     assert {p[0] for p in board._BOARD_PATTERNS} == enum_values("motherboards", "board_type")
+
+    # ── cpu (wave 3B): grammar vocabulary + the WHOLE curated model table ──
+    from app.services.desc_extractor import cpu
+
+    arch_enum = enum_values("cpu", "architecture")
+    family_enum = enum_values("cpu", "family")
+    socket_enum = enum_values("cpu", "socket")
+    assert set(cpu._CODENAME_ARCH.values()) <= arch_enum
+    assert set(cpu._ARCH_NAMES.values()) <= arch_enum
+    assert set(cpu._VN_ARCH.values()) <= arch_enum
+    assert {cpu.XEON, cpu.CORE_I, cpu.EPYC, cpu.RYZEN, cpu.THREADRIPPER, cpu.ATOM} <= family_enum
+    assert (cpu._CORE_MIN, cpu._CORE_MAX) == numeric_range("cpu", "core_count")
+    assert (cpu._GHZ_MIN, cpu._GHZ_MAX) == numeric_range("cpu", "clock_speed_ghz")
+    assert (cpu._TDP_MIN, cpu._TDP_MAX) == numeric_range("cpu", "tdp_watts")
+    # Every value in app/data/cpu_model_specs.json must pass the SAME seeded gates
+    # the grammar enforces — a table typo must fail HERE, not silently be dropped
+    # by record_spec (enums) or sail through unchecked (numerics).
+    table = cpu.load_model_specs()
+    allowed_keys = {"family", "socket", "core_count", "clock_speed_ghz", "tdp_watts", "architecture"}
+    for model, entry in table.items():
+        assert model == model.upper().strip(), model  # parser-normalized key form
+        assert set(entry) <= allowed_keys, model
+        if "family" in entry:
+            assert entry["family"] in family_enum, model
+        if "socket" in entry:
+            assert entry["socket"] in socket_enum, model
+        if "architecture" in entry:
+            assert entry["architecture"] in arch_enum, model
+        if "core_count" in entry:
+            assert cpu._CORE_MIN <= entry["core_count"] <= cpu._CORE_MAX, model
+        if "clock_speed_ghz" in entry:
+            assert cpu._GHZ_MIN <= entry["clock_speed_ghz"] <= cpu._GHZ_MAX, model
+        if "tdp_watts" in entry:
+            assert cpu._TDP_MIN <= entry["tdp_watts"] <= cpu._TDP_MAX, model
+        # Key REACHABILITY: the parser grammar must be able to PRODUCE every key —
+        # a curated entry keyed "GOLD6334" / "E5 2680 V3" / "I5 6500" would pass
+        # every value assertion above yet be permanently dead weight
+        # (load_model_specs().get(model) could never hit it).
+        assert model in cpu._models(model), model
+        # E-series vN keys: _VN_ARCH overrides the table architecture at extraction
+        # time (the table is only the fallback), so an incoherent table value would
+        # be invisibly masked — pin table↔map coherence.
+        if model.startswith(("E3-", "E5-", "E7-")) and " V" in model:
+            assert entry.get("architecture") == cpu._VN_ARCH[model[-2:]], model

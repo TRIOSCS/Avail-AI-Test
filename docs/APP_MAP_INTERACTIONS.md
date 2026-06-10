@@ -938,24 +938,35 @@ owns arbitration in one place:
        (no schema row / out-of-enum value) from BOTH channels emit the same
        aggregate WARNING as the mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
-       description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
-       dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
-       part-master/inventory descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre
-       Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `Tape, JAG 7`), source=
+       description→spec token grammar across NINE commodities (phase 1: hdd/ssd/
+       dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards; wave
+       3B: cpu — TRIO part-master/inventory descriptions like `HD, 450GB, 15KRPM,
+       3.5", Fibre Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `SPS-CPU BDW
+       E5-2650L V4 14C 1_7GHZ 65W`), source=
        "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
        extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"/
        "Card,"/"Library,"…) and conflicting tokens, while NEUTRAL leads (packaging
        words/brands/SPS- prefixes: "ASSY,"/"MSI,"/"SPS-PCA,"…) fall through to
        body-token + category-hint arbitration instead of dying foreign. Per-module
-       structural guards: wattage exists only on the power_supplies route (CPU "135W"
-       TDP unreachable — cpu stays hint-only) and gpu memory_gb requires a GPU-context
-       token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
-       Only cards already categorized to one of the eight commodities are written
+       structural guards: wattage exists only on the power_supplies route while the
+       cpu route emits tdp_watts (CPU "135W" TDP can never land in wattage), gpu
+       memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
+       "10GB"/"100GbE" rows emit nothing, and cpu bare cores/TDP tokens AND
+       codename-only architecture require a CPU-context signal (MPN-echo descs
+       and chassis rows emit nothing). Hinted extraction adds a body-token
+       contradiction guard (a cpu-hinted motherboard FRU returns None; dram
+       tokens under a cpu hint are exempt subordinate vocabulary). The cpu route
+       adds a step-0 pollution deny-list (is_cpu_pollution — Murata/EPCOS
+       B-clusters/AVX/TE/StorageTek shapes from docs/CPU_DECODE_FEASIBILITY.md)
+       and a curated model→spec table (app/data/cpu_model_specs.json) merged
+       UNDER desc tokens (skipped when the desc names two models, incl. dangling
+       slash-alternates like "GOLD 6230R/6240R").
+       Only cards already categorized to one of the nine commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
        The F1 ladder (fru_desc_parse 82 < desc_parse 83 < fru_matrix_decode 84 <
        mpn_decode 85 < vendor 90) keeps decode/vendor values authoritative and the
        card's OWN description above its FRU-linked prose — no per-writer
-       pre-gate. The five phase-2 commodities have no MPN decoders, so
+       pre-gate. The phase-2/3 commodities have no MPN decoders, so
        desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
