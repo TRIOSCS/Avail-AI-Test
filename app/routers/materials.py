@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -476,12 +477,19 @@ async def enrich_material(
     """Apply AI-generated enrichment data to a material card.
 
     ``category``/``manufacturer`` are PROVENANCED columns and go through the F1 ladder
-    (never raw setattr): the body's ``source`` is honored when it is a registered
-    SOURCE_TIER key; an unregistered pusher (the default ``claude_agent``) ranks as an
-    AI guess (tier 40) — un-vouched external AI data fills empty columns but never
-    displaces decode / vendor / trio / manual provenance, and off-vocab categories are
-    rejected, never persisted. ``updated_fields`` reports only writes that actually
-    landed.
+    (never raw setattr): the body's ``source`` is honored only when it is a registered
+    SOURCE_TIER key BELOW the ground-truth band (< trio_source/95). ``manual`` (100) is
+    a human assertion and ``trio_source`` (95) is TRIO's own part master — a pusher
+    claiming either could overwrite a genuine human edit, permanently lock the column
+    against every future enrichment correction, and corrupt the validation-conflict
+    contract (``record_validation_conflict`` treats ``manual`` as a human value).
+    Anything unregistered (the default ``claude_agent``) or ground-truth-tier is
+    DEMOTED to ``ai_guess`` (tier 40) — logged at WARNING, and reported as
+    ``ladder_source`` in the response — so un-vouched external AI data fills empty
+    columns but never displaces decode / vendor / trio / manual provenance. Off-vocab
+    categories are rejected, never persisted. ``updated_fields`` reports only writes
+    that actually landed; a category/manufacturer write the ladder (or the category
+    normalizer) refused is listed in ``rejected_fields``.
     """
     from ..services.spec_tiers import SOURCE_TIER, set_category, set_manufacturer
 
@@ -490,8 +498,31 @@ async def enrich_material(
         raise HTTPException(404, "Material not found")
     body = await request.json()
     source = body.get("source", "claude_agent")
-    ladder_source = source if source in SOURCE_TIER else "ai_guess"
-    confidence = min(max(float(body.get("confidence") or 0.5), 0.0), 1.0)
+    if source in SOURCE_TIER and SOURCE_TIER[source] < SOURCE_TIER["trio_source"]:
+        ladder_source = source
+    else:
+        ladder_source = "ai_guess"
+        if source != "claude_agent":
+            # Loud demotion: ai_guess IS registered, so tier_for's unknown-source
+            # WARNING never fires for it — without this line a pusher sending
+            # "digikey" instead of "digikey_api" (or claiming "manual") would lose
+            # silently forever with nothing to find in the logs.
+            logger.warning(
+                "enrich_material: card={} body source {!r} demoted to ai_guess/40 ({})",
+                card_id,
+                source,
+                "not a registered SOURCE_TIER key"
+                if source not in SOURCE_TIER
+                else "ground-truth tiers are not honored from pushers",
+            )
+    raw_confidence = body.get("confidence")
+    if raw_confidence is None:
+        confidence = 0.5
+    else:
+        try:
+            confidence = min(max(float(raw_confidence), 0.0), 1.0)
+        except (TypeError, ValueError):
+            raise HTTPException(422, f'"confidence" must be a number between 0 and 1, got {raw_confidence!r}.')
     enrichment_fields = (
         "lifecycle_status",
         "package_type",
@@ -503,21 +534,34 @@ async def enrich_material(
         "description",
     )
     updated = []
+    rejected = []
     for field in enrichment_fields:
         val = body.get(field)
         if val is not None:
             setattr(card, field, val)
             updated.append(field)
-    if body.get("category") is not None and set_category(card, body["category"], ladder_source, confidence):
-        updated.append("category")
-    if body.get("manufacturer") is not None and set_manufacturer(card, body["manufacturer"], ladder_source, confidence):
-        updated.append("manufacturer")
+    if body.get("category") is not None:
+        if set_category(card, body["category"], ladder_source, confidence):
+            updated.append("category")
+        else:
+            rejected.append("category")
+    if body.get("manufacturer") is not None:
+        if set_manufacturer(card, body["manufacturer"], ladder_source, confidence):
+            updated.append("manufacturer")
+        else:
+            rejected.append("manufacturer")
     if updated:
         card.enrichment_source = source
         card.enriched_at = datetime.now(timezone.utc)
     db.commit()
     invalidate_prefix("material_list")
-    return {"ok": True, "updated_fields": updated, "card_id": card_id}
+    return {
+        "ok": True,
+        "updated_fields": updated,
+        "rejected_fields": rejected,
+        "ladder_source": ladder_source,
+        "card_id": card_id,
+    }
 
 
 @router.delete("/api/materials/{card_id}")

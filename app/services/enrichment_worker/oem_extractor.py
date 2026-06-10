@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from app.services.commodity_registry import get_all_commodities
 from app.utils.claude_client import claude_json
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
@@ -24,6 +25,11 @@ from .oem_domains import is_crossref_domain, is_oem_domain
 
 _MIN_CROSSREF_CONFIDENCE = 0.90
 _MIN_OEM_CONFIDENCE = 0.90
+
+# category routes through the F1 ladder's normalize_category (off-vocab → dropped, never
+# persisted), so the OEM-description prompt constrains Claude to the canonical commodity
+# vocabulary — free-text OEM-page strings ("Memory Module") would be rejected at write time.
+_CATEGORY_VOCAB = ", ".join(sorted(get_all_commodities()))
 
 
 # --------------------------------- cross-reference ---------------------------------
@@ -173,9 +179,10 @@ _OEM_SYSTEM = (
 )
 _OEM_PROMPT = (
     "Find the OEM/FRU part number {mpn} (vendor: {vendor}) on the vendor's official parts or "
-    'support page. Return JSON: {{"description": str, "manufacturer": str, "category": str, '
+    'support page. Return JSON: {{"description": str, "manufacturer": str, "category": str|null, '
     '"datasheet_url": str|null, "confidence": float, "exact_mpn_found": str, "source_urls": '
-    "[str]}}. exact_mpn_found must be the OEM code exactly as printed on the page."
+    "[str]}}. exact_mpn_found must be the OEM code exactly as printed on the page. "
+    "category MUST be one of: " + _CATEGORY_VOCAB + " — pick the closest match, or null if none fits."
 )
 
 

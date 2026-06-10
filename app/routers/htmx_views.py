@@ -7763,6 +7763,7 @@ async def update_material_card(
     # Same contract as routers/materials.py::update_material — through the F1 ladder
     # at manual/100 (canonicalized via the alias table), with the same conflict-
     # clearing semantics as the category path below.
+    manufacturer_toast: str | None = None
     if "manufacturer" in form:
         from ..services.manufacturer_normalizer import normalize_brand_name
         from ..services.spec_tiers import clear_validation_conflicts, set_manufacturer
@@ -7773,12 +7774,25 @@ async def update_material_card(
             # validation conflict for it (even unchanged: the human looked and
             # confirmed their value), mirroring the category path below.
             clear_validation_conflicts(card, "manufacturer")
-            if normalize_brand_name(db, raw_manufacturer) != card.manufacturer:
+            # Canonical-to-CANONICAL comparison (exact match short-circuits the alias
+            # lookups): legacy cards store non-canonical aliases ("TI", "HP" — the
+            # stored value pre-dates the ladder), and the edit form round-trips the
+            # stored value verbatim — comparing canonical(incoming) against the RAW
+            # stored value would see "Texas Instruments" != "TI" on every unrelated
+            # save and silently re-stamp the maker as manual (tier 100), locking out
+            # every future enrichment correction.
+            if raw_manufacturer != (card.manufacturer or "") and normalize_brand_name(
+                db, raw_manufacturer
+            ) != normalize_brand_name(db, card.manufacturer or ""):
                 set_manufacturer(card, raw_manufacturer, "manual", 1.0)
             # Canonical-equal → no-op: an unchanged value must NOT be re-stamped as a
             # manual (tier 100) edit just because the user saved another field.
-        # Empty/whitespace → no-op: the ladder never blanks a value (set_manufacturer
-        # contract — the old raw write could silently blank the maker here).
+        elif card.manufacturer:
+            # Empty/whitespace → no-op: the ladder never blanks a value
+            # (set_manufacturer contract — the old raw write could silently blank the
+            # maker here). Tell the user instead of silently dropping the edit,
+            # mirroring the category blank-rejection toast below.
+            manufacturer_toast = f'Manufacturer can\'t be cleared — kept "{card.manufacturer}".'
 
     # Category NEVER goes through raw setattr: a raw write would leave the OLD
     # provenance columns attached to the NEW value (the next enrichment pass would
@@ -7816,10 +7830,14 @@ async def update_material_card(
     db.commit()
     logger.info("Material card {} updated by {}", card_id, user.email)
     response = await material_detail_partial(request, card_id, user, db)
-    if category_toast:
-        # Surface the rejection WITHOUT breaking the partial swap, via the existing
+    toast_messages = [m for m in (category_toast, manufacturer_toast) if m]
+    if toast_messages:
+        # Surface the rejection(s) WITHOUT breaking the partial swap, via the existing
         # showToast HX-Trigger convention bridged to $store.toast (htmx_app.js).
-        response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": category_toast, "type": "warning"}})
+        # HX-Trigger is a single JSON event map, so both rejections share one toast.
+        response.headers["HX-Trigger"] = json.dumps(
+            {"showToast": {"message": " ".join(toast_messages), "type": "warning"}}
+        )
     return response
 
 

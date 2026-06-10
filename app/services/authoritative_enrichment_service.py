@@ -374,10 +374,12 @@ async def enrich_card(
     because, after its first ``await``, every session op this function performs is
     SYNCHRONOUS (it contains no await), so it runs atomically between awaits on the
     single-threaded event loop and can never interleave mid-operation with another
-    card's enrichment. The post-await session ops are exactly the F1-ladder writes
-    inside the apply_* helpers: ``set_manufacturer``'s alias-table SELECT (cached
-    per-process after the first non-empty load) and ``set_category``'s stale-facet
-    purge SELECT/DELETE, which fires only on a win that CHANGES an existing category.
+    card's enrichment. The post-await session ops are the F1-ladder setters
+    (``set_category``/``set_manufacturer``) called from the apply_* helpers AND from
+    the ai_inferred branch's ``set_category`` below: ``set_manufacturer``'s
+    alias-table SELECT (cached per-process after the first non-empty load) and
+    ``set_category``'s stale-facet purge SELECT/DELETE, which fires only on a win
+    that CHANGES an existing category.
     Do NOT add AWAITED DB work, a flush-and-read-back sequence, or anything that
     expires/refreshes shared ORM state after the first await without switching
     callers to per-card sessions — concurrent runs (import script, enrich_cards)
@@ -402,8 +404,10 @@ async def enrich_card(
     web_enabled = not (disabled and "web_search" in disabled)
 
     # Distributor / manufacturer web tier.
-    # CONCURRENCY INVARIANT: this await is pure async (no DB) — no DB query/flush follows it;
-    # see the docstring above for the full invariant.
+    # CONCURRENCY INVARIANT: this await is pure async (no DB); the apply_web_sourced
+    # that follows performs only SYNCHRONOUS F1-ladder session ops (set_manufacturer's
+    # alias-table SELECT, set_category's stale-facet purge SELECT/DELETE) — see the
+    # docstring above for the full invariant.
     if web_enabled:
         if web_meter is not None:
             web_meter.reserve_web_call()

@@ -223,8 +223,13 @@ async def enrich_card_specs(
             #     transaction on PG) across the entire multi-minute extraction and
             #     lose EVERY earlier chunk's specs to a single late failure —
             #     committing per chunk bounds both the open-transaction window and the
-            #     blast radius (the except below rolls back just the failed chunk and
-            #     keeps going);
+            #     blast radius (the except below rolls back just the failed chunk's
+            #     spec writes and keeps going — EXCEPT a FIRST-chunk commit failure in
+            #     the worker-shared-session case of point (3), where the rollback also
+            #     discards the batch's pending core-attr/decode/crosswalk writes riding
+            #     on this commit; that batch's results are lost, and the cards simply
+            #     re-enter via the next batch's re-selection because enrichment_status
+            #     rolled back with them);
             # (2) three of the four callers (the 2h scheduler job _job_spec_enrichment,
             #     the htmx Enrich button, app/management/enrich_specs.py) have NO
             #     commit of their own — this commit IS their persistence;
@@ -232,7 +237,9 @@ async def enrich_card_specs(
             #     the FIRST chunk commit here also persists the batch's pending
             #     core-attr/decode/crosswalk writes; the worker's batch-final commit
             #     remains the safety net for batches where this function raises before
-            #     committing or processes zero chunks (see the matching comment there).
+            #     committing or processes zero chunks — but NOT for a failed first
+            #     chunk commit (after the rollback nothing is pending for it to save;
+            #     see the matching comment there).
             try:
                 db.commit()
             except Exception as e:  # noqa: BLE001

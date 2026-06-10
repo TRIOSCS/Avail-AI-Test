@@ -882,11 +882,14 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> Stamps material_cards.enriched_at
 
 Worker second-pass ordering (run_one_batch, same shared post-await session; passes 1-3
-persist at the batch-final commit — pass 4, enrich_card_specs, commits PER CHUNK on
-that shared session because its chunks are separated by long awaited Claude calls and
-three of its callers have no commit of their own — see the load-bearing commit comment
-in spec_enrichment_service.py — so the batch's pending writes persist with its first
-chunk commit and the batch-final commit is the safety net). As of SP2 the run ORDER is
+share the batch session and normally persist with pass 4's FIRST per-chunk commit —
+pass 4, enrich_card_specs, commits PER CHUNK on that shared session because its chunks
+are separated by long awaited Claude calls and three of its callers have no commit of
+their own — see the load-bearing commit comment in spec_enrichment_service.py; the
+batch-final commit is the safety net when pass 4 is skipped (no enriched_ids), raises
+early, or processes zero chunks — but not for a failed first-chunk COMMIT, whose
+rollback discards the batch's pending writes and lets the cards re-select next batch).
+As of SP2 the run ORDER is
 no longer load-bearing: record_spec arbitrates
 every write through the F1 source-tier ladder (app/services/spec_tiers.py —
 mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > fru_desc_parse 82 >
@@ -1134,11 +1137,14 @@ Dual-brand writers (W1-W7 — every write regex-gated or source-backed, never gu
 | W7 | Manual edit (PUT `/api/materials/{id}`, PUT `/v2/partials/materials/{id}`, Add-part modal) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` + `add_material`, `routers/htmx_views.py::update_material_card` (wins also clear the key's validation conflicts — a manual re-assert resolves the flag; the htmx PUT clears on any non-empty re-assertion, mirrors its category path, and never re-stamps an unchanged value) |
 | W8 | Authoritative enrichment — exact-MPN distributor match (incl. cross-ref re-verification), OEM-official page, web extraction | manufacturer (+ category, same writers) | `{connector}_api`/90 · `oem_official`/80 · `web_search`/70 | 1.0 / result confidence | `authoritative_enrichment_service.py` apply_authoritative / apply_cross_ref_verified / apply_oem_sourced / apply_web_sourced — ladder-rejected writes are dropped from `enrichment_provenance` (it never claims a write that didn't land) |
 
-Ladder losses are NOT silent for the going-forward writers: W4 surfaces
-`skipped_maker_conflict` (writer stats + batch WARNING) and W6 surfaces
-`brand_conflicts`/`manufacturer_conflicts` (ingest stats + batch WARNING) whenever a
-non-empty incoming value loses to a DIFFERENT existing value (same-value losses are
-agreement, not conflict). Card MERGE (`material_card_service.merge_material_cards`)
+Ladder losses are NOT silent: every NON-manual rejection logs at INFO inside
+`_set_provenanced_column` (category, brand and manufacturer alike — W8's enrichment
+writers have no aggregate counter, so this per-loss INFO is their only production
+trace). On top of that, W4 surfaces `skipped_maker_conflict` (writer stats + batch
+WARNING) and W6 surfaces `brand_conflicts`/`manufacturer_conflicts` (ingest stats +
+batch WARNING) whenever a non-empty incoming value loses to a DIFFERENT existing value
+(same-value losses are agreement, not conflict). Card MERGE
+(`material_card_service.merge_material_cards`)
 carries the source card's brand + manufacturer through `set_brand`/`set_manufacturer`
 with the source card's STORED provenance (legacy floor when unprovenanced) — the ladder
 arbitrates target-vs-source and the outcome is logged at INFO (the losing value is
@@ -1174,9 +1180,11 @@ specs via `record_spec` + dry-run parity via `spec_would_write`), the manual edi
 endpoint `routers/htmx_views.py::update_material_card` (manual:100 for category AND
 manufacturer — a deliberate human change always wins, a category flip purges the old
 commodity's facets, a non-empty maker re-assertion clears its validation conflicts; an
-UNCHANGED re-submitted value is NOT re-stamped manual, off-vocab/blank categories are
-rejected with a `showToast` warning instead of persisting, and a blank maker can never
-blank the column), and ALL the enrichment category writers — `enrichment.py` (connector
+UNCHANGED re-submitted value is NOT re-stamped manual — the maker guard compares
+canonical to CANONICAL via `normalize_brand_name` on BOTH sides, since legacy cards
+store non-canonical aliases ("TI") that the edit form round-trips verbatim —
+off-vocab/blank categories AND a blank maker are rejected with a `showToast` warning
+instead of persisting/blanked silently), and ALL the enrichment category writers — `enrichment.py` (connector
 `{name}_api` tiers), `material_enrichment_service.py` (claude_haiku:40), and
 `authoritative_enrichment_service.py` (apply_authoritative + apply_cross_ref_verified
 at `{connector}_api`:90, apply_oem_sourced at oem_official:80, apply_web_sourced at
@@ -1187,10 +1195,12 @@ ladder monopoly is complete: every category/manufacturer writer routes through
 `card.manufacturer` remains** (the only direct maker assignments left are
 fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
 at the legacy floor until a routed writer stamps real provenance; SP3 adds the
-`@validates` hardening). Visibility: a NON-manual `set_category` rejection logs at INFO
-(mirrors `record_spec` — a systematically losing category writer must be visible);
-maker rejections stay DEBUG, surfaced instead by the writers' aggregate conflict
-counters/WARNINGs. The deterministic decode is protected by its tier (85), not by
+`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
+systematically losing writer must be visible at production log levels; the W8
+enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
+losses there would be production-invisible). Only manual submissions stay DEBUG (the
+human gets endpoint feedback). The deterministic decode is protected by its tier (85), not by
 running before the fru-crosswalk (84) / desc-parse (83) / AI spec (60) passes — the old
 per-writer confidence pre-gates are removed.
 

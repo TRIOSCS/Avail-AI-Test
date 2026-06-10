@@ -442,14 +442,19 @@ def _set_provenanced_column(
                 {"source": source, **incoming},
                 value,
             )
-        # Visibility rule (mirrors record_spec._incoming_loses): a category writer
-        # that systematically loses arbitration must be visible at production log
-        # levels, so NON-manual category rejections log at INFO. Manual category
-        # submissions stay at DEBUG (the human gets endpoint feedback — toast/422 —
-        # and the no-op re-assert paths are deliberate), as do brand/manufacturer
-        # rejections (their going-forward writers surface aggregate conflict
-        # WARNINGs instead: skipped_maker_conflict, ingest conflict tallies).
-        log = logger.info if (attr == "category" and source != "manual") else logger.debug
+        # Visibility rule (mirrors record_spec._incoming_loses): a writer that
+        # systematically loses arbitration must be visible at production log levels,
+        # so NON-manual rejections log at INFO for EVERY provenanced column
+        # (category, brand, manufacturer). Some writers ALSO surface aggregate
+        # conflict WARNINGs (mpn_decoder's skipped_maker_conflict, ingest's conflict
+        # tallies), but the W8 enrichment writers (apply_authoritative /
+        # apply_cross_ref_verified / apply_oem_sourced / apply_web_sourced) have no
+        # such counter — a DEBUG-only maker loss there would be production-invisible
+        # (no validation conflict either unless the kept value is manual and the
+        # loser is tier >= 80). Only manual submissions stay at DEBUG: the human
+        # gets endpoint feedback (toast/422) and the no-op re-assert paths are
+        # deliberate.
+        log = logger.info if source != "manual" else logger.debug
         log(
             "set_{}: card={} kept existing {}={!r} (incoming {!r}@{} lost)",
             attr,

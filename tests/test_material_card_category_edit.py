@@ -286,7 +286,12 @@ def test_unchanged_manufacturer_not_restamped_but_clears_conflict(client, db_ses
 
 def test_blank_manufacturer_never_blanks_existing(client, db_session: Session):
     """The ladder never blanks a value (set_manufacturer contract) — the old raw write
-    could silently blank the maker here."""
+    could silently blank the maker here.
+
+    The rejection is surfaced via the showToast HX-Trigger (same feedback contract as
+    the category blank path): a deliberate clear-attempt must be distinguishable from a
+    successful save.
+    """
     card = _card(
         db_session,
         "ST2000NM0018",
@@ -302,3 +307,76 @@ def test_blank_manufacturer_never_blanks_existing(client, db_session: Session):
     db_session.refresh(card)
     assert card.manufacturer == "Seagate"
     assert card.manufacturer_source == "manual"
+    toast = _toast(resp)
+    assert toast is not None
+    assert "Manufacturer can't be cleared" in toast["message"]
+    assert "Seagate" in toast["message"]
+    assert toast["type"] == "warning"
+
+
+def test_unchanged_alias_manufacturer_not_restamped_with_seeded_alias_table(client, db_session: Session):
+    """Legacy cards store NON-canonical aliases ("TI" — pre-ladder data), and the edit
+    form round-trips the stored value verbatim.
+
+    With a populated manufacturers table
+    the no-re-stamp guard must compare canonical to CANONICAL: comparing
+    canonical("TI") == "Texas Instruments" against the RAW stored "TI" would see a
+    difference on every unrelated save and silently re-stamp the maker manual/100,
+    locking out every future enrichment correction. (The suite's default empty
+    manufacturers table makes normalize_brand_name a pass-through, so this test seeds
+    a real alias row to exercise the production path.)
+    """
+    from app.models import Manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
+    db_session.commit()
+    card = _card(db_session, "LM317T-ALIAS", manufacturer="TI")  # NULL provenance — legacy
+
+    resp = client.put(
+        f"/v2/partials/materials/{card.id}",
+        data={"manufacturer": "TI", "description": "Adjustable regulator"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.description == "Adjustable regulator"
+    assert card.manufacturer == "TI"  # not silently flipped to the canonical name
+    assert card.manufacturer_source is None  # no manual/100 re-stamp
+    assert card.manufacturer_tier is None
+
+
+def test_canonical_resubmit_of_stored_alias_not_restamped(client, db_session: Session):
+    """Canonical-to-canonical equality: re-submitting the CANONICAL form of a stored
+    alias ("Texas Instruments" over stored "TI") is the same maker, not an edit — it
+    must not be re-stamped manual/100 either."""
+    from app.models import Manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
+    db_session.commit()
+    card = _card(db_session, "LM317T-CANON", manufacturer="TI")
+
+    resp = client.put(
+        f"/v2/partials/materials/{card.id}",
+        data={"manufacturer": "Texas Instruments", "description": "Adj regulator"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "TI"
+    assert card.manufacturer_source is None
+    assert card.manufacturer_tier is None
+
+
+def test_alias_manufacturer_change_still_lands_with_seeded_alias_table(client, db_session: Session):
+    """A GENUINE maker change on an alias-stored card still routes through the ladder at
+    manual/100 (the canonical-to-canonical guard must not eat real edits)."""
+    from app.models import Manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
+    db_session.commit()
+    card = _card(db_session, "LM317T-EDIT", manufacturer="TI")
+
+    resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": "STMicroelectronics"})
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.manufacturer == "STMicroelectronics"
+    assert card.manufacturer_source == "manual"
+    assert card.manufacturer_tier == 100

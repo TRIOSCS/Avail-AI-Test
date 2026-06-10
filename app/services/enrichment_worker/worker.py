@@ -181,7 +181,10 @@ async def run_one_batch(
     chunks, and three callers with no commit of their own), so the batch's pending
     core-attr writes persist with its FIRST chunk commit; the batch-final commit below
     is the safety net for batches where the spec pass raises early or processes zero
-    chunks. Bounded by the worker's daily_cap (≤ daily_cap cards/day receive a spec
+    chunks — but NOT for a failed first-chunk COMMIT (the spec pass's rollback discards
+    the batch's pending writes with it, leaving nothing for the safety net; those cards
+    re-enter via the next batch's re-selection because enrichment_status rolled back
+    too). Bounded by the worker's daily_cap (≤ daily_cap cards/day receive a spec
     pass).
 
     Returns an empty dict if the batch is empty (caller should idle-sleep).
@@ -381,7 +384,9 @@ async def run_one_batch(
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
     # session. enrich_card_specs commits PER CHUNK (load-bearing — see its commit comment),
     # so the batch's pending writes above persist with its first chunk commit; the
-    # batch-final commit below covers an early raise / zero-chunk run.
+    # batch-final commit below covers an early raise / zero-chunk run (NOT a failed
+    # first-chunk commit — that rollback discards the batch's pending writes, and the
+    # cards re-select next batch).
     if enriched_ids:
         from app.services.spec_enrichment_service import enrich_card_specs
 
