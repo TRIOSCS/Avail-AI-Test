@@ -70,6 +70,7 @@ def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
     lifecycle = ai.get("lifecycle_status", "active")
 
     from app.services.category_normalizer import normalize_category
+    from app.services.spec_tiers import set_category
 
     cat = normalize_category(cat) or cat
     if cat not in VALID_CATEGORIES:
@@ -79,7 +80,9 @@ def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
 
     if desc:
         card.description = desc
-    card.category = cat
+    # Through the F1 ladder: a Haiku batch guess (claude_haiku, tier 40) fills an empty
+    # category but can never overwrite decode (85) / vendor (90) / TRIO (95) provenance.
+    set_category(card, cat, "claude_haiku", 0.5)
     card.lifecycle_status = lifecycle
     card.enrichment_source = "claude_haiku"
     card.enriched_at = datetime.now(timezone.utc)

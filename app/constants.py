@@ -476,6 +476,25 @@ class MaterialEnrichmentStatus(StrEnum):
     NOT_CATALOGUED = "not_catalogued"
 
 
+class MaterialCondition(StrEnum):
+    """Canonical stock-condition vocabulary for MaterialCard.condition.
+
+    Single source of truth for the column's documented value set — the model comment
+    (models/intelligence.py), the Condition global facet template, and the SP-Ingest
+    condition canonicalizer (services/source_ingest/clean.py) all speak this vocabulary.
+    Application-validated, no DB CHECK. NOTE: this is the card/facet vocabulary;
+    ``app.utils.normalization.normalize_condition`` is a separate lowercase vocab
+    (new/refurb/used) for search-result/offer rows — do not conflate the two.
+    """
+
+    NEW = "New"
+    RECERTIFIED = "Recertified"
+    REFURBISHED = "Refurbished"
+    USED = "Used"
+    PULLED = "Pulled"
+    UNKNOWN = "Unknown"
+
+
 class FruLinkKind(StrEnum):
     """Relationship kind for FruLink rows (IBM/Lenovo FRU crosswalk).
 

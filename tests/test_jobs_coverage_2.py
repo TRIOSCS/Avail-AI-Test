@@ -1921,6 +1921,13 @@ class TestApplyEnrichmentToCard:
         card = MagicMock()
         card.manufacturer = "Existing MFR"
         card.category = "Existing Cat"
+        # Real provenance values: the category now routes through spec_tiers.set_category,
+        # whose ladder math needs concrete tier/confidence (a manual=100 prior outranks
+        # the incoming digikey_api=90, so the category is kept).
+        card.category_source = "manual"
+        card.category_confidence = 1.0
+        card.category_tier = 100
+        card.category_updated_at = None
         card.normalized_mpn = "lm358"
         enrichment = {"manufacturer": "TI", "category": "IC", "source": "digikey", "confidence": 0.95}
         db = _mock_db()

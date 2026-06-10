@@ -1,8 +1,11 @@
 """Worker adapter: decode each card's MPN and persist the specs via record_spec.
 
-Runs in the enrichment worker's second pass (await-free, shared session), BEFORE the AI
-spec extractor, so the deterministic 0.95-confidence decode is the baseline the 0.85
-description-mined pass cannot overwrite. Does not commit — the caller manages the txn.
+Runs in the enrichment worker's second pass (await-free, shared session). The deterministic
+0.95-confidence decode (tier 85) is NOT protected by run-order: the F1 tier ladder in
+record_spec / set_category (app/services/spec_tiers.py) is authoritative. A later, lower-tier
+spec_extraction (tier 60) pass can never overwrite a decode value regardless of which ran
+first, and the decode's category write only wins over a lower-tier category. Does not commit
+— the caller manages the txn.
 """
 
 from collections import Counter
@@ -13,6 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import MaterialCard
 from app.services.mpn_decoder import decode_mpn
 from app.services.mpn_decoder._common import DECODE_SOURCE
+from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
 
 
@@ -35,9 +39,11 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     #                       deploy's reseed or drift after a failed/manual reseed).
     dropped_no_schema: Counter = Counter()
     dropped_out_of_enum: Counter = Counter()
-    # "card_category->decoded_commodity" -> cards whose existing category conflicts with the
-    # decoded commodity (whole decode skipped). A recurring pair is the signal that the
-    # category alias map (app/services/category_normalizer.py) needs another entry.
+    # "card_category->decoded_commodity" -> cards whose decoded commodity LOST the category
+    # ladder (set_category) against a different existing category — the decoded specs are then
+    # rejected by record_spec's schema lookup, so the decode contributes nothing. A recurring
+    # pair is the signal that the category alias map (app/services/category_normalizer.py)
+    # needs another entry.
     skipped_category_conflict: Counter = Counter()
     for card_id in card_ids:
         # Per-card isolation: a single bad card must never abort decode for the rest of the batch.
@@ -49,12 +55,6 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             if result is None:
                 continue
             card_cat = (card.category or "").lower().strip()
-            if card_cat and card_cat != result.commodity:
-                # Decoded commodity conflicts with the card's category — skip. A shared spec_key
-                # (capacity_gb exists for hdd/ssd/dram) must not write a drive's capacity onto a
-                # differently-categorized card. An existing category is authoritative.
-                skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
-                continue
             cache = schema_caches.get(result.commodity)
             if cache is None:
                 cache = schema_caches[result.commodity] = load_schema_cache(db, result.commodity)
@@ -70,30 +70,43 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             # nested txn rolls back ONLY this card, keeping the outer transaction usable and the
             # totals honest (incremented after a clean release).
             with db.begin_nested():
-                if not card_cat:
-                    # The decoder's commodity is regex-gated against the strict manufacturer
-                    # scheme (e.g. an `M393A…` part is unambiguously a Samsung DDR4 RDIMM ⇒ dram),
-                    # so an un-categorized card can be categorized FROM the decode. Only ever SET a
-                    # missing category — an existing one is authoritative and never overwritten.
-                    card.category = result.commodity
-                card_written = sum(
-                    1
-                    for spec_key, value in result.specs.items()
-                    if record_spec(
-                        db,
-                        card_id,
-                        spec_key,
-                        value,
-                        source=DECODE_SOURCE,
-                        confidence=result.confidence,
-                        schema_cache=cache,
+                # The decoder's commodity is regex-gated against the strict manufacturer scheme
+                # (e.g. an `M393A…` part is unambiguously a Samsung DDR4 RDIMM ⇒ dram), so it is
+                # canonical and safe to feed the ladder. set_category (tier 85) writes it iff it
+                # beats the card's existing category provenance — it corrects a lower-tier guess
+                # (purging the old commodity's stale facets) but never overwrites a vendor/manual
+                # category.
+                did_categorize = set_category(card, result.commodity, DECODE_SOURCE, result.confidence)
+                # EXPLICIT cross-commodity guard: if the card's category (post-ladder) is not the
+                # decoded commodity, write NO specs — a drive's capacity must never land on a
+                # non-drive card. Do not rely on schema-cache keying to enforce this: the schemas
+                # overlap across commodities (capacity_gb exists for hdd/ssd/dram), so a
+                # cache-miss is an accident of plumbing, not an invariant.
+                if (card.category or "").lower().strip() != result.commodity:
+                    card_written = 0
+                else:
+                    card_written = sum(
+                        1
+                        for spec_key, value in result.specs.items()
+                        if record_spec(
+                            db,
+                            card_id,
+                            spec_key,
+                            value,
+                            source=DECODE_SOURCE,
+                            confidence=result.confidence,
+                            schema_cache=cache,
+                        )
                     )
-                )
             # Reached only on a clean savepoint release — so a rolled-back card contributes nothing.
             decoded_cards += 1
             written += card_written
-            if not card_cat:
+            if did_categorize:
                 categorized += 1
+            elif card_cat and card_cat != result.commodity:
+                # The category write lost the ladder against a DIFFERENT existing category —
+                # the decoded specs were rejected too (schema mismatch), so surface the pair.
+                skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
         except Exception:
             logger.exception("mpn-decode: failed on card_id={}", card_id)
     if dropped_no_schema or dropped_out_of_enum:
@@ -107,8 +120,8 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
         )
     if skipped_category_conflict:
         logger.warning(
-            "mpn-decode: {} cards skipped — existing card category conflicts with the decoded "
-            "commodity for {} (a recurring pair may mean category_normalizer.CATEGORY_ALIASES "
+            "mpn-decode: {} cards kept their existing category — the decoded commodity lost the "
+            "category ladder for {} (a recurring pair may mean category_normalizer.CATEGORY_ALIASES "
             "needs an entry)",
             sum(skipped_category_conflict.values()),
             dict(skipped_category_conflict),

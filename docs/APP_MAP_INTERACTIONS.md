@@ -870,40 +870,41 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> Stamps material_cards.enriched_at
 
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
-commit; the ordering realizes the confidence tiering — each deterministic layer
-lands before the next, and each downstream writer carries its own guard that
-skips keys already held at STRICTLY higher confidence. record_spec itself only
-protects vendor-API values — its cross-source rule is otherwise latest-write-wins —
-so a writer claiming confidence >= a prior still overwrites it (e.g. an AI value
-self-reported at 0.95 can replace an mpn_decode 0.95) until the SP2 source-tier
-ladder lands in record_spec):
+commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
+every write through the F1 source-tier ladder (app/services/spec_tiers.py —
+mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > spec_extraction 60; vendor
+APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
+of the confidence it claims or which pass ran first, so the old per-writer
+"skip keys already held at higher confidence" pre-gates are REMOVED — the ladder
+owns arbitration in one place:
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
-       decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
+       decode, source="mpn_decode" (tier 85), confidence 0.95
+       (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
        crosswalk decode (IBM/Lenovo FRU spare PNs inherit the STRICT-INTERSECTED
        decode of their fru_links rel_kind='mfg_model' models — only spec keys present
        in every decode with equal values write; a commodity disagreement skips the
-       card), source="fru_matrix_decode", confidence 0.93
+       card), source="fru_matrix_decode" (tier 84), confidence 0.93
        (settings.fru_crosswalk_enrich_enabled). Zero LLM/network; ONE fru_links query
        per batch. Scope is the FULL batch ids, NOT enriched_ids — FRU spares finish
        not_found, and the pass never touches enrichment_status. Fills a NULL category
-       from the agreed commodity (mirroring mpn_decode; an existing category is
-       authoritative — a mismatch skips the card); never writes manufacturer; never
+       from the agreed commodity via spec_tiers.set_category (an existing DIFFERENT
+       category skips the card before any write); never writes manufacturer; never
        writes the reverse direction (a card that IS a mfg_model already decodes
-       first-party at 0.95). Pre-gates each key on the prior entry's confidence
-       (> 0.93 skipped) like desc_parse, so mpn_decode/vendor-API values stay
-       authoritative. Isolation is two-level: decode/intersect failures are caught
-       per FRU, write failures per card (SAVEPOINT) — both surface in the returned
-       `failed` count so the worker's stats line distinguishes a no-op batch from a
-       crashed one. Schema-drift drops (no schema row / out-of-enum value) emit the
-       same aggregate WARNING as the mpn-decode writer.
+       first-party at tier 85). The ladder (84 < 85, < vendor 90) guarantees it never
+       overwrites mpn_decode/vendor values — no per-writer pre-gate. Isolation is
+       two-level: decode/intersect failures are caught per FRU, write failures per
+       card (SAVEPOINT) — both surface in the returned `failed` count so the worker's
+       stats line distinguishes a no-op batch from a crashed one. Schema-drift drops
+       (no schema row / out-of-enum value) emit the same aggregate WARNING as the
+       mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
        description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
        dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
        part-master/inventory descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre
        Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `Tape, JAG 7`), source=
-       "desc_parse", confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
+       "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
        extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"/
        "Card,"/"Library,"…) and conflicting tokens, while NEUTRAL leads (packaging
        words/brands/SPS- prefixes: "ASSY,"/"MSI,"/"SPS-PCA,"…) fall through to
@@ -913,16 +914,16 @@ ladder lands in record_spec):
        token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
        Only cards already categorized to one of the eight commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The writer skips keys already held at higher confidence, so mpn_decode 0.95,
-       fru_matrix_decode 0.93 and vendor-API values stay authoritative. The five
-       phase-2 commodities have no MPN decoders, so desc_parse is their top
-       non-vendor deterministic source.
+       The F1 ladder (desc_parse 83 < fru_matrix_decode 84 < mpn_decode 85 <
+       vendor 90) keeps decode/vendor values authoritative — no per-writer
+       pre-gate. The five phase-2 commodities have no MPN decoders, so
+       desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
-       source="spec_extraction", facets gated at confidence >= 0.85. Applies the
-       same strictly-higher-confidence skip guard, so it never clobbers an
-       mpn_decode/fru_matrix_decode/desc_parse key it under-claims against (an AI
-       confidence >= the deterministic prior still wins — see the tiering caveat
-       above).
+       source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
+       (FACET_MIN_CONF — an AI output-quality floor, not cross-source
+       arbitration). The ladder guarantees it never clobbers an
+       mpn_decode/fru_matrix_decode/desc_parse/vendor key, even when it
+       self-reports 0.95+.
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
@@ -944,14 +945,114 @@ spec_enrichment_service.py  — SECOND PASS
     |             free-text summary bar because a wrong spec value silently mis-filters a part)
     |
     +---> spec_write_service.record_spec()
-    |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values)
-    |       +---> DB: UPSERT material_spec_facets (one row per spec facet per card)
+    |       +---> spec_tiers.tier_for(source) + resolve(existing, incoming)  — F1 LADDER
+    |       |       (single uniform conflict rule for ALL sources; see contract below)
+    |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values
+    |       |        incl. tier) — only when resolve() says the incoming write wins
+    |       +---> DB: UPSERT material_spec_facets (incl. source/confidence/tier mirroring the
+    |       |        winning JSONB entry — a losing write never mutates the facet)
     |       +---> DB: UPDATE material_cards.specs_summary (plain-text key-spec summary)
     |
     +---> DB: UPDATE material_cards.specs_enriched_at = now()
     |       (idempotent gate: NULL cards are processed; non-NULL cards are skipped
     |        unless force=True, e.g. from the Enrich button)
+```
 
+### spec_tiers — source→tier provenance ladder (SP2/F1+F2, `app/services/spec_tiers.py`)
+
+The single authoritative "which source wins" rule, so source-execution ORDER is no longer
+load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest write wins").
+
+```
+SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
+             · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
+             · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
+             · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
+               floor for a valued category with NULL provenance) ·
+               {ai_guess,claude_opus_inferred,claude_haiku}:40
+             (unknown → 0 with a once-per-source WARNING — an unregistered writer loses
+              every conflict; migration 096 carries a CASE snapshot of this map, pinned by
+              a sync test)
+
+tier_for(source) -> int                 # SOURCE_TIER.get(source, 0); warns once on unknown
+
+resolve(existing, incoming) -> bool      # incoming wins iff its (tier, confidence, updated_at)
+                                         # tuple is STRICTLY greater. existing=None → win.
+                                         # higher tier always overrides; equal tier → higher
+                                         # confidence; exact tie → newer updated_at; full tie → keep.
+                                         # Pure function — no DB, no side effects.
+
+set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB-touching helper
+    +---> normalize_category(value); None (off-vocab/empty) → return False, no write
+    +---> build incoming{tier,confidence,now}; existing from card.category_* (None if category
+    |     NULL; valued-but-NULL-provenance → legacy_backfill floor tier 50, same as the
+    |     migration backfill, so an AI guess can't flip un-routed legacy data)
+    +---> resolve(): on win set card.category + category_source/confidence/tier/updated_at,
+    |     return True; else leave card untouched, return False  (a lower-tier source can't
+    |     overwrite a higher-tier category; junk can't blank a real one). Tie-breaks compare
+    |     category_updated_at (the category's OWN timestamp), never the card-wide updated_at.
+    +---> on a win that CHANGES the category: purge the OLD commodity's MaterialSpecFacet
+    |     rows + their specs_structured mirrors (logged at INFO) — a re-categorized card
+    |     must not keep matching the old commodity's deep-filters
+    +---> write=False = read-only twin (same verdict, zero mutation) — used by the
+          SP-Ingest dry run so its report can't drift from --apply
+```
+
+Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
+`mpn_decoder/writer.py` (decode category via `set_category`, tier 85),
+`fru_crosswalk_enrich.py` (tier 84), the SP-Ingest pipeline (`source_ingest/ingest.py` —
+TRIO part-master categories via `set_category` at trio_source:95 / trio_source_ai:88,
+specs via `record_spec` + dry-run parity via `spec_would_write`), the manual edit
+endpoint `routers/htmx_views.py::update_material_card` (manual:100 — a deliberate human
+change always wins and purges the old commodity's facets; an UNCHANGED re-submitted value
+is NOT re-stamped manual, and off-vocab/blank values are rejected with a `showToast`
+warning instead of persisting), and ALL three remaining
+category writers — `enrichment.py` (connector `{name}_api` tiers), `material_enrichment_
+service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
+(claude_opus_inferred:40) — now route through `set_category` (no direct `card.category`
+assignment remains; SP3 adds the `@validates` hardening). The deterministic decode is
+protected by its tier (85), not by running before the fru-crosswalk (84) / desc-parse
+(83) / AI spec (60) passes — the old per-writer confidence pre-gates are removed.
+
+### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
+
+```
+python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]
+    |
+    v
+parsers.py     — parse_inventory_sheet (.csv/.xlsx/.txt, header auto-detect) +
+    |            parse_sfdc_material_master (streams the multi-hundred-MB
+    |            LSC1__Material__c.csv row by row) + parse_sfdc_manufacturers
+    |            (lookup-ID → name; raw Salesforce IDs are never emitted)
+    v
+clean.py       — clean_record: MPN suffix strip + dedup key (normalize_mpn_key),
+    |            _x000D_/control scrub, condition → constants.MaterialCondition
+    |            (None when the source carries none — NEVER a synthetic "Unknown"),
+    |            normalize_trio_category (TRIO-scoped codes, e.g. bare "Memory"→dram),
+    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops
+    v
+consolidate.py — group by normalized_mpn → ConsolidatedPart per MPN (longest desc,
+    |            modal manufacturer/condition, highest-priority-kind category,
+    |            qty sum, sfdc_master>inventory_sheet spec merge); un-cleaned
+    |            records (empty dedup key) are counted + WARNed, never silent
+    v
+ai_correct.py  — OPTIONAL (--ai-correct): one Claude call per part under the
+    |            no-fabrication guardrail; per-PART failure isolation, fail-fast on
+    |            ClaudeUnavailable/Auth, consecutive-failure abort; returns
+    |            {corrected, failed} for the report — an EMPTY structured result
+    |            (claude_structured → None, no tool_use block) counts as failed and
+    |            toward the abort streak; corrected counts only applied results
+    v
+ingest.py      — AUGMENT material_cards: category via set_category (trio_source:95 /
+                 trio_source_ai:88), specs via record_spec, description/condition
+                 fill-only-when-empty ("Unknown" == empty). Per-card SAVEPOINTs;
+                 tallies merge only after a clean release; failed parts counted +
+                 sampled in the report. apply=False (DEFAULT) = dry run through the
+                 SAME gates (set_category(write=False) + spec_would_write) so the
+                 go/no-go report matches --apply exactly.
+```
+
+```
 Startup backfill:
     _backfill_material_cards() in startup.py
     +---> Runs at application boot

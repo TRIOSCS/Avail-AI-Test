@@ -4,8 +4,9 @@ from dataclasses import dataclass, field
 
 # Source tag + confidence for everything these decoders write (see record_spec).
 DECODE_SOURCE = "mpn_decode"
-DECODE_CONFIDENCE = 0.95  # deterministic rule — outranks AI description mining (0.85),
-# but record_spec never lets it overwrite a protected vendor-API value.
+DECODE_CONFIDENCE = 0.95  # deterministic rule. The F1 tier ladder (app/services/spec_tiers.py)
+# maps mpn_decode to tier 85, so it outranks AI description mining (spec_extraction, tier 60)
+# regardless of write order, and never overwrites a vendor-API (tier 90) or manual (100) value.
 
 
 @dataclass

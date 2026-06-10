@@ -33,7 +33,13 @@ async def main(limit: int = 500, batch_size: int = 30):
         stats = await enrich_material_cards(card_ids, db, batch_size=batch_size)
         logger.info("Re-enrichment complete: {}", stats)
 
-        # Backfill MaterialSpecFacet rows from updated specs_structured
+        # Backfill MaterialSpecFacet rows from updated specs_structured. Each entry is
+        # re-recorded with ITS OWN provenance (source/confidence from the JSONB entry,
+        # falling back to spec_extraction) — never an arbitrary tag like
+        # card.enrichment_source, which is not a spec_tiers.SOURCE_TIER key and would
+        # rank the re-record at tier 0 (losing to every ranked source). A same-source
+        # re-record at equal (tier, confidence) wins on the newer timestamp, which is
+        # exactly what refreshes the facet projection.
         from app.services.spec_write_service import record_spec
 
         enriched_cards = db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()
@@ -42,15 +48,29 @@ async def main(limit: int = 500, batch_size: int = 30):
             if not card.specs_structured or not card.category:
                 continue
             for spec_key, spec_data in card.specs_structured.items():
-                value = spec_data.get("value") if isinstance(spec_data, dict) else spec_data
+                if isinstance(spec_data, dict):
+                    value = spec_data.get("value")
+                    entry_source = str(spec_data.get("source") or "spec_extraction")
+                    # Explicit-None check, NOT `or`: a stored confidence of 0.0 is a
+                    # legitimate value — `or` would inflate it to 0.85, and the same-source
+                    # equal-tier re-record would then PERSIST that manufactured confidence
+                    # (0.85 > 0.0 wins the ladder), letting the entry beat other same-tier
+                    # sources it never legitimately outranked. The 0.85 default applies
+                    # only to entries with NO stored confidence.
+                    conf = spec_data.get("confidence")
+                    entry_confidence = float(conf) if conf is not None else 0.85
+                else:
+                    value = spec_data
+                    entry_source = "spec_extraction"
+                    entry_confidence = 0.85
                 if value is not None:
                     record_spec(
                         db,
                         int(card.id),
                         spec_key,
                         value,
-                        source=str(card.enrichment_source or "reenrich"),
-                        confidence=0.85,
+                        source=entry_source,
+                        confidence=entry_confidence,
                     )
                     facet_count += 1
         db.commit()

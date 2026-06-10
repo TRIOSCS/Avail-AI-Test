@@ -292,10 +292,12 @@ async def run_one_batch(
     web_state["web_calls"] = web_calls_today
 
     # Deterministic MPN→spec decode (storage/DRAM): zero-LLM, regex-gated, enum-validated by
-    # record_spec. Runs FIRST so its 0.95 values are the baseline — both downstream writers
-    # (desc-parse, AI spec pass) skip keys already held at strictly higher confidence; an AI
-    # value claiming conf >= a prior can still overwrite until the SP2 source-tier ladder
-    # lands in record_spec. Same session, committed together below.
+    # record_spec. Run order is NOT load-bearing: record_spec's F1 tier ladder
+    # (app/services/spec_tiers.py — mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 >
+    # spec_extraction 60) arbitrates every write, so a downstream pass can never overwrite a
+    # decode value regardless of the confidence it claims or which pass ran first. The old
+    # per-writer "skip keys already held at higher confidence" pre-gates are gone — the
+    # ladder owns arbitration in one place. Same session, committed together below.
     if enriched_ids:
         from app.config import settings
 
@@ -309,14 +311,14 @@ async def run_one_batch(
 
     # Deterministic FRU crosswalk decode: FRU spare PNs (IBM/Lenovo) inherit the
     # strict-intersected decode of their approved mfg_model links, source=
-    # "fru_matrix_decode" at 0.93 — between mpn-decode (0.95, first-party decode is
-    # stronger evidence) and desc-parse (0.90; for cards in enriched_ids, a missing
-    # category the crosswalk fills lets desc-parse pick them up in the SAME batch —
-    # not_found FRU spares are NOT in enriched_ids, so they only benefit from the
-    # crosswalk itself this batch). Scope is the
-    # FULL batch (batch_ids, not enriched_ids): not_found/quarantined cards are safe to
-    # include — the pass is deterministic and free, and it never touches
-    # enrichment_status. Same session, committed together below.
+    # "fru_matrix_decode" (ladder tier 84 — below first-party mpn_decode 85, above
+    # desc_parse 83; record_spec's ladder arbitrates, not run order). For cards in
+    # enriched_ids, a missing category the crosswalk fills lets desc-parse pick them up
+    # in the SAME batch — not_found FRU spares are NOT in enriched_ids, so they only
+    # benefit from the crosswalk itself this batch. Scope is the FULL batch (batch_ids,
+    # not enriched_ids): not_found/quarantined cards are safe to include — the pass is
+    # deterministic and free, and it never touches enrichment_status. Same session,
+    # committed together below.
     if batch_ids:
         from app.config import settings
 
@@ -329,10 +331,11 @@ async def run_one_batch(
                 logger.exception("ENRICH_WORKER: fru-crosswalk failed over {} cards", len(batch_ids))
 
     # Deterministic description→spec extraction (storage/DRAM token grammar): zero-LLM,
-    # enum-validated by record_spec. Runs AFTER mpn-decode (its 0.95 values outrank this
-    # pass's 0.90 — the writer skips higher-confidence keys) and BEFORE the AI spec pass
-    # (>= 0.85, which applies the same strictly-higher-confidence skip guard), on the same
-    # shared post-await session. Committed together below.
+    # enum-validated by record_spec. source="desc_parse" (ladder tier 83): the F1 ladder —
+    # not run order, and no per-writer pre-gates — guarantees it never overwrites
+    # mpn_decode (85) / fru_matrix_decode (84) / vendor-API (90) values and always beats
+    # the AI spec pass (spec_extraction, 60) regardless of the confidence either claims.
+    # Same shared post-await session, committed together below.
     if enriched_ids:
         from app.config import settings
 

@@ -1,11 +1,11 @@
 """Worker adapter: extract each card's description specs and persist via record_spec.
 
-Runs in the enrichment worker's second pass (await-free, shared session), AFTER the
-mpn-decode pass (0.95) and BEFORE the AI spec extractor (0.85), so the deterministic
-0.90 description grammar lands between them. Keys an earlier pass already holds at
-HIGHER confidence (mpn_decode 0.95, vendor APIs) are skipped here — record_spec's
-current cross-source rule is latest-write-wins, so this guard is what keeps the
-decode baseline authoritative until the SP2 source-tier ladder lands in record_spec.
+Runs in the enrichment worker's second pass (await-free, shared session), between the
+mpn-decode pass and the AI spec extractor. Run order is NOT load-bearing: record_spec's
+F1 tier ladder (app/services/spec_tiers.py) arbitrates every write — desc_parse is
+tier 83, so it can never overwrite an mpn_decode (85) / vendor-API (90) / trio_source
+(95) value and always beats AI spec_extraction (60), regardless of which pass ran
+first. (The old per-writer confidence pre-gate is gone — the ladder owns arbitration.)
 Unlike mpn_decoder/writer.py this NEVER writes a category: descriptions are not a
 regex-gated commodity proof, so only cards already categorized to a handled
 commodity (SPEC_COMMODITIES: hdd/ssd/dram/power_supplies/displays/tape_drives/gpu/
@@ -45,16 +45,11 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
         return 0
     if schema_cache is None:
         schema_cache = load_schema_cache(db, category)
-    prior_specs = card.specs_structured or {}
     written = 0
     with db.begin_nested():
+        # No pre-gate here: record_spec's F1 tier ladder rejects any write that loses to a
+        # higher-(tier, confidence, updated_at) prior (e.g. mpn_decode at tier 85 > 83).
         for spec_key, value in result.specs.items():
-            prior = prior_specs.get(spec_key)
-            # Guard against the SAME confidence the write below uses (result.confidence,
-            # always DESC_CONFIDENCE today) so the skip threshold and the written value
-            # can never disagree: mpn_decode (0.95) / vendor-API values outrank this pass.
-            if prior and float(prior.get("confidence") or 0.0) > result.confidence:
-                continue
             if record_spec(
                 db,
                 int(card.id),

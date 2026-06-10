@@ -407,13 +407,14 @@ class TestEnrichMaterialCard:
 
 class TestApplyEnrichmentToCard:
     def test_sets_manufacturer_and_category(self, db_session):
-        """Sets manufacturer and category when not already set."""
+        """Sets manufacturer and canonical category (via the ladder) when not already
+        set."""
         from app.services.enrichment import _apply_enrichment_to_card
 
         card = _make_card(db_session)
         enrichment = {
             "manufacturer": "Texas Instruments",
-            "category": "Voltage Regulators",
+            "category": "IC",  # alias → canonical "ics_other"
             "source": "digikey",
             "confidence": 0.95,
         }
@@ -425,7 +426,32 @@ class TestApplyEnrichmentToCard:
             _apply_enrichment_to_card(card, enrichment, db_session)
 
         assert card.manufacturer == "Texas Instruments"
-        assert card.category == "Voltage Regulators"
+        # The category routes through spec_tiers.set_category: canonical key + provenance
+        # stamped at the connector's ladder tier (digikey_api = 90).
+        assert card.category == "ics_other"
+        assert card.category_source == "digikey_api"
+        assert card.category_tier == 90
+
+    def test_off_vocab_category_is_rejected_not_persisted(self, db_session):
+        """Off-vocab category junk is never written (set_category rejects it) — the old
+        `normalize_category(raw) or raw` junk fallback is gone."""
+        from app.services.enrichment import _apply_enrichment_to_card
+
+        card = _make_card(db_session)
+        enrichment = {
+            "manufacturer": "Texas Instruments",
+            "category": "Voltage Regulators",  # no canonical alias
+            "source": "digikey",
+            "confidence": 0.95,
+        }
+
+        with (
+            patch("app.services.enrichment.classify_material_card", return_value={}),
+            patch("app.services.enrichment.tag_material_card"),
+        ):
+            _apply_enrichment_to_card(card, enrichment, db_session)
+
+        assert card.category is None  # junk rejected, column left NULL
 
     def test_does_not_overwrite_existing_manufacturer(self, db_session):
         """Does not overwrite existing manufacturer."""

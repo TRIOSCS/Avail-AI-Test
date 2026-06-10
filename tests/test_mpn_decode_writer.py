@@ -141,17 +141,25 @@ def test_decode_writes_ecc_false(db_session: Session):
     assert _facets(db_session, card.id)["ecc"] == "false"
 
 
-def test_decode_skips_on_category_mismatch(db_session: Session):
-    # A drive MPN on a card mis-categorized as dram must NOT write (commodity guard prevents
-    # writing a drive's capacity onto a DRAM card via the shared capacity_gb key). An EXISTING
-    # category is authoritative — it is never overwritten by the decode. The skip is NOT
-    # silent: it is counted in the returned stats (the worker INFO-logs them every batch) and
-    # WARNed with the (card_category -> decoded_commodity) pair, because a recurring pair is
-    # exactly the signal that the category alias map needs another entry.
+def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
+    # A drive MPN on a card whose "dram" category came from a HIGHER tier (vendor, tier 90)
+    # must NOT be re-categorized by the decode (tier 85). The ladder rejects the decode's
+    # category write, so set_category returns False, categorized stays 0, and no drive specs
+    # are written onto the DRAM card (record_spec rejects the cross-commodity capacity_gb).
+    # The ladder loss is NOT silent: it is counted in the returned stats and WARNed with the
+    # (card_category -> decoded_commodity) pair, because a recurring pair is exactly the
+    # signal that the category alias map needs another entry.
     from loguru import logger as loguru_logger
 
     seed_commodity_schemas(db_session)
-    card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category="dram")
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="dram",
+        category_source="digikey_api",
+        category_confidence=1.0,
+        category_tier=90,
+    )
     db_session.add(card)
     db_session.flush()
 
@@ -161,10 +169,39 @@ def test_decode_skips_on_category_mismatch(db_session: Session):
         stats = decode_and_record_specs(db_session, [card.id])
     finally:
         loguru_logger.remove(sink_id)
-    assert stats == {"decoded": 0, "written": 0, "categorized": 0, "skipped_category_conflict": 1}
+    assert stats == {"decoded": 1, "written": 0, "categorized": 0, "skipped_category_conflict": 1}
     assert any("dram->hdd" in w for w in warnings), warnings
-    assert _facets(db_session, card.id) == {}
-    assert card.category == "dram"  # untouched
+    assert card.category == "dram"  # higher-tier category preserved
+    # The card's category is still "dram", so a drive's capacity_gb has no dram schema match
+    # and is rejected — nothing drive-specific lands on the DRAM card.
+    assert "capacity_gb" not in _facets(db_session, card.id)
+
+
+def test_decode_recategorizes_low_tier_category(db_session: Session):
+    # A drive MPN on a card mis-categorized as "dram" from a LOW tier (ai_guess, tier 40)
+    # IS corrected by the decode (tier 85): the ladder now governs, so the card becomes "hdd"
+    # and the drive specs land. This is the override half of the new ladder semantics.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="dram",
+        category_source="claude_opus_inferred",
+        category_confidence=0.4,
+        category_tier=40,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    stats = decode_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats["categorized"] == 1
+    assert stats["skipped_category_conflict"] == 0
+    assert card.category == "hdd"  # corrected by the higher-tier decode
+    assert card.category_source == "mpn_decode"
+    assert card.category_tier == 85
+    assert _facets(db_session, card.id)["capacity_gb"] == 4000
 
 
 def test_decode_skips_unrecognized_mpn(db_session: Session):
@@ -194,6 +231,8 @@ def test_decode_categorizes_uncategorized_card(db_session: Session):
     assert stats["decoded"] == 1
     assert stats["written"] >= 3
     assert card.category == "hdd"  # set from the decode
+    assert card.category_source == "mpn_decode"  # provenance recorded via set_category
+    assert card.category_tier == 85
     f = _facets(db_session, card.id)
     assert f["capacity_gb"] == 4000
     assert f["form_factor"] == '3.5"'
@@ -205,7 +244,16 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
     # so sibling cards in the same batch still commit and the counters stay honest.
     seed_commodity_schemas(db_session)
     bad = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category=None)
-    good = MaterialCard(normalized_mpn="st8000nm0055", display_mpn="ST8000NM0055", category="hdd")
+    # The good card already carries a higher-tier (vendor) "hdd" category, so the decode does
+    # NOT re-categorize it — isolating this test to the savepoint/rollback behavior on `bad`.
+    good = MaterialCard(
+        normalized_mpn="st8000nm0055",
+        display_mpn="ST8000NM0055",
+        category="hdd",
+        category_source="digikey_api",
+        category_confidence=1.0,
+        category_tier=90,
+    )
     db_session.add_all([bad, good])
     db_session.flush()
 

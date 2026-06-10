@@ -153,10 +153,11 @@ def test_card_manufacturer_never_written(db_session: Session):
     assert card.manufacturer == "IBM"
 
 
-def test_confidence_guard_skips_higher_prior_overwrites_lower(db_session: Session):
-    # A prior key held at confidence > 0.93 (mpn_decode 0.95) is skipped; a prior
-    # held lower (spec_extraction 0.85) is overwritten — record_spec alone is
-    # latest-write-wins, so this pre-gate is what keeps the decode baseline authoritative.
+def test_ladder_skips_higher_tier_prior_overwrites_lower(db_session: Session):
+    # record_spec's F1 tier ladder arbitrates: a prior mpn_decode key (tier 85,
+    # backfilled in-memory from its source) beats the incoming fru_matrix_decode (84)
+    # and is skipped; a prior spec_extraction key (tier 60) loses and is overwritten.
+    # The writer carries NO pre-gate of its own.
     seed_commodity_schemas(db_session)
     card = _card(
         db_session,
@@ -174,7 +175,14 @@ def test_confidence_guard_skips_higher_prior_overwrites_lower(db_session: Sessio
 
     assert stats["written"] == 2  # form_factor overwritten + usage_class fresh; capacity skipped
     specs = card.specs_structured
-    assert specs["capacity_gb"] == {"value": 8000, "source": "mpn_decode", "confidence": 0.95, "updated_at": "x"}
+    # The mpn_decode prior survives COMPLETELY untouched: record_spec backfills the legacy
+    # tier on a COPY for the comparison and never mutates a losing entry in place.
+    assert specs["capacity_gb"] == {
+        "value": 8000,
+        "source": "mpn_decode",
+        "confidence": 0.95,
+        "updated_at": "x",
+    }
     assert specs["form_factor"]["value"] == '3.5"'
     assert specs["form_factor"]["source"] == FRU_DECODE_SOURCE
     assert specs["usage_class"]["source"] == FRU_DECODE_SOURCE

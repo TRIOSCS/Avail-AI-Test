@@ -1,0 +1,244 @@
+"""tests/test_source_ingest_parsers.py — SP-Ingest parsers (sheet + SFDC master).
+
+Covers: app/services/source_ingest/parsers.py — header-detected inventory-sheet parsing
+across .csv/.txt and SFDC part-master streaming (IsDeleted skip, OEM/description/category
+fallbacks, deep-facet emission). Fixtures are tiny fake CSVs + a staged-style .txt capture.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from app.services.source_ingest.models import (
+    SOURCE_KIND_INVENTORY_SHEET,
+    SOURCE_KIND_SFDC_MASTER,
+)
+from app.services.source_ingest.parsers import (
+    parse_inventory_sheet,
+    parse_sfdc_manufacturers,
+    parse_sfdc_material_master,
+)
+
+_SFDC_HEADER = (
+    "Id,IsDeleted,LSC1__Material_Number__c,LSC1__OEM__c,Brand__c,"
+    "LSC1__Manufacturer_Brand__c,Material_Description__c,"
+    "LSC1__Material_Detail_Description__c,LSC1__Material_Short_Description__c,"
+    "LSC1__Common_Name__c,LSC1__Category__c,Commodity_Code__c,"
+    "LSC1__Total_Available_Inventory__c,Capacity__c,Legacy_RPM__c,Form_Factor__c"
+)
+
+
+def _write(path: Path, lines: list[str]) -> Path:
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_parse_inventory_csv_maps_columns(tmp_path):
+    csv_path = _write(
+        tmp_path / "inv.csv",
+        [
+            "Part Number,ProductDescription,Whse,Condition,Commodity,On Hand,Last Cost",
+            '00AR327 - Pull,"HDD, 6Gbps 1.2TB 10K 2.5 Inch HDD, IBM",4SALE,Pull,HDD,354,$4.00',
+            "005052089 - Pull,4TB 7.2K Rpm 3.5inch 12gbps Sas HDD,4SALE,Pull,HDD,142,$0.00",
+        ],
+    )
+    recs = list(parse_inventory_sheet(csv_path))
+    assert len(recs) == 2
+    r0 = recs[0]
+    assert r0.raw_mpn == "00AR327 - Pull"  # suffix still present (clean.py strips it)
+    assert r0.description == "HDD, 6Gbps 1.2TB 10K 2.5 Inch HDD, IBM"
+    assert r0.condition == "Pull"
+    assert r0.category == "HDD"
+    assert r0.quantity == 354
+    assert r0.source_kind == SOURCE_KIND_INVENTORY_SHEET
+    assert r0.source_file == "inv.csv"
+
+
+def test_parse_inventory_firesale_description_header(tmp_path):
+    # Firesale uses "Description" (not "ProductDescription") and a "On Hand" with thousands sep.
+    csv_path = _write(
+        tmp_path / "fire.csv",
+        [
+            "Part Number,Description,Whse,Condition,Commodity,On Hand",
+            'BLM21SP331SH1D,"Ferrite Beads 330 OHM, Murata Electronics",4SALE,New,Other,"2,936"',
+        ],
+    )
+    recs = list(parse_inventory_sheet(csv_path))
+    assert len(recs) == 1
+    assert recs[0].quantity == 2936
+    assert recs[0].category == "Other"
+
+
+def test_parse_inventory_txt_capture_skips_preamble(tmp_path):
+    # The staged .txt captures carry a prose preamble before the real tab-delimited header.
+    txt = _write(
+        tmp_path / "Inventory_sample.txt",
+        [
+            "SOURCE: OneDrive — Inventory 2.12.26.xlsx",
+            "Fetched via MCP read_resource — TRUNCATED.",
+            "Columns: Part Number | ProductDescription | Whse | Condition | Commodity | On Hand",
+            "",
+            "Part Number\tProductDescription\tWhse\tCondition\tCommodity\tOn Hand\tInventory Days\tLast Cost",
+            "00AJ660 - Pull\tMemory, 16GB MEMORY DDR3 1600MHZ, IBM\t4SALE\tPull\tMEMORY\t6\t20\t$7.62",
+            "(... continues; tool truncated.)",
+        ],
+    )
+    recs = list(parse_inventory_sheet(txt))
+    assert len(recs) == 1  # preamble + trailing note ignored; one real data row
+    assert recs[0].raw_mpn == "00AJ660 - Pull"
+    assert recs[0].quantity == 6
+
+
+def test_parse_sfdc_master_maps_and_emits_specs(tmp_path):
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            'a01,false,ST4000NM0035,Seagate,,,4TB Enterprise HDD,,,,hdd,,12,4000,7200,"3.5"""',
+        ],
+    )
+    recs = list(parse_sfdc_material_master(csv_path))
+    assert len(recs) == 1
+    r = recs[0]
+    assert r.raw_mpn == "ST4000NM0035"
+    assert r.manufacturer == "Seagate"  # LSC1__OEM__c primary
+    assert r.description == "4TB Enterprise HDD"
+    assert r.category == "hdd"
+    assert r.quantity == 12
+    assert r.source_kind == SOURCE_KIND_SFDC_MASTER
+    # Deep facets mapped to app spec_keys, only non-empty emitted.
+    assert r.specs["capacity_gb"] == "4000"
+    assert r.specs["rpm"] == "7200"
+    assert r.specs["form_factor"] == '3.5"'
+
+
+def test_parse_sfdc_master_skips_isdeleted(tmp_path):
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,true,DELETED-001,IBM,,,Should be skipped,,,,hdd,,,,,",
+            "a02,false,KEEP-002,IBM,,,Keep me,,,,hdd,,,,,",
+        ],
+    )
+    recs = list(parse_sfdc_material_master(csv_path))
+    assert [r.raw_mpn for r in recs] == ["KEEP-002"]
+
+
+def test_parse_sfdc_oem_and_description_fallbacks(tmp_path):
+    # OEM falls back to Brand__c; description falls back to detail/short/common name.
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,false,FB-001,,DellBrand,,,Detail desc here,,,memory,,,,,",
+        ],
+    )
+    r = list(parse_sfdc_material_master(csv_path))[0]
+    assert r.manufacturer == "DellBrand"
+    assert r.description == "Detail desc here"
+    assert r.category == "memory"
+
+
+def test_parse_sfdc_handles_cp1252_bytes(tmp_path):
+    # The real SFDC exports carry stray cp1252 bytes (NBSP 0xa0, smart quotes) that crash
+    # a strict UTF-8 stream — the parsers must detect and fall back, never raise.
+    csv_path = tmp_path / "LSC1__Manufacturers__c.csv"
+    csv_path.write_bytes(
+        b"Id,IsDeleted,Name\n"
+        b"a2F001,0,Acme\xa0Corp\n"  # cp1252 NBSP inside the name
+        b"a2F002,0,Seagate\n"
+    )
+    lookup = parse_sfdc_manufacturers(csv_path)
+    assert lookup["a2F002"] == "Seagate"
+    assert lookup["a2F001"].startswith("Acme")  # decoded via cp1252, not crashed
+
+
+def test_parse_sfdc_manufacturers_builds_id_to_name_map(tmp_path):
+    csv_path = _write(
+        tmp_path / "LSC1__Manufacturers__c.csv",
+        [
+            "Id,IsDeleted,Name,LSC1__Short_Name__c",
+            "a2F1U0000009rIvUAI,0,3M,",
+            "a2F1U0000009rIwUAI,0,Seagate,STX",
+            "a2F1U0000009rIxUAI,1,DeletedCo,",  # IsDeleted → skipped
+            "a2F1U0000009rIyUAI,0,,",  # blank name → skipped
+        ],
+    )
+    lookup = parse_sfdc_manufacturers(csv_path)
+    assert lookup == {"a2F1U0000009rIvUAI": "3M", "a2F1U0000009rIwUAI": "Seagate"}
+
+
+def test_parse_sfdc_master_resolves_manufacturer_lookup_id(tmp_path):
+    # LSC1__OEM__c / Brand__c are ~0% filled in this org (CATALOG.md profile): the real
+    # signal is the LSC1__Manufacturer_Brand__c Salesforce ID, resolved via the lookup.
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,false,LOOKUP-001,,,a2F1U0000009rIwUAI,Drive with looked-up OEM,,,,hdd,,,,,",
+        ],
+    )
+    lookup = {"a2F1U0000009rIwUAI": "Seagate"}
+    r = list(parse_sfdc_material_master(csv_path, lookup))[0]
+    assert r.manufacturer == "Seagate"
+
+
+def test_parse_sfdc_master_never_emits_raw_lookup_id(tmp_path):
+    # An unresolvable lookup ID (no lookup table / unknown id) must yield manufacturer=None
+    # — a raw Salesforce ID must never land in material_cards.manufacturer.
+    csv_path = _write(
+        tmp_path / "LSC1__Material__c.csv",
+        [
+            _SFDC_HEADER,
+            "a01,false,LOOKUP-002,,,a2F1U0000009rMISSING,No lookup hit,,,,hdd,,,,,",
+        ],
+    )
+    assert list(parse_sfdc_material_master(csv_path))[0].manufacturer is None
+    assert list(parse_sfdc_material_master(csv_path, {"other": "Acme"}))[0].manufacturer is None
+
+
+# --- .xlsx path (the canonical operational sheets ARE .xlsx) -------------------------
+
+
+def test_parse_inventory_xlsx_numeric_cells_round_trip(tmp_path):
+    # openpyxl returns numeric cells as int/float: a float-typed Part Number cell must
+    # NOT become "5052089.0" (its dedup key would keep the trailing zero after the dot is
+    # stripped — "50520890" — and silently fail to merge with the SFDC master's string
+    # MPN), and int/float quantity cells must parse. Leading zeros in NUMBER-typed cells
+    # are unrecoverable (Excel already discarded them) — documented parser limitation.
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "ProductDescription", "Condition", "Commodity", "On Hand"])
+    ws.append([5052089.0, "HDD, 1.2TB 10K 2.5 Inch, IBM", "Pull", "Hard Drive", 7])  # float PN, int qty
+    ws.append(["ST4000NM0035", "HDD, 4TB 7.2K SAS, Seagate", "New", "Hard Drive", 3.0])  # float qty
+    path = tmp_path / "Inventory 2.12.26.xlsx"
+    wb.save(path)
+
+    recs = list(parse_inventory_sheet(path))
+    assert [r.raw_mpn for r in recs] == ["5052089", "ST4000NM0035"]  # no ".0" corruption
+    assert recs[0].quantity == 7
+    assert recs[1].quantity == 3
+    assert recs[0].condition == "Pull"
+    assert recs[0].source_kind == SOURCE_KIND_INVENTORY_SHEET
+
+
+def test_parse_inventory_xlsx_header_detection_and_empty_cells(tmp_path):
+    # A preamble row before the real header is skipped; None cells map to None fields.
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["TRIO firesale export — internal", None, None, None, None])
+    ws.append(["Part Number", "Description", "Condition", "Commodity", "Qty"])
+    ws.append(["00AJ141", "HDD, 4TB, IBM", None, None, None])
+    path = tmp_path / "Firesale.xlsx"
+    wb.save(path)
+
+    recs = list(parse_inventory_sheet(path))
+    assert len(recs) == 1
+    assert recs[0].raw_mpn == "00AJ141"
+    assert recs[0].condition is None
+    assert recs[0].quantity is None

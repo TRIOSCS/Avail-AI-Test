@@ -854,7 +854,7 @@ class TestUpdateMaterialCard:
             data={
                 "manufacturer": "ON Semiconductor",
                 "description": "Updated description",
-                "category": "Regulators",
+                "category": "voltage_regulators",
                 "package_type": "TO-220",
                 "lifecycle_status": "active",
                 "rohs_status": "compliant",
@@ -864,7 +864,12 @@ class TestUpdateMaterialCard:
         assert resp.status_code == 200
         db_session.refresh(test_material_card)
         assert test_material_card.manufacturer == "ON Semiconductor"
-        assert test_material_card.category == "Regulators"
+        # Category routes through spec_tiers.set_category (F1 ladder) — a human edit
+        # lands canonical with manual (tier 100) provenance, never as raw free text.
+        assert test_material_card.category == "voltage_regulators"
+        assert test_material_card.category_source == "manual"
+        assert test_material_card.category_tier == 100
+        assert test_material_card.category_confidence == 1.0
         assert test_material_card.pin_count == 3
 
     def test_update_material_card_invalid_pin_count_ignored(

@@ -82,9 +82,9 @@ def test_desc_writes_non_ecc_as_false_facet(db_session: Session):
 
 def test_desc_rerun_is_idempotent_and_rewrites_corrected_descriptions(db_session: Session):
     # Re-enrichment runs the desc-parse pass again over the same card. Pin the intended
-    # semantics: an unchanged description re-writes the SAME values (record_spec's
-    # same-source equal-confidence rule overwrites, so written re-counts — data stays
-    # identical), and a corrected description MUST replace the stale desc_parse values.
+    # semantics: an unchanged description re-writes the SAME values (equal tier+confidence,
+    # newer updated_at → the ladder lets the rerun overwrite in place, so written re-counts
+    # — data stays identical), and a corrected description MUST replace stale values.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "46W0769M", "dram", "Mem, 16GB DDR4 2Rx4 PC4-2400T RDIMM")
 
@@ -95,8 +95,8 @@ def test_desc_rerun_is_idempotent_and_rewrites_corrected_descriptions(db_session
     second = extract_and_record(db_session, card)
     db_session.commit()
 
-    assert first == second == 6  # same-source equal-confidence priors fall through the
-    # > guard and are overwritten in place — re-runs re-count but never change data
+    assert first == second == 6  # same-source equal-(tier, confidence) priors lose the
+    # updated_at tie-break and are overwritten in place — re-runs re-count, data unchanged
     assert _facets(db_session, card.id) == before
     assert card.specs_structured["capacity_gb"]["source"] == "desc_parse"
 
@@ -150,11 +150,12 @@ def test_desc_writes_phase2_seed_extension_members(db_session: Session):
 
 
 def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Session):
-    # A vendor-API gpu memory_gb at 0.95 must survive the desc-parse pass — the
-    # writer's strictly-higher-confidence guard applies to the new commodities too.
+    # A vendor-API gpu memory_gb must survive the desc-parse pass — under the F1
+    # ladder a registered vendor source (tier 90) outranks desc_parse (tier 83),
+    # so the ladder (not a writer pre-gate) keeps the vendor value authoritative.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "900-2G500-0000-000", "gpu", "SPS-PCA, NVIDIA Tesla V100 32GB Module")
-    assert record_spec(db_session, card.id, "memory_gb", 16, source="vendor_api", confidence=0.95)
+    assert record_spec(db_session, card.id, "memory_gb", 16, source="digikey_api", confidence=0.95)
 
     written = extract_and_record(db_session, card)
     db_session.commit()
@@ -162,7 +163,7 @@ def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Sess
     assert written == 1  # gpu_family only; memory_gb skipped
     f = _facets(db_session, card.id)
     assert f["memory_gb"] == 16  # the 0.95 prior is untouched (desc said 32)
-    assert card.specs_structured["memory_gb"]["source"] == "vendor_api"
+    assert card.specs_structured["memory_gb"]["source"] == "digikey_api"
     assert f["gpu_family"] == "Tesla"
     assert card.specs_structured["gpu_family"]["source"] == "desc_parse"
 
@@ -189,9 +190,9 @@ def test_desc_skips_non_storage_memory_category(db_session: Session):
 
 
 def test_desc_never_overwrites_higher_confidence_decode_value(db_session: Session):
-    # An mpn_decode (0.95) capacity must survive a CONFLICTING desc-parsed capacity —
-    # record_spec's cross-source rule is latest-write-wins, so the writer's own
-    # confidence guard is what keeps the decode baseline authoritative.
+    # An mpn_decode capacity must survive a CONFLICTING desc-parsed capacity — the F1
+    # tier ladder in record_spec (mpn_decode 85 > desc_parse 83) rejects the write; the
+    # writer no longer carries its own confidence pre-gate.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "ST4000NM0035", "hdd", 'HD, 450GB, 15KRPM, 3.5", Fibre Channel')
     assert record_spec(db_session, card.id, "capacity_gb", 4000, source="mpn_decode", confidence=0.95)
@@ -207,7 +208,7 @@ def test_desc_never_overwrites_higher_confidence_decode_value(db_session: Sessio
 
 
 def test_desc_overwrites_lower_confidence_ai_value(db_session: Session):
-    # A prior AI-mined value (spec_extraction, 0.85) yields to the deterministic 0.90.
+    # A prior AI-mined value (spec_extraction, tier 60) yields to desc_parse (tier 83).
     seed_commodity_schemas(db_session)
     card = _card(db_session, "17P8581", "hdd", 'HDD, 300GB, 15,000 RPM, 3.5", FC w/Tray')
     assert record_spec(db_session, card.id, "rpm", "7200", source="spec_extraction", confidence=0.85)

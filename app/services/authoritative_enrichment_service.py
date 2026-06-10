@@ -374,10 +374,13 @@ async def enrich_card(
     now = datetime.now(timezone.utc)
     card.enriched_at = now
     if inf.status == "ai_inferred":
-        from app.services.category_normalizer import normalize_category
+        from app.services.spec_tiers import set_category
 
         card.description = inf.description
-        card.category = normalize_category(inf.category) or inf.category
+        # Through the F1 ladder: an Opus inference (claude_opus_inferred, tier 40) fills
+        # an empty category but can never overwrite decode/vendor/TRIO provenance, and
+        # off-vocab junk is rejected instead of persisted.
+        set_category(card, inf.category, "claude_opus_inferred", inf.confidence)
         card.enrichment_source = "claude_opus_inferred"
         card.enrichment_status = MaterialEnrichmentStatus.AI_INFERRED
         # >= 0.95-confidence guess: added, but flagged for human reconfirmation so it

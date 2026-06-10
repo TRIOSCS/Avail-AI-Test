@@ -5,16 +5,17 @@ decodes every linked ``mfg_model`` manufacturer model with the existing pure MPN
 decoders (zero LLM, zero network), STRICT-INTERSECTS the results (only spec keys
 present in every decode with equal values survive; a commodity disagreement skips
 the card entirely), and writes the agreed specs onto the FRU card via
-``record_spec(source="fru_matrix_decode", confidence=0.93)`` — between mpn_decode
-(0.95) and desc_parse (0.90) on the confidence ladder. Keys a prior pass already
-holds at STRICTLY higher confidence are pre-gated here, never overwritten — this
-file is one of the three pre-gate sites enumerated in record_spec's ARBITRATION
-MODEL registry (app/services/spec_write_service.py), which the SP2 source-tier
-ladder will consolidate. Category is filled from the agreed commodity ONLY when the
-card has none (an existing category is authoritative and a mismatch skips the
-card); the card's manufacturer is never touched. Reverse direction (a card that IS
-a mfg_model) gains nothing here — its own MPN already decodes directly at 0.95.
-Does not commit — the caller manages the txn.
+``record_spec(source="fru_matrix_decode", confidence=0.93)`` — tier 84 on the F1
+source-tier ladder (app/services/spec_tiers.py), between mpn_decode (85) and
+desc_parse (83). record_spec's ladder arbitrates every write — this pass can never
+overwrite an mpn_decode/vendor-API/trio_source prior and always beats desc_parse /
+AI spec_extraction, so there is NO per-writer confidence pre-gate here. Category is
+filled from the agreed commodity ONLY when the card has none (via
+``spec_tiers.set_category``, stamping tier-84 provenance; an existing DIFFERENT
+category skips the card before any write); the card's manufacturer is never
+touched. Reverse direction (a card that IS a mfg_model) gains nothing here — its
+own MPN already decodes directly at tier 85. Does not commit — the caller manages
+the txn.
 
 Called by: app/services/enrichment_worker/worker.py (run_one_batch, second pass,
            gated by settings.fru_crosswalk_enrich_enabled, over the FULL batch ids).
@@ -31,14 +32,15 @@ from sqlalchemy.orm import Session
 from app.constants import FruLinkKind
 from app.models import FruLink, MaterialCard
 from app.services.mpn_decoder import DecodeResult, decode_mpn
+from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
 from app.utils.normalization import normalize_mpn_key
 
-# Source tag + confidence for everything this pass writes (see record_spec). Sits
-# between mpn_decode (0.95 — first-party decode of the card's own MPN is strictly
-# stronger evidence) and desc_parse (0.90). DecodeResult.confidence (0.95) is
-# deliberately ignored: a one-hop workbook mapping plus decode is weaker than a
-# first-party decode.
+# Source tag + confidence for everything this pass writes (see record_spec). Tier 84 on
+# the F1 ladder (spec_tiers.SOURCE_TIER) — between mpn_decode (85: first-party decode of
+# the card's own MPN is strictly stronger evidence) and desc_parse (83).
+# DecodeResult.confidence (0.95) is deliberately ignored: a one-hop workbook mapping plus
+# decode is weaker than a first-party decode. The ladder, not this confidence, arbitrates.
 FRU_DECODE_SOURCE = "fru_matrix_decode"
 FRU_DECODE_CONFIDENCE = 0.93
 
@@ -195,7 +197,6 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                         dropped_no_schema[f"{commodity}.{spec_key}"] += 1
                     elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
                         dropped_out_of_enum[f"{commodity}.{spec_key}={value}"] += 1
-                prior_specs = card.specs_structured or {}
                 # SAVEPOINT per card: record_spec flushes, so a DB-level failure would
                 # otherwise poison the shared batch transaction. The nested txn rolls back
                 # ONLY this card (including a categorize-from-null); counters increment
@@ -204,18 +205,15 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                     if not card_cat:
                         # The agreed commodity is regex-gated against strict manufacturer
                         # schemes AND agreed across ALL decoded substitutes — a safe FILL
-                        # for a missing category, never an overwrite. record_spec requires
-                        # a category, so this precedes the loop.
-                        card.category = commodity
+                        # for a missing category (set_category stamps tier-84 provenance;
+                        # existing=None always loses to the incoming write). record_spec
+                        # requires a category, so this precedes the loop.
+                        set_category(card, commodity, FRU_DECODE_SOURCE, FRU_DECODE_CONFIDENCE)
+                    # No pre-gate: record_spec's F1 tier ladder rejects any write that
+                    # loses to a higher-(tier, confidence, updated_at) prior (mpn_decode
+                    # 85 / vendor 90 / trio_source 95 all outrank tier 84).
                     card_written = 0
                     for spec_key, value in agreed.items():
-                        prior = prior_specs.get(spec_key)
-                        # Pre-SP2 overwrite guard: record_spec's cross-source rule is
-                        # latest-write-wins, so keys already held at STRICTLY higher
-                        # confidence (mpn_decode 0.95, vendor APIs) are skipped here.
-                        # Registered in record_spec's ARBITRATION MODEL docstring.
-                        if prior and float(prior.get("confidence") or 0.0) > FRU_DECODE_CONFIDENCE:
-                            continue
                         if record_spec(
                             db,
                             card_id,
