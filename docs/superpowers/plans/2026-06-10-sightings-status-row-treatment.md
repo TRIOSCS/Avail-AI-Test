@@ -97,7 +97,7 @@ In `app/templates/htmx/partials/sightings/_vendor_row.html`:
           <span class="font-medium text-sm {{ 'text-gray-400' if vs == 'unavailable' else 'text-gray-900' }}">{{ s.vendor_name }}</span>
 ```
 
-(c) `vs_styles` dict — stronger badges on tinted rows (50-shade chips vanish against 50-shade tints):
+(c) `vs_styles` dict — offer-in's `bg-emerald-50` chip would vanish against the `bg-emerald-50/50` tint, so it becomes `bg-emerald-100`; unavailable's gray chip becomes `bg-rose-100` to read as a negative state against the rose tint:
 
 ```jinja
           {% set vs_styles = {

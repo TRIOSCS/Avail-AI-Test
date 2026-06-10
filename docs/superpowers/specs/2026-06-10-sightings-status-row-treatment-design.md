@@ -20,7 +20,7 @@ vendor status `vs` (server-side precedence already resolved in
 sighting` — no template-side precedence logic needed).
 
 This reuses the page's existing vocabulary: hot requirement rows use `bg-rose-50/30`,
-accepted excess bids use `bg-emerald-50/50`, status pills are 50-shade chips.
+accepted excess bids use `bg-emerald-50/50`.
 
 ## Exact changes — `app/templates/htmx/partials/sightings/_vendor_row.html`
 
@@ -29,11 +29,14 @@ accepted excess bids use `bg-emerald-50/50`, status pills are 50-shade chips.
    - `vs == 'unavailable'` → `bg-rose-50/60 hover:bg-rose-50/80`
    - `vs == 'offer-in'` → `bg-emerald-50/50 hover:bg-emerald-50/70`
    - all other statuses → `hover:bg-gray-50/50` (exactly as today)
-   Implemented via a Jinja `{% set %}` dict lookup with **full literal class strings**
-   (Tailwind content-scan requirement — never concatenate class fragments).
+   Implemented via a Jinja `{% set %}` conditional with **full literal class strings**
+   (Tailwind content-scan requirement — never concatenate class fragments). The
+   `vs == 'unavailable'` comparison is hoisted once into an `is_unavailable` flag at
+   the top of the partial and reused by every unavailable-specific conditional.
 
-2. **Badge styles** (`vs_styles` dict): 50-shade chips disappear against 50-shade row
-   tints, so tinted rows get 100-shade badges:
+2. **Badge styles** (`vs_styles` dict): offer-in's `bg-emerald-50` chip would vanish
+   against the `bg-emerald-50/50` tint, so it becomes `bg-emerald-100`; unavailable's
+   gray chip becomes `bg-rose-100` to read as a negative state against the rose tint:
    - `'unavailable'`: `bg-gray-100 text-gray-500` → `bg-rose-100 text-rose-700`
    - `'offer-in'`: `bg-emerald-50 text-emerald-700` → `bg-emerald-100 text-emerald-700`
    - `blacklisted`, `contacted`, `sighting`: unchanged.
@@ -72,6 +75,8 @@ Route-level render tests in `tests/test_sightings_router.py` (pattern: existing
 ## Risks
 
 - Tailwind purge: all classes are literal strings in the template, covered by the
-  content scan; `deploy.sh` additionally verifies template classes exist in built CSS.
+  content scan; `deploy.sh` additionally verifies the base color classes exist in
+  built CSS (its check strips opacity modifiers like `/60`, so variant coverage
+  relies on the content scan).
 - Translucent tints (`/60`, `/50`) sit on white panel background — consistent with the
   existing `bg-rose-50/30` hot-row treatment.
