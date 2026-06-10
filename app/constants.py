@@ -526,3 +526,36 @@ class FruLinkKind(StrEnum):
 # app-synthesized sentinel (CDC pending-qualification sheet); the FRU panels render
 # it as the amber "CDC pending" pill — keep ingest and display on this constant.
 CDC_PENDING = "cdc_pending"
+
+
+class UnavailabilityReason(StrEnum):
+    """Why a (vendor, part) pair is durably unavailable.
+
+    Single source of truth for VendorPartUnavailability.reason values AND their
+    display labels (``.label``) — templates and services render labels through
+    the property, never duplicate the strings.
+    """
+
+    BOUGHT_BY_US = "bought_by_us"
+    SOLD_ELSEWHERE = "sold_elsewhere"
+    BROKEN = "broken"
+    NOT_REALLY_THERE = "not_really_there"
+    DIFFERENT_PART = "different_part"
+    OTHER = "other"
+
+    @property
+    def label(self) -> str:
+        """Human display label for this reason."""
+        return _UNAVAILABILITY_REASON_LABELS[self]
+
+
+# Display labels for UnavailabilityReason, kept beside the enum. The .label property
+# is the only reader — templates/services go through it, never duplicate these strings.
+_UNAVAILABILITY_REASON_LABELS: dict[UnavailabilityReason, str] = {
+    UnavailabilityReason.BOUGHT_BY_US: "We bought them",
+    UnavailabilityReason.SOLD_ELSEWHERE: "Vendor sold them",
+    UnavailabilityReason.BROKEN: "Broken / bad condition",
+    UnavailabilityReason.NOT_REALLY_THERE: "Not really in stock",
+    UnavailabilityReason.DIFFERENT_PART: "Different part number",
+    UnavailabilityReason.OTHER: "Other",
+}
