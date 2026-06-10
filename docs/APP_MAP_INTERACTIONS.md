@@ -872,8 +872,8 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
 commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
 every write through the F1 source-tier ladder (app/services/spec_tiers.py —
-mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > spec_extraction 60; vendor
-APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
+mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > fru_desc_parse 82 >
+spec_extraction 60; vendor APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
 of the confidence it claims or which pass ran first, so the old per-writer
 "skip keys already held at higher confidence" pre-gates are REMOVED — the ladder
 owns arbitration in one place:
@@ -882,23 +882,55 @@ owns arbitration in one place:
        decode, source="mpn_decode" (tier 85), confidence 0.95
        (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
-       crosswalk decode (IBM/Lenovo FRU spare PNs inherit the STRICT-INTERSECTED
-       decode of their fru_links rel_kind='mfg_model' models — only spec keys present
-       in every decode with equal values write; a commodity disagreement skips the
-       card), source="fru_matrix_decode" (tier 84), confidence 0.93
-       (settings.fru_crosswalk_enrich_enabled). Zero LLM/network; ONE fru_links query
-       per batch. Scope is the FULL batch ids, NOT enriched_ids — FRU spares finish
-       not_found, and the pass never touches enrichment_status. Fills a NULL category
-       from the agreed commodity via spec_tiers.set_category (an existing DIFFERENT
-       category skips the card before any write); never writes manufacturer; never
-       writes the reverse direction (a card that IS a mfg_model already decodes
-       first-party at tier 85). The ladder (84 < 85, < vendor 90) guarantees it never
-       overwrites mpn_decode/vendor values — no per-writer pre-gate. Isolation is
-       two-level: decode/intersect failures are caught per FRU, write failures per
-       card (SAVEPOINT) — both surface in the returned `failed` count so the worker's
-       stats line distinguishes a no-op batch from a crashed one. Schema-drift drops
-       (no schema row / out-of-enum value) emit the same aggregate WARNING as the
-       mpn-decode writer.
+       crosswalk enrichment: ONE pass, TWO evidence channels over the same single
+       fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
+       settings.fru_crosswalk_enrich_enabled. (a) DECODE channel: IBM/Lenovo FRU
+       spare PNs inherit the STRICT-INTERSECTED decode of their rel_kind='mfg_model'
+       models — only spec keys present in every decode with equal values write; a
+       commodity disagreement skips the card (BOTH channels) — source=
+       "fru_matrix_decode" (tier 84), confidence 0.93. (b) LINKED-DESCRIPTION channel
+       (wave 3A): the qual-sheet prose stored on the FRU's mfg_model + drive_pn rows
+       (e.g. drive_pn `18TB 3.5 HDD 7.2K 12 Gb/s SAS`, mfg_model `SSD; 2.5; 1.92 TB
+       Samsung PM1733`) runs through desc_extractor.extract_desc(description,
+       commodity_hint=card.category) — the SPEC_COMMODITIES eligibility gate
+       guarantees the hint is always set. Commodity agreement is judged over ALL
+       extractions (a spec-less result like bare "HDD, Hot Swap" prose is still
+       commodity evidence): a desc-side commodity disagreement skips just the desc
+       channel (counted in desc_commodity_conflict), and a UNANIMOUS commodity
+       contradicting the card's category skips it too (desc_category_mismatch —
+       the decode channel's existing-category-is-authoritative rule applied to
+       desc evidence; reachable only as hdd<->ssd via extract_desc's same-family
+       lead refinement). Spec-less extractions are then EXCLUDED from the per-key
+       intersection (one barren row must not veto rich siblings under
+       absence-is-not-agreement) and the survivors intersect under the SAME
+       intersect_decodes contract (conflicting values dropped + counted per card
+       in desc_dropped_conflict — the decode channel's dropped_conflict counts per
+       FRU; a single extracting description passes all its specs) — source=
+       "fru_desc_parse" (tier 82), confidence 0.88. The desc channel runs in its
+       OWN per-card SAVEPOINT after the decode channel's savepoint has RELEASED,
+       so a category the decode just filled still routes the extraction in the
+       same batch; it NEVER writes a category (linked prose is not a regex-gated
+       commodity proof — a still-category-less card gets nothing from it).
+       Zero LLM/network; ONE fru_links query per batch. Scope is the FULL batch ids,
+       NOT enriched_ids — FRU spares finish not_found, and the pass never touches
+       enrichment_status. Fills a NULL category from the agreed DECODE commodity via
+       spec_tiers.set_category (an existing DIFFERENT category skips the card before
+       any write); never writes manufacturer; never writes the reverse direction (a
+       card that IS a mfg_model already decodes first-party at tier 85 and
+       desc-parses its own description at tier 83). The ladder (82 < 83 desc_parse <
+       84 < 85, < vendor 90) guarantees neither channel overwrites
+       mpn_decode/desc_parse/vendor values — no per-writer pre-gate. Isolation is
+       three-level: decode/intersect failures are caught per FRU, decode-channel
+       write failures per card (SAVEPOINT 1 — the card is lost, counted in
+       `failed`, and the desc channel does not run on it), and desc-channel
+       failures per channel (SAVEPOINT 2, sequential after SAVEPOINT 1's release —
+       a desc failure rolls back ONLY the desc writes, the card keeps its decode
+       writes + category fill, counted in `desc_failed`, never `failed`). The
+       worker's stats line distinguishes a no-op batch from a crashed one (desc
+       channel adds desc_parsed/desc_written/desc_failed/desc_dropped_conflict/
+       desc_commodity_conflict/desc_category_mismatch counters). Schema-drift drops
+       (no schema row / out-of-enum value) from BOTH channels emit the same
+       aggregate WARNING as the mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
        description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
        dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
@@ -914,16 +946,17 @@ owns arbitration in one place:
        token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
        Only cards already categorized to one of the eight commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The F1 ladder (desc_parse 83 < fru_matrix_decode 84 < mpn_decode 85 <
-       vendor 90) keeps decode/vendor values authoritative — no per-writer
+       The F1 ladder (fru_desc_parse 82 < desc_parse 83 < fru_matrix_decode 84 <
+       mpn_decode 85 < vendor 90) keeps decode/vendor values authoritative and the
+       card's OWN description above its FRU-linked prose — no per-writer
        pre-gate. The five phase-2 commodities have no MPN decoders, so
        desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
        arbitration). The ladder guarantees it never clobbers an
-       mpn_decode/fru_matrix_decode/desc_parse/vendor key, even when it
-       self-reports 0.95+.
+       mpn_decode/fru_matrix_decode/desc_parse/fru_desc_parse/vendor key, even
+       when it self-reports 0.95+.
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
@@ -966,6 +999,8 @@ load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest
 ```
 SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
              · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
+             · fru_desc_parse:82 (FRU-linked qual-sheet descriptions — below the card's
+               OWN description, above the OEM scrapers)
              · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
              · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
                floor for a valued category with NULL provenance) ·
@@ -1211,7 +1246,7 @@ collect_metrics(db) — a handful of aggregate queries over active cards
     |       facet rows total, per-commodity rows + distinct spec_keys (top-15;
     |       facet.category IS the commodity)
     +---> Sources: specs_structured entries grouped by each entry's recorded
-    |       "source" (mpn_decode / desc_parse / fru_matrix_decode /
+    |       "source" (mpn_decode / desc_parse / fru_matrix_decode / fru_desc_parse /
     |       spec_extraction / vendor APIs / "(none)" for legacy non-dict entries
     |       or entries with a missing/null source).
     |       ONE query: PG iterates the JSONB in SQL (CROSS JOIN LATERAL
