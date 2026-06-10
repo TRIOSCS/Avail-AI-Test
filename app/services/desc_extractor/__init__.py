@@ -23,7 +23,10 @@ Coverage is deliberately CONSERVATIVE: a field is emitted only when the descript
 grammar expresses it unambiguously; conflicting signals omit the key, a foreign
 commodity label (``Other,``/``Tray,``/``Card,``/``Library,``…) suppresses extraction
 entirely. Packaging-word and brand leads (``ASSY,``/``FRU,``/``MSI,``/``SPS-…``)
-are NEUTRAL — they fall through to body-token + hint arbitration instead.
+are NEUTRAL — they fall through to body-token + hint arbitration instead. Under a
+commodity hint, a description whose lead or strong body tokens ALL belong to a
+different family than the hint returns None (contradiction guard — a motherboard
+FRU in the SFDC CPU bucket must not take cpu facets).
 """
 
 import re
@@ -219,13 +222,24 @@ _BODY_TOKENS = (
 # lead matched and NO other body token fired ("Xeon GOLD 6134 3.2G 8C 130W",
 # "SPS-PROC HSW E5-1630v3 4C 3.7GHz 140W", "I7-7600U PROCESSOR" already routes via
 # the strong \bPROCESSOR\b token). The Scalable shape requires a 3-9xxx model number
-# so 80-PLUS "PLATINUM 1100W" PSU grades never match.
+# so 80-PLUS "PLATINUM 1100W" PSU grades never match, and it never claims a Pentium
+# Gold / Athlon Gold-Silver consumer part — those route via their own brand words
+# (cpu.py suppresses the Scalable interpretation for them entirely).
 _CPU_WEAK = re.compile(
-    r"\bXEON\b|\bEPYC\b|\bRYZEN\b|\bPROC\b"
+    r"\bXEON\b|\bEPYC\b|\bRYZEN\b|\bPROC\b|\bPENTIUM\b|\bATHLON\b"
     r"|\bE[357]-?\d{4}"
     r"|\bI[3579]-\d{4,5}"
-    r"|\b(?:GOLD|SILVER|PLATINUM|BRONZE)[ -]?[3-9]\d{3}[A-VX-Z]?\b"
+    r"|(?<!PENTIUM )(?<!ATHLON )\b(?:GOLD|SILVER|PLATINUM|BRONZE)[ -]?[3-9]\d{3}[A-VX-Z]?\b"
 )
+
+# Families whose STRONG body tokens are routine vocabulary inside another family's
+# descriptions — under that hint they refine, never contradict. cpu descriptions
+# state their supported memory constantly ("Intel i5-9400 2.9GHz/6C/9M 65W DDR4
+# 2666" — a real CPU-bucket row), the exact inverse of boards naming their CPUs
+# (_CPU_WEAK subordination above). Corpus-validated: dram-under-cpu is the only
+# pair whose exemption restores real extractions without re-admitting a wrong
+# facet (the storage×dram HARD conflict below still applies unconditionally).
+_SUBORDINATE_UNDER: dict[str, frozenset[str]] = {"cpu": frozenset({"dram"})}
 
 
 def _is_neutral_lead(label: str) -> bool:
@@ -288,24 +302,30 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
     if lead:
         found.add(lead)
 
-    families = {_FAMILY[c] for c in found}
-    if hint:
-        families.add(_FAMILY[hint])
+    found_families = {_FAMILY[c] for c in found}
+    families = found_families | ({_FAMILY[hint]} if hint else set())
     if "storage" in families and "dram" in families:
         # The HARD cross-family conflict is storage×dram only (both read bare-GB
         # capacity) — e.g. "Memory, 256GB, LiteOn SSD, M.2 2280" or a drive
         # description on a DIMM-categorized card. Never pick a side. gpu also reads
         # GB but is defended inside the gpu module, not here: memory_gb requires a
         # GPU-context token, and a DRAM-module body token without a gpu_family hit
-        # disqualifies it (a bare NVIDIA token on a DIMM row is not GB context) —
-        # so a gpu-hinted card with body-only dram/hdd tokens routes gpu and then
-        # extracts nothing.
+        # disqualifies it (a bare NVIDIA token on a DIMM row is not GB context).
         return None
 
     if hint:
         if lead and _FAMILY[lead] != _FAMILY[hint]:
             # TRIO's own label contradicts the card category ("MEMORY," lead on a
             # gpu-hinted card) — never extract from a contradicted description.
+            return None
+        contradicting = found_families - {_FAMILY[hint]} - _SUBORDINATE_UNDER.get(_FAMILY[hint], frozenset())
+        if found_families and _FAMILY[hint] not in found_families and contradicting:
+            # Every strong signal the text carries (lead and/or body tokens) belongs
+            # to a DIFFERENT family than the hinted card category — e.g. the
+            # CPU-bucket motherboard FRU "SPS-MB UMA I5-8265U 8GB W/HEATSINK WIN"
+            # under a cpu hint. Same contradiction class as the lead guard above:
+            # never write the hint's facets onto a part whose own tokens say it is
+            # something else (a wrong facet value is worse than a missing one).
             return None
         # The hint (card category) routes; a same-family lead refines it
         # ("SSD," lead on an hdd-hinted card routes the ssd vocabulary).
@@ -338,9 +358,9 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
         specs = extract_board(text)
     else:  # cpu — the only remaining SPEC_COMMODITIES member
         if is_cpu_pollution(text):
-            # Step-0 pollution guard (CPU_DECODE_FEASIBILITY.md): the SFDC CPU bucket
-            # carries MLCCs/connectors/tape parts — a denied row extracts NOTHING,
-            # not even the commodity hint.
+            # Step-0 pollution guard (docs/CPU_DECODE_FEASIBILITY.md): the SFDC CPU
+            # bucket carries MLCCs/connectors/tape parts — a denied row extracts
+            # NOTHING, not even the commodity hint.
             return None
         specs = extract_cpu(text)
     return DescResult(commodity=effective, specs=specs, confidence=DESC_CONFIDENCE)

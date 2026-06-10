@@ -53,7 +53,7 @@ _X000D_RE = re.compile(r"_x000[dD]_")
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _WS_RE = re.compile(r"\s+")
 
-# CPU-bucket pollution guard (CATALOG.md ingest warning + analysis/CPU_DECODE_FEASIBILITY.md
+# CPU-bucket pollution guard (CATALOG.md ingest warning + docs/CPU_DECODE_FEASIBILITY.md
 # step 0): ~14% of the SFDC master's Commodity_Code__c='CPU' rows are NON-CPU parts. A
 # tier-95 ``set_category("cpu")`` on a Murata MLCC would be near-unoverridable (only
 # manual=100 beats trio_source), so MPNs matching the empirically-found false-positive

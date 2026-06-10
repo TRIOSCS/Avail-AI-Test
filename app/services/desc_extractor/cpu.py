@@ -10,11 +10,11 @@ What: reads CPU facets out of compact human processor descriptions like
       ranges AND the whole model-spec table against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing — which
       also calls is_cpu_pollution, the step-0 deny-list from
-      source_ingest/analysis/CPU_DECODE_FEASIBILITY.md).
+      docs/CPU_DECODE_FEASIBILITY.md).
 Depends on: _common (SpecDict alias + unique_or_none), app/data/
       cpu_model_specs.json (curated ARK-style model→spec table).
 
-Grammars (all corpus-verified in CPU_DECODE_FEASIBILITY.md §2):
+Grammars (all corpus-verified in docs/CPU_DECODE_FEASIBILITY.md §2):
 - HP board-IC: ``IC,uP,<codename>,<model>,<GHz>,<W>,<cache>`` (comma or space
   delimited — routing gates on the full ``IC,uP`` prefix; bare ``IC,`` stays the
   general components bin).
@@ -42,8 +42,10 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   desc-stated GHz/core-count always beats the table. Lookup requires exactly
   ONE distinct extracted model string.
 - family is emitted only from explicit family signals (XEON word / model-string
-  class) and only for seeded members; Pentium/Celeron/Itanium/Opteron rows emit
-  spec tokens but no family.
+  class) and only for seeded members; Pentium/Celeron/Athlon/Itanium/Opteron
+  rows emit spec tokens but no family — incl. the metal-tier consumer brands
+  (Pentium Gold/Silver, Athlon Gold/Silver), whose GOLD/SILVER + bare 3-9xxx
+  model shapes are suppressed from the Xeon Scalable interpretation.
 """
 
 import json
@@ -104,6 +106,20 @@ _XEON_E = re.compile(r"\bE([357])-?(\d{4})((?:[A-Z](?!\d)){0,2}) ?(?:V(\d))?\b")
 # 80-PLUS grades never carry a 3xxx-9xxx model), suffix letter excludes W (a
 # trailing W is a wattage, never a Scalable suffix).
 _XEON_SCALABLE = re.compile(r"\b(GOLD|SILVER|PLATINUM|BRONZE)[ -]?([3-9]\d{3}[A-VX-Z]?)\b")
+# Intel Pentium Gold/Silver and AMD Athlon Gold/Silver reuse the Scalable metal
+# words with bare 3-9xxx(U/Y) model numbers ("PENTIUM GOLD 7505", "ATHLON SILVER
+# 3050U") — a metal-brand word ANYWHERE in the text suppresses the Scalable
+# interpretation (model lookup + Xeon family) entirely; spec tokens still emit
+# via the PENTIUM/ATHLON members of _CPU_CONTEXT. A whole-text search, not a
+# lookbehind, so "PENTIUM® GOLD" trademark forms suppress too.
+_METAL_BRAND = re.compile(r"\bPENTIUM\b|\bATHLON\b")
+# Dangling slash-alternates: broker shorthand naming a SECOND CPU whose token is
+# lexically incomplete ("E5-2620 V3/V4", "GOLD 6230R/6240R", "I5-6500/6600").
+# Matched ONLY at a model token's end (re.match at pos) and expanded to a full
+# model string, so the unique-model gate sees BOTH alternates and skips the
+# table merge (unique-or-omit — the first alternate's table entry must not win).
+_ALT_VN = re.compile(r"/V(\d)\b")
+_ALT_NUM = re.compile(r"/(\d{4}[A-Z]{0,2})\b")
 # HP letter form: "SPS-CPU SKL Xeon-G 6138 20c 2.0G 125W".
 _XEON_SCALABLE_HP = re.compile(r"\bXEON-([GSPB]) ?([3-9]\d{3}[A-VX-Z]?)\b")
 _HP_SCALABLE_LETTER = {"G": "GOLD", "S": "SILVER", "P": "PLATINUM", "B": "BRONZE"}
@@ -127,7 +143,7 @@ _ATOM_WORD = re.compile(r"\bATOM\b")
 _CPU_CONTEXT = re.compile(
     r"\bCPU\b|\bPROCESSORS?\b|\bPROC\b|\bUP\b"
     r"|\bXEON\b|\bEPYC\b|\bRYZEN\b|\bTHREADRIPPER\b|\bATOM\b"
-    r"|\bITANIUM ?2?\b|\bOPTERON\b|\bPENTIUM\b|\bCELERON\b"
+    r"|\bITANIUM ?2?\b|\bOPTERON\b|\bPENTIUM\b|\bCELERON\b|\bATHLON\b"
 )
 
 # ── spec-token grammars ──────────────────────────────────────────────────
@@ -138,8 +154,13 @@ _GHZ = re.compile(r"\b(\d(?:\.\d{1,2})?) ?(?:GHZ|GZ)\b")
 _GHZ_UNDERSCORE = re.compile(r"\b(\d)_(\d{1,2}) ?GHZ\b")
 _GHZ_BARE_G = re.compile(r"\b(\d\.\d{1,2})G\b")
 # Core count: glued "14C" (word-bounded, so "I2C"/"53C4" never match) or
-# "8-Core"/"12 CORE"/"12CORE".
-_CORES_GLUED = re.compile(r"\b(\d{1,3})C\b")
+# "8-Core"/"12 CORE"/"12CORE". Operating-temperature ranges on industrial
+# CPU-module rows carry the same glued shape ("0-70C", "-40 TO 85C") AND the CPU
+# context word, so a range/sign marker before the digits blocks the match: a
+# DIGIT-hyphen ("0-70C", "0 - 70C"), a bare sign (" -40C") or a "TO " ("TO
+# 85C"). A LETTER-hyphen is NOT a range — corpus spec chains glue cores as
+# "2.3G-6C(BGA)" and must keep parsing.
+_CORES_GLUED = re.compile(r"(?<!\d-)(?<!\d - )(?<! -)(?<!\bTO )\b(\d{1,3})C\b")
 _CORES_WORD = re.compile(r"\b(\d{1,3})[- ]?CORES?\b")
 # TDP: explicit W/WATT(S) unit, 2-3 digits ("1/4W" resistor fractions and glued
 # "150W22C" compounds never match). Emitted as tdp_watts ONLY — the wattage key
@@ -152,19 +173,27 @@ _CORE_MIN, _CORE_MAX = 1, 256
 _GHZ_MIN, _GHZ_MAX = 0.5, 6.0
 _TDP_MIN, _TDP_MAX = 10, 500
 
-# ── step-0 pollution deny-list (CPU_DECODE_FEASIBILITY.md §0/§6) ─────────
+# ── step-0 pollution deny-list (docs/CPU_DECODE_FEASIBILITY.md §0/§6) ────
 # The SFDC CPU bucket is polluted with passives/connectors/tape parts whose
-# MPN-echo descriptions must never reach the cpu grammars. Patterns are the
-# empirically-found false-positive classes from the report — anchored MPN
-# shapes plus the tape-library context words that broke s-spec matching.
+# MPN-echo descriptions must never reach the cpu grammars. Patterns cover the
+# report's documented false-positive MPN classes (anchored shapes plus the
+# tape-library context words that broke s-spec matching) — NOT the report's
+# full ≥5,600-row step-0 re-bucket sweep: rows the list misses are still safe
+# facet-wise because every cpu grammar is context-gated (verified to emit zero
+# facets across the full 39,979-row corpus), but a caller re-bucketing the
+# commodity off this predicate inherits the narrower coverage.
 _POLLUTION = (
     re.compile(r"^GRM\d"),  # Murata GRM MLCC ("GRM155R71C104MA88D")
     re.compile(r"^EE[EU]"),  # Panasonic EEEF/EEUF caps ("EEEFK1E471GP")
-    re.compile(r"^B72\d"),  # EPCOS/TDK varistors ("B72220P3271K102")
+    # EPCOS/TDK B-prefix clusters: B32 film caps, B57 NTCs, B59 PTCs, B65 cores,
+    # B72 varistors, B78 transformers, B82 inductors, B88 arresters.
+    re.compile(r"^B(?:32|57|59|65|72|78|82|88)\d"),
     re.compile(r"^\d{5}[A-Z]\d{3}[A-Z]AT"),  # AVX MLCC ("06035A101JAT2A")
     re.compile(r"^SN74"),  # TI logic ("SN74ALVC244PWR")
     re.compile(r"^SMAJ"),  # TVS diodes ("SMAJ24CA-13-F")
-    re.compile(r"^\d?-?\d{6}-\d$"),  # TE connectors ("640456-9", "1-640456-0")
+    # TE connectors: 6-7 digit bodies, optional single-digit size prefix
+    # ("640456-9", "1-640456-0", "1-1376115-2").
+    re.compile(r"^\d?-?\d{6,7}-\d$"),
     re.compile(r"\bSL500\b|\bSL85Z\b|\bSTK\b|\bLTO-?\d?\b"),  # StorageTek/tape-library contexts
 )
 
@@ -196,19 +225,42 @@ def is_cpu_pollution(text: str) -> bool:
 
 
 def _models(text: str) -> set[str]:
-    """All normalized model strings found (any class)."""
+    """All normalized model strings found (any class).
+
+    A dangling slash-alternate right after a model token ("E5-2620 V3/V4", "GOLD
+    6230R/6240R") expands to a SECOND model string — the row names two CPUs, so
+    unique- or-omit skips the table merge exactly as it does when both tokens are
+    lexically complete.
+    """
     found: set[str] = set()
     for m in _XEON_E.finditer(text):
         series, num, suffix, vn = m.groups()
-        found.add(f"E{series}-{num}{suffix}" + (f" V{vn}" if vn else ""))
-    for m in _XEON_SCALABLE.finditer(text):
-        found.add(f"{m.group(1)} {m.group(2)}")
+        base = f"E{series}-{num}{suffix}"
+        found.add(base + (f" V{vn}" if vn else ""))
+        alt_vn = _ALT_VN.match(text, m.end())
+        if alt_vn:
+            found.add(f"{base} V{alt_vn.group(1)}")
+        alt_num = _ALT_NUM.match(text, m.end())
+        if alt_num:
+            found.add(f"E{series}-{alt_num.group(1)}")
+    if not _METAL_BRAND.search(text):  # Pentium/Athlon Gold-Silver never read as Scalable
+        for m in _XEON_SCALABLE.finditer(text):
+            found.add(f"{m.group(1)} {m.group(2)}")
+            alt_num = _ALT_NUM.match(text, m.end())
+            if alt_num:
+                found.add(f"{m.group(1)} {alt_num.group(1)}")
     for m in _XEON_SCALABLE_HP.finditer(text):
         found.add(f"{_HP_SCALABLE_LETTER[m.group(1)]} {m.group(2)}")
     for m in _CORE_I_MODEL.finditer(text):
         found.add(f"I{m.group(1)}-{m.group(2)}{m.group(3)}")
+        alt_num = _ALT_NUM.match(text, m.end())
+        if alt_num:
+            found.add(f"I{m.group(1)}-{alt_num.group(1)}")
     for m in _EPYC_MODEL.finditer(text):
         found.add(f"EPYC {m.group(1)}")
+        alt_num = _ALT_NUM.match(text, m.end())
+        if alt_num:
+            found.add(f"EPYC {alt_num.group(1)}")
     for m in _RYZEN_MODEL.finditer(text):
         found.add(f"RYZEN {m.group(1)} {m.group(2)}")
     return found
@@ -217,7 +269,10 @@ def _models(text: str) -> set[str]:
 def _family(text: str) -> str | None:
     """Seeded family member from explicit family signals, or None on conflict."""
     members: set[str] = set()
-    if _XEON_WORD.search(text) or _XEON_E.search(text) or _XEON_SCALABLE.search(text) or _XEON_SCALABLE_HP.search(text):
+    # The Scalable metal-word shape is a Xeon signal ONLY without a Pentium/Athlon
+    # brand word — "PENTIUM GOLD 7505"/"ATHLON SILVER 3050U" must not emit Xeon.
+    scalable = bool(_XEON_SCALABLE.search(text)) and not _METAL_BRAND.search(text)
+    if _XEON_WORD.search(text) or _XEON_E.search(text) or scalable or _XEON_SCALABLE_HP.search(text):
         members.add(XEON)
     if _CORE_I_WORD.search(text) or _CORE_I_MODEL.search(text):
         members.add(CORE_I)
@@ -326,7 +381,13 @@ def extract_cpu(text: str) -> SpecDict:
         tdp = _tdp_watts(text)
         if tdp is not None:
             specs["tdp_watts"] = tdp
+    # Codename/arch-name architecture needs the same independent CPU corroboration
+    # as the bare tokens: a chassis row like "SPS-BASE ENCLOSURE KBL-R" (real
+    # CPU-bucket pollution) must not emit a Kaby Lake facet from the codename
+    # alone. The corroborating signal must be EXTERNAL to the codename token
+    # itself (model, family word, parsed clock, or a _CPU_CONTEXT word); the
+    # _VN_ARCH path is already model-gated.
     arch = _architecture(text, model)
-    if arch is not None:
+    if arch is not None and (model is not None or family is not None or clock is not None or _CPU_CONTEXT.search(text)):
         specs["architecture"] = arch
     return specs

@@ -913,11 +913,16 @@ owns arbitration in one place:
        structural guards: wattage exists only on the power_supplies route while the
        cpu route emits tdp_watts (CPU "135W" TDP can never land in wattage), gpu
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
-       "10GB"/"100GbE" rows emit nothing, and cpu bare cores/TDP tokens require a
-       CPU-context signal (MPN-echo descs emit nothing). The cpu route adds a
-       step-0 pollution deny-list (is_cpu_pollution — Murata/EPCOS/AVX/TE/
-       StorageTek shapes from CPU_DECODE_FEASIBILITY.md) and a curated model→spec
-       table (app/data/cpu_model_specs.json) merged UNDER desc tokens.
+       "10GB"/"100GbE" rows emit nothing, and cpu bare cores/TDP tokens AND
+       codename-only architecture require a CPU-context signal (MPN-echo descs
+       and chassis rows emit nothing). Hinted extraction adds a body-token
+       contradiction guard (a cpu-hinted motherboard FRU returns None; dram
+       tokens under a cpu hint are exempt subordinate vocabulary). The cpu route
+       adds a step-0 pollution deny-list (is_cpu_pollution — Murata/EPCOS
+       B-clusters/AVX/TE/StorageTek shapes from docs/CPU_DECODE_FEASIBILITY.md)
+       and a curated model→spec table (app/data/cpu_model_specs.json) merged
+       UNDER desc tokens (skipped when the desc names two models, incl. dangling
+       slash-alternates like "GOLD 6230R/6240R").
        Only cards already categorized to one of the nine commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
        The F1 ladder (desc_parse 83 < fru_matrix_decode 84 < mpn_decode 85 <

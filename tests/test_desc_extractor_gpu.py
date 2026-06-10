@@ -83,9 +83,6 @@ GUARDED_GB_CASES = [
     # NVIDIA-branded Mellanox NIC: the spaced "25Gb" link speed uppercases into the
     # \bGB\b shape, but the NIC clause (ConnectX/SFP/dual-port) disqualifies memory_gb.
     "NVIDIA ConnectX-4 Lx 25Gb dual-port SFP28 adapter",
-    # DRAM-module row: NVIDIA context alone must not unlock memory_gb — the 16GB
-    # belongs to the SODIMM, not a GPU (no gpu_family hit to override).
-    "SODIMM 16GB DDR4 for NVIDIA DGX Station",
     # Decimal memory bandwidth: "14.4GB/S" would capture its fractional digit (4)
     # without the trailing-"/S" skip — nothing may emit.
     "GPU CARD, GT710 PASSIVE 14.4GB/S GDDR5",
@@ -97,6 +94,16 @@ def test_memory_gb_requires_gpu_context_token(description):
     result = extract_desc(description, commodity_hint="gpu")
     assert result is not None
     assert result.specs == {}, f"{description!r} must not emit GPU specs"
+
+
+def test_dram_module_row_under_gpu_hint_is_contradicted():
+    # DRAM-module row on a gpu-categorized card: the SODIMM/DDR4 strong body
+    # tokens contradict the gpu hint, so the router's body-token contradiction
+    # guard suppresses extraction OUTRIGHT (None) — the 16GB belongs to the
+    # SODIMM, not a GPU. (Before the guard this row routed gpu and relied on the
+    # gpu module's internal dram-token defense to emit nothing; the guard now
+    # stops it one layer earlier, same protected outcome.)
+    assert extract_desc("SODIMM 16GB DDR4 for NVIDIA DGX Station", commodity_hint="gpu") is None
 
 
 def test_t4_emits_tesla_family():

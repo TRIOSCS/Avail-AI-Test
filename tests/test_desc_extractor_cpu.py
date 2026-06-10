@@ -1,7 +1,8 @@
 """CPU description→spec extraction — REAL corpus strings (SFDC CPU bucket).
 
-Verbatim positives from /root/source_ingest/analysis/cpu_rows.csv and the grammar
-samples in CPU_DECODE_FEASIBILITY.md §2: the HP board-IC ``IC,uP,…`` grammar (comma
+Verbatim positives from the SFDC CPU-bucket corpus (39,979 rows; host-local
+analysis extract, not committed) and the grammar samples in
+docs/CPU_DECODE_FEASIBILITY.md §2: the HP board-IC ``IC,uP,…`` grammar (comma
 and space forms), the HP spares ``SPS-CPU``/``SPS-PROC`` grammar (underscore
 decimals, ``Gz`` misspellings, glued ``E52650Lv2``, ``Xeon-G/-S/-P/-B`` letter
 forms), generic model strings (E3/E5/E7, Scalable, Core iN, EPYC, Ryzen), and the
@@ -503,11 +504,15 @@ POLLUTION_CASES = [
     "GRM155R71C104MA88D",  # Murata GRM MLCC
     "EEEFK1E471GP",  # Panasonic cap
     "B72220P3271K102",  # EPCOS/TDK varistor
+    "B32922C3224M",  # EPCOS/TDK film cap (B32 cluster)
+    "B57236S100M",  # EPCOS/TDK NTC thermistor (B57 cluster)
+    "B82422A1104K100",  # EPCOS/TDK inductor (B82 cluster)
     "06035A101JAT2A",  # AVX MLCC
     "SN74ALVC244PWR",  # TI logic
     "SMAJ24CA-13-F",  # TVS diode
     "640456-9",  # TE connector
     "1-640456-0",  # TE connector (prefixed form)
+    "1-1376115-2",  # TE connector (prefixed 7-digit body)
     "STK/SL500/BASE/ROHS",  # StorageTek SL500 tape-library part
     "LTO4-HP4FC-SL85Z",  # tape drive mis-bucketed as CPU
     "SL500/POWER/SUPPLY",
@@ -649,3 +654,57 @@ def test_threadripper_subsumes_ryzen_family_word():
     result = extract_desc("CPU, AMD Ryzen Threadripper 3960X 3.8GHz 24C")
     assert result is not None
     assert result.specs == {"family": "Threadripper", "core_count": 24, "clock_speed_ghz": 3.8}
+
+
+def test_pentium_athlon_metal_brands_never_read_as_scalable():
+    # Intel Pentium Gold / AMD Athlon Gold-Silver reuse the Scalable metal words
+    # with bare 3-9xxx(U/Y) model numbers — neither a Xeon family nor a Scalable
+    # model/table merge may emit. Spec tokens still extract (PENTIUM/ATHLON are
+    # _CPU_CONTEXT members), and the brand words weak-route the row to cpu.
+    result = extract_desc("PENTIUM GOLD 7505 2.0GHZ 2C 15W")
+    assert result is not None and result.commodity == "cpu"
+    assert result.specs == {"clock_speed_ghz": 2.0, "core_count": 2, "tdp_watts": 15}
+    result = extract_desc("AMD Athlon Silver 3050U 2.3GHz 15W")
+    assert result is not None and result.commodity == "cpu"
+    assert result.specs == {"clock_speed_ghz": 2.3, "tdp_watts": 15}
+    assert extract_cpu("ATHLON GOLD 3150U 2.4GHZ 15W") == {"clock_speed_ghz": 2.4, "tdp_watts": 15}
+    # The real Scalable shape is unaffected.
+    assert extract_cpu("XEON GOLD 6134 3.2G 8C 130W")["family"] == "Xeon"
+
+
+def test_slash_alternate_models_skip_table_merge():
+    # Broker shorthand naming TWO parts where only the first token is lexically
+    # complete: the first alternate's table entry must NOT merge (E5-2620 v4 is
+    # 8C, 6240R is 24C/165W — unique-or-omit). Direct tokens + family still emit.
+    specs = extract_cpu("XEON E5-2620 V3/V4 COMPATIBLE HEATSINK 90W")
+    assert specs == {"family": "Xeon", "tdp_watts": 90}
+    specs = extract_cpu("XEON GOLD 6230R/6240R 2.1GHZ")
+    assert specs == {"family": "Xeon", "clock_speed_ghz": 2.1}
+    # The two-complete-models form keeps behaving the same (pinned above in
+    # test_conflicting_models_omit_table_fields).
+
+
+def test_temperature_ranges_never_read_as_core_count():
+    # Industrial/embedded CPU-module rows state operating-temperature ranges with
+    # the glued-NC shape; the row IS CPU-context, so the context gate alone cannot
+    # save it — the digit-range/sign marker before the digits must block the match.
+    assert extract_cpu("CPU MODULE 0-70C") == {}
+    assert extract_cpu("CPU MODULE 0 - 70C") == {}
+    assert extract_cpu("CPU MODULE -40 TO 85C") == {}
+    # Legit glued counts still parse — including the LETTER-hyphen spec chains
+    # ("2.3G-6C(BGA)", verbatim corpus row: only a DIGIT before the hyphen is a
+    # temperature range).
+    assert extract_cpu("XEON CPU 16C 2.1GHZ") == {"family": "Xeon", "core_count": 16, "clock_speed_ghz": 2.1}
+    assert extract_cpu("CPU(1140P)R5 100-000000290 2.3G-6C(BGA)") == {"clock_speed_ghz": 2.3, "core_count": 6}
+
+
+def test_codename_alone_never_emits_architecture():
+    # Verbatim CPU-bucket row L17587-001 "SPS-BASE ENCLOSURE KBL-R": a chassis
+    # whose description matches the KBL-R codename and nothing else CPU-shaped.
+    # Architecture needs independent corroboration (model / family / clock /
+    # _CPU_CONTEXT) — same gate class as the bare cores/TDP tokens.
+    assert extract_cpu("SPS-BASE ENCLOSURE KBL-R") == {}
+    result = extract_desc("SPS-BASE ENCLOSURE KBL-R", commodity_hint="cpu")
+    assert result is not None and result.specs == {}
+    # With corroboration the codename still emits.
+    assert extract_cpu("SPS-CPU KBL-R 3.6GHZ") == {"clock_speed_ghz": 3.6, "architecture": "Kaby Lake"}

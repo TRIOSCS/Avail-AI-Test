@@ -104,6 +104,24 @@ def test_hint_contradicted_by_other_family_lead_returns_none():
     assert extract_desc("Mem, 16GB DDR4 RDIMM", commodity_hint="motherboards") is None
 
 
+def test_hint_contradicted_by_other_family_body_tokens_returns_none():
+    # Verbatim CPU-bucket rows L67388-601/L69297-601: a motherboard FRU whose card
+    # sits in the SFDC CPU bucket. The \bMB\b body token is the row's ONLY strong
+    # signal and it contradicts the cpu hint — extraction must return None instead
+    # of writing a cpu family facet onto a motherboard (same contradiction class
+    # as the lead guard above, mirrored onto body tokens).
+    assert extract_desc("SPS-MB UMA I5-8265U 8GB W/HEATSINK WIN", commodity_hint="cpu") is None
+    # A same-family token alongside the foreign one still extracts: the hinted
+    # "PROCESSOR + MB L3 cache" row keeps decoding (pinned in
+    # test_desc_extractor_cpu.py::test_spaced_mb_cache_is_a_known_conservative_loss).
+    # SUBORDINATE-vocabulary exemption: cpu descriptions state their supported
+    # memory, so a dram body token under a cpu hint refines, never contradicts
+    # (verbatim corpus row — the full table merge must survive).
+    result = extract_desc("Intel i5-9400 2.9GHz/6C/9M 65W DDR4 2666", commodity_hint="cpu")
+    assert result is not None and result.commodity == "cpu"
+    assert result.specs["core_count"] == 6 and result.specs["family"] == "Core i-series"
+
+
 def test_neutral_leads_fall_through_to_body_and_hint():
     # Packaging-word / brand / SPS- leads are NEUTRAL — they must not die foreign.
     # "ASSY," rescued by the body LTO token; "Innolux," by the body LCD token;
@@ -296,3 +314,13 @@ def test_emittable_vocabulary_matches_commodity_seeds():
             assert cpu._GHZ_MIN <= entry["clock_speed_ghz"] <= cpu._GHZ_MAX, model
         if "tdp_watts" in entry:
             assert cpu._TDP_MIN <= entry["tdp_watts"] <= cpu._TDP_MAX, model
+        # Key REACHABILITY: the parser grammar must be able to PRODUCE every key —
+        # a curated entry keyed "GOLD6334" / "E5 2680 V3" / "I5 6500" would pass
+        # every value assertion above yet be permanently dead weight
+        # (load_model_specs().get(model) could never hit it).
+        assert model in cpu._models(model), model
+        # E-series vN keys: _VN_ARCH overrides the table architecture at extraction
+        # time (the table is only the fallback), so an incoherent table value would
+        # be invisibly masked — pin table↔map coherence.
+        if model.startswith(("E3-", "E5-", "E7-")) and " V" in model:
+            assert entry.get("architecture") == cpu._VN_ARCH[model[-2:]], model
