@@ -109,19 +109,24 @@ stored `evidence_tier` (NULL on 4 of 6 paths):
 ### Suppression matrix (per fresh row matching a record, in `apply_to_fresh_sightings`)
 
 Record **not active** (window lapsed or released): never stamp; row renders advisory.
-Record **active**, in priority order:
+Record **active**: **dispatch on the row's source class — NOT priority order**. The
+three overrides apply to mutually exclusive classes (LIVE → O1 only, HUMAN_DIRECT →
+O3 only, listing-class → O2 only), so the stronger evidence class always wins: a
+HUMAN_DIRECT row whose qty also clears the O2 jump still releases the record (S7),
+and O1 already subsumes any O2-shaped signal on LIVE rows.
 
-- **O1 Live truth** — class LIVE AND `qty_available > 0` AND
+- **O1 Live truth** (class LIVE) — `qty_available > 0` AND
   `qty_available != qty_at_mark` (NULL snapshot ⇒ passes) → leave unstamped
   (advisory+nudge). Applies to ALL reasons incl. `different_part`.
-- **O2 Restock** — `qty_at_mark` non-NULL AND fresh qty non-NULL AND fresh `>` snapshot
-  AND fresh `>= snapshot × 2.0` (knob; strict-greater always required); snapshot 0 ⇒
-  any fresh > 0; NULL either side = no signal. Leave unstamped (advisory+nudge), **no
-  record mutation** (stateless, self-healing). LOT+LISTING only.
-- **O3 Vendor document** — class HUMAN_DIRECT AND `qty_available > 0` →
+- **O2 Restock** (listing-class, the default) — `qty_at_mark` non-NULL AND fresh qty
+  non-NULL AND fresh `>` snapshot AND fresh `>= snapshot × 2.0` (knob; strict-greater
+  always required); snapshot 0 ⇒ any fresh > 0; NULL either side = no signal. Leave
+  unstamped (advisory+nudge), **no record mutation** (stateless, self-healing).
+  LOT+LISTING only.
+- **O3 Vendor document** (class HUMAN_DIRECT) — `qty_available > 0` →
   **record-level release** (`released_at=now`, `release_trigger='vendor_email'`, one
   ActivityLog line), stamp nothing. LOT+LISTING only.
-- **else** — stamp `is_unavailable=True`.
+- **else** — a row whose class's override doesn't fire → stamp `is_unavailable=True`.
 
 **Offer hook:** at offer creation, `release_on_offer(...)` releases matching active
 records (`release_trigger='offer_received'`), all reasons except `different_part`.
@@ -160,7 +165,8 @@ New `app/services/vendor_unavailability.py` (all business logic here; routers st
   `HUMAN_DIRECT_SOURCES` as `Final` constants; `_source_class(sighting)` (default
   listing-class); `_window_days(reason)` (reads settings; `different_part` → `None`);
   `is_active(record, now)` (THE shared predicate — status, RFQ exclusion, row render,
-  apply all use it); `_override(record, sighting)` implementing O1/O2.
+  apply all use it); `_override_verdict(record, sighting)` implementing the
+  class-dispatched O1/O2/O3 verdict (stamp / surface / release).
 - **ONE sighting-matching helper (CRITICAL-2):** all sighting matching — record,
   clear, apply, status — goes through a single Python-side helper with the NULL-norm
   fallback (`_sighting_norm` semantics: `vendor_name_normalized or
@@ -208,7 +214,8 @@ New `app/services/vendor_unavailability.py` (all business logic here; routers st
   **candidate-key SET `{normalize_mpn_key(mpn_matched), primary_key}` (both
   non-empty, IMPORTANT-5)** — mirroring status semantics, so a row whose
   `mpn_matched` normalizes differently from the record key still matches via the
-  primary key. Per matched row, apply the suppression matrix: non-active record →
+  primary key. Per matched row, apply the suppression matrix dispatched on the row's
+  source class (LIVE → O1, HUMAN_DIRECT → O3, listing → O2): non-active record →
   skip (advisory rendering happens reader-side); O3 → record release + ActivityLog;
   O1/O2 → leave unstamped; else stamp. Returns count stamped.
 - `release_on_offer(db, requirement, vendor_name, user) -> int` (new): releases
@@ -438,8 +445,10 @@ all-listings-of-this-MPN caveat copy).
   class; `different_part` never expires; O1 equality-guard (identical distributor echo
   stays stamped; changed qty surfaces); O2 ratio boundary + NULL-no-signal both
   directions + snapshot-0; O3 releases via `email_attachment` but
-  `email_auto_import`/`excess_list` stamp; unknown/empty source_type stamps and never
-  releases; per-key snapshot isolation (two keys, different qtys); re-mark keeps old
+  `email_auto_import`/`excess_list` stamp; source-class dispatch (a HUMAN_DIRECT row
+  whose qty also clears the O2 jump RELEASES the record — O2 never shadows O3; a LIVE
+  qty jump takes the O1 path, no record mutation); unknown/empty source_type stamps
+  and never releases; per-key snapshot isolation (two keys, different qtys); re-mark keeps old
   snapshot when no qty visible and resets `released_at`; offer hook releases
   all-but-`different_part`; Batch 4 rows-win + expired-record-doesn't-pin-pill;
   `excluded_vendor_norms` active-only; knob validators reject 0/negative.

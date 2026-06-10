@@ -11,7 +11,8 @@ Temporal policy ("Two Windows, Real Proof",
 docs/superpowers/specs/2026-06-10-unavailability-temporal-policy.md): suppression is
 read-time bounded per reason class — LOT reasons ride a 30d window, ``not_really_there``
 180d, ``different_part`` never expires — and releasable by real proof via the O1/O2/O3
-override matrix embedded in ``apply_to_fresh_sightings``. ``is_active()`` here is THE
+override matrix embedded in ``apply_to_fresh_sightings`` (dispatched per source class:
+LIVE → O1, HUMAN_DIRECT → O3, listing → O2). ``is_active()`` here is THE
 single authority every read surface uses; ``Sighting.is_unavailable`` is only a render
 cache. The keys a vendor+requirement covers are the vendor's sightings'
 ``normalize_mpn_key(mpn_matched)`` values plus the requirement's primary-MPN key.
@@ -78,6 +79,11 @@ _CLASS_LIVE: Final[str] = "live"
 _CLASS_HUMAN_DIRECT: Final[str] = "human_direct"
 _CLASS_LISTING: Final[str] = "listing"
 
+# Per-(active record, fresh row) verdicts from _override_verdict.
+_VERDICT_STAMP: Final[str] = "stamp"  # no override fired — stamp is_unavailable
+_VERDICT_SURFACE: Final[str] = "surface"  # O1/O2 — leave row unstamped, no record mutation
+_VERDICT_RELEASE: Final[str] = "release"  # O3 — record-level release ('vendor_email')
+
 
 @dataclass(frozen=True)
 class UnavailabilityIntel:
@@ -135,32 +141,49 @@ def _source_class(sighting: Sighting) -> str:
     return _CLASS_LISTING
 
 
-def _override(record: VendorPartUnavailability, sighting: Sighting) -> bool:
-    """Row-level overrides O1/O2 — True ⇒ leave the row unstamped (advisory+nudge).
+def _override_verdict(record: VendorPartUnavailability, sighting: Sighting) -> str:
+    """Override verdict for one (active record, fresh row) pair — DISPATCHED BY SOURCE
+    CLASS, never priority order.
 
-    O1 live truth: LIVE class AND qty > 0 AND qty != qty_at_mark (NULL snapshot
+    The three overrides apply to mutually exclusive source classes, so each row is
+    evaluated against exactly one: LIVE → O1, HUMAN_DIRECT → O3, listing-class → O2.
+    Stronger evidence class always wins — a HUMAN_DIRECT row whose qty also clears the
+    O2 jump must RELEASE the record (the vendor sent a stock list, S7), not merely
+    surface the row; and O1 already subsumes any O2-shaped signal on LIVE rows (any
+    qty difference triggers it).
+
+    O1 live truth (LIVE → SURFACE): qty > 0 AND qty != qty_at_mark (NULL snapshot
     passes) — the equality-guard keeps a stale distributor echo showing the exact
     flagged qty stamped. Applies to ALL reasons incl. different_part (an authorized
-    catalog match is identity evidence).
+    catalog match is identity evidence). Row-level only, no record mutation.
 
-    O2 restock: snapshot and fresh qty both non-NULL AND fresh > snapshot AND
-    fresh >= snapshot × factor (snapshot 0 ⇒ any fresh > 0 falls out of the
-    strict-greater). NULL on either side = no signal, never "no change". No record
-    mutation — stateless and self-healing. Disabled for different_part (more of the
-    wrong part is still the wrong part).
+    O3 vendor document (HUMAN_DIRECT → RELEASE): qty > 0 — the caller stamps nothing
+    and performs the record-level release ('vendor_email' + ActivityLog). Disabled for
+    different_part (a qty claim doesn't fix identity).
+
+    O2 restock (listing-class → SURFACE): snapshot and fresh qty both non-NULL AND
+    fresh > snapshot AND fresh >= snapshot × factor (snapshot 0 ⇒ any fresh > 0 falls
+    out of the strict-greater). NULL on either side = no signal, never "no change".
+    No record mutation — stateless and self-healing. Disabled for different_part
+    (more of the wrong part is still the wrong part).
     """
     qty = sighting.qty_available
-    if (
-        _source_class(sighting) == _CLASS_LIVE
-        and qty is not None
-        and qty > 0
-        and (record.qty_at_mark is None or qty != record.qty_at_mark)
-    ):
-        return True
+    source_class = _source_class(sighting)
+    if source_class == _CLASS_LIVE:
+        if qty is not None and qty > 0 and (record.qty_at_mark is None or qty != record.qty_at_mark):
+            return _VERDICT_SURFACE
+        return _VERDICT_STAMP
+    if source_class == _CLASS_HUMAN_DIRECT:
+        if qty is not None and qty > 0 and record.reason != UnavailabilityReason.DIFFERENT_PART:
+            return _VERDICT_RELEASE
+        return _VERDICT_STAMP
+    # Listing-class (the default) — O2 only.
     if record.reason == UnavailabilityReason.DIFFERENT_PART:
-        return False
+        return _VERDICT_STAMP
     snap = record.qty_at_mark
-    return snap is not None and qty is not None and qty > snap and qty >= snap * settings.unavailability_qty_jump_factor
+    if snap is not None and qty is not None and qty > snap and qty >= snap * settings.unavailability_qty_jump_factor:
+        return _VERDICT_SURFACE
+    return _VERDICT_STAMP
 
 
 # ── Shared matching helpers ───────────────────────────────────────────────────
@@ -501,11 +524,13 @@ def apply_to_fresh_sightings(
 
     Each sighting matches on its candidate-key SET {normalize_mpn_key(mpn_matched),
     primary key} (both non-empty, IMPORTANT-5) against the full fetched records — one
-    batched query. Per matched record, in priority order: non-active record → skip
-    (advisory rendering happens reader-side); O1/O2 → leave unstamped, no record
-    mutation; O3 (HUMAN_DIRECT, qty > 0, not different_part) → record-level release
-    ('vendor_email') + one ActivityLog line, stamp nothing; else stamp. A row is stamped
-    when ANY matching active record says stamp.
+    batched query. Per matched record: non-active record → skip (advisory rendering
+    happens reader-side); else dispatch on the row's source class (LIVE → O1 only,
+    HUMAN_DIRECT → O3 only, listing-class → O2 only — mutually exclusive classes, never
+    priority order). SURFACE (O1/O2) → leave unstamped, no record mutation; RELEASE (O3:
+    HUMAN_DIRECT, qty > 0, not different_part) → record-level release ('vendor_email') +
+    one ActivityLog line, stamp nothing; STAMP otherwise. A row is stamped when ANY
+    matching active record says stamp.
 
     Does NOT commit. Returns the number of sightings flagged.
     """
@@ -544,14 +569,10 @@ def apply_to_fresh_sightings(
             rec = records.get((norm, key))
             if rec is None or not is_active(rec, now):
                 continue  # no/expired/released record — never stamp from it
-            if _override(rec, s):  # O1 live truth / O2 restock — row-level only
+            verdict = _override_verdict(rec, s)  # class-dispatched: O1 / O2 / O3
+            if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
                 continue
-            if (
-                _source_class(s) == _CLASS_HUMAN_DIRECT
-                and s.qty_available is not None
-                and s.qty_available > 0
-                and rec.reason != UnavailabilityReason.DIFFERENT_PART
-            ):
+            if verdict == _VERDICT_RELEASE:
                 # O3 vendor document — safe to write here: this path is reached
                 # from a user-initiated router, not a background worker.
                 _release_record(

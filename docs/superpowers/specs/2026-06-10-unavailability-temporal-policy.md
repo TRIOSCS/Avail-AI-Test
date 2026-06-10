@@ -58,15 +58,20 @@ the stored `evidence_tier`, which is NULL on 4 of 6 persistence paths:
 Per fresh row matching a record, in `apply_to_fresh_sightings`.
 
 If the record is **not active** (window lapsed or `released_at` set): never stamp; row
-renders **advisory** (history hint + verify affordance). If **active**, evaluate in
-priority order:
+renders **advisory** (history hint + verify affordance). If **active**, **dispatch on
+the row's source class — NOT priority order**: the three overrides apply to mutually
+exclusive classes (LIVE → O1 only, HUMAN_DIRECT → O3 only, listing-class → O2 only),
+so the stronger evidence class always wins. In particular, a HUMAN_DIRECT row whose
+qty also clears the O2 jump still RELEASES the record (S7 — the vendor sent a stock
+list; under priority order O2 would shadow O3 and leave the mark active). O1 already
+subsumes any O2-shaped signal on LIVE rows, since any qty difference triggers it.
 
 | # | override | rule (NULL-safe, Python only, no raw_data, no SQL-over-JSON) | applies to |
 |---|---|---|---|
 | O1 | **Live truth** | class LIVE AND `qty_available > 0` AND `qty_available != qty_at_mark` (NULL snapshot ⇒ passes) → leave row unstamped, renders advisory+nudge. The `!=`-guard means a stale distributor-API echo showing the exact flagged qty stays stamped (marks on DigiKey/Mouser rows are no longer total no-ops) | ALL reasons incl. `different_part` (an authorized catalog match is identity evidence) |
-| O2 | **Restock** | `qty_at_mark` non-NULL AND fresh `qty_available` non-NULL AND fresh `> qty_at_mark` AND fresh `>= qty_at_mark × factor` (2.0); snapshot 0 ⇒ any fresh > 0. NULL either side = **no signal** (never "no change"). Row left unstamped → advisory+nudge. **No record mutation** — a one-off broker qty jitter surfaces one row this scrape and is re-stamped next scrape if the listing reverts: stateless, self-healing, no flap, no re-mark chore | LOT + LISTING reasons; disabled for `different_part` (more of the wrong part is still the wrong part) |
+| O2 | **Restock** | class LISTING (the default) AND `qty_at_mark` non-NULL AND fresh `qty_available` non-NULL AND fresh `> qty_at_mark` AND fresh `>= qty_at_mark × factor` (2.0); snapshot 0 ⇒ any fresh > 0. NULL either side = **no signal** (never "no change"). Row left unstamped → advisory+nudge. **No record mutation** — a one-off broker qty jitter surfaces one row this scrape and is re-stamped next scrape if the listing reverts: stateless, self-healing, no flap, no re-mark chore | LOT + LISTING reasons; disabled for `different_part` (more of the wrong part is still the wrong part) |
 | O3 | **Vendor document** | class HUMAN_DIRECT AND `qty_available > 0` → **record-level release**: `released_at=now`, `release_trigger='vendor_email'`, one ActivityLog line, stamp nothing. Safe to write here: this path is a user-initiated router, not a background worker — no worker race | LOT + LISTING; disabled for `different_part` (a qty claim doesn't fix identity) |
-| — | **else** | stamp `is_unavailable=True` (current behavior) | |
+| — | **else** | a row whose class's override doesn't fire → stamp `is_unavailable=True` (current behavior) | |
 
 **Offer hook** (the only other `released_at` writer): at offer creation,
 `release_on_offer(db, vendor_name, requirement)` releases matching records

@@ -1057,6 +1057,60 @@ class TestOverrideO3VendorDocument:
         assert rec.released_at is None
 
 
+class TestSourceClassDispatch:
+    """Overrides dispatch on mutually exclusive source classes (LIVE → O1, HUMAN_DIRECT
+    → O3, listing → O2) — never priority order.
+
+    Pins the S7 edge: a qty that also clears the O2 jump must NOT shadow the
+    stronger evidence class.
+    """
+
+    def test_human_direct_qty_jump_releases_record_not_o2(self, db_session: Session):
+        """email_attachment row with qty >= 2x snapshot fires O3 (record release), not
+        O2 (row-level only) — the vendor sent a stock list, so RFQ resumes."""
+        requirement = _make_requirement(db_session)
+        rec = _make_record(db_session, qty_at_mark=100)
+        row = _make_sighting(
+            db_session,
+            requirement,
+            "Acme Components",
+            mpn_matched="ST3300657SS",
+            qty_available=200,  # >= 2.0 x snapshot — would satisfy the O2 jump too
+            source_type="email_attachment",
+        )
+
+        count = apply_to_fresh_sightings(db_session, requirement, [row])
+        db_session.commit()
+
+        assert count == 0
+        assert bool(row.is_unavailable) is False
+        assert rec.released_at is not None
+        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        entries = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.VENDOR_AVAILABLE).all()
+        assert len(entries) == 1
+        assert entries[0].requirement_id == requirement.id
+
+    def test_live_qty_jump_takes_o1_path_no_record_mutation(self, db_session: Session):
+        """LIVE row with qty >= 2x snapshot surfaces via O1 (row-level only) — never O2,
+        never a release."""
+        requirement = _make_requirement(db_session)
+        rec = _make_record(db_session, qty_at_mark=100)
+        row = _make_sighting(
+            db_session,
+            requirement,
+            "Acme Components",
+            mpn_matched="ST3300657SS",
+            qty_available=200,  # >= 2.0 x snapshot — O1 subsumes any O2-shaped signal
+            source_type="digikey",
+        )
+
+        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 0
+        assert bool(row.is_unavailable) is False
+        assert rec.released_at is None
+        assert rec.release_trigger is None
+        assert rec.qty_at_mark == 100
+
+
 class TestUnknownSourceClass:
     @pytest.mark.parametrize("source_type", [None, "", "mystery_feed", "stock_list", "historical", "vendor_affinity"])
     def test_unknown_or_listing_source_stamps_and_never_releases(self, db_session: Session, source_type):
