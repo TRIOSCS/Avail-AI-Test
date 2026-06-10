@@ -777,14 +777,23 @@ ladder lands in record_spec):
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
     2. desc_extractor/writer.py::extract_and_record_specs — deterministic
-       description→spec token grammar (storage + DRAM; TRIO part-master/inventory
-       descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
+       description→spec token grammar across EIGHT commodities (phase 1: hdd/ssd/
+       dram; phase 2: power_supplies/displays/tape_drives/gpu/motherboards — TRIO
+       part-master/inventory descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre
+       Channel`, `PSU, 1460W 240V/200V AC Hot Swap`, `Tape, JAG 7`), source=
        "desc_parse", confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
-       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"…) and
-       conflicting tokens; only already-categorized hdd/ssd/dram cards are written
+       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"/
+       "Card,"/"Library,"…) and conflicting tokens, while NEUTRAL leads (packaging
+       words/brands/SPS- prefixes: "ASSY,"/"MSI,"/"SPS-PCA,"…) fall through to
+       body-token + category-hint arbitration instead of dying foreign. Per-module
+       structural guards: wattage exists only on the power_supplies route (CPU "135W"
+       TDP unreachable — cpu stays hint-only) and gpu memory_gb requires a GPU-context
+       token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
+       Only cards already categorized to one of the eight commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
        The writer skips keys already held at higher confidence, so mpn_decode 0.95
-       and vendor-API values stay authoritative.
+       and vendor-API values stay authoritative. The five phase-2 commodities have
+       no MPN decoders, so desc_parse is their top non-vendor source.
     3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction", facets gated at confidence >= 0.85. Applies the
        same strictly-higher-confidence skip guard, so it never clobbers an

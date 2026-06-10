@@ -15,9 +15,11 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar — sits between mpn_decod
 # vendor-API value, and the writer skips keys already held at higher confidence.
 
 # The only commodities the extractor fills specs for — single source of truth shared
-# by extract_desc (routing) and writer.py (card eligibility). Other inferred
-# commodities (motherboards/power_supplies/cpu) come back as a bare hint, empty specs.
-SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram"})
+# by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
+# set). cpu stays hint-only (empty specs): keeping it OUT of this set is the
+# PSU-vs-CPU wattage guard — a `wattage` key can only ever be emitted on the
+# power_supplies route, so CPU "135W" TDP text is structurally unreachable.
+SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram", "power_supplies", "displays", "tape_drives", "gpu", "motherboards"})
 
 
 @dataclass
@@ -25,9 +27,10 @@ class DescResult:
     """Outcome of extracting one description string.
 
     ``commodity`` is the inferred commodity KEY hint (e.g. "hdd", "ssd", "dram",
-    "motherboards", "power_supplies", "cpu") for CALLERS to use — the extractor and
-    its writer never set a card's category from it. It is always set: when no
-    commodity can be established, extract_desc returns None instead of a DescResult.
+    "power_supplies", "displays", "tape_drives", "gpu", "motherboards", "cpu") for
+    CALLERS to use — the extractor and its writer never set a card's category from
+    it. It is always set: when no commodity can be established, extract_desc
+    returns None instead of a DescResult.
     ``specs`` maps seeded spec_key -> value (enum string / int / float / bool — bool
     only for boolean schemas like dram.ecc, exactly like mpn_decoder.DecodeResult).
     """
