@@ -92,8 +92,14 @@ def _apply_result(part: ConsolidatedPart, result: dict) -> None:
         part.ai_description = desc.strip()
 
     # Only accept an AI category when the source had none (don't override real category).
+    # 'other' is rejected outright (defense in depth — ai_correct() also withholds it from
+    # the schema enum): it is the ABSENCE of classification, not a classification, and
+    # writing it at trio_source_ai (88) would permanently lock the card out of every
+    # deterministic re-homing lane below it — mpn_decode (85), fru_matrix_decode (84),
+    # desc_parse (83), fru_desc_parse (82), partsurfer/oem (80) — exactly the rows
+    # clean.py blanks TRIO's 'Other' code to keep open.
     cat = result.get("category")
-    if not part.category and isinstance(cat, str) and cat.strip():
+    if not part.category and isinstance(cat, str) and cat.strip() and cat.strip().lower() != "other":
         part.ai_category = cat.strip()
         conf = result.get("category_confidence")
         part.ai_category_confidence = float(conf) if isinstance(conf, (int, float)) else 0.5
@@ -139,7 +145,12 @@ async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
     everything" from "AI failed on 100% of parts". ``corrected`` counts only parts where a
     structured result was actually applied.
     """
-    canonical_keys = sorted(get_all_commodities())
+    # 'other' is withheld from the model's vocabulary: clean.py deliberately blanks TRIO's
+    # 'Other' code so the no-category rows stay open to real categorization, and those are
+    # precisely the rows this lane categorizes (ai_category applies only when part.category
+    # is falsy). Offering 'other' would re-lock them at tier 88, above every deterministic
+    # decode/desc-parse lane. The model returns null when no real commodity fits.
+    canonical_keys = sorted(k for k in get_all_commodities() if k != "other")
     schema = _schema(canonical_keys)
     vocab_line = "Canonical category keys (choose exactly one or null): " + ", ".join(canonical_keys)
 
