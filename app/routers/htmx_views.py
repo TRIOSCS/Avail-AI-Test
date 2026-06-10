@@ -7185,7 +7185,11 @@ async def materials_filters_sub_partial(
 ):
     """Render sub-filters for a selected commodity with live facet counts."""
     if not commodity.strip():
-        return HTMLResponse("")
+        # No commodity scope — render the placeholder nudge (skip the facet/coverage
+        # service calls; subfilters.html handles the commodity_selected=False branch).
+        ctx = _base_ctx(request, user, "materials")
+        ctx["commodity_selected"] = False
+        return template_response("htmx/partials/materials/filters/subfilters.html", ctx)
 
     # Parse active filters so facet counts reflect current selection
     parsed_filters = _parse_filter_json(sub_filters)

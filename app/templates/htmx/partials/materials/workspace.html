@@ -15,7 +15,9 @@
        aria-hidden="true"
        class="fixed inset-0 bg-gray-900/40 z-40 lg:hidden"></div>
 
-  {# -- Sidebar (desktop: static, mobile: slide-over drawer) -- #}
+  {# -- Sidebar (desktop: static, mobile: slide-over drawer) --
+     Mobile drawer offsets top-[52px] bottom-[48px] assume a 52px app header + 48px
+     bottom nav — update them if the app chrome changes. #}
   <div :class="drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
        x-trap.noscroll="drawerOpen"
        @keydown.escape.window="drawerOpen = false"
@@ -102,33 +104,30 @@
            hx-sync="this:replace">
       </div>
 
-      {# ── More attributes (manufacturer + lifecycle/RoHS/condition/datasheet) ──
-         Collapsed by default; demoted below the commodity facets. Containers still load
-         while hidden (hx-trigger="load") so counts are ready when expanded. #}
+      {# ── Data confidence (3 groups, first filter fold, EXPANDED by default) ──
+         Trust is the headline filter, so it sits directly under the commodity context
+         and opens by default. Collapse policy: navigation sections open, trust fold
+         open, heavy folds below closed. Each group checkbox toggles its member
+         enrichment tiers; the backend still receives a `statuses` CSV. #}
       <div class="border-t border-gray-100 pt-3 mt-3">
-        {{ disclosure_header('moreAttrsOpen', 'more-attrs-panel', 'More attributes', 'attributesActiveCount > 0', 'attributesActiveCount') }}
-        <div id="more-attrs-panel" role="region" aria-label="More attributes" x-show="moreAttrsOpen" x-collapse x-cloak class="mt-2">
-          {# Manufacturer #}
-          <div id="manufacturer-filter-container"
-               hx-get="/v2/partials/materials/filters/manufacturers"
-               hx-target="this"
-               hx-trigger="load, commodity-changed from:body"
-               hx-indicator="#mfr-filter-spinner"
-               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
-               hx-swap="innerHTML">
-          </div>
-          {# Global facets — lifecycle / RoHS / condition / has-datasheet #}
-          <div id="global-filter-container"
-               hx-get="/v2/partials/materials/filters/global"
-               hx-target="this"
-               hx-trigger="load, commodity-changed from:body"
-               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
-               hx-swap="innerHTML">
-          </div>
+        {{ disclosure_header('confidenceOpen', 'confidence-panel', 'Data confidence', 'confidenceNarrowed', 'activeConfidenceGroups.length') }}
+        <div id="confidence-panel" role="region" aria-label="Data confidence" x-show="confidenceOpen" x-collapse x-cloak class="space-y-0.5 mt-2">
+          <template x-for="group in CONFIDENCE_GROUPS" :key="group.key">
+            <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+              <input type="checkbox"
+                     :checked="confidenceGroupChecked(group.key)"
+                     @change="toggleConfidenceGroup(group.key)"
+                     class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+              <span class="inline-block w-2 h-2 rounded-full flex-shrink-0" :class="group.dot"></span>
+              <span class="text-gray-700 truncate flex-1 text-[13px]" x-text="group.label"></span>
+            </label>
+          </template>
         </div>
       </div>
 
-      {# ── Sourcing signals (Layer-3 operational filters) ──────────────
+      {# ── Sourcing signals (Layer-3 operational filters, 2nd fold, collapsed) ──
+         Heavy fold (11 heterogeneous controls) — closed by default per the collapse
+         policy; the active-count badge + persistOr cover discoverability.
          Stock/price/crosses toggles, internal tri-state, recently-searched chips and
          min-searches — MaterialCard + vendor-history predicates, no per-value counts,
          so this section is static (no HTMX reload needed). #}
@@ -192,22 +191,30 @@
         </div>
       </div>
 
-      {# ── Data confidence (3 groups, collapsed, bottom) ───────────────
-         Lowest-priority filter. Each group checkbox toggles its member enrichment tiers;
-         the backend still receives a `statuses` CSV. #}
+      {# ── More attributes (manufacturer + lifecycle/RoHS/condition/datasheet) ──
+         Last fold, collapsed by default per the collapse policy (heavy folds closed).
+         Containers still load while hidden (hx-trigger="load") so counts are ready
+         when expanded. #}
       <div class="border-t border-gray-100 pt-3 mt-3">
-        {{ disclosure_header('confidenceOpen', 'confidence-panel', 'Data confidence', 'confidenceNarrowed', 'activeConfidenceGroups.length') }}
-        <div id="confidence-panel" role="region" aria-label="Data confidence" x-show="confidenceOpen" x-collapse x-cloak class="space-y-0.5 mt-2">
-          <template x-for="group in CONFIDENCE_GROUPS" :key="group.key">
-            <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
-              <input type="checkbox"
-                     :checked="confidenceGroupChecked(group.key)"
-                     @change="toggleConfidenceGroup(group.key)"
-                     class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
-              <span class="inline-block w-2 h-2 rounded-full flex-shrink-0" :class="group.dot"></span>
-              <span class="text-gray-700 truncate flex-1 text-[13px]" x-text="group.label"></span>
-            </label>
-          </template>
+        {{ disclosure_header('moreAttrsOpen', 'more-attrs-panel', 'More attributes', 'attributesActiveCount > 0', 'attributesActiveCount') }}
+        <div id="more-attrs-panel" role="region" aria-label="More attributes" x-show="moreAttrsOpen" x-collapse x-cloak class="mt-2">
+          {# Manufacturer #}
+          <div id="manufacturer-filter-container"
+               hx-get="/v2/partials/materials/filters/manufacturers"
+               hx-target="this"
+               hx-trigger="load, commodity-changed from:body"
+               hx-indicator="#mfr-filter-spinner"
+               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+               hx-swap="innerHTML">
+          </div>
+          {# Global facets — lifecycle / RoHS / condition / has-datasheet #}
+          <div id="global-filter-container"
+               hx-get="/v2/partials/materials/filters/global"
+               hx-target="this"
+               hx-trigger="load, commodity-changed from:body"
+               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+               hx-swap="innerHTML">
+          </div>
         </div>
       </div>
 

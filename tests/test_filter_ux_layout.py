@@ -12,7 +12,7 @@ def test_workspace_commodity_first_structure(client):
     # Type-to-find + recents wiring.
     assert 'x-model="categorySearch"' in t
     assert "recentCommodities" in t
-    # "More attributes" collapse wraps manufacturer + global; confidence collapses at bottom.
+    # "More attributes" collapse wraps manufacturer + global; confidence is the first fold.
     assert "moreAttrsOpen" in t
     assert "more-attrs-panel" in t
     assert "confidenceOpen" in t
@@ -20,8 +20,9 @@ def test_workspace_commodity_first_structure(client):
     # Drawer a11y.
     assert "x-trap" in t
 
-    # Commodity-first ORDER: Category section → commodity facets → More attributes → Data confidence.
-    assert t.index("Category") < t.index("More attributes") < t.index("Data confidence")
+    # Fold ORDER: Category section → commodity facets → Data confidence (trust, first
+    # fold) → Sourcing signals → More attributes (heavy folds demoted to the bottom).
+    assert t.index("Category") < t.index("Data confidence") < t.index("Sourcing signals") < t.index("More attributes")
     # Category tree moved ABOVE the manufacturer container (was below it pre-reorg)...
     assert t.index("filters/tree") < t.index("manufacturer-filter-container")
     # ...and the commodity sub-filters come before the demoted "More attributes" block.
@@ -29,7 +30,7 @@ def test_workspace_commodity_first_structure(client):
 
 
 def test_workspace_confidence_still_three_groups(client):
-    # The 3-group confidence filter survives the reorg (now inside the collapsed panel).
+    # The 3-group confidence filter survives the reorg (first fold, expanded by default).
     resp = client.get("/v2/partials/materials/workspace")
     assert resp.status_code == 200
     assert "toggleConfidenceGroup(" in resp.text

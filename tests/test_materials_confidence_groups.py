@@ -1,8 +1,8 @@
 """Unit 7 — data-confidence 3-group filter.
 
 Backend: statuses CSV still filters by enrichment_status (default = all tiers = no narrowing;
-empty = no filter). Render: the workspace sidebar exposes the 3 group checkboxes at the
-bottom and no longer uses the old per-tier handler.
+empty = no filter). Render: the workspace sidebar exposes the 3 group checkboxes in the
+first filter fold (expanded by default) and no longer uses the old per-tier handler.
 """
 
 from sqlalchemy.orm import Session
@@ -44,7 +44,7 @@ def test_statuses_subset_narrows(db_session: Session):
     assert results[0].normalized_mpn == "v"
 
 
-def test_workspace_renders_confidence_groups_at_bottom(client):
+def test_workspace_renders_confidence_groups_first_fold(client):
     resp = client.get("/v2/partials/materials/workspace")
     assert resp.status_code == 200
     assert "Data confidence" in resp.text

@@ -603,7 +603,9 @@ Alpine.data('materialsFilter', () => ({
   recentCommodities: persistOr([], 'mat_recent_commodities'),
   moreAttrsOpen: persistOr(false, 'mat_more_attrs_open'),
   sourcingOpen: persistOr(false, 'mat_sourcing_open'),
-  confidenceOpen: persistOr(false, 'mat_confidence_open'),
+  // Confidence fold (first filter fold) opens by default — trust is the headline
+  // filter; the heavy folds (sourcing / more attributes) stay closed until opened.
+  confidenceOpen: persistOr(true, 'mat_confidence_open'),
 
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
   // Array order pins the visual ordering of the Data-confidence section.
