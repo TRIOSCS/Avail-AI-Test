@@ -294,7 +294,7 @@ async def run_one_batch(
     # Deterministic MPN→spec decode (storage/DRAM): zero-LLM, regex-gated, enum-validated by
     # record_spec. Run order is NOT load-bearing: record_spec's F1 tier ladder
     # (app/services/spec_tiers.py — mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 >
-    # spec_extraction 60) arbitrates every write, so a downstream pass can never overwrite a
+    # fru_desc_parse 82 > spec_extraction 60) arbitrates every write, so a downstream pass can never overwrite a
     # decode value regardless of the confidence it claims or which pass ran first. The old
     # per-writer "skip keys already held at higher confidence" pre-gates are gone — the
     # ladder owns arbitration in one place. Same session, committed together below.
@@ -309,10 +309,15 @@ async def run_one_batch(
             except Exception:
                 logger.exception("ENRICH_WORKER: mpn-decode failed over {} cards", len(enriched_ids))
 
-    # Deterministic FRU crosswalk decode: FRU spare PNs (IBM/Lenovo) inherit the
+    # Deterministic FRU crosswalk enrichment — ONE pass, two channels over the same
+    # batched fru_links query: (1) FRU spare PNs (IBM/Lenovo) inherit the
     # strict-intersected decode of their approved mfg_model links, source=
     # "fru_matrix_decode" (ladder tier 84 — below first-party mpn_decode 85, above
-    # desc_parse 83; record_spec's ladder arbitrates, not run order). For cards in
+    # desc_parse 83); (2) the qual-sheet descriptions stored on their mfg_model +
+    # drive_pn links run through the desc_extractor grammar and intersect, source=
+    # "fru_desc_parse" (tier 82 — below desc_parse 83: the card's OWN description
+    # outranks a linked row's prose; above partsurfer 80). record_spec's ladder
+    # arbitrates, not run order. For cards in
     # enriched_ids, a missing category the crosswalk fills lets desc-parse pick them up
     # in the SAME batch — not_found FRU spares are NOT in enriched_ids, so they only
     # benefit from the crosswalk itself this batch. Scope is the FULL batch (batch_ids,
@@ -333,7 +338,8 @@ async def run_one_batch(
     # Deterministic description→spec extraction (storage/DRAM token grammar): zero-LLM,
     # enum-validated by record_spec. source="desc_parse" (ladder tier 83): the F1 ladder —
     # not run order, and no per-writer pre-gates — guarantees it never overwrites
-    # mpn_decode (85) / fru_matrix_decode (84) / vendor-API (90) values and always beats
+    # mpn_decode (85) / fru_matrix_decode (84) / vendor-API (90) values, always overrides
+    # a linked-description fru_desc_parse (82) value, and always beats
     # the AI spec pass (spec_extraction, 60) regardless of the confidence either claims.
     # Same shared post-await session, committed together below.
     if enriched_ids:

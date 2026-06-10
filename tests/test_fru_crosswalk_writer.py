@@ -1,7 +1,13 @@
 """Writer — crosswalk_and_record_specs: FRU cards inherit the strict-intersected decode
 of their approved mfg_model links via record_spec (source="fru_matrix_decode",
-confidence 0.93), with the category fill / mismatch-skip / per-FRU + per-card isolation
-/ single-query guarantees stated inline on each test."""
+confidence 0.93) AND the strict-intersected desc_extractor parse of their linked qual-
+sheet descriptions (source="fru_desc_parse", tier 82, confidence 0.88), with the
+category fill / mismatch-skip / per-FRU + per-card isolation / single-query guarantees
+stated inline on each test.
+
+Description corpus strings are REAL fru_links rows from the live FRU matrix ingest
+(Qlot/Gabor/CZ sheets).
+"""
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -11,6 +17,8 @@ from app.services.commodity_registry import seed_commodity_schemas
 from app.services.fru_crosswalk_enrich import (
     FRU_DECODE_CONFIDENCE,
     FRU_DECODE_SOURCE,
+    FRU_DESC_CONFIDENCE,
+    FRU_DESC_SOURCE,
     crosswalk_and_record_specs,
 )
 from app.utils.normalization import normalize_mpn_key
@@ -20,10 +28,16 @@ ZERO_STATS = {
     "decoded": 0,
     "written": 0,
     "categorized": 0,
+    "desc_parsed": 0,
+    "desc_written": 0,
     "failed": 0,
+    "desc_failed": 0,
     "dropped_conflict": 0,
+    "desc_dropped_conflict": 0,
     "commodity_conflict": 0,
+    "desc_commodity_conflict": 0,
     "category_mismatch": 0,
+    "desc_category_mismatch": 0,
 }
 
 
@@ -40,7 +54,13 @@ def _card(db: Session, mpn: str, category: str | None = None, **kw) -> MaterialC
 
 
 def _link(
-    db: Session, fru: str, related: str, mfg: str | None = "Seagate", kind: str = "mfg_model", sheet: str = "Main"
+    db: Session,
+    fru: str,
+    related: str,
+    mfg: str | None = "Seagate",
+    kind: str = "mfg_model",
+    sheet: str = "Main",
+    description: str | None = None,
 ) -> FruLink:
     link = FruLink(
         fru_raw=fru,
@@ -49,6 +69,7 @@ def _link(
         related_norm=normalize_mpn_key(related),
         rel_kind=kind,
         manufacturer=mfg,
+        description=description,
         source_sheet=sheet,
     )
     db.add(link)
@@ -67,16 +88,13 @@ def test_writer_writes_intersected_specs_with_source_and_confidence(db_session: 
     stats = crosswalk_and_record_specs(db_session, [card.id])
     db_session.commit()
 
-    assert stats == {
-        "matched": 1,
-        "decoded": 1,
-        "written": 2,
-        "categorized": 0,
-        "failed": 0,
-        "dropped_conflict": 1,  # capacity_gb 4000 vs 8000
-        "commodity_conflict": 0,
-        "category_mismatch": 0,
-    }
+    assert stats == dict(
+        ZERO_STATS,
+        matched=1,
+        decoded=1,
+        written=2,
+        dropped_conflict=1,  # capacity_gb 4000 vs 8000
+    )
     f = _facets(db_session, card.id)
     assert f == {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}
     entry = card.specs_structured["form_factor"]
@@ -214,17 +232,32 @@ def test_duplicate_links_across_sheets_decode_once(db_session: Session, monkeypa
     assert stats["dropped_conflict"] == 0
 
 
-def test_non_mfg_model_links_excluded(db_session: Session):
-    # drive_pn (and every other rel_kind) is out of scope this wave — a FRU with
-    # only non-mfg_model links is not even "matched".
+def test_out_of_scope_rel_kinds_excluded_even_with_descriptions(db_session: Session):
+    # Only mfg_model + drive_pn rows are in scope — an option/tray row's description
+    # describes an accessory context, never the FRU's own specs, so a FRU with only
+    # out-of-scope links is not even "matched" (they are filtered in the ONE query).
     seed_commodity_schemas(db_session)
     card = _card(db_session, "00AJ141", category="hdd")
-    _link(db_session, "00AJ141", "ST4000NM0035", kind="drive_pn")
-    _link(db_session, "00AJ141", "00AJ144", mfg=None, kind="option")
+    _link(db_session, "00AJ141", "00AJ144", mfg=None, kind="option", description="8TB 3.5 HDD 7.2K 12Gb/s SAS")
+    _link(db_session, "00AJ141", "00AJ145", mfg=None, kind="tray", description="1.2TB 2.5 HDD 10K 12 Gb/s SAS")
 
     stats = crosswalk_and_record_specs(db_session, [card.id])
 
     assert stats == ZERO_STATS
+    assert _facets(db_session, card.id) == {}
+
+
+def test_drive_pn_without_description_matches_but_asserts_nothing(db_session: Session):
+    # A drive_pn related PN is an IBM spare number, NOT a decodable manufacturer
+    # model — it joins the scope ONLY for its description. Description-less drive_pn
+    # rows are matched (the kind is queried now) but contribute zero evidence.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category="hdd")
+    _link(db_session, "00AJ141", "00D5317", mfg=None, kind="drive_pn")
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1)
     assert _facets(db_session, card.id) == {}
 
 
@@ -496,3 +529,413 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     assert "form_factor" not in f  # dropped (out-of-enum), exactly mirroring record_spec
     assert f["capacity_gb"] == 4000  # sibling keys still written
     assert stats["written"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Linked-description channel (fru_desc_parse, tier 82) — wave 3A
+# ---------------------------------------------------------------------------
+
+# REAL fru_links descriptions from the live FRU matrix ingest (Qlot/Gabor/CZ sheets).
+_DESC_HDD_8TB = "8TB 3.5 HDD 7.2K 12Gb/s SAS"  # fru 01LJ065 / 00VN423
+_DESC_HDD_18TB = "18TB 3.5 HDD 7.2K 12 Gb/s SAS"  # qual-sheet drive_pn prose
+_DESC_HDD_1_2TB = "1.2TB 2.5 HDD 10K 12 Gb/s SAS"  # fru 01LJ787 / 00FJ069
+_DESC_HDD_450GB = 'HDD, 450GB 15000RPM 16MB 3.5" SAS'  # fru 46Y0295 / ST3450857SS
+_DESC_SSD_PM1733 = "SSD; 2.5; 1.92 TB Samsung PM1733"  # fru 01YM586 / MZWLJ1T9HBJR-000M3
+_DESC_SSD_PHOENIX = 'SSD, Toshiba, Phoenix M3, Non-SED, 2.5", 800GB, SAS, 12Gb/s, 10 DWPD'  # fru 00AR331
+
+
+def test_drive_pn_descriptions_intersect_and_write_fru_desc_parse(db_session: Session):
+    # Two qual-sheet drive_pn rows agreeing on rpm + interface but conflicting on
+    # capacity: the agreed keys write at tier 82 / "fru_desc_parse" / 0.88, the
+    # conflicting key is dropped AND counted in the DESC-side counter (per card —
+    # never blended into the per-FRU decode counter). drive_pn related PNs are IBM
+    # spares (never decoded), so the decode channel contributes nothing (decoded=0).
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category="hdd")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ065", "00VN424", mfg=None, kind="drive_pn", description=_DESC_HDD_18TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == dict(
+        ZERO_STATS,
+        matched=1,
+        desc_parsed=1,
+        desc_written=2,
+        desc_dropped_conflict=1,  # capacity_gb 8000 vs 18000
+    )
+    f = _facets(db_session, card.id)
+    assert f == {"rpm": "7200", "interface": "SAS"}
+    entry = card.specs_structured["rpm"]
+    assert entry["source"] == FRU_DESC_SOURCE == "fru_desc_parse"
+    assert entry["confidence"] == FRU_DESC_CONFIDENCE == 0.88
+    assert entry["tier"] == 82
+
+
+def test_mfg_model_description_feeds_desc_channel_single_source_passes(db_session: Session):
+    # mfg_model rows carry bare-drive prose too; an UNDECODABLE model (bare "PM863"
+    # passes no vendor regex gate) still contributes its description. One extracting
+    # description passes ALL its specs — one-of-N agreement, same as the decode channel.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AR331", category="ssd")
+    _link(db_session, "00AR331", "PM863", mfg="Toshiba", description=_DESC_SSD_PHOENIX)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_parsed=1, desc_written=3)
+    f = _facets(db_session, card.id)
+    assert f == {"capacity_gb": 800, "form_factor": '2.5"', "interface": "SAS"}
+    assert card.specs_structured["capacity_gb"]["source"] == FRU_DESC_SOURCE
+
+
+def test_desc_commodity_conflict_skips_desc_channel(db_session: Session):
+    # An HDD-prose row next to an SSD-prose row (same storage family, so neither is
+    # suppressed by the card hint): the descriptions can't agree on what the part IS
+    # — the desc channel asserts nothing, the skip surfaces in the
+    # desc_commodity_conflict counter (not buried at DEBUG), and the disagreement is
+    # not a counted key-value conflict.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category="hdd")
+    _link(db_session, "00AJ141", "00D5317", mfg=None, kind="drive_pn", description=_DESC_HDD_450GB)
+    _link(db_session, "00AJ141", "00D5318", mfg=None, kind="drive_pn", description=_DESC_SSD_PHOENIX)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_commodity_conflict=1)
+    assert _facets(db_session, card.id) == {}
+
+
+def test_fru_desc_parse_ladder_loses_to_higher_tiers_beats_lower(db_session: Session):
+    # record_spec's F1 ladder arbitrates the desc channel exactly like every writer:
+    # a desc_parse prior (83 — the card's OWN description) and an mpn_decode prior
+    # (85) both survive an incoming fru_desc_parse (82); a spec_extraction prior
+    # (60) loses and is overwritten.
+    seed_commodity_schemas(db_session)
+    card = _card(
+        db_session,
+        "01LJ065",
+        category="hdd",
+        specs_structured={
+            "rpm": {"value": "15000", "source": "desc_parse", "confidence": 0.90, "updated_at": "x"},
+            "capacity_gb": {"value": 4000, "source": "mpn_decode", "confidence": 0.95, "updated_at": "x"},
+            "interface": {"value": "SATA", "source": "spec_extraction", "confidence": 0.85, "updated_at": "x"},
+        },
+    )
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_parsed=1, desc_written=1)  # only interface lands
+    specs = card.specs_structured
+    # Higher-tier priors survive COMPLETELY untouched (record_spec never mutates a loser).
+    assert specs["rpm"] == {"value": "15000", "source": "desc_parse", "confidence": 0.90, "updated_at": "x"}
+    assert specs["capacity_gb"] == {"value": 4000, "source": "mpn_decode", "confidence": 0.95, "updated_at": "x"}
+    assert specs["interface"]["value"] == "SAS"
+    assert specs["interface"]["source"] == FRU_DESC_SOURCE
+    assert specs["interface"]["tier"] == 82
+
+
+def test_decode_filled_category_routes_desc_channel_same_pass(db_session: Session):
+    # ONE pass, chained channels: the decode channel fills the NULL category from the
+    # agreed commodity inside its own savepoint, and the desc channel (running after
+    # that savepoint RELEASED — released changes stay visible in the enclosing
+    # transaction) uses that fresh category as its extraction hint. The decode's
+    # tier-84 capacity beats the desc row's conflicting tier-82 capacity, so the desc
+    # channel lands only its novel keys.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ787", category=None)
+    _link(db_session, "01LJ787", "ST4000NM0035")  # decodes hdd: capacity 4000 / 3.5" / Enterprise
+    _link(db_session, "01LJ787", "00FJ069", mfg=None, kind="drive_pn", description=_DESC_HDD_1_2TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == dict(
+        ZERO_STATS,
+        matched=1,
+        decoded=1,
+        written=3,
+        categorized=1,
+        desc_parsed=1,
+        desc_written=2,  # rpm + interface; capacity_gb lost 82 < 84
+    )
+    assert card.category == "hdd"
+    assert card.category_source == FRU_DECODE_SOURCE  # the desc channel NEVER categorizes
+    f = _facets(db_session, card.id)
+    assert f["capacity_gb"] == 4000  # decode (84) kept over desc prose (82)
+    assert f["rpm"] == "10000"
+    assert f["interface"] == "SAS"
+    assert card.specs_structured["capacity_gb"]["source"] == FRU_DECODE_SOURCE
+    assert card.specs_structured["rpm"]["source"] == FRU_DESC_SOURCE
+
+
+def test_descriptions_never_categorize_a_category_less_card(db_session: Session):
+    # No decodable models → no regex-gated commodity proof → the NULL category stays
+    # NULL and the desc channel is skipped entirely (record_spec requires a category;
+    # linked prose must never fill one).
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category=None)
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1)
+    assert card.category is None
+    assert _facets(db_session, card.id) == {}
+
+
+def test_desc_channel_skipped_for_non_spec_commodity_category(db_session: Session):
+    # The desc channel mirrors the first-party desc writer's eligibility gate: a card
+    # categorized outside SPEC_COMMODITIES (e.g. "cables") takes nothing from linked
+    # prose, even when that prose extracts cleanly under no hint.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category="cables")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1)
+    assert _facets(db_session, card.id) == {}
+
+
+def test_category_mismatch_skips_desc_channel_too(db_session: Session):
+    # The decode commodity contradicts the existing category → the card is skipped
+    # ENTIRELY: the linked descriptions describe those same mismatching substitutes,
+    # so the desc channel must not write around the skip.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category="dram")
+    _link(db_session, "00AJ141", "ST4000NM0035")
+    _link(db_session, "00AJ141", "00D5317", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1, decoded=1, category_mismatch=1)
+    assert card.category == "dram"
+    assert _facets(db_session, card.id) == {}
+
+
+def test_decode_commodity_conflict_skips_desc_channel_too(db_session: Session):
+    # Substitute models that disagree on what the part IS (hdd vs ssd decode) poison
+    # BOTH channels — nothing may be asserted from descriptions of contradicting
+    # substitutes either.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category=None)
+    _link(db_session, "00AJ141", "ST4000NM0035")
+    _link(db_session, "00AJ141", "MZQL21T9HCJR", mfg="Samsung")
+    _link(db_session, "00AJ141", "00D5317", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1, decoded=1, commodity_conflict=1)
+    assert card.category is None
+    assert _facets(db_session, card.id) == {}
+
+
+def test_duplicate_descriptions_across_sheets_extract_once(db_session: Session, monkeypatch):
+    # The same qual-sheet prose repeated across sheets collapses into ONE extraction
+    # (the per-FRU description set), mirroring the decode channel's dedup.
+    import app.services.fru_crosswalk_enrich as mod
+
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category="hdd")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", sheet="Qlot", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", sheet="Gabor", description=_DESC_HDD_8TB)
+
+    calls: list[str] = []
+    real_extract = mod.extract_desc
+
+    def counting(description, commodity_hint=None):
+        calls.append(description)
+        return real_extract(description, commodity_hint=commodity_hint)
+
+    monkeypatch.setattr(mod, "extract_desc", counting)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert calls == [_DESC_HDD_8TB]
+    assert stats == dict(ZERO_STATS, matched=1, desc_parsed=1, desc_written=3)
+
+
+def test_desc_channel_links_resolved_in_the_same_single_select(db_session: Session):
+    # The desc channel rides the decode channel's ONE fru_links SELECT — extending
+    # the rel_kind filter must not add a second query.
+    engine = db_session.get_bind()
+
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ787", category=None)
+    _link(db_session, "01LJ787", "ST4000NM0035")
+    _link(db_session, "01LJ787", "00FJ069", mfg=None, kind="drive_pn", description=_DESC_HDD_1_2TB)
+
+    fru_link_selects: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "fru_links" in statement:
+            fru_link_selects.append(statement)
+
+    event.listen(engine, "before_cursor_execute", counter)
+    try:
+        stats = crosswalk_and_record_specs(db_session, [card.id])
+    finally:
+        event.remove(engine, "before_cursor_execute", counter)
+
+    assert len(fru_link_selects) == 1, fru_link_selects
+    assert stats["written"] == 3
+    assert stats["desc_written"] == 2
+
+
+def test_desc_failure_keeps_decode_writes_and_counts_desc_failed(db_session: Session, monkeypatch):
+    # The channels run in SEQUENTIAL savepoints: a failure during the desc channel
+    # rolls back ONLY the desc savepoint — the card's already-RELEASED decode writes
+    # and category fill survive (the stronger evidence is never nuked by the more
+    # failure-prone prose channel), the loss surfaces in desc_failed (NOT failed —
+    # the card is not lost), siblings persist, and the shared transaction stays clean.
+    import app.services.fru_crosswalk_enrich as mod
+
+    seed_commodity_schemas(db_session)
+    good = _card(db_session, "01LJ065", category="hdd")
+    bad = _card(db_session, "01LJ787", category=None)
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ787", "ST4000NM0035")
+    _link(db_session, "01LJ787", "00FJ069", mfg=None, kind="drive_pn", description=_DESC_HDD_1_2TB)
+
+    real_record_spec = mod.record_spec
+
+    def flaky(db, card_id, *args, **kwargs):
+        if card_id == bad.id and kwargs.get("source") == FRU_DESC_SOURCE:
+            db.flush()
+            raise RuntimeError("simulated flush failure in the desc channel")
+        return real_record_spec(db, card_id, *args, **kwargs)
+
+    monkeypatch.setattr(mod, "record_spec", flaky)
+
+    stats = crosswalk_and_record_specs(db_session, [good.id, bad.id])
+    db_session.commit()  # must NOT raise — the desc savepoint kept the transaction clean
+
+    assert stats["matched"] == 2
+    assert stats["failed"] == 0  # no card was LOST
+    assert stats["desc_failed"] == 1  # the desc-channel loss surfaces in its own counter
+    assert stats["desc_parsed"] == 1  # only the good card
+    assert stats["desc_written"] == 3
+    assert stats["decoded"] == 1
+    assert stats["written"] == 3  # the bad card's decode writes SURVIVE the desc failure
+    assert stats["categorized"] == 1
+    assert bad.category == "hdd"  # the decode-channel category fill survives too
+    f_bad = _facets(db_session, bad.id)
+    assert f_bad == {"capacity_gb": 4000, "form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}
+    assert bad.specs_structured["capacity_gb"]["source"] == FRU_DECODE_SOURCE
+    assert "rpm" not in f_bad  # the desc savepoint itself fully rolled back
+    assert _facets(db_session, good.id) == {"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"}
+
+
+def test_uniform_sibling_commodity_prose_skips_desc_channel(db_session: Session):
+    # UNANIMOUS SSD-lead prose on an hdd-categorized card: extract_desc's same-family
+    # lead refinement returns commodity='ssd' for EVERY row, so there is no
+    # intra-description conflict — but the agreed commodity contradicts the card's
+    # category. The desc channel must mirror the decode channel's category_mismatch
+    # rule (an existing category is authoritative, never written-around): NOTHING is
+    # written (no SSD capacity asserted on an hdd card at tier 82, no ssd-only keys
+    # polluting the dropped_no_schema seed-drift WARNING), and the skip surfaces in
+    # desc_category_mismatch.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01YM586", category="hdd")
+    _link(db_session, "01YM586", "00D5317", mfg=None, kind="drive_pn", description=_DESC_SSD_PM1733)
+    _link(db_session, "01YM586", "00D5318", mfg=None, kind="drive_pn", description=_DESC_SSD_PHOENIX)
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_category_mismatch=1)
+    assert card.category == "hdd"
+    assert _facets(db_session, card.id) == {}
+
+
+def test_spec_less_description_does_not_veto_rich_sibling_specs(db_session: Session):
+    # "HDD, Hot Swap" extracts commodity-only (empty specs) — common tray/hot-swap
+    # qual-sheet rows sitting next to full drive prose under the same FRU. Under the
+    # strict absence-is-not-agreement intersection one barren row would silently veto
+    # EVERY key of the rich sibling (agreed={}, dropped=0 — invisible); instead it is
+    # excluded from the per-key intersection (while still counting as commodity
+    # evidence) and the rich row's specs land.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category="hdd")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ065", "00VN424", mfg=None, kind="drive_pn", description="HDD, Hot Swap")
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_parsed=1, desc_written=3)
+    assert _facets(db_session, card.id) == {"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"}
+    assert card.specs_structured["capacity_gb"]["source"] == FRU_DESC_SOURCE
+
+
+def test_spec_less_description_commodity_still_vetoes_the_channel(db_session: Session):
+    # The flip side of the empty-spec filter: a spec-less extraction stays IN the
+    # commodity-agreement check. A bare SSD-lead row ("SSD, Hot Swap" → commodity=
+    # 'ssd', specs={}) next to HDD prose is a real commodity conflict and must skip
+    # the channel even though it would contribute no keys to the intersection.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "01LJ065", category="hdd")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ065", "00VN424", mfg=None, kind="drive_pn", description="SSD, Hot Swap")
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats == dict(ZERO_STATS, matched=1, desc_commodity_conflict=1)
+    assert _facets(db_session, card.id) == {}
+
+
+def test_desc_drop_counts_per_card_on_a_multi_card_fru(db_session: Session):
+    # The desc intersection runs per CARD (its extraction hint is the card's
+    # category), so the SAME conflicting description pair counts once for EACH card
+    # sharing the fru_norm — desc_dropped_conflict is per-card where dropped_conflict
+    # is per-FRU, which is exactly why they are separate counters (one unit each).
+    seed_commodity_schemas(db_session)
+    card_a = _card(db_session, "01LJ065", category="hdd")
+    card_b = _card(db_session, "01-LJ-065", category="hdd")
+    assert normalize_mpn_key(card_a.normalized_mpn) == normalize_mpn_key(card_b.normalized_mpn)
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+    _link(db_session, "01LJ065", "00VN424", mfg=None, kind="drive_pn", description=_DESC_HDD_18TB)
+
+    stats = crosswalk_and_record_specs(db_session, [card_a.id, card_b.id])
+    db_session.commit()
+
+    assert stats == dict(
+        ZERO_STATS,
+        matched=2,
+        desc_parsed=2,
+        desc_written=4,
+        desc_dropped_conflict=2,  # capacity conflict counted once PER CARD on the shared FRU
+    )
+    for card in (card_a, card_b):
+        assert _facets(db_session, card.id) == {"rpm": "7200", "interface": "SAS"}
+
+
+def test_desc_channel_surfaces_schema_drift_in_the_aggregate_warning(db_session: Session):
+    # A desc-extracted key with no live schema row must surface in the same aggregate
+    # WARNING the decode channel uses — record_spec alone drops it at DEBUG only.
+    from loguru import logger as loguru_logger
+
+    from app.models import CommoditySpecSchema
+
+    seed_commodity_schemas(db_session)
+    db_session.query(CommoditySpecSchema).filter_by(commodity="hdd", spec_key="rpm").delete()
+    db_session.flush()
+    card = _card(db_session, "01LJ065", category="hdd")
+    _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = crosswalk_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any("hdd.rpm" in w and "dropped" in w for w in warnings), warnings
+    f = _facets(db_session, card.id)
+    assert "rpm" not in f  # dropped (no schema)
+    assert f["capacity_gb"] == 8000  # sibling keys still written
+    assert stats["desc_written"] == 2

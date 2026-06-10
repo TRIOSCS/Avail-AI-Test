@@ -65,6 +65,7 @@ _SOURCE_TIER_SQL_CASE = (
     "WHEN 'mpn_decode' THEN 85 "
     "WHEN 'fru_matrix_decode' THEN 84 "
     "WHEN 'desc_parse' THEN 83 "
+    "WHEN 'fru_desc_parse' THEN 82 "
     "WHEN 'partsurfer' THEN 80 "
     "WHEN 'psref' THEN 80 "
     "WHEN 'web_search' THEN 70 "

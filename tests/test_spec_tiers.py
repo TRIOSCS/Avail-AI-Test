@@ -359,3 +359,13 @@ def test_set_category_flip_purges_stale_commodity_facets_and_specs(db_session: S
     # Old commodity's facet row AND its JSONB mirror are gone.
     assert db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id).count() == 0
     assert "ddr_type" not in (card.specs_structured or {})
+
+
+def test_fru_desc_parse_tier_sits_between_desc_parse_and_partsurfer():
+    # Wave 3A: the desc grammar run over a FRU's LINKED qual-sheet descriptions is
+    # one hop weaker than the card's OWN description (desc_parse 83) but stronger
+    # than the OEM scrapers (partsurfer/psref 80).
+    assert SOURCE_TIER["fru_desc_parse"] == 82
+    assert SOURCE_TIER["desc_parse"] > SOURCE_TIER["fru_desc_parse"]  # 83 > 82
+    assert SOURCE_TIER["fru_desc_parse"] > SOURCE_TIER["partsurfer"]  # 82 > 80
+    assert SOURCE_TIER["fru_matrix_decode"] > SOURCE_TIER["fru_desc_parse"]  # 84 > 82

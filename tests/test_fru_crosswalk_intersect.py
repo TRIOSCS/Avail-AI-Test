@@ -7,6 +7,7 @@ that any one of them omits) is never asserted.
 
 import pytest
 
+from app.services.desc_extractor import DescResult
 from app.services.fru_crosswalk_enrich import intersect_decodes
 from app.services.mpn_decoder import DecodeResult
 
@@ -88,3 +89,57 @@ def test_three_way_intersection_requires_all_to_agree():
     assert commodity == "hdd"
     assert agreed == {"capacity_gb": 4000}  # form_factor absent from c; rpm conflicts
     assert dropped == 1  # only rpm is a counted value conflict
+
+
+# ---------------------------------------------------------------------------
+# DescResult inputs (the fru_desc_parse channel) — intersect_decodes is shared by
+# both evidence channels, so the SAME contract must hold for desc extractions.
+# ---------------------------------------------------------------------------
+
+
+def _hdd_desc(specs: dict) -> "DescResult":
+    return DescResult(commodity="hdd", specs=specs)
+
+
+def test_desc_results_full_agreement_keeps_all_specs():
+    # Extractions of "8TB 3.5 HDD 7.2K 12Gb/s SAS"-style qual-sheet prose.
+    a = _hdd_desc({"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"})
+    b = _hdd_desc({"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"})
+
+    commodity, agreed, dropped = intersect_decodes([a, b])
+
+    assert commodity == "hdd"
+    assert agreed == {"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"}
+    assert dropped == 0
+
+
+def test_desc_results_conflicting_value_dropped_and_counted():
+    # An 8TB row next to an 18TB row: shared rpm/interface survive, capacity is
+    # dropped AND counted.
+    a = _hdd_desc({"capacity_gb": 8000, "rpm": "7200", "interface": "SAS"})
+    b = _hdd_desc({"capacity_gb": 18000, "rpm": "7200", "interface": "SAS"})
+
+    commodity, agreed, dropped = intersect_decodes([a, b])
+
+    assert commodity == "hdd"
+    assert agreed == {"rpm": "7200", "interface": "SAS"}
+    assert dropped == 1
+
+
+def test_desc_results_commodity_disagreement_returns_none():
+    # HDD prose next to SSD prose — the linked rows can't agree on what the part IS.
+    a = _hdd_desc({"capacity_gb": 450})
+    b = DescResult(commodity="ssd", specs={"capacity_gb": 800})
+
+    assert intersect_decodes([a, b]) == (None, {}, 0)
+
+
+def test_single_desc_result_passes_all_its_specs():
+    # One-of-N agreement: a lone extracting description asserts everything it parsed.
+    a = _hdd_desc({"capacity_gb": 1200, "rpm": "10000", "interface": "SAS"})
+
+    commodity, agreed, dropped = intersect_decodes([a])
+
+    assert commodity == "hdd"
+    assert agreed == {"capacity_gb": 1200, "rpm": "10000", "interface": "SAS"}
+    assert dropped == 0
