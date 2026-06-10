@@ -283,6 +283,81 @@ class TestSightingsMarkUnavailable:
         assert resp.status_code == 200
 
 
+class TestSightingsVendorRowStatusTreatment:
+    """Row-level visual treatment keyed off computed vendor status (spec
+    2026-06-10-sightings-status-row-treatment-design.md)."""
+
+    def test_unavailable_vendor_gets_red_row_treatment(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "bg-rose-50/60" in resp.text  # row tint
+        assert "bg-rose-100 text-rose-700" in resp.text  # badge
+
+    def test_offer_in_vendor_gets_green_row_treatment(self, client, db_session):
+        req, r, _ = _seed_data(db_session)
+        db_session.add(
+            Offer(
+                requirement_id=r.id,
+                requisition_id=req.id,
+                vendor_name="Good Vendor",
+                mpn="TEST-MPN-001",
+                unit_price=1.50,
+                qty_available=100,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "bg-emerald-50/50" in resp.text  # row tint
+        assert "bg-emerald-100 text-emerald-700" in resp.text  # badge
+
+    def test_offer_dominates_unavailable_row_treatment(self, client, db_session):
+        """Precedence pin: a vendor whose sightings are ALL unavailable but who has a
+        live Offer renders green, never red — offer-in dominates unavailable in
+        compute_vendor_statuses (app/services/sighting_status.py)."""
+        req, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.add(
+            Offer(
+                requirement_id=r.id,
+                requisition_id=req.id,
+                vendor_name="Good Vendor",
+                mpn="TEST-MPN-001",
+                unit_price=1.50,
+                qty_available=100,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "bg-emerald-50/50" in resp.text  # offer-in row tint wins
+        assert "bg-rose-50/60" not in resp.text  # unavailable tint must NOT render
+
+    def test_plain_sighting_row_has_no_status_tint(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "bg-rose-50/60" not in resp.text
+        assert "bg-emerald-50/50" not in resp.text
+
+
 class TestSightingsAssignBuyer:
     def test_assigns_buyer(self, client, db_session):
         _, r, _ = _seed_data(db_session)

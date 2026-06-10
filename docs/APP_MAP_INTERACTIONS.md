@@ -439,6 +439,12 @@ and the requisitions add-offer form share one field grid
 (offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
 entered offers appear in the Activity tab automatically.
 
+Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
+the server-computed vendor status `vs` (precedence resolved in
+app/services/sighting_status.py — offer-in dominates unavailable): unavailable
+rows get a soft rose tint + dimmed text + rose badge; offer-in rows get an
+emerald tint + emerald badge.
+
 NOTE: the two creation paths historically wrote Offer.normalized_mpn differently
 (create_offer = normalize_mpn_key, add_offer = normalize_mpn); add_offer was
 fixed to use normalize_mpn_key, and the part query matches both forms for safety.
