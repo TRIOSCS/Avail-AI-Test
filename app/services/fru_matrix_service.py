@@ -217,7 +217,9 @@ def get_fru_view(db: Session, mpn: str) -> FruView | None:
     norm = normalize_mpn_key(mpn)
     if not norm:
         return None
-    links = db.execute(select(FruLink).where(FruLink.fru_norm == norm).order_by(FruLink.id)).scalars().all()
+    # Defensive fetch cap: real FRUs carry well under 100 links; the cap bounds
+    # memory/dedup work if a pathological key ever accumulates thousands of rows.
+    links = db.execute(select(FruLink).where(FruLink.fru_norm == norm).order_by(FruLink.id).limit(5000)).scalars().all()
     if not links:
         return None
 
@@ -259,7 +261,12 @@ def get_reverse_view(db: Session, mpn: str, limit: int = REVERSE_VIEW_LIMIT) -> 
     norm = normalize_mpn_key(mpn)
     if not norm:
         return ReverseView(usages=(), total=0)
-    links = db.execute(select(FruLink).where(FruLink.related_norm == norm).order_by(FruLink.id)).scalars().all()
+    # Defensive fetch cap (common hardware like trays/screws appears under MANY
+    # FRUs): bounds the Python grouping below; display itself caps at ``limit``,
+    # so the cap only affects the reported total on pathological parts.
+    links = (
+        db.execute(select(FruLink).where(FruLink.related_norm == norm).order_by(FruLink.id).limit(2000)).scalars().all()
+    )
     if not links:
         return ReverseView(usages=(), total=0)
 
