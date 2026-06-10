@@ -39,8 +39,10 @@ suffix (`feat/spec-resolver-1-migration`, `-2-models`, …) and merges bottom-up
 
 1. Branch off **current** `origin/main` (`git fetch && git switch -c <name> origin/main`).
 2. Open a PR early; keep it focused and small.
-3. If `main` moves under you, **rebase onto `origin/main`** before merge (this is
-   normal maintenance, not a drift band-aid).
+3. If `main` moves under you, **merge `origin/main` into the branch** before merging
+   (normal maintenance, not a drift band-aid). Do NOT rebase a pushed branch — the
+   resulting force-push is hook-blocked; see CLAUDE.md "Git Discipline" for the
+   append-only recovery recipe if a branch was already rebased.
 4. Merge, then **delete the branch promptly** (local + remote).
 
 Do not let branches accumulate. A branch with no open PR and no active work is a
