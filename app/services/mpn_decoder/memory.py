@@ -280,7 +280,14 @@ _KING_GEN_BY_SPEED = {
     "56": DDR5,
     "64": DDR5,
 }
-_KING_FORM = {"N": (UDIMM, False), "E": (UDIMM, True), "R": (RDIMM, True), "L": (LRDIMM, True), "S": (SODIMM, False)}
+_KING_FORM = {
+    "N": (UDIMM, False),
+    "E": (UDIMM, True),
+    "R": (RDIMM, True),
+    "L": (LRDIMM, True),
+    "S": (SODIMM, False),
+    "SE": (SODIMM, True),  # two-letter ECC-SODIMM token (KVR16LSE11/8) — bare S is non-ECC
+}
 _KING_RANK_COUNT = {"S": "1", "D": "2", "Q": "4"}
 
 
@@ -295,6 +302,8 @@ def _kingston(mpn: str) -> DecodeResult | None:
     km = _KVR_KSM.match(mpn)
     if km:
         speed_code, lflag, letter = km.groups()
+        if letter == "S" and mpn[km.end() : km.end() + 1] == "E":
+            letter = "SE"  # ECC SODIMM — the regex captures one letter; peek at the E
         speed = _KING_SPEED.get(speed_code)
         if speed:
             specs["speed_mhz"] = speed

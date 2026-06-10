@@ -19,6 +19,10 @@ CASES = [
     ("MTA8ATF1G64AZ-2G6E1", {"ddr_type": "DDR4", "ecc": False}),
     # Kingston — trailing /<cap>, KVR/KSM speed+module, explicit D<gen> token
     ("KVR16N11/8", {"capacity_gb": 8, "speed_mhz": 1600, "form_factor": "UDIMM", "ecc": False}),
+    # SE is the two-letter ECC-SODIMM token; bare S is non-ECC (review finding: SE
+    # must not silently decode as ecc=False at 0.95 confidence).
+    ("KVR16LSE11/8", {"capacity_gb": 8, "speed_mhz": 1600, "form_factor": "SO-DIMM", "ecc": True}),
+    ("KVR16LS11/8", {"capacity_gb": 8, "speed_mhz": 1600, "form_factor": "SO-DIMM", "ecc": False}),
     (
         "KVR21R15D4/16",
         {"capacity_gb": 16, "speed_mhz": 2133, "form_factor": "RDIMM", "ecc": True, "ddr_type": "DDR4"},
