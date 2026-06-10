@@ -169,13 +169,17 @@ class TestUpdateMaterial:
     def test_update_enrichment_field_sets_source(
         self, client: TestClient, db_session: Session, test_material_card: MaterialCard
     ):
+        # Category must be canonical: off-vocab values now 422 instead of silently
+        # dropping (see test_put_rejects_offvocab_category_422 in
+        # tests/test_on_add_enrichment.py for the rejection contract).
         resp = client.put(
             f"/api/materials/{test_material_card.id}",
-            json={"lifecycle_status": "active", "category": "Voltage Regulators"},
+            json={"lifecycle_status": "active", "category": "dram"},
         )
         assert resp.status_code == 200
         db_session.refresh(test_material_card)
         assert test_material_card.lifecycle_status == "active"
+        assert test_material_card.category == "dram"
         assert test_material_card.enrichment_source == "manual"
 
     def test_update_not_found(self, client: TestClient):

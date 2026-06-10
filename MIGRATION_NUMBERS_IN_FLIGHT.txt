@@ -23,3 +23,4 @@
 # Format: <3-digit number> <branch> <notes...>  — lines starting with '#' are ignored.
 097 feat/dual-brand-filters dual-brand columns (PR #263, open — must re-chain down_revision onto 098 before merge: both currently chain off 096)
 098 perf/materials-post-ingest materials perf indexes (PR #262, MERGED to main)
+099 feat/on-add-enrichment on-add enrichment conflicts (PR #264, open — chains onto 098; collides with 097: whichever of #263/#264 merges second must re-chain its down_revision onto the other and re-run `alembic heads`)

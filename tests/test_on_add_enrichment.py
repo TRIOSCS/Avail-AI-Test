@@ -109,17 +109,182 @@ def test_add_part_rejects_short_mpn_422(client, db_session: Session):
 
 
 def test_add_part_rejects_offvocab_category_422(client, db_session: Session):
+    from app.utils.normalization import normalize_mpn_key
+
+    before = db_session.query(MaterialCard).count()
     resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-99", "category": "FLUX_CAPACITOR"})
     assert resp.status_code == 422
     assert "not a recognized commodity" in resp.text
-    # Card NOT created on a blocking validation failure.
-    assert db_session.query(MaterialCard).filter_by(normalized_mpn="zztestpart-99").first() is None
+    # Card NOT created on a blocking validation failure — query by the REAL dedup key
+    # (normalize_mpn_key strips dashes; "zztestpart-99" could never match anything).
+    key = normalize_mpn_key("ZZTESTPART-99")
+    assert key == "zztestpart99"
+    assert db_session.query(MaterialCard).filter_by(normalized_mpn=key).first() is None
+    assert db_session.query(MaterialCard).count() == before
 
 
 def test_add_part_rejects_bad_condition_422(client, db_session: Session):
     resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-99", "condition": "Mint"})
     assert resp.status_code == 422
     assert "not a valid condition" in resp.text
+
+
+def test_add_part_punctuation_only_mpn_rerenders_modal_422(client, db_session: Session):
+    """An MPN that passes normalize_mpn (display normalizer keeps dashes) but empties
+    normalize_mpn_key must re-render the modal like every other 422 — never a raw JSON
+    body (the beforeSwap allowlist would inject it into #modal-content as text)."""
+    before = db_session.query(MaterialCard).count()
+    resp = client.post("/api/materials/add", data={"mpn": "---"})
+    assert resp.status_code == 422
+    assert "Enter a valid MPN" in resp.text
+    assert 'name="mpn"' in resp.text  # the form re-renders, not a JSON error body
+    assert db_session.query(MaterialCard).count() == before
+
+
+def test_add_part_manual_category_vs_decode_records_conflict(client, db_session: Session):
+    """V2 end-to-end through the modal: manual category=hdd on a deterministically-DRAM
+    MPN keeps the manual value, blocks the cross-commodity decoded specs, and records
+    ONE conflict on key='category' with mpn_decode evidence."""
+    seed_commodity_schemas(db_session)
+    resp = client.post("/api/materials/add", data={"mpn": DRAM_MPN, "category": "hdd"})
+    assert resp.status_code == 200
+
+    card = _get_card(db_session, DRAM_MPN)
+    assert card.category == "hdd"  # manual/100 kept — never overwritten by the system
+    assert card.category_source == "manual"
+    assert not (card.specs_structured or {})  # cross-commodity guard blocked DRAM specs
+    assert card.has_validation_conflict
+    (entry,) = [c for c in card.validation_conflicts if c["key"] == "category"]
+    assert entry["manual"]["value"] == "hdd"
+    assert entry["evidence"]["source"] == "mpn_decode"
+    assert entry["evidence"]["value"] == "dram"
+
+
+def test_readd_of_enriched_card_does_not_stamp(client, db_session: Session):
+    """The priority lane stamps only cards select_batch can pick — an already-enriched
+    re-add would hold a stamp nothing ever clears (run_one_batch is the sole
+    clearer)."""
+    existing = MaterialCard(
+        normalized_mpn="zztestpart66",
+        display_mpn="ZZTESTPART-66",
+        enrichment_status="verified",
+        enriched_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(existing)
+    db_session.commit()
+
+    resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-66"})
+    assert resp.status_code == 200
+    db_session.refresh(existing)
+    assert existing.enrich_requested_at is None
+
+
+def test_readd_with_category_clears_conflict(client, db_session: Session):
+    """Re-adding an existing conflicted card with a category is a manual re-assertion —
+    it clears the category conflict exactly like both PUT paths."""
+    from app.services.spec_tiers import set_category
+
+    card = MaterialCard(
+        normalized_mpn="zztestpart55",
+        display_mpn="ZZTESTPART-55",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.flush()
+    set_category(card, "dram", "manual", 1.0)
+    set_category(card, "hdd", "mpn_decode", 0.95)  # loses, records the conflict
+    db_session.commit()
+    assert card.has_validation_conflict
+
+    resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-55", "category": "dram"})
+    assert resp.status_code == 200
+    db_session.refresh(card)
+    assert card.category == "dram"
+    assert not card.has_validation_conflict
+    assert (card.validation_conflicts or []) == []
+
+
+def test_put_rejects_offvocab_category_422(client, db_session: Session):
+    """The JSON API surfaces an off-vocab category rejection — a 200 with the edit
+    silently dropped is indistinguishable from acceptance."""
+    from app.services.spec_tiers import set_category
+
+    card = MaterialCard(
+        normalized_mpn="zztestpart44",
+        display_mpn="ZZTESTPART-44",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.flush()
+    set_category(card, "dram", "manual", 1.0)
+    db_session.commit()
+
+    resp = client.put(f"/api/materials/{card.id}", json={"category": "FLUX_CAPACITOR"})
+    assert resp.status_code == 422
+    assert "not a recognized commodity" in resp.json()["error"]
+    db_session.refresh(card)
+    assert card.category == "dram"  # untouched
+
+    # Blanking is rejected too — the ladder never clears a category.
+    resp = client.put(f"/api/materials/{card.id}", json={"category": "  "})
+    assert resp.status_code == 422
+    assert "can't be cleared" in resp.json()["error"]
+    db_session.refresh(card)
+    assert card.category == "dram"
+
+
+def test_workspace_hides_add_part_for_non_buyer(db_session: Session):
+    """POST /api/materials/add is require_buyer; the workspace (require_user) must not
+    show the Add-part button to roles whose submit would 403 (agent is the only
+    require_user role outside require_buyer's allowed set)."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+    from app.models import User
+
+    agent = User(
+        email="agent-onadd@trioscs.com",
+        name="Agent",
+        role="agent",
+        azure_id="test-azure-agent-onadd",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(agent)
+    db_session.commit()
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: agent
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/v2/partials/materials/workspace")
+            assert resp.status_code == 200
+            assert "Add part" not in resp.text
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_workspace_shows_add_part_for_buyer(client, db_session: Session):
+    resp = client.get("/v2/partials/materials/workspace")
+    assert resp.status_code == 200
+    assert "Add part" in resp.text
+
+
+def test_has_buyer_role_matches_require_buyer_set():
+    """has_buyer_role is the single source of truth for buyer-gated UI — it must track
+    require_buyer's allowed set exactly (agent stays excluded by design)."""
+    from types import SimpleNamespace
+
+    from app.constants import UserRole
+    from app.dependencies import has_buyer_role
+
+    allowed = {UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN}
+    for role in UserRole:
+        assert has_buyer_role(SimpleNamespace(role=role)) is (role in allowed)
+    assert has_buyer_role(None) is False
 
 
 def test_add_form_partial_renders(client, db_session: Session):
@@ -143,9 +308,10 @@ def test_bulk_import_runs_passes_warns_and_does_not_stamp(client, db_session: Se
     body = resp.json()
     assert body["created"] == 1
     assert body["skipped"] == 1
-    # V3 rejection surfaced per-row, never silent.
+    # V3 rejection surfaced per-row, never silent. `row` is the 1-based SOURCE-file
+    # row (header = 1, DRAM_MPN = 2, "AB" = 3) — the line the user opens and fixes.
     (warning,) = body["warnings"]
-    assert warning["row"] == 2
+    assert warning["row"] == 3
     assert warning["field"] == "mpn"
     assert "AB" in warning["reason"]
 
@@ -210,9 +376,12 @@ def test_enrich_status_terminal_returns_286(client, db_session: Session):
     assert "every 15s" not in resp.text
 
 
-def test_enrich_status_404_on_missing_card(client, db_session: Session):
+def test_enrich_status_missing_card_stops_polling(client, db_session: Session):
+    """A deleted/missing card answers 286 (htmx stop-polling), NOT 404 — htmx neither
+    swaps nor cancels an `every 15s` poll on a 4xx, so a 404 would poll forever."""
     resp = client.get("/v2/partials/materials/999999/enrich-status")
-    assert resp.status_code == 404
+    assert resp.status_code == 286
+    assert resp.text == ""
 
 
 # --- Needs-review faceted filter -------------------------------------------------

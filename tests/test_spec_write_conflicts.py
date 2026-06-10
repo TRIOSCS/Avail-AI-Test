@@ -135,6 +135,44 @@ def test_equal_value_records_no_conflict(db_session: Session):
     assert not card.has_validation_conflict
 
 
+def test_same_source_corroboration_drops_stale_entry(db_session: Session):
+    """'Newest evidence replaces' includes replacing-with-nothing: when a source's
+    latest observation AGREES with the manual value, its stale contradiction is removed
+    (deterministic sources re-fire every pass — a fixed decoder must unflag the
+    card)."""
+    card = _make_card(db_session)
+    _make_schema(db_session)
+
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="manual", confidence=1.0)
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.9)
+    db_session.flush()
+    assert card.has_validation_conflict
+
+    # The same source now reports the manual value — corroboration clears its entry.
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.95)
+    db_session.flush()
+    assert (card.validation_conflicts or []) == []
+    assert not card.has_validation_conflict
+
+
+def test_same_source_corroboration_keeps_other_sources_entries(db_session: Session):
+    """Corroboration from ONE source only removes THAT source's stale entry — another
+    source's live contradiction stays and the flag recomputes True."""
+    card = _make_card(db_session)
+    _make_schema(db_session)
+
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="manual", confidence=1.0)
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.9)
+    record_spec(db_session, card.id, "ddr_type", "DDR5", source="mouser_api", confidence=0.9)
+    db_session.flush()
+    assert len(card.validation_conflicts) == 2
+
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.95)
+    db_session.flush()
+    assert [c["evidence"]["source"] for c in card.validation_conflicts] == ["mouser_api"]
+    assert card.has_validation_conflict
+
+
 def test_non_manual_existing_never_flags(db_session: Session):
     """Only manual values raise conflicts — a vendor value beaten by another vendor
     write is plain ladder arbitration, not a review item."""
@@ -288,3 +326,91 @@ def test_accept_route_404_when_no_conflict(client, db_session: Session):
     db_session.commit()
     resp = client.post(f"/v2/partials/materials/{card.id}/conflicts/ddr_type/accept")
     assert resp.status_code == 404
+
+
+def test_accept_route_keeps_entry_when_spec_write_fails(client, db_session: Session):
+    """'Use this value' must NOT clear the conflict when the write no-ops (the entry is
+    the only persisted record of the contradiction) — it keeps it and surfaces a
+    toast."""
+    card = _make_card(db_session)
+    _make_schema(db_session)  # enum: DDR3/DDR4/DDR5 — "DDR9" fails validation
+    card.validation_conflicts = [
+        {
+            "key": "ddr_type",
+            "manual": {"value": "DDR3", "updated_at": ""},
+            "evidence": {"source": "digikey_api", "tier": 90, "confidence": 0.97, "value": "DDR9", "observed_at": ""},
+        }
+    ]
+    card.has_validation_conflict = True
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/materials/{card.id}/conflicts/ddr_type/accept")
+    assert resp.status_code == 200
+    assert "showToast" in resp.headers.get("HX-Trigger", "")
+    db_session.refresh(card)
+    assert card.has_validation_conflict  # entry kept — nothing was written
+    assert [c["key"] for c in card.validation_conflicts] == ["ddr_type"]
+    assert "ddr_type" not in (card.specs_structured or {})
+
+
+def test_accept_route_keeps_entry_when_category_write_fails(client, db_session: Session):
+    """Category variant: an off-vocab evidence value can't be written by set_category —
+    the conflict entry survives and the failure is surfaced."""
+    card = _make_card(db_session, category=None)
+    set_category(card, "dram", "manual", 1.0)
+    card.validation_conflicts = [
+        {
+            "key": "category",
+            "manual": {"value": "dram", "updated_at": ""},
+            "evidence": {
+                "source": "mpn_decode",
+                "tier": 85,
+                "confidence": 0.95,
+                "value": "flux_capacitor",
+                "observed_at": "",
+            },
+        }
+    ]
+    card.has_validation_conflict = True
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/materials/{card.id}/conflicts/category/accept")
+    assert resp.status_code == 200
+    assert "showToast" in resp.headers.get("HX-Trigger", "")
+    db_session.refresh(card)
+    assert card.category == "dram"  # untouched
+    assert card.has_validation_conflict
+    assert [c["key"] for c in card.validation_conflicts] == ["category"]
+
+
+# --- Commodity flip purges orphaned conflict entries -----------------------------
+
+
+def test_category_flip_purges_orphaned_spec_conflicts(db_session: Session):
+    """A category flip purges the old commodity's specs/facets — conflict entries keyed
+    by those purged spec keys go with them (the manual values they reference no longer
+    exist; accepting one could never write).
+
+    'category' entries survive the purge.
+    """
+    card = _make_card(db_session, category=None)
+    _make_schema(db_session)
+    set_category(card, "dram", "manual", 1.0)
+    set_category(card, "ssd", "mpn_decode", 0.95)  # loses → category conflict recorded
+
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="manual", confidence=1.0)
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.9)
+    db_session.flush()
+    assert {c["key"] for c in card.validation_conflicts} == {"category", "ddr_type"}
+
+    # Manual flip to hdd: dram facets/specs purge → the ddr_type conflict is an orphan.
+    assert set_category(card, "hdd", "manual", 1.0)
+    db_session.flush()
+    assert card.category == "hdd"
+    assert "ddr_type" not in (card.specs_structured or {})
+    assert [c["key"] for c in card.validation_conflicts] == ["category"]
+    assert card.has_validation_conflict  # the surviving category entry keeps the flag
+
+    # And when the purge removes the LAST entry, the flag drops too.
+    clear_validation_conflicts(card, "category")
+    assert not card.has_validation_conflict

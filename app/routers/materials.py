@@ -105,10 +105,10 @@ async def add_material(
     condition → 422 with the modal re-rendered carrying per-field messages.
     Success → HX-Redirect to the card detail.
     """
-    from ..constants import MaterialCondition
+    from ..constants import MaterialCondition, MaterialEnrichmentStatus
     from ..search_service import resolve_material_card, run_deterministic_passes
     from ..services.category_normalizer import normalize_category
-    from ..services.spec_tiers import set_category
+    from ..services.spec_tiers import clear_validation_conflicts, set_category
     from ..utils.normalization import normalize_mpn
 
     form = await request.form()
@@ -149,8 +149,24 @@ async def add_material(
         is None
     )
     card = resolve_material_card(mpn, db)
-    if card is None:  # defensive — normalize_mpn already gated above
-        raise HTTPException(422, "Invalid MPN")
+    if card is None:
+        # Reachable: normalize_mpn (display normalizer, keeps punctuation) passed but
+        # normalize_mpn_key (dedup key, strips ALL non-alphanumerics) emptied — e.g. a
+        # punctuation-only "MPN" like "---". Re-render the modal like every other 422;
+        # a raw HTTPException body would be swapped into #modal-content as JSON text
+        # (htmx_app.js force-allows 422 swaps targeted there).
+        return render_add_modal(
+            request,
+            errors={"mpn": "Enter a valid MPN."},
+            values={
+                "mpn": mpn,
+                "manufacturer": manufacturer,
+                "description": description,
+                "category": category,
+                "condition": condition,
+            },
+            status_code=422,
+        )
 
     # Manual/100 writes — blank = blank (never default, suggest, or copy values).
     written: list[str] = []
@@ -164,8 +180,12 @@ async def add_material(
         card.condition = condition  # validated MaterialCondition vocabulary above
         written.append("condition")
     if canonical_category:
-        set_category(card, canonical_category, "manual", 1.0)
-        written.append("category")
+        if set_category(card, canonical_category, "manual", 1.0):
+            written.append("category")
+            # A manual (re-)assertion resolves any recorded category conflict — same
+            # clearing semantics as both PUT paths (a re-add through the modal is a
+            # re-assertion too; the stale "Needs review" badge must not survive it).
+            clear_validation_conflicts(card, "category")
     if written:
         _stamp_manual_provenance(card, written)
         if not card.enrichment_source:
@@ -177,7 +197,16 @@ async def add_material(
     run_deterministic_passes(db, [card.id])
     # Priority lane: single-add only — a user is actively waiting on this card. The
     # worker FIFOs stamped cards ahead of the backlog and clears the stamp per batch.
-    card.enrich_requested_at = datetime.now(timezone.utc)
+    # Stamp ONLY cards select_batch can actually pick (unenriched / not_found /
+    # not_catalogued): run_one_batch clearing is the sole clearing mechanism, so a
+    # stamp on an already-enriched re-add would persist forever and front-run the
+    # FIFO if the card ever re-entered eligibility.
+    if card.enrichment_status in (
+        MaterialEnrichmentStatus.UNENRICHED,
+        MaterialEnrichmentStatus.NOT_FOUND,
+        MaterialEnrichmentStatus.NOT_CATALOGUED,
+    ):
+        card.enrich_requested_at = datetime.now(timezone.utc)
     db.commit()
     invalidate_prefix("material_list")
 
@@ -395,9 +424,20 @@ async def update_material(
             written.append(field)
     if data.category is not None:
         # F1 ladder: a human edit is manual/100 — it wins, gets provenance stamped,
-        # and purges the old commodity's facets. Off-vocab values are never persisted
-        # (set_category normalizes and no-ops — and must NOT clear conflicts either).
-        if set_category(card, data.category, "manual", 1.0):
+        # and purges the old commodity's facets. Off-vocab values are never persisted,
+        # and the JSON API must SAY so (a 200 with the edit silently dropped is
+        # indistinguishable from acceptance — the htmx PUT path surfaces the same
+        # rejection as a toast). 422 reverts the whole request (nothing committed).
+        from ..services.category_normalizer import normalize_category
+
+        raw_category = data.category.strip()
+        canonical = normalize_category(raw_category)
+        if canonical is None:
+            if raw_category:
+                raise HTTPException(422, f'"{raw_category}" is not a recognized commodity.')
+            # The ladder never blanks an existing category (set_category contract).
+            raise HTTPException(422, f'Category can\'t be cleared — kept "{card.category or "none"}".')
+        if set_category(card, canonical, "manual", 1.0):
             written.append("category")
             # A canonical re-assertion clears any recorded conflict for the key
             # (even an unchanged value: the human looked and confirmed it).
@@ -549,7 +589,7 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
     """
     import os as _os
 
-    from ..file_utils import extract_mpns, parse_tabular_file
+    from ..file_utils import extract_mpns_with_rows, parse_tabular_file
     from ..search_service import resolve_material_card, run_deterministic_passes
     from ..utils.normalization import normalize_mpn
 
@@ -565,14 +605,16 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
         raise HTTPException(413, "File too large -- 10MB maximum")
 
     rows = parse_tabular_file(content, file.filename or "")
-    mpns = extract_mpns(rows)
-    if not mpns:
+    mpn_rows = extract_mpns_with_rows(rows)
+    if not mpn_rows:
         raise HTTPException(400, "No part numbers found in file")
 
     created = existing = skipped = 0
     card_ids: list[int] = []
     warnings: list[dict] = []
-    for row_no, mpn in enumerate(mpns, start=1):
+    # row numbers are 1-based SOURCE-file rows (header = row 1) so a warning's `row`
+    # points at the spreadsheet line the user can actually open and fix.
+    for row_no, mpn in mpn_rows:
         # V3 normalization gate — never silent: surface the row + reason. normalize_mpn
         # (not the dedup key) owns the >=3-chars rule.
         if not normalize_mpn(mpn):
@@ -599,7 +641,7 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
         "created": created,
         "existing": existing,
         "skipped": skipped,
-        "total_rows": len(mpns),
+        "total_rows": len(mpn_rows),
         "warnings": warnings,
     }
 
@@ -675,7 +717,9 @@ async def import_stock_list_standalone(
     card_ids: list[int] = []
     warnings: list[dict] = []
 
-    for row_no, raw_row in enumerate(rows, start=1):
+    # row numbers are 1-based SOURCE-file rows (the header occupies file row 1) so a
+    # warning's `row` points at the spreadsheet line the user can actually open and fix.
+    for row_no, raw_row in enumerate(rows, start=2):
         parsed = normalize_stock_row(raw_row)
         if not parsed:
             skipped += 1

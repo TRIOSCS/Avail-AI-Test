@@ -168,26 +168,43 @@ def record_validation_conflict(
       - the two values actually differ after normalization (corroboration is not stored).
 
     Persists an entry into ``card.validation_conflicts`` de-duped per
-    ``(key, evidence.source)`` — newest evidence replaces — and sets
-    ``card.has_validation_conflict``. Returns True iff an entry was written.
+    ``(key, evidence.source)`` — newest evidence replaces, and a same-source
+    observation that now AGREES with the manual value removes that source's stale
+    entry (deterministic sources re-fire on every pass; a fixed decoder must not
+    leave the card flagged forever) — and sets ``card.has_validation_conflict``.
+    Returns True iff an entry was written.
     """
-    if (existing_prov or {}).get("source") != "manual":
+    existing_prov = existing_prov or {}
+    incoming_prov = incoming_prov or {}
+    if existing_prov.get("source") != "manual":
         return False
-    incoming_source = (incoming_prov or {}).get("source", "")
+    incoming_source = incoming_prov.get("source", "")
     incoming_tier = incoming_prov.get("tier")
     if incoming_tier is None:
         incoming_tier = tier_for(incoming_source)
     if int(incoming_tier) < CONFLICT_EVIDENCE_MIN_TIER:
         return False
-    manual_value = (existing_prov or {}).get("value")
+    manual_value = existing_prov.get("value")
     if _conflict_value_key(manual_value) == _conflict_value_key(incoming_value):
+        # Corroboration: this source's NEWEST observation agrees with the manual
+        # value. "Newest evidence replaces" includes replacing-with-nothing — drop
+        # any stale contradiction this source recorded earlier and recompute the flag.
+        stale = [
+            c
+            for c in (card.validation_conflicts or [])
+            if c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source
+        ]
+        if stale:
+            kept = [c for c in (card.validation_conflicts or []) if c not in stale]
+            card.validation_conflicts = kept
+            card.has_validation_conflict = bool(kept)
         return False
 
     entry = {
         "key": key,
         "manual": {
             "value": manual_value,
-            "updated_at": (existing_prov or {}).get("updated_at") or "",
+            "updated_at": existing_prov.get("updated_at") or "",
         },
         "evidence": {
             "source": incoming_source,
@@ -258,6 +275,12 @@ def _purge_stale_commodity_data(card: "MaterialCard", new_category: str, source:
     ``specs_structured`` entries (record_spec always writes both) are dropped so the
     winning sources re-assert their specs under the new commodity's schema.
 
+    ``validation_conflicts`` entries keyed by the purged spec keys are dropped too
+    (and ``has_validation_conflict`` recomputed): the manual values they reference no
+    longer exist on the card, the new commodity has no schema for them, so accepting
+    one could never write anything — they would be dead review items. ``category``
+    entries are untouched (never a facet spec key).
+
     No-op when the card has no session (a brand-new, not-yet-added card has no facet
     rows to purge).
     """
@@ -284,6 +307,16 @@ def _purge_stale_commodity_data(card: "MaterialCard", new_category: str, source:
     specs = dict(card.specs_structured or {})
     removed = [k for k in stale_keys if specs.pop(k, None) is not None]
     card.specs_structured = specs
+    # Conflict entries for purged spec keys are orphans — the manual value they point
+    # at was just removed, and the new commodity has no schema for the key (accepting
+    # would no-op). Drop them with the specs they describe; recompute the flag.
+    conflicts = list(card.validation_conflicts or [])
+    if conflicts:
+        stale_key_set = set(stale_keys)
+        kept_conflicts = [c for c in conflicts if c.get("key") not in stale_key_set]
+        if len(kept_conflicts) != len(conflicts):
+            card.validation_conflicts = kept_conflicts
+            card.has_validation_conflict = bool(kept_conflicts)
     logger.info(
         "set_category: card={} re-categorized {!r} → {!r} (source={}) — purged {} stale "
         "facet row(s) {} and {} matching specs_structured entr(ies) from the old commodity",

@@ -270,7 +270,10 @@
           </svg>
         </div>
 
-        {# Add part — opens the single-add modal (on-add auto-enrichment). #}
+        {# Add part — opens the single-add modal (on-add auto-enrichment). Buyer-gated:
+           POST /api/materials/add is require_buyer, so non-buyer roles never see the
+           button (their submit would 403 with no visible feedback in the modal). #}
+        {% if can_add_parts %}
         <button @click="$dispatch('open-modal')"
                 hx-get="/v2/partials/materials/add-form"
                 hx-target="#modal-content"
@@ -280,6 +283,7 @@
           <svg data-loading-remove class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           <span class="hidden sm:inline">Add part</span>
         </button>
+        {% endif %}
       </div>
 
       {# AI interpretation chip (populated via OOB swap from ai_interpret.html) #}

@@ -369,7 +369,7 @@ def test_update_material_enrichment_fields(client, db_session, test_material_car
         json={
             "lifecycle_status": "active",
             "package_type": "DIP-8",
-            "category": "Voltage Regulator",
+            "category": "voltage_regulators",  # canonical key — off-vocab now 422s (ladder PUT fix)
             "rohs_status": "compliant",
             "pin_count": 8,
             "datasheet_url": "https://ti.com/ds/lm317t.pdf",

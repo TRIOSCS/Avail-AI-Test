@@ -41,7 +41,7 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, require_admin, require_user
+from ..dependencies import get_user, has_buyer_role, require_admin, require_buyer, require_user
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -7031,6 +7031,9 @@ async def materials_workspace_partial(
     ctx["total_materials"] = total_materials
     ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
     ctx["global_facet_counts"] = get_global_facet_counts(db)
+    # The workspace is require_user, but POST /api/materials/add is require_buyer —
+    # hide the "Add part" button from roles whose submit would 403 (dead-end otherwise).
+    ctx["can_add_parts"] = has_buyer_role(user)
     return template_response("htmx/partials/materials/workspace.html", ctx)
 
 
@@ -7446,10 +7449,13 @@ async def materials_faceted_partial(
 @router.get("/v2/partials/materials/add-form", response_class=HTMLResponse)
 async def material_add_form_partial(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
 ):
     """Render the Add-part modal form (loaded into #modal-content).
 
+    require_buyer matches POST /api/materials/add — the form must never render for a
+    role whose submit would 403 (the workspace also hides the button via
+    has_buyer_role).
     NOTE: must stay registered BEFORE /v2/partials/materials/{card_id} — the path
     would otherwise be captured by the card_id route.
     """
@@ -7476,7 +7482,11 @@ async def material_enrich_status_partial(
 
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
-        raise HTTPException(404, "Material card not found")
+        # Polling sub-resource, not a navigable page: htmx neither swaps nor cancels
+        # an `every 15s` poll on a 4xx, so a 404 would leave a detail view open after
+        # the card is deleted hammering this route forever. 286 stops the poll; the
+        # empty body clears the badge.
+        return HTMLResponse("", status_code=286)
 
     ctx = _base_ctx(request, user, "materials")
     ctx["card"] = card
@@ -7529,9 +7539,33 @@ async def material_conflict_accept(
     value = (chosen.get("evidence") or {}).get("value")
 
     if key == "category":
-        set_category(card, value, "manual", 1.0)
+        wrote = set_category(card, value, "manual", 1.0)
     else:
-        record_spec(db, card.id, key, value, source="manual", confidence=1.0)
+        wrote = record_spec(db, card.id, key, value, source="manual", confidence=1.0)
+    if not wrote:
+        # The accepted value could not be written — off-vocab category, schema gone
+        # after a commodity flip, or enum/numeric rejection. KEEP the conflict entry
+        # (it is the only persisted record of the contradiction) and surface the
+        # failure instead of silently pretending the decision was applied.
+        logger.warning(
+            "Material card {} conflict-accept on {!r}: value {!r} could not be written — entry kept",
+            card_id,
+            key,
+            value,
+        )
+        response = await material_detail_partial(request, card_id, user, db)
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {
+                    "message": (
+                        f'Couldn\'t apply "{value}" to {key} — the value no longer fits '
+                        "this card's schema. The conflict was kept."
+                    ),
+                    "type": "warning",
+                }
+            }
+        )
+        return response
     clear_validation_conflicts(card, key)
     db.commit()
     logger.info("Material card {} conflict on {!r} accepted ({!r}) by {}", card_id, key, value, user.email)

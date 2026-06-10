@@ -189,12 +189,14 @@ class TestUpdateMaterial:
 
     def test_update_enrichment_fields(self, client, db_session):
         card = _make_card(db_session)
+        # Category must be canonical — off-vocab values now 422 instead of silently
+        # dropping (rejection contract: tests/test_on_add_enrichment.py).
         resp = client.put(
             f"/api/materials/{card.id}",
             json={
                 "lifecycle_status": "active",
                 "package_type": "DIP-8",
-                "category": "voltage regulator",
+                "category": "hdd",
                 "rohs_status": "compliant",
                 "pin_count": 8,
             },
@@ -682,10 +684,12 @@ class TestDirectHandlerCoverage:
 
         from app.schemas.vendors import MaterialCardUpdate
 
+        # Category must be canonical — off-vocab values now 422 instead of silently
+        # dropping (rejection contract: tests/test_on_add_enrichment.py).
         data = MaterialCardUpdate(
             lifecycle_status="active",
             package_type="SOT-23",
-            category="transistor",
+            category="cpu",
             rohs_status="compliant",
             pin_count=3,
             datasheet_url="https://example.com/ds.pdf",

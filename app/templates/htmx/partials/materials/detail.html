@@ -119,6 +119,9 @@
               <span class="text-gray-500">(conf {{ ev.get('confidence') }}{% if ev.get('observed_at') %}, {{ ev.get('observed_at')[:10] }}{% endif %})</span>
             </span>
           </div>
+          {# hx-vals quoting is intentional: SINGLE-quoted attribute + |tojson is the
+             canonical safe pattern (tojson emits a double-quoted JSON string and
+             escapes any ' as ') — do not "fix" to double quotes. #}
           <button hx-post="/v2/partials/materials/{{ card.id }}/conflicts/{{ conflict.get('key') }}/accept"
                   hx-vals='{"source": {{ ev.get('source', '')|tojson }}}'
                   hx-target="#main-content"
