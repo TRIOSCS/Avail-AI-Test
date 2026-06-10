@@ -177,6 +177,66 @@ class TestDeriveVendorStatus:
         statuses = compute_vendor_statuses(r.id, req.id, db_session)
         assert statuses["Acme Corp"] == "offer-in"
 
+    def test_unavailable_overrides_contacted(self, db_session):
+        """F4 precedence pin: contacted is a step; unavailable is its answer — a mark
+        made after contacting must be visible. Active record + all rows stamped +
+        contacted → 'unavailable' (offer-in still dominates everything but
+        blacklisted)."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        user = _make_user(db_session)
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name="Acme Corp",
+                parts_included=["TEST-MPN-001"],
+                status="sent",
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "unavailable"
+
+    def test_offer_in_overrides_unavailable_and_contacted(self, db_session):
+        """offer-in dominance pin survives the F4 reorder: offer-in beats both
+        unavailable and contacted."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        user = _make_user(db_session)
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        _make_summary(db_session, r.id, "Acme Corp")
+        _add_sighting(db_session, r.id, "Acme Corp", stamped=True)
+        _add_record(db_session, "Acme Corp", normalize_mpn_key(r.primary_mpn), age_days=1)
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name="Acme Corp",
+                parts_included=["TEST-MPN-001"],
+                status="sent",
+            )
+        )
+        db_session.add(
+            Offer(
+                requisition_id=req.id,
+                requirement_id=r.id,
+                vendor_name="Acme Corp",
+                mpn="TEST-MPN-001",
+            )
+        )
+        db_session.commit()
+        statuses = compute_vendor_statuses(r.id, req.id, db_session)
+        assert statuses["Acme Corp"] == "offer-in"
+
     def test_empty_vendor_names_returns_empty_dict(self, db_session):
         """Line 43: compute_vendor_statuses with no vendors returns empty dict."""
         from app.services.sighting_status import compute_vendor_statuses

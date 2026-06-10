@@ -3,7 +3,6 @@
 Computes a status per vendor for a given requirement by checking:
 - VendorCard.is_blacklisted -> "blacklisted"
 - Offer exists for requirement + vendor -> "offer-in"
-- Contact sent to vendor for requisition -> "contacted"
 - Reader-authority rule (the record predicate is the only authority;
   Sighting.is_unavailable is a render cache): vendor is "unavailable" iff
   (an ACTIVE VendorPartUnavailability record matches — vendor norm × any of
@@ -11,7 +10,13 @@ Computes a status per vendor for a given requirement by checking:
   vendor has NO unstamped sighting row) OR (no matching record at all AND all
   rows flagged — true legacy). Rows win: one override-surfaced row flips the
   pill off; an expired/released record's stale stamped rows never pin it.
+- Contact sent to vendor for requisition -> "contacted"
 - Default -> "sighting"
+
+Precedence: blacklisted > offer-in > unavailable > contacted > sighting.
+unavailable outranks contacted because contacted is a step and unavailable is
+its answer — a mark made after contacting must be visible; offer-in still
+dominates everything but blacklisted.
 
 Called by: htmx_views.part_tab_sourcing
 Depends on: models (VendorCard, Offer, Contact, Sighting, VendorSightingSummary,
@@ -44,8 +49,10 @@ def compute_vendor_statuses(
 ) -> dict[str, str]:
     """Compute vendor status for each vendor on a requirement.
 
-    Priority: blacklisted > offer-in > contacted > unavailable > sighting
-    Uses batched lookups with consistent name normalization.
+    Priority: blacklisted > offer-in > unavailable > contacted > sighting
+    (contacted is a step; unavailable is its answer — a mark made after
+    contacting must be visible). Uses batched lookups with consistent name
+    normalization.
     """
     if vendor_names is None:
         summaries = (
@@ -141,7 +148,10 @@ def compute_vendor_statuses(
         elif flags and all(flags):
             unavail_norms.add(norm)  # true legacy: flagged rows, no record at all
 
-    # Resolve statuses with priority: blacklisted > offer-in > contacted > unavailable > sighting
+    # Resolve statuses with priority: blacklisted > offer-in > unavailable >
+    # contacted > sighting. unavailable outranks contacted: contacted is a step
+    # and unavailable is its answer — a mark made after contacting must be
+    # visible. offer-in still dominates everything but blacklisted.
     result: dict[str, str] = {}
     for vn in vendor_names:
         norm = normalized[vn]
@@ -149,10 +159,10 @@ def compute_vendor_statuses(
             result[vn] = "blacklisted"
         elif vn in offer_vendors or norm in {normalize_vendor_name(ov) for ov in offer_vendors}:
             result[vn] = "offer-in"
-        elif vn in contacted_vendors or norm in {normalize_vendor_name(cv) for cv in contacted_vendors}:
-            result[vn] = "contacted"
         elif norm in unavail_norms:
             result[vn] = "unavailable"
+        elif vn in contacted_vendors or norm in {normalize_vendor_name(cv) for cv in contacted_vendors}:
+            result[vn] = "contacted"
         else:
             result[vn] = "sighting"
     return result

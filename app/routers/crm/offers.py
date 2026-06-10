@@ -1048,6 +1048,9 @@ async def promote_offer(
     offer.status = OfferStatus.ACTIVE
     offer.promoted_by_id = user.id
     offer.promoted_at = datetime.now(timezone.utc)
+    # Offer hook: user promotion of a pending offer is user-initiated proof of
+    # availability — release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     log_activity(
         db,
         activity_type=ActivityType.OFFER_STATUS_CHANGED,

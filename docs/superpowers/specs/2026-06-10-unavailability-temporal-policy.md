@@ -74,7 +74,7 @@ subsumes any O2-shaped signal on LIVE rows, since any qty difference triggers it
 | — | **else** | a row whose class's override doesn't fire → stamp `is_unavailable=True` (current behavior) | |
 
 **Offer hook** (the only other `released_at` writer): **`released_at` is written only
-by user-initiated proof** — a person entering, saving, or approving an offer. All five
+by user-initiated proof** — a person entering, saving, or approving an offer. All
 sites go through ONE gate, `maybe_release_on_offer(db, requirement_id, vendor_name,
 user)` (thin wrapper over `release_on_offer`; `'offer_received'`, all reasons **except
 `different_part`** — same principle as O3: *availability evidence never releases
@@ -84,7 +84,10 @@ convert/enter-offer route, which delegates to it; (2) manual `add_offer`
 (`app/routers/htmx_views.py`); (3) the user-edited `save_parsed_offers` route
 (`htmx_views.py`, persists ACTIVE); (4) `save_freeform_offers`
 (`app/services/ai_offer_service.py`, ACTIVE after user review); (5) the
-pending-review → approve transition (`approve_offer`, `crm/offers.py`).
+pending-review → approve transitions — `approve_offer` (`crm/offers.py`) plus its
+three approval twins: `promote_offer_htmx` (review-queue promote, `htmx_views.py`),
+`promote_offer` (T4→T5 API promote, `crm/offers.py`), and the `review_offer`
+approve branch (requisition offers tab, `htmx_views.py`).
 **Excluded — never release:** auto-created offers (background inbox monitor
 `_auto_create_offers_from_parse`; excess auto-matching `match_excess_demand` /
 `create_proactive_matches_for_excess`) are auto-mined evidence — same class as the
@@ -112,7 +115,9 @@ cache.** One helper `is_active(record, now)` used identically by all read surfac
    `(active record matches AND vendor has NO unstamped row)` OR `(no record at all AND
    all rows flagged — true legacy)`. Rows-win: one override-surfaced row flips the
    pill off "unavailable"; an expired record's stale stamped rows no longer pin the
-   pill (no more RFQ-resumed-while-tab-says-unavailable incoherence).
+   pill (no more RFQ-resumed-while-tab-says-unavailable incoherence). Pill precedence:
+   `blacklisted > offer-in > unavailable > contacted > sighting` — contacted is a step;
+   unavailable is its answer: a mark made after contacting must be visible.
 3. **RFQ** (`excluded_vendor_norms` + send/preview re-checks): active records only —
    fetch the few matching records and filter with `is_active` in Python.
    Released/expired → RFQ resumes, and now the tab agrees.

@@ -338,6 +338,17 @@ def _create_sightings_from_attachment(
             .first()
         )
         if existing:
+            # A RE-SENT vendor stock list is fresh HUMAN_DIRECT evidence: refresh
+            # the deduped row's qty/price from the new parse and include it in the
+            # apply batch so the override matrix evaluates it (O3 release). A bare
+            # `continue` here silently defeated the documented vendor-email release.
+            new_qty = normalize_quantity(row.get("qty"))
+            if new_qty is not None:
+                existing.qty_available = new_qty
+            new_price = normalize_price(row.get("unit_price"))
+            if new_price is not None:
+                existing.unit_price = new_price
+            created_by_req.setdefault(matched_req.id, []).append(existing)
             continue
 
         # Resolve material card
@@ -372,9 +383,10 @@ def _create_sightings_from_attachment(
         created_by_req.setdefault(matched_req.id, []).append(sighting)
         created += 1
 
-    # Re-apply durable vendor+part unavailability knowledge per requirement.
-    # This is the HUMAN_DIRECT path: a buyer-routed attachment row with qty>0
-    # triggers override O3 (record release) instead of stamping.
+    # Re-apply durable vendor+part unavailability knowledge per requirement
+    # (created rows AND dedup-refreshed re-sent rows). This is the HUMAN_DIRECT
+    # path: a buyer-routed attachment row with qty>0 triggers override O3
+    # (record release) instead of stamping.
     req_by_id = {req.id: req for req in reqs}
     for req_id, fresh_rows in created_by_req.items():
         apply_to_fresh_sightings(db, req_by_id[req_id], fresh_rows)

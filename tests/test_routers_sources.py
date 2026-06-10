@@ -144,9 +144,22 @@ def test_create_sightings_skips_empty_mpn():
 
 
 def test_create_sightings_skips_duplicates():
-    """Existing sighting prevents duplicate creation."""
+    """Existing sighting prevents duplicate creation — but the dedup hit refreshes the
+    row's qty from the new parse and routes it through the unavailability apply batch
+    (so a re-sent stock list still fires the O3 release) instead of being silently
+    skipped."""
     req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
-    existing = SimpleNamespace(id=99)  # Already exists
+    existing = SimpleNamespace(  # already exists — realistic sighting stub
+        id=99,
+        vendor_name="ACME",
+        vendor_name_normalized="acme",
+        mpn_matched="LM358N",
+        source_type="email_attachment",
+        qty_available=0,
+        unit_price=None,
+        is_unavailable=False,
+        is_authorized=None,
+    )
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req], existing_sightings=[existing])
 
@@ -154,6 +167,8 @@ def test_create_sightings_skips_duplicates():
     created = _create_sightings_from_attachment(db, vr, rows)
 
     assert created == 0
+    assert existing.qty_available == 100  # refreshed from the re-sent parse
+    assert existing.unit_price is None  # absent in the new parse → kept
 
 
 def test_create_sightings_case_insensitive_mpn():

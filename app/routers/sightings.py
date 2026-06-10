@@ -19,7 +19,7 @@ from typing import Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from loguru import logger
 from pydantic import ValidationError
 from sqlalchemy import func as sqlfunc
@@ -96,15 +96,30 @@ _SORT_COLUMNS = {
 }
 
 
-def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
-    """Return an OOB swap div that triggers a toast notification via Alpine."""
+def _oob_toast_html(msg: str, level: str = "success") -> str:
+    """The OOB toast fragment — swaps into #toast-trigger and fires $store.toast."""
     safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
-    return HTMLResponse(
+    return (
         f'<div hx-swap-oob="true" id="toast-trigger"'
         f" x-init=\"$store.toast.message='{safe_msg}';"
         f"$store.toast.type='{level}';"
         f'$store.toast.show=true"></div>'
     )
+
+
+def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
+    """Return an OOB swap div that triggers a toast notification via Alpine."""
+    return HTMLResponse(_oob_toast_html(msg, level))
+
+
+def _append_oob_toast(resp: Response, msg: str, level: str = "success") -> HTMLResponse:
+    """Append the OOB toast fragment to an already-rendered HTMX response (mark/clear
+    feedback on detail re-renders), preserving the original custom headers."""
+    out = HTMLResponse(resp.body.decode("utf-8") + _oob_toast_html(msg, level), status_code=resp.status_code)
+    for key, value in resp.headers.items():
+        if key.lower() not in ("content-length", "content-type"):
+            out.headers[key] = value
+    return out
 
 
 # Result headers on POST /v2/partials/sightings/send-inquiry: the route returns HTTP 200
@@ -1036,6 +1051,25 @@ async def sightings_unavailable_form(
     return template_response("htmx/partials/sightings/unavailable_form.html", ctx)
 
 
+async def _mark_error_response(
+    request: Request,
+    requirement_id: int,
+    db: Session,
+    user: User,
+    msg: str,
+) -> HTMLResponse:
+    """400-path feedback for the mark/clear routes.
+
+    htmx callers get the re-rendered detail plus the ACTIONABLE message as an error
+    toast (the global htmx:responseError handler only shows a generic "Request failed"
+    line); non-htmx/API callers keep the 400 JSON contract.
+    """
+    if request.headers.get("HX-Request") != "true":
+        raise HTTPException(status_code=400, detail=msg)
+    detail = await sightings_detail(request, requirement_id, db, user)
+    return _append_oob_toast(detail, msg, "error")
+
+
 @router.post("/v2/partials/sightings/{requirement_id}/mark-unavailable", response_class=HTMLResponse)
 async def sightings_mark_unavailable(
     request: Request,
@@ -1049,18 +1083,22 @@ async def sightings_mark_unavailable(
     Requires a validated reason (+ optional note) and delegates entirely to
     record_unavailability (upsert per MPN key, normalized sighting re-stamp,
     ActivityLog). Re-POSTing for an already-marked vendor is the re-arm path. The
-    service's ValueErrors (zero derivable keys / empty vendor norm) map to a 400 JSON
-    error with nothing written.
+    service's ValueErrors (zero derivable keys / empty vendor norm) surface their
+    actionable message as an error toast to htmx callers and as a 400 JSON error to API
+    callers — nothing written either way. Success re-renders the detail panel with a
+    confirmation toast appended.
     """
     form = await request.form()
     vendor_name = str(form.get("vendor_name") or "").strip()
     if not vendor_name:
-        raise HTTPException(status_code=400, detail="vendor_name required")
+        return await _mark_error_response(request, requirement_id, db, user, "vendor_name required")
     try:
         reason = UnavailabilityReason(str(form.get("reason") or ""))
     except ValueError:
         valid = ", ".join(m.value for m in UnavailabilityReason)
-        raise HTTPException(status_code=400, detail=f"reason is required and must be one of: {valid}")
+        return await _mark_error_response(
+            request, requirement_id, db, user, f"reason is required and must be one of: {valid}"
+        )
     note = str(form.get("note") or "") or None
 
     requirement = db.get(Requirement, requirement_id)
@@ -1071,12 +1109,15 @@ async def sightings_mark_unavailable(
         record_unavailability(db, requirement, vendor_name, reason, note, user)
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc))
+        return await _mark_error_response(request, requirement_id, db, user, str(exc))
     db.commit()
 
     await _publish_if_user_source(source, user.id, requirement_id)
 
-    return await sightings_detail(request, requirement_id, db, user)
+    detail = await sightings_detail(request, requirement_id, db, user)
+    if _toast_suppressed_for_sse(source):
+        return detail
+    return _append_oob_toast(detail, f"Marked {vendor_name} unavailable — {reason.label}")
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/mark-available", response_class=HTMLResponse)
@@ -1088,11 +1129,12 @@ async def sightings_mark_available(
     user: User = Depends(require_user),
 ):
     """Undo a mark: delete the vendor's unavailability records and unflag its
-    sightings (clear_unavailability), then re-render the detail panel."""
+    sightings (clear_unavailability), then re-render the detail panel with a
+    confirmation toast appended (errors surface per _mark_error_response)."""
     form = await request.form()
     vendor_name = str(form.get("vendor_name") or "").strip()
     if not vendor_name:
-        raise HTTPException(status_code=400, detail="vendor_name required")
+        return await _mark_error_response(request, requirement_id, db, user, "vendor_name required")
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -1102,12 +1144,15 @@ async def sightings_mark_available(
         clear_unavailability(db, requirement, vendor_name, user)
     except ValueError as exc:
         db.rollback()
-        raise HTTPException(status_code=400, detail=str(exc))
+        return await _mark_error_response(request, requirement_id, db, user, str(exc))
     db.commit()
 
     await _publish_if_user_source(source, user.id, requirement_id)
 
-    return await sightings_detail(request, requirement_id, db, user)
+    detail = await sightings_detail(request, requirement_id, db, user)
+    if _toast_suppressed_for_sse(source):
+        return detail
+    return _append_oob_toast(detail, f"{vendor_name} marked available again")
 
 
 @router.patch("/v2/partials/sightings/{requirement_id}/assign", response_class=HTMLResponse)

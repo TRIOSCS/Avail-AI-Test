@@ -372,6 +372,55 @@ class TestSightingsMarkUnavailable:
         )
         assert rec.reason == UnavailabilityReason.OTHER
 
+    def test_success_response_contains_toast_fragment(self, client, db_session):
+        """F5: success appends the OOB toast fragment to the re-rendered detail —
+        'Marked <vendor> unavailable — <reason label>'."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "Marked Good Vendor unavailable" in resp.text
+        assert "Vendor sold them" in resp.text
+        assert "$store.toast.type='success'" in resp.text
+
+    def test_invalid_reason_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: htmx callers see the actionable message as an error toast on the
+        re-rendered detail (the global htmx:responseError handler only shows a
+        generic line); nothing is written."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "gone_fishing"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "must be one of" in resp.text
+        assert "$store.toast.type='error'" in resp.text
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
+    def test_zero_key_mark_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: the service ValueError (no derivable MPN keys) surfaces its actionable
+        message to htmx callers; API callers keep the 400 JSON (pinned above)."""
+        req = Requisition(name="Keyless RFQ 2", status="active", customer_name="NoKey Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=None, sourcing_status="open")
+        db_session.add(r)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "broken"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "no MPN keys derivable" in resp.text
+        assert "$store.toast.type='error'" in resp.text
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
     def test_suffixed_vendor_name_marks_end_to_end(self, client, db_session):
         """'X, Inc.' marks work end-to-end — the route delegates to the service's
         normalized matching (the old lower(trim()) strict-equality matcher is gone)."""
@@ -433,6 +482,32 @@ class TestSightingsMarkAvailable:
         )
         assert resp.status_code == 400
         assert resp.json()["error"]
+
+    def test_success_response_contains_toast_fragment(self, client, db_session):
+        """F5: success appends the OOB toast — '<vendor> marked available again'."""
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, requirement_id=r.id)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Good Vendor"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "Good Vendor marked available again" in resp.text
+        assert "$store.toast.type='success'" in resp.text
+
+    def test_empty_norm_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: htmx callers get the actionable empty-norm message as an error toast
+        instead of the generic responseError line."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Inc."},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "normalizes to nothing" in resp.text
+        assert "$store.toast.type='error'" in resp.text
 
 
 class TestUnavailableFormModal:
@@ -509,6 +584,47 @@ class TestVendorRowThreeStates:
         assert "Send RFQ" not in body
         assert "Mark Unavail" not in body
         assert "Convert to offer" not in body
+
+    def test_state1_renders_for_contacted_vendor(self, client, db_session):
+        """F4 precedence pin: a vendor that was CONTACTED and then marked renders the
+        full state-1 UI — rose tint, reason, Mark available. Contacted is a step;
+        unavailable is its answer — a mark made after contacting must be visible."""
+        from app.models.auth import User
+        from app.models.offers import Contact
+
+        req, r, _ = _seed_data(db_session)
+        user = User(email="rowpin@example.com", name="Row Pin", role="buyer")
+        db_session.add(user)
+        db_session.flush()
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name="Good Vendor",
+                parts_included=["TEST-MPN-001"],
+                status="sent",
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, reason="bought_by_us", age_days=2, requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "bg-rose-50/60" in body  # rose row tint
+        assert "bg-rose-100 text-rose-700" in body  # Unavailable pill, not Contacted
+        assert "We bought them" in body  # reason label renders
+        assert "Mark available" in body  # state-1 action present
+        assert "Send RFQ" not in body  # action trio hidden
+        assert "Mark Unavail" not in body
 
     def test_state2_expired_record_renders_advisory_hint_and_verify(self, client, db_session):
         _, r, _ = _seed_data(db_session)

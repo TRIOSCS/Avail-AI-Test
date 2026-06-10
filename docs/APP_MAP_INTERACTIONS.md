@@ -503,6 +503,13 @@ helper, writes an ActivityLog entry. DELETE is deliberate (explicit human
 "forget it"); history survives in the activity timeline. Auto-expiry and
 overrides O1/O2 never delete.
 
+**Feedback.** Both routes re-render the detail panel with an appended OOB
+toast fragment (success: "Marked {vendor} unavailable — {reason label}" /
+"{vendor} marked available again"). On the 400 paths, htmx callers
+(`HX-Request`) get the re-rendered detail plus the ACTIONABLE message as an
+error toast (the global `htmx:responseError` handler only shows a generic
+line); non-htmx/API callers keep the 400 JSON contract.
+
 **Temporal policy — "Two Windows, Real Proof"**
 (`docs/superpowers/specs/2026-06-10-unavailability-temporal-policy.md` is
 authoritative). Suppression is read-time bounded per reason class: `is_active` =
@@ -522,16 +529,18 @@ everything else is listing-class → **O2**: fresh qty > snapshot AND ≥ snapsh
 `unavailability_qty_jump_factor` (2.0) leaves the row unstamped with no record
 mutation (stateless, self-healing). O2/O3 — and the offer hook — are disabled
 for different_part. **Offer-release hook:** `released_at` is written only by
-user-initiated proof — the five offer entry/save/approval sites (canonical
+user-initiated proof — the offer entry/save/approval sites (canonical
 `create_offer` incl. the sightings route that delegates to it, manual
 add-offer, the save-parsed-offers route, `save_freeform_offers`,
-pending-review approve) call the shared `maybe_release_on_offer(...)` gate
-after the offer persists (same transaction) — `release_trigger=
-'offer_received'`; auto-created offers (inbox monitor, excess matching) and
-clone paths never release. Expired/released records render as labeled
-advisory states, never silent suppression.
+pending-review approve, plus its three approval twins: the htmx review-queue
+promote, the T4→T5 API promote, and the requisition offers-tab review
+approve) call the shared `maybe_release_on_offer(...)` gate after the offer
+persists (same transaction) — `release_trigger='offer_received'`;
+auto-created offers (inbox monitor, excess matching) and clone paths never
+release. Expired/released records render as labeled advisory states, never
+silent suppression.
 
-**Re-stamping at every sighting-persistence path.** Each of the six code paths
+**Re-stamping at every sighting-persistence path.** Each of the eight code paths
 that persist fresh Sighting rows calls `apply_to_fresh_sightings(db,
 requirement, rows)` — which embeds the O1/O2/O3 matrix, so every path gets
 policy behavior for free — in its OWN session, right where the rows are created:
@@ -541,11 +550,19 @@ policy behavior for free — in its OWN session, right where the rows are create
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
-   release path: a buyer-routed attachment with qty > 0 releases instead of stamping).
+   release path: a buyer-routed attachment with qty > 0 releases instead of
+   stamping). A RE-SENT attachment that hits the dedup key refreshes the
+   existing row's qty/price from the new parse and joins the apply batch, so
+   the O3 release still fires — never a silent skip.
 5. `app/routers/htmx_views.py` — add-to-requisition picker (deliberately stamped;
    the user can Mark available to override).
 6. `app/jobs/inventory_jobs.py` — excess-list sighting creation (rows grouped
    per requirement before calling).
+7. `app/routers/requisitions/requirements.py` — `import_stock_list` manual
+   vendor stock-list import (rows grouped per requirement before the commit).
+8. `app/services/search_worker_base/queue_manager.py` — the ICS/NC
+   cross-requirement dedup, which clones prior sightings onto a NEW
+   requirement (applied before its commit).
 
 **Reader-authority rule.** The record predicate is the only authority; the row
 flag is a render cache that every reader reinterprets:
@@ -563,11 +580,12 @@ flag is a render cache that every reader reinterprets:
    record at all AND all rows flagged — true legacy). Rows-win: one
    override-surfaced row flips the pill; an expired record's stale stamped rows
    no longer pin it. The legacy all-rows-flagged branch applies ONLY to vendors
-   with no record. Precedence unchanged: blacklisted > offer-in > contacted >
-   unavailable > sighting.
+   with no record. Precedence: blacklisted > offer-in > unavailable > contacted
+   > sighting — contacted is a step; unavailable is its answer: a mark made
+   after contacting must be visible.
 3. **RFQ:** active records only (next paragraph).
 
-Races across the six writers leave at most a stale flag that the next render
+Races across the eight writers leave at most a stale flag that the next render
 reinterprets correctly — no reconciliation pass, no read-path writes.
 
 **RFQ exclusion (active-only, with visible skip).** The RFQ vendor modal

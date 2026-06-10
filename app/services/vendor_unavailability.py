@@ -21,14 +21,16 @@ legacy NULL-column fallback — never raw/lower(trim()) comparisons, never bare 
 equality. Functions never commit; callers own the transaction.
 
 Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
-           the five user-initiated offer sites via maybe_release_on_offer
-           (routers/crm/offers.py create_offer + approve_offer,
-           routers/htmx_views.py add_offer + save_parsed_offers,
+           the user-initiated offer sites via maybe_release_on_offer
+           (routers/crm/offers.py create_offer + approve_offer + promote_offer,
+           routers/htmx_views.py add_offer + save_parsed_offers +
+           promote_offer_htmx + review_offer approve,
            services/ai_offer_service.py save_freeform_offers),
            app/services/sighting_status.py (reader-authority Batch 4),
            sighting-persistence paths via apply_to_fresh_sightings()
            (search_service, ICS/NC sighting writers, sources import,
-           add-to-requisition picker, inventory jobs)
+           add-to-requisition picker, inventory jobs, manual stock-list
+           import, ICS/NC queue-manager dedup clones)
 Depends on: VendorPartUnavailability, Sighting, ActivityLog models,
             UnavailabilityReason/ActivityType/Channel constants,
             settings (unavailability_* knobs),

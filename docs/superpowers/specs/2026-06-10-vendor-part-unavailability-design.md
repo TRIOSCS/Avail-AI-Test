@@ -131,9 +131,11 @@ and O1 already subsumes any O2-shaped signal on LIVE rows.
 **Offer hook:** user-initiated offer proof — a person entering, saving, or approving
 an offer — releases matching active records via the shared
 `maybe_release_on_offer(...)` gate (`release_trigger='offer_received'`), all reasons
-except `different_part`. It fires at five sites (canonical `create_offer` incl. the
-sightings route that delegates to it, manual `add_offer`, the save-parsed-offers
-route, `save_freeform_offers`, pending-review approval) and never from auto-created
+except `different_part`. It fires at the user-initiated sites (canonical
+`create_offer` incl. the sightings route that delegates to it, manual `add_offer`,
+the save-parsed-offers route, `save_freeform_offers`, and pending-review approval —
+`approve_offer` plus its three approval twins: the htmx review-queue promote, the
+T4→T5 API promote, and the offers-tab review approve) and never from auto-created
 (inbox monitor, excess matching) or clone paths. Availability evidence (qty, email,
 offer) never releases identity knowledge; only LIVE catalog evidence or manual clear
 does.
@@ -253,17 +255,19 @@ mixed-variant case** (vendor with a record + a mix of stamped and unstamped rows
 NOT `unavailable`). The legacy branch stays anchored on the shared normalized-name
 helper (architect finding 2 — fixes the case/whitespace drift miss).
 **MINOR-8: log a warning when the requirement row referenced by a status computation
-is missing** instead of silently treating it as key-less. Precedence order is
-unchanged: `blacklisted > offer-in > contacted > unavailable > sighting` (offer-in
-still dominates — already pinned by test).
+is missing** instead of silently treating it as key-less. Precedence order:
+`blacklisted > offer-in > unavailable > contacted > sighting` — contacted is a step;
+unavailable is its answer: a mark made after contacting must be visible (offer-in
+still dominates everything but blacklisted — pinned by test).
 
 ### Re-application at EVERY sighting-persistence path
 
 Invariant: **no fresh `Sighting` row ever contradicts an _active_ record; overrides
 O1–O3, window expiry, offer release, and manual clear all land in the advisory +
-verify state — labeled, never silent.** Six code paths persist new sightings
-(architect finding 3); each calls `apply_to_fresh_sightings(...)` — which now embeds
-the O1/O2/O3 policy matrix — with its OWN session right where the rows are created:
+verify state — labeled, never silent.** Eight code paths persist new sightings
+(architect finding 3 + the two writers found in the silent-failure batch); each calls
+`apply_to_fresh_sightings(...)` — which now embeds the O1/O2/O3 policy matrix — with
+its OWN session right where the rows are created:
 
 1. `app/search_service.py` — after the fresh-`Sighting` construction loop that follows
    the connector-aware delete, **inside search's separate write session** (the
@@ -274,12 +278,21 @@ the O1/O2/O3 policy matrix — with its OWN session right where the rows are cre
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
 4. `app/routers/sources.py` email-attachment import — note this is also the
    HUMAN_DIRECT path: a buyer-routed attachment with qty>0 triggers override O3
-   (record release) instead of stamping.
+   (record release) instead of stamping. A RE-SENT attachment that hits the dedup
+   key (requirement, vendor, MPN, source_type) refreshes the existing row's
+   qty/price from the new parse and joins the apply batch, so O3 still fires —
+   never a silent skip.
 5. `app/routers/htmx_views.py` add-to-requisition picker — deliberately included: a
    manually added sighting for a known-dead vendor+part renders flagged with its
    reason; the user can Mark available to override, so knowledge is surfaced, never
    silently bypassed. (`app/jobs/inventory_jobs.py` creates excess-list sightings —
    include it the same way; group rows per requirement before calling.)
+6. `app/routers/requisitions/requirements.py` `import_stock_list` — the manual
+   vendor stock-list import; rows grouped per requirement (the inventory_jobs
+   pattern), applied before the commit.
+7. `app/services/search_worker_base/queue_manager.py` — the ICS/NC
+   cross-requirement dedup clones prior sightings onto a NEW requirement;
+   applied before its commit (the req object is in scope).
 
 ## HTTP layer (`app/routers/sightings.py`)
 
@@ -292,15 +305,17 @@ the O1/O2/O3 policy matrix — with its OWN session right where the rows are cre
 - `POST /v2/partials/sightings/{requirement_id}/mark-unavailable` (existing route,
   extended): now accepts `reason` (required, validated against the enum) and `note`
   (optional) form fields; delegates to `record_unavailability`; keeps the existing
-  `source` SSE param + `_publish_if_user_source` behavior; still re-renders the detail
-  panel. 400 on missing vendor_name (unchanged) or invalid reason. **The service's
-  `ValueError`s (zero derivable MPN keys — CRITICAL-1; empty vendor norm —
-  IMPORTANT-4) map to a 400 JSON error (`{"error": ...}` format); no ActivityLog is
-  written on those paths.** Re-POSTing for an already-marked vendor is the re-arm
-  path (upsert refresh).
+  `source` SSE param + `_publish_if_user_source` behavior; re-renders the detail
+  panel **with an appended OOB success toast** ("Marked {vendor} unavailable —
+  {reason label}"). On the 400 paths (missing vendor_name, invalid reason, the
+  service's `ValueError`s — zero derivable MPN keys CRITICAL-1 / empty vendor norm
+  IMPORTANT-4), **htmx callers get the re-rendered detail plus the actionable
+  message as an error toast; non-htmx/API callers keep the 400 JSON error
+  (`{"error": ...}` format). No ActivityLog is written on those paths.**
+  Re-POSTing for an already-marked vendor is the re-arm path (upsert refresh).
 - `POST /v2/partials/sightings/{requirement_id}/mark-available` (new): vendor_name form
-  field; delegates to `clear_unavailability`; same 400-on-ValueError mapping; same SSE
-  publish + detail re-render.
+  field; delegates to `clear_unavailability`; same error mapping; same SSE
+  publish + detail re-render with the "{vendor} marked available again" toast.
 - **There is NO separate verify-availability endpoint.** The verify affordance in the
   UI maps onto the two existing actions: "Still unavailable" → re-arm = the
   mark-unavailable modal (upsert refresh); "It's back" → clear = mark-available.

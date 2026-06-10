@@ -379,14 +379,18 @@ class TestBatchNotesCoverage:
 
 class TestMarkUnavailableCoverage:
     def test_mark_unavailable_missing_vendor_name(self, client: TestClient, req_item):
-        """Line 844-845: vendor_name missing → 400."""
+        """vendor_name missing: htmx callers get the actionable message as an error
+        toast on the re-rendered detail (F5); API callers keep the 400 JSON
+        (pinned in test_sightings_router.py)."""
         _, item = req_item
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/mark-unavailable",
             data={},
             headers={"HX-Request": "true"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "vendor_name required" in resp.text
+        assert "$store.toast.type='error'" in resp.text
 
     def test_mark_unavailable_success_with_sightings(self, client: TestClient, req_item, db_session: Session):
         """Lines 847-866: sightings found and marked unavailable."""

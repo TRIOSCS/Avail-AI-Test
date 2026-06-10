@@ -1981,6 +1981,9 @@ async def review_offer(
         offer.approved_by_id = user.id
 
         offer.approved_at = datetime.now(timezone.utc)
+        # Offer hook: user approval of a pending offer is user-initiated proof of
+        # availability — release the vendor's matching active unavailability records.
+        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     else:
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
@@ -2341,6 +2344,10 @@ async def promote_offer_htmx(
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    # Offer hook: user approval of a pending offer is user-initiated proof of
+    # availability — release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
 
     _log_activity(
         db,
