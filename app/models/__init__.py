@@ -44,6 +44,9 @@ from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F4
 # Faceted Search
 from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
 
+# FRU crosswalk (IBM/Lenovo FRU ↔ 11S ↔ model ↔ tray relationships)
+from .fru_link import FruLink  # noqa: F401
+
 # ICsource Search
 from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401

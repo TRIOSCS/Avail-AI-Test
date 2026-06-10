@@ -23,12 +23,14 @@
     'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
     'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
   } %}
-  {# Stock-condition badge palette — same shape as the lifecycle badges. #}
+  {# Stock-condition badge palette — same shape as the lifecycle badges.
+     Refurbished/Used share violet (second-life stock family) so amber stays
+     exclusively "caution / reconfirm" (lifecycle EOL/LTB, AI-guess). #}
   {% set cond_colors = {
     'New': 'bg-emerald-50 text-emerald-700 border-emerald-200',
     'Recertified': 'bg-sky-50 text-sky-700 border-sky-200',
-    'Refurbished': 'bg-amber-50 text-amber-700 border-amber-200',
-    'Used': 'bg-amber-50 text-amber-600 border-amber-200',
+    'Refurbished': 'bg-violet-50 text-violet-700 border-violet-200',
+    'Used': 'bg-violet-50 text-violet-700 border-violet-200',
     'Pulled': 'bg-rose-50 text-rose-700 border-rose-200',
     'Unknown': 'bg-gray-100 text-gray-600 border-gray-200',
   } %}
@@ -69,7 +71,9 @@
               </a>
               {% endif %}
               {% if m.cross_references %}
-              <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200"
+              {# Neutral gray — count metadata, not a status; indigo means exactly
+                 "OEM-official" (the OEM-SOURCED badge below). #}
+              <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200"
                     title="Known cross-references / substitutes">
                 {{ m.cross_references|length }} alternate{{ '' if m.cross_references|length == 1 else 's' }}
               </span>
@@ -78,7 +82,10 @@
             {% if m._primary_specs %}
             <div class="flex flex-wrap gap-1 mt-0.5">
               {% for spec in m._primary_specs[:3] %}
-              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data">
+              {# title keeps the label visible on hover when the commodity-scoped
+                 rendering shows the value only. #}
+              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data"
+                    title="{{ spec.label }}: {{ spec.value }}">
                 {%- if not commodity and spec.label %}{{ spec.label }}: {% endif %}{{ spec.value }}
               </span>
               {% endfor %}

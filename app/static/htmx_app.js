@@ -566,6 +566,13 @@ document.addEventListener('keydown', (e) => {
 // otherwise (vitest mocks / plugin absent) — never throws at factory-call time.
 const persistOr = (def, key) => (typeof Alpine !== 'undefined' && Alpine.$persist) ? Alpine.$persist(def).as(key) : def;
 
+// One-time storage migration: the confidence fold default flipped false→true, but
+// @alpinejs/persist writes the CURRENT value to storage on init — so every browser that
+// ever loaded the page under the old `persistOr(false, 'mat_confidence_open')` carries a
+// persisted `false` that would override the new default. The fold state moved to
+// 'mat_confidence_open2'; drop the dead key so a revert can't resurrect it.
+if (typeof localStorage !== 'undefined') localStorage.removeItem('mat_confidence_open');
+
 Alpine.data('materialsFilter', () => ({
   commodity: '',
   subFilters: {},
@@ -603,7 +610,11 @@ Alpine.data('materialsFilter', () => ({
   recentCommodities: persistOr([], 'mat_recent_commodities'),
   moreAttrsOpen: persistOr(false, 'mat_more_attrs_open'),
   sourcingOpen: persistOr(false, 'mat_sourcing_open'),
-  confidenceOpen: persistOr(false, 'mat_confidence_open'),
+  // Confidence fold (first filter fold) opens by default — trust is the headline
+  // filter; the heavy folds (sourcing / more attributes) stay closed until opened.
+  // Key is the rotated 'mat_confidence_open2' so the new open default actually reaches
+  // returning users (see the legacy-key removal above persistOr's call sites).
+  confidenceOpen: persistOr(true, 'mat_confidence_open2'),
 
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
   // Array order pins the visual ordering of the Data-confidence section.

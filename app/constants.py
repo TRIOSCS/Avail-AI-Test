@@ -463,3 +463,36 @@ class MaterialEnrichmentStatus(StrEnum):
     NOT_FOUND = "not_found"
     OEM_SOURCED = "oem_sourced"
     NOT_CATALOGUED = "not_catalogued"
+
+
+class FruLinkKind(StrEnum):
+    """Relationship kind for FruLink rows (IBM/Lenovo FRU crosswalk).
+
+    Single source of truth for the valid fru_links.rel_kind values. Enforced via
+    @validates on FruLink for ORM construction AND re-validated by the ingest's bulk
+    upsert path (a Core insert, which bypasses ORM events).
+    """
+
+    IBM_11S = "ibm_11s"  # IBM 11S part number stamped on the part
+    MFG_MODEL = "mfg_model"  # Manufacturer model / MPN (e.g. SSDSC2BB120G4I)
+    OPTION = "option"  # IBM/Lenovo option number
+    OPTION_PN = "option_pn"  # Option part number
+    SOURCING_PN = "sourcing_pn"  # Additional sourcing / make-to-label numbers
+    LENOVO_PN = "lenovo_pn"  # Lenovo / Idea part number
+    LENOVO_PPN = "lenovo_ppn"  # Lenovo PPN (FRU-PPN BOM)
+    TRAY = "tray"  # Carrier / tray part number
+    TRAY_ALT = "tray_alt"  # Alternate carrier / tray
+    BRACKET = "bracket"  # Mounting bracket
+    BOARD = "board"  # Interposer / carrier board
+    SCREWS = "screws"  # Mounting screws
+    SHUTTLE = "shuttle"  # NetApp shuttle
+    DONGLE = "dongle"  # NetApp dongle
+    DRIVE_PN = "drive_pn"  # Bare drive part number (qual lists)
+    ASSEMBLY = "assembly"  # Assembly part number
+
+
+# fru_links.qual_status is otherwise free text from the workbook's qual column
+# ("qlot approved", "qlot approved - Only EMEA", ...). CDC_PENDING is the single
+# app-synthesized sentinel (CDC pending-qualification sheet); the FRU panels render
+# it as the amber "CDC pending" pill — keep ingest and display on this constant.
+CDC_PENDING = "cdc_pending"

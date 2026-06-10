@@ -866,6 +866,63 @@ find_crosses() endpoint
 
 ---
 
+## FRU Crosswalk (IBM/Lenovo FRU ↔ 11S ↔ model ↔ tray)
+
+```
+Ingest (one-off, admin CLI):
+python -m app.management.ingest_fru_matrix <FRU_PN_TRAY matrix .xlsx> [--apply] [--allow-missing-sheets]
+    |
+    +---> sheet-coverage guard: a mapped sheet missing from the workbook is FATAL
+    |       (date-stamped names get renamed in new revisions) unless
+    |       --allow-missing-sheets; sheets neither mapped (PARSERS) nor in
+    |       KNOWN_SKIPPED_SHEETS are reported as unexpected and block --apply
+    +---> per-sheet parsers (openpyxl read_only): Main, Qlot, Gabor, CZ, CDC,
+    |       Lenovo-HDD, Lenovo FRU-PN, LVN VPD Mapping, Series, NSeries(NetApp)
+    |       - hygiene: nbsp strip, sentinel→NULL (N/A, #N/A, PENDIENTE, ...),
+    |         comma/slash multi-value split, carrier parentheticals→note,
+    |         Lenovo SAP zero-padding/_<letter><digits> suffix de-pad (FRU and PPN
+    |         cells both gated by the PN-plausibility regex), NSeries FRU
+    |         forward-fill, prose cells rejected by PN-plausibility regex
+    |       - normalization: fru_norm/related_norm via normalize_mpn_key
+    |       - bounded context columns (manufacturer/series/machine/qual_status)
+    |         truncated to model column lengths at parse time (PG-safe)
+    |
+    +---> DEFAULT dry run: "sheets parsed X/Y", per-sheet parsed/skipped counts,
+    |       per-kind link counts, unparsed-cell counters (per kind/column, so a
+    |       column-wide format change is visible), samples — no writes
+    +---> --apply: chunked upsert into fru_links in ONE transaction (all-or-nothing;
+            insert new edges; refresh context attrs on existing unique key;
+            additive-only — absent edges are never deleted, None never nulls)
+
+Lookup (read path):
+GET /v2/partials/materials/{card_id}          (material detail surface)
+GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
+    |                                          registered BEFORE the {card_id} route)
+    v
+fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
+fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under
+    |   (raw input normalized internally; cross-sheet dedup prefers rows with
+    |    qual_status/manufacturer and coalesces missing attributes)
+    v
+htmx/partials/materials/fru_section.html
+    |   (on detail.html the FRU panels render ABOVE Crosses & Substitutes)
+    +---> "FRU matrix" panel: sections (Approved drives & models / 11S part numbers /
+    |       Options / Trays & hardware / Lenovo PNs / Sourcing & assembly), count
+    |       badges, qual pills (amber=cdc_pending sentinel, emerald=ANY other
+    |       non-empty qual_status — free workbook text, no closed vocabulary),
+    |       series chips + first 3 machine chips (+N overflow chip, title lists the
+    |       rest); each section shows 12 items, the rest hidden behind an inline
+    |       "Show all (N)" / "Show less" Alpine expander; items link to materials
+    |       search
+    +---> "Used in FRUs" panel: FRU | role | qualification | context table — shows
+            10 rows, the rest behind the same inline expander; server-capped at
+            REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
+            screws/tray PNs can sit under thousands of FRUs); each FRU links to its
+            own fru-lookup (swaps #fru-crosswalk in place, pushes the materials URL)
+```
+
+---
+
 ## Faceted Search (Full-Text Search)
 
 ```
@@ -905,11 +962,21 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
-    |       value no longer collapses its siblings to 0).
-    +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
-    |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
-    |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
-    +---> "Sourcing signals" (collapsed, $persist sourcingOpen; active-count badge) —
+    |       value no longer collapses its siblings to 0). With NO commodity selected the
+    |       route renders the server-side placeholder "Select a category to unlock spec
+    |       filters" (subfilters.html commodity_selected=False branch; no service calls)
+    |       instead of an empty response.
+    +---> Data confidence (FIRST filter fold, EXPANDED by default — $persist
+    |     confidenceOpen defaults true under the ROTATED key mat_confidence_open2;
+    |     the legacy mat_confidence_open key held a persisted `false` for every
+    |     prior visitor — persist writes the current value on init — and is removed
+    |     on load so the new default reaches returning users): 3 groups —
+    |     Trusted / AI-inferred / No data;
+    |     default all-on; `statuses[]` → `?statuses=` CSV → search_materials_faceted
+    |     (IN-filters enrichment_status; precedence over the legacy verified_only).
+    |     Collapse policy: navigation sections open, trust fold open, heavy folds
+    |     below closed.
+    +---> "Sourcing signals" (2nd fold, collapsed, $persist sourcingOpen; active-count badge) —
     |     Layer-3 operational filters, all top-level params on
     |     /v2/partials/materials/faceted → search_materials_faceted():
     |       has_stock   (EXISTS MaterialVendorHistory row)
@@ -934,10 +1001,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     derived from the maps that drive the query branches); the JS twin is
     |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
     |     Static section (no per-value counts → no HTMX reload).
-    +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
-    |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
-    |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
-    |     legacy verified_only).
+    +---> "More attributes" (LAST fold, collapsed, $persist moreAttrsOpen; active-count
+    |     badge): Manufacturer (search + top-N) + Global facets (lifecycle / rohs /
+    |     condition / has_datasheet) via get_global_facet_counts(). Containers load
+    |     while hidden.
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
@@ -951,10 +1018,14 @@ SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
 Result-row upgrades (list.html, server-side in materials_faceted_partial):
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
-    |     3 scalar specs_structured entries, formatted "label: value".
+    |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
+    |     title="label: value" so the value-only commodity rendering keeps its label
+    |     on hover.
     +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
-    |     "N alternates" badge when cross_references is non-empty; condition badge
-    |     styled like the lifecycle palette.
+    |     "N alternates" chip when cross_references is non-empty (neutral gray — count
+    |     metadata, not a status; indigo is reserved for OEM-SOURCED); condition badge
+    |     styled like the lifecycle palette, with Refurbished/Used sharing violet
+    |     (second-life family) so amber stays exclusively caution/reconfirm.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

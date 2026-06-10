@@ -60,10 +60,23 @@ def test_subfilters_renders_for_commodity(client, db_session: Session):
     assert "DDR Type" in resp.text
 
 
-def test_subfilters_empty_for_no_commodity(client):
+def test_subfilters_placeholder_for_no_commodity(client):
+    # No commodity → server-rendered nudge toward the category tree (replaces the
+    # old empty-string response), with no spec-filter sections or coverage line.
     resp = client.get("/v2/partials/materials/filters/sub")
     assert resp.status_code == 200
-    assert resp.text == ""
+    assert "Select a category to unlock spec filters" in resp.text
+    assert 'class="text-[11px] text-gray-400 italic px-2 mt-2"' in resp.text
+    assert "clearSubFilters()" not in resp.text
+    assert "have filterable specs" not in resp.text
+    assert "No filters available for this category" not in resp.text
+
+
+def test_subfilters_no_placeholder_with_commodity(client):
+    # With a commodity scope the placeholder nudge must NOT render.
+    resp = client.get("/v2/partials/materials/filters/sub?commodity=dram")
+    assert resp.status_code == 200
+    assert "Select a category to unlock spec filters" not in resp.text
 
 
 def test_faceted_results_returns_materials(client, db_session: Session):
@@ -744,6 +757,49 @@ def test_faceted_row_crosses_badge_singular(client, db_session: Session):
     assert "1 alternates" not in resp.text
 
 
+def test_faceted_row_second_life_conditions_render_violet(client, db_session: Session):
+    # Refurbished/Used share the violet second-life family; amber stays exclusively
+    # caution/reconfirm (lifecycle EOL/LTB, AI guess).
+    _op_card(db_session, "row-refurb", condition="Refurbished")
+    _op_card(db_session, "row-used", condition="Used")
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    assert resp.text.count("bg-violet-50 text-violet-700 border-violet-200") == 2
+    assert "bg-amber-50" not in resp.text
+
+
+def test_faceted_row_crosses_chip_neutral_not_indigo(client, db_session: Session):
+    # The alternates chip is count metadata, not a status — neutral gray; indigo is
+    # reserved for the OEM-SOURCED badge.
+    _op_card(db_session, "row-cross-neutral", cross_references=[{"mpn": "ALT-1"}])
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted")
+    assert 'title="Known cross-references / substitutes"' in resp.text
+    assert "bg-gray-100 text-gray-600 border-gray-200" in resp.text
+    assert "bg-indigo-50" not in resp.text
+
+
+def test_faceted_spec_chip_title_keeps_label_in_commodity_context(client, db_session: Session):
+    # Commodity-scoped chips render value-only; the title keeps "Label: value" on hover.
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="capacity_gb",
+            display_name="Capacity (GB)",
+            data_type="numeric",
+            sort_order=1,
+            is_filterable=True,
+            is_primary=True,
+        )
+    )
+    _op_card(db_session, "chip-hover", category="dram", specs_structured={"capacity_gb": {"value": 32}})
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted?commodity=dram")
+    assert resp.status_code == 200
+    assert 'title="Capacity (GB): 32"' in resp.text
+
+
 def test_faceted_spec_chips_without_commodity_use_schema_primaries(client, db_session: Session):
     """No-commodity rows chip their own category's is_primary specs as 'label:
 
@@ -818,4 +874,7 @@ def test_faceted_spec_chips_in_commodity_context_unchanged(client, db_session: S
     compact = resp.text.replace("\n", "").replace(" ", "")
     assert ">64<" in compact
     assert ">32<" in compact
-    assert "Capacity (GB): 64" not in resp.text
+    # Value-only in the chip body (no "label:" prefix rendered)…
+    assert ">Capacity(GB):64<" not in compact
+    # …but the label survives on hover via the title attribute.
+    assert 'title="Capacity (GB): 64"' in resp.text
