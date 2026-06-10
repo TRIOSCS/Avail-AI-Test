@@ -9,8 +9,8 @@ first. (The old per-writer confidence pre-gate is gone — the ladder owns arbit
 Unlike mpn_decoder/writer.py this NEVER writes a category: descriptions are not a
 regex-gated commodity proof, so only cards already categorized to a handled
 commodity (SPEC_COMMODITIES: hdd/ssd/dram/power_supplies/displays/tape_drives/gpu/
-motherboards — the spec'd _HANDLED set) are processed (record_spec requires a
-category anyway). The five phase-2 commodities have no MPN decoders, so desc_parse
+motherboards/cpu — the spec'd _HANDLED set) are processed (record_spec requires a
+category anyway). The phase-2/3 commodities have no MPN decoders, so desc_parse
 is their top non-vendor source by confidence. Does not commit — the caller manages
 the txn.
 

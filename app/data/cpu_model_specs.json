@@ -1,0 +1,2216 @@
+{
+ "_meta": {
+  "what": "Curated CPU model-string -> spec lookup table for the deterministic description extractor (app/services/desc_extractor/cpu.py). Keys are NORMALIZED model strings exactly as the cpu grammar emits them (uppercase; 'E5-2650L V4', 'GOLD 6248', 'I7-9700K', 'EPYC 7551P'). Values hold only the six seeded cpu facet keys: family, socket, core_count, clock_speed_ghz (base clock), tdp_watts, architecture.",
+  "provenance": "Hand-curated 2026-06 from public Intel ARK / AMD product-spec knowledge for the highest-volume server/desktop models in the SFDC CPU corpus (docs/CPU_DECODE_FEASIBILITY.md): Xeon E5-1600/2600/4600 v1-v4, Xeon Scalable gen1/gen2 (Bronze/Silver/Gold/Platinum), common E3/E7, EPYC 7001/7002, common Core i3/i5/i7/i9 desktop. A field is present ONLY when stated with high confidence; uncertain fields are omitted per model (e.g. EPYC 7001 configurable 155/170W TDPs, E7 socket naming). Several entries are corroborated by verbatim corpus descriptions (E5-2673 V3/V4, GOLD 6134, E3-1225 V5, I5-8400, I7-9700K).",
+  "extending": "Extend, don't trust blindly: add models only with a primary source (Intel ARK / AMD spec page) in hand; clock_speed_ghz is the BASE clock, never turbo; keep keys in the extractor's normalized form; every value must stay inside the seeded cpu enum/range vocabulary in app/data/commodity_seeds.json (drift-guarded by tests/test_desc_extractor_routing.py). Desc-stated tokens always override this table (merged UNDER extracted values in extract_cpu)."
+ },
+ "models": {
+  "E5-2603": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2609": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2620": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2630": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2630L": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 60,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2640": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2643": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2650": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2650L": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 70,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2660": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2665": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 115,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2667": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2670": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 115,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2680": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2687W": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 150,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2690": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 135,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-1620": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-1650": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-1660": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 130,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-4650L": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 115,
+   "architecture": "Sandy Bridge"
+  },
+  "E5-2603 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 80,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2609 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 80,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2620 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 80,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2630 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 80,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2630L V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 60,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2640 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 95,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2643 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2650 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 95,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2650L V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 10,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 70,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2660 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 10,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 95,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2667 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2670 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 10,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 115,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2680 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 10,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 115,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2687W V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 8,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 150,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2690 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 10,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2695 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 12,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 115,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2697 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 12,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-1620 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 4,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-1650 V2": {
+   "family": "Xeon",
+   "socket": "LGA2011",
+   "core_count": 6,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 130,
+   "architecture": "Ivy Bridge"
+  },
+  "E5-2603 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 1.6,
+   "tdp_watts": 85,
+   "architecture": "Haswell"
+  },
+  "E5-2609 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 1.9,
+   "tdp_watts": 85,
+   "architecture": "Haswell"
+  },
+  "E5-2620 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 85,
+   "architecture": "Haswell"
+  },
+  "E5-2623 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 4,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 105,
+   "architecture": "Haswell"
+  },
+  "E5-2630 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 85,
+   "architecture": "Haswell"
+  },
+  "E5-2630L V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 55,
+   "architecture": "Haswell"
+  },
+  "E5-2637 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 135,
+   "architecture": "Haswell"
+  },
+  "E5-2640 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 90,
+   "architecture": "Haswell"
+  },
+  "E5-2643 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 135,
+   "architecture": "Haswell"
+  },
+  "E5-2650 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 105,
+   "architecture": "Haswell"
+  },
+  "E5-2650L V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 65,
+   "architecture": "Haswell"
+  },
+  "E5-2660 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 105,
+   "architecture": "Haswell"
+  },
+  "E5-2667 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 135,
+   "architecture": "Haswell"
+  },
+  "E5-2670 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 120,
+   "architecture": "Haswell"
+  },
+  "E5-2673 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 105,
+   "architecture": "Haswell"
+  },
+  "E5-2680 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 120,
+   "architecture": "Haswell"
+  },
+  "E5-2683 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 120,
+   "architecture": "Haswell"
+  },
+  "E5-2687W V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 160,
+   "architecture": "Haswell"
+  },
+  "E5-2690 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 135,
+   "architecture": "Haswell"
+  },
+  "E5-2695 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 120,
+   "architecture": "Haswell"
+  },
+  "E5-2697 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 145,
+   "architecture": "Haswell"
+  },
+  "E5-2698 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 135,
+   "architecture": "Haswell"
+  },
+  "E5-2699 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 18,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 145,
+   "architecture": "Haswell"
+  },
+  "E5-1630 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 4,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 140,
+   "architecture": "Haswell"
+  },
+  "E5-1650 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 140,
+   "architecture": "Haswell"
+  },
+  "E5-1660 V3": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 140,
+   "architecture": "Haswell"
+  },
+  "E5-2603 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 85,
+   "architecture": "Broadwell"
+  },
+  "E5-2609 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 85,
+   "architecture": "Broadwell"
+  },
+  "E5-2620 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 85,
+   "architecture": "Broadwell"
+  },
+  "E5-2623 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 4,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 85,
+   "architecture": "Broadwell"
+  },
+  "E5-2630 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 85,
+   "architecture": "Broadwell"
+  },
+  "E5-2630L V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 55,
+   "architecture": "Broadwell"
+  },
+  "E5-2637 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2640 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 10,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 90,
+   "architecture": "Broadwell"
+  },
+  "E5-2643 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2650 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 105,
+   "architecture": "Broadwell"
+  },
+  "E5-2650L V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 65,
+   "architecture": "Broadwell"
+  },
+  "E5-2660 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 105,
+   "architecture": "Broadwell"
+  },
+  "E5-2667 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2673 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 20,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2680 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 120,
+   "architecture": "Broadwell"
+  },
+  "E5-2683 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 120,
+   "architecture": "Broadwell"
+  },
+  "E5-2687W V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 12,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 160,
+   "architecture": "Broadwell"
+  },
+  "E5-2690 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 14,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2695 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 18,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 120,
+   "architecture": "Broadwell"
+  },
+  "E5-2697 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 18,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 145,
+   "architecture": "Broadwell"
+  },
+  "E5-2697A V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 145,
+   "architecture": "Broadwell"
+  },
+  "E5-2698 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 20,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 135,
+   "architecture": "Broadwell"
+  },
+  "E5-2699 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 22,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 145,
+   "architecture": "Broadwell"
+  },
+  "E5-1650 V4": {
+   "family": "Xeon",
+   "socket": "LGA2011-3",
+   "core_count": 6,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 140,
+   "architecture": "Broadwell"
+  },
+  "BRONZE 3104": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 6,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "BRONZE 3106": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 1.7,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "SILVER 4108": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 1.8,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "SILVER 4110": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "SILVER 4112": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 4,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "SILVER 4114": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 10,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "SILVER 4116": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "GOLD 5115": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 10,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 85,
+   "architecture": "Skylake"
+  },
+  "GOLD 5117": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 14,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 105,
+   "architecture": "Skylake"
+  },
+  "GOLD 5118": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 105,
+   "architecture": "Skylake"
+  },
+  "GOLD 5120": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 14,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 105,
+   "architecture": "Skylake"
+  },
+  "GOLD 5122": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 105,
+   "architecture": "Skylake"
+  },
+  "GOLD 6126": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 125,
+   "architecture": "Skylake"
+  },
+  "GOLD 6128": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 6,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 115,
+   "architecture": "Skylake"
+  },
+  "GOLD 6130": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 125,
+   "architecture": "Skylake"
+  },
+  "GOLD 6132": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 14,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 140,
+   "architecture": "Skylake"
+  },
+  "GOLD 6134": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 130,
+   "architecture": "Skylake"
+  },
+  "GOLD 6136": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "GOLD 6138": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 125,
+   "architecture": "Skylake"
+  },
+  "GOLD 6140": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 140,
+   "architecture": "Skylake"
+  },
+  "GOLD 6142": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "GOLD 6144": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "GOLD 6146": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 165,
+   "architecture": "Skylake"
+  },
+  "GOLD 6148": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "GOLD 6150": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 165,
+   "architecture": "Skylake"
+  },
+  "GOLD 6152": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 22,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 140,
+   "architecture": "Skylake"
+  },
+  "GOLD 6154": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 200,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8153": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 125,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8156": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 105,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8158": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8160": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8164": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 26,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 150,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8168": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 205,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8170": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 26,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 165,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8176": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 165,
+   "architecture": "Skylake"
+  },
+  "PLATINUM 8180": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 205,
+   "architecture": "Skylake"
+  },
+  "BRONZE 3204": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 6,
+   "clock_speed_ghz": 1.9,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "BRONZE 3206R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 1.9,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4208": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4210": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 10,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4210R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 10,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 100,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4214": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4214R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 100,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4215": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "SILVER 4216": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 100,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5215": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 10,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 85,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5217": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 115,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5218": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5218R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5220": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5220R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 5222": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 4,
+   "clock_speed_ghz": 3.8,
+   "tdp_watts": 105,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6226": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6226R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6230": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6230R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 26,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6234": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 130,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6238": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 22,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 140,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6238R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 165,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6240": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6240R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 165,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6242": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6242R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6244": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 8,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6246": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 12,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 165,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6246R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6248": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 20,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6248R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6252": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 150,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6254": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 18,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 200,
+   "architecture": "Cascade Lake"
+  },
+  "GOLD 6258R": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8253": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 16,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 125,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8260": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 165,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8268": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 24,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8270": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 26,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8276": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 165,
+   "architecture": "Cascade Lake"
+  },
+  "PLATINUM 8280": {
+   "family": "Xeon",
+   "socket": "LGA3647",
+   "core_count": 28,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 205,
+   "architecture": "Cascade Lake"
+  },
+  "E3-1220": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E3-1230": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E3-1240": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E3-1270": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 80,
+   "architecture": "Sandy Bridge"
+  },
+  "E3-1220 V2": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 69,
+   "architecture": "Ivy Bridge"
+  },
+  "E3-1230 V2": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 69,
+   "architecture": "Ivy Bridge"
+  },
+  "E3-1240 V2": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 69,
+   "architecture": "Ivy Bridge"
+  },
+  "E3-1270 V2": {
+   "family": "Xeon",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 69,
+   "architecture": "Ivy Bridge"
+  },
+  "E3-1220 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1230 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1231 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1240 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1270 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1271 V3": {
+   "family": "Xeon",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 80,
+   "architecture": "Haswell"
+  },
+  "E3-1220 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1225 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1230 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1240 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1245 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1270 V5": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 80,
+   "architecture": "Skylake"
+  },
+  "E3-1220 V6": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 72,
+   "architecture": "Kaby Lake"
+  },
+  "E3-1230 V6": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 72,
+   "architecture": "Kaby Lake"
+  },
+  "E3-1240 V6": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 72,
+   "architecture": "Kaby Lake"
+  },
+  "E3-1270 V6": {
+   "family": "Xeon",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.8,
+   "tdp_watts": 72,
+   "architecture": "Kaby Lake"
+  },
+  "E7-4820 V4": {
+   "family": "Xeon",
+   "core_count": 10,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 115,
+   "architecture": "Broadwell"
+  },
+  "E7-4830 V3": {
+   "family": "Xeon",
+   "core_count": 12,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 115,
+   "architecture": "Haswell"
+  },
+  "E7-4830 V4": {
+   "family": "Xeon",
+   "core_count": 14,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 115,
+   "architecture": "Broadwell"
+  },
+  "E7-4850 V3": {
+   "family": "Xeon",
+   "core_count": 14,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 115,
+   "architecture": "Haswell"
+  },
+  "E7-4850 V4": {
+   "family": "Xeon",
+   "core_count": 16,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 115,
+   "architecture": "Broadwell"
+  },
+  "E7-8880 V3": {
+   "family": "Xeon",
+   "core_count": 18,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 150,
+   "architecture": "Haswell"
+  },
+  "E7-8880 V4": {
+   "family": "Xeon",
+   "core_count": 22,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 150,
+   "architecture": "Broadwell"
+  },
+  "E7-8890 V3": {
+   "family": "Xeon",
+   "core_count": 18,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 165,
+   "architecture": "Haswell"
+  },
+  "E7-8890 V4": {
+   "family": "Xeon",
+   "core_count": 24,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 165,
+   "architecture": "Broadwell"
+  },
+  "E7-8895 V3": {
+   "family": "Xeon",
+   "core_count": 18,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 165,
+   "architecture": "Haswell"
+  },
+  "EPYC 7251": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 8,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 120,
+   "architecture": "Zen"
+  },
+  "EPYC 7261": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 8,
+   "clock_speed_ghz": 2.5,
+   "architecture": "Zen"
+  },
+  "EPYC 7281": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.1,
+   "architecture": "Zen"
+  },
+  "EPYC 7301": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.2,
+   "architecture": "Zen"
+  },
+  "EPYC 7351P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.4,
+   "architecture": "Zen"
+  },
+  "EPYC 7401": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.0,
+   "architecture": "Zen"
+  },
+  "EPYC 7401P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.0,
+   "architecture": "Zen"
+  },
+  "EPYC 7451": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 180,
+   "architecture": "Zen"
+  },
+  "EPYC 7501": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.0,
+   "architecture": "Zen"
+  },
+  "EPYC 7551": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 180,
+   "architecture": "Zen"
+  },
+  "EPYC 7551P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 180,
+   "architecture": "Zen"
+  },
+  "EPYC 7601": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 180,
+   "architecture": "Zen"
+  },
+  "EPYC 7232P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 120,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7252": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 120,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7262": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 8,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 155,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7272": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 12,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 120,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7282": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 120,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7302": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 155,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7302P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 16,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 155,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7352": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 155,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7402": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 180,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7402P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 24,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 180,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7452": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.35,
+   "tdp_watts": 155,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7502": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 180,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7502P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 180,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7532": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 200,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7542": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 32,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 225,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7552": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 48,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 200,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7642": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 48,
+   "clock_speed_ghz": 2.3,
+   "tdp_watts": 225,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7702": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 64,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 200,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7702P": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 64,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 200,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7742": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 64,
+   "clock_speed_ghz": 2.25,
+   "tdp_watts": 225,
+   "architecture": "Zen 2"
+  },
+  "EPYC 7H12": {
+   "family": "EPYC",
+   "socket": "SP3",
+   "core_count": 64,
+   "clock_speed_ghz": 2.6,
+   "tdp_watts": 280,
+   "architecture": "Zen 2"
+  },
+  "I5-2400": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "I5-2500": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "I7-2600": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 95,
+   "architecture": "Sandy Bridge"
+  },
+  "I5-3470": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 77,
+   "architecture": "Ivy Bridge"
+  },
+  "I5-3570": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 77,
+   "architecture": "Ivy Bridge"
+  },
+  "I7-3770": {
+   "family": "Core i-series",
+   "socket": "LGA1155",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 77,
+   "architecture": "Ivy Bridge"
+  },
+  "I5-4570": {
+   "family": "Core i-series",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 84,
+   "architecture": "Haswell"
+  },
+  "I5-4590": {
+   "family": "Core i-series",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 84,
+   "architecture": "Haswell"
+  },
+  "I5-4690": {
+   "family": "Core i-series",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.5,
+   "tdp_watts": 84,
+   "architecture": "Haswell"
+  },
+  "I7-4770": {
+   "family": "Core i-series",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 84,
+   "architecture": "Haswell"
+  },
+  "I7-4790": {
+   "family": "Core i-series",
+   "socket": "LGA1150",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 84,
+   "architecture": "Haswell"
+  },
+  "I3-6100": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 2,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 51,
+   "architecture": "Skylake"
+  },
+  "I5-6500": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 65,
+   "architecture": "Skylake"
+  },
+  "I5-6500T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 2.5,
+   "tdp_watts": 35,
+   "architecture": "Skylake"
+  },
+  "I5-6600": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.3,
+   "tdp_watts": 65,
+   "architecture": "Skylake"
+  },
+  "I7-6700": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 65,
+   "architecture": "Skylake"
+  },
+  "I7-6700T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 35,
+   "architecture": "Skylake"
+  },
+  "I7-6700K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 4.0,
+   "tdp_watts": 91,
+   "architecture": "Skylake"
+  },
+  "I3-7100": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 2,
+   "clock_speed_ghz": 3.9,
+   "tdp_watts": 51,
+   "architecture": "Kaby Lake"
+  },
+  "I3-7100T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 2,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 35,
+   "architecture": "Kaby Lake"
+  },
+  "I5-7400T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 35,
+   "architecture": "Kaby Lake"
+  },
+  "I5-7500": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.4,
+   "tdp_watts": 65,
+   "architecture": "Kaby Lake"
+  },
+  "I5-7500T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 2.7,
+   "tdp_watts": 35,
+   "architecture": "Kaby Lake"
+  },
+  "I7-7700": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 65,
+   "architecture": "Kaby Lake"
+  },
+  "I7-7700T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 35,
+   "architecture": "Kaby Lake"
+  },
+  "I7-7700K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 4.2,
+   "tdp_watts": 91,
+   "architecture": "Kaby Lake"
+  },
+  "I3-8100": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 4,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I5-8400": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 2.8,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I5-8500": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I5-8500T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 2.1,
+   "tdp_watts": 35,
+   "architecture": "Coffee Lake"
+  },
+  "I5-8600": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I7-8700": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.2,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I7-8700T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 2.4,
+   "tdp_watts": 35,
+   "architecture": "Coffee Lake"
+  },
+  "I7-8700K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 95,
+   "architecture": "Coffee Lake"
+  },
+  "I5-9400": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I5-9500": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I5-9500T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 2.2,
+   "tdp_watts": 35,
+   "architecture": "Coffee Lake"
+  },
+  "I5-9600K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 6,
+   "clock_speed_ghz": 3.7,
+   "tdp_watts": 95,
+   "architecture": "Coffee Lake"
+  },
+  "I7-9700": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 8,
+   "clock_speed_ghz": 3.0,
+   "tdp_watts": 65,
+   "architecture": "Coffee Lake"
+  },
+  "I7-9700T": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 8,
+   "clock_speed_ghz": 2.0,
+   "tdp_watts": 35,
+   "architecture": "Coffee Lake"
+  },
+  "I7-9700K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 8,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 95,
+   "architecture": "Coffee Lake"
+  },
+  "I9-9900K": {
+   "family": "Core i-series",
+   "socket": "LGA1151",
+   "core_count": 8,
+   "clock_speed_ghz": 3.6,
+   "tdp_watts": 95,
+   "architecture": "Coffee Lake"
+  },
+  "I5-10400": {
+   "family": "Core i-series",
+   "socket": "LGA1200",
+   "core_count": 6,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 65,
+   "architecture": "Comet Lake"
+  },
+  "I5-10500": {
+   "family": "Core i-series",
+   "socket": "LGA1200",
+   "core_count": 6,
+   "clock_speed_ghz": 3.1,
+   "tdp_watts": 65,
+   "architecture": "Comet Lake"
+  },
+  "I7-10700": {
+   "family": "Core i-series",
+   "socket": "LGA1200",
+   "core_count": 8,
+   "clock_speed_ghz": 2.9,
+   "tdp_watts": 65,
+   "architecture": "Comet Lake"
+  }
+ }
+}

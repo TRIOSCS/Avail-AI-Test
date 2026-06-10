@@ -168,6 +168,38 @@ def test_desc_skips_higher_confidence_prior_on_phase2_commodity(db_session: Sess
     assert card.specs_structured["gpu_family"]["source"] == "desc_parse"
 
 
+def test_desc_writes_cpu_facets_with_table_merge(db_session: Session):
+    # Wave 3B: cpu is a full SPEC_COMMODITIES member. The HP spares grammar plus
+    # the curated model→spec table land all six seeded cpu facets — including the
+    # enum members (architecture/family/socket) record_spec re-validates against
+    # the seeded vocabulary, and tdp_watts (NEVER wattage) for the "65W" token.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "835609-001", "cpu", "SPS-CPU BDW E5-2650L V4 14C 1_7GHZ 65W - 835609-001")
+
+    stats = extract_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats == {"parsed": 1, "written": 6, "failed": 0}
+    f = _facets(db_session, card.id)
+    assert f["family"] == "Xeon"
+    assert f["socket"] == "LGA2011-3"  # table-only facet (descs almost never say it)
+    assert f["core_count"] == 14
+    assert f["clock_speed_ghz"] == 1.7  # underscore-decimal corpus form "1_7GHZ"
+    assert f["tdp_watts"] == 65
+    assert f["architecture"] == "Broadwell"
+    assert "wattage" not in f  # the PSU key is structurally unreachable from cpu
+    assert card.specs_structured["architecture"]["source"] == "desc_parse"
+
+
+def test_desc_skips_polluted_cpu_card(db_session: Session):
+    # Step-0 pollution guard: a Murata MLCC mis-bucketed as cpu writes nothing.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104MA88D", "cpu", "GRM155R71C104MA88D")
+
+    assert extract_and_record_specs(db_session, [card.id]) == {"parsed": 0, "written": 0, "failed": 0}
+    assert _facets(db_session, card.id) == {}
+
+
 def test_desc_skips_uncategorized_card(db_session: Session):
     # Unlike the MPN decoder, a description is not a regex-gated commodity proof — the
     # writer never categorizes, and an uncategorized card cannot take facets anyway.

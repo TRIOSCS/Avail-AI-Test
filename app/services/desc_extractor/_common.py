@@ -4,7 +4,7 @@ What: DescResult dataclass, the canonical SpecDict specs type every extractor
       returns, plus the source tag / confidence every desc-parsed spec is written
       with (see record_spec).
 Called by: app/services/desc_extractor/{__init__,storage,memory,power,display,
-      tape,gpu,board,writer}.py.
+      tape,gpu,board,cpu,writer}.py.
 Depends on: nothing (pure).
 """
 
@@ -40,10 +40,12 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar. Arbitration is by the F1 
 
 # The only commodities the extractor fills specs for — single source of truth shared
 # by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
-# set). cpu stays hint-only (empty specs): keeping it OUT of this set is the
-# PSU-vs-CPU wattage guard — a `wattage` key can only ever be emitted on the
-# power_supplies route, so CPU "135W" TDP text is structurally unreachable.
-SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram", "power_supplies", "displays", "tape_drives", "gpu", "motherboards"})
+# set). The PSU-vs-CPU wattage guard is structural: only extract_psu can emit the
+# `wattage` key, while the cpu route emits `tdp_watts` — CPU "135W" TDP text can
+# never land in wattage and PSU ratings can never land in tdp_watts.
+SPEC_COMMODITIES = frozenset(
+    {"hdd", "ssd", "dram", "power_supplies", "displays", "tape_drives", "gpu", "motherboards", "cpu"}
+)
 
 
 @dataclass
