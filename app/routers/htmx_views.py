@@ -7296,12 +7296,15 @@ async def materials_faceted_partial(
     has_stock_flag = _flag("has_stock", has_stock)
     has_price_flag = _flag("has_price", has_price)
     has_crosses_flag = _flag("has_crosses", has_crosses)
-    if internal not in INTERNAL_FILTER_VALUES:
-        logger.warning("materials faceted: unknown internal={!r}, degrading to 'all'", internal)
-        internal = "all"
-    if searched_within not in SEARCHED_WITHIN_VALUES:
-        logger.warning("materials faceted: unknown searched_within={!r}, degrading to 'any'", searched_within)
-        searched_within = "any"
+
+    def _choice(name: str, raw: str, valid: tuple[str, ...], default: str) -> str:
+        if raw in valid:
+            return raw
+        logger.warning("materials faceted: unknown {}={!r}, degrading to {!r}", name, raw, default)
+        return default
+
+    internal = _choice("internal", internal, INTERNAL_FILTER_VALUES, "all")
+    searched_within = _choice("searched_within", searched_within, SEARCHED_WITHIN_VALUES, "any")
     try:
         min_searches_n = int(min_searches)
     except ValueError:
