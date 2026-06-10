@@ -639,6 +639,81 @@ not requisition-scoped.
 
 ---
 
+## 10. Click-to-Contact Outreach Logging (CDM Workspace)
+
+```
+User clicks a contact link (tel:/mailto:/Teams deep link/weixin://) in
+tabs/contacts_tab.html inside the CDM account workspace
+    |
+    v
+Delegated click listener in app/static/htmx_app.js
+    |
+    +---> Reads data-* attributes from the [data-outreach-log] element
+    |       (data-channel phone|email|teams|wechat, data-value,
+    |        data-company-id, data-site-id, data-contact-id, data-contact-name)
+    |
+    +---> Fire-and-forget fetch POST /api/activity/outreach-initiated
+    |       (app/routers/activity.py, schema OutreachInitiatedRequest in
+    |        app/schemas/activity.py)
+    |
+    +---> On success: $store.toast success flash + #cdm-list refresh
+    |       (re-sorts the account list so the touch is visible immediately;
+    |        the refresh preserves the current pagination offset/limit, read
+    |        from data-* attrs on the _account_list.html header)
+    +---> On success WITH dropped_links (server removed stale entity links):
+    |       $store.toast WARNING flash instead — the touch is logged but
+    |       invisible on this account; the list refresh is skipped
+    +---> On failure (429/5xx/network): $store.toast ERROR flash — outreach
+    |       logging failures are never silent
+    |
+    v
+activity.py router -> log_outreach_initiated(db, user_id=..., channel=...,
+    |                                          contact_value=..., ...)
+    |   - rate limit: per-user "outreach" bucket (30/min), separate from the
+    |     click-to-call bucket (10/min) so channels never starve each other
+    |   - nonexistent OR mismatched company/site/contact ids (site not under
+    |     the company, contact not under the site) are nulled out with a
+    |     warning (stale DOM ids must not FK-crash the insert or bump an
+    |     unrelated entity) and reported back as dropped_links in the 201 body
+    |
+    v
+app/services/activity_service.log_outreach_initiated()
+    |
+    +---> Dedup: same user + channel + company/site/contact links + contacted
+    |       value (channel snapshot column; subject for WeChat) within 120s
+    |       (OUTREACH_DEDUP_SECONDS) returns the existing row — double-clicks
+    |       do not create duplicate activities or double bumps, while distinct
+    |       same-named contacts never collapse into one log
+    |
+    +---> Maps channel to ActivityType:
+    |       phone   -> ActivityType.CALL_LOGGED   (direction=outbound)
+    |       email   -> ActivityType.EMAIL_SENT
+    |       teams   -> ActivityType.TEAMS_MESSAGE
+    |       wechat  -> ActivityType.WECHAT_MESSAGE  (new, constants.py)
+    |
+    +---> DB: INSERT activity_log (is_meaningful=True, direction=outbound,
+    |       linked to company_id + site_contact_id)
+    |
+    +---> DB: UPDATE companies.last_activity_at = now()
+    +---> DB: UPDATE customer_sites.last_activity_at = now()
+    |       (both bumps feed the CDM workspace staleness sort:
+    |        oldest = longest since activity first)
+
+Channel enum (app/constants.py):
+    Channel.PHONE | Channel.EMAIL | Channel.TEAMS | Channel.WECHAT (new)
+```
+
+CDM business rules (staleness tiers, account-list query/sort, contact-row
+assembly) live in `app/services/crm_service.py` (`staleness_tier`,
+`cdm_company_query`, `cdm_list_ctx`, `company_contact_rows`); the
+`htmx_views.py` routes are thin wrappers.
+`company_detail_partial` builds `contact_rows` via the `company_contact_rows` helper
+(active SiteContacts across the company's active sites + legacy site-level
+contacts on active sites) and passes it to
+`tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
+
+---
+
 ## Enrichment Pipeline
 
 ```
@@ -1456,7 +1531,7 @@ the current implementation.
 | Requisitions | 45 | CRUD, search, bulk archive/assign, claim |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
-| Companies/CRM | 40 | CRUD, sites, contacts, enrichment, import |
+| Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
 | Buy Plans | 6 | CRUD, external approval via token |

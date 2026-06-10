@@ -112,6 +112,12 @@ class TestFormatPhoneE164EdgeCases:
         result = format_phone_e164("44207946095800")
         assert result == "+44207946095800"
 
+    def test_more_than_15_digits_returns_none(self):
+        """E.164 caps at 15 digits — longer strings are not phone numbers (and would
+        overflow the String(100) phone snapshot columns downstream)."""
+        assert format_phone_e164("1234567890123456") is None
+        assert format_phone_e164("+" + "9" * 30) is None
+
     def test_11_digits_not_starting_with_1_returns_none(self):
         """11 digits not starting with 1 — falls through to line 58 (return None)."""
         result = format_phone_e164("44207946095")
