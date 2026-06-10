@@ -334,7 +334,8 @@ def test_mutation_response_is_panel_scoped(client, db_session):
     assert "activeTab: 'vendors'" not in resp.text  # not the full detail shell
 
 
-# ── Offer hook: release_on_offer at the sightings offer-creation route ──────
+# ── Offer hook: the sightings offer-creation route releases via the canonical
+#    create_offer (maybe_release_on_offer) — no route-level call ──────────────
 
 
 def _unav(db, vendor_norm, key, reason="sold_elsewhere", age_days=0):

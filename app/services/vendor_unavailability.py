@@ -20,9 +20,13 @@ Vendor matching goes through ONE shared helper (``sighting_vendor_norm``) with t
 legacy NULL-column fallback — never raw/lower(trim()) comparisons, never bare column
 equality. Functions never commit; callers own the transaction.
 
-Called by: app/routers/sightings.py (mark-unavailable / mark-available routes,
-           offer-hook release), app/services/sighting_status.py (reader-authority
-           Batch 4), sighting-persistence paths via apply_to_fresh_sightings()
+Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
+           the five user-initiated offer sites via maybe_release_on_offer
+           (routers/crm/offers.py create_offer + approve_offer,
+           routers/htmx_views.py add_offer + save_parsed_offers,
+           services/ai_offer_service.py save_freeform_offers),
+           app/services/sighting_status.py (reader-authority Batch 4),
+           sighting-persistence paths via apply_to_fresh_sightings()
            (search_service, ICS/NC sighting writers, sources import,
            add-to-requisition picker, inventory jobs)
 Depends on: VendorPartUnavailability, Sighting, ActivityLog models,
@@ -662,6 +666,31 @@ def release_on_offer(
             released,
         )
     return released
+
+
+def maybe_release_on_offer(
+    db: Session,
+    requirement_id: int | None,
+    vendor_name: str | None,
+    user: User | None,
+) -> int:
+    """The single offer-hook gate every user-initiated offer site calls.
+
+    Principle: ``released_at`` is written only by user-initiated proof — a person
+    entering, saving, or approving an offer. Auto-created offers (background inbox
+    monitor, excess auto-matching) are auto-mined evidence — same class as demoted
+    stock-list re-uploads — and never release; clones are never proof. Those paths
+    must NOT call this.
+
+    Thin wrapper over ``release_on_offer``: resolves the requirement and no-ops (0)
+    when ``requirement_id`` or ``vendor_name`` is missing. Does NOT commit.
+    """
+    if not requirement_id or not vendor_name or not vendor_name.strip():
+        return 0
+    requirement = db.get(Requirement, requirement_id)
+    if requirement is None:
+        return 0
+    return release_on_offer(db, requirement, vendor_name, user)
 
 
 def excluded_vendor_norms(db: Session, requirements: Iterable[Requirement]) -> set[str]:

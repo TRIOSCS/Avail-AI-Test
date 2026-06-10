@@ -51,7 +51,6 @@ from ..services.vendor_unavailability import (
     clear_unavailability,
     excluded_vendor_norms,
     record_unavailability,
-    release_on_offer,
     sighting_vendor_norm,
     unavailability_for_requirement,
 )
@@ -1652,10 +1651,9 @@ async def sightings_create_offer(
         # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
         raise RequestValidationError(e.errors()) from e
 
+    # The canonical create_offer fires the offer-hook release itself
+    # (maybe_release_on_offer) — no route-level call needed here.
     await create_offer(requirement.requisition_id, payload, user=user, db=db)
-    # Offer hook: an incoming offer is proof of availability — release the vendor's
-    # matching ACTIVE unavailability records ('offer_received'; never different_part).
-    release_on_offer(db, requirement, vendor_name, user)
     db.commit()
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")

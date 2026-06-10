@@ -88,7 +88,7 @@ from ..services.part_history_service import (
     sightings_for_card,
 )
 from ..services.status_machine import require_valid_transition
-from ..services.vendor_unavailability import apply_to_fresh_sightings
+from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
 from ..template_env import template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
@@ -1554,6 +1554,9 @@ async def save_parsed_offers(
             status=OfferStatus.ACTIVE,
         )
         db.add(offer)
+        # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
+        # proof of availability, release the vendor's matching active records.
+        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user)
         saved_count += 1
 
     db.commit()
@@ -2074,6 +2077,9 @@ async def add_offer(
     )
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
+    # Offer hook: a manually entered offer is user-initiated proof of availability —
+    # release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
 
     _log_activity(

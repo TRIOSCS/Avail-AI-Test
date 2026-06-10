@@ -1689,3 +1689,227 @@ class TestInventoryJobReapplication:
 
         row = db_session.query(Sighting).filter_by(requirement_id=requirement.id, source_type="email_auto_import").one()
         assert row.is_unavailable is True
+
+
+# ── Offer-hook wiring: user-initiated proof releases at five sites; auto-mined
+#    and clone paths never release (maybe_release_on_offer is the single gate) ──
+
+
+def _hook_record(
+    db_session: Session,
+    vendor: str,
+    mpn: str = "LM317T",
+    reason: UnavailabilityReason = UnavailabilityReason.SOLD_ELSEWHERE,
+) -> VendorPartUnavailability:
+    """An ACTIVE record keyed to the conftest test_requisition's primary MPN."""
+    rec = VendorPartUnavailability(
+        vendor_name_normalized=normalize_vendor_name(vendor),
+        normalized_mpn=normalize_mpn_key(mpn),
+        reason=reason,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(rec)
+    db_session.commit()
+    return rec
+
+
+def _hook_offer_input(**kw):
+    from types import SimpleNamespace
+
+    defaults = dict(
+        mpn="LM317T",
+        vendor_name="Arrow Electronics",
+        manufacturer="Texas Instruments",
+        qty_available=1000,
+        unit_price=0.50,
+        currency="USD",
+        lead_time="2 weeks",
+        date_code="2025+",
+        condition="new",
+        packaging="tape_reel",
+        moq=100,
+        notes="Test offer",
+    )
+    defaults.update(kw)
+    return SimpleNamespace(**defaults)
+
+
+def _assert_released(db_session: Session, rec: VendorPartUnavailability) -> None:
+    db_session.expire_all()
+    rec = db_session.get(VendorPartUnavailability, rec.id)
+    assert rec.released_at is not None
+    assert rec.release_trigger == RELEASE_TRIGGER_OFFER_RECEIVED
+
+
+def _assert_not_released(db_session: Session, rec: VendorPartUnavailability) -> None:
+    db_session.expire_all()
+    rec = db_session.get(VendorPartUnavailability, rec.id)
+    assert rec.released_at is None
+    assert rec.release_trigger is None
+
+
+class TestOfferHookReleasingSites:
+    """The five user-initiated creation/approval sites release via the shared
+    maybe_release_on_offer gate."""
+
+    def test_crm_create_offer_api_releases(self, client, db_session: Session, test_requisition):
+        rec = _hook_record(db_session, "Arrow Electronics")
+        requirement = test_requisition.requirements[0]
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/offers",
+            json={
+                "requirement_id": requirement.id,
+                "vendor_name": "Arrow Electronics",
+                "mpn": "LM317T",
+                "qty_available": 500,
+                "unit_price": 0.45,
+            },
+        )
+        assert resp.status_code == 200
+        _assert_released(db_session, rec)
+
+    def test_crm_create_offer_api_never_releases_different_part(self, client, db_session: Session, test_requisition):
+        rec = _hook_record(db_session, "Arrow Electronics", reason=UnavailabilityReason.DIFFERENT_PART)
+        requirement = test_requisition.requirements[0]
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/offers",
+            json={
+                "requirement_id": requirement.id,
+                "vendor_name": "Arrow Electronics",
+                "mpn": "LM317T",
+                "unit_price": 0.45,
+            },
+        )
+        assert resp.status_code == 200
+        _assert_not_released(db_session, rec)
+
+    def test_manual_add_offer_releases(self, client, db_session: Session, test_requisition):
+        rec = _hook_record(db_session, "Arrow Electronics")
+        requirement = test_requisition.requirements[0]
+        resp = client.post(
+            f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
+            data={
+                "vendor_name": "Arrow Electronics",
+                "mpn": "LM317T",
+                "qty_available": "500",
+                "requirement_id": str(requirement.id),
+            },
+        )
+        assert resp.status_code == 200
+        _assert_released(db_session, rec)
+
+    def test_save_parsed_offers_route_releases(self, client, db_session: Session, test_requisition):
+        """The user-edited parse form persists offers ACTIVE — user-initiated proof."""
+        rec = _hook_record(db_session, "Arrow Electronics")
+        resp = client.post(
+            f"/v2/partials/requisitions/{test_requisition.id}/save-parsed-offers",
+            data={
+                "vendor_name": "Arrow Electronics",
+                "offers[0].mpn": "LM317T",
+                "offers[0].qty_available": "100",
+                "offers[0].unit_price": "0.45",
+            },
+        )
+        assert resp.status_code == 200
+        _assert_released(db_session, rec)
+
+    def test_ai_save_parsed_pending_review_does_not_release_until_approved(
+        self, client, db_session: Session, test_requisition, test_user: User
+    ):
+        """save_parsed_offers persists PENDING_REVIEW (not proof yet); the user
+        approving the pending offer is the proof that releases."""
+        from unittest.mock import patch
+
+        from app.services.ai_offer_service import save_parsed_offers as ai_save_parsed
+
+        rec = _hook_record(db_session, "Arrow Electronics")
+        with patch("app.search_service.resolve_material_card", return_value=None):
+            result = ai_save_parsed(db_session, test_requisition.id, None, [_hook_offer_input()], test_user.id)
+        db_session.commit()
+        assert result["created"] == 1
+        _assert_not_released(db_session, rec)
+
+        resp = client.put(f"/api/offers/{result['offer_ids'][0]}/approve")
+        assert resp.status_code == 200
+        _assert_released(db_session, rec)
+
+    def test_save_freeform_offers_releases(self, db_session: Session, test_requisition, test_user: User):
+        from unittest.mock import patch
+
+        from app.services.ai_offer_service import save_freeform_offers
+
+        rec = _hook_record(db_session, "Arrow Electronics")
+        with patch("app.search_service.resolve_material_card", return_value=None):
+            result = save_freeform_offers(db_session, test_requisition.id, [_hook_offer_input()], test_user.id)
+        db_session.commit()
+        assert result["created"] == 1
+        _assert_released(db_session, rec)
+
+
+class TestOfferHookExcludedPaths:
+    """Auto-created offers (inbox monitor, excess matching) and clones are auto-mined
+    evidence / copies — never proof, never release."""
+
+    def test_email_auto_create_does_not_release(self, db_session: Session, test_user: User, test_requisition):
+        from unittest.mock import patch
+
+        from app.email_service import _auto_create_offers_from_parse
+        from app.models import Offer, VendorResponse
+
+        rec = _hook_record(db_session, "TestVendor Inc")
+        vr = VendorResponse(
+            requisition_id=test_requisition.id,
+            vendor_name="TestVendor Inc",
+            vendor_email="sales@testvendor.com",
+            confidence=0.9,
+            scanned_by_user_id=test_user.id,
+            status="new",
+            received_at=datetime.now(timezone.utc),
+            message_id="msg-unav-hook-1",
+        )
+        db_session.add(vr)
+        db_session.commit()
+
+        draft = {"mpn": "LM317T", "vendor_name": "TestVendor Inc", "unit_price": 1.5}
+        with patch("app.services.response_parser.extract_draft_offers", return_value=[draft]):
+            _auto_create_offers_from_parse(vr, {"confidence": 0.9}, db_session)
+        db_session.commit()
+
+        offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).one()
+        assert offer.status == "active"  # would have released if this path were hooked
+        assert offer.requirement_id == test_requisition.requirements[0].id
+        _assert_not_released(db_session, rec)
+
+    def test_excess_match_does_not_release(self, db_session: Session, test_user: User, test_requisition):
+        from app.models import Company, Offer
+        from app.services.excess_service import confirm_import, create_excess_list, match_excess_demand
+
+        requirement = test_requisition.requirements[0]
+        requirement.normalized_mpn = normalize_mpn_key("LM317T")
+        company = Company(name="Arrow Electronics")
+        db_session.add(company)
+        db_session.commit()
+
+        rec = _hook_record(db_session, "Arrow Electronics")
+        el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
+        confirm_import(db_session, el.id, [{"part_number": "LM317T", "quantity": 500, "asking_price": 0.45}])
+        result = match_excess_demand(db_session, el.id, user_id=test_user.id)
+
+        assert result["matches_created"] >= 1
+        offer = db_session.query(Offer).filter_by(source="excess", requisition_id=test_requisition.id).one()
+        assert offer.requirement_id == requirement.id
+        _assert_not_released(db_session, rec)
+
+    def test_clone_does_not_release(self, client, db_session: Session, test_requisition, test_offer):
+        from app.models import Offer
+
+        test_offer.requirement_id = test_requisition.requirements[0].id
+        db_session.commit()
+        rec = _hook_record(db_session, "Arrow Electronics")
+
+        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
+        assert resp.status_code == 200
+        new_id = resp.json()["id"]
+        cloned = db_session.query(Offer).filter_by(requisition_id=new_id).all()
+        assert len(cloned) == 1 and cloned[0].requirement_id is not None
+        _assert_not_released(db_session, rec)

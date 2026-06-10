@@ -128,10 +128,15 @@ and O1 already subsumes any O2-shaped signal on LIVE rows.
   ActivityLog line), stamp nothing. LOT+LISTING only.
 - **else** — a row whose class's override doesn't fire → stamp `is_unavailable=True`.
 
-**Offer hook:** at offer creation, `release_on_offer(...)` releases matching active
-records (`release_trigger='offer_received'`), all reasons except `different_part`.
-Availability evidence (qty, email, offer) never releases identity knowledge; only LIVE
-catalog evidence or manual clear does.
+**Offer hook:** user-initiated offer proof — a person entering, saving, or approving
+an offer — releases matching active records via the shared
+`maybe_release_on_offer(...)` gate (`release_trigger='offer_received'`), all reasons
+except `different_part`. It fires at five sites (canonical `create_offer` incl. the
+sightings route that delegates to it, manual `add_offer`, the save-parsed-offers
+route, `save_freeform_offers`, pending-review approval) and never from auto-created
+(inbox monitor, excess matching) or clone paths. Availability evidence (qty, email,
+offer) never releases identity knowledge; only LIVE catalog evidence or manual clear
+does.
 
 ### Reader-side authority rule
 
@@ -221,8 +226,8 @@ New `app/services/vendor_unavailability.py` (all business logic here; routers st
 - `release_on_offer(db, requirement, vendor_name, user) -> int` (new): releases
   matching **active** records for the vendor across the requirement's keys —
   `released_at=now`, `release_trigger='offer_received'`, ActivityLog — all reasons
-  except `different_part`. Called from the offer-creation route. No-op (0) when
-  nothing matches.
+  except `different_part`. Called via the `maybe_release_on_offer(...)` gate from
+  the five user-initiated offer sites. No-op (0) when nothing matches.
 - `excluded_vendor_norms(db, requirements) -> set[str]`: vendor norms having an
   **active** record (fetch full rows, Python-filter with `is_active`) whose
   `normalized_mpn` is in the requirements' primary-MPN keys. (Deliberate boundary:
@@ -299,9 +304,10 @@ the O1/O2/O3 policy matrix — with its OWN session right where the rows are cre
 - **There is NO separate verify-availability endpoint.** The verify affordance in the
   UI maps onto the two existing actions: "Still unavailable" → re-arm = the
   mark-unavailable modal (upsert refresh); "It's back" → clear = mark-available.
-- **Offer hook:** the offer-creation route calls `release_on_offer(...)` after the
-  offer is persisted (same transaction) — an incoming offer is proof of availability
-  and releases the records (except `different_part`).
+- **Offer hook:** the canonical `create_offer` fires `maybe_release_on_offer(...)`
+  itself after the offer is persisted (same transaction), so this route needs no
+  hook call of its own — a user-entered offer is proof of availability and releases
+  the records (except `different_part`).
 - Detail view: fetch `unavailability_for_requirement(...)` once and pass
   `unavailable_intel` (vendor name → annotated record incl. `is_active`) into the
   template context.

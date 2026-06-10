@@ -521,9 +521,14 @@ HUMAN_DIRECT (`email_attachment` only) → **O3**: qty > 0 releases the record
 everything else is listing-class → **O2**: fresh qty > snapshot AND ≥ snapshot ×
 `unavailability_qty_jump_factor` (2.0) leaves the row unstamped with no record
 mutation (stateless, self-healing). O2/O3 — and the offer hook — are disabled
-for different_part. **Offer-release hook:** the offer-creation route calls
-`release_on_offer(...)` after the offer persists (same transaction) —
-`release_trigger='offer_received'`. Expired/released records render as labeled
+for different_part. **Offer-release hook:** `released_at` is written only by
+user-initiated proof — the five offer entry/save/approval sites (canonical
+`create_offer` incl. the sightings route that delegates to it, manual
+add-offer, the save-parsed-offers route, `save_freeform_offers`,
+pending-review approve) call the shared `maybe_release_on_offer(...)` gate
+after the offer persists (same transaction) — `release_trigger=
+'offer_received'`; auto-created offers (inbox monitor, excess matching) and
+clone paths never release. Expired/released records render as labeled
 advisory states, never silent suppression.
 
 **Re-stamping at every sighting-persistence path.** Each of the six code paths

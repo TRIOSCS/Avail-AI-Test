@@ -28,6 +28,7 @@ from ...schemas.responses import OfferListResponse
 from ...services.activity_service import log_activity
 from ...services.credential_service import get_credential_cached
 from ...services.status_machine import require_valid_transition
+from ...services.vendor_unavailability import maybe_release_on_offer
 from ...utils.async_helpers import safe_background_task
 from ...utils.normalization import normalize_mpn_key
 from ...vendor_utils import normalize_vendor_name
@@ -398,6 +399,12 @@ async def create_offer(
 
     db.flush()  # offer.id populated; activity row + offer committed together below
 
+    # Offer hook: a user-entered ACTIVE offer is proof of availability — release the
+    # vendor's matching active unavailability records ('offer_received'). Same
+    # session/commit as the offer itself.
+    if offer.status == OfferStatus.ACTIVE:
+        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
+
     log_activity(
         db,
         activity_type=ActivityType.OFFER_CREATED,
@@ -640,6 +647,9 @@ async def approve_offer(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "active"}, ["status"])
+    # Offer hook: user approval of a pending offer is user-initiated proof of
+    # availability — release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     log_activity(
         db,
         activity_type=ActivityType.OFFER_STATUS_CHANGED,

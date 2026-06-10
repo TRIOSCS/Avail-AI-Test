@@ -73,11 +73,25 @@ subsumes any O2-shaped signal on LIVE rows, since any qty difference triggers it
 | O3 | **Vendor document** | class HUMAN_DIRECT AND `qty_available > 0` → **record-level release**: `released_at=now`, `release_trigger='vendor_email'`, one ActivityLog line, stamp nothing. Safe to write here: this path is a user-initiated router, not a background worker — no worker race | LOT + LISTING; disabled for `different_part` (a qty claim doesn't fix identity) |
 | — | **else** | a row whose class's override doesn't fire → stamp `is_unavailable=True` (current behavior) | |
 
-**Offer hook** (the only other `released_at` writer): at offer creation,
-`release_on_offer(db, vendor_name, requirement)` releases matching records
-(`'offer_received'`), all reasons **except `different_part`** — same principle as O3:
-*availability evidence (qty, email, offer) never releases identity knowledge; only
-LIVE catalog evidence or manual clear does.*
+**Offer hook** (the only other `released_at` writer): **`released_at` is written only
+by user-initiated proof** — a person entering, saving, or approving an offer. All five
+sites go through ONE gate, `maybe_release_on_offer(db, requirement_id, vendor_name,
+user)` (thin wrapper over `release_on_offer`; `'offer_received'`, all reasons **except
+`different_part`** — same principle as O3: *availability evidence never releases
+identity knowledge*): (1) canonical `create_offer` (`app/routers/crm/offers.py`),
+fires only for ACTIVE offers with a requirement_id and also covers the sightings
+convert/enter-offer route, which delegates to it; (2) manual `add_offer`
+(`app/routers/htmx_views.py`); (3) the user-edited `save_parsed_offers` route
+(`htmx_views.py`, persists ACTIVE); (4) `save_freeform_offers`
+(`app/services/ai_offer_service.py`, ACTIVE after user review); (5) the
+pending-review → approve transition (`approve_offer`, `crm/offers.py`).
+**Excluded — never release:** auto-created offers (background inbox monitor
+`_auto_create_offers_from_parse`; excess auto-matching `match_excess_demand` /
+`create_proactive_matches_for_excess`) are auto-mined evidence — same class as the
+demoted stock-list re-uploads — and the three clone paths (`crm/clone.py`,
+`requisition_service.py`, `proactive_service.py`) copy old offers: clones are never
+proof. `ai_offer_service.save_parsed_offers` persists PENDING_REVIEW and therefore
+does not release until a user approves.
 
 **Deliberately excluded triggers** (judge-backed rationale): price deltas (0% column
 fill on brokerbin/NC — exactly where marks live — plus repricer-bot noise); date-code
