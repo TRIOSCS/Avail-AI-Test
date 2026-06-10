@@ -39,7 +39,7 @@ New table `vendor_part_unavailability`, model `VendorPartUnavailability` in
 | `reason` | String(32), not null | values from new `UnavailabilityReason` StrEnum |
 | `note` | Text, nullable | free-text "what we learned" |
 | `created_by_id` | FK `users.id`, nullable, `ondelete="SET NULL"` | |
-| `created_at` | UTCDateTime, server default now | |
+| `created_at` | UTCDateTime, Python default **and** server default now (dual-default sibling pattern — avoids None-before-flush in tests) | |
 
 Unique constraint on (`vendor_name_normalized`, `normalized_mpn`). Marking again for an
 existing key is an **update** (reason/note/created_by/created_at refreshed), not an error.
@@ -67,8 +67,11 @@ New `app/services/vendor_unavailability.py` (all business logic here; routers st
   always. Empty/None keys are skipped.
 - `record_unavailability(db, requirement, vendor_name, reason, note, user) -> int`:
   upserts one record per key (unique-key update semantics above); sets
-  `is_unavailable=True` on all the vendor's sightings for the requirement (same
-  normalized-vendor match the current endpoint uses); writes ONE `ActivityLog` entry
+  `is_unavailable=True` on all the vendor's sightings for the requirement, matched via
+  `Sighting.vendor_name_normalized == normalize_vendor_name(vendor_name)` — NOT the
+  current route's `lower(trim(...))` comparison, which misses vendors with legal
+  suffixes ("X, Inc.") and is hereby replaced (architect finding 1); writes ONE
+  `ActivityLog` entry
   (follow the existing direct-construction pattern in `app/routers/sightings.py`,
   e.g. the entries near the offer/RFQ actions) with vendor, reason label, note, MPN.
   Returns number of records written. Does NOT commit (caller commits).
@@ -93,18 +96,32 @@ New `app/services/vendor_unavailability.py` (all business logic here; routers st
 vendor is `unavailable` if **either** all its sighting rows are flagged (legacy row
 flag — keeps the requisitions-page per-sighting toggle working) **or** a
 `VendorPartUnavailability` record matches (vendor_norm, any key from that vendor's
-sightings' MPNs ∪ requirement primary key). Precedence order is unchanged:
+sightings' MPNs ∪ requirement primary key). The legacy branch is re-anchored on
+`Sighting.vendor_name_normalized` (grouped by normalized name) instead of raw
+`vendor_name` — fixes a pre-existing silent miss when summary and sighting names
+drift in case/whitespace (architect finding 2). Precedence order is unchanged:
 `blacklisted > offer-in > contacted > unavailable > sighting` (offer-in still
 dominates — already pinned by test).
 
-### Search re-application
+### Re-application at EVERY sighting-persistence path
 
-In `app/search_service.py`, immediately after the fresh `Sighting` objects are
-constructed and added (the loop following the connector-aware delete), call
-`apply_to_fresh_sightings(...)` **inside the same write session** (search uses a
-separate session; the call must use that session, not the caller's). This closes the
-resurrection hole at its root: a phantom listing that comes back from a connector is
-re-marked unavailable before anyone sees it.
+Invariant: **no fresh `Sighting` row ever contradicts a durable record.** Five code
+paths persist new sightings (architect finding 3); each calls
+`apply_to_fresh_sightings(...)` with its OWN session right where the rows are created:
+
+1. `app/search_service.py` — after the fresh-`Sighting` construction loop that follows
+   the connector-aware delete, **inside search's separate write session** (the
+   CLAUDE.md session caveat is the trap). This is the synchronous resurrection hole.
+2. `app/services/ics_worker/sighting_writer.py` — async ICS browser worker; injection
+   at the end of its save loop, its own session. Without this, ICS results arriving
+   after a search re-open the hole.
+3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
+4. `app/routers/sources.py` email-attachment import.
+5. `app/routers/htmx_views.py` add-to-requisition picker — deliberately included: a
+   manually added sighting for a known-dead vendor+part renders flagged with its
+   reason; the user can Mark available to override, so knowledge is surfaced, never
+   silently bypassed. (`app/jobs/inventory_jobs.py` creates excess-list sightings —
+   include it the same way; group rows per requirement before calling.)
 
 ## HTTP layer (`app/routers/sightings.py`)
 
@@ -122,7 +139,13 @@ re-marked unavailable before anyone sees it.
   `unavailable_intel` (vendor name → record) into the template context.
 - RFQ vendor modal (`sightings_vendor_modal`): suggested-vendors query additionally
   excludes vendors in `excluded_vendor_norms(db, requirements)` (alongside the
-  existing blacklist filter).
+  existing blacklist filter). Multi-requirement semantics: excluded if unavailable for
+  ANY selected part (deliberately conservative — documented, not accidental).
+- Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
+  `sightings_send_inquiry` and `sightings_preview_inquiry` re-check submitted
+  `vendor_names` against `excluded_vendor_norms` at request time; excluded vendors are
+  dropped from the send AND visibly reported in the response (follow the existing
+  skipped-vendor reporting style used by batch RFQ — never a silent drop).
 
 ## UI (`_vendor_row.html` — additive to the shipped row treatment)
 
@@ -163,7 +186,11 @@ re-marked unavailable before anyone sees it.
 - **Routes** (`tests/test_sightings_router.py`): mark with reason+note → 200, detail
   shows rose row + reason label; invalid reason → 400; mark-available → row back to
   normal; unavailable-form renders all six reasons; RFQ vendor modal excludes the
-  marked vendor for that requirement and still shows it for an unrelated requirement.
+  marked vendor for that requirement and still shows it for an unrelated requirement;
+  mark works for a suffixed vendor name ("X, Inc." — the normalization fix);
+  send-inquiry with an excluded vendor drops it and reports the skip in the response.
+- **Async writers**: resurrection test for at least one of the ICS/NC sighting
+  writers (record exists → writer saves fresh rows → rows come back flagged).
 - **Migration**: upgrade → downgrade → upgrade locally; `alembic heads` single head;
   revision id length guard (existing test covers).
 
