@@ -29,14 +29,20 @@ trio_source 95 always beat this pass; it always beats web_search 70 / spec_extra
    ``card.cross_references``, deduped on normalized mpn + source.
 5. **Status**: if (category written OR ≥1 spec written) AND the card is not VERIFIED:
    upgrade to OEM_SOURCED + stamp enrichment_source/enriched_at and merge an
-   ``enrichment_provenance["oem_crosswalk"]`` audit entry. Spares are the population
-   distributors miss by construction; the upgrade short-circuits enrich_card's
-   early-return and saves up to 3 web calls per card.
+   ``enrichment_provenance["oem_crosswalk"]`` audit entry. Service spares are the
+   population distributors miss by construction; the upgrade short-circuits
+   enrich_card's early-return and saves up to 3 web calls per card. EXCEPTION:
+   ``-B\\d{2}`` OPTION KITS (OPTION_KIT_RE) are widely distributor-catalogued, so an
+   UNENRICHED option kit only takes the spec/xref writes (counted
+   ``option_kit_deferred``) and keeps its free tier-90 connector pass — it accepts the
+   uplift once a connector attempt has already missed (any non-UNENRICHED status).
 
 Freshness (negative cache) also lives here: ``resolved`` rows are PERMANENT;
 ``no_match`` rows block re-resolution for NO_MATCH_RETRY_DAYS (90) from
 ``looked_up_at``; a stale no_match row is updated in place on retry.
-``pending_resolution`` is the shared selector for Pass A and the backfill CLI.
+``pending_resolution`` is the shared selector — and ``apply_resolution`` the shared
+row writer (the single keeper of the status×canonical nullability invariant and the
+no_match ``source_domain=''`` sentinel) — for Pass A and the backfill CLI.
 
 Called by: app/services/enrichment_worker/worker.py (run_one_batch — Pass B over the
            FULL batch ids BEFORE the per-card core loop; pending_resolution feeds
@@ -52,6 +58,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -60,10 +67,14 @@ from app.constants import MaterialEnrichmentStatus, OemCrosswalkStatus
 from app.models import MaterialCard, OemCrosswalk
 from app.services.desc_extractor import extract_desc
 from app.services.desc_extractor._common import SPEC_COMMODITIES
+from app.services.enrichment_worker.oem_classifier import OPTION_KIT_RE
 from app.services.mpn_decoder import decode_mpn
 from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
 from app.utils.normalization import normalize_mpn_key
+
+if TYPE_CHECKING:
+    from app.services.enrichment_worker.oem_crosswalk_resolver import OemResolveResult
 
 # Negative-cache retry window: a no_match row blocks re-resolution for 90 days from
 # looked_up_at (uncatalogued OEM service parts rarely become catalogued). resolved
@@ -123,6 +134,53 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
+def apply_resolution(
+    row: OemCrosswalk | None,
+    result: OemResolveResult,
+    *,
+    display_mpn: str,
+    spare_norm: str,
+    vendor: str,
+    now: datetime | None = None,
+) -> OemCrosswalk:
+    """Build (``row=None``) or refresh in place (a stale no_match row) the
+    ``oem_crosswalk`` row for one resolver outcome.
+
+    The SINGLE row writer shared by worker Pass A and the backfill CLI — the one place
+    the status×canonical nullability invariant (ck_oem_crosswalk_status_canonical) and
+    the no_match ``source_domain=''`` sentinel (what lets uq_oem_crosswalk_edge dedupe
+    negatives) are maintained, so the two writers cannot drift. String fields are
+    clamped to their column widths: the values are LLM output, and PostgreSQL raises
+    DataError on overflow where the SQLite suite silently passes. The caller owns
+    ``db.add`` (when new) and flush/commit.
+    """
+    if row is None:
+        row = OemCrosswalk(spare_raw=display_mpn[:64], spare_norm=spare_norm[:64], vendor=vendor)
+    resolved = result.status == OemCrosswalkStatus.RESOLVED
+    row.status = result.status
+    if resolved:
+        # __post_init__ guarantees canonical_mpn/source_url are present and the
+        # resolver's shape guard caps canonical length — the clamps are belt-and-braces.
+        row.canonical_mpn_raw = (result.canonical_mpn or "")[:64]
+        row.canonical_mpn_norm = normalize_mpn_key(result.canonical_mpn)[:64]
+        row.canonical_manufacturer = (result.manufacturer or "")[:128] or None
+        row.title = result.title
+        row.confidence = result.confidence
+        row.source_url = result.source_url
+        row.source_domain = (result.source_domain or "")[:128]
+    else:
+        row.canonical_mpn_raw = None
+        row.canonical_mpn_norm = None
+        row.canonical_manufacturer = None
+        row.title = None
+        row.confidence = None
+        row.source_url = None
+        row.source_domain = ""  # NOT NULL sentinel — see the model docstring
+    row.payload = result.payload
+    row.looked_up_at = now or datetime.now(timezone.utc)
+    return row
+
+
 def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
     """OEM-crosswalk-enrich the spare-PN cards among *card_ids* from their cached
     resolved rows; write category/specs/cross-ref/status per the module contract.
@@ -137,6 +195,10 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
     - decode_written / title_written: specs persisted per channel.
     - xref_added: cross_references entries appended (post-dedupe).
     - status_upgraded: cards upgraded to oem_sourced.
+    - option_kit_deferred: UNENRICHED option-kit (-B\\d{2}) cards that took spec/xref
+      writes but NOT the status uplift — they keep their free tier-90 connector pass
+      (the cohort distributors DO catalogue); they upgrade once a connector attempt
+      has missed.
     - failed: cards LOST to an exception — the per-card SAVEPOINT rolls back only that
       card's writes; the rest of the batch proceeds.
     """
@@ -149,6 +211,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
         title_written=0,
         xref_added=0,
         status_upgraded=0,
+        option_kit_deferred=0,
         failed=0,
     )
 
@@ -219,6 +282,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
                 title_written = 0
                 xref_added = 0
                 status_upgraded = 0
+                option_kit_deferred = 0
                 # SAVEPOINT — record_spec flushes, so a DB-level failure would
                 # otherwise poison the shared batch transaction. The nested txn rolls
                 # back ONLY this card's writes; counters apply after a clean release.
@@ -290,31 +354,42 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
                         card.cross_references = xrefs
                         xref_added = 1
 
-                    # ── Status upgrade: spares are the population distributors miss by
-                    # construction — short-circuits enrich_card's early-return (saves up
-                    # to 3 web calls/card). VERIFIED is never downgraded.
+                    # ── Status upgrade: service spares are the population distributors
+                    # miss by construction — short-circuits enrich_card's early-return
+                    # (saves up to 3 web calls/card). VERIFIED is never downgraded.
+                    # OPTION KITS (-B\d{2}) are the exception: distributors DO catalogue
+                    # them, so an UNENRICHED kit defers the uplift and keeps its FREE
+                    # tier-90 connector pass (enrich_card runs this very batch); any
+                    # other status means a connector attempt already happened
+                    # (not_found/not_catalogued missed; web/ai ran after the
+                    # authoritative tier missed) — the uplift then costs nothing.
                     if (categorized or decode_written or title_written) and (
                         card.enrichment_status != MaterialEnrichmentStatus.VERIFIED
                     ):
-                        card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
-                        card.enrichment_source = source
-                        card.enriched_at = now
-                        prov = dict(card.enrichment_provenance or {})
-                        prov["oem_crosswalk"] = {
-                            "spare": card.display_mpn,
-                            "canonical_mpn": row.canonical_mpn_raw,
-                            "source_url": row.source_url,
-                            "confidence": row.confidence,
-                            "fetched_at": _aware(row.looked_up_at).isoformat() if row.looked_up_at else None,
-                        }
-                        card.enrichment_provenance = prov
-                        status_upgraded = 1
+                        is_option_kit = bool(OPTION_KIT_RE.match((card.display_mpn or "").strip().upper()))
+                        if is_option_kit and card.enrichment_status == MaterialEnrichmentStatus.UNENRICHED:
+                            option_kit_deferred = 1
+                        else:
+                            card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
+                            card.enrichment_source = source
+                            card.enriched_at = now
+                            prov = dict(card.enrichment_provenance or {})
+                            prov["oem_crosswalk"] = {
+                                "spare": card.display_mpn,
+                                "canonical_mpn": row.canonical_mpn_raw,
+                                "source_url": row.source_url,
+                                "confidence": row.confidence,
+                                "fetched_at": _aware(row.looked_up_at).isoformat() if row.looked_up_at else None,
+                            }
+                            card.enrichment_provenance = prov
+                            status_upgraded = 1
                 # Reached only on a clean savepoint release.
                 stats["categorized"] += int(categorized)
                 stats["decode_written"] += decode_written
                 stats["title_written"] += title_written
                 stats["xref_added"] += xref_added
                 stats["status_upgraded"] += status_upgraded
+                stats["option_kit_deferred"] += option_kit_deferred
             except Exception:
                 stats["failed"] += 1
                 logger.exception("oem-crosswalk: failed on card_id={}", card_id)
@@ -322,13 +397,14 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
     if stats["decode_written"] or stats["title_written"] or stats["status_upgraded"] or stats["failed"]:
         logger.info(
             "oem-crosswalk: wrote {} decode + {} title specs across {} matched cards "
-            "({} newly categorized, {} status upgrades, {} xrefs, {} canonical conflicts, "
-            "{} category mismatches, {} failed)",
+            "({} newly categorized, {} status upgrades, {} option-kit uplifts deferred, "
+            "{} xrefs, {} canonical conflicts, {} category mismatches, {} failed)",
             stats["decode_written"],
             stats["title_written"],
             stats["matched"],
             stats["categorized"],
             stats["status_upgraded"],
+            stats["option_kit_deferred"],
             stats["xref_added"],
             stats["canonical_conflict"],
             stats["category_mismatch"],

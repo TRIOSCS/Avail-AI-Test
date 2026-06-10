@@ -10,22 +10,27 @@ display_mpn classifies as *vendor*, ordered demand-first:
   (3) other commodities,
 then resolves each via the Claude-grounded resolver and UPSERTS oem_crosswalk rows only
 (resolved or 90-day-negative no_match) — NO spec writes: the enrichment worker's Pass B
-back-fills cards deterministically as batches cycle. Bills the SAME two date-keyed
-counters as the worker (enrichment_worker:web_calls:{date} +
-enrichment_worker:oem_resolves:{date}), stops at EITHER daily cap (web_daily_cap /
-oem_resolve_daily_cap from EnrichmentWorkerConfig.from_env() — raise
-ENRICHMENT_WEB_DAILY_CAP / ENRICHMENT_OEM_RESOLVE_DAILY_CAP for a drain window), and
-sleeps >= 2s between calls. Commits after every upsert so progress survives
-interruption. Stops after 5 consecutive ClaudeErrors (a backend outage must not burn
-the day's budget on failures). --dry-run prints the ordered candidate list and exits
-without any web call.
+back-fills cards deterministically as batches cycle. Designed to run ALONGSIDE the live
+worker: each item re-checks pending_resolution immediately before resolving (the
+startup snapshot goes stale while the loop paces — a norm the worker cached mid-run is
+skipped, not re-billed), a unique-key IntegrityError at commit is tolerated (rollback +
+continue — the concurrent writer's row is the desired end state), and the SAME two
+date-keyed counters as the worker (enrichment_worker:web_calls:{date} +
+enrichment_worker:oem_resolves:{date}) are billed via the atomic intel_cache.incr_count
+BEFORE each await, so neither biller can lose the other's updates. Stops at EITHER
+daily cap (web_daily_cap / oem_resolve_daily_cap from EnrichmentWorkerConfig.from_env()
+— raise ENRICHMENT_WEB_DAILY_CAP / ENRICHMENT_OEM_RESOLVE_DAILY_CAP for a drain
+window), and sleeps >= 2s between calls. Commits after every upsert so progress
+survives interruption. Stops after 5 consecutive ClaudeErrors (a backend outage must
+not burn the day's budget on failures). --dry-run prints the ordered candidate list and
+exits without any web call.
 
 Called by: an operator (manually, post-deploy of migration 100 — NOT at startup).
 Depends on: app.database.SessionLocal, enrichment_worker.config.EnrichmentWorkerConfig,
       enrichment_worker.oem_classifier.classify_oem_vendor,
       enrichment_worker.oem_crosswalk_resolver.resolve_oem_spare,
-      oem_crosswalk_enrich.pending_resolution, models.MaterialCard/OemCrosswalk,
-      cache.intel_cache, utils.normalization.normalize_mpn_key.
+      oem_crosswalk_enrich.pending_resolution/apply_resolution,
+      models.MaterialCard, cache.intel_cache, utils.normalization.normalize_mpn_key.
 """
 
 from __future__ import annotations
@@ -35,13 +40,14 @@ import asyncio
 from datetime import datetime, timezone
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from app.cache import intel_cache
-from app.models import MaterialCard, OemCrosswalk
+from app.models import MaterialCard
 from app.services.enrichment_worker.config import EnrichmentWorkerConfig
 from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
 from app.services.enrichment_worker.oem_crosswalk_resolver import resolve_oem_spare
-from app.services.oem_crosswalk_enrich import pending_resolution
+from app.services.oem_crosswalk_enrich import apply_resolution, pending_resolution
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
 
@@ -110,19 +116,16 @@ async def run(vendor: str, limit: int | None, dry_run: bool) -> int:
         web_key = f"enrichment_worker:web_calls:{today_str}"
         oem_key = f"enrichment_worker:oem_resolves:{today_str}"
 
-        def _count(key: str, floor: int) -> int:
-            cached = intel_cache.get_cached(key)
-            return max(int(cached.get("count", 0)) if isinstance(cached, dict) else 0, floor)
-
-        web_calls = _count(web_key, 0)
-        oem_resolves = _count(oem_key, 0)
+        web_calls = intel_cache.get_count(web_key)
+        oem_resolves = intel_cache.get_count(oem_key)
         attempted = 0
         consecutive_errors = 0
         for norm, display in queue:
             # Re-read both counters each iteration (the worker shares them) and stop
-            # at EITHER cap — the sub-cap is counted INSIDE the web cap.
-            web_calls = _count(web_key, web_calls)
-            oem_resolves = _count(oem_key, oem_resolves)
+            # at EITHER cap — the sub-cap is counted INSIDE the web cap. The local is
+            # the in-process floor when the cache no-ops.
+            web_calls = max(intel_cache.get_count(web_key), web_calls)
+            oem_resolves = max(intel_cache.get_count(oem_key), oem_resolves)
             if web_calls >= config.web_daily_cap:
                 logger.info("backfill-oem-crosswalk: web daily cap reached ({}) — stopping", config.web_daily_cap)
                 break
@@ -132,9 +135,21 @@ async def run(vendor: str, limit: int | None, dry_run: bool) -> int:
                     config.oem_resolve_daily_cap,
                 )
                 break
-            # Reserve BEFORE the await; flush in finally (the WebMeter discipline).
-            web_calls += 1
-            oem_resolves += 1
+
+            # Per-item freshness re-check: the startup `pending` snapshot goes stale
+            # while this loop paces — the live worker may have cached this norm
+            # minutes ago. Skipping costs one SELECT; not skipping costs a billed
+            # resolve plus a unique-key collision at commit.
+            item_pending = pending_resolution(db, [norm], vendor)
+            if norm not in item_pending:
+                logger.info("backfill-oem-crosswalk: {} already cached by a concurrent writer — skipping", display)
+                continue
+            stale_row = item_pending[norm]
+
+            # Bill BEFORE the await via the atomic incr (no lost updates against the
+            # worker's biller) — a call that bills then raises is already counted.
+            web_calls = max(intel_cache.incr_count(web_key, ttl_days=1.0), web_calls + 1)
+            oem_resolves = max(intel_cache.incr_count(oem_key, ttl_days=1.0), oem_resolves + 1)
             attempted += 1
             try:
                 result = await resolve_oem_spare(display, norm, vendor)
@@ -148,29 +163,20 @@ async def run(vendor: str, limit: int | None, dry_run: bool) -> int:
                     break
                 await asyncio.sleep(_SLEEP_SECONDS)
                 continue
-            finally:
-                intel_cache.set_cached(web_key, {"count": web_calls}, ttl_days=1.0)
-                intel_cache.set_cached(oem_key, {"count": oem_resolves}, ttl_days=1.0)
             consecutive_errors = 0
 
-            stale_row = pending.get(norm)
-            row = (
-                stale_row if stale_row is not None else OemCrosswalk(spare_raw=display, spare_norm=norm, vendor=vendor)
-            )
-            resolved = result.status == "resolved"
-            row.status = result.status
-            row.canonical_mpn_raw = result.canonical_mpn if resolved else None
-            row.canonical_mpn_norm = normalize_mpn_key(result.canonical_mpn) if resolved else None
-            row.canonical_manufacturer = result.manufacturer if resolved else None
-            row.title = result.title if resolved else None
-            row.confidence = result.confidence if resolved else None
-            row.source_url = result.source_url if resolved else None
-            row.source_domain = result.source_domain if resolved else None
-            row.payload = result.payload
-            row.looked_up_at = datetime.now(timezone.utc)
+            row = apply_resolution(stale_row, result, display_mpn=display, spare_norm=norm, vendor=vendor)
             if stale_row is None:
                 db.add(row)
-            db.commit()  # per-row commit: progress survives interruption
+            try:
+                db.commit()  # per-row commit: progress survives interruption
+            except IntegrityError:
+                # The worker committed the same edge during our await — rollback and
+                # move on; the existing row IS the desired end state (the cache won).
+                db.rollback()
+                logger.info("backfill-oem-crosswalk: {} upserted concurrently — keeping the existing row", display)
+                await asyncio.sleep(_SLEEP_SECONDS)
+                continue
             logger.info("backfill-oem-crosswalk: {} -> {} ({})", display, result.status, result.canonical_mpn)
             await asyncio.sleep(_SLEEP_SECONDS)
         logger.info("backfill-oem-crosswalk: done — {} resolves attempted", attempted)

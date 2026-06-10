@@ -1,9 +1,9 @@
 {
-  "_comment": "Gate 5 (shape): the OEM does not catalogue the spare — every field is null.",
+  "_comment": "Gate 5 (shape): the OEM does not catalogue the spare \u2014 every field is null.",
   "canonical_mpn": null,
   "manufacturer": null,
   "title": null,
   "quote": "",
   "confidence": 0.0,
-  "source_urls": ["https://partsurfer.hp.com/Search.aspx?SearchText=875942-001"]
+  "source_url": "https://partsurfer.hp.com/Search.aspx?SearchText=875942-001"
 }

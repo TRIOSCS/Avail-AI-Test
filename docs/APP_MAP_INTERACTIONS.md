@@ -884,22 +884,38 @@ migration 100, spec: SPEC_OEM_WEB_RESOLUTION):
     classifier gained the `\d{6}-B\d{2}` option-kit and `L\d{5}-\d{3}` L-series
     shapes) and have NO fresh oem_crosswalk row are resolved via
     enrichment_worker/oem_crosswalk_resolver.resolve_oem_spare — Claude web_search
-    grounded extraction (the oem_extractor contract: claude_json + five Python trust
-    gates — allowlisted domain, BOTH PNs verbatim in the sourced quote, no-echo,
-    confidence >= 0.90, graceful-no_match on shape; NO direct HTTP to PartSurfer/
-    PSREF, ever). Outcomes upsert the PERMANENT oem_crosswalk cache (resolved rows
-    forever; no_match rows are a 90-day negative cache, updated in place on retry) —
-    each unique spare PN costs exactly ONE web call ever. Pacing: at most
-    oem_resolve_per_batch (default 2) per batch and oem_resolve_daily_cap (default
-    40) per day, the sub-cap counted INSIDE web_daily_cap; every call bills
+    grounded extraction (claude_json + five Python trust gates, HARDER than the
+    ephemeral oem_extractor contract because the outcome is permanent with no
+    distributor re-verification: (1) the SINGLE source_url the quote was taken from
+    is allowlisted — provenance is gated, not just some visited URL; (2) BOTH PNs
+    appear as whole TOKENS of the verbatim quote (token-boundary membership, never
+    substring of the collapsed quote — rejects title fragments / truncations /
+    cross-token spans) and the canonical normalizes to >= 6 chars, <= 64 raw;
+    (3) no-echo by containment either way; (4) confidence >= 0.90; (5) graceful
+    no_match on a parsed dict's null/malformed fields. An UNPARSEABLE/empty response
+    raises ClaudeError — transient, NEVER a 90-day no_match. NO direct HTTP to
+    PartSurfer/PSREF, ever). Outcomes upsert the PERMANENT oem_crosswalk cache
+    (resolved rows forever; no_match rows are a 90-day negative cache, updated in
+    place on retry — DB-deduped via the source_domain='' sentinel) through the
+    shared apply_resolution writer, inside a SAVEPOINT (an IntegrityError/DataError
+    race with the drain CLI rolls back ONLY that row, never the batch session; the
+    run_one_batch wrapper also rollback-recovers a poisoned session) — each unique
+    spare PN costs exactly ONE web call ever. Pacing: at most oem_resolve_per_batch
+    (default 2) per batch and oem_resolve_daily_cap (default 40) per day, the
+    sub-cap counted INSIDE web_daily_cap; every call bills
     enrichment_worker:web_calls:{date} AND enrichment_worker:oem_resolves:{date}
-    (reserve-before-await, flush-in-finally; max-of-cache-and-in-process defense).
-    ClaudeError → breaker.record_claude_error, NO row (free retry next batch). NOT a
-    BaseConnector — no ApiSource row, no health ping (our code never opens an HTTP
-    connection to the OEM; the only failure surface is the Claude API). The paced
-    drain CLI `python -m app.management.backfill_oem_crosswalk --vendor hpe
-    [--limit N] [--dry-run]` resolves+upserts rows only (demand-first: cpu+searched,
-    cpu, rest), billing the SAME two counters, >=2s between calls.
+    BEFORE the await via intel_cache.incr_count (atomic Redis INCRBY — two
+    concurrent billers never lose updates; max-of-cache-and-in-process defense
+    retained for cache loss). ClaudeError → breaker.record_claude_error, NO row
+    (free retry next batch). NOT a BaseConnector — no ApiSource row, no health ping
+    (our code never opens an HTTP connection to the OEM; the only failure surface is
+    the Claude API). The paced drain CLI `python -m
+    app.management.backfill_oem_crosswalk --vendor hpe [--limit N] [--dry-run]`
+    resolves+upserts rows only (demand-first: cpu+searched, cpu, rest), billing the
+    SAME two counters the same atomic way, re-checking pending_resolution per item
+    (a norm the worker cached mid-run is skipped, not re-billed), tolerating
+    IntegrityError at its per-row commit (rollback + continue), >=2s between calls,
+    aborting after 5 consecutive ClaudeErrors.
 
     Pass B — deterministic writer (zero network), oem_crosswalk_enrich.py::
     oem_crosswalk_and_record_specs over the FULL batch ids: cards whose
@@ -916,11 +932,17 @@ migration 100, spec: SPEC_OEM_WEB_RESOLUTION):
     (4) cross_references append {mpn, manufacturer, source}, deduped on normalized
     mpn+source; (5) status — (category OR >=1 spec written) AND not VERIFIED →
     enrichment_status=oem_sourced + enrichment_source + enriched_at +
-    enrichment_provenance["oem_crosswalk"] audit entry. Running BEFORE the core loop
-    means the upgrade short-circuits enrich_card's VERIFIED/OEM_SOURCED early-return
-    and saves up to 3 web calls/card. Per-card SAVEPOINT; no commit (batch-final
-    commit owns durability); the F1 ladder (80 < fru_desc_parse 82 < ... < vendor
-    90; > web_search 70 > spec_extraction 60) arbitrates — no per-writer pre-gates.
+    enrichment_provenance["oem_crosswalk"] audit entry; EXCEPT an UNENRICHED
+    `\d{6}-B\d{2}` option kit (OPTION_KIT_RE — distributors DO catalogue that
+    cohort), which takes the spec/xref writes but defers the uplift (counted
+    option_kit_deferred) so enrich_card still runs the FREE tier-90 authoritative
+    connector pass; it upgrades once any connector attempt has happened (not_found/
+    not_catalogued/web/ai statuses). Running BEFORE the core loop means the upgrade
+    short-circuits enrich_card's VERIFIED/OEM_SOURCED early-return and saves up to
+    3 web calls/card for the service-spare cohort distributors miss by construction.
+    Per-card SAVEPOINT; no commit (batch-final commit owns durability); the F1
+    ladder (80 < fru_desc_parse 82 < ... < vendor 90; > web_search 70 >
+    spec_extraction 60) arbitrates — no per-writer pre-gates.
 
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
 commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates

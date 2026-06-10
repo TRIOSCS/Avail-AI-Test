@@ -81,8 +81,9 @@ class TestExecution:
         with engine.begin() as conn:
             conn.execute(
                 text(
-                    "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, source_domain, looked_up_at) "
-                    "VALUES ('875942-001', '875942001', 'hpe', 'resolved', 'partsurfer.hp.com', '2026-06-10')"
+                    "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, canonical_mpn_norm, "
+                    "source_domain, looked_up_at) VALUES ('875942-001', '875942001', 'hpe', 'resolved', "
+                    "'cd8067303409000', 'partsurfer.hp.com', '2026-06-10')"
                 )
             )
         import sqlalchemy.exc
@@ -91,14 +92,52 @@ class TestExecution:
             with engine.begin() as conn:
                 conn.execute(
                     text(
-                        "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, source_domain, "
-                        "looked_up_at) VALUES ('875942-001', '875942001', 'hpe', 'no_match', "
-                        "'partsurfer.hp.com', '2026-06-10')"
+                        "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, canonical_mpn_norm, "
+                        "source_domain, looked_up_at) VALUES ('875942-001', '875942001', 'hpe', 'resolved', "
+                        "'cd8067303409000', 'partsurfer.hp.com', '2026-06-10')"
                     )
                 )
             raise AssertionError("duplicate edge insert should have violated uq_oem_crosswalk_edge")
         except sqlalchemy.exc.IntegrityError:
             pass
+
+        # no_match rows carry the '' sentinel domain (server default), NOT NULL —
+        # NULLs are pairwise-distinct in a UNIQUE constraint, so a nullable domain
+        # would never dedupe negatives. Two no_match rows for the same (spare_norm,
+        # vendor) must collide.
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, looked_up_at) "
+                    "VALUES ('918042-601', '918042601', 'hpe', 'no_match', '2026-06-10')"
+                )
+            )
+        try:
+            with engine.begin() as conn:
+                conn.execute(
+                    text(
+                        "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, looked_up_at) "
+                        "VALUES ('918042-601', '918042601', 'hpe', 'no_match', '2026-06-11')"
+                    )
+                )
+            raise AssertionError("duplicate no_match insert should have violated uq_oem_crosswalk_edge")
+        except sqlalchemy.exc.IntegrityError:
+            pass
+
+        # ck_oem_crosswalk_status_canonical: canonical_mpn_norm is non-NULL iff
+        # status='resolved' — both illegal shapes must be rejected.
+        for stmt in (
+            "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, looked_up_at) "
+            "VALUES ('111111-001', '111111001', 'hpe', 'resolved', '2026-06-10')",
+            "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, canonical_mpn_norm, looked_up_at) "
+            "VALUES ('222222-001', '222222001', 'hpe', 'no_match', 'st4000nm0035', '2026-06-10')",
+        ):
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(stmt))
+                raise AssertionError("insert should have violated ck_oem_crosswalk_status_canonical")
+            except sqlalchemy.exc.IntegrityError:
+                pass
 
         self._run(engine, _mod.downgrade)
         assert "oem_crosswalk" not in inspect(engine).get_table_names()

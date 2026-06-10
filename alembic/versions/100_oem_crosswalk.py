@@ -3,7 +3,11 @@
 One row per grounded resolution of an OEM/system-vendor spare PN (Phase A: HP/HPE via
 PartSurfer) to the canonical manufacturer MPN it relabels, INCLUDING negative rows
 (status='no_match' — a 90-day negative cache so an uncatalogued spare is not re-fetched
-daily). Written by the enrichment worker's paced resolution pass (Pass A) and the
+daily). no_match rows store source_domain='' (NOT NULL sentinel — NULLs are pairwise-
+distinct in a UNIQUE constraint, so a nullable domain would never dedupe negatives),
+making uq_oem_crosswalk_edge enforce one negative row per (spare_norm, vendor).
+ck_oem_crosswalk_status_canonical pins the status×canonical nullability invariant.
+Written by the enrichment worker's paced resolution pass (Pass A) and the
 backfill_oem_crosswalk CLI; read by app/services/oem_crosswalk_enrich.py (the
 deterministic tier-80 writer pass).
 
@@ -42,13 +46,17 @@ def upgrade() -> None:
         sa.Column("title", sa.Text(), nullable=True),
         sa.Column("confidence", sa.Float(), nullable=True),
         sa.Column("source_url", sa.Text(), nullable=True),
-        sa.Column("source_domain", sa.String(length=128), nullable=True),
+        sa.Column("source_domain", sa.String(length=128), nullable=False, server_default=""),
         sa.Column("payload", sa.JSON(), nullable=True),
         sa.Column("looked_up_at", sa.DateTime(), nullable=False),
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.Column("updated_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("spare_norm", "vendor", "source_domain", name="uq_oem_crosswalk_edge"),
+        sa.CheckConstraint(
+            "(status = 'resolved') = (canonical_mpn_norm IS NOT NULL)",
+            name="ck_oem_crosswalk_status_canonical",
+        ),
     )
     op.create_index("ix_oem_crosswalk_spare_norm", "oem_crosswalk", ["spare_norm"], unique=False)
     op.create_index("ix_oem_crosswalk_canonical_norm", "oem_crosswalk", ["canonical_mpn_norm"], unique=False)

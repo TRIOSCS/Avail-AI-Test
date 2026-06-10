@@ -33,6 +33,7 @@ ZERO_STATS = Counter(
     title_written=0,
     xref_added=0,
     status_upgraded=0,
+    option_kit_deferred=0,
     failed=0,
 )
 
@@ -82,10 +83,11 @@ def _row(
 def test_decode_channel_writes_specs_categorizes_and_upgrades(db_session: Session):
     # The canonical Seagate model decodes deterministically: a NULL-category spare card
     # is categorized hdd, gets the decode's specs at partsurfer/0.90 (tier 80), an
-    # audit cross-reference, and the oem_sourced status upgrade.
+    # audit cross-reference, and the oem_sourced status upgrade (service-spare shape —
+    # option kits defer the uplift, see the dedicated tests below).
     seed_commodity_schemas(db_session)
-    card = _card(db_session, "695510-B21", category=None)
-    row = _row(db_session, "695510-B21")
+    card = _card(db_session, "695510-001", category=None)
+    row = _row(db_session, "695510-001")
 
     stats = oem_crosswalk_and_record_specs(db_session, [card.id])
     db_session.commit()
@@ -111,7 +113,7 @@ def test_decode_channel_writes_specs_categorizes_and_upgrades(db_session: Sessio
     assert card.enrichment_source == "partsurfer"
     assert card.enriched_at is not None
     prov = card.enrichment_provenance["oem_crosswalk"]
-    assert prov["spare"] == "695510-B21"
+    assert prov["spare"] == "695510-001"
     assert prov["canonical_mpn"] == "ST4000NM0035"
     assert prov["source_url"] == row.source_url
     assert prov["confidence"] == 0.95
@@ -209,9 +211,9 @@ def test_agreeing_rows_across_domains_write_once(db_session: Session):
     # Multiple resolved rows that AGREE on the canonical norm are fine — the highest-
     # confidence row is picked deterministically and the card writes once.
     seed_commodity_schemas(db_session)
-    card = _card(db_session, "695510-B21", category=None)
-    _row(db_session, "695510-B21", domain="partsurfer.hp.com", confidence=0.92)
-    _row(db_session, "695510-B21", domain="parts.hp.com", confidence=0.97)
+    card = _card(db_session, "695510-001", category=None)
+    _row(db_session, "695510-001", domain="partsurfer.hp.com", confidence=0.92)
+    _row(db_session, "695510-001", domain="parts.hp.com", confidence=0.97)
 
     stats = oem_crosswalk_and_record_specs(db_session, [card.id])
 
@@ -250,7 +252,7 @@ def test_status_upgrade_matrix(db_session: Session):
     }
     cards = {}
     for i, status in enumerate(cases):
-        spare = f"69551{i}-B21"
+        spare = f"69551{i}-001"
         cards[status] = _card(db_session, spare, category=None, enrichment_status=status)
         _row(db_session, spare)
 
@@ -260,6 +262,51 @@ def test_status_upgrade_matrix(db_session: Session):
     for status, expected in cases.items():
         assert cards[status].enrichment_status == expected, status
         assert _facets(db_session, cards[status].id) != {}  # specs written regardless
+
+
+def test_option_kit_unenriched_defers_uplift_keeps_connector_chance(db_session: Session):
+    # -B\d{2} OPTION KITS are widely distributor-catalogued — unlike service spares,
+    # the population the spec's "distributors miss by construction" premise covers. An
+    # UNENRICHED kit takes the spec/xref writes (the ladder protects them) but NOT the
+    # oem_sourced uplift, so enrich_card still runs the FREE tier-90 authoritative
+    # connector pass instead of being permanently locked at tier-80 crosswalk data.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "695510-B21", category=None)
+    _row(db_session, "695510-B21")
+
+    stats = oem_crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats["status_upgraded"] == 0
+    assert stats["option_kit_deferred"] == 1
+    assert stats["decode_written"] == 3  # evidence still written
+    assert stats["xref_added"] == 1
+    assert card.category == "hdd"
+    assert card.enrichment_status == MaterialEnrichmentStatus.UNENRICHED  # connector pass preserved
+    assert card.enrichment_source is None
+    assert (card.enrichment_provenance or {}).get("oem_crosswalk") is None
+
+
+def test_option_kit_upgrades_after_connector_miss(db_session: Session):
+    # Once a connector attempt has already missed (not_found / not_catalogued), the
+    # free tier-90 chance is spent — the option kit takes the uplift like a spare
+    # (stopping the daily not_found re-check churn).
+    seed_commodity_schemas(db_session)
+    cases = {
+        MaterialEnrichmentStatus.NOT_FOUND: MaterialEnrichmentStatus.OEM_SOURCED,
+        MaterialEnrichmentStatus.NOT_CATALOGUED: MaterialEnrichmentStatus.OEM_SOURCED,
+    }
+    cards = {}
+    for i, status in enumerate(cases):
+        spare = f"69552{i}-B21"
+        cards[status] = _card(db_session, spare, category=None, enrichment_status=status)
+        _row(db_session, spare)
+
+    stats = oem_crosswalk_and_record_specs(db_session, [c.id for c in cards.values()])
+
+    assert stats["status_upgraded"] == 2
+    assert stats["option_kit_deferred"] == 0
+    for status, expected in cases.items():
+        assert cards[status].enrichment_status == expected, status
 
 
 def test_no_write_no_status_upgrade_but_xref_recorded(db_session: Session):
@@ -295,10 +342,10 @@ def test_savepoint_isolation_poison_card_fails_alone(db_session: Session):
     # A record_spec blow-up on one card rolls back ONLY that card's writes (per-card
     # SAVEPOINT); the sibling card still gets its full enrichment.
     seed_commodity_schemas(db_session)
-    poison = _card(db_session, "695510-B21", category=None)
-    healthy = _card(db_session, "695511-B21", category=None)
-    _row(db_session, "695510-B21")
-    _row(db_session, "695511-B21")
+    poison = _card(db_session, "695510-001", category=None)
+    healthy = _card(db_session, "695511-001", category=None)
+    _row(db_session, "695510-001")
+    _row(db_session, "695511-001")
 
     real_record_spec = record_spec
 
@@ -338,7 +385,15 @@ def test_no_match_rows_and_unmatched_cards_are_ignored(db_session: Session):
     seed_commodity_schemas(db_session)
     negative = _card(db_session, "695510-B21", category=None)
     unmatched = _card(db_session, "918042-601", category=None)
-    _row(db_session, "695510-B21", status=OemCrosswalkStatus.NO_MATCH, canonical=None, mfg=None, confidence=None)
+    _row(
+        db_session,
+        "695510-B21",
+        status=OemCrosswalkStatus.NO_MATCH,
+        canonical=None,
+        mfg=None,
+        confidence=None,
+        domain="",
+    )
 
     stats = oem_crosswalk_and_record_specs(db_session, [negative.id, unmatched.id])
 

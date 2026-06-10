@@ -76,23 +76,46 @@ def _run(
     web_state: dict | None = None,
     cache_counts: dict | None = None,
     oem_writer_mock=None,
+    lossy_cache: bool = False,
 ):
     cfg = cfg or EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
     breaker = breaker or EnrichmentCircuitBreaker(cfg)
     web_state = web_state if web_state is not None else {"web_calls": 0, "oem_resolves": 0}
-    cache_counts = cache_counts or {}
+    # Simulated shared counter store (what Redis INCRBY provides in prod): keyed by
+    # the counter-name fragment, seeded from cache_counts, advanced by incr_count.
+    # lossy_cache simulates BOTH cache backends down (reads 0, increments don't
+    # stick) — the scenario web_state's in-process backstop exists for.
+    counters = dict(cache_counts or {})
 
-    def get_cached(key):
-        for fragment, count in cache_counts.items():
+    def _fragment(key):
+        for fragment in ("web_calls", "oem_resolves"):
             if fragment in key:
-                return {"count": count}
-        return None
+                return fragment
+        return key
+
+    if lossy_cache:
+
+        def get_count(key):
+            return 0
+
+        def incr_count(key, amount=1, ttl_days=1.0):
+            return amount
+
+    else:
+
+        def get_count(key):
+            return counters.get(_fragment(key), 0)
+
+        def incr_count(key, amount=1, ttl_days=1.0):
+            frag = _fragment(key)
+            counters[frag] = counters.get(frag, 0) + amount
+            return counters[frag]
 
     patches = [
         patch("app.services.enrichment_worker.worker.enrich_card", side_effect=_fake_enrich_metered),
         patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
-        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", side_effect=get_cached),
-        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_count", side_effect=get_count),
+        patch("app.services.enrichment_worker.worker.intel_cache.incr_count", side_effect=incr_count),
         patch("app.services.enrichment_worker.oem_crosswalk_resolver.resolve_oem_spare", resolve_mock),
         patch(
             "app.services.mpn_decoder.writer.decode_and_record_specs",
@@ -210,6 +233,87 @@ def test_pass_a_claude_error_feeds_breaker_writes_no_row_still_bills(db_session)
     assert web_state["oem_resolves"] == 1
 
 
+def test_pass_a_web_cap_boundary_mid_pass(db_session):
+    # Boundary, not exhaustion: at 79/80 with two pending candidates the contract is
+    # EXACTLY one resolve then stop — an off-by-one in the gate (>= vs >) or a reserve
+    # moved above the cap check would leak past the cap or strand the final slot.
+    _seed_card(db_session, "875940-001")
+    _seed_card(db_session, "875941-001")
+    resolve_mock = AsyncMock(return_value=RESOLVED)
+
+    _, web_state, _ = _run(db_session, resolve_mock, cache_counts={"web_calls": 79})
+
+    assert resolve_mock.await_count == 1
+    assert db_session.query(OemCrosswalk).count() == 1
+    assert web_state["oem_resolves"] == 1  # exactly the one boundary slot was spent
+
+
+def test_pass_a_oem_sub_cap_boundary_mid_pass(db_session):
+    # Mirror boundary for the sub-cap: 39/40 with two pending → exactly one resolve.
+    _seed_card(db_session, "875940-001")
+    _seed_card(db_session, "875941-001")
+    resolve_mock = AsyncMock(return_value=RESOLVED)
+
+    _, web_state, _ = _run(db_session, resolve_mock, cache_counts={"oem_resolves": 39})
+
+    assert resolve_mock.await_count == 1
+    assert db_session.query(OemCrosswalk).count() == 1
+    assert web_state["oem_resolves"] == 40
+
+
+def test_pass_a_upsert_race_skips_spare_and_batch_survives(db_session):
+    # The drain CLI can commit the same (spare_norm, vendor, source_domain) edge while
+    # the worker's resolve await is in flight: the worker's flush then raises
+    # IntegrityError. The SAVEPOINT must roll back ONLY that upsert (the concurrent
+    # row is the desired end state) — the session stays usable and the rest of the
+    # batch still enriches; the billed call stays billed.
+    from sqlalchemy import text
+
+    _seed_card(db_session, "875942-001")
+    _seed_card(db_session, "LM2596S-5.0")  # generic card — proves the batch survives
+
+    async def racing_resolve(display, norm, vendor):
+        db_session.execute(
+            text(
+                "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, canonical_mpn_raw, "
+                "canonical_mpn_norm, source_domain, looked_up_at) VALUES ('875942-001', '875942001', 'hpe', "
+                "'resolved', 'ST4000NM0035', 'st4000nm0035', 'partsurfer.hp.com', '2026-06-10')"
+            )
+        )
+        return RESOLVED
+
+    resolve_mock = AsyncMock(side_effect=racing_resolve)
+
+    counts, web_state, _ = _run(db_session, resolve_mock)
+
+    assert resolve_mock.await_count == 1
+    rows = db_session.query(OemCrosswalk).filter_by(spare_norm="875942001").all()
+    assert len(rows) == 1  # the concurrent writer's row won; no duplicate, no crash
+    # 1 OEM bill (the race never unbills) + 1 core-loop call for the generic card;
+    # the spare card itself was upgraded by Pass B off the racing row (zero calls).
+    assert web_state["web_calls"] == 2
+    assert counts[MaterialEnrichmentStatus.WEB_SOURCED] == 1  # the core loop still ran
+    assert counts[MaterialEnrichmentStatus.OEM_SOURCED] == 1  # Pass B used the winner's row
+
+
+def test_pass_a_non_claude_failure_keeps_billed_calls_in_web_state(db_session):
+    # A non-ClaudeError escaping the pass is swallowed by run_one_batch's wrapper; the
+    # in-process backstop (web_state — THE defense when the cache is unavailable,
+    # hence lossy_cache) must keep the already-billed OEM call instead of being
+    # clobbered by the stale local at the end-of-batch reconciliation.
+    _seed_card(db_session, "875942-001")
+    resolve_mock = AsyncMock(side_effect=RuntimeError("boom after billing"))
+
+    counts, web_state, _ = _run(db_session, resolve_mock, lossy_cache=True)
+
+    assert resolve_mock.await_count == 1
+    # 1 OEM bill (survived the swallowed crash) + 1 core-loop call for the card the
+    # dead pass left unupgraded — the stale-local clobber would report 1.
+    assert web_state["web_calls"] == 2
+    assert web_state["oem_resolves"] == 1
+    assert counts  # the batch itself still completed
+
+
 def test_pass_a_fresh_no_match_blocks_resolution(db_session):
     # The 90-day negative cache: a 10-day-old no_match row blocks re-resolution.
     _seed_card(db_session, "875942-001")
@@ -322,8 +426,8 @@ def test_pass_b_runs_before_core_loop_over_full_batch(db_session):
     with (
         patch("app.services.enrichment_worker.worker.enrich_card", side_effect=tracking_enrich),
         patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
-        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
-        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_count", return_value=0),
+        patch("app.services.enrichment_worker.worker.intel_cache.incr_count", side_effect=lambda *a, **k: 1),
         patch(
             "app.services.enrichment_worker.oem_crosswalk_resolver.resolve_oem_spare", AsyncMock(return_value=NO_MATCH)
         ),
