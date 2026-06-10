@@ -3,9 +3,11 @@ ConsolidatedPart.
 
 What: ``consolidate`` groups cleaned SourceRecords by ``normalized_mpn`` and picks the best
       value per field with provenance — description = longest non-empty; manufacturer = modal
-      (most common) non-empty; category = first canonical non-empty; condition = most common;
-      quantity = sum; specs = merged with SFDC-master values winning over inventory-sheet
-      values. Source priority for ties is sfdc_master > inventory_sheet.
+      (most common) non-empty; category = the highest-priority source-kind's non-empty value
+      (sfdc_master > inventory_sheet unconditionally, first-seen within a kind); condition =
+      most common; quantity = sum; specs = merged with SFDC-master values winning over
+      inventory-sheet values. For the modal/longest fields, source-kind priority
+      (sfdc_master > inventory_sheet) is only a tie-break.
 Called by: app/management/ingest_source_data.py (after clean.py, before ai_correct/ingest).
 Depends on: the SourceRecord / ConsolidatedPart dataclasses + SOURCE_KIND_PRIORITY (no DB,
       no app services — a pure transform over the cleaned records).
@@ -15,6 +17,8 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Iterable
+
+from loguru import logger
 
 from app.services.source_ingest.models import (
     SOURCE_KIND_PRIORITY,
@@ -144,11 +148,23 @@ def consolidate(records: Iterable[SourceRecord]) -> list[ConsolidatedPart]:
     """Group cleaned records by ``normalized_mpn`` and consolidate each group.
 
     Insertion order of first appearance is preserved in the output. Returns one
-    ConsolidatedPart per distinct ``normalized_mpn``.
+    ConsolidatedPart per distinct ``normalized_mpn``. Records with an empty
+    ``normalized_mpn`` are records that never went through clean_record (a pipeline
+    wiring bug — parsers leave the dedup key blank): they are skipped, COUNTED, and
+    surfaced as a WARNING so a mis-wired parse→consolidate shortcut cannot silently
+    produce an empty/shrunken ingest.
     """
     groups: dict[str, list[SourceRecord]] = {}
+    skipped_uncleaned = 0
     for rec in records:
         if not rec.normalized_mpn:
+            skipped_uncleaned += 1
             continue
         groups.setdefault(rec.normalized_mpn, []).append(rec)
+    if skipped_uncleaned:
+        logger.warning(
+            "consolidate: skipped {} record(s) with empty normalized_mpn — they bypassed "
+            "clean_record (pipeline must be parse → clean → consolidate)",
+            skipped_uncleaned,
+        )
     return [_consolidate_group(group) for group in groups.values()]

@@ -3,7 +3,8 @@ it).
 
 What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and normalizes the
       MPN to its dedup key; scrubs ``_x000D_`` / control chars and collapses whitespace in the
-      free-text fields; canonicalizes ``condition`` to a small enum; maps the source commodity
+      free-text fields; canonicalizes ``condition`` to the MaterialCondition vocabulary
+      (constants.py — None when the source carries none); maps the source commodity
       to an app-canonical category (None if unmappable) with a CPU-bucket pollution deny-list
       (the SFDC master's 'CPU' code is ~14% non-CPU parts — see _CPU_POLLUTION_RE); and DROPS
       the record when the MPN is too short / falsy or the description says "DO NOT USE".
@@ -21,27 +22,26 @@ from __future__ import annotations
 
 import re
 
+from app.constants import MaterialCondition
 from app.services.category_normalizer import normalize_trio_category
 from app.services.source_ingest.models import SourceRecord
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
 
-# Condition canon enum (task-mandated): the small set we persist downstream.
-CONDITION_NEW = "New"
-CONDITION_PULL = "Pull"
-CONDITION_REFURBISHED = "Refurbished"
-CONDITION_USED = "Used"
-CONDITION_UNKNOWN = "Unknown"
-
-# Source condition string (lowercased, substring) -> canonical enum. Ordered most-specific
-# first so "refurbished" is not swallowed by a looser pattern.
+# Source condition string (lowercased, substring) -> MaterialCard.condition canonical
+# value (constants.MaterialCondition — the column's documented vocabulary). Ordered
+# most-specific first so "recertified"/"refurbished" are not swallowed by a looser
+# pattern. Absent/unmatched input canonicalizes to None, NEVER to "Unknown": a synthetic
+# Unknown would (a) outvote a real sheet condition in consolidate's modal vote and
+# (b) permanently occupy the fill-only-when-empty card column.
 _CONDITION_MAP: list[tuple[str, str]] = [
-    ("refurb", CONDITION_REFURBISHED),
-    ("recondition", CONDITION_REFURBISHED),
-    ("pull", CONDITION_PULL),
-    ("used", CONDITION_USED),
-    ("surplus", CONDITION_USED),
-    ("new", CONDITION_NEW),
-    ("factory", CONDITION_NEW),
+    ("recert", MaterialCondition.RECERTIFIED),
+    ("refurb", MaterialCondition.REFURBISHED),
+    ("recondition", MaterialCondition.REFURBISHED),
+    ("pull", MaterialCondition.PULLED),
+    ("used", MaterialCondition.USED),
+    ("surplus", MaterialCondition.USED),
+    ("new", MaterialCondition.NEW),
+    ("factory", MaterialCondition.NEW),
 ]
 
 # MPN suffixes that mark stock state, not the part identity: " - Pull", " - New", "-x"/"-X".
@@ -85,15 +85,21 @@ def _scrub_text(value: str | None) -> str | None:
     return s or None
 
 
-def canonicalize_condition(raw: str | None) -> str:
-    """Map a source condition string to {New, Pull, Refurbished, Used, Unknown}."""
+def canonicalize_condition(raw: str | None) -> str | None:
+    """Map a source condition string to the MaterialCondition vocabulary, or None.
+
+    Returns one of {New, Recertified, Refurbished, Used, Pulled} — the column's
+    documented canon (constants.MaterialCondition) — or ``None`` when the source said
+    nothing / nothing recognizable. "No data" stays None (the column stays NULL) so a
+    later real value can still fill it; it is never collapsed into "Unknown".
+    """
     if not raw:
-        return CONDITION_UNKNOWN
+        return None
     s = str(raw).strip().lower()
     for pattern, canon in _CONDITION_MAP:
         if pattern in s:
-            return canon
-    return CONDITION_UNKNOWN
+            return str(canon)
+    return None
 
 
 def strip_mpn_suffix(raw_mpn: str) -> str:
@@ -131,10 +137,11 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     dropped.
 
     Drops when: the MPN normalizes to falsy / <3 chars, OR the description contains
-    "DO NOT USE" (case-insensitive). Mutates a copy-in-place: scrubs text fields, sets
-    ``normalized_mpn`` (dedup key) and ``raw_mpn`` (display form), canonicalizes condition,
-    fills manufacturer from the trailing OEM token when absent, and maps the source category
-    to a canonical key (None if unmappable).
+    "DO NOT USE" (case-insensitive). Returns a NEW, cleaned SourceRecord (the input is
+    never modified): scrubs text fields, sets ``normalized_mpn`` (dedup key) and
+    ``raw_mpn`` (display form), canonicalizes condition (None when the source had none),
+    fills manufacturer from the trailing OEM token when absent, and maps the source
+    category to a canonical key (None if unmappable).
     """
     display_mpn = strip_mpn_suffix(rec.raw_mpn)
     norm_key = normalize_mpn_key(display_mpn)
@@ -155,6 +162,13 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     category = normalize_trio_category(rec.category)
     if category == "cpu" and _CPU_POLLUTION_RE.match(display_mpn):
         # Known non-CPU MPN shape inside the polluted CPU bucket — blank, never write.
+        category = None
+    if category == "other":
+        # TRIO's 'Other' code is the ABSENCE of classification, not ground truth — writing
+        # the canonical "other" bucket at tier 95 would permanently block the decode (85) /
+        # desc-parse (83) / AI lanes from ever re-homing the ~18k re-homeable rows the
+        # facet-curation analysis identified (HDD trays, CPUs, SSDs, …). Blank it: the card
+        # stays in the no-commodity bucket, open to real categorization.
         category = None
 
     return SourceRecord(

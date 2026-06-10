@@ -83,14 +83,22 @@ def test_clean_keeps_explicit_manufacturer_over_trailing():
 
 
 def test_canonicalize_condition():
+    # Canon is the MaterialCard.condition documented vocabulary (constants.MaterialCondition):
+    # "Pull" maps to the column's canonical "Pulled", and "Recertified" is reachable.
     assert canonicalize_condition("New") == "New"
-    assert canonicalize_condition("Pull") == "Pull"
+    assert canonicalize_condition("Pull") == "Pulled"
+    assert canonicalize_condition("Pulled") == "Pulled"
     assert canonicalize_condition("Refurbished") == "Refurbished"
+    assert canonicalize_condition("Recertified") == "Recertified"
+    assert canonicalize_condition("Factory Recertified") == "Recertified"
     assert canonicalize_condition("Used") == "Used"
     assert canonicalize_condition("Factory New") == "New"
-    assert canonicalize_condition("Other") == "Unknown"
-    assert canonicalize_condition(None) == "Unknown"
-    assert canonicalize_condition("") == "Unknown"
+    # Absent / unrecognized input → None (the column stays NULL), NEVER a synthetic
+    # "Unknown" — an Unknown would outvote real sheet conditions in consolidation and
+    # permanently occupy the fill-only-when-empty card column.
+    assert canonicalize_condition("Other") is None
+    assert canonicalize_condition(None) is None
+    assert canonicalize_condition("") is None
 
 
 def test_clean_maps_category_canonical_or_none():
@@ -107,6 +115,15 @@ def test_clean_resolves_trio_scoped_commodity_codes():
     assert clean_record(_rec(raw_mpn="REAL123", category="Memory")).category == "dram"
     assert clean_record(_rec(raw_mpn="REAL123", category="Hard Drive")).category == "hdd"
     assert clean_record(_rec(raw_mpn="REAL123", category="Main Board")).category == "motherboards"
+
+
+def test_clean_blanks_other_commodity_code():
+    # TRIO's 'Other' code carries no classification signal — a tier-95 "other" category
+    # would permanently block decode/desc/AI re-homing, so it is blanked (card stays in
+    # the no-commodity bucket). Real coarse codes (IC, OEM ASSY) still map.
+    assert clean_record(_rec(raw_mpn="85Y6185", category="Other")).category is None
+    assert clean_record(_rec(raw_mpn="REAL123", category="IC")).category == "ics_other"
+    assert clean_record(_rec(raw_mpn="REAL123", category="OEM ASSY")).category == "oem_assemblies"
 
 
 def test_clean_blanks_cpu_category_for_polluted_mpn_shapes():
