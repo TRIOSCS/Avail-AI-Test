@@ -60,6 +60,18 @@ CASES = [
         "displays",
         {"backlight": "LED"},
     ),
+    # ── packaging-suffixed display leads (explicit _LEAD_MAP entries) ────
+    ("LCD ASSY, 15, HD, 1MIC 8.1", None, {"resolution": "1366x768"}),
+    (
+        "PNL KIT, LCD 15.6 FHD UWVA W/BEZEL",
+        None,
+        {"resolution": "1920x1080", "diagonal_size": 15.6},
+    ),
+    # ── camera tokens: HD/FHD before CAM/CAMERA/WEBCAM is the camera, not the panel ──
+    ("PANEL, W/HD CAMERA", None, {}),
+    ("SPS-LCD BEZEL HD WEBCAM LANNISTER", None, {}),  # a bezel, not a panel
+    ("SPS-LCD CABLE TS PANEL HD WEBCAM", None, {}),  # a cable, not a panel
+    ("CAMERA AIO520 FHD CAM BSN", "displays", {}),
     # ── deliberate misses (conservative > wrong) ─────────────────────────
     ("ZB555KL-4A 5.5 HD+LCD MODULE", None, {}),  # HD+ excluded; 5.5 below the 7" floor
 ]
@@ -72,6 +84,40 @@ def test_display_extract_exact(description, hint, expected):
     assert result.commodity == "displays"
     assert result.specs == expected
     assert result.confidence == 0.90
+
+
+def test_bare_spaced_in_is_a_preposition_not_an_inch_mark():
+    # "<number> IN <word>" is English ("IN STOCK", "IN RACK") — only quote marks,
+    # glued/hyphenated IN, or INCH(ES) count as a diagonal unit.
+    for desc in ("PANEL 15 IN STOCK", "CHASSIS 19 IN RACK", "BACKLIGHT 60 IN"):
+        result = extract_desc(desc, commodity_hint="displays")
+        assert result is not None
+        assert result.specs == {}, f"{desc!r} must not emit a diagonal"
+
+
+def test_n_in_1_dock_grammar_is_not_a_diagonal():
+    # "8-IN-1"/"10 IN 1" multiplexer/dock counts are rejected by the trailing-digit
+    # lookahead (the 7-86 range alone would pass N>=7).
+    for desc in ("LCD, 8-IN-1 docking module", "MONITOR, 10 IN 1 KVM"):
+        result = extract_desc(desc)
+        assert result is not None
+        assert result.specs == {}, f"{desc!r} must not emit a diagonal"
+
+
+def test_distinct_named_and_explicit_resolutions_omit_the_key():
+    # Conflict pin: FHD (1920x1080) vs explicit 1366x768 ⇒ resolution omitted;
+    # the diagonal before the named class still extracts.
+    result = extract_desc("LCD, 15.6 FHD 1366x768")
+    assert result is not None
+    assert result.specs == {"diagonal_size": 15.6}
+
+
+def test_unseeded_explicit_pixel_pair_is_dropped():
+    # 1024x768 matches _RES_EXPLICIT but is not a seeded member — the hardcoded
+    # _RES_SEEDED allowlist is the only barrier before record_spec.
+    result = extract_desc("LCD, 1024x768 panel")
+    assert result is not None
+    assert result.specs == {}
 
 
 def test_backlight_is_always_the_generic_led_bucket():

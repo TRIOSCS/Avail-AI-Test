@@ -44,7 +44,8 @@ CASES = [
     (
         "ZT - 800W power supply, N+1 Redundancy (Delta p/n DPS-800AB-27 A)",
         None,
-        {"wattage": 800, "psu_class": "Server/Redundant"},  # DPS-800AB agrees with 800W
+        # only 800W matches — the 800 inside DPS-800AB has no W unit token
+        {"wattage": 800, "psu_class": "Server/Redundant"},
     ),
     (
         "Dell Model: A670P-00 Server Power Supply 670W",
@@ -89,6 +90,21 @@ def test_psu_extract_exact(description, hint, expected):
     assert result.commodity == "power_supplies"
     assert result.specs == expected
     assert result.confidence == 0.90
+
+
+def test_two_distinct_wattages_omit_the_key():
+    # Conflict pin for the unique-survivor contract: 750W vs 800W ⇒ wattage omitted
+    # (never max()/first-match picked); the hot-plug class still extracts.
+    result = extract_desc("PSU, 750W or 800W hot-plug power supply")
+    assert result is not None
+    assert result.specs == {"psu_class": "Server/Redundant"}
+
+
+def test_two_distinct_psu_classes_omit_the_key():
+    # ATX vs AC-DC adapter ⇒ psu_class omitted; the unambiguous wattage survives.
+    result = extract_desc("PSU, 65W ATX AC adapter")
+    assert result is not None
+    assert result.specs == {"wattage": 65}
 
 
 def test_generic_power_supply_emits_no_psu_class():

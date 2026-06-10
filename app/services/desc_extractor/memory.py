@@ -8,7 +8,7 @@ What: reads capacity / DDR generation / speed / ECC / module form / rank out of
       enforced ONLY here (record_spec performs no numeric_range check) — the drift
       guard in tests/test_desc_extractor_routing.py pins both against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (constants only) — pure functions.
+Depends on: _common (SpecDict alias only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - capacity_gb requires an explicit GB/G token and the seeded 1-512 range (MB-era
@@ -29,6 +29,8 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 """
 
 import re
+
+from app.services.desc_extractor._common import SpecDict
 
 # Canonical dram enum strings — MUST match the dram entry in app/data/commodity_seeds.json.
 RDIMM, LRDIMM, UDIMM, SODIMM, DIMM = "RDIMM", "LRDIMM", "UDIMM", "SO-DIMM", "DIMM"
@@ -115,9 +117,9 @@ def _rank(text: str) -> str | None:
     return ranks.pop() if len(ranks) == 1 else None
 
 
-def extract_memory(text: str) -> dict[str, str | int | bool]:
+def extract_memory(text: str) -> SpecDict:
     """Extract dram specs from an upper-cased, whitespace-collapsed description."""
-    specs: dict[str, str | int | bool] = {}
+    specs: SpecDict = {}
     capacity = _capacity_gb(text)
     if capacity is not None:
         specs["capacity_gb"] = capacity

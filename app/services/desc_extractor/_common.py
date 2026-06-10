@@ -1,12 +1,20 @@
 """Shared types + constants for the deterministic description→spec extractors.
 
-What: DescResult dataclass plus the source tag / confidence every desc-parsed spec is
-      written with (see record_spec).
-Called by: app/services/desc_extractor/{__init__,storage,memory,writer}.py.
+What: DescResult dataclass, the canonical SpecDict specs type every extractor
+      returns, plus the source tag / confidence every desc-parsed spec is written
+      with (see record_spec).
+Called by: app/services/desc_extractor/{__init__,storage,memory,power,display,
+      tape,gpu,board,writer}.py.
 Depends on: nothing (pure).
 """
 
 from dataclasses import dataclass, field
+
+# Canonical specs mapping — EVERY per-commodity extractor returns exactly this type.
+# dict is invariant in its value type, so a module returning a narrower union (e.g.
+# dict[str, str]) would fail the extract_desc dispatch under mypy; the shared alias
+# keeps all seven extractors and DescResult.specs in lockstep.
+SpecDict = dict[str, str | int | float | bool]
 
 # Source tag + confidence for everything this extractor writes (see record_spec).
 DESC_SOURCE = "desc_parse"
@@ -36,5 +44,5 @@ class DescResult:
     """
 
     commodity: str
-    specs: dict[str, str | int | float | bool] = field(default_factory=dict)
+    specs: SpecDict = field(default_factory=dict)
     confidence: float = DESC_CONFIDENCE

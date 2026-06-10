@@ -27,7 +27,7 @@ are NEUTRAL — they fall through to body-token + hint arbitration instead.
 
 import re
 
-from app.services.desc_extractor._common import DESC_CONFIDENCE, SPEC_COMMODITIES, DescResult
+from app.services.desc_extractor._common import DESC_CONFIDENCE, SPEC_COMMODITIES, DescResult, SpecDict
 from app.services.desc_extractor.board import extract_board
 from app.services.desc_extractor.display import extract_display
 from app.services.desc_extractor.gpu import extract_gpu
@@ -76,6 +76,12 @@ _LEAD_MAP = {
     "AC ADAPTERS": "power_supplies",
     "LCD": "displays",
     "LCD PANEL": "displays",
+    # Packaging-suffixed display labels are mapped EXPLICITLY — _is_neutral_lead
+    # requires every label word to be neutral, so "LCD ASSY,"/"PNL KIT," would
+    # otherwise die foreign ("LCD"/"PNL" are commodity words, not packaging).
+    "LCD ASSY": "displays",
+    "PNL KIT": "displays",
+    "PANEL KIT": "displays",
     "PNL": "displays",
     "PANEL": "displays",
     "DISPLAY": "displays",
@@ -100,9 +106,13 @@ _FOREIGN = "__foreign__"
 # Leads that are packaging words or brand names, NOT commodity labels — treated as
 # *no lead* (fall through to body-token + hint arbitration) instead of FOREIGN.
 # Any "SPS…"-prefixed lead is neutral too ("SPS-PCA, NVIDIA Tesla V100 32GB Module"
-# must not die foreign), and so is a label whose LAST word is neutral ("SUPERMICRO
-# FRU," is brand+packaging). Phase-1 guards still hold behind a neutral lead: a
-# brand-led body mixing HDD+DIMM tokens hard-conflicts to None as before.
+# must not die foreign). A multi-word label is neutral only when EVERY word is
+# neutral ("SUPERMICRO FRU," is brand+packaging); a label mixing a foreign word
+# with packaging ("CBL ASSY,"/"DRIVE TRAY KIT,") stays FOREIGN — an accessory row
+# must never take the facets of the part it fits ("Cable Assy, for LCD 15.6" FHD
+# panel" describes the panel the cable serves, not the cable). Phase-1 guards
+# still hold behind a neutral lead: a brand-led body mixing HDD+DIMM tokens
+# hard-conflicts to None as before.
 _NEUTRAL_LEADS = frozenset(
     {
         # structural / packaging words
@@ -139,6 +149,7 @@ _NEUTRAL_LEADS = frozenset(
         "ZIPPY",
         "CISCO",
         "EMULEX",
+        "SUPERMICRO",
     }
 )
 
@@ -192,7 +203,12 @@ _BODY_TOKENS = (
 
 
 def _is_neutral_lead(label: str) -> bool:
-    return label.startswith("SPS") or label in _NEUTRAL_LEADS or label.rsplit(" ", 1)[-1] in _NEUTRAL_LEADS
+    if label.startswith("SPS"):
+        return True
+    # EVERY word must be neutral — a single-word check would miss "SUPERMICRO FRU",
+    # while any looser rule (e.g. last-word-only) re-opens the foreign-lead guard
+    # for accessory labels like "CBL ASSY,"/"DRIVE TRAY KIT,".
+    return all(word in _NEUTRAL_LEADS for word in label.split())
 
 
 def _lead_commodity(text: str) -> str | None:
@@ -247,9 +263,11 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
         # The HARD cross-family conflict is storage×dram only (both read bare-GB
         # capacity) — e.g. "Memory, 256GB, LiteOn SSD, M.2 2280" or a drive
         # description on a DIMM-categorized card. Never pick a side. gpu also reads
-        # GB but is defended inside the gpu module by the GPU-context-token guard,
-        # not here — a gpu-hinted card with body-only dram/hdd tokens routes gpu and
-        # then extracts nothing.
+        # GB but is defended inside the gpu module, not here: memory_gb requires a
+        # GPU-context token, and a DRAM-module body token without a gpu_family hit
+        # disqualifies it (a bare NVIDIA token on a DIMM row is not GB context) —
+        # so a gpu-hinted card with body-only dram/hdd tokens routes gpu and then
+        # extracts nothing.
         return None
 
     if hint:
@@ -269,6 +287,9 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
         # body tokens with no lead to arbitrate (e.g. both HDD and SSD).
         return None
 
+    # Every extractor returns the canonical _common.SpecDict (dict is invariant in
+    # its value type — a narrower per-module union would fail this dispatch).
+    specs: SpecDict
     if effective in ("hdd", "ssd"):
         specs = extract_storage(text, effective)
     elif effective == "dram":

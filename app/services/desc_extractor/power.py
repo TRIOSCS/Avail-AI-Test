@@ -9,7 +9,7 @@ What: reads wattage / supply class out of compact human PSU descriptions like
       drift guard in tests/test_desc_extractor_routing.py pins both against the
       seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (constants only) — pure functions.
+Depends on: _common (SpecDict alias only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - wattage requires an explicit W/WATT(S) unit token with word boundaries, so
@@ -26,6 +26,8 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 """
 
 import re
+
+from app.services.desc_extractor._common import SpecDict
 
 # Canonical psu_class enum strings — MUST match the power_supplies entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -64,10 +66,10 @@ def _psu_class(text: str) -> str | None:
     return members.pop() if len(members) == 1 else None
 
 
-def extract_psu(text: str) -> dict[str, str | int]:
+def extract_psu(text: str) -> SpecDict:
     """Extract power_supplies specs from an upper-cased, whitespace-collapsed
     description."""
-    specs: dict[str, str | int] = {}
+    specs: SpecDict = {}
     wattage = _wattage(text)
     if wattage is not None:
         specs["wattage"] = wattage

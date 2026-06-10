@@ -69,6 +69,10 @@ NONE_CASES = [
     "Card, FRU ThinkSerRSC_1ux16_v1.0",
     "VPD card, VPD CARD S824 52FE, IBM",
     "Library, 3592 Tape Drive, Jag6 Drive",
+    # packaging-SUFFIXED accessory labels stay foreign — "CBL ASSY," mixes a foreign
+    # word with a packaging word, so the all-words-neutral rule never rescues it
+    # (the body MB token must not emit a System Board for a cable assembly)
+    "CBL ASSY,RPS REAR MB, XL",
     # degenerate: the description IS the part number (real rows where desc == Name)
     "BCM84894B0IFSBG",
     "160-10020-01",
@@ -129,10 +133,45 @@ def test_neutral_leads_fall_through_to_body_and_hint():
     assert extract_desc("MSI, RTX3080, 10G/D6X/3DP/H") is None
 
 
+def test_packaging_suffixed_foreign_labels_stay_foreign_even_hinted():
+    # The all-words-neutral boundary: a label whose last word is packaging but whose
+    # other words are foreign ("Drive Tray Kit,"/"Cable Assy,") must NOT fall through
+    # to body/hint arbitration — an accessory row would otherwise take the facets of
+    # the part it fits (wrong facet values are worse than missing ones).
+    assert extract_desc("Drive Tray Kit, 600GB 15K rpm SAS HDD trays", commodity_hint="hdd") is None
+    assert extract_desc('Cable Assy, for LCD 15.6" FHD panel', commodity_hint="displays") is None
+    # All-words-neutral labels still rescue: brand+packaging falls through to the hint.
+    result = extract_desc("SUPERMICRO FRU,DAUGHTER CARD REPLACEMENT KIT", commodity_hint="motherboards")
+    assert result is not None and result.commodity == "motherboards"
+
+
 def test_neutral_lead_keeps_phase1_conflict_guards():
     # Behind a neutral brand lead, a body mixing HDD+DIMM tokens still hard-conflicts
     # to None (constructed string — the guard predates phase 2 and must survive it).
     assert extract_desc("HP, 16GB DDR4 DIMM + 512GB SSD bundle") is None
+
+
+# ── phase-2 lead/first-token map coverage: every new entry routes ─────────
+# (the two-letter "TD,"/"GC," labels carry the highest future-collision risk —
+# a typo or accidental map removal must fail here, not silently lose recall)
+PHASE2_LEAD_CASES = [
+    ("TD, LTO-6 HH SAS", "tape_drives"),
+    ("GC, NVIDIA Quadro P2000 5GB", "gpu"),
+    ("PANEL, 15.6 FHD AG", "displays"),
+    ("VIDEO CARD, NVIDIA Quadro 600 1GB", "gpu"),
+    ("VIDEO BOARD, GeForce GT730 2GB", "gpu"),
+    ("GRAPHIC CARD, Radeon RX550 4GB", "gpu"),
+    ("MONITOR 27INCH HP EliteDisplay", "displays"),  # comma-less first token
+    ("DSPLY 23.8 FHD TOUCH", "displays"),  # comma-less first token
+    ("GC NVIDIA T1000 4GB", "gpu"),  # comma-less first token
+]
+
+
+@pytest.mark.parametrize("description,commodity", PHASE2_LEAD_CASES)
+def test_phase2_lead_and_first_token_routing(description, commodity):
+    result = extract_desc(description)
+    assert result is not None, f"{description!r} did not route"
+    assert result.commodity == commodity
 
 
 def test_lead_label_dot_strip_normalization():

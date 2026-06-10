@@ -8,9 +8,14 @@ What: reads drive type / interface / form factor out of compact human tape-drive
       keys. The drift guard in tests/test_desc_extractor_routing.py pins the
       vocabularies against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (constants only) — pure functions.
+Depends on: _common (SpecDict alias only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
+- Media/supplies rows emit NOTHING: a CARTRIDGE / CLEANING / MEDIA / LABEL / WORM
+  token means the row is a cartridge, cleaning kit or barcode-label pack — not a
+  drive — even though the "Tape," lead or a glued LTO body token routes it here
+  ("Tape, Cleaning Cartridge, DAT 320", "LTO6-LABEL"). Same conservative-loss
+  rationale as the ``Library,`` exclusion below.
 - drive_type collects ALL grammar hits (LTO-N / LTO GEN N / Ultrium N, the closed
   TS11xx + 3592-model + Jaguar maps, DAT/DDS, AIT) and emits only a unique
   surviving member. "Ultrium 3000" (a product line, not a generation) is rejected
@@ -25,10 +30,18 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
+from app.services.desc_extractor._common import SpecDict
+
 # Canonical tape_drives enum strings — MUST match the tape_drives entry in
 # app/data/commodity_seeds.json (drift-guarded).
 DAT, AIT = "DAT", "AIT"
 FULL_HEIGHT, HALF_HEIGHT = "Full-Height", "Half-Height"
+
+# Media/supplies tokens: a cartridge, cleaning cartridge, loose media or barcode
+# label pack is NOT a drive — extraction is suppressed entirely (a mis-bucketed
+# tape_drives card would otherwise take a 0.90 drive_type that outranks the AI
+# reader). Mirrors the upstream "Library," foreign-lead rationale.
+_MEDIA = re.compile(r"\bCARTRIDGES?\b|\bCLEANING\b|\bMEDIA\b|\bLABELS?\b|\bWORM\b")
 
 _LTO = re.compile(r"\bLTO[- ]?([3-9])\b")
 _LTO_GEN = re.compile(r"\bLTO\s?GEN\s?([3-9])\b")
@@ -90,10 +103,12 @@ def _form_factor(text: str) -> str | None:
     return hits.pop() if len(hits) == 1 else None
 
 
-def extract_tape(text: str) -> dict[str, str]:
+def extract_tape(text: str) -> SpecDict:
     """Extract tape_drives specs from an upper-cased, whitespace-collapsed
     description."""
-    specs: dict[str, str] = {}
+    if _MEDIA.search(text):
+        return {}  # cartridge / cleaning / label / WORM media row — not a drive
+    specs: SpecDict = {}
     drive_type = _drive_type(text)
     if drive_type is not None:
         specs["drive_type"] = drive_type

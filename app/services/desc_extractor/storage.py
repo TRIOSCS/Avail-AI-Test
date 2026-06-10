@@ -8,7 +8,7 @@ What: reads capacity / rpm / form factor / interface out of compact human drive
       skips unseeded keys (it performs no numeric_range check — capacity sanity
       lives in the link-speed exclusions here).
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (constants only) — pure functions.
+Depends on: _common (SpecDict alias only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - Capacity requires an explicit unit token (GB/G/TB). Link-speed tokens are excluded
@@ -29,6 +29,8 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 """
 
 import re
+
+from app.services.desc_extractor._common import SpecDict
 
 # Canonical enum strings — MUST match the hdd/ssd entries in app/data/commodity_seeds.json.
 _FF_BY_VALUE = {"2.5": '2.5"', "3.5": '3.5"', "1.8": '1.8"'}
@@ -110,9 +112,9 @@ def _interface(text: str, commodity: str) -> str | None:
     return member if member in _IFACE_VOCAB[commodity] else None
 
 
-def extract_storage(text: str, commodity: str) -> dict[str, str | int | float]:
+def extract_storage(text: str, commodity: str) -> SpecDict:
     """Extract hdd/ssd specs from an upper-cased, whitespace-collapsed description."""
-    specs: dict[str, str | int | float] = {}
+    specs: SpecDict = {}
     capacity = _capacity_gb(text)
     if capacity is not None:
         specs["capacity_gb"] = capacity

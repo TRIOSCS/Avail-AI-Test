@@ -71,6 +71,11 @@ CASES = [
     # ── hint-routed grammar without a routing token ──────────────────────
     ("LTO GEN5", "tape_drives", {"drive_type": "LTO-5"}),
     ("LTO7HHSAS", "tape_drives", {}),  # fully glued — every boundary dead, deliberate miss
+    # ── media/supplies rows: cartridges and label packs are NOT drives ───
+    ("Tape, Cleaning Cartridge, DAT 320, IBM", None, {}),
+    ("HP Q2078A LTO8 30TB RW DATA CARTRIDGE", None, {}),
+    ("SPS-Data Cartridge, LTO-8 30TB WORM", None, {}),
+    ("LTO6-LABEL", None, {}),  # barcode-label pack — glued LTO6 routes, _MEDIA suppresses
 ]
 
 
@@ -87,3 +92,11 @@ def test_library_lead_is_foreign_even_with_drive_grammar():
     # A library is not a drive: the "Library," lead suppresses extraction entirely —
     # accepted conservative loss, even though Jag6/3592 drive tokens appear.
     assert extract_desc("Library, 3592 Tape Drive, Jag6 Drive") is None
+
+
+def test_conflicting_generations_and_interfaces_omit_both_keys():
+    # Conflict pins for the unique-survivor contract: LTO-5×LTO-6 drops drive_type
+    # and SAS×FC drops interface — never first-match/max picked.
+    result = extract_desc("Tape Drive, LTO-5 / LTO-6, SAS FC")
+    assert result is not None
+    assert result.specs == {}

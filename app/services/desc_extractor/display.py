@@ -8,18 +8,25 @@ What: reads resolution / diagonal size / backlight out of compact human panel
       keys, but numeric ranges are enforced ONLY here — the drift guard in
       tests/test_desc_extractor_routing.py pins both against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
-Depends on: _common (constants only) — pure functions.
+Depends on: _common (SpecDict alias only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - resolution from named classes (HD/FHD/QHD/WUXGA/UHD/4K) and explicit WxH pixel
   pairs that are seeded members. ``HD+`` is excluded by ``(?!\\+)`` and ``WXGA``
   is deliberately unmapped (1280x800-vs-1366x768 ambiguity); glued tokens
-  ("FRUDummy14FHD", "FHDI") never match — the boundary kills them. Two DISTINCT
-  pixel values ⇒ omit (the same value from both grammars is fine).
-- diagonal_size only from an explicit inch mark (21.5" / 21.5-IN / 27inch) or a
-  decimal size immediately before a named resolution class ("15.6 FHD"); bare
-  integers ("HU, FHD … 13 TS") and width markers ("15.6W WXGA") are deliberate
-  misses. Candidates filtered to the seeded 7-86 range; unique-or-omit.
+  ("FRUDummy14FHD", "FHDI") never match — the boundary kills them. A named class
+  immediately before a camera word ("PANEL, W/HD CAMERA", "SPS-LCD BEZEL HD
+  WEBCAM", "AIO520 FHD CAM") describes the integrated camera, not the panel —
+  suppressed via lookahead. Two DISTINCT pixel values ⇒ omit (the same value
+  from both grammars is fine).
+- diagonal_size only from an explicit inch unit — quote marks (21.5"/21.5''), a
+  glued or hyphenated IN (23IN / 21.5-IN), or INCH(ES) — or a decimal size
+  immediately before a named resolution class ("15.6 FHD"). A bare SPACED "IN"
+  is the English preposition ("PANEL 15 IN STOCK", "19 IN RACK") and never
+  matches, and "N-IN-1" dock/multiplexer grammar is rejected by a trailing-digit
+  lookahead. Bare integers ("HU, FHD … 13 TS") and width markers ("15.6W WXGA")
+  are deliberate misses. Candidates filtered to the seeded 7-86 range;
+  unique-or-omit.
 - backlight: WLED (white LED) and bare LED on TRIO panels are the same white
   bucket — both map to the generic seeded "LED" member. Never emit the seeded
   "LED White"/"LED RGB" members from descriptions (white-vs-RGB is not
@@ -28,6 +35,8 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 """
 
 import re
+
+from app.services.desc_extractor._common import SpecDict
 
 # Canonical displays enum strings — MUST match the displays entry in
 # app/data/commodity_seeds.json (drift-guarded).
@@ -56,9 +65,15 @@ _RES_SEEDED = {
     "3840x2160",
 }
 
-_RES_NAMED = re.compile(r"\b(WUXGA|UHD|QHD|FHD|HD)(?!\+)\b|\b4K\b")
+# A named class that immediately precedes a camera word modifies the integrated
+# CAMERA, not the panel ("W/HD CAMERA", "HD WEBCAM", "FHD CAM") — suppressed.
+_NO_CAMERA = r"(?!\s?/?\s?(?:CAM(?:ERA)?|WEBCAM)\b)"
+_RES_NAMED = re.compile(r"\b(WUXGA|UHD|QHD|FHD|HD)(?!\+)\b" + _NO_CAMERA + r"|\b4K\b" + _NO_CAMERA)
 _RES_EXPLICIT = re.compile(r"\b(\d{3,4})\s?X\s?(\d{3,4})\b")
-_DIAG_INCH = re.compile(r"\b(\d{1,2}(?:\.\d{1,2})?)\s?(?:\"|''|[- ]?IN(?:CH(?:ES)?)?\b)")
+# Inch unit required: quotes, glued/hyphenated IN, or INCH(ES). A bare spaced "IN"
+# is the English preposition ("15 IN STOCK") — only the CH-suffixed form may be
+# spaced. The (?![- ]?\d) lookahead rejects "8-IN-1" dock/multiplexer grammar.
+_DIAG_INCH = re.compile(r"\b(\d{1,2}(?:\.\d{1,2})?)(?:\s?(?:\"|'')|\s?[- ]?INCH(?:ES)?\b(?![- ]?\d)|-?IN\b(?![- ]?\d))")
 _DIAG_BEFORE_RES = re.compile(r"\b(\d{1,2}\.\d)\s+(?=(?:FHD|UHD|QHD|WUXGA|HD)(?!\+)\b)")
 _BACKLIGHT = re.compile(r"\bW?LED\b")
 
@@ -88,9 +103,9 @@ def _diagonal_size(text: str) -> int | float | None:
     return int(value) if value.is_integer() else value
 
 
-def extract_display(text: str) -> dict[str, str | int | float]:
+def extract_display(text: str) -> SpecDict:
     """Extract displays specs from an upper-cased, whitespace-collapsed description."""
-    specs: dict[str, str | int | float] = {}
+    specs: SpecDict = {}
     resolution = _resolution(text)
     if resolution is not None:
         specs["resolution"] = resolution
