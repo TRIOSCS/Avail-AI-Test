@@ -288,8 +288,10 @@ async def run_one_batch(
     web_state["web_calls"] = web_calls_today
 
     # Deterministic MPN→spec decode (storage/DRAM): zero-LLM, regex-gated, enum-validated by
-    # record_spec. Runs BEFORE the AI spec pass so its 0.95 values are the baseline the 0.85
-    # description-mined pass cannot overwrite. Same session, committed together below.
+    # record_spec. Runs FIRST so its 0.95 values are the baseline — both downstream writers
+    # (desc-parse, AI spec pass) skip keys already held at strictly higher confidence; an AI
+    # value claiming conf >= a prior can still overwrite until the SP2 source-tier ladder
+    # lands in record_spec. Same session, committed together below.
     if enriched_ids:
         from app.config import settings
 
@@ -304,7 +306,8 @@ async def run_one_batch(
     # Deterministic description→spec extraction (storage/DRAM token grammar): zero-LLM,
     # enum-validated by record_spec. Runs AFTER mpn-decode (its 0.95 values outrank this
     # pass's 0.90 — the writer skips higher-confidence keys) and BEFORE the AI spec pass
-    # (0.85), on the same shared post-await session. Committed together below.
+    # (>= 0.85, which applies the same strictly-higher-confidence skip guard), on the same
+    # shared post-await session. Committed together below.
     if enriched_ids:
         from app.config import settings
 

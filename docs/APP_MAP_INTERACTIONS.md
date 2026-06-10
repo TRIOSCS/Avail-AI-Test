@@ -766,8 +766,13 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> Stamps material_cards.enriched_at
 
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
-commit; the ordering IS the confidence tiering — each deterministic layer lands
-before the next, and lower layers never overwrite a higher one):
+commit; the ordering realizes the confidence tiering — each deterministic layer
+lands before the next, and each downstream writer carries its own guard that
+skips keys already held at STRICTLY higher confidence. record_spec itself only
+protects vendor-API values — its cross-source rule is otherwise latest-write-wins —
+so a writer claiming confidence >= a prior still overwrites it (e.g. an AI value
+self-reported at 0.95 can replace an mpn_decode 0.95) until the SP2 source-tier
+ladder lands in record_spec):
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
@@ -781,7 +786,10 @@ before the next, and lower layers never overwrite a higher one):
        The writer skips keys already held at higher confidence, so mpn_decode 0.95
        and vendor-API values stay authoritative.
     3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
-       source="spec_extraction", facets gated at confidence >= 0.85.
+       source="spec_extraction", facets gated at confidence >= 0.85. Applies the
+       same strictly-higher-confidence skip guard, so it never clobbers an
+       mpn_decode/desc_parse key it under-claims against (an AI confidence >= the
+       deterministic prior still wins — see the tiering caveat above).
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]

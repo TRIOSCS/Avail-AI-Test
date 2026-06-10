@@ -112,8 +112,11 @@ def test_same_family_lead_refines_hint():
 
 def test_emittable_vocabulary_matches_commodity_seeds():
     """Drift guard: every enum member the extractor can emit must exist verbatim in
-    app/data/commodity_seeds.json (record_spec re-validates at runtime, but a seed
-    rename must fail HERE, loudly, not silently zero out extraction coverage)."""
+    app/data/commodity_seeds.json, and the hardcoded numeric-range constants must
+    equal the seeded numeric_range (record_spec re-validates enums at runtime but
+    performs NO numeric_range check, so the extractor constants are the only range
+    gate). A seed rename or range change must fail HERE, loudly, not silently zero
+    out extraction coverage."""
     seeds = json.loads((Path(__file__).resolve().parents[1] / "app" / "data" / "commodity_seeds.json").read_text())
 
     def enum_values(commodity: str, spec_key: str) -> set:
@@ -122,7 +125,25 @@ def test_emittable_vocabulary_matches_commodity_seeds():
                 return set(spec.get("enum_values") or [])
         return set()
 
-    from app.services.desc_extractor.memory import DIMM, LRDIMM, RDIMM, SODIMM, UDIMM
+    def numeric_range(commodity: str, spec_key: str) -> tuple:
+        for spec in seeds[commodity]:
+            if spec["spec_key"] == spec_key:
+                rng = spec.get("numeric_range") or {}
+                return (rng.get("min"), rng.get("max"))
+        return (None, None)
+
+    from app.services.desc_extractor.memory import (
+        _CAP_MAX,
+        _CAP_MIN,
+        _RANK_VALID,
+        _SPEED_MAX,
+        _SPEED_MIN,
+        DIMM,
+        LRDIMM,
+        RDIMM,
+        SODIMM,
+        UDIMM,
+    )
     from app.services.desc_extractor.storage import _FF_VOCAB, _IFACE_VOCAB, _RPM_VOCAB
 
     for commodity in ("hdd", "ssd"):
@@ -131,3 +152,6 @@ def test_emittable_vocabulary_matches_commodity_seeds():
     assert set(_RPM_VOCAB.values()) == enum_values("hdd", "rpm")
     assert {RDIMM, LRDIMM, UDIMM, SODIMM, DIMM} <= enum_values("dram", "form_factor")
     assert {"DDR", "DDR2", "DDR3", "DDR3L", "DDR4", "DDR5"} <= enum_values("dram", "ddr_type")
+    assert _RANK_VALID == enum_values("dram", "rank")
+    assert (_CAP_MIN, _CAP_MAX) == numeric_range("dram", "capacity_gb")
+    assert (_SPEED_MIN, _SPEED_MAX) == numeric_range("dram", "speed_mhz")
