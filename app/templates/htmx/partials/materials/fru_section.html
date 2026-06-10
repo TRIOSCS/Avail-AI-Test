@@ -8,12 +8,15 @@
             show_empty (bool, lookup mode renders an empty state when nothing matches).
   Called by: materials/detail.html (include), htmx_views.py fru_lookup_partial (HTMX swap).
   Depends on: app/services/fru_matrix_service.py view dataclasses.
+  Caps: matrix sections show 12 items, usages table 10 rows; the rest render hidden
+  behind inline "Show all (N)" / "Show less" expanders (Alpine, client-side).
 #}
 
 <div id="fru-crosswalk">
   {% if fru_view %}
   {# ── FRU matrix (forward view) ── #}
-  <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ fruOpen: true }">
+  {# showAll: per-section expander flags, keyed by section loop.index0 #}
+  <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ fruOpen: true, showAll: {} }">
     <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="fruOpen = !fruOpen" @keydown.enter="fruOpen = !fruOpen" @keydown.space.prevent="fruOpen = !fruOpen" :aria-expanded="fruOpen">
       <div class="flex items-center gap-2.5">
         <div class="flex items-center justify-center w-7 h-7 rounded-md bg-brand-50">
@@ -34,31 +37,37 @@
         {% for m in fru_view.machines[:3] %}
         <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border bg-brand-50 text-brand-600 border-brand-200">{{ m }}</span>
         {% endfor %}
+        {% if fru_view.machines|length > 3 %}
+        <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200" title="{{ fru_view.machines[3:]|join(', ') }}">+{{ fru_view.machines|length - 3 }}</span>
+        {% endif %}
         <span class="text-gray-400 text-sm" x-text="fruOpen ? '▾' : '▸'"></span>
       </div>
     </div>
 
     <div x-show="fruOpen" x-transition x-cloak class="px-5 py-3">
       {% for section in fru_view.sections %}
+      {% set section_idx = loop.index0 %}
       <div class="{{ 'mb-6' if not loop.last else '' }}">
         <div class="flex items-center gap-2 mb-1">
           <h3 class="text-xs font-medium text-gray-500">{{ section.label }}</h3>
           <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">{{ section.items|length }}</span>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
           {% for item in section.items %}
+          {% set item_meta = [item.kind_label, item.manufacturer, item.description]|select|join(' · ') %}
           <a href="/v2/materials?q={{ item.related_raw|urlencode }}"
              hx-get="/v2/partials/materials?q={{ item.related_raw|urlencode }}"
              hx-target="#main-content"
              hx-push-url="/v2/materials?q={{ item.related_raw|urlencode }}"
              {% if item.note %}title="{{ item.note }}"{% endif %}
+             {% if loop.index0 >= 12 %}x-show="showAll[{{ section_idx }}]" x-cloak{% endif %}
              class="group flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-transparent hover:border-brand-200 hover:bg-brand-50/50 transition-all duration-150">
             <div class="min-w-0">
-              <span class="block text-sm font-semibold text-gray-800 group-hover:text-brand-700 truncate transition-colors font-mono">
+              <span class="block text-sm font-semibold text-gray-800 group-hover:text-brand-700 truncate transition-colors font-mono" title="{{ item.related_raw }}">
                 {{ item.related_raw }}
               </span>
-              <span class="block text-[11px] text-gray-400 truncate mt-0.5">
-                {{ item.kind_label }}{% if item.manufacturer %} · {{ item.manufacturer }}{% endif %}{% if item.description %} · {{ item.description }}{% endif %}
+              <span class="block text-[11px] text-gray-400 truncate mt-0.5" title="{{ item_meta }}">
+                {{ item_meta }}
               </span>
               {% if item.qual_status %}
               <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border mt-0.5
@@ -73,6 +82,12 @@
           </a>
           {% endfor %}
         </div>
+        {% if section.items|length > 12 %}
+        <button @click="showAll[{{ section_idx }}] = !showAll[{{ section_idx }}]"
+                :aria-expanded="!!showAll[{{ section_idx }}]"
+                class="text-[11px] text-brand-600 hover:text-brand-700 font-medium mt-1"
+                x-text="showAll[{{ section_idx }}] ? 'Show less' : 'Show all ({{ section.items|length }})'"></button>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
@@ -82,7 +97,8 @@
   {% if fru_usages %}
   {# ── Used in FRUs (reverse view) ── #}
   {% set fru_usages_total = fru_usages_total|default(fru_usages|length) %}
-  <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ usagesOpen: true }">
+  {# showAll: single expander flag for the rows beyond the 10-row cap #}
+  <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ usagesOpen: true, showAll: false }">
     <div class="px-5 py-3 flex items-center justify-between border-b border-gray-100 cursor-pointer" role="button" tabindex="0" @click="usagesOpen = !usagesOpen" @keydown.enter="usagesOpen = !usagesOpen" @keydown.space.prevent="usagesOpen = !usagesOpen" :aria-expanded="usagesOpen">
       <div class="flex items-center gap-2.5">
         <div class="flex items-center justify-center w-7 h-7 rounded-md bg-brand-50">
@@ -108,7 +124,8 @@
         </tr></thead>
         <tbody>
           {% for u in fru_usages %}
-          <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
+          <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors"
+              {% if loop.index0 >= 10 %}x-show="showAll" x-cloak{% endif %}>
             <td class="py-2 px-3">
               <a hx-get="/v2/partials/materials/fru-lookup?q={{ u.fru_raw|urlencode }}"
                  hx-target="#fru-crosswalk"
@@ -132,6 +149,12 @@
           {% endfor %}
         </tbody>
       </table>
+      {% if fru_usages|length > 10 %}
+      <button @click="showAll = !showAll"
+              :aria-expanded="showAll"
+              class="text-[11px] text-brand-600 hover:text-brand-700 font-medium mt-2"
+              x-text="showAll ? 'Show less' : 'Show all ({{ fru_usages|length }})'"></button>
+      {% endif %}
       {% if fru_usages_total > fru_usages|length %}
       <p class="pt-2 text-[11px] text-gray-400">Showing first {{ fru_usages|length }} of {{ fru_usages_total }} FRUs.</p>
       {% endif %}

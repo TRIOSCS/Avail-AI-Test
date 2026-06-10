@@ -2,9 +2,11 @@
 
 What: Asserts the material detail surface renders the "FRU matrix" panel (forward
       view), the "Used in FRUs" panel (reverse view), and stays clean for parts with
-      no crosswalk data; and that /v2/partials/materials/fru-lookup serves both views
-      plus an empty state (only for a non-empty query), rejects unauthenticated
-      callers, and is not shadowed by the {card_id} route.
+      no crosswalk data; the template caps (12 matrix items / 10 usage rows / 3
+      machine chips) with their inline "Show all (N)" expanders and +N overflow chip;
+      and that /v2/partials/materials/fru-lookup serves both views plus an empty
+      state (only for a non-empty query), rejects unauthenticated callers, and is
+      not shadowed by the {card_id} route.
 Called by: pytest
 Depends on: conftest client fixture, app.models (MaterialCard, FruLink),
             app/templates/htmx/partials/materials/fru_section.html
@@ -81,6 +83,78 @@ class TestDetailSurface:
         )
         resp = client.get(f"/v2/partials/materials/{card.id}")
         assert "CDC pending" in resp.text
+
+
+class TestCapsAndExpanders:
+    """Template caps: matrix sections show 12 items, usages table 10 rows; the rest
+    render hidden (x-show/x-cloak) behind inline "Show all (N)" expanders."""
+
+    def test_matrix_section_caps_at_12_with_expander_at_13_items(self, client, db_session):
+        card = _seed_card(db_session, "00AJ001")
+        for i in range(13):
+            _seed_link(db_session, related=f"ST93006{i:02d}SS")
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        assert "Show all (13)" in resp.text
+        # All 13 items are in the DOM; exactly the 13th is hidden behind the flag.
+        for i in range(13):
+            assert f"ST93006{i:02d}SS" in resp.text
+        assert resp.text.count('x-show="showAll[0]"') == 1
+
+    def test_no_matrix_expander_at_12_items(self, client, db_session):
+        card = _seed_card(db_session, "00AJ001")
+        for i in range(12):
+            _seed_link(db_session, related=f"ST93006{i:02d}SS")
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        assert "Show all (" not in resp.text
+        assert 'x-show="showAll[0]"' not in resp.text
+
+    def test_usages_cap_at_10_with_expander_at_11_usages(self, client, db_session):
+        card = _seed_card(db_session, "ST9300603SS")
+        for i in range(11):
+            _seed_link(db_session, fru=f"00AJ{i:03d}", related="ST9300603SS")
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        assert "Show all (11)" in resp.text
+        # All 11 rows are in the DOM; exactly the 11th is hidden behind the flag.
+        for i in range(11):
+            assert f"00AJ{i:03d}" in resp.text
+        assert resp.text.count('x-show="showAll"') == 1
+
+    def test_no_usages_expander_at_10_usages(self, client, db_session):
+        card = _seed_card(db_session, "ST9300603SS")
+        for i in range(10):
+            _seed_link(db_session, fru=f"00AJ{i:03d}", related="ST9300603SS")
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        assert "Show all (" not in resp.text
+        assert 'x-show="showAll"' not in resp.text
+
+    def test_machines_overflow_chip_at_4_machines(self, client, db_session):
+        card = _seed_card(db_session, "00AJ001")
+        for i, machine in enumerate(["Storwize V7000", "POWER 8", "x3650 M5", "FlashSystem 900"]):
+            _seed_link(db_session, related=f"ST93006{i:02d}SS", machine=machine)
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        # First 3 machines render as chips; the 4th collapses into a +1 overflow
+        # chip whose title lists the remainder.
+        assert ">+1</span>" in resp.text
+        assert 'title="FlashSystem 900"' in resp.text
+
+    def test_no_machines_overflow_chip_at_3_machines(self, client, db_session):
+        card = _seed_card(db_session, "00AJ001")
+        for i, machine in enumerate(["Storwize V7000", "POWER 8", "x3650 M5"]):
+            _seed_link(db_session, related=f"ST93006{i:02d}SS", machine=machine)
+
+        resp = client.get(f"/v2/partials/materials/{card.id}")
+        assert resp.status_code == 200
+        assert ">+1</span>" not in resp.text
 
 
 class TestFruLookupEndpoint:

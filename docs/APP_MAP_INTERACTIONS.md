@@ -899,13 +899,18 @@ fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears u
     |    qual_status/manufacturer and coalesces missing attributes)
     v
 htmx/partials/materials/fru_section.html
+    |   (on detail.html the FRU panels render ABOVE Crosses & Substitutes)
     +---> "FRU matrix" panel: sections (Approved drives & models / 11S part numbers /
     |       Options / Trays & hardware / Lenovo PNs / Sourcing & assembly), count
     |       badges, qual pills (amber=cdc_pending sentinel, emerald=ANY other
     |       non-empty qual_status — free workbook text, no closed vocabulary),
-    |       series/machine context chips; items link to materials search
-    +---> "Used in FRUs" panel: FRU | role | qualification | context table, capped
-            at REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
+    |       series chips + first 3 machine chips (+N overflow chip, title lists the
+    |       rest); each section shows 12 items, the rest hidden behind an inline
+    |       "Show all (N)" / "Show less" Alpine expander; items link to materials
+    |       search
+    +---> "Used in FRUs" panel: FRU | role | qualification | context table — shows
+            10 rows, the rest behind the same inline expander; server-capped at
+            REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
             screws/tray PNs can sit under thousands of FRUs); each FRU links to its
             own fru-lookup (swaps #fru-crosswalk in place, pushes the materials URL)
 ```
