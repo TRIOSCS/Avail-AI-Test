@@ -765,6 +765,32 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> search_vector trigger auto-updates TSVECTOR with new description/category
     +---> Stamps material_cards.enriched_at
 
+Worker second-pass ordering (run_one_batch, same shared post-await session, one
+commit; the ordering realizes the confidence tiering — each deterministic layer
+lands before the next, and each downstream writer carries its own guard that
+skips keys already held at STRICTLY higher confidence. record_spec itself only
+protects vendor-API values — its cross-source rule is otherwise latest-write-wins —
+so a writer claiming confidence >= a prior still overwrites it (e.g. an AI value
+self-reported at 0.95 can replace an mpn_decode 0.95) until the SP2 source-tier
+ladder lands in record_spec):
+
+    1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
+       decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
+    2. desc_extractor/writer.py::extract_and_record_specs — deterministic
+       description→spec token grammar (storage + DRAM; TRIO part-master/inventory
+       descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
+       "desc_parse", confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
+       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"…) and
+       conflicting tokens; only already-categorized hdd/ssd/dram cards are written
+       (NEVER categorizes — a description is not a regex-gated commodity proof).
+       The writer skips keys already held at higher confidence, so mpn_decode 0.95
+       and vendor-API values stay authoritative.
+    3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
+       source="spec_extraction", facets gated at confidence >= 0.85. Applies the
+       same strictly-higher-confidence skip guard, so it never clobbers an
+       mpn_decode/desc_parse key it under-claims against (an AI confidence >= the
+       deterministic prior still wins — see the tiering caveat above).
+
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
   OR
@@ -840,6 +866,50 @@ Startup backfill:
 Env: MATERIAL_ENRICHMENT_ENABLED=true
 ```
 
+### Deterministic MPN decode (worker second pass, BEFORE the AI spec pass)
+
+`enrichment_worker/worker.py::run_one_batch` → `mpn_decoder/writer.py::decode_and_record_specs`
+(gated by `settings.mpn_decode_enabled`, default on) → `decode_mpn()` in
+`app/services/mpn_decoder/` → `record_spec(source="mpn_decode", confidence=0.95)`.
+Zero network/LLM; strict per-vendor regex gates; anything unrecognized returns None.
+Coverage report: `scripts/decode_mpn_dryrun.py` (read-only; per-vendor/commodity counts;
+`--apply` backfills). Category conflicts skip; NULL categories are set from the decode.
+
+Vendor/scheme inventory (module → gate → decoded keys):
+
+| Module | Vendor | Scheme gate (examples) | Decodes |
+|---|---|---|---|
+| storage.py | Seagate | `ST<GB><family>` (ST4000NM0035) | capacity, form_factor, usage_class |
+| storage.py | Western Digital | `WD<TB×10><family>` (WD40EFRX) | capacity, usage_class+form for known 3.5" families |
+| storage.py | Toshiba | `(MG\|MN\|MD\|MQ\|DT)\d{2}[A-Z]{3}` (MG08ACA16TE) | form_factor, usage_class, capacity from `<n>T` token |
+| storage.py | HGST/Hitachi | `HUH\|HUS(?=\d)\|HUC\|HTS\|HDN\|HDS\|HMS` | form_factor, usage_class, capacity from `<n>T` token; HUSMM/HUSSL SAS SSDs excluded |
+| ssd.py | Samsung | retail `MZ-<fam><cap>` (MZ-V8P2T0B/AM) + OEM `MZ<fam><cap>` (MZVL21T0HCLR, MZ7LH1T9HMLT, MZQL21T9HCJR, MZILT3T8HBLS) | capacity, form_factor (2.5"/M.2 2280/M.2 22110/U.2/mSATA), interface (SATA/SAS; NVMe gen only via pinned family tables), nand_type for retail EVO/QVO + V-table only |
+| ssd.py | Micron | `MTFD<code><cap>` (MTFDKBA960TFR, MTFDDAK1T9TDS) | capacity, form_factor+interface from verified code table (DAK/DAV/KBA/KBG/KBK/KCB/KCC/HBA/HAL); unknown codes → None |
+| ssd.py | Intel/Solidigm | `SSD(SC2\|SCK\|PE2\|PEK\|PF2)…<nnn>[GT]` (SSDPE2KX040T8) | capacity (G literal, T via decimal-TB table), form_factor, interface (E=PCIe 3.0, F=PCIe 4.0) |
+| ssd.py | Kioxia | `KXG<gen>` (XG M.2), `KPM<gen>` (PM SAS 2.5"), `K(CM\|CD)<gen>` (CM/CD U.2/U.3) | capacity via verified tokens (1T02=1024, 3T84=3840…), form_factor, interface (gen 5=PCIe 3.0, 6=PCIe 4.0; later gens capacity-only) |
+| ssd.py | WD | `WDS<nnn>[GT]<rev><suffix>` (WDS100T1X0E) | capacity, form_factor+interface from suffix table (B0A/R0A/G0A/B0B/G0B/B0C/X0C/R0C/X0E) |
+| memory.py | Samsung | `M<code><gen>` (M393A2K43DB3-CWE) | ddr_type, form_factor, ecc, registered; DDR4: voltage 1.2, capacity from density digit, rank via verified org-token table (ambiguous 8G40 omitted); DDR3 voltage from -C/-H/-Y suffix |
+| memory.py | SK Hynix | `HM(A\|T\|CG\|CT)` (HMA84GR7AFR4N-UH) | ddr_type, form_factor, ecc, registered; DDR4: voltage 1.2, capacity+rank from die×width math (R/U modules only — LRDIMM/3DS excluded) |
+| memory.py | Micron | `MTA…G(64\|72)<mod>Z` + DDR3 `MT<n>(J\|K)SF…` (MTA18ASF2G72PZ-2G6E1, MT36KSF2G72PZ-1G6M1) | ddr_type, ecc, capacity (n×8), form_factor+registered from module letter, rank from device count (two-letter module codes omit rank), voltage (DDR4 1.2; DDR3 J=1.5/K=1.35) |
+| memory.py | Kingston | `KVR/KSM<speed><L?><module>` (+KCP/KTH/KTD cap-only) | speed, ddr_type from speed code (13-18=DDR3, 21-32=DDR4, 48-64=DDR5 — NOT the D4 rank token), form_factor, ecc, registered, rank from S/D/Q×4/8 token, voltage (DDR4 1.2; DDR3 1.5, L-flag 1.35), capacity from `/<n>` (die-rev suffixes tolerated) |
+| memory.py | Crucial | `CT<cap>G<gen><form>` (CT16G4RFD8266) | capacity, ddr_type, form_factor (incl. L=LRDIMM), ecc, registered, rank from `F[SDQ][48]` token, speed, voltage (DDR4 1.2) |
+
+Never guessed: NVMe PCIe generation outside the pinned tables (seeded `interface` enum has
+no bare "NVMe"), nand_type outside Samsung retail EVO/QVO/V-table, DDR5 voltage (1.1 V is
+deliberately not emitted), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes, Kingston
+KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 rank token must
+never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+`commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
+`tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
+aggregate WARNING for BOTH of `record_spec`'s silent vocabulary drops — a decoded key with
+no schema row AND an enum value outside the LIVE row's enum_values (the worker decodes
+against live DB rows, which can lag a deploy's reseed) — so a drift can never silently
+zero the feature (`record_spec` drops both cases at DEBUG only). Cards skipped because
+their existing category conflicts with the decoded commodity are counted too
+(`skipped_category_conflict` in the per-batch stats, plus a WARNING with the
+`card_category->decoded_commodity` pairs — the number that says whether the
+category-alias map needs another entry).
+
 ## Cross-Reference Caching
 
 ```
@@ -856,6 +926,63 @@ find_crosses() endpoint
     |               +---> DB: UPDATE material_cards.cross_references (cache result)
     |
     +---> Return cross-references to template
+```
+
+---
+
+## FRU Crosswalk (IBM/Lenovo FRU ↔ 11S ↔ model ↔ tray)
+
+```
+Ingest (one-off, admin CLI):
+python -m app.management.ingest_fru_matrix <FRU_PN_TRAY matrix .xlsx> [--apply] [--allow-missing-sheets]
+    |
+    +---> sheet-coverage guard: a mapped sheet missing from the workbook is FATAL
+    |       (date-stamped names get renamed in new revisions) unless
+    |       --allow-missing-sheets; sheets neither mapped (PARSERS) nor in
+    |       KNOWN_SKIPPED_SHEETS are reported as unexpected and block --apply
+    +---> per-sheet parsers (openpyxl read_only): Main, Qlot, Gabor, CZ, CDC,
+    |       Lenovo-HDD, Lenovo FRU-PN, LVN VPD Mapping, Series, NSeries(NetApp)
+    |       - hygiene: nbsp strip, sentinel→NULL (N/A, #N/A, PENDIENTE, ...),
+    |         comma/slash multi-value split, carrier parentheticals→note,
+    |         Lenovo SAP zero-padding/_<letter><digits> suffix de-pad (FRU and PPN
+    |         cells both gated by the PN-plausibility regex), NSeries FRU
+    |         forward-fill, prose cells rejected by PN-plausibility regex
+    |       - normalization: fru_norm/related_norm via normalize_mpn_key
+    |       - bounded context columns (manufacturer/series/machine/qual_status)
+    |         truncated to model column lengths at parse time (PG-safe)
+    |
+    +---> DEFAULT dry run: "sheets parsed X/Y", per-sheet parsed/skipped counts,
+    |       per-kind link counts, unparsed-cell counters (per kind/column, so a
+    |       column-wide format change is visible), samples — no writes
+    +---> --apply: chunked upsert into fru_links in ONE transaction (all-or-nothing;
+            insert new edges; refresh context attrs on existing unique key;
+            additive-only — absent edges are never deleted, None never nulls)
+
+Lookup (read path):
+GET /v2/partials/materials/{card_id}          (material detail surface)
+GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
+    |                                          registered BEFORE the {card_id} route)
+    v
+fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
+fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under
+    |   (raw input normalized internally; cross-sheet dedup prefers rows with
+    |    qual_status/manufacturer and coalesces missing attributes)
+    v
+htmx/partials/materials/fru_section.html
+    |   (on detail.html the FRU panels render ABOVE Crosses & Substitutes)
+    +---> "FRU matrix" panel: sections (Approved drives & models / 11S part numbers /
+    |       Options / Trays & hardware / Lenovo PNs / Sourcing & assembly), count
+    |       badges, qual pills (amber=cdc_pending sentinel, emerald=ANY other
+    |       non-empty qual_status — free workbook text, no closed vocabulary),
+    |       series chips + first 3 machine chips (+N overflow chip, title lists the
+    |       rest); each section shows 12 items, the rest hidden behind an inline
+    |       "Show all (N)" / "Show less" Alpine expander; items link to materials
+    |       search
+    +---> "Used in FRUs" panel: FRU | role | qualification | context table — shows
+            10 rows, the rest behind the same inline expander; server-capped at
+            REVERSE_VIEW_LIMIT (200) with "showing first N of M" line (shared
+            screws/tray PNs can sit under thousands of FRUs); each FRU links to its
+            own fru-lookup (swaps #fru-crosswalk in place, pushes the materials URL)
 ```
 
 ---
@@ -899,17 +1026,70 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
-    |       value no longer collapses its siblings to 0).
-    +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
-    |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
-    |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
-    +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
-    |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
-    |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
-    |     legacy verified_only).
+    |       value no longer collapses its siblings to 0). With NO commodity selected the
+    |       route renders the server-side placeholder "Select a category to unlock spec
+    |       filters" (subfilters.html commodity_selected=False branch; no service calls)
+    |       instead of an empty response.
+    +---> Data confidence (FIRST filter fold, EXPANDED by default — $persist
+    |     confidenceOpen defaults true under the ROTATED key mat_confidence_open2;
+    |     the legacy mat_confidence_open key held a persisted `false` for every
+    |     prior visitor — persist writes the current value on init — and is removed
+    |     on load so the new default reaches returning users): 3 groups —
+    |     Trusted / AI-inferred / No data;
+    |     default all-on; `statuses[]` → `?statuses=` CSV → search_materials_faceted
+    |     (IN-filters enrichment_status; precedence over the legacy verified_only).
+    |     Collapse policy: navigation sections open, trust fold open, heavy folds
+    |     below closed.
+    +---> "Sourcing signals" (2nd fold, collapsed, $persist sourcingOpen; active-count badge) —
+    |     Layer-3 operational filters, all top-level params on
+    |     /v2/partials/materials/faceted → search_materials_faceted():
+    |       has_stock   (EXISTS MaterialVendorHistory row)
+    |       has_price   (EXISTS row with last_price IS NOT NULL)
+    |       has_crosses (cross_references holds a non-empty list; portable text-cast
+    |                    predicate — identical on PG JSONB and SQLite JSON-as-text)
+    |       internal    (tri-state all|standard|internal on is_internal_part; default
+    |                    `all` — deliberately not `standard` — so first load never
+    |                    silently drops rows)
+    |       searched_within (7d|30d|90d|any chips on last_searched_at)
+    |       min_searches    (int ≥ 0 on search_count)
+    |     Unknown/invalid values degrade to the no-op default with a WARNING log
+    |     (hand-edited URLs never 500/422; the log surfaces frontend/backend
+    |     vocabulary drift). This covers ALL the operational params: the enum-ish
+    |     ones (internal / searched_within), non-numeric or negative min_searches,
+    |     AND the boolean flags (has_stock / has_price / has_crosses /
+    |     has_datasheet) — declared as lenient strings, truthy {true,1,yes,on} /
+    |     falsy {false,0,'',no,off}, anything else WARNs and degrades to False
+    |     (a bool Query would 422 on ?has_stock=bogus and htmx would silently
+    |     refuse to swap, leaving stale results with only the generic error toast). Vocabularies are owned by
+    |     faceted_search_service (INTERNAL_FILTER_VALUES / SEARCHED_WITHIN_VALUES,
+    |     derived from the maps that drive the query branches); the JS twin is
+    |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
+    |     Static section (no per-value counts → no HTMX reload).
+    +---> "More attributes" (LAST fold, collapsed, $persist moreAttrsOpen; active-count
+    |     badge): Manufacturer (search + top-N) + Global facets (lifecycle / rohs /
+    |     condition / has_datasheet) via get_global_facet_counts(). Containers load
+    |     while hidden.
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
+
+Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
+SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
+    +---> Sub-filters panel header shows "N of M parts in <commodity> have filterable
+    |     specs" so thin parametric results are explained before filtering.
+    +---> Zero results + active parametric sub_filters + N < M → list.html renders the
+    |     "not yet spec-enriched" nudge instead of the generic empty state.
+Result-row upgrades (list.html, server-side in materials_faceted_partial):
+    +---> Spec chips also render WITHOUT a commodity: each card's own category's
+    |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
+    |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
+    |     title="label: value" so the value-only commodity rendering keeps its label
+    |     on hover.
+    +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
+    |     "N alternates" chip when cross_references is non-empty (neutral gray — count
+    |     metadata, not a status; indigo is reserved for OEM-SOURCED); condition badge
+    |     styled like the lifecycle palette, with Refurbished/Used sharing violet
+    |     (second-life family) so amber stays exclusively caution/reconfirm.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

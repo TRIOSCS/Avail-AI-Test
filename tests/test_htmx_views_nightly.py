@@ -546,7 +546,8 @@ class TestMaterialsPartials:
     def test_materials_filters_sub_no_commodity(self, client, db_session: Session):
         resp = client.get("/v2/partials/materials/filters/sub")
         assert resp.status_code == 200
-        assert resp.text == ""
+        # Server-rendered placeholder nudge (replaced the old empty-string response).
+        assert "Select a category to unlock spec filters" in resp.text
 
     def test_materials_filters_sub_with_commodity(self, client, db_session: Session):
         resp = client.get("/v2/partials/materials/filters/sub?commodity=ic")

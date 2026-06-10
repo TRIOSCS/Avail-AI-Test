@@ -151,7 +151,7 @@ def _mock_db():
 
 
 async def test_main_runs_one_batch_then_shuts_down():
-    """Main() does startup heartbeat, runs one batch, exits on shutdown."""
+    """Runs main(): startup heartbeat, one batch, then exits on shutdown."""
     import app.services.enrichment_worker.worker as w
 
     original = w._shutdown_requested

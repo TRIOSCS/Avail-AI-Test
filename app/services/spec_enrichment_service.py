@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import MaterialEnrichmentStatus
 from app.models.intelligence import MaterialCard
-from app.services.commodity_registry import get_batch_spec_schema
+from app.services.commodity_registry import COARSE_BUCKETS_WITHOUT_SEEDS, get_batch_spec_schema
 from app.services.spec_write_service import record_spec
 
 # Only cards whose description/category came from a trustworthy, source-attributed tier may
@@ -56,6 +56,10 @@ def build_spec_prompt(category: str, cards: list[dict]) -> str:
             line += f" (number{', unit: ' + unit if unit else ''})"
         elif spec["type"] == "boolean":
             line += " (true/false)"
+        if spec.get("note"):
+            # Seed-level extraction guidance (e.g. graded-ladder vocabularies where one
+            # value must be picked deterministically) — see commodity_seeds.json.
+            line += f" — {spec['note']}"
         spec_instructions.append(line)
     spec_text = "\n".join(spec_instructions)
 
@@ -124,8 +128,10 @@ async def enrich_card_specs(
     gate is a correctness invariant and applies even when ``force=True`` (force only bypasses
     the ``specs_enriched_at`` re-process filter). Cards are grouped by category; each category
     uses its own prompt/schema. Specs with confidence >= FACET_MIN_CONF are written via
-    record_spec (JSONB + facet). Every processed card gets specs_enriched_at stamped so it is
-    not reprocessed.
+    record_spec (JSONB + facet), EXCEPT keys an earlier pass already holds at strictly higher
+    confidence (the deterministic mpn_decode 0.95 / desc_parse 0.90 tiers) — those are skipped
+    so this AI pass never clobbers a deterministic value it under-claims against. Every
+    processed card gets specs_enriched_at stamped so it is not reprocessed.
     """
     from app.utils.claude_client import claude_structured  # lazy: tests patch at source
 
@@ -183,10 +189,21 @@ async def enrich_card_specs(
                 stats["cards_processed"] += 1
                 wrote_any = False
                 if ai_part:
+                    prior_specs = c.specs_structured or {}
                     for spec in spec_defs:
                         value = ai_part.get(spec["key"])
                         conf = ai_part.get(f"{spec['key']}_confidence", 0.0)
                         if value is not None and conf >= FACET_MIN_CONF:
+                            # Confidence-ladder guard (mirrors desc_extractor/writer.py):
+                            # keys already held at strictly higher confidence — the
+                            # deterministic mpn_decode (0.95) / desc_parse (0.90) tiers
+                            # written earlier in the same batch — are skipped, because
+                            # record_spec's cross-source rule is latest-write-wins. An AI
+                            # value claiming conf >= the prior still overwrites, until the
+                            # SP2 source-tier ladder lands in record_spec.
+                            prior = prior_specs.get(spec["key"])
+                            if prior and float(prior.get("confidence") or 0.0) > float(conf):
+                                continue
                             if record_spec(
                                 db,
                                 int(c.id),
@@ -221,12 +238,20 @@ async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int
     Only cards with a trustworthy/source-attributed status
     (verified/web_sourced/oem_sourced) seed specs, so guess/orphan descriptions never
     produce facets.
+
+    Declared coarse buckets (COARSE_BUCKETS_WITHOUT_SEEDS) are excluded at the query:
+    they carry no spec schema BY DESIGN, so their cards would otherwise be re-selected
+    into the limit window every run, skipped unstamped, and re-selected forever —
+    eventually starving seeded commodities out of the window. Excluding them (rather
+    than stamping specs_enriched_at) keeps them eligible automatically if a schema is
+    ever added.
     """
     rows = (
         db.query(MaterialCard.id)
         .filter(
             MaterialCard.specs_enriched_at.is_(None),
             MaterialCard.category.isnot(None),
+            MaterialCard.category.notin_(sorted(COARSE_BUCKETS_WITHOUT_SEEDS)),
             MaterialCard.description.isnot(None),
             MaterialCard.description != "",
             MaterialCard.deleted_at.is_(None),
