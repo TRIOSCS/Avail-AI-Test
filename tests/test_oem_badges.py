@@ -1,9 +1,10 @@
-"""Badge rendering for oem_sourced + not_catalogued in the materials list partial."""
+"""Badge rendering for oem_sourced + not_catalogued in the materials list partial, and
+the dual-brand result-row cell ("IBM · Seagate Technology")."""
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
-def _render(status, provenance=None):
+def _render(status, provenance=None, *, brand=None, manufacturer="Lenovo"):
     env = Environment(
         loader=FileSystemLoader("app/templates"),
         autoescape=select_autoescape(["html"]),
@@ -17,7 +18,8 @@ def _render(status, provenance=None):
             "enrichment_provenance": provenance or {},
             "lifecycle_status": None,
             "display_mpn": "01HW917",
-            "manufacturer": "Lenovo",
+            "brand": brand,
+            "manufacturer": manufacturer,
             "category": "Memory",
             "description": "x",
             "_vendor_count": 0,
@@ -42,3 +44,33 @@ def test_oem_sourced_badge_renders():
 def test_not_catalogued_badge_renders():
     html = _render("not_catalogued")
     assert "NOT CATALOGUED" in html
+
+
+# --- Dual-brand cell: brand (OEM label) · manufacturer (actual maker) ---
+
+
+def test_dual_display_renders_both_when_distinct():
+    html = _render("unenriched", brand="IBM", manufacturer="Seagate Technology")
+    assert "IBM · Seagate Technology" in html
+
+
+def test_dual_display_single_value_when_equal():
+    html = _render("unenriched", brand="Lenovo", manufacturer="Lenovo")
+    assert "Lenovo" in html
+    assert "Lenovo · Lenovo" not in html
+
+
+def test_dual_display_brand_only():
+    html = _render("unenriched", brand="IBM", manufacturer=None)
+    assert "IBM" in html
+    assert "·" not in html.split("01HW917")[1].split("Memory")[0]  # no stray delimiter in the cell
+
+
+def test_dual_display_manufacturer_only():
+    html = _render("unenriched", brand=None, manufacturer="Seagate Technology")
+    assert "Seagate Technology" in html
+
+
+def test_dual_display_dashes_when_neither():
+    html = _render("unenriched", brand=None, manufacturer=None)
+    assert "--" in html

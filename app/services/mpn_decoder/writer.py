@@ -16,18 +16,25 @@ from sqlalchemy.orm import Session
 from app.models import MaterialCard
 from app.services.mpn_decoder import decode_mpn
 from app.services.mpn_decoder._common import DECODE_SOURCE
-from app.services.spec_tiers import set_category
+from app.services.spec_tiers import set_category, set_manufacturer
 from app.services.spec_write_service import load_schema_cache, record_spec
+
+# Confidence for the decode's MAKER write (dual-brand W4 — the vendor gate is the same
+# deterministic regex as the specs, but the maker claim is one notch below the per-spec
+# decode confidence by design: spec'd at 0.9, tier mpn_decode/85).
+MAKER_CONFIDENCE = 0.9
 
 
 def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     """Decode the MPNs of *card_ids* and write decoded specs.
 
-    Returns {decoded, written, categorized, skipped_category_conflict}.
+    Returns {decoded, written, categorized, manufacturers_set,
+    skipped_category_conflict}.
     """
     decoded_cards = 0
     written = 0
     categorized = 0
+    manufacturers_set = 0
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
     # record_spec drops BOTH vocabulary-drift cases at DEBUG only (invisible at the
     # production INFO level), so the discard of decoder output is surfaced here as an
@@ -77,6 +84,13 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 # (purging the old commodity's stale facets) but never overwrites a vendor/manual
                 # category.
                 did_categorize = set_category(card, result.commodity, DECODE_SOURCE, result.confidence)
+                # Dual-brand W4: the decode's vendor IS the actual maker (the regex gate
+                # is manufacturer-scheme-specific), so write it through the maker ladder
+                # at mpn_decode/0.9 — it corrects a legacy OEM label sitting in
+                # `manufacturer` (tier 50) but never overwrites vendor-API (90) / manual
+                # (100) / trio_source (95) values. Unconditional on the category outcome:
+                # the maker claim comes from the MPN itself, not the commodity.
+                did_set_maker = set_manufacturer(card, result.vendor, DECODE_SOURCE, MAKER_CONFIDENCE)
                 # EXPLICIT cross-commodity guard: if the card's category (post-ladder) is not the
                 # decoded commodity, write NO specs — a drive's capacity must never land on a
                 # non-drive card. Do not rely on schema-cache keying to enforce this: the schemas
@@ -101,6 +115,8 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
             # Reached only on a clean savepoint release — so a rolled-back card contributes nothing.
             decoded_cards += 1
             written += card_written
+            if did_set_maker:
+                manufacturers_set += 1
             if did_categorize:
                 categorized += 1
             elif card_cat and card_cat != result.commodity:
@@ -137,5 +153,6 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
         "decoded": decoded_cards,
         "written": written,
         "categorized": categorized,
+        "manufacturers_set": manufacturers_set,
         "skipped_category_conflict": sum(skipped_category_conflict.values()),
     }

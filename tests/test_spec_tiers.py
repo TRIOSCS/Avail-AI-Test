@@ -369,3 +369,182 @@ def test_fru_desc_parse_tier_sits_between_desc_parse_and_partsurfer():
     assert SOURCE_TIER["desc_parse"] > SOURCE_TIER["fru_desc_parse"]  # 83 > 82
     assert SOURCE_TIER["fru_desc_parse"] > SOURCE_TIER["partsurfer"]  # 82 > 80
     assert SOURCE_TIER["fru_matrix_decode"] > SOURCE_TIER["fru_desc_parse"]  # 84 > 82
+
+
+# --- set_brand / set_manufacturer (dual-brand, migration 097) -----------------
+
+
+def test_set_brand_rejects_none_empty_whitespace(db_session: Session):
+    card = _card(db_session, normalized_mpn="brand-empty")
+    from app.services.spec_tiers import set_brand, set_manufacturer
+
+    for empty in (None, "", "   "):
+        assert set_brand(card, empty, "trio_source", 0.9) is False
+        assert set_manufacturer(card, empty, "trio_source", 0.9) is False
+    assert card.brand is None
+    assert card.manufacturer is None
+    assert card.brand_source is None
+    assert card.manufacturer_source is None
+
+
+def test_set_brand_writes_on_empty_card_with_provenance(db_session: Session):
+    from app.services.spec_tiers import set_brand
+
+    card = _card(db_session, normalized_mpn="brand-fresh")
+    assert set_brand(card, "IBM", "desc_parse", 0.85) is True
+    assert card.brand == "IBM"
+    assert card.brand_source == "desc_parse"
+    assert card.brand_confidence == 0.85
+    assert card.brand_tier == 83
+    assert card.brand_updated_at is not None
+
+
+def test_set_manufacturer_higher_tier_corrects_lower(db_session: Session):
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _card(
+        db_session,
+        normalized_mpn="maker-correct",
+        manufacturer="IBM",
+        manufacturer_source="desc_parse",
+        manufacturer_confidence=0.85,
+        manufacturer_tier=83,
+    )
+    assert set_manufacturer(card, "Seagate", "trio_source", 0.9) is True
+    assert card.manufacturer == "Seagate"  # verbatim — manufacturers table unseeded here
+    assert card.manufacturer_source == "trio_source"
+    assert card.manufacturer_tier == 95
+
+
+def test_set_manufacturer_lower_tier_cannot_downgrade(db_session: Session):
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _card(
+        db_session,
+        normalized_mpn="maker-keep",
+        manufacturer="Seagate Technology",
+        manufacturer_source="trio_source",
+        manufacturer_confidence=0.9,
+        manufacturer_tier=95,
+    )
+    assert set_manufacturer(card, "Kingston", "desc_parse", 0.99) is False
+    assert card.manufacturer == "Seagate Technology"
+    assert card.manufacturer_source == "trio_source"
+
+
+def test_set_brand_equal_tier_higher_confidence_wins(db_session: Session):
+    from app.services.spec_tiers import set_brand
+
+    card = _card(
+        db_session,
+        normalized_mpn="brand-eq-tier",
+        brand="Dell",
+        brand_source="desc_parse",
+        brand_confidence=0.70,
+        brand_tier=83,
+    )
+    assert set_brand(card, "IBM", "desc_parse", 0.90) is True
+    assert card.brand == "IBM"
+    assert set_brand(card, "Lenovo", "desc_parse", 0.50) is False  # lower conf loses
+    assert card.brand == "IBM"
+
+
+def test_set_manufacturer_null_provenance_existing_ranks_at_legacy_floor(db_session: Session):
+    # ALL pre-097 manufacturer values are valued-but-unprovenanced: they must rank at the
+    # legacy_backfill floor (50) — an AI guess (40) cannot flip them, but trio_source (95)
+    # maker evidence displaces a legacy OEM name (the ST300MP0016 headline case).
+    from app.services.spec_tiers import set_manufacturer
+
+    card = _card(db_session, normalized_mpn="maker-legacy", manufacturer="IBM")
+    assert card.manufacturer_tier is None and card.manufacturer_source is None
+
+    assert set_manufacturer(card, "Seagate", "ai_guess", 0.99) is False  # 40 < floor 50
+    assert card.manufacturer == "IBM"
+    assert card.manufacturer_tier is None  # losing write never stamps provenance
+
+    assert set_manufacturer(card, "Seagate", "trio_source", 0.9) is True  # 95 > floor 50
+    assert card.manufacturer == "Seagate"
+    assert card.manufacturer_source == "trio_source"
+    assert card.manufacturer_tier == 95
+
+
+def test_set_brand_null_provenance_existing_ranks_at_legacy_floor(db_session: Session):
+    from app.services.spec_tiers import set_brand
+
+    card = _card(db_session, normalized_mpn="brand-legacy", brand="IBM")
+    assert set_brand(card, "Dell", "ai_guess", 0.99) is False  # 40 < floor 50
+    assert card.brand == "IBM"
+    assert set_brand(card, "Dell", "desc_parse", 0.85) is True  # 83 > floor 50
+    assert card.brand == "Dell"
+
+
+def test_set_brand_and_manufacturer_write_false_twins_do_not_mutate(db_session: Session):
+    from app.services.spec_tiers import set_brand, set_manufacturer
+
+    card = _card(
+        db_session,
+        normalized_mpn="dual-dry-twin",
+        brand="IBM",
+        brand_source="legacy_backfill",
+        brand_confidence=0.5,
+        brand_tier=50,
+        manufacturer="IBM",
+        manufacturer_source="legacy_backfill",
+        manufacturer_confidence=0.5,
+        manufacturer_tier=50,
+    )
+    assert set_brand(card, "Dell", "desc_parse", 0.85, write=False) is True
+    assert set_brand(card, "Dell", "ai_guess", 0.9, write=False) is False
+    assert set_manufacturer(card, "Seagate", "trio_source", 0.9, write=False) is True
+    assert set_manufacturer(card, "Seagate", "ai_guess", 0.9, write=False) is False
+    # Untouched either way (dry-run parity contract).
+    assert card.brand == "IBM"
+    assert card.manufacturer == "IBM"
+    assert card.brand_tier == 50
+    assert card.manufacturer_tier == 50
+
+
+def test_set_brand_normalizes_via_manufacturers_table(db_session: Session):
+    from app.models import Manufacturer
+    from app.services.spec_tiers import set_brand, set_manufacturer
+
+    db_session.add(Manufacturer(canonical_name="Hewlett Packard Enterprise", aliases=["HPE", "HP"]))
+    db_session.add(Manufacturer(canonical_name="Seagate Technology", aliases=["Seagate"]))
+    db_session.flush()
+
+    card = _card(db_session, normalized_mpn="dual-normalize")
+    assert set_brand(card, "HP", "desc_parse", 0.85) is True
+    assert card.brand == "Hewlett Packard Enterprise"
+    assert set_manufacturer(card, "SEAGATE", "trio_source", 0.9) is True
+    assert card.manufacturer == "Seagate Technology"
+
+
+def test_set_brand_same_value_same_tier_refreshes_via_newer_timestamp(db_session: Session):
+    # Exact (tier, confidence) tie → newer updated_at wins (same F1 rule as category).
+    from app.services.spec_tiers import set_brand
+
+    old = datetime.now(timezone.utc) - timedelta(days=2)
+    card = _card(
+        db_session,
+        normalized_mpn="brand-tie-newer",
+        brand="IBM",
+        brand_source="desc_parse",
+        brand_confidence=0.85,
+        brand_tier=83,
+        brand_updated_at=old,
+    )
+    assert set_brand(card, "Dell", "desc_parse", 0.85) is True
+    assert card.brand == "Dell"
+    assert card.brand_updated_at is not None and card.brand_updated_at > old
+
+
+def test_set_category_unchanged_behavior_through_shared_helper(db_session: Session):
+    # Regression pin for the _set_provenanced_column extraction: set_category still
+    # normalizes, still refuses junk, still stamps the same provenance columns.
+    card = _card(db_session, normalized_mpn="cat-delegate", category=None)
+    assert set_category(card, "Microprocessors - MPU", "mpn_decode", 0.95) is True
+    assert card.category == "microprocessors"
+    assert card.category_source == "mpn_decode"
+    assert card.category_tier == 85
+    assert set_category(card, "VPD Card", "manual", 1.0) is False  # off-vocab still rejected
+    assert card.category == "microprocessors"

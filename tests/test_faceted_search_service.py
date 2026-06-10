@@ -287,6 +287,93 @@ def test_search_faceted_filters_by_manufacturer(db_session: Session):
     assert results[0].manufacturer == "TI"
 
 
+# --- Dual-brand: combined facet ORs across brand + manufacturer (migration 097) ---
+
+
+def _dual_card(db, mpn, *, brand=None, manufacturer=None, category="hdd"):
+    card = MaterialCard(
+        normalized_mpn=mpn,
+        display_mpn=mpn.upper(),
+        brand=brand,
+        manufacturer=manufacturer,
+        category=category,
+    )
+    db.add(card)
+    return card
+
+
+def test_filter_matches_brand_only_manufacturer_only_and_both(db_session: Session):
+    # The headline: filtering "IBM" matches the IBM-labeled drive actually made by
+    # Seagate, and filtering "Seagate Technology" matches the SAME card.
+    _dual_card(db_session, "st300mp0016", brand="IBM", manufacturer="Seagate Technology")
+    _dual_card(db_session, "ssd001", manufacturer="Seagate Technology")  # maker-only
+    _dual_card(db_session, "fru001", brand="IBM")  # label-only
+    _dual_card(db_session, "other1", manufacturer="Kingston Technology")
+    db_session.flush()
+
+    _, total_ibm = search_materials_faceted(db_session, manufacturers=["IBM"])
+    assert total_ibm == 2  # the dual card + the label-only card
+
+    _, total_seagate = search_materials_faceted(db_session, manufacturers=["Seagate Technology"])
+    assert total_seagate == 2  # the dual card + the maker-only card
+
+    # OR-within-facet: selecting both values is a union, the dual card counted once.
+    results, total_both = search_materials_faceted(db_session, manufacturers=["IBM", "Seagate Technology"])
+    assert total_both == 3
+    assert {r.normalized_mpn for r in results} == {"st300mp0016", "ssd001", "fru001"}
+
+
+def test_manufacturer_options_count_spans_both_columns(db_session: Session):
+    _dual_card(db_session, "st300mp0016", brand="IBM", manufacturer="Seagate Technology")
+    _dual_card(db_session, "fru001", brand="IBM")
+    _dual_card(db_session, "ssd001", manufacturer="Seagate Technology")
+    db_session.flush()
+
+    options = {o["name"]: o["count"] for o in get_manufacturer_options(db_session)}
+    assert options["IBM"] == 2  # brand column on two cards
+    assert options["Seagate Technology"] == 2  # manufacturer column on two cards
+
+
+def test_manufacturer_options_dedupe_card_when_brand_equals_manufacturer(db_session: Session):
+    # A card carrying the same name in BOTH columns counts ONCE (COUNT(DISTINCT id)).
+    _dual_card(db_session, "wd001", brand="Western Digital", manufacturer="Western Digital")
+    db_session.flush()
+
+    options = get_manufacturer_options(db_session)
+    assert options == [{"name": "Western Digital", "count": 1}]
+
+
+def test_manufacturer_options_commodity_scopes_both_union_branches(db_session: Session):
+    _dual_card(db_session, "hdd1", brand="IBM", manufacturer="Seagate Technology", category="hdd")
+    _dual_card(db_session, "dram1", brand="Lenovo", manufacturer="Samsung", category="dram")
+    db_session.flush()
+
+    options = {o["name"] for o in get_manufacturer_options(db_session, commodity="hdd")}
+    assert options == {"IBM", "Seagate Technology"}  # brand AND manufacturer branches scoped
+    assert "Lenovo" not in options
+    assert "Samsung" not in options
+
+
+def test_manufacturer_options_exclude_deleted_in_both_branches(db_session: Session):
+    from datetime import datetime, timezone
+
+    card = _dual_card(db_session, "gone1", brand="IBM", manufacturer="Seagate Technology")
+    card.deleted_at = datetime.now(timezone.utc)
+    db_session.flush()
+
+    assert get_manufacturer_options(db_session) == []
+
+
+def test_brand_filter_scopes_with_commodity(db_session: Session):
+    # AND-across-facets: the brand OR-match still respects the commodity filter.
+    _dual_card(db_session, "hdd1", brand="IBM", category="hdd")
+    _dual_card(db_session, "dram1", brand="IBM", category="dram")
+    db_session.flush()
+
+    _, total = search_materials_faceted(db_session, commodity="hdd", manufacturers=["IBM"])
+    assert total == 1
+
+
 # --- Global facets: lifecycle / rohs / has_datasheet ---
 
 

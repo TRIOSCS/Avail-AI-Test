@@ -3,7 +3,9 @@
 What: ``ingest`` walks each ConsolidatedPart, finds its MaterialCard by ``normalized_mpn`` and
       AUGMENTS — creating the card when absent (never clobbering an existing description, since
       we have no description-tier yet). Category goes through ``set_category`` (tier
-      ``trio_source``=95, or ``trio_source_ai``=88 when AI-inferred); each spec through the
+      ``trio_source``=95, or ``trio_source_ai``=88 when AI-inferred); manufacturer (actual
+      maker) and brand (OEM label) go through ``set_manufacturer``/``set_brand`` at
+      trio_source/0.9 (dual-brand W6 — each no-ops on None); each spec through the
       ``record_spec`` tier ladder so TRIO ground truth (95) beats vendor (90) / decode (85) and
       a later lower-tier write can never overwrite it. Per-card ``begin_nested()`` SAVEPOINTs
       mirror mpn_decoder/writer.py so one bad card never poisons the batch — and, like that
@@ -32,11 +34,13 @@ from app.constants import MaterialCondition
 from app.models import MaterialCard
 from app.services.source_ingest.ai_correct import AI_SOURCE
 from app.services.source_ingest.models import ConsolidatedPart
-from app.services.spec_tiers import set_category, tier_for
+from app.services.spec_tiers import set_brand, set_category, set_manufacturer, tier_for
 from app.services.spec_write_service import load_schema_cache, record_spec, spec_would_write
 
 # Raw-source provenance tag (top of the ladder, tier 95).
 RAW_SOURCE = "trio_source"
+# Confidence for the ladder-routed brand/manufacturer writes (dual-brand W6).
+BRAND_CONFIDENCE = 0.9
 _COMMIT_CHUNK = 500
 _SAMPLE_LIMIT = 15
 _FAILED_SAMPLE_LIMIT = 10
@@ -55,6 +59,8 @@ def _empty_stats() -> dict:
         "failed": 0,
         "failed_mpns": [],
         "categories_set": 0,
+        "brands_set": 0,
+        "manufacturers_set": 0,
         "descriptions_filled": 0,
         "conditions_filled": 0,
         "specs_written": 0,
@@ -113,14 +119,22 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
     # this card, keeping the outer transaction usable. The per-card tallies accumulate in
     # LOCALS and merge into stats only after a clean savepoint release — a rolled-back card
     # must contribute nothing, or the report would claim writes that were undone.
-    tally = {"categories_set": 0, "descriptions_filled": 0, "conditions_filled": 0, "specs_written": 0}
+    tally = {
+        "categories_set": 0,
+        "brands_set": 0,
+        "manufacturers_set": 0,
+        "descriptions_filled": 0,
+        "conditions_filled": 0,
+        "specs_written": 0,
+    }
     by_source: dict[str, int] = defaultdict(int)
     with db.begin_nested():
         if card is None:
+            # Manufacturer is NOT written in the constructor — it goes through the
+            # set_manufacturer ladder below so its provenance columns are stamped.
             card = MaterialCard(
                 normalized_mpn=part.normalized_mpn,
                 display_mpn=part.raw_mpn,
-                manufacturer=part.manufacturer,
             )
             db.add(card)
             db.flush()  # assign card.id before record_spec needs it
@@ -129,6 +143,15 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
         if cat_value and set_category(card, cat_value, source=cat_source, confidence=cat_conf):
             tally["categories_set"] += 1
             by_source[cat_source] += 1
+
+        # Dual-brand W6: maker + OEM label through the ladder at trio_source/0.9.
+        # Each no-ops on None/empty; a lower-tier value can never displace a higher one.
+        if set_manufacturer(card, part.manufacturer, RAW_SOURCE, BRAND_CONFIDENCE):
+            tally["manufacturers_set"] += 1
+            by_source[RAW_SOURCE] += 1
+        if set_brand(card, part.brand, RAW_SOURCE, BRAND_CONFIDENCE):
+            tally["brands_set"] += 1
+            by_source[RAW_SOURCE] += 1
 
         # Description: fill ONLY when empty — there is no description-tier yet, so we must not
         # clobber an existing description (documented design choice; see module docstring).
@@ -213,9 +236,15 @@ def _tally_dry_run(
         existing_specs: dict = {}
         desc_would = bool(desc)
         cond_would = _condition_fillable(part.condition, None)
+        # Brand/manufacturer: on a fresh card any non-empty value wins (existing=None);
+        # set_brand/set_manufacturer reject empties, mirrored by the bool() gate here.
+        mfr_would = bool(part.manufacturer and str(part.manufacturer).strip())
+        brand_would = bool(part.brand and str(part.brand).strip())
     else:
         stats["would_update"] += 1
         category_would = bool(cat_value) and set_category(card, cat_value, cat_source, cat_conf, write=False)
+        mfr_would = set_manufacturer(card, part.manufacturer, RAW_SOURCE, BRAND_CONFIDENCE, write=False)
+        brand_would = set_brand(card, part.brand, RAW_SOURCE, BRAND_CONFIDENCE, write=False)
         # Specs are validated against the category the card WOULD have after --apply.
         effective_category = cat_value if category_would else card.category
         existing_specs = dict(card.specs_structured or {})
@@ -241,6 +270,12 @@ def _tally_dry_run(
     if category_would:
         stats["categories_set"] += 1
         stats["fields_by_source"][cat_source] += 1
+    if mfr_would:
+        stats["manufacturers_set"] += 1
+        stats["fields_by_source"][RAW_SOURCE] += 1
+    if brand_would:
+        stats["brands_set"] += 1
+        stats["fields_by_source"][RAW_SOURCE] += 1
     if desc_would:
         stats["descriptions_filled"] += 1
         stats["fields_by_source"][RAW_SOURCE] += 1
@@ -300,6 +335,7 @@ def _tally_dry_run(
                 "display_mpn": part.raw_mpn,
                 "action": "create" if card is None else "update",
                 "manufacturer": part.manufacturer,
+                "brand": part.brand,
                 "category": cat_value,
                 "category_source": cat_source if cat_value else None,
                 "description": (desc[:80] + "…") if desc and len(desc) > 80 else desc,

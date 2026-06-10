@@ -338,3 +338,88 @@ def test_dry_run_does_not_count_specs_without_resolvable_category(db_session: Se
     applied = ingest(db_session, [part], apply=True)
     assert dry["specs_written"] == applied["specs_written"] == 0
     assert dry["categories_set"] == applied["categories_set"] == 0
+
+
+# --- Dual-brand W6: brand/manufacturer through the ladder at trio_source/0.9 ---
+
+
+def test_new_card_manufacturer_written_via_ladder_with_provenance(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part(manufacturer="Seagate")], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.manufacturer == "Seagate"  # verbatim — manufacturers table unseeded here
+    assert card.manufacturer_source == "trio_source"
+    assert card.manufacturer_tier == 95
+    assert card.manufacturer_confidence == 0.9
+    assert stats["manufacturers_set"] == 1
+
+
+def test_brand_written_via_ladder(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part(brand="IBM", manufacturer="Seagate")], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.brand == "IBM"
+    assert card.brand_source == "trio_source"
+    assert card.brand_tier == 95
+    assert card.manufacturer == "Seagate"
+    assert stats["brands_set"] == 1
+    assert stats["manufacturers_set"] == 1
+
+
+def test_none_brand_and_manufacturer_are_noops(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part()], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.brand is None
+    assert card.manufacturer is None
+    assert stats["brands_set"] == 0
+    assert stats["manufacturers_set"] == 0
+
+
+def test_higher_tier_manufacturer_not_overwritten_by_ingest(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(manufacturer="WrongCo")], apply=True)
+    db_session.refresh(card)
+    assert card.manufacturer == "Seagate Technology"  # manual(100) resists trio(95)
+    assert stats["manufacturers_set"] == 0
+
+
+def test_dual_brand_dry_run_parity(db_session: Session):
+    # Dry-run tallies for brands_set/manufacturers_set must equal apply tallies —
+    # including the loss against a higher-tier existing manufacturer.
+    seed_commodity_schemas(db_session)
+    blocked = MaterialCard(
+        normalized_mpn="blockedmpn",
+        display_mpn="BLOCKEDMPN",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(blocked)
+    db_session.flush()
+
+    parts = [
+        _part(brand="IBM", manufacturer="Seagate"),
+        _part(normalized_mpn="blockedmpn", raw_mpn="BLOCKEDMPN", manufacturer="WrongCo", brand="Dell"),
+    ]
+    dry = ingest(db_session, parts, apply=False)
+    applied = ingest(db_session, parts, apply=True)
+
+    for key in ("brands_set", "manufacturers_set", "fields_by_source"):
+        assert dry[key] == applied[key], f"dry/apply diverged on {key}: {dry[key]} != {applied[key]}"
+    assert applied["manufacturers_set"] == 1  # only the fresh card's maker landed
+    assert applied["brands_set"] == 2  # both brands landed (no existing brand anywhere)

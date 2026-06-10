@@ -28,7 +28,13 @@ class MaterialCard(Base):
     id = Column(Integer, primary_key=True)
     normalized_mpn = Column(String(255), nullable=False, unique=True, index=True)
     display_mpn = Column(String(255), nullable=False)
+    # Dual-brand semantics (migration 097): `manufacturer` = the ACTUAL MAKER (Seagate
+    # Technology, Kingston Technology, Hitachi/IBM); `brand` = the OEM LABEL on the part
+    # (IBM, Dell Technologies, Hewlett Packard Enterprise, Lenovo). Nullable — most cards
+    # never get a brand. Both are written ONLY via spec_tiers.set_manufacturer/set_brand
+    # (F1 ladder + normalize_brand_name); the combined "Brand" facet ORs across both.
     manufacturer = Column(String(255), index=True)
+    brand = Column(String(255), index=True)
     description = Column(String(1000))
     search_count = Column(Integer, default=0)
     last_searched_at = Column(UTCDateTime)
@@ -72,6 +78,21 @@ class MaterialCard(Base):
     category_confidence = Column(Float)
     category_tier = Column(Integer)
     category_updated_at = Column(UTCDateTime)  # when the category was last (re)written via the ladder
+
+    # Brand + manufacturer provenance (migration 097 — written via spec_tiers.set_brand /
+    # set_manufacturer, governed by the same F1 ladder as category_*). A valued
+    # manufacturer with NULL provenance (legacy data, or a writer that bypassed the
+    # helpers) ranks at the legacy_backfill floor (tier 50, conf 0.5) at runtime — so
+    # trio_source (95) maker evidence can displace an OEM name sitting in `manufacturer`
+    # from legacy data, but a stray AI guess (40) cannot.
+    brand_source = Column(String(50))
+    brand_confidence = Column(Float)
+    brand_tier = Column(Integer)
+    brand_updated_at = Column(UTCDateTime)
+    manufacturer_source = Column(String(50))
+    manufacturer_confidence = Column(Float)
+    manufacturer_tier = Column(Integer)
+    manufacturer_updated_at = Column(UTCDateTime)
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 

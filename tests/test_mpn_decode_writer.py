@@ -61,8 +61,18 @@ def test_decode_writes_ssd_and_categorizes_null_category(db_session: Session):
     stats = decode_and_record_specs(db_session, [card.id])
     db_session.commit()
 
-    assert stats == {"decoded": 1, "written": 3, "categorized": 1, "skipped_category_conflict": 0}
+    assert stats == {
+        "decoded": 1,
+        "written": 3,
+        "categorized": 1,
+        "manufacturers_set": 1,  # dual-brand W4: decode vendor → manufacturer ladder
+        "skipped_category_conflict": 0,
+    }
     assert card.category == "ssd"
+    assert card.manufacturer == "Samsung"  # verbatim — manufacturers table unseeded here
+    assert card.manufacturer_source == "mpn_decode"
+    assert card.manufacturer_tier == 85
+    assert card.manufacturer_confidence == 0.9
     f = _facets(db_session, card.id)
     assert f["form_factor"] == "U.2"
     assert f["interface"] == "NVMe PCIe 4.0"
@@ -169,9 +179,16 @@ def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
         stats = decode_and_record_specs(db_session, [card.id])
     finally:
         loguru_logger.remove(sink_id)
-    assert stats == {"decoded": 1, "written": 0, "categorized": 0, "skipped_category_conflict": 1}
+    assert stats == {
+        "decoded": 1,
+        "written": 0,
+        "categorized": 0,
+        "manufacturers_set": 1,  # the maker claim comes from the MPN, not the commodity
+        "skipped_category_conflict": 1,
+    }
     assert any("dram->hdd" in w for w in warnings), warnings
     assert card.category == "dram"  # higher-tier category preserved
+    assert card.manufacturer == "Seagate"  # W4 maker write still lands (ladder-gated)
     # The card's category is still "dram", so a drive's capacity_gb has no dram schema match
     # and is rejected — nothing drive-specific lands on the DRAM card.
     assert "capacity_gb" not in _facets(db_session, card.id)
@@ -212,7 +229,13 @@ def test_decode_skips_unrecognized_mpn(db_session: Session):
     db_session.flush()
 
     stats = decode_and_record_specs(db_session, [card.id])
-    assert stats == {"decoded": 0, "written": 0, "categorized": 0, "skipped_category_conflict": 0}
+    assert stats == {
+        "decoded": 0,
+        "written": 0,
+        "categorized": 0,
+        "manufacturers_set": 0,
+        "skipped_category_conflict": 0,
+    }
 
 
 def test_decode_categorizes_uncategorized_card(db_session: Session):

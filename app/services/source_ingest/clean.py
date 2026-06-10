@@ -8,8 +8,11 @@ What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and nor
       to an app-canonical category (None if unmappable) with a CPU-bucket pollution deny-list
       (the SFDC master's 'CPU' code is ~14% non-CPU parts — see _CPU_POLLUTION_RE); and DROPS
       the record when the MPN is too short / falsy or the description says "DO NOT USE".
-      ``extract_trailing_oem`` pulls the embedded ", IBM"/", EMC"/", HP" manufacturer token out
-      of a sheet description.
+      ``extract_trailing_oem`` pulls the embedded ", IBM"/", EMC"/", HP" trailing token out
+      of a sheet description. Dual-brand routing (SPEC_DUAL_BRAND_FILTERS §2 W6): a trailing
+      token matching OEM_TRAILING_RE (IBM/Dell/HP/HPE/Lenovo — an OEM LABEL, not a maker)
+      fills ``record.brand``; any other plausible trailing token keeps the legacy behavior
+      and fills ``manufacturer`` when absent. Brand is NEVER inferred beyond that regex.
 Called by: app/management/ingest_source_data.py (between parse and consolidate).
 Depends on: app.utils.normalization.normalize_mpn_key (the dedup-key normalizer the app uses
       for material_cards.normalized_mpn) + normalize_mpn (display form); app.services.
@@ -24,6 +27,7 @@ import re
 
 from app.constants import MaterialCondition
 from app.services.category_normalizer import normalize_trio_category
+from app.services.manufacturer_normalizer import OEM_TRAILING_RE
 from app.services.source_ingest.models import SourceRecord
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
 
@@ -140,8 +144,9 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     "DO NOT USE" (case-insensitive). Returns a NEW, cleaned SourceRecord (the input is
     never modified): scrubs text fields, sets ``normalized_mpn`` (dedup key) and
     ``raw_mpn`` (display form), canonicalizes condition (None when the source had none),
-    fills manufacturer from the trailing OEM token when absent, and maps the source
-    category to a canonical key (None if unmappable).
+    routes a trailing OEM-label token (OEM_TRAILING_RE) to ``brand``, fills manufacturer
+    from any OTHER plausible trailing token when absent, and maps the source category to
+    a canonical key (None if unmappable).
     """
     display_mpn = strip_mpn_suffix(rec.raw_mpn)
     norm_key = normalize_mpn_key(display_mpn)
@@ -153,8 +158,16 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
     if description and "do not use" in description.lower():
         return None
 
+    # Dual-brand routing: a trailing token in the literal OEM-label list is BRAND
+    # evidence ("HDD, ..., IBM" → brand IBM), never a maker. Anything else keeps the
+    # legacy behavior: fill manufacturer when the source carried none.
+    brand = _scrub_text(rec.brand)
+    oem_match = OEM_TRAILING_RE.search(description) if description else None
+    if oem_match and not brand:
+        brand = oem_match.group(1)
+
     manufacturer = _scrub_text(rec.manufacturer)
-    if not manufacturer:
+    if not manufacturer and not oem_match:
         manufacturer = extract_trailing_oem(description)
 
     # All source_ingest data is TRIO's own export, so the TRIO-scoped vocabulary
@@ -175,6 +188,7 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
         raw_mpn=normalize_mpn(display_mpn) or display_mpn,
         normalized_mpn=norm_key,
         manufacturer=manufacturer,
+        brand=brand,
         description=description,
         condition=canonicalize_condition(rec.condition),
         quantity=rec.quantity,

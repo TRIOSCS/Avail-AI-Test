@@ -377,6 +377,18 @@ def _seed_manufacturers(conn) -> None:
         ("IBM", []),
         ("Hewlett Packard Enterprise", ["HPE", "HP"]),
         ("Dell Technologies", ["Dell"]),
+        # Dual-brand normalization seeds (SPEC_DUAL_BRAND_FILTERS §2): canonical homes
+        # for the brand/maker names normalize_brand_name resolves. "Toshiba" the
+        # canonical deliberately coexists with the "Toshiba" alias of "Toshiba
+        # Electronic Devices" above — canonical names win the lookup-map collision.
+        ("Lenovo", []),
+        ("Toshiba", []),
+        ("Hitachi", []),
+        ("Maxtor", []),
+        ("Fujitsu", []),
+        ("Quantum", []),
+        ("SanDisk", []),
+        ("Kingston Technology", ["Kingston"]),
     ]
     for canonical_name, aliases in seeds:
         _exec(
