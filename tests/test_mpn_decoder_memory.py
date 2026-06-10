@@ -118,6 +118,10 @@ RANK_CASES = [
         "MT36KSF2G72PZ-1G6M1",  # 16GB 2Rx4 DDR3L-1600 RDIMM (KSF = 1.35 V)
         {"rank": "2Rx4", "capacity_gb": 16, "ddr_type": "DDR3", "voltage": 1.35, "registered": "Registered"},
     ),
+    (
+        "MT18JSF1G72PZ-1G9E1",  # 8GB 1Rx4 DDR3-1866 RDIMM (JSF = standard 1.5 V)
+        {"rank": "1Rx4", "capacity_gb": 8, "ddr_type": "DDR3", "voltage": 1.5, "registered": "Registered"},
+    ),
     # Kingston — S/D/Q rank token; speed code pins the generation; L = DDR3L flag
     (
         "KVR21R15D4/16",  # 16GB 2Rx4 DDR4-2133 RDIMM
@@ -146,6 +150,30 @@ RANK_CASES = [
     (
         "KSM26ES8/8ME",  # 8GB 1Rx8 DDR4-2666 ECC UDIMM (die-rev suffix after capacity)
         {"rank": "1Rx8", "capacity_gb": 8, "registered": "Unbuffered", "ecc": True, "voltage": 1.2},
+    ),
+    (
+        "KVR24L17Q4/32",  # 32GB 4Rx4 DDR4-2400 LRDIMM — after a DDR4 speed the L IS the module letter
+        {
+            "rank": "4Rx4",
+            "form_factor": "LRDIMM",
+            "registered": "Load-Reduced",
+            "voltage": 1.2,
+            "ddr_type": "DDR4",
+            "speed_mhz": 2400,
+            "capacity_gb": 32,
+        },
+    ),
+    (
+        "KSM32LQ4/64HDM",  # 64GB 4Rx4 DDR4-3200 LRDIMM — rank token Q4 directly after the L flag
+        {
+            "rank": "4Rx4",
+            "form_factor": "LRDIMM",
+            "registered": "Load-Reduced",
+            "voltage": 1.2,
+            "ddr_type": "DDR4",
+            "speed_mhz": 3200,
+            "capacity_gb": 64,
+        },
     ),
     # Crucial — explicit F<S|D|Q><4|8> token right after the form letter
     ("CT16G4RFD8266", {"rank": "2Rx8", "registered": "Registered", "voltage": 1.2}),
@@ -201,3 +229,41 @@ def test_kingston_ddr3_rank_token_is_not_a_generation():
     assert result.specs.get("ddr_type") == "DDR3"
     assert result.specs.get("rank") == "2Rx4"
     assert result.specs.get("voltage") == 1.5
+
+
+def test_kingston_ddr2_part_omits_ddr_type():
+    # KVR667D2D4P5/4G is a real DDR2-667 2Rx4 registered DIMM. Its speed code "66" is not in
+    # _KING_GEN_BY_SPEED, and the D[345] fallback must NOT fire for KVR/KSM parts — the D4
+    # substring is the rank token, and reading it as DDR4 was the exact bug the speed table
+    # fixed. ddr_type must be ABSENT (omitted, never guessed); the rank token still decodes.
+    result = decode_mpn("KVR667D2D4P5/4G")
+    assert result is not None
+    assert "ddr_type" not in result.specs
+    assert result.specs.get("rank") == "2Rx4"
+    assert result.specs.get("capacity_gb") == 4
+
+
+def test_kingston_ddr5_speed_and_dash_capacity():
+    # KVR48U40BS8-16 exercises three new paths at once: the DDR5 rows of _KING_GEN_BY_SPEED,
+    # the dash-separated capacity branch of _KING_CAP, and the DDR5 voltage omission
+    # (1.1 V is deliberately not emitted). "U" is not in _KING_FORM → no form_factor.
+    result = decode_mpn("KVR48U40BS8-16")
+    assert result is not None
+    assert result.specs.get("ddr_type") == "DDR5"
+    assert result.specs.get("speed_mhz") == 4800
+    assert result.specs.get("rank") == "1Rx8"
+    assert result.specs.get("capacity_gb") == 16
+    assert "voltage" not in result.specs
+    assert "form_factor" not in result.specs
+
+
+def test_samsung_ddr2_modules_emit_correct_buffering_without_ddr_type():
+    # DDR2-era Samsung modules DO match the 393/378 gates (generation letter T just leaves
+    # ddr_type unset). The emitted buffering is still correct — 393/378 buffering is
+    # era-invariant — so this pins the docstring's "never a wrong buffering value" claim.
+    result = decode_mpn("M393T5750EZA-CE6")  # DDR2 RDIMM
+    assert result.specs.get("registered") == "Registered"
+    assert "ddr_type" not in result.specs
+    result = decode_mpn("M378T2863QZS-CE6")  # DDR2 UDIMM
+    assert result.specs.get("registered") == "Unbuffered"
+    assert "ddr_type" not in result.specs
