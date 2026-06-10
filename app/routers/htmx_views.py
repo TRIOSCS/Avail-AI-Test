@@ -3013,22 +3013,42 @@ async def search_history_panel(
     """Render the 'What we know' history panel for the searched MPN.
 
     Called by: results_shell.html right column (hx-get).
-    Depends on: part_history_service.get_part_history, normalize_mpn_key.
+    Depends on: part_history_service.get_part_history, normalize_mpn_key,
+                fru_matrix_service.get_fru_view/get_reverse_view (compact FRU
+                crosswalk context — both views are capped/cheap reads).
     """
+    from ..services.fru_matrix_service import get_fru_view, get_reverse_view
     from ..services.part_history_service import PartHistory, get_part_history
     from ..utils.normalization import normalize_mpn_key
 
     key = normalize_mpn_key(mpn)  # pure/cheap; outside try so it can be logged on failure
+    fru_view = None
+    fru_reverse = None
     try:
         history = get_part_history(db, key)
+        if key:
+            # FRU crosswalk context, only for a concrete searched MPN: forward
+            # (the MPN is a FRU) and reverse (the MPN appears under FRUs).
+            fru_view = get_fru_view(db, mpn)
+            fru_reverse = get_reverse_view(db, mpn)
         error = False
     except Exception:
         logger.exception("search_history_panel failed mpn={} key={} user={}", mpn, key, user.id)
         history = PartHistory(found=False)
+        fru_view = None
+        fru_reverse = None
         error = True
 
     ctx = _base_ctx(request, user, "search")
-    ctx.update({"history": history, "error": error})
+    ctx.update(
+        {
+            "history": history,
+            "error": error,
+            "fru_view": fru_view,
+            "fru_reverse": fru_reverse,
+            "fru_query": mpn,
+        }
+    )
     return template_response("htmx/partials/search/history_panel.html", ctx)
 
 

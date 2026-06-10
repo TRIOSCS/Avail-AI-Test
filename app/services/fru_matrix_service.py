@@ -7,7 +7,8 @@ input and normalize it internally with normalize_mpn_key. The reverse view is
 capped at REVERSE_VIEW_LIMIT usages (shared hardware PNs like screws can sit under
 thousands of FRUs); ReverseView.total carries the uncapped count for display.
 
-Called by: app/routers/htmx_views.py (material detail + fru-lookup partials)
+Called by: app/routers/htmx_views.py (material detail + fru-lookup partials, and the
+           search-page "What we know" panel's compact FRU-crosswalk context)
 Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
             app/utils/normalization.normalize_mpn_key
 """
@@ -72,6 +73,11 @@ assert {k for _, kinds in _SECTIONS for k in kinds} == set(FruLinkKind), "_SECTI
 assert set(KIND_LABELS) == set(FruLinkKind), "KIND_LABELS must cover every FruLinkKind"
 
 
+def _plural(n: int, noun: str) -> str:
+    """'1 tray' / '3 trays' — display helper for compact summary lines."""
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 @dataclass(frozen=True)
 class FruLinkItem:
     """One deduplicated related part under a FRU."""
@@ -121,6 +127,49 @@ class FruView:
         """Count of sectioned (kind-mapped, deduplicated) items on display."""
         return sum(len(s.items) for s in self.sections)
 
+    def _count_kinds(self, kinds: set[FruLinkKind]) -> int:
+        return sum(1 for s in self.sections for i in s.items if i.rel_kind in kinds)
+
+    @property
+    def drive_count(self) -> int:
+        """Items in the 'Approved drives & models' section (drive PNs + mfg models)."""
+        return self._count_kinds({FruLinkKind.DRIVE_PN, FruLinkKind.MFG_MODEL})
+
+    @property
+    def ibm_11s_count(self) -> int:
+        return self._count_kinds({FruLinkKind.IBM_11S})
+
+    @property
+    def tray_count(self) -> int:
+        return self._count_kinds({FruLinkKind.TRAY, FruLinkKind.TRAY_ALT})
+
+    @property
+    def top_models(self) -> tuple[FruLinkItem, ...]:
+        """First 3 manufacturer-model items (qualified-first order) for compact
+        context."""
+        models = [i for s in self.sections for i in s.items if i.rel_kind == FruLinkKind.MFG_MODEL]
+        return tuple(models[:3])
+
+    @property
+    def summary(self) -> str:
+        """One-line count summary for the search-page 'What we know' FRU context.
+
+        Non-zero headline groups joined with '·'; falls back to the total link count
+        when the FRU carries none of the headline kinds (e.g. Lenovo PNs only).
+        """
+        segments = [
+            _plural(n, noun)
+            for n, noun in (
+                (self.drive_count, "approved drive"),
+                (self.ibm_11s_count, "11S number"),
+                (self.tray_count, "tray"),
+            )
+            if n
+        ]
+        if not segments:
+            segments = [_plural(self.total_links, "linked part")]
+        return " · ".join(segments)
+
 
 @dataclass(frozen=True)
 class FruUsage:
@@ -154,6 +203,11 @@ class ReverseView:
 
     usages: tuple[FruUsage, ...]
     total: int  # distinct (FRU, role) usages before the display cap
+
+    @property
+    def top_frus(self) -> tuple[str, ...]:
+        """First 3 distinct FRU numbers (display spelling) for compact context."""
+        return tuple(dict.fromkeys(u.fru_raw for u in self.usages))[:3]
 
 
 def _richness(link: FruLink) -> tuple[int, int, int, int]:

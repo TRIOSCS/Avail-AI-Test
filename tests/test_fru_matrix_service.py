@@ -4,7 +4,9 @@ What: Seeds fru_links rows and asserts get_fru_view section grouping, cross-shee
       dedup (richer rows preferred, missing attributes coalesced), qualified-first
       ordering, deterministic fru_raw selection, raw-input normalization,
       get_reverse_view dedup/context/cap (ReverseView), KIND_LABELS/_SECTIONS
-      completeness against FruLinkKind, and the qual pill helpers.
+      completeness against FruLinkKind, the qual pill helpers, and the compact
+      summary helpers (FruView.summary/top_models, ReverseView.top_frus) behind
+      the search-page "What we know" FRU-crosswalk context.
 Called by: pytest
 Depends on: app.models.FruLink, app.services.fru_matrix_service
 """
@@ -191,6 +193,49 @@ class TestGetReverseView:
         assert len(view.usages) == REVERSE_VIEW_LIMIT
         # Deterministic order: the cap keeps the first FRUs alphabetically.
         assert view.usages[0].fru_raw == "FRU0000"
+
+
+class TestCompactSummaries:
+    """FruView.summary/top_models + ReverseView.top_frus — the search-page 'What we
+    know' FRU-crosswalk context helpers."""
+
+    def test_summary_counts_headline_kinds(self, db_session):
+        _add(db_session, related="ST9300603SS", kind=FruLinkKind.MFG_MODEL)
+        _add(db_session, related="00VN562", kind=FruLinkKind.DRIVE_PN)
+        _add(db_session, related="68Y7789", kind=FruLinkKind.IBM_11S)
+        _add(db_session, related="44T2216", kind=FruLinkKind.TRAY)
+        view = get_fru_view(db_session, "00AJ001")
+        assert view.summary == "2 approved drives · 1 11S number · 1 tray"
+
+    def test_summary_falls_back_to_total_links(self, db_session):
+        _add(db_session, related="01GR331", kind=FruLinkKind.LENOVO_PN)
+        view = get_fru_view(db_session, "00AJ001")
+        assert view.summary == "1 linked part"
+
+    def test_tray_alt_counts_as_tray(self, db_session):
+        _add(db_session, related="44T2216", kind=FruLinkKind.TRAY)
+        _add(db_session, related="44T2217", kind=FruLinkKind.TRAY_ALT)
+        view = get_fru_view(db_session, "00AJ001")
+        assert view.tray_count == 2
+        assert view.summary == "2 trays"
+
+    def test_top_models_caps_at_three_mfg_models_only(self, db_session):
+        for i in range(4):
+            _add(db_session, related=f"ST930060{i}SS", kind=FruLinkKind.MFG_MODEL, manufacturer="Seagate")
+        _add(db_session, related="00VN562", kind=FruLinkKind.DRIVE_PN)
+        view = get_fru_view(db_session, "00AJ001")
+        assert len(view.top_models) == 3
+        assert all(m.rel_kind == FruLinkKind.MFG_MODEL.value for m in view.top_models)
+        assert view.top_models[0].manufacturer == "Seagate"
+
+    def test_top_frus_distinct_and_capped_at_three(self, db_session):
+        # Same FRU twice (two roles) must appear once; 4 distinct FRUs cap at 3.
+        _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY)
+        _add(db_session, fru="00AJ001", related="44T2216", kind=FruLinkKind.TRAY_ALT)
+        for i in range(2, 5):
+            _add(db_session, fru=f"00AJ00{i}", related="44T2216", kind=FruLinkKind.TRAY)
+        view = get_reverse_view(db_session, "44T2216")
+        assert view.top_frus == ("00AJ001", "00AJ002", "00AJ003")
 
 
 class TestModelValidation:

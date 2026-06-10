@@ -139,6 +139,9 @@ results_shell.html (right column)
               |        BY material_card_id: offers, distinct buyers, confirmed/won
               |        (won/sold offers + won requisitions + customer purchases),
               |        sightings, requirements, and a min/max/last price trend.
+              +---> fru_matrix_service.get_fru_view / get_reverse_view(db, mpn)
+              |        FRU-crosswalk context (capped/cheap reads, only for a
+              |        concrete searched MPN — see "FRU crosswalk context" below)
               +---> renders history_panel.html (or empty state if no card)
 ```
 
@@ -147,6 +150,20 @@ materials detail router (`material_detail_partial`, `material_tab_partial`)
 consumes the same `*_for_card` helpers, so the search panel and the full part
 page can never drift. The endpoint is wrapped in try/except (logged via
 Loguru) and degrades to an empty/error panel rather than failing the page.
+
+**FRU crosswalk context.** When the searched MPN matches `fru_links` in either
+direction, the panel appends a compact "FRU crosswalk" card (silent on no hit,
+matching the materials-detail decision):
+
+- **Forward hit** (the MPN is a FRU): one-line counts via `FruView.summary`
+  ("N approved drives · M 11S numbers · K trays", falling back to "N linked
+  parts"), plus up to 3 manufacturer-model chips (`FruView.top_models`).
+- **Reverse hit** (the MPN appears under FRUs): "Used in N FRUs"
+  (`ReverseView.total`) plus up to 3 distinct FRU numbers
+  (`ReverseView.top_frus`).
+- Both cases share a "View full FRU matrix →" deep link to the materials
+  surface (`/v2/materials?q=<mpn>`, the same URL pattern the fru-lookup
+  partial pushes) — the full matrix is never duplicated on the search page.
 
 ```
 Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
@@ -953,6 +970,8 @@ Lookup (read path):
 GET /v2/partials/materials/{card_id}          (material detail surface)
 GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
     |                                          registered BEFORE the {card_id} route)
+GET /v2/partials/search/history?mpn=<pn>      (search-page "What we know" panel —
+    |                                          compact context card only; see §2a)
     v
 fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
 fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under

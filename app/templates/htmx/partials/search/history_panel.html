@@ -1,6 +1,8 @@
-{# What-we-know panel — searched part's internal history.
+{# What-we-know panel — searched part's internal history + compact FRU crosswalk context.
    Called by: htmx_views.search_history_panel
-   Depends on: PartHistory (history), error flag, Alpine.js for the accordion. #}
+   Depends on: PartHistory (history), error flag, Alpine.js for the accordion;
+               fru_view (FruView | None), fru_reverse (ReverseView | None) and
+               fru_query for the FRU crosswalk card (renders nothing on no hit). #}
 {% if error %}
 <div class="rounded-xl bg-white p-6 text-center border border-amber-200 shadow-sm">
   <p class="text-sm font-medium text-amber-700">History could not be loaded.</p>
@@ -110,6 +112,49 @@
     <span class="font-medium">${{ history.price_trend.min_price }}</span> –
     <span class="font-medium">${{ history.price_trend.max_price }}</span>
     · last ${{ history.price_trend.last_price or "—" }}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+{# ── FRU crosswalk context — compact card, renders ONLY on a crosswalk hit
+     (forward: the searched MPN is a FRU; reverse: it appears under FRUs).
+     Full matrix lives on the materials surface — deep link, don't duplicate. #}
+{% if not error and (fru_view or (fru_reverse and fru_reverse.total > 0)) %}
+<div class="mt-3 rounded-xl bg-white border border-gray-100 shadow-sm p-4">
+  <div class="flex items-center justify-between gap-2">
+    <p class="text-sm font-semibold text-gray-900">FRU crosswalk</p>
+    <a href="/v2/materials?q={{ fru_query | urlencode }}"
+       hx-get="/v2/partials/materials?q={{ fru_query | urlencode }}"
+       hx-target="#main-content" hx-push-url="/v2/materials?q={{ fru_query | urlencode }}"
+       class="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-700">View full FRU matrix →</a>
+  </div>
+
+  {% if fru_view %}
+  <p class="mt-2 text-xs text-gray-600">
+    <span class="font-mono font-semibold text-gray-800">{{ fru_view.fru_raw }}</span>
+    is a FRU · {{ fru_view.summary }}
+  </p>
+  {% if fru_view.top_models %}
+  <div class="mt-2 flex flex-wrap gap-1">
+    {% for m in fru_view.top_models %}
+    <span class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+      <span class="font-mono">{{ m.related_raw }}</span>{% if m.manufacturer %} · {{ m.manufacturer }}{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if fru_reverse and fru_reverse.total > 0 %}
+  <p class="mt-2 text-xs text-gray-600">
+    Used in <span class="font-semibold text-gray-900">{{ fru_reverse.total }}</span>
+    FRU{{ '' if fru_reverse.total == 1 else 's' }}
+  </p>
+  <div class="mt-1 flex flex-wrap gap-1">
+    {% for f in fru_reverse.top_frus %}
+    <span class="inline-block rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600 font-mono">{{ f }}</span>
+    {% endfor %}
   </div>
   {% endif %}
 </div>
