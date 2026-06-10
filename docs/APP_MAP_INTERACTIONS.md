@@ -656,13 +656,24 @@ Delegated click listener in app/static/htmx_app.js
     |       (app/routers/activity.py, schema OutreachInitiatedRequest in
     |        app/schemas/activity.py)
     |
-    +---> On success: $store.toast success flash
+    +---> On success: $store.toast success flash + #cdm-list refresh
+    |       (re-sorts the account list so the touch is visible immediately)
+    +---> On failure (429/5xx/network): $store.toast ERROR flash — outreach
+    |       logging failures are never silent
     |
     v
 activity.py router -> log_outreach_initiated(db, user, request)
+    |   - rate limit: per-user "outreach" bucket (30/min), separate from the
+    |     click-to-call bucket (10/min) so channels never starve each other
+    |   - nonexistent company/site/contact ids are nulled out with a warning
+    |     (stale DOM ids must not FK-crash the insert)
     |
     v
 app/services/activity_service.log_outreach_initiated()
+    |
+    +---> Dedup: same user+channel+subject+company within 120s
+    |       (OUTREACH_DEDUP_SECONDS) returns the existing row — double-clicks
+    |       do not create duplicate activities or double bumps
     |
     +---> Maps channel to ActivityType:
     |       phone   -> ActivityType.CALL_LOGGED   (direction=outbound)
@@ -682,7 +693,11 @@ Channel enum (app/constants.py):
     Channel.PHONE | Channel.EMAIL | Channel.TEAMS | Channel.WECHAT (new)
 ```
 
-`company_detail_partial` builds `contact_rows` via the `_company_contact_rows` helper
+CDM business rules (staleness tiers, account-list query/sort, contact-row
+assembly) live in `app/services/crm_service.py` (`staleness_tier`,
+`cdm_company_query`, `cdm_list_ctx`, `company_contact_rows`); the
+`htmx_views.py` routes are thin wrappers.
+`company_detail_partial` builds `contact_rows` via the `company_contact_rows` helper
 (SiteContacts across all active sites + legacy site-level contacts) and passes it to
 `tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
 

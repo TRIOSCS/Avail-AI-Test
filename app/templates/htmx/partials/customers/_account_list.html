@@ -15,13 +15,16 @@
 <div class="divide-y divide-gray-100">
   {% for c in companies %}
   <div id="cdm-row-{{ c.id }}" role="button" tabindex="0"
-       class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2"
+       class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
        hx-get="/v2/partials/customers/{{ c.id }}"
        hx-target="#cdm-detail"
        hx-swap="innerHTML"
+       hx-target-error="#cdm-error"
+       hx-trigger="click, keyup[key=='Enter']"
+       data-loading-class="opacity-60 pointer-events-none"
        preload="mouseover"
        @click="selectedId = {{ c.id }}"
-       @keydown.enter="selectedId = {{ c.id }}"
+       @keyup.enter="selectedId = {{ c.id }}"
        :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
     <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.staleness, 'bg-gray-300') }}"
           role="img" aria-label="{{ c.staleness|replace('_', ' ')|title }}"
@@ -39,23 +42,30 @@
   {% endfor %}
 </div>
 
-{# Pagination #}
+{# Pagination — keyboard-operable; offset clamped at 0; limit pinned so a
+   future page-size control can't desync links from the route default. #}
 {% if total > limit %}
 <div class="flex items-center justify-center gap-1 py-2 border-t border-gray-100">
   {% if offset > 0 %}
-  <a hx-get="/v2/partials/customers/account-list?offset={{ offset - limit }}"
+  <a role="button" tabindex="0"
+     hx-get="/v2/partials/customers/account-list?offset={{ [offset - limit, 0]|max }}&limit={{ limit }}"
      hx-target="#cdm-list"
      hx-swap="innerHTML"
+     hx-target-error="#cdm-error"
      hx-include="#cdm-filters"
-     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
+     hx-trigger="click, keyup[key=='Enter']"
+     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">Prev</a>
   {% endif %}
   <span class="px-2 py-1 text-xs text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
   {% if offset + limit < total %}
-  <a hx-get="/v2/partials/customers/account-list?offset={{ offset + limit }}"
+  <a role="button" tabindex="0"
+     hx-get="/v2/partials/customers/account-list?offset={{ offset + limit }}&limit={{ limit }}"
      hx-target="#cdm-list"
      hx-swap="innerHTML"
+     hx-target-error="#cdm-error"
      hx-include="#cdm-filters"
-     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
+     hx-trigger="click, keyup[key=='Enter']"
+     class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">Next</a>
   {% endif %}
 </div>
 {% endif %}

@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth
+from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth, OutreachChannel
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -567,18 +567,33 @@ def log_company_note(
 # click-to-contact outreach logged from the CDM account workspace.
 # WeChat has no dedicated snapshot column — the handle is kept in notes.
 _OUTREACH_CHANNEL_MAP: dict[str, tuple[str, str, str, str | None]] = {
-    "phone": (ActivityType.CALL_LOGGED, Channel.PHONE, EventType.CALL, "contact_phone"),
-    "email": (ActivityType.EMAIL_SENT, Channel.EMAIL, EventType.EMAIL, "contact_email"),
-    "teams": (ActivityType.TEAMS_MESSAGE, Channel.TEAMS, EventType.MESSAGE, "contact_email"),
-    "wechat": (ActivityType.WECHAT_MESSAGE, Channel.WECHAT, EventType.MESSAGE, None),
+    OutreachChannel.PHONE: (ActivityType.CALL_LOGGED, Channel.PHONE, EventType.CALL, "contact_phone"),
+    OutreachChannel.EMAIL: (ActivityType.EMAIL_SENT, Channel.EMAIL, EventType.EMAIL, "contact_email"),
+    OutreachChannel.TEAMS: (ActivityType.TEAMS_MESSAGE, Channel.TEAMS, EventType.MESSAGE, "contact_email"),
+    OutreachChannel.WECHAT: (ActivityType.WECHAT_MESSAGE, Channel.WECHAT, EventType.MESSAGE, None),
 }
 
 _OUTREACH_SUBJECT_VERBS: dict[str, str] = {
-    "phone": "Call to",
-    "email": "Email to",
-    "teams": "Teams message to",
-    "wechat": "WeChat message to",
+    OutreachChannel.PHONE: "Call to",
+    OutreachChannel.EMAIL: "Email to",
+    OutreachChannel.TEAMS: "Teams message to",
+    OutreachChannel.WECHAT: "WeChat message to",
 }
+
+# Re-clicking the same contact link within this window returns the existing
+# ActivityLog instead of writing a duplicate (double-clicks, re-opened dialers).
+OUTREACH_DEDUP_SECONDS = 120
+
+
+def bump_company_site_activity(db: Session, company_id: int | None, customer_site_id: int | None) -> None:
+    """Set last_activity_at = now on a company and/or site (staleness sort feed)."""
+    now = datetime.now(timezone.utc)
+    if company_id:
+        db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
+    if customer_site_id:
+        db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
+            {"last_activity_at": now}, synchronize_session=False
+        )
 
 
 def log_outreach_initiated(
@@ -598,13 +613,36 @@ def log_outreach_initiated(
     Called by: POST /api/activity/outreach-initiated (CDM contact panel).
     Creates an outbound, meaningful, auto-logged ActivityLog and bumps
     last_activity_at on the company and site so staleness sorting reflects
-    the touch immediately. Caller commits.
+    the touch immediately. Re-clicks within OUTREACH_DEDUP_SECONDS return the
+    existing record instead of duplicating it. Caller commits.
     """
     if channel not in _OUTREACH_CHANNEL_MAP:
         raise ValueError(f"Unknown outreach channel: {channel}")
     activity_type, log_channel, event_type, snapshot_col = _OUTREACH_CHANNEL_MAP[channel]
 
     target = contact_name or contact_value
+    subject = f"{_OUTREACH_SUBJECT_VERBS[channel]} {target}"
+
+    # Dedup window — same user, channel, target, and entity within the window
+    # is the same click (double-click / retry), not a second touch.
+    dedup_cutoff = datetime.now(timezone.utc) - timedelta(seconds=OUTREACH_DEDUP_SECONDS)
+    existing = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.channel == log_channel,
+            ActivityLog.subject == subject,
+            ActivityLog.company_id == company_id,
+            ActivityLog.created_at >= dedup_cutoff,
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .first()
+    )
+    if existing:
+        logger.info(f"Outreach dedup hit: {channel} -> company {company_id} by user {user_id} (id={existing.id})")
+        return existing
+
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
@@ -617,7 +655,7 @@ def log_outreach_initiated(
         customer_site_id=customer_site_id,
         site_contact_id=site_contact_id,
         contact_name=contact_name,
-        subject=f"{_OUTREACH_SUBJECT_VERBS[channel]} {target}",
+        subject=subject,
         notes=f"source=click_to_contact origin={origin or 'unknown'} contact={contact_value}",
     )
     if snapshot_col:
@@ -625,13 +663,7 @@ def log_outreach_initiated(
     db.add(record)
     db.flush()
 
-    now = datetime.now(timezone.utc)
-    if company_id:
-        db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
-    if customer_site_id:
-        db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
-            {"last_activity_at": now}, synchronize_session=False
-        )
+    bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Outreach logged: {channel} -> company {company_id} by user {user_id}")
     return record
 

@@ -4313,9 +4313,13 @@ async def partials_companies_redirect(request: Request, path: str = ""):
     return RedirectResponse(url=new_url, status_code=301)
 
 
-STALENESS_OVERDUE_DAYS = 30
-STALENESS_DUE_SOON_DAYS = 14
-
+# CDM staleness rules + account-list query building live in the service layer.
+# Re-exported here under their historical names for callers/tests that import
+# them from this module (noqa F401 keeps ruff from stripping the aliases).
+from ..services.crm_service import STALENESS_DUE_SOON_DAYS, STALENESS_OVERDUE_DAYS  # noqa: E402, F401
+from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
+from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
+from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
 _ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
@@ -4330,139 +4334,20 @@ def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -
     return hx_target, push_url_base
 
 
-def _staleness_tier(last_activity_at: datetime | None) -> str:
-    """Compute staleness tier from last_activity_at timestamp."""
-    if last_activity_at is None:
-        return "new"
-    ts = last_activity_at
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    days = (datetime.now(timezone.utc) - ts).days
-    if days >= STALENESS_OVERDUE_DAYS:
-        return "overdue"
-    if days >= STALENESS_DUE_SOON_DAYS:
-        return "due_soon"
-    return "recent"
-
-
-# Sort options for the CDM account workspace left panel. Default "oldest"
-# puts the longest-neglected accounts at the top (call-list order).
-_CDM_SORTS = {
-    "oldest": lambda: Company.last_activity_at.asc().nullsfirst(),
-    "newest": lambda: Company.last_activity_at.desc().nullslast(),
-    "name_asc": lambda: sqlfunc.lower(Company.name).asc(),
-    "name_desc": lambda: sqlfunc.lower(Company.name).desc(),
-}
-
-_CDM_ACCOUNT_TYPES = ("Customer", "Prospect", "Partner", "Competitor")
-
-
-def _cdm_company_query(
-    db: Session, user: User, *, search: str, staleness: str, account_type: str, my_only: str, sort: str
-):
-    """Build the filtered + sorted CDM account list query."""
-    query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
-
-    if search.strip():
-        sb = SearchBuilder(search.strip())
-        query = query.filter(sb.ilike_filter(Company.name))
-
-    now = datetime.now(timezone.utc)
-    overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
-    due_soon_cutoff = now - timedelta(days=STALENESS_DUE_SOON_DAYS)
-    if staleness == "overdue":
-        query = query.filter(Company.last_activity_at < overdue_cutoff)
-    elif staleness == "due_soon":
-        query = query.filter(
-            Company.last_activity_at >= overdue_cutoff,
-            Company.last_activity_at < due_soon_cutoff,
-        )
-    elif staleness == "recent":
-        query = query.filter(Company.last_activity_at >= due_soon_cutoff)
-    elif staleness == "new":
-        query = query.filter(Company.last_activity_at.is_(None))
-
-    if account_type in _CDM_ACCOUNT_TYPES:
-        query = query.filter(Company.account_type == account_type)
-    if my_only:
-        query = query.filter(Company.account_owner_id == user.id)
-
-    sort_fn = _CDM_SORTS.get(sort, _CDM_SORTS["oldest"])
-    return query.order_by(sort_fn())
-
-
-def _cdm_list_ctx(
-    db: Session,
-    user: User,
-    *,
-    search: str,
-    staleness: str,
-    account_type: str,
-    my_only: str,
-    sort: str,
-    limit: int,
-    offset: int,
-) -> dict:
-    """Shared context for the CDM workspace shell and its account-list partial."""
-    query = _cdm_company_query(
-        db, user, search=search, staleness=staleness, account_type=account_type, my_only=my_only, sort=sort
-    )
-    total = query.count()
-    companies = query.offset(offset).limit(limit).all()
-    for c in companies:
-        c.staleness = _staleness_tier(c.last_activity_at)
-
-    # Overdue chip — accounts owned by this user needing a call (sales/trader only)
-    overdue_count = 0
-    if user.role in ("sales", "trader"):
-        call_threshold = datetime.now(timezone.utc) - timedelta(days=STALENESS_OVERDUE_DAYS)
-        overdue_count = (
-            db.query(sqlfunc.count(Company.id))
-            .filter(
-                Company.is_active.is_(True),
-                Company.account_owner_id == user.id,
-                or_(
-                    Company.last_activity_at < call_threshold,
-                    Company.last_activity_at.is_(None),
-                ),
-            )
-            .scalar()
-            or 0
-        )
-
-    return {
-        "companies": companies,
-        "search": search,
-        "staleness": staleness,
-        "account_type": account_type,
-        "my_only": my_only,
-        "sort": sort,
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-        "overdue_count": overdue_count,
-        "account_types": _CDM_ACCOUNT_TYPES,
-    }
-
-
 @router.get("/v2/partials/customers", response_class=HTMLResponse)
 async def companies_list_partial(
     request: Request,
     search: str = "",
     staleness: str = "",
     account_type: str = "",
-    my_only: str = "",
+    my_only: bool = False,
     sort: str = "oldest",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the CDM account workspace (split-panel list + detail) as HTML partial.
-
-    Legacy hx_target/push_url_base query params (still sent by the CRM shell) are
-    ignored — the workspace always swaps account detail into #cdm-detail.
-    """
+    """Return the CDM account workspace (split-panel list + detail) as HTML partial."""
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         _cdm_list_ctx(
@@ -4475,6 +4360,7 @@ async def companies_list_partial(
             sort=sort,
             limit=limit,
             offset=offset,
+            include_overdue=True,
         )
     )
     return template_response("htmx/partials/customers/list.html", ctx)
@@ -4486,14 +4372,18 @@ async def companies_account_list_partial(
     search: str = "",
     staleness: str = "",
     account_type: str = "",
-    my_only: str = "",
+    my_only: bool = False,
     sort: str = "oldest",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return only the CDM left-panel account list (filter/sort/pagination refresh)."""
+    """Return only the CDM left-panel account list (filter/sort/pagination refresh).
+
+    The overdue chip lives in the filter bar (not re-rendered here), so this route skips
+    the overdue COUNT query.
+    """
     ctx = {"request": request, "user": user}
     ctx.update(
         _cdm_list_ctx(
@@ -4623,29 +4513,6 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
-def _company_contact_rows(db: Session, company_id: int) -> list[dict]:
-    """All contacts for a company across its sites, plus legacy site-level contacts.
-
-    Returns [{"contact": SiteContact|None, "site": CustomerSite|None, "legacy": bool}].
-    Used by the detail panel (contacts shown inline) and the contacts tab.
-    """
-    sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()
-    site_map = {s.id: s for s in sites}
-    contacts: list[SiteContact] = []
-    if site_map:
-        contacts = (
-            db.query(SiteContact)
-            .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.is_(True))
-            .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-            .all()
-        )
-    rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]
-    for s in sites:
-        if s.contact_name or s.contact_email:
-            rows.append({"contact": None, "site": s, "legacy": True})
-    return rows
-
-
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4693,7 +4560,7 @@ async def company_detail_partial(
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
-            "contact_rows": _company_contact_rows(db, company_id),
+            "contact_rows": _company_contact_rows(db, company_id, sites=list(company.sites or [])),
             "user": user,
         }
     )
@@ -5089,6 +4956,15 @@ async def set_primary_contact(
     db: Session = Depends(get_db),
 ):
     """Set a contact as primary for the site (unsets others)."""
+    # Validate the site belongs to the company BEFORE mutating — a mismatched
+    # URL must not flip the primary flag and then 500 on render.
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -5111,8 +4987,6 @@ async def set_primary_contact(
         .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
         .all()
     )
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
-    company = db.query(Company).filter(Company.id == company_id).first()
     ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts

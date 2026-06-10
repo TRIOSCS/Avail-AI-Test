@@ -9,7 +9,8 @@
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-<div class="max-w-5xl mx-auto space-y-6">
+{# max-w-3xl: must fit the CDM right panel (~60% viewport), not just full-page #}
+<div class="max-w-3xl mx-auto space-y-6">
 
   {# ── Header Card ─────────────────────────────────────────── #}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
@@ -54,8 +55,9 @@
       </div>
     </div>
 
-    {# Quick info grid (4 cols) #}
-    <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+    {# Quick info grid — 2 cols: the md: viewport breakpoint lies inside a
+       split panel (panel is far narrower than the viewport) #}
+    <div class="mt-6 grid grid-cols-2 gap-4">
       <div class="p-3 rounded-lg bg-gray-50">
         <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</p>
         <p class="mt-1 text-sm font-medium text-gray-900">
@@ -126,7 +128,7 @@
   {# ── Tabs — Contacts first (CDM call-list workflow) ───────── #}
   <div x-data="{ activeTab: 'contacts' }">
     <div class="border-b border-gray-200">
-      <nav class="flex gap-6 -mb-px">
+      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections">
         {% for tab_id, tab_label, tab_count in [
           ('contacts', 'Contacts', contact_rows|length if contact_rows is defined else none),
           ('sites', 'Sites', sites|length),
@@ -134,6 +136,9 @@
           ('activity', 'Activity', none)
         ] %}
         <button @click="activeTab = '{{ tab_id }}'"
+                role="tab"
+                :aria-selected="activeTab === '{{ tab_id }}' ? 'true' : 'false'"
+                aria-controls="company-tab-content"
                 hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
                 hx-trigger="click"
@@ -150,7 +155,7 @@
     </div>
 
     {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
-    <div id="company-tab-content" class="mt-4">
+    <div id="company-tab-content" class="mt-4" role="tabpanel">
       {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
     </div>
   </div>

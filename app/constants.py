@@ -405,6 +405,15 @@ class Channel(StrEnum):
     WECHAT = "wechat"
 
 
+class OutreachChannel(StrEnum):
+    """Click-to-contact outreach channels (CDM contact panel buttons)."""
+
+    PHONE = "phone"
+    EMAIL = "email"
+    TEAMS = "teams"
+    WECHAT = "wechat"
+
+
 class EventType(StrEnum):
     """Canonical activity_log.event_type values (Communication-Intelligence kind)."""
 

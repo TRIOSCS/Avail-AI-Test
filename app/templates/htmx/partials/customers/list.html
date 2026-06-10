@@ -8,15 +8,21 @@
                _detail_empty.html, brand palette.
 #}
 
+{# fitHeight: sized to the viewport in both mount contexts (standalone page and
+   CRM shell tab). @resize.window is auto-unbound by Alpine when the element is
+   swapped out — never add window listeners via x-init here (they leak across
+   HTMX navigations). #}
 <div id="cdm-workspace" class="flex flex-col min-h-[420px]"
-     x-data="{ selectedId: null }"
-     x-init="const fit = () => { $el.style.height = Math.max(420, window.innerHeight - $el.getBoundingClientRect().top - 64) + 'px' }; fit(); window.addEventListener('resize', fit)">
+     x-data="{ selectedId: null, fitHeight() { this.$el.style.height = Math.max(420, window.innerHeight - this.$el.getBoundingClientRect().top - 64) + 'px' } }"
+     x-init="$nextTick(() => fitHeight())"
+     @resize.window.debounce.150ms="fitHeight()">
 
   {# ── Filter / sort bar ─────────────────────────────────────── #}
   <form id="cdm-filters" class="flex items-center gap-2 flex-wrap pb-3 flex-shrink-0"
         hx-get="/v2/partials/customers/account-list"
         hx-target="#cdm-list"
         hx-swap="innerHTML"
+        hx-target-error="#cdm-error"
         hx-trigger="change, keyup changed delay:300ms from:#cdm-search">
 
     <input id="cdm-search" aria-label="Search accounts" type="text" name="search" value="{{ search }}"
@@ -66,6 +72,10 @@
 
     <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
   </form>
+
+  {# Error region — failed list refreshes / row loads land here instead of
+     silently leaving stale rows behind (response-targets extension). #}
+  <div id="cdm-error" class="mb-2 empty:hidden rounded-lg border border-rose-200 bg-rose-50 p-2 text-sm text-rose-700 flex-shrink-0"></div>
 
   {# ── Split workspace: account list (left) + detail panel (right) ── #}
   <div id="split-cdm"

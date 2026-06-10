@@ -11,7 +11,7 @@
 {% macro outreach_btn(label, href, channel, value, company_id, site_id, contact_id, contact_name, icon_path, new_tab=False) %}
 <a href="{{ href }}"
    {% if new_tab %}target="_blank" rel="noopener noreferrer"{% endif %}
-   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors"
+   class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-lg border border-gray-200 text-gray-700 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-1"
    data-outreach-log
    data-channel="{{ channel }}"
    data-value="{{ value }}"

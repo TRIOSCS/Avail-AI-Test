@@ -20,31 +20,62 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, Channel, Direction, EventType
+from ..constants import ActivityType, Channel, Direction, EventType, OutreachChannel
 from ..database import get_db
 from ..dependencies import require_user
-from ..models import ActivityLog, Company, User, VendorCard
+from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
 from ..schemas.activity import ActivityTimelineResponse, CallInitiatedRequest, OutreachInitiatedRequest
+from ..services.activity_service import bump_company_site_activity, log_outreach_initiated
 from ..utils.phone_utils import format_phone_display, format_phone_e164
 
 router = APIRouter(prefix="/api/activity", tags=["activity"])
 
 # ── In-memory rate limiter ─────────────────────────────────────────────
-_call_log: dict[int, list[float]] = defaultdict(list)
-_RATE_LIMIT = 10  # max calls per user per minute
+# Buckets are keyed per user AND per endpoint family so a rep's heavy phone
+# use never silently blocks their email/Teams outreach logging (and vice
+# versa). Outreach gets a higher budget: the CDM call-list workflow can
+# legitimately produce several logs per contact per minute.
+_call_log: dict[str, list[float]] = defaultdict(list)
+_RATE_LIMIT = 10  # max click-to-call logs per user per minute
+_OUTREACH_RATE_LIMIT = 30  # max outreach logs per user per minute
 
 
-def _check_rate_limit(user_id: int) -> bool:
+def _check_rate_limit(user_id: int, bucket: str = "call", limit: int = _RATE_LIMIT) -> bool:
     """Return True if user is within rate limit, False if exceeded."""
+    key = f"{user_id}:{bucket}"
     now = time.time()
     window = now - 60
-    timestamps = _call_log[user_id]
+    timestamps = _call_log[key]
     # Prune old entries
-    _call_log[user_id] = [t for t in timestamps if t > window]
-    if len(_call_log[user_id]) >= _RATE_LIMIT:
+    _call_log[key] = [t for t in timestamps if t > window]
+    if len(_call_log[key]) >= limit:
         return False
-    _call_log[user_id].append(now)
+    _call_log[key].append(now)
     return True
+
+
+def _validated_entity_ids(
+    db: Session,
+    company_id: int | None,
+    customer_site_id: int | None,
+    site_contact_id: int | None = None,
+) -> tuple[int | None, int | None, int | None]:
+    """Null out entity ids that don't exist (warn, don't reject).
+
+    The DOM can carry stale ids (e.g. a coworker deleted the contact while the panel was
+    open); inserting them raises FK IntegrityError → opaque 500. Keep the activity, drop
+    the dangling link.
+    """
+    if company_id and not db.get(Company, company_id):
+        logger.warning(f"activity log: company_id={company_id} not found — dropping link")
+        company_id = None
+    if customer_site_id and not db.get(CustomerSite, customer_site_id):
+        logger.warning(f"activity log: customer_site_id={customer_site_id} not found — dropping link")
+        customer_site_id = None
+    if site_contact_id and not db.get(SiteContact, site_contact_id):
+        logger.warning(f"activity log: site_contact_id={site_contact_id} not found — dropping link")
+        site_contact_id = None
+    return company_id, customer_site_id, site_contact_id
 
 
 @router.post("/call-initiated", status_code=201)
@@ -70,7 +101,7 @@ def call_initiated(
         phone_display = format_phone_display(body.phone_number)
 
         # Resolve company from vendor if not provided
-        company_id = body.company_id
+        company_id, customer_site_id, _ = _validated_entity_ids(db, body.company_id, body.customer_site_id)
         vendor_card_id = body.vendor_card_id
         vendor_name = None
 
@@ -109,7 +140,7 @@ def call_initiated(
             is_meaningful=True,
             vendor_card_id=vendor_card_id,
             company_id=company_id,
-            customer_site_id=body.customer_site_id,
+            customer_site_id=customer_site_id,
             requisition_id=requisition_id,
             contact_phone=e164,
             subject=subject,
@@ -117,14 +148,16 @@ def call_initiated(
             notes=f"source=click_to_call origin={body.origin or 'unknown'} phone_display={phone_display}",
         )
         db.add(record)
+        # A logged call is a touch — keep the CDM staleness sort honest.
+        bump_company_site_activity(db, company_id, customer_site_id)
         db.commit()
 
         return {"id": record.id}
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"call-initiated error: {e}")
+    except Exception:
+        logger.exception("call-initiated error")
         db.rollback()
         raise HTTPException(500, "Failed to record phone contact")
 
@@ -137,39 +170,40 @@ def outreach_initiated(
 ):
     """Log a click-to-contact event (phone / email / Teams / WeChat).
 
-    Fired from the CDM account workspace contact panel when a user clicks a tel:/
-    mailto:/Teams/WeChat
-    link. Creates an outbound ActivityLog and bumps
-    company/site last_activity_at so the staleness sort updates.
+    Fired from the CDM contact panel on tel:/mailto:/Teams/WeChat link clicks.
+    Creates an outbound ActivityLog and bumps company/site last_activity_at so
+    the staleness sort updates. Re-clicks within the dedup window return the
+    existing record.
     """
     try:
         contact_value = body.contact_value.strip()
-        if body.channel == "phone":
+        if body.channel == OutreachChannel.PHONE:
             e164 = format_phone_e164(contact_value)
             if not e164:
                 raise HTTPException(400, "Invalid phone number")
             contact_value = e164
-        elif body.channel in ("email", "teams") and "@" not in contact_value:
-            raise HTTPException(400, "Invalid email address")
+        elif body.channel in (OutreachChannel.EMAIL, OutreachChannel.TEAMS):
+            local, _, domain = contact_value.partition("@")
+            if not local or "." not in domain:
+                raise HTTPException(400, "Invalid email address")
         elif not contact_value:
             raise HTTPException(400, "Contact value is required")
 
-        if not _check_rate_limit(user.id):
+        if not _check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
             raise HTTPException(429, "Too many outreach logs — try again in a minute")
 
-        if body.company_id and not db.get(Company, body.company_id):
-            logger.warning(f"outreach-initiated: company_id={body.company_id} not found")
-
-        from ..services.activity_service import log_outreach_initiated
+        company_id, customer_site_id, site_contact_id = _validated_entity_ids(
+            db, body.company_id, body.customer_site_id, body.site_contact_id
+        )
 
         record = log_outreach_initiated(
             db,
             user_id=user.id,
             channel=body.channel,
             contact_value=contact_value,
-            company_id=body.company_id,
-            customer_site_id=body.customer_site_id,
-            site_contact_id=body.site_contact_id,
+            company_id=company_id,
+            customer_site_id=customer_site_id,
+            site_contact_id=site_contact_id,
             contact_name=body.contact_name,
             origin=body.origin,
         )
@@ -178,8 +212,8 @@ def outreach_initiated(
 
     except HTTPException:
         raise
-    except Exception as e:
-        logger.error(f"outreach-initiated error: {e}")
+    except Exception:
+        logger.exception("outreach-initiated error")
         db.rollback()
         raise HTTPException(500, "Failed to record outreach")
 

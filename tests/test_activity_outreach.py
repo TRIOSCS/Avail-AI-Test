@@ -148,13 +148,78 @@ class TestOutreachInitiated:
         from app.routers import activity as activity_router
 
         user_buckets = activity_router._call_log
-        # Fill the rate limit window for every user id the override may use
-        for _ in range(activity_router._RATE_LIMIT):
+        # Outreach has its own (higher) budget, separate from call-initiated
+        for _ in range(activity_router._OUTREACH_RATE_LIMIT):
             resp = self._post(client, cdm_company, "phone", "+14155551234")
             assert resp.status_code == 201
         resp = self._post(client, cdm_company, "phone", "+14155551234")
         assert resp.status_code == 429
         assert user_buckets  # sanity: limiter actually tracked the user
+
+    def test_rate_limit_bucket_separate_from_call_initiated(self, client, cdm_company):
+        """Exhausting the click-to-call budget must not block outreach logging."""
+        from app.routers import activity as activity_router
+
+        for _ in range(activity_router._RATE_LIMIT):
+            resp = client.post("/api/activity/call-initiated", json={"phone_number": "4155551234"})
+            assert resp.status_code == 201
+        resp = client.post("/api/activity/call-initiated", json={"phone_number": "4155551234"})
+        assert resp.status_code == 429
+
+        # Outreach still works — separate bucket
+        resp = self._post(client, cdm_company, "email", "pat@outreachtest.com")
+        assert resp.status_code == 201
+
+    def test_double_click_dedup_returns_same_record(self, client, db_session, cdm_company):
+        """Re-clicking the same contact link within the window must not duplicate."""
+        from app.models import ActivityLog as AL
+
+        first = self._post(client, cdm_company, "phone", "+14155551234")
+        second = self._post(client, cdm_company, "phone", "+14155551234")
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["id"] == second.json()["id"]
+        count = (
+            db_session.query(AL)
+            .filter(AL.activity_type == "call_logged", AL.company_id == cdm_company["company"].id)
+            .count()
+        )
+        assert count == 1
+
+    def test_nonexistent_entity_ids_dropped_not_500(self, client, db_session):
+        """Stale DOM ids (deleted company/site/contact) must not FK-crash the log."""
+        resp = client.post(
+            "/api/activity/outreach-initiated",
+            json={
+                "channel": "phone",
+                "contact_value": "4155551234",
+                "company_id": 999999,
+                "customer_site_id": 999999,
+                "site_contact_id": 999999,
+            },
+        )
+        assert resp.status_code == 201
+        record = db_session.get(ActivityLog, resp.json()["id"])
+        assert record.company_id is None
+        assert record.customer_site_id is None
+        assert record.site_contact_id is None
+
+    def test_call_initiated_bumps_last_activity(self, client, db_session, cdm_company):
+        """Click-to-call (legacy endpoint) also feeds the staleness sort now."""
+        before = datetime.now(timezone.utc) - timedelta(minutes=1)
+        resp = client.post(
+            "/api/activity/call-initiated",
+            json={
+                "phone_number": "4155551234",
+                "company_id": cdm_company["company"].id,
+                "customer_site_id": cdm_company["site"].id,
+            },
+        )
+        assert resp.status_code == 201
+        db_session.expire_all()
+        company = db_session.get(Company, cdm_company["company"].id)
+        assert company.last_activity_at is not None
+        assert company.last_activity_at.replace(tzinfo=timezone.utc) > before
 
 
 class TestLogOutreachService:

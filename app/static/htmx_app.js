@@ -187,19 +187,46 @@ document.body.addEventListener('click', (evt) => {
     const headers = { 'Content-Type': 'application/json' };
     const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
     if (csrfCookie) headers['x-csrftoken'] = csrfCookie;
-    // keepalive lets the request finish even if the click navigates away
+    const showOutreachToast = (message, type) => {
+        Alpine.store('toast').message = message;
+        Alpine.store('toast').type = type;
+        Alpine.store('toast').show = true;
+    };
+    // keepalive lets the request finish even if the click navigates away.
+    // The fetch is never awaited before the default link action, so the
+    // call/email/Teams handler always opens — but failures must still be
+    // VISIBLE: a silent 429/500 means the rep believes the touch was logged
+    // while the staleness sort quietly stops reflecting their work.
     fetch('/api/activity/outreach-initiated', {
         method: 'POST',
         headers: headers,
         body: JSON.stringify(payload),
         keepalive: true,
     }).then((resp) => {
-        if (!resp.ok) return;
+        if (!resp.ok) {
+            showOutreachToast(
+                resp.status === 429
+                    ? 'Outreach NOT logged — rate limit hit, wait a minute'
+                    : 'Outreach NOT logged (error ' + resp.status + ')',
+                'error'
+            );
+            return;
+        }
         const labels = { phone: 'Call', email: 'Email', teams: 'Teams message', wechat: 'WeChat message' };
-        Alpine.store('toast').message = (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : '');
-        Alpine.store('toast').type = 'success';
-        Alpine.store('toast').show = true;
-    }).catch(() => { /* fire-and-forget: never block the call/email itself */ });
+        showOutreachToast(
+            (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
+            'success'
+        );
+        // Refresh the CDM account list (if on the workspace) so the logged
+        // touch is immediately visible in the staleness sort/labels. Reuses
+        // the filter form's own hx-get (current filters included).
+        const cdmFilters = document.getElementById('cdm-filters');
+        if (cdmFilters && document.getElementById('cdm-list')) {
+            htmx.trigger(cdmFilters, 'change');
+        }
+    }).catch(() => {
+        showOutreachToast('Outreach NOT logged — network error', 'error');
+    });
 });
 
 // ── HTMX error handler — show toast on failed requests ──────
