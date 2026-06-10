@@ -189,6 +189,19 @@ def _annotated_unavailability(
     return annotated
 
 
+def _partition_by_unavailability(vendor_names: list[str], excluded_norms: set[str]) -> tuple[list[str], list[str]]:
+    """Split vendor display names into (unavailable, sendable) against the active-only
+    excluded-norm set, preserving order.
+
+    The RFQ preview/send re-check shares this partition: vendors with an ACTIVE
+    unavailability record on the selected parts are dropped from the send and reported
+    visibly, never silently.
+    """
+    unavailable = [vn for vn in vendor_names if normalize_vendor_name(vn) in excluded_norms]
+    sendable = [vn for vn in vendor_names if normalize_vendor_name(vn) not in excluded_norms]
+    return unavailable, sendable
+
+
 @router.get("/v2/partials/sightings/workspace", response_class=HTMLResponse)
 async def sightings_workspace(
     request: Request,
@@ -1326,9 +1339,7 @@ async def sightings_preview_inquiry(
     # filter alone leaves a TOCTOU hole): excluded vendors are dropped from the
     # preview and reported visibly — never a silent drop.
     excluded = excluded_vendor_norms(db, requirements)
-    unavailable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) in excluded]
-    if unavailable_vendors:
-        vendor_names = [vn for vn in vendor_names if normalize_vendor_name(vn) not in excluded]
+    unavailable_vendors, vendor_names = _partition_by_unavailability(vendor_names, excluded)
 
     requisition_ids = {r.requisition_id for r in requirements}
     requisition_id = next(iter(requisition_ids)) if requisition_ids else None
@@ -1410,8 +1421,7 @@ async def sightings_send_inquiry(
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
     # from the send and reported visibly below — never a silent drop.
     excluded = excluded_vendor_norms(db, requirements)
-    unavailable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) in excluded]
-    sendable_vendors = [vn for vn in vendor_names if normalize_vendor_name(vn) not in excluded]
+    unavailable_vendors, sendable_vendors = _partition_by_unavailability(vendor_names, excluded)
 
     requisition_ids = {r.requisition_id for r in requirements}
     requisition_id = next(iter(requisition_ids)) if requisition_ids else None
