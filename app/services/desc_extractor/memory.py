@@ -4,13 +4,14 @@ What: reads capacity / DDR generation / speed / ECC / module form / rank out of
       compact human memory descriptions like ``Mem, 16GB DDR4 2Rx4 PC4-2400T RDIMM``
       — NO network, NO LLM. Every emitted value is a seeded dram enum member /
       in-range numeric per app/data/commodity_seeds.json; record_spec independently
-      re-validates them (``rank`` has no seeded schema yet, so record_spec skips it
-      until the dram seeds gain one — the pure extractor still returns it).
+      re-validates enum members and skips unseeded keys, but numeric ranges are
+      enforced ONLY here (record_spec performs no numeric_range check) — the drift
+      guard in tests/test_desc_extractor_routing.py pins both against the seeds.
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
 Depends on: _common (constants only) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
-- capacity_gb requires an explicit GB/G token and the seeded 1-256 range (MB-era
+- capacity_gb requires an explicit GB/G token and the seeded 1-512 range (MB-era
   modules and bandwidth-per-second tokens never match).
 - ddr_type from explicit DDR/DDR2/DDR3/DDR3L/DDR4/DDR5 tokens, or the PC3-/PC3L-/
   PC4-<digits> prefixes (PC3→DDR3, PC3L→DDR3L, PC4→DDR4). Mixed generations ⇒ omit.
@@ -23,7 +24,8 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   use); False from "Non-ECC". Contradictory signals ⇒ omit.
 - form_factor: RDIMM/UDIMM/LRDIMM/SO-DIMM tokens verbatim; a bare "DIMM" token maps
   to the seeded generic "DIMM" only when no specific form is present.
-- rank: verbatim 1Rx4/1Rx8/2Rx4/2Rx8/4Rx4/8Rx4 tokens only.
+- rank: verbatim 1Rx4/1Rx8/2Rx4/2Rx8/4Rx4/8Rx4 tokens only — the seeded dram rank
+  enum mirrors _RANK_VALID exactly, so record_spec persists it like the other keys.
 """
 
 import re
@@ -51,8 +53,11 @@ _DIMM_GENERIC = re.compile(r"\bDIMM\b")
 _RANK = re.compile(r"\b([1248])RX([48])\b")
 _RANK_VALID = {"1Rx4", "1Rx8", "2Rx4", "2Rx8", "4Rx4", "8Rx4"}
 
-_SPEED_MIN, _SPEED_MAX = 800, 8400  # seeded dram speed_mhz numeric_range
-_CAP_MIN, _CAP_MAX = 1, 256  # seeded dram capacity_gb numeric_range
+# Seeded dram numeric_ranges (speed_mhz, capacity_gb) — record_spec does NOT validate
+# numeric ranges, so these constants are the only range gate; the drift guard in
+# tests/test_desc_extractor_routing.py asserts them against commodity_seeds.json.
+_SPEED_MIN, _SPEED_MAX = 800, 8400
+_CAP_MIN, _CAP_MAX = 1, 512
 
 
 def _capacity_gb(text: str) -> int | None:

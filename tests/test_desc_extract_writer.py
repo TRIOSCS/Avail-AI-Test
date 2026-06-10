@@ -32,7 +32,7 @@ def test_desc_writes_facets_for_hdd_description(db_session: Session):
     stats = extract_and_record_specs(db_session, [card.id])
     db_session.commit()
 
-    assert stats == {"parsed": 1, "written": 4}
+    assert stats == {"parsed": 1, "written": 4, "failed": 0}
     f = _facets(db_session, card.id)
     assert f["capacity_gb"] == 450
     assert f["rpm"] == "15000"
@@ -45,23 +45,67 @@ def test_desc_writes_facets_for_hdd_description(db_session: Session):
         assert entry["confidence"] == 0.90
 
 
-def test_desc_writes_dram_and_skips_unseeded_rank(db_session: Session):
+def test_desc_writes_dram_including_seeded_rank(db_session: Session):
     seed_commodity_schemas(db_session)
     card = _card(db_session, "46W0769M", "dram", "Mem, 16GB DDR4 2Rx4 PC4-2400T RDIMM")
 
     written = extract_and_record(db_session, card)
     db_session.commit()
 
-    # rank ("2Rx4") is extracted by the pure module but has no seeded dram schema yet,
-    # so record_spec skips it — 5 of the 6 extracted keys persist.
-    assert written == 5
+    # All 6 extracted keys persist — the seeded dram rank enum mirrors the extractor's
+    # _RANK_VALID set (pinned by the drift guard in test_desc_extractor_routing.py).
+    assert written == 6
     f = _facets(db_session, card.id)
     assert f["capacity_gb"] == 16
     assert f["ddr_type"] == "DDR4"
     assert f["speed_mhz"] == 2400
     assert f["form_factor"] == "RDIMM"
     assert f["ecc"] == "true"
-    assert "rank" not in f
+    assert f["rank"] == "2Rx4"
+    assert card.specs_structured["rank"]["source"] == "desc_parse"
+
+
+def test_desc_writes_non_ecc_as_false_facet(db_session: Session):
+    # The ecc=False path must persist as a searchable "false" facet (record_spec's
+    # boolean path), not be dropped — Non-ECC is a real, filterable property.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "KCP316ND8/8", "dram", "Memory, 8GB DDR3 1600MHz Non-ECC UDIMM, Kingston")
+
+    written = extract_and_record(db_session, card)
+    db_session.commit()
+
+    assert written == 5
+    f = _facets(db_session, card.id)
+    assert f["ecc"] == "false"
+    assert card.specs_structured["ecc"]["source"] == "desc_parse"
+
+
+def test_desc_rerun_is_idempotent_and_rewrites_corrected_descriptions(db_session: Session):
+    # Re-enrichment runs the desc-parse pass again over the same card. Pin the intended
+    # semantics: an unchanged description re-writes the SAME values (record_spec's
+    # same-source equal-confidence rule overwrites, so written re-counts — data stays
+    # identical), and a corrected description MUST replace the stale desc_parse values.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "46W0769M", "dram", "Mem, 16GB DDR4 2Rx4 PC4-2400T RDIMM")
+
+    first = extract_and_record(db_session, card)
+    db_session.commit()
+    before = _facets(db_session, card.id)
+
+    second = extract_and_record(db_session, card)
+    db_session.commit()
+
+    assert first == second == 6  # same-source equal-confidence priors fall through the
+    # > guard and are overwritten in place — re-runs re-count but never change data
+    assert _facets(db_session, card.id) == before
+    assert card.specs_structured["capacity_gb"]["source"] == "desc_parse"
+
+    # Description corrected between runs (16GB was wrong) — the new value must win.
+    card.description = "Mem, 32GB DDR4 2Rx4 PC4-2400T RDIMM"
+    db_session.flush()
+    assert extract_and_record(db_session, card) == 6
+    db_session.commit()
+    assert _facets(db_session, card.id)["capacity_gb"] == 32
 
 
 def test_desc_skips_uncategorized_card(db_session: Session):
@@ -71,7 +115,7 @@ def test_desc_skips_uncategorized_card(db_session: Session):
     card = _card(db_session, "00AR327", None, "HDD, 6Gbps 1.2TB 10K 2.5 Inch HDD, IBM")
 
     assert extract_and_record(db_session, card) == 0
-    assert extract_and_record_specs(db_session, [card.id]) == {"parsed": 0, "written": 0}
+    assert extract_and_record_specs(db_session, [card.id]) == {"parsed": 0, "written": 0, "failed": 0}
     assert _facets(db_session, card.id) == {}
     assert card.category is None  # never categorized from a description
 
@@ -81,7 +125,7 @@ def test_desc_skips_non_storage_memory_category(db_session: Session):
     seed_commodity_schemas(db_session)
     card = _card(db_session, "C0805C104K5RACTU", "capacitors", 'HD, 450GB, 15KRPM, 3.5", Fibre Channel')
 
-    assert extract_and_record_specs(db_session, [card.id]) == {"parsed": 0, "written": 0}
+    assert extract_and_record_specs(db_session, [card.id]) == {"parsed": 0, "written": 0, "failed": 0}
     assert _facets(db_session, card.id) == {}
 
 
@@ -145,6 +189,7 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
     assert stats["parsed"] == 1  # only the good card
     assert stats["written"] == 4
+    assert stats["failed"] == 1  # the bad card surfaces in the aggregate, not just the log
     assert _facets(db_session, bad.id) == {}  # bad card fully rolled back, even key 1
     f = _facets(db_session, good.id)
     assert f["capacity_gb"] == 300
@@ -161,6 +206,6 @@ def test_batch_skips_missing_and_unparseable_cards(db_session: Session):
     stats = extract_and_record_specs(db_session, [parseable.id, no_grammar.id, 999_999])
     db_session.commit()
 
-    assert stats == {"parsed": 1, "written": 3}
+    assert stats == {"parsed": 1, "written": 3, "failed": 0}
     assert _facets(db_session, parseable.id) == {"capacity_gb": 600, "rpm": "15000", "interface": "SAS"}
     assert _facets(db_session, no_grammar.id) == {}

@@ -9,7 +9,8 @@ What: reads parametric specs straight out of TRIO's compact *human description*
       whole-word HDD/SSD/DIMM-grammar token, or the caller's commodity hint);
       anything else returns None (never guessed). Extracted values map to the
       seeded commodity_spec_schemas facet keys/enum values; record_spec
-      independently re-validates them.
+      independently re-validates enum members and skips unseeded keys, while
+      numeric ranges are enforced only inside the extractors themselves.
 Called by: the enrichment worker's second pass via desc_extractor/writer.py
       (between the mpn-decode pass at 0.95 and the AI spec reader at 0.85).
 Depends on: desc_extractor.{_common,storage,memory} (pure functions).
@@ -21,13 +22,9 @@ commodity label (``Other,``/``Tray,``/``LCD,``…) suppresses extraction entirel
 
 import re
 
-from app.services.desc_extractor._common import DESC_CONFIDENCE, DescResult
+from app.services.desc_extractor._common import DESC_CONFIDENCE, SPEC_COMMODITIES, DescResult
 from app.services.desc_extractor.memory import extract_memory
 from app.services.desc_extractor.storage import extract_storage
-
-# Commodities this extractor can fill specs for. Other inferred commodities
-# (motherboards/power_supplies/cpu) are returned as a bare hint with empty specs.
-_SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram"})
 
 _FAMILY = {
     "hdd": "storage",
@@ -86,8 +83,9 @@ _BODY_TOKENS = (
 
 
 def _lead_commodity(text: str) -> str | None:
-    """Mapped commodity for a `<Label>,` lead, _FOREIGN for an unhandled label, else
-    None."""
+    """Mapped commodity for a `<Label>,` lead, _FOREIGN for an unhandled label, else the
+    _FIRST_TOKEN_MAP commodity for an unambiguous comma-less first token (e.g. ``SSD
+    480GB 7mmH …``), else None."""
     m = _LEAD.match(text)
     if m:
         return _LEAD_MAP.get(m.group(1).strip(), _FOREIGN)
@@ -113,7 +111,7 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
         return None
 
     hint = (commodity_hint or "").lower().strip() or None
-    if hint is not None and hint not in _SPEC_COMMODITIES:
+    if hint is not None and hint not in SPEC_COMMODITIES:
         return None
 
     lead = _lead_commodity(text)

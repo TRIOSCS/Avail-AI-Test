@@ -21,11 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
 from app.services.desc_extractor import extract_desc
-from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE
+from app.services.desc_extractor._common import DESC_SOURCE, SPEC_COMMODITIES
 from app.services.spec_write_service import load_schema_cache, record_spec
-
-# The only commodities the extractor fills specs for (must mirror extract_desc).
-_HANDLED = frozenset({"hdd", "ssd", "dram"})
 
 
 def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | None = None) -> int:
@@ -38,7 +35,7 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
     """
     description = (card.description or "").strip()
     category = (card.category or "").lower().strip()
-    if not description or category not in _HANDLED:
+    if not description or category not in SPEC_COMMODITIES:
         return 0
     result = extract_desc(description, commodity_hint=category)
     if result is None or not result.specs:
@@ -50,8 +47,10 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
     with db.begin_nested():
         for spec_key, value in result.specs.items():
             prior = prior_specs.get(spec_key)
-            if prior and float(prior.get("confidence") or 0.0) > DESC_CONFIDENCE:
-                # mpn_decode (0.95) / vendor-API values outrank this pass — leave them.
+            # Guard against the SAME confidence the write below uses (result.confidence,
+            # always DESC_CONFIDENCE today) so the skip threshold and the written value
+            # can never disagree: mpn_decode (0.95) / vendor-API values outrank this pass.
+            if prior and float(prior.get("confidence") or 0.0) > result.confidence:
                 continue
             if record_spec(
                 db,
@@ -69,10 +68,14 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
 def extract_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     """Desc-parse the descriptions of *card_ids* and write extracted specs.
 
-    Returns {parsed, written}: cards that landed at least one spec, and total specs.
+    Returns {parsed, written, failed}: cards that landed at least one spec, total specs,
+    and cards that raised — so the worker's summary line distinguishes a healthy no-op
+    batch from a fully-crashed one (the per-card tracebacks are logged below, but the
+    aggregate must surface failures too).
     """
     parsed = 0
     written = 0
+    failed = 0
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
     for card_id in card_ids:
         # Per-card isolation: a single bad card must never abort the rest of the batch.
@@ -81,7 +84,7 @@ def extract_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]
             if card is None:
                 continue
             category = (card.category or "").lower().strip()
-            if category not in _HANDLED:
+            if category not in SPEC_COMMODITIES:
                 continue
             cache = schema_caches.get(category)
             if cache is None:
@@ -91,7 +94,8 @@ def extract_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]
                 parsed += 1
                 written += card_written
         except Exception:
+            failed += 1
             logger.exception("desc-parse: failed on card_id={}", card_id)
-    if written:
-        logger.info("desc-parse: wrote {} specs across {} cards", written, parsed)
-    return {"parsed": parsed, "written": written}
+    if written or failed:
+        logger.info("desc-parse: wrote {} specs across {} cards ({} cards failed)", written, parsed, failed)
+    return {"parsed": parsed, "written": written, "failed": failed}

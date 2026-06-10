@@ -74,6 +74,29 @@ CASES = [
         "Memory, 1 GB PC2-3200 200 PIN DDR2, SMART",  # spaced unit; PC2 prefix NOT inferred
         {"capacity_gb": 1, "ddr_type": "DDR2"},
     ),
+    (
+        "Memory, 512GB DDR4 8Rx4 3200MHz LRDIMM, Samsung",  # seed max (512GB LRDIMMs ship)
+        {
+            "capacity_gb": 512,
+            "ddr_type": "DDR4",
+            "speed_mhz": 3200,
+            "form_factor": "LRDIMM",
+            "ecc": True,  # LRDIMM ⇒ ECC (JEDEC)
+            "rank": "8Rx4",
+        },
+    ),
+    (
+        "Memory, 8GB DDR3 1600MHz Non-ECC UDIMM, Kingston",  # explicit negation ⇒ False
+        {"capacity_gb": 8, "ddr_type": "DDR3", "speed_mhz": 1600, "form_factor": "UDIMM", "ecc": False},
+    ),
+    (
+        "Mem, 8GB DDR3 Non-ECC RDIMM",  # Non-ECC contradicts RDIMM⇒ECC — omit, never guess
+        {"capacity_gb": 8, "ddr_type": "DDR3", "form_factor": "RDIMM"},
+    ),
+    (
+        "Mem, 16GB DDR4 RDIMM 19.2GB/S",  # bandwidth-per-second token is not a 2nd capacity
+        {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
+    ),
 ]
 
 

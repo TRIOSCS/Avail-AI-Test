@@ -4,7 +4,9 @@ What: reads capacity / rpm / form factor / interface out of compact human drive
       descriptions like ``HD, 450GB, 15KRPM, 3.5", Fibre Channel`` or
       ``4TB 7.2K Rpm 3.5inch 12gbps Sas HDD`` — NO network, NO LLM. Every emitted
       value is a seeded commodity_spec_schemas enum member / valid numeric for the
-      routed commodity; record_spec independently re-validates them.
+      routed commodity; record_spec independently re-validates enum members and
+      skips unseeded keys (it performs no numeric_range check — capacity sanity
+      lives in the link-speed exclusions here).
 Called by: app/services/desc_extractor/__init__.py (extract_desc routing).
 Depends on: _common (constants only) — pure functions.
 
@@ -18,7 +20,9 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - Conflicting signals for a key (two different capacities, 2.5" + 3.5", SAS + SATA)
   ⇒ that key is omitted, the rest still extract.
 - Speed-qualified interfaces ("6Gbps SAS") collapse to the bare seeded enum member
-  (the hdd/ssd seeds carry no speed-qualified entries).
+  (the seeds carry no speed-qualified SATA/SAS/SCSI entries; the ssd seeds DO carry
+  generation-qualified "NVMe PCIe 3.0/4.0/5.0" members, but NVMe is not in the ssd
+  _IFACE_VOCAB here, so this extractor never emits it on the ssd route).
 - Per-commodity vocabulary gating: rpm is hdd-only; ssd form_factor only accepts
   2.5" (3.5"/1.8" are not seeded ssd members); bare "NVMe" and "FC" are seeded for
   hdd but not ssd, so they are omitted on the ssd route.

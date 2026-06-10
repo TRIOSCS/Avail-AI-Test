@@ -14,18 +14,24 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar — sits between mpn_decod
 # and the AI spec reader (0.85); record_spec never lets it overwrite a protected
 # vendor-API value, and the writer skips keys already held at higher confidence.
 
+# The only commodities the extractor fills specs for — single source of truth shared
+# by extract_desc (routing) and writer.py (card eligibility). Other inferred
+# commodities (motherboards/power_supplies/cpu) come back as a bare hint, empty specs.
+SPEC_COMMODITIES = frozenset({"hdd", "ssd", "dram"})
+
 
 @dataclass
 class DescResult:
     """Outcome of extracting one description string.
 
-    ``commodity`` is an inferred commodity KEY hint (e.g. "hdd", "ssd", "dram",
+    ``commodity`` is the inferred commodity KEY hint (e.g. "hdd", "ssd", "dram",
     "motherboards", "power_supplies", "cpu") for CALLERS to use — the extractor and
-    its writer never set a card's category from it.
+    its writer never set a card's category from it. It is always set: when no
+    commodity can be established, extract_desc returns None instead of a DescResult.
     ``specs`` maps seeded spec_key -> value (enum string / int / float / bool — bool
     only for boolean schemas like dram.ecc, exactly like mpn_decoder.DecodeResult).
     """
 
-    commodity: str | None
+    commodity: str
     specs: dict[str, str | int | float | bool] = field(default_factory=dict)
     confidence: float = DESC_CONFIDENCE
