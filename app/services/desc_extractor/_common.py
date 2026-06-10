@@ -8,11 +8,31 @@ Called by: app/services/desc_extractor/{__init__,storage,memory,power,display,
 Depends on: nothing (pure).
 """
 
+import re
 from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, field
 from typing import TypeVar
 
 _T = TypeVar("_T")
+
+# NAND-die context (re-audit 2026-06-10, residual class 3 — card 74115): NAND component
+# descriptions write their die density under the gigaBIT convention with a BARE "G"
+# ("Nand, 512G, MLC" = 512 Gbit = 64 GB), which the round-1 Gb-guard (lowercase-b
+# _BIT_UNITS rewrite in __init__.py) cannot see. Signals, on the upper-cased text:
+# the NAND word itself, a cell-level token (SLC/MLC/TLC/QLC), a Micron MT29-series
+# die MPN echoed into the description, or a standalone x8/x16 organization token
+# (the \b guards keep DRAM rank tokens like "2RX8" and org strings like "256MX16"
+# from matching — no boundary between the letter and the X).
+_NAND_DIE_CONTEXT = re.compile(r"\bNAND\b|\b[SMTQ]LC\b|\bMT29[A-Z0-9]|\bX0?8\b|\bX16\b")
+
+
+def nand_die_context(text: str) -> bool:
+    """True when the upper-cased description carries NAND-die signals — bare ``<n>G``
+    tokens then denote gigaBITS of die density, never gigabytes of capacity, so the
+    capacity extractors must skip them (deliberate NO-WRITE: densities are not a seeded
+    spec and are never ÷8-converted — a wrong facet value is worse than a missing
+    one)."""
+    return bool(_NAND_DIE_CONTEXT.search(text))
 
 
 def unique_or_none(values: AbstractSet[_T]) -> _T | None:

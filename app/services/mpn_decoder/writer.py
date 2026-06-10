@@ -45,8 +45,14 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     #                       enum_values (CI pins decoder constants against the JSON seeds,
     #                       but the worker decodes against live DB rows, which can lag a
     #                       deploy's reseed or drift after a failed/manual reseed).
+    #   dropped_off_grid    "commodity.spec_key=value" -> value the DECODER itself refused
+    #                       to emit (DecodeResult.dropped — today the hdd shipped-capacity
+    #                       grid in storage.decode_storage). The decoder drop is silent by
+    #                       construction (pure function), so it is surfaced here alongside
+    #                       record_spec's vocabulary drops.
     dropped_no_schema: Counter = Counter()
     dropped_out_of_enum: Counter = Counter()
+    dropped_off_grid: Counter = Counter()
     # "card_category->decoded_commodity" -> cards whose decoded commodity LOST the category
     # ladder (set_category) against a different existing category — the decoded specs are then
     # rejected by record_spec's schema lookup AND the maker write is skipped (same cross-
@@ -79,6 +85,8 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                     dropped_no_schema[f"{result.commodity}.{spec_key}"] += 1
                 elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
                     dropped_out_of_enum[f"{result.commodity}.{spec_key}={value}"] += 1
+            for spec_key, value in result.dropped.items():
+                dropped_off_grid[f"{result.commodity}.{spec_key}={value}"] += 1
             # SAVEPOINT per card: record_spec flushes, so a DB-level failure (constraint, type)
             # would otherwise poison the shared transaction — swallowed here, it would surface
             # later as a failed/rolled-back commit with the counters still claiming success. The
@@ -150,14 +158,17 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 skipped_category_conflict[f"{card_cat}->{result.commodity}"] += 1
         except Exception:
             logger.exception("mpn-decode: failed on card_id={}", card_id)
-    if dropped_no_schema or dropped_out_of_enum:
+    if dropped_no_schema or dropped_out_of_enum or dropped_off_grid:
         logger.warning(
             "mpn-decode: {} decoded spec values dropped — no commodity_spec_schemas row for {}; "
             "value outside the live enum_values for {} "
-            "(decoder and seeded schemas have drifted; see tests/test_mpn_decoder_seed_sync.py)",
-            sum(dropped_no_schema.values()) + sum(dropped_out_of_enum.values()),
+            "(decoder and seeded schemas have drifted; see tests/test_mpn_decoder_seed_sync.py); "
+            "off the shipped-capacity grid for {} (the decoder refused an implausible value — "
+            "see storage.HDD_SHIPPED_CAPACITY_GB)",
+            sum(dropped_no_schema.values()) + sum(dropped_out_of_enum.values()) + sum(dropped_off_grid.values()),
             dict(dropped_no_schema),
             dict(dropped_out_of_enum),
+            dict(dropped_off_grid),
         )
     if skipped_category_conflict:
         logger.warning(

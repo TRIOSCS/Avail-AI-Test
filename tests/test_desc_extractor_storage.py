@@ -131,6 +131,20 @@ CASES = [
         "ssd",
         {"capacity_gb": 128},
     ),
+    (
+        # Re-audit 2026-06-10 class 3: NAND-die context turns a bare "512G" into a
+        # gigaBIT die density (512 Gbit) — never a drive capacity. Deliberate NO-WRITE.
+        "SSD, Nand, 512G, MLC, Micron",
+        "ssd",
+        {},
+    ),
+    (
+        # …but an EXPLICIT GB token stays gigabytes even when the desc names its flash
+        # type — real drives advertise TLC/MLC constantly.
+        "SSD, 960GB, TLC, SATA, Samsung",
+        "ssd",
+        {"capacity_gb": 960, "interface": "SATA"},
+    ),
 ]
 
 

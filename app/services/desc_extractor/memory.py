@@ -14,7 +14,14 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - capacity_gb requires an explicit GB/G token and the seeded 1-512 range (MB-era
   modules and bandwidth-per-second tokens never match). GigaBIT component-density
   tokens ("2Gb, 128*16" — lowercase b) are neutralized to "2GBIT" by extract_desc's
-  pre-uppercase _BIT_UNITS rewrite, so bits can never be recorded as bytes.
+  pre-uppercase _BIT_UNITS rewrite, so bits can never be recorded as bytes. Under
+  NAND-die context (_common.nand_die_context: NAND/SLC/MLC/TLC/QLC tokens, MT29
+  die MPNs, x8/x16 org strings) a BARE "<n>G" token is the die-density gigaBIT
+  convention ("Nand, 512G, MLC" = 512 Gbit = 64 GB — re-audit card 74115, which
+  the casing guard can't see) and is skipped: a deliberate NO-WRITE, never a ÷8
+  conversion. Such cards are usually also miscategorized dram (they are NAND
+  flash) — that reclassification is a separate, out-of-scope fix; this guard
+  only stops the wrong capacity write.
 - ddr_type from explicit DDR/DDR2/DDR3/DDR3L/DDR4/DDR5 tokens, or the PC3-/PC3L-/
   PC4-<digits> prefixes (PC3→DDR3, PC3L→DDR3L, PC4→DDR4). Mixed generations ⇒ omit.
 - speed_mhz only from an explicit MHz token (seed range 800-8400, so "DDR-333MHz"
@@ -32,12 +39,14 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict, unique_or_none
+from app.services.desc_extractor._common import SpecDict, nand_die_context, unique_or_none
 
 # Canonical dram enum strings — MUST match the dram entry in app/data/commodity_seeds.json.
 RDIMM, LRDIMM, UDIMM, SODIMM, DIMM = "RDIMM", "LRDIMM", "UDIMM", "SO-DIMM", "DIMM"
 
-_CAPACITY = re.compile(r"\b(\d{1,3})\s?G(?:B)?\b")
+# Group 2 (the "B") distinguishes an explicit "<n>GB" from a bare "<n>G" — the bare
+# form is gigaBITS under NAND-die context (see _capacity_gb).
+_CAPACITY = re.compile(r"\b(\d{1,3})\s?G(B)?\b")
 _MHZ = re.compile(r"\b(\d{1,2},?\d{3})\s?MHZ\b|\b(\d{3})\s?MHZ\b")
 _PC4_SPEED_GRADE = re.compile(r"\bPC4[- ]?(2400T|2666V|3200AA)\b")
 _PC4_SPEED = {"2400T": 2400, "2666V": 2666, "3200AA": 3200}
@@ -66,8 +75,13 @@ _CAP_MIN, _CAP_MAX = 1, 512
 
 def _capacity_gb(text: str) -> int | None:
     values: set[int] = set()
+    nand = nand_die_context(text)
     for m in _CAPACITY.finditer(text):
         if text[m.end() : m.end() + 2] == "/S":
+            continue
+        if nand and not m.group(2):
+            # Bare "<n>G" under NAND-die context is a gigaBIT die density, not a
+            # module capacity — deliberate no-write (see the module docstring).
             continue
         value = int(m.group(1))
         if _CAP_MIN <= value <= _CAP_MAX:

@@ -965,7 +965,13 @@ owns arbitration in one place:
        Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
        ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
        neutralized BEFORE the upper-casing so bits are never recorded as GB
-       capacity (skipped, never ÷8-converted), and cpu bare cores/TDP tokens AND
+       capacity (skipped, never ÷8-converted), NAND-die context (_common.
+       nand_die_context: NAND/SLC/MLC/TLC/QLC tokens, MT29 die MPNs, x8/x16
+       org strings — re-audit 2026-06-10) makes a BARE "<n>G" token a gigaBIT
+       die density on the dram and hdd/ssd routes ("Nand, 512G, MLC" = 512 Gbit,
+       deliberate no-write — explicit GB/TB tokens unaffected; the cat=dram
+       miscategorization of NAND dies is a separate, still-open defect), and
+       cpu bare cores/TDP tokens AND
        codename-only architecture require a CPU-context signal (MPN-echo descs
        and chassis rows emit nothing). Hinted extraction adds a body-token
        contradiction guard (a cpu-hinted motherboard FRU returns None; dram
@@ -1334,8 +1340,8 @@ Vendor/scheme inventory (module → gate → decoded keys):
 
 | Module | Vendor | Scheme gate (examples) | Decodes |
 |---|---|---|---|
-| storage.py | Seagate | `ST<GB><family><0-led tail>$` (ST4000NM0035, ST300MM0006) — the structured 0-led tail is the era gate; legacy `ST<ff><digits><iface>` shapes (ST39103FC, ST373207LC) and STMicroelectronics order codes (ST232BDR, STM32… — explicit `_STMICRO_DENY`) return None | capacity, form_factor+usage_class for mapped families |
-| storage.py | Western Digital | era split by SUFFIX SHAPE: legacy `WD<digits><exactly 2 letters>` = decimal-GB (WD800BB = 80 GB, WD64AA = 6.4 GB, capacity only); modern `WD<2-3 digits><4+ letters>` = TB×10 (WD40EFRX), 3-digit forms only with a recognized family token (unrecognized 3-digit+4-letter and ALL 4-digit+4-letter shapes are era-ambiguous → None) | capacity, usage_class+form for known 3.5" families |
+| storage.py | Seagate | `ST<GB (3-5 digits)><family><0-led tail>$` (ST4000NM0035, ST300MM0006) — the structured 0-led tail is the era gate; the capacity must also sit inside the family's shipped envelope (`_SEAGATE_ENVELOPE` — re-audit 2026-06-10: a digit-dropped truncation like ST120MM0198 passes the SHAPE gate, so out-of-envelope OR an unlisted family ⇒ None, never a best-effort capacity; the closed table also keeps Nytro/Pulsar SAS SSD families FM/FP from taking an hdd decode); legacy `ST<ff><digits><iface>` shapes (ST39103FC, ST373207LC) and STMicroelectronics order codes (ST232BDR, STM32… — explicit `_STMICRO_DENY`) return None | capacity, form_factor+usage_class for mapped families |
+| storage.py | Western Digital | era split by SUFFIX SHAPE: legacy `WD<digits><exactly 2 letters>` = decimal-GB (WD800BB = 80 GB, WD64AA = 6.4 GB, capacity only); modern `WD<2-3 digits><4+ letters>` = revision-digit scheme (re-audit 2026-06-10): the FINAL digit of the numeric group is a revision/generation marker, capacity = leading digits as TB (WD40PURZ = WD42PURZ = 4 TB, WD101EFBX = 10 TB rev 1 — never 4.2/10.1 TB), sole exception the shipped Caviar-Green fractional points WD15/WD25 = 1.5/2.5 TB; 3-digit forms only with a recognized family token (unrecognized 3-digit+4-letter and ALL 4-digit+4-letter shapes are era-ambiguous → None) | capacity, usage_class+form for known 3.5" families |
 | storage.py | Toshiba | `(MG\|MN\|MD\|MQ\|DT)\d{2}[A-Z]{3}` (MG08ACA16TE) | form_factor, usage_class, capacity from `<n>T` token |
 | storage.py | HGST/Hitachi | `HUH\|HUS(?=\d)\|HUC\|HTS\|HDN\|HDS\|HMS` | form_factor, usage_class, capacity from `<n>T` token; HUSMM/HUSSL SAS SSDs excluded |
 | ssd.py | Samsung | retail `MZ-<fam><cap>` (MZ-V8P2T0B/AM) + OEM `MZ<fam><cap>` (MZVL21T0HCLR, MZ7LH1T9HMLT, MZQL21T9HCJR, MZILT3T8HBLS) | capacity, form_factor (2.5"/M.2 2280/M.2 22110/U.2/mSATA), interface (SATA/SAS; NVMe gen only via pinned family tables), nand_type for retail EVO/QVO + V-table only |
@@ -1356,14 +1362,23 @@ KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 ra
 never be misread as DDR4), legacy Seagate `ST<ff><digits><iface>` capacities (the digit
 string mixes a form-factor digit with MB digits and the pre-~1996 era encodes UNFORMATTED
 MB — no pattern-only era split exists, so those shapes return None; facet-accuracy audit
-2026-06-10, `tests/test_mpn_decoder_storage.py` pins the audit cards), and era-ambiguous
-WD shapes (3-digit+4-letter without a known modern family token, all 4-digit+4-letter). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+2026-06-10, `tests/test_mpn_decoder_storage.py` pins the audit cards), era-ambiguous
+WD shapes (3-digit+4-letter without a known modern family token, all 4-digit+4-letter),
+fractional-TB reads of WD's modern revision digit (re-audit 2026-06-10: WD42PURZ is 4 TB
+rev 2, never 4.2 TB), out-of-envelope/unlisted-family modern Seagate capacities
+(truncated/malformed strings get NO decode), and ANY hdd capacity off the discrete
+shipped-capacity grid (`storage.HDD_SHIPPED_CAPACITY_GB` — applied in `decode_storage`
+to every hdd decoder; an off-grid value moves to `DecodeResult.dropped`, never `specs`,
+deliberately hdd-only: SSD capacities are near-continuous and ssd.py reads explicit
+size fields, so the digit-string failure class doesn't exist there). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
 `commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
 `tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
-aggregate WARNING for BOTH of `record_spec`'s silent vocabulary drops — a decoded key with
-no schema row AND an enum value outside the LIVE row's enum_values (the worker decodes
-against live DB rows, which can lag a deploy's reseed) — so a drift can never silently
-zero the feature (`record_spec` drops both cases at DEBUG only). Cards skipped because
+aggregate WARNING for all THREE silent drop channels — a decoded key with
+no schema row, an enum value outside the LIVE row's enum_values (the worker decodes
+against live DB rows, which can lag a deploy's reseed), and the decoder's own off-grid
+capacity refusals (`DecodeResult.dropped`) — so a drift or plausibility rejection can
+never silently zero the feature (`record_spec` drops its two cases at DEBUG only; the
+decoder drop is a pure function with no logging of its own). Cards skipped because
 their existing category conflicts with the decoded commodity are counted too
 (`skipped_category_conflict` in the per-batch stats, plus a WARNING with the
 `card_category->decoded_commodity` pairs — the number that says whether the
@@ -1378,7 +1393,8 @@ source (the F1 newest-timestamp tie-break lets the re-run win its own stale
 entry); a key the fixed extractor no longer yields is DELETED from both
 material_spec_facets and specs_structured (wrong is worse than missing —
 provenance stays honest). Dry-run by default with per-failure-class tallies
-(legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family); SAVEPOINT per card.
+(round 1: legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
+wd_revision_digit/capacity_grid/seagate_envelope/nand_density); SAVEPOINT per card.
 
 ## Cross-Reference Caching
 

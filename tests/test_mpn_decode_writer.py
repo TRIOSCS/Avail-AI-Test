@@ -140,6 +140,36 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     assert f["form_factor"] == "RDIMM"  # sibling keys still written
 
 
+def test_writer_warns_when_capacity_off_shipped_grid(db_session: Session):
+    # Third drop channel (re-audit 2026-06-10): the DECODER itself refuses an off-grid
+    # hdd capacity (shipped-capacity grid backstop) — the value lands in
+    # DecodeResult.dropped, never in specs, so record_spec never sees it. The writer
+    # must surface that silent, pure-function drop in the same aggregate WARNING as
+    # record_spec's vocabulary drops. No 17 TB HDD has ever shipped, so the T-token
+    # read on this Toshiba shape is implausible; the prefix-derived specs still land.
+    from loguru import logger as loguru_logger
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="mg09aca17te", display_mpn="MG09ACA17TE", category="hdd")
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = decode_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any("hdd.capacity_gb=17000" in w and "shipped-capacity grid" in w for w in warnings), warnings
+    assert stats["decoded"] == 1
+    f = _facets(db_session, card.id)
+    assert "capacity_gb" not in f  # the off-grid value was never offered to record_spec
+    assert f["form_factor"] == '3.5"'  # trustworthy prefix-derived specs still written
+    assert f["usage_class"] == "Enterprise / Datacenter"
+
+
 def test_decode_writes_ecc_false(db_session: Session):
     # Regression: a non-ECC module must persist ecc="false" (the string→bool corruption bug).
     seed_commodity_schemas(db_session)

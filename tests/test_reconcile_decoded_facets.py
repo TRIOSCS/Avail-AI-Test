@@ -1,9 +1,9 @@
 """The facet-accuracy reconcile command — dry-run parity, correction, and delete paths.
 
-Seeds cards with the PRE-FIX wrong facet values the 2026-06-10 audit found (written
-through record_spec exactly like production, then backdated so the re-run's newer
-timestamp wins the same-tier ladder), and asserts the reconcile command corrects,
-deletes, or leaves each row per its failure class.
+Seeds cards with the PRE-FIX wrong facet values the 2026-06-10 audit AND the same-day
+re-audit (round 2) found (written through record_spec exactly like production, then
+backdated so the re-run's newer timestamp wins the same-tier ladder), and asserts the
+reconcile command corrects, deletes, or leaves each row per its failure class.
 """
 
 from sqlalchemy.orm import Session
@@ -55,6 +55,15 @@ def _seed_audit_cards(db: Session) -> dict[str, MaterialCard]:
         "gpu": _card(db, "GPU3070OEM", "gpu", "NVIDIA, RTX, 3070"),
         # control — modern Seagate decode is already right: must stay untouched
         "modern": _card(db, "ST4000NM0035", "hdd"),
+        # round 2 — WD modern revision digit (re-audit card 578746): corrected 10100 → 10000
+        "wd_rev": _card(db, "WD101EFBX", "hdd"),
+        # round 2 — digit-dropped truncation slips the Seagate shape gate (re-audit card
+        # 120169): the envelope-gated decoder now yields None → deleted
+        "seagate_trunc": _card(db, "ST120MM0198", "hdd"),
+        # round 2 — off-grid capacity the decoder now drops (shipped-capacity grid): deleted
+        "off_grid": _card(db, "MG09ACA17TE", "hdd"),
+        # round 2 — bare-"G" NAND die density coerced to GB (re-audit card 74115): deleted
+        "nand": _card(db, "MT29F512G08CBCAB", "dram", "MT29F512G08CBCAB, Micron, NAND, 512G, MLC"),
     }
     _seed_wrong(db, cards["wd"], "capacity_gb", 80000, "mpn_decode")
     _seed_wrong(db, cards["stmicro"], "capacity_gb", 232, "mpn_decode")
@@ -62,6 +71,10 @@ def _seed_audit_cards(db: Session) -> dict[str, MaterialCard]:
     _seed_wrong(db, cards["dram"], "capacity_gb", 2, "desc_parse")
     _seed_wrong(db, cards["gpu"], "gpu_family", "RTX", "desc_parse")
     _seed_wrong(db, cards["modern"], "capacity_gb", 4000, "mpn_decode")
+    _seed_wrong(db, cards["wd_rev"], "capacity_gb", 10100, "mpn_decode")
+    _seed_wrong(db, cards["seagate_trunc"], "capacity_gb", 120, "mpn_decode")
+    _seed_wrong(db, cards["off_grid"], "capacity_gb", 17000, "mpn_decode")
+    _seed_wrong(db, cards["nand"], "capacity_gb", 512, "desc_parse")
     # The dram card's CORRECT desc-parsed key — outside TARGET_SPEC_KEYS, must survive.
     assert record_spec(db, cards["dram"].id, "ddr_type", "DDR3", source="desc_parse", confidence=0.90)
     db.commit()
@@ -74,15 +87,21 @@ def test_dry_run_tallies_without_writing(db_session: Session):
     summary = reconcile(db_session, apply=False)
 
     assert summary["mode"] == "dry-run"
-    assert summary["corrected"] == 2  # WD capacity + RTX family
-    assert summary["deleted"] == 3  # STMicro + legacy Seagate + Gb-bit dram
+    assert summary["corrected"] == 3  # WD legacy capacity + RTX family + WD revision digit
+    assert summary["deleted"] == 6  # STMicro + legacy Seagate + Gb-bit dram + trunc + grid + NAND
     assert summary["unchanged"] == 1  # modern Seagate control
     assert summary["failed"] == 0
     assert summary["by_class"]["legacy_wd"] == {"corrected": 1}
     assert summary["by_class"]["stmicro_gate"] == {"deleted": 1}
-    assert summary["by_class"]["legacy_seagate"] == {"deleted": 1, "unchanged": 1}
+    assert summary["by_class"]["legacy_seagate"] == {"deleted": 1}
     assert summary["by_class"]["gb_bit"] == {"deleted": 1}
     assert summary["by_class"]["rtx_family"] == {"corrected": 1}
+    # Round-2 classes: the modern-shape control row moved from the round-1 legacy_seagate
+    # bucket into the (more precise) envelope-gated branch bucket.
+    assert summary["by_class"]["wd_revision_digit"] == {"corrected": 1}
+    assert summary["by_class"]["seagate_envelope"] == {"deleted": 1, "unchanged": 1}
+    assert summary["by_class"]["capacity_grid"] == {"deleted": 1}
+    assert summary["by_class"]["nand_density"] == {"deleted": 1}
 
     # Dry-run wrote NOTHING: every wrong value and every facet row is still in place.
     db_session.expire_all()
@@ -90,6 +109,10 @@ def test_dry_run_tallies_without_writing(db_session: Session):
     assert _facets(db_session, cards["stmicro"].id)["capacity_gb"] == 232
     assert _facets(db_session, cards["dram"].id)["capacity_gb"] == 2
     assert _facets(db_session, cards["gpu"].id)["gpu_family"] == "RTX"
+    assert _facets(db_session, cards["wd_rev"].id)["capacity_gb"] == 10100
+    assert _facets(db_session, cards["seagate_trunc"].id)["capacity_gb"] == 120
+    assert _facets(db_session, cards["off_grid"].id)["capacity_gb"] == 17000
+    assert _facets(db_session, cards["nand"].id)["capacity_gb"] == 512
 
 
 def test_apply_corrects_deletes_and_matches_dry_run(db_session: Session):
@@ -109,8 +132,13 @@ def test_apply_corrects_deletes_and_matches_dry_run(db_session: Session):
     assert wd_entry["value"] == 80
     assert wd_entry["source"] == "mpn_decode"
     assert wd_entry["updated_at"] > _OLD_TS
-    # classes 1/3/4 deleted: facet row AND specs_structured entry are gone.
-    for name in ("stmicro", "seagate", "dram"):
+    # round 2 corrected: the revision-digit read (10.1 TB ghost) becomes 10 TB.
+    assert _facets(db_session, cards["wd_rev"].id)["capacity_gb"] == 10000
+    wd_rev_entry = cards["wd_rev"].specs_structured["capacity_gb"]
+    assert wd_rev_entry["source"] == "mpn_decode"
+    assert wd_rev_entry["updated_at"] > _OLD_TS
+    # deleted classes (rounds 1+2): facet row AND specs_structured entry are gone.
+    for name in ("stmicro", "seagate", "dram", "seagate_trunc", "off_grid", "nand"):
         assert "capacity_gb" not in _facets(db_session, cards[name].id), name
         assert "capacity_gb" not in (cards[name].specs_structured or {}), name
     # the dram card's non-targeted desc_parse key survives (only capacity was wrong).
@@ -128,11 +156,11 @@ def test_apply_is_idempotent(db_session: Session):
     first = reconcile(db_session, apply=True)
     second = reconcile(db_session, apply=True)
 
-    assert first["corrected"] == 2 and first["deleted"] == 3
+    assert first["corrected"] == 3 and first["deleted"] == 6
     # Second pass finds the corrected rows already right and the deleted rows gone.
     assert second["corrected"] == 0
     assert second["deleted"] == 0
-    assert second["unchanged"] == 3  # wd + gpu (now right) + modern control
+    assert second["unchanged"] == 4  # wd + gpu + wd_rev (now right) + modern control
 
 
 def test_delete_skipped_when_jsonb_provenance_drifted(db_session: Session):

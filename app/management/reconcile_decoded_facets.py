@@ -11,9 +11,14 @@ What: facet-accuracy hotfix companion (audit 2026-06-10). Re-runs the corrected 
         * fixed extractor yields NOTHING for a previously-recorded key -> DELETE the
           facet row and its specs_structured entry (the old value was a misdecode —
           wrong is worse than missing, provenance stays honest).
-      Dry-run by default with per-failure-class tallies (legacy_wd / legacy_seagate /
-      stmicro_gate / gb_bit / rtx_family); --apply writes. SAVEPOINT per card so one
-      bad card never poisons the batch.
+      Dry-run by default with per-failure-class tallies — round 1: legacy_wd /
+      legacy_seagate / stmicro_gate / gb_bit / rtx_family; round 2 (re-audit
+      2026-06-10): wd_revision_digit (modern WD final-digit revision markers read as
+      tenths-of-TB), capacity_grid (hdd capacity the decoder now drops as off the
+      shipped-capacity grid), seagate_envelope (modern structured-tail Seagate shapes,
+      now per-family-envelope gated), nand_density (bare-"G" gigaBIT die densities
+      recorded as GB). --apply writes. SAVEPOINT per card so one bad card never
+      poisons the batch.
 Usage: python -m app.management.reconcile_decoded_facets [--apply] [--limit N]
 Called by: admin manually after deploying the facet-accuracy hotfix.
 Depends on: mpn_decoder.decode_mpn, desc_extractor.extract_desc,
@@ -30,10 +35,10 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialSpecFacet
 from app.services.desc_extractor import extract_desc
-from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES
+from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES, nand_die_context
 from app.services.mpn_decoder import decode_mpn
 from app.services.mpn_decoder._common import DECODE_CONFIDENCE, DECODE_SOURCE
-from app.services.mpn_decoder.storage import _STMICRO_DENY
+from app.services.mpn_decoder.storage import _SEAGATE, _STMICRO_DENY, _WD_MODERN
 from app.services.spec_write_service import load_schema_cache, record_spec, spec_would_write
 from app.utils.normalization import normalize_mpn
 
@@ -52,18 +57,32 @@ _BIT_TOKEN = re.compile(r"\b\d+(?:\.\d+)?\s?[KMGT]b(?![A-Za-z])")
 
 
 def _classify(facet: MaterialSpecFacet, card: MaterialCard) -> str:
-    """Audit failure-class bucket for a targeted facet row (tally key, not behavior)."""
+    """Audit failure-class bucket for a targeted facet row (tally key, not behavior).
+
+    Round-2 buckets (re-audit 2026-06-10): capacity_grid (the fixed decoder DROPS the
+    key as off the shipped-capacity grid — checked first, it is the most specific
+    signal), wd_revision_digit / seagate_envelope (the row sits in the modern WD /
+    modern Seagate grammar branch that the round-2 fixes re-gated — the legacy_* buckets
+    keep covering the round-1 legacy shapes), and nand_density (bare-"G" gigaBIT die
+    densities on a capacity_gb row).
+    """
     if facet.source == DECODE_SOURCE:
         mpn = normalize_mpn(card.display_mpn) or ""
         if _STMICRO_DENY.match(mpn):
             return "stmicro_gate"
+        result = decode_mpn(card.display_mpn, card.manufacturer)
+        if result is not None and facet.spec_key in result.dropped:
+            return "capacity_grid"
         if mpn.startswith("WD"):
-            return "legacy_wd"
+            return "wd_revision_digit" if _WD_MODERN.match(mpn) else "legacy_wd"
         if mpn.startswith("ST"):
-            return "legacy_seagate"
+            return "seagate_envelope" if _SEAGATE.match(mpn) else "legacy_seagate"
         return "other_mpn_decode"
     if facet.spec_key == "gpu_family":
         return "rtx_family"
+    description = re.sub(r"\s+", " ", card.description or "").strip().upper()
+    if facet.spec_key == "capacity_gb" and nand_die_context(description):
+        return "nand_density"
     if _BIT_TOKEN.search(card.description or ""):
         return "gb_bit"
     return "other_desc_parse"
