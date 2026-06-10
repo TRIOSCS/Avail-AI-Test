@@ -43,16 +43,22 @@ class TestRevisionMetadata:
         # re-parenting beats a no-op merge revision for a not-yet-deployed migration.
         assert _mod.down_revision == "095_wechat_id"
 
-    def test_single_head(self):
-        # The migration chain must converge to exactly one head (no unmerged branches) —
-        # a second head makes `alembic upgrade head` error out at deploy time.
+    def test_on_single_head_mainline(self):
+        # The migration chain must converge to exactly one head (no unmerged branches —
+        # test_migration_chain.py owns that invariant) AND 096 must sit on the mainline
+        # walked from that head. Asserting reachability instead of pinning the head name
+        # keeps this test from rotting every time a newer migration lands (it broke when
+        # 098 became the head).
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["096_spec_provenance"], f"expected single head 096_spec_provenance, got {heads}"
+        script = ScriptDirectory.from_config(cfg)
+        heads = script.get_heads()
+        assert len(heads) == 1, f"expected a single head, got {heads}"
+        mainline = {rev.revision for rev in script.iterate_revisions(heads[0], "base")}
+        assert "096_spec_provenance" in mainline, "096_spec_provenance fell off the mainline walked from the head"
 
     def test_source_tier_sql_case_matches_live_ladder(self):
         # The migration cannot import app code, so its CASE is a literal snapshot of
