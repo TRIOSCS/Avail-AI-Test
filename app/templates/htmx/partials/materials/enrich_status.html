@@ -1,0 +1,42 @@
+{# enrich_status.html — enrichment-status badge for the material detail header.
+   While the card is 'unenriched' the badge polls its own route every 15s ("Queued for
+   enrichment"); the route answers HTTP 286 once enrichment_status leaves 'unenriched',
+   so htmx swaps the final badge and stops polling. Terminal/enriched states render the
+   tier badge + enriched_at (same vocabulary/colors as list.html's status column).
+   Receives: card (MaterialCard).
+   Called by: detail.html (include) and htmx_views.material_enrich_status_partial. #}
+{% if card.enrichment_status == 'unenriched' %}
+<p hx-get="/v2/partials/materials/{{ card.id }}/enrich-status"
+   hx-trigger="every 15s"
+   hx-target="this"
+   hx-swap="outerHTML"
+   class="inline-flex items-center gap-1 text-xs text-amber-600">
+  <svg class="h-3 w-3 animate-spin" fill="none" viewBox="0 0 24 24">
+    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+  </svg>
+  Queued for enrichment
+</p>
+{% else %}
+{% set es = card.enrichment_status %}
+{% set es_styles = {
+  'verified': ('bg-emerald-50 text-emerald-700 border-emerald-200', 'VERIFIED'),
+  'web_sourced': ('bg-sky-50 text-sky-700 border-sky-200', 'WEB-SOURCED'),
+  'oem_sourced': ('bg-indigo-50 text-indigo-700 border-indigo-200', 'OEM-SOURCED'),
+  'ai_inferred': ('bg-amber-50 text-amber-700 border-amber-200', 'AI GUESS'),
+  'not_found': ('bg-gray-100 text-gray-500 border-gray-200', 'NOT FOUND'),
+  'not_catalogued': ('bg-gray-100 text-gray-500 border-gray-200', 'NOT CATALOGUED'),
+} %}
+{% set badge = es_styles.get(es) %}
+<p class="inline-flex items-center gap-1.5 text-xs text-emerald-600">
+  {% if badge %}
+  <span class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full border {{ badge[0] }}">{{ badge[1] }}</span>
+  {% endif %}
+  {% if card.enriched_at %}
+  <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+  </svg>
+  Enriched {{ card.enriched_at.strftime('%b %d, %Y') }}
+  {% endif %}
+</p>
+{% endif %}

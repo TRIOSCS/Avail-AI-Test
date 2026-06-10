@@ -1,0 +1,74 @@
+{# add_modal.html — single-part "Add part" form loaded into #modal-content.
+   Exactly five fields (MPN required; manufacturer / description / category / condition
+   optional). Blank = blank: omitted fields stay NULL for enrichment to fill — the form
+   never defaults, suggests, or copies values. On success the server answers
+   HX-Redirect → the card detail; on validation failure it answers 422 with this
+   partial re-rendered carrying per-field errors (htmx_app.js allows the 422 swap
+   into #modal-content).
+   Receives: commodities (list[(key, display_name)]), conditions (list[str]),
+             errors (dict[field, message]), values (dict[field, str] — sticky input).
+   Called by: workspace.html "Add part" button → GET /v2/partials/materials/add-form;
+              re-rendered by POST /api/materials/add on 422.
+   Depends on: global modal shell (htmx/base.html), Alpine.js, Tailwind brand palette. #}
+<div class="p-6">
+  <div class="flex items-center justify-between mb-6">
+    <h2 class="text-lg font-semibold text-gray-900">Add part</h2>
+    {# Close handled by the global modal chrome X (base.html) #}
+  </div>
+
+  <form hx-post="/api/materials/add"
+        hx-target="#modal-content"
+        hx-swap="innerHTML"
+        data-loading-disable>
+    <div class="grid grid-cols-1 gap-4">
+      <div>
+        <label class="block text-sm font-medium text-gray-900 mb-1">MPN <span class="text-rose-500">*</span></label>
+        <input type="text" name="mpn" required value="{{ values.get('mpn', '') }}"
+               placeholder="e.g. M393A2K40CB2-CTD"
+               class="w-full px-3 py-2 border {{ 'border-rose-300' if errors.get('mpn') else 'border-brand-200' }} rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        {% if errors.get('mpn') %}<p class="mt-1 text-xs text-rose-600">{{ errors['mpn'] }}</p>{% endif %}
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-900 mb-1">Manufacturer</label>
+        <input type="text" name="manufacturer" value="{{ values.get('manufacturer', '') }}"
+               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-sm font-medium text-gray-900 mb-1">Description</label>
+        <input type="text" name="description" value="{{ values.get('description', '') }}"
+               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-900 mb-1">Category</label>
+          <select name="category"
+                  class="w-full px-3 py-2 border {{ 'border-rose-300' if errors.get('category') else 'border-brand-200' }} rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">Leave blank — let enrichment decide</option>
+            {% for key, name in commodities %}
+            <option value="{{ key }}" {{ 'selected' if values.get('category') == key }}>{{ name }}</option>
+            {% endfor %}
+          </select>
+          {% if errors.get('category') %}<p class="mt-1 text-xs text-rose-600">{{ errors['category'] }}</p>{% endif %}
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-900 mb-1">Condition</label>
+          <select name="condition"
+                  class="w-full px-3 py-2 border {{ 'border-rose-300' if errors.get('condition') else 'border-brand-200' }} rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+            <option value="">Leave blank</option>
+            {% for cond in conditions %}
+            <option value="{{ cond }}" {{ 'selected' if values.get('condition') == cond }}>{{ cond }}</option>
+            {% endfor %}
+          </select>
+          {% if errors.get('condition') %}<p class="mt-1 text-xs text-rose-600">{{ errors['condition'] }}</p>{% endif %}
+        </div>
+      </div>
+    </div>
+    <p class="mt-4 text-xs text-gray-400">Only the MPN is required — anything left blank is filled by enrichment, never guessed.</p>
+    <div class="mt-6 flex justify-end gap-3 pt-4 border-t border-gray-100">
+      <button type="button" @click="$dispatch('close-modal')"
+              class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
+      <button type="submit"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 shadow-sm transition-colors">Add part</button>
+    </div>
+  </form>
+</div>

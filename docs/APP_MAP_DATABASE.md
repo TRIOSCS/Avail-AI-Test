@@ -303,6 +303,9 @@
 | category_updated_at | UTCDateTime, nullable | SP2/F2 (migration 096). When the category was last (re)written through the ladder — the tie-break timestamp for `set_category` (never borrowed from the card-wide `updated_at`). NULL for legacy rows (ranks as ""). |
 | enriched_at | UTCDateTime, nullable | When the first-pass card enrichment (description/category/lifecycle) ran; NULL = not yet run |
 | specs_enriched_at | UTCDateTime, nullable, indexed | When the second-pass structured-spec extraction ran; NULL = spec pass not yet run |
+| enrich_requested_at | UTCDateTime, nullable, indexed | Worker priority-lane stamp (migration 099, on-add enrichment). Set ONLY by `POST /api/materials/add` (a user is actively waiting on the card); bulk/stock/email/search creation never stamps. The worker's `select_batch` orders `IS NOT NULL DESC, ASC NULLS LAST` ahead of everything (FIFO among stamped); `run_one_batch` clears the stamp on every batch card pre-await so a terminal `not_found` card can't pin the lane. |
+| validation_conflicts | JSONB, nullable | List of conflicts where a tier≥80 authoritative source contradicted a `manual` (tier 100) value — the ladder KEPT the manual value, `spec_tiers.record_validation_conflict` persisted the contradiction. Entries: `{"key": <spec_key\|"category">, "manual": {value, updated_at}, "evidence": {source, tier, confidence, value, observed_at}}`; de-duped per `(key, evidence.source)`, newest evidence replaces. Cleared per-key by a PUT re-assertion of the field or the conflict-accept route. Migration 099. |
+| has_validation_conflict | Boolean NOT NULL default false | `true` iff `validation_conflicts` is non-empty — the "Needs review" review-queue filter predicate (`has_validation_conflict=true` on the faceted route). Migration 099. |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
 
 > **Startup backfill:** `_backfill_material_cards()` in `startup.py` runs at boot to ensure every MPN in requirements has a corresponding material card.
@@ -311,6 +314,8 @@
 > - `trig_material_cards_search_vector` — PostgreSQL trigger maintains `search_vector` TSVECTOR on INSERT/UPDATE (weighted: display_mpn=A, manufacturer=B, description/category=C)
 > - `ix_material_cards_search_vector` — GIN index for fast full-text search via `plainto_tsquery()` + `ts_rank()`
 > - `ix_material_cards_trgm_mpn` — pg_trgm GIN index on `display_mpn` for typo-tolerant search
+> - `ix_material_cards_enrich_requested_at` — btree on the priority-lane stamp (worker `select_batch` ordering; migration 099)
+> - `ix_material_cards_needs_review` — PARTIAL index `(has_validation_conflict) WHERE has_validation_conflict` backing the review-queue filter (conflicted cards are a tiny minority; migration 099)
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 

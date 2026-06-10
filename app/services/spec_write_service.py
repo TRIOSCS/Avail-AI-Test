@@ -18,7 +18,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
-from app.services.spec_tiers import resolve, tier_for
+from app.services.spec_tiers import record_validation_conflict, resolve, tier_for
 from app.services.unit_normalizer import normalize_value
 
 _NUMERIC_RE = re.compile(r"^\s*([+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)\s*([a-zA-Zµμ%Ω°/]+.*)?\s*$")
@@ -232,8 +232,9 @@ def record_spec(
     # (tier, confidence, updated_at) tuple beats the existing entry's (spec_tiers.resolve).
     # Higher tier always overrides; equal tier → higher confidence; tie → newer.
     specs = dict(card.specs_structured or {})
+    existing_entry = specs.get(spec_key)
     if _incoming_loses(
-        specs.get(spec_key),
+        existing_entry,
         source=source,
         incoming_tier=incoming_tier,
         confidence=confidence,
@@ -242,6 +243,17 @@ def record_spec(
         spec_key=spec_key,
         value=value,
     ):
+        # The ladder kept the existing entry. When that entry is a manual (tier 100)
+        # value and the loser is an authoritative source (tier >= 80) reporting
+        # something ELSE, persist the contradiction for human review — the helper
+        # gates manual / tier>=80 / values-differ, so this call is safe on every lose.
+        record_validation_conflict(
+            card,
+            spec_key,
+            existing_entry,
+            new_entry,
+            bool(value) if schema.data_type == "boolean" else new_entry["value"],
+        )
         return False
 
     # Write to JSONB (source of truth)

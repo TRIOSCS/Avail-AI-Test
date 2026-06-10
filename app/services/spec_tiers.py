@@ -123,6 +123,112 @@ def _prov_key(entry: dict) -> tuple[int, float, str]:
     )
 
 
+# ── Validation conflicts (on-add enrichment, migration 099) ──────────────────────────
+# A manual (tier 100) value is NEVER overwritten by the system — but when a source in
+# the deterministic/authoritative band contradicts it, that contradiction is recorded on
+# the card (validation_conflicts JSONB + has_validation_conflict flag) so a human can
+# review it. Tier >= 80 = the authoritative band (trio_source 95, connector APIs 90,
+# trio_source_ai 88, mpn_decode 85, fru_matrix_decode 84, desc_parse 83,
+# fru_desc_parse 82, partsurfer/psref 80). web_search 70 / brokerbin 65 / ai_guess 40
+# never flag — too noisy to challenge a human.
+CONFLICT_EVIDENCE_MIN_TIER = 80
+
+
+def _conflict_value_key(value) -> str:
+    """Normalize a value for conflict comparison.
+
+    Numerics compare as floats (so 16 == 16.0 == "16"); everything else compares case-
+    insensitively with whitespace stripped (so "DDR4" == "ddr4", True == "true").
+    """
+    text = str(value).strip()
+    try:
+        return repr(float(text))
+    except (TypeError, ValueError):
+        return text.casefold()
+
+
+def record_validation_conflict(
+    card: "MaterialCard",
+    key: str,
+    existing_prov: dict | None,
+    incoming_prov: dict,
+    incoming_value,
+) -> bool:
+    """Record that authoritative evidence contradicts a manual value. Single choke
+    point.
+
+    Called from the LOSE branches of ``record_spec`` (spec_write_service) and
+    ``set_category`` — i.e. after the F1 ladder already KEPT the existing value. Gates
+    (all enforced here so call sites stay dumb):
+      - the existing entry is a ``manual`` (tier 100) value;
+      - the incoming source ranks in the authoritative band (tier >= 80);
+      - the two values actually differ after normalization (corroboration is not stored).
+
+    Persists an entry into ``card.validation_conflicts`` de-duped per
+    ``(key, evidence.source)`` — newest evidence replaces — and sets
+    ``card.has_validation_conflict``. Returns True iff an entry was written.
+    """
+    if (existing_prov or {}).get("source") != "manual":
+        return False
+    incoming_source = (incoming_prov or {}).get("source", "")
+    incoming_tier = incoming_prov.get("tier")
+    if incoming_tier is None:
+        incoming_tier = tier_for(incoming_source)
+    if int(incoming_tier) < CONFLICT_EVIDENCE_MIN_TIER:
+        return False
+    manual_value = (existing_prov or {}).get("value")
+    if _conflict_value_key(manual_value) == _conflict_value_key(incoming_value):
+        return False
+
+    entry = {
+        "key": key,
+        "manual": {
+            "value": manual_value,
+            "updated_at": (existing_prov or {}).get("updated_at") or "",
+        },
+        "evidence": {
+            "source": incoming_source,
+            "tier": int(incoming_tier),
+            "confidence": incoming_prov.get("confidence"),
+            "value": incoming_value,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    conflicts = [
+        c
+        for c in (card.validation_conflicts or [])
+        if not (c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source)
+    ]
+    conflicts.append(entry)
+    card.validation_conflicts = conflicts
+    card.has_validation_conflict = True
+    logger.info(
+        "validation conflict: card={} key={} manual={!r} kept; {} (tier {}) reported {!r}",
+        getattr(card, "id", None),
+        key,
+        manual_value,
+        incoming_source,
+        incoming_tier,
+        incoming_value,
+    )
+    return True
+
+
+def clear_validation_conflicts(card: "MaterialCard", key: str) -> bool:
+    """Drop every conflict entry for *key* (a human re-asserted or accepted a value).
+
+    Recomputes ``has_validation_conflict`` (empty list → False). Returns True iff
+    anything was removed.
+    """
+    conflicts = list(card.validation_conflicts or [])
+    kept = [c for c in conflicts if c.get("key") != key]
+    if len(kept) == len(conflicts):
+        return False
+    card.validation_conflicts = kept
+    card.has_validation_conflict = bool(kept)
+    return True
+
+
 def resolve(existing: dict | None, incoming: dict) -> bool:
     """Return ``True`` iff *incoming* wins over *existing* under the F1 ladder.
 
@@ -258,6 +364,21 @@ def set_category(
         }
 
     if not resolve(existing, incoming):
+        if write:
+            # The ladder kept the existing category. If that category is a manual value
+            # and the loser is an authoritative source reporting something ELSE, persist
+            # the contradiction for human review (the helper gates manual/tier>=80/diff).
+            record_validation_conflict(
+                card,
+                "category",
+                {
+                    "source": card.category_source,
+                    "value": card.category,
+                    "updated_at": existing["updated_at"] if existing else "",
+                },
+                {"source": source, **incoming},
+                canonical,
+            )
         logger.debug(
             "set_category: card={} kept existing category={!r} (incoming {!r}@{} lost)",
             getattr(card, "id", None),

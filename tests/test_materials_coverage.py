@@ -554,12 +554,16 @@ class TestUpdateMaterialAllFields:
         db_session.add(mc)
         db_session.commit()
 
+        # Category goes through the F1 ladder now (set_category, manual/100) — it must
+        # be a canonical commodity; off-vocab values are no longer persisted as junk.
         resp = client.put(
             f"/api/materials/{mc.id}",
-            json={"category": "MCU"},
+            json={"category": "dram"},
         )
         assert resp.status_code == 200
-        assert resp.json()["enrichment_source"] == "manual"
+        data = resp.json()
+        assert data["enrichment_source"] == "manual"
+        assert data["category"] == "dram"
 
     def test_update_does_not_overwrite_existing_enrichment_source(self, client, db_session):
         """PUT does not overwrite an existing enrichment_source."""

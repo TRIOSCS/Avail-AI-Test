@@ -7,6 +7,7 @@
 {% set rohs_counts = global_facet_counts.get('rohs', {}) %}
 {% set condition_counts = global_facet_counts.get('condition', {}) %}
 {% set ds_count = global_facet_counts.get('has_datasheet', {}).get('true', 0) %}
+{% set nr_count = global_facet_counts.get('needs_review', {}).get('true', 0) %}
 
 {# Lifecycle facet — stored values: active|eol|obsolete|nrfnd|ltb (NRND→nrfnd) #}
 {% set lifecycle_opts = [
@@ -90,6 +91,22 @@
            class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
     <span class="text-gray-700 truncate flex-1 text-[13px]">Has datasheet</span>
     <span class="text-[11px] text-gray-400 tabular-nums">{{ ds_count }}</span>
+  </label>
+</div>
+{% endif %}
+
+{# Needs-review toggle — has_validation_conflict (an authoritative source contradicts
+   a manual value). Hidden until conflicts exist, matching the Datasheet toggle. #}
+{% if nr_count > 0 %}
+<div class="mb-3">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Review</h4>
+  <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
+    <input aria-label="Only parts needing conflict review" type="checkbox"
+           :checked="needsReview"
+           @change="toggleNeedsReview()"
+           class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+    <span class="text-gray-700 truncate flex-1 text-[13px]">Needs review</span>
+    <span class="text-[11px] text-gray-400 tabular-nums">{{ nr_count }}</span>
   </label>
 </div>
 {% endif %}

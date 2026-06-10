@@ -1048,6 +1048,22 @@ set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB
     |     must not keep matching the old commodity's deep-filters
     +---> write=False = read-only twin (same verdict, zero mutation) — used by the
           SP-Ingest dry run so its report can't drift from --apply
+
+record_validation_conflict(card, key, existing_prov, incoming_prov, incoming_value) -> bool
+    # The validation-contract choke point (on-add enrichment, migration 099). Called from
+    # the LOSE branches of record_spec (spec_write_service) and set_category (write=True
+    # only) — i.e. AFTER the ladder already kept the existing value. Gates (all here, so
+    # call sites stay dumb): existing source == "manual"; incoming tier >= 80 (the
+    # authoritative band — web 70 / brokerbin 65 / ai 40 never challenge a human);
+    # normalized values differ (numerics as float, strings casefolded — corroboration is
+    # never stored). Appends to card.validation_conflicts (de-dupe per (key,
+    # evidence.source), newest replaces) + sets has_validation_conflict. Arbitration is
+    # UNCHANGED — the manual value always survives; this only persists the contradiction.
+
+clear_validation_conflicts(card, key) -> bool
+    # Drops every entry for *key* and recomputes has_validation_conflict. Called by the
+    # PUT updates when the field is re-asserted (routers/materials.py::update_material,
+    # htmx_views::update_material_card — category) and by the conflict-accept route.
 ```
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
@@ -1065,6 +1081,74 @@ service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
 assignment remains; SP3 adds the `@validates` hardening). The deterministic decode is
 protected by its tier (85), not by running before the fru-crosswalk (84) / desc-parse
 (83) / AI spec (60) passes — the old per-writer confidence pre-gates are removed.
+
+### On-add auto-enrichment (single-add modal, inline passes, priority lane, validation conflicts)
+
+Every card created by a user action gets (a) immediate deterministic enrichment,
+(b) prioritized worker enrichment, (c) ladder-safe validation of user input with
+persistent, surfaced conflicts. Manual values are NEVER overwritten by the system.
+
+```
+"Add part" button (materials workspace header) --hx-get--> GET /v2/partials/materials/add-form
+    |   renders htmx/partials/materials/add_modal.html into #modal-content
+    v
+POST /api/materials/add  (routers/materials.py — exactly 5 fields: mpn required;
+    |                     manufacturer / description / category / condition optional)
+    +---> V3 intake validation, BLOCKING + never silent: normalize_mpn (>=3 chars),
+    |     category via category_normalizer → canonical commodity, condition in
+    |     MaterialCondition. Failure → 422 re-rendering the modal with per-field
+    |     messages (htmx_app.js allows 422 swaps targeted at #modal-content only).
+    +---> resolve_material_card() create-or-resolve; manual values enter the F1 ladder
+    |     at manual/100 (category via set_category; manufacturer/description/condition
+    |     columns + manual/100/conf-1.0 entries in enrichment_provenance). Blank = blank —
+    |     omitted fields stay NULL for enrichment to fill, never defaulted or guessed.
+    +---> db.flush() → search_service.run_deterministic_passes(db, [card.id]) — the three
+    |     inline zero-network passes (decode 85 → fru-crosswalk 84 → desc-parse 83; same
+    |     feature flags as the worker; ladder arbitrates, order not load-bearing) so
+    |     deterministic facets/category are queryable in the create response.
+    +---> stamps card.enrich_requested_at (PRIORITY LANE — single-add ONLY; bulk import,
+    |     stock import, email auto-import, source ingest and the search flow never stamp:
+    |     they ride the created_at fast lane + search_count demand ordering).
+    +---> success → HX-Redirect: /v2/materials/{id} (the modal redirects to card detail).
+
+Bulk surfaces gain the same server-side pipeline (no UI changes):
+  POST /api/materials/import-part-numbers + /api/materials/import-stock → V3-invalid rows
+  are skipped + surfaced as response `warnings: [{row, field, reason}]`; all touched card
+  ids run run_deterministic_passes in the same session/commit. Search-driven creation
+  (search_requirement's write session) runs the passes over its card ids before
+  _schedule_background_enrichment.
+
+Worker priority lane (enrichment_worker/worker.py):
+  select_batch ORDER BY gains a leading pair — `enrich_requested_at IS NOT NULL DESC,
+  enrich_requested_at ASC NULLS LAST` — ahead of the existing (status=unenriched DESC,
+  search_count DESC, created_at DESC): FIFO among user-requested cards, then current
+  behavior. run_one_batch sets enrich_requested_at = None on EVERY batch card immediately
+  after select_batch returns (attribute writes pre-await — the worker's
+  no-query-after-await discipline; persisted by the batch-final commit), so a terminal
+  not_found card cannot pin the lane. SLA (worker healthy, caps not exhausted):
+  deterministic facets immediate; connector/web/AI tiers P50 <= 90s, P95 <= 5min.
+
+Status badge (card detail header): htmx/partials/materials/enrich_status.html — while
+  enrichment_status == unenriched it polls GET /v2/partials/materials/{id}/enrich-status
+  every 15s ("Queued for enrichment"); the route answers HTTP 286 once the status leaves
+  unenriched (htmx swaps the final tier badge + enriched_at and STOPS polling).
+
+Validation conflicts (storage: material_cards.validation_conflicts JSONB +
+  has_validation_conflict + partial index, migration 099; write hook:
+  spec_tiers.record_validation_conflict — see the spec_tiers contract above):
+  V1 decode-vs-manual spec keys (the decoder writes, the ladder rejects, the hook
+  records); V2 manual category vs regex-gated decoded commodity (set_category hook;
+  the decoder's cross-commodity guard is unchanged); V3 = the intake rejections above.
+  Surfacing: amber "Needs review — N conflict(s)" hero badge + per-key warning rows in
+  the detail Specifications panel with tooltip ("Manual value kept. <source> reported
+  <value> (conf <c>) on <date>") and an "Use this value" button →
+  POST /v2/partials/materials/{id}/conflicts/{key}/accept (writes the evidence value at
+  manual/100 — a human decision — and clears the key's entries). Clearing: any PUT
+  re-assertion of a conflicted field clears that key; empty list → flag false.
+  Review queue: "Needs review" checkbox in filters/global.html →
+  `has_validation_conflict=true` validated in the faceted route → query branch in
+  faceted_search_service (backed by the partial index).
+```
 
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
 

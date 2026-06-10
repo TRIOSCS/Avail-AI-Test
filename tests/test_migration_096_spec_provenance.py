@@ -45,14 +45,16 @@ class TestRevisionMetadata:
 
     def test_single_head(self):
         # The migration chain must converge to exactly one head (no unmerged branches) —
-        # a second head makes `alembic upgrade head` error out at deploy time.
+        # a second head makes `alembic upgrade head` error out at deploy time. The head
+        # NAME is deliberately not pinned (it advances with every new migration and was
+        # a perpetual merge-conflict magnet); the invariant is the COUNT.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["096_spec_provenance"], f"expected single head 096_spec_provenance, got {heads}"
+        assert len(heads) == 1, f"expected exactly one migration head, got {heads}"
 
     def test_source_tier_sql_case_matches_live_ladder(self):
         # The migration cannot import app code, so its CASE is a literal snapshot of

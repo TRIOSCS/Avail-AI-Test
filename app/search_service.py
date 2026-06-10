@@ -374,6 +374,13 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if primary_card_id and not write_req.material_card_id:
             write_req.material_card_id = primary_card_id
 
+        # 3a. Inline deterministic passes over this search's card ids (same write
+        # session, committed with the sightings below) — decoded facets/category are
+        # queryable the moment the search returns, without waiting on the worker.
+        # NO enrich_requested_at stamp here: search flow rides the existing
+        # created_at fast lane + search_count demand ordering.
+        run_deterministic_passes(write_db, card_ids)
+
         # 3b. Fire background enrichment for cards without manufacturer
         await _schedule_background_enrichment(card_ids, write_db)
 
@@ -2106,6 +2113,48 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
         logger.warning("Tag classification failed for card {}", card.id, exc_info=True)
 
     return card
+
+
+def run_deterministic_passes(db: Session, card_ids: list[int] | set[int]) -> None:
+    """Run the three inline deterministic enrichment passes over *card_ids*.
+
+    On-create pipeline (on-add enrichment): zero-network, pure CPU + local queries
+    (~15ms/card), shared session, no commit — the caller owns the transaction. Order
+    mirrors the enrichment worker's second pass (mpn_decode 85 → fru_matrix_decode 84 →
+    desc_parse 83) but run order is NOT load-bearing: the F1 tier ladder
+    (app/services/spec_tiers.py) arbitrates every write. Idempotent — re-running over
+    an existing card re-asserts the same values through the ladder.
+
+    Called by: POST /api/materials/add, the bulk part-number / stock imports
+    (routers/materials.py), and search_requirement's write session below — every
+    user-action card-creation path. Respects the same feature flags as the worker.
+    """
+    ids = sorted(int(i) for i in card_ids)
+    if not ids:
+        return
+    from .config import settings as _settings
+
+    if _settings.mpn_decode_enabled:
+        from .services.mpn_decoder.writer import decode_and_record_specs
+
+        try:
+            logger.info("INLINE_ENRICH: mpn-decode {}", decode_and_record_specs(db, ids))
+        except Exception:
+            logger.exception("INLINE_ENRICH: mpn-decode failed over {} cards", len(ids))
+    if _settings.fru_crosswalk_enrich_enabled:
+        from .services.fru_crosswalk_enrich import crosswalk_and_record_specs
+
+        try:
+            logger.info("INLINE_ENRICH: fru-crosswalk {}", crosswalk_and_record_specs(db, ids))
+        except Exception:
+            logger.exception("INLINE_ENRICH: fru-crosswalk failed over {} cards", len(ids))
+    if _settings.desc_parse_enabled:
+        from .services.desc_extractor.writer import extract_and_record_specs
+
+        try:
+            logger.info("INLINE_ENRICH: desc-parse {}", extract_and_record_specs(db, ids))
+        except Exception:
+            logger.exception("INLINE_ENRICH: desc-parse failed over {} cards", len(ids))
 
 
 async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
