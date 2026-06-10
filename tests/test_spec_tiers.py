@@ -58,6 +58,14 @@ def test_trio_source_tiers_rank_correctly():
     assert SOURCE_TIER["trio_source_ai"] > SOURCE_TIER["mpn_decode"]  # 88 > 85
 
 
+def test_desc_parse_tier_sits_between_decode_and_ai_extraction():
+    # The deterministic description grammar replaces the old run-order + writer pre-gate
+    # protection: the ladder itself must pin mpn_decode > desc_parse > spec_extraction.
+    assert SOURCE_TIER["desc_parse"] == 83
+    assert SOURCE_TIER["mpn_decode"] > SOURCE_TIER["desc_parse"]  # 85 > 83
+    assert SOURCE_TIER["desc_parse"] > SOURCE_TIER["spec_extraction"]  # 83 > 60
+
+
 # --- resolve ----------------------------------------------------------------
 
 
@@ -115,8 +123,10 @@ def _card(db: Session, **kw) -> MaterialCard:
 
 
 def test_set_category_off_vocab_returns_false_no_write(db_session: Session):
+    # "VPD Card" has no canonical key in any alias map (the 2026-06-09 taxonomy expansion
+    # made "Integrated Circuits (ICs)" a real alias → ics_other, so it no longer works here).
     card = _card(db_session, normalized_mpn="off-vocab", category=None)
-    wrote = set_category(card, "Integrated Circuits (ICs)", "claude_opus_inferred", 0.9)
+    wrote = set_category(card, "VPD Card", "claude_opus_inferred", 0.9)
     assert wrote is False
     assert card.category is None
     assert card.category_source is None

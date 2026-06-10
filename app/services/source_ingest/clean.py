@@ -10,14 +10,16 @@ What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and nor
 Called by: app/management/ingest_source_data.py (between parse and consolidate).
 Depends on: app.utils.normalization.normalize_mpn_key (the dedup-key normalizer the app uses
       for material_cards.normalized_mpn) + normalize_mpn (display form); app.services.
-      category_normalizer.normalize_category; the SourceRecord dataclass.
+      category_normalizer.normalize_trio_category (the SFDC ingest entry point — consults
+      the TRIO-scoped Commodity_Code__c vocabulary first, e.g. bare "Memory"→dram, then
+      falls back to the global alias map); the SourceRecord dataclass.
 """
 
 from __future__ import annotations
 
 import re
 
-from app.services.category_normalizer import normalize_category
+from app.services.category_normalizer import normalize_trio_category
 from app.services.source_ingest.models import SourceRecord
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
 
@@ -132,7 +134,9 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
         description=description,
         condition=canonicalize_condition(rec.condition),
         quantity=rec.quantity,
-        category=normalize_category(rec.category),
+        # All source_ingest data is TRIO's own export, so the TRIO-scoped vocabulary
+        # (e.g. bare "Memory" → dram) applies before the global alias map.
+        category=normalize_trio_category(rec.category),
         specs=dict(rec.specs),
         source_file=rec.source_file,
         source_kind=rec.source_kind,

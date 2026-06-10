@@ -30,8 +30,11 @@ if TYPE_CHECKING:
 # TRIO's own authoritative inventory/part-master data (ground truth) so it sits ABOVE the
 # vendor distributor APIs (tier 90); its AI-corrected variant ``trio_source_ai`` sits just
 # below vendor APIs but above the deterministic MPN decode (85). Vendor distributor APIs
-# share tier 90; the deterministic MPN decode is 85; OEM scrapers (PartSurfer/PSREF) map to
-# 80; AI free-text mining sits at the bottom. ``manual`` (a human edit) tops it.
+# share tier 90; the deterministic MPN decode is 85; the deterministic description→spec
+# grammar (``desc_parse``) sits just below it at 83 — preserving the relative order
+# mpn_decode > desc_parse > spec_extraction the worker's run-order + writer pre-gates used
+# to enforce by hand; OEM scrapers (PartSurfer/PSREF) map to 80; AI free-text mining sits
+# at the bottom. ``manual`` (a human edit) tops it.
 SOURCE_TIER: dict[str, int] = {
     "manual": 100,
     "trio_source": 95,
@@ -42,6 +45,7 @@ SOURCE_TIER: dict[str, int] = {
     "oemsecrets_api": 90,
     "trio_source_ai": 88,
     "mpn_decode": 85,
+    "desc_parse": 83,
     "partsurfer": 80,
     "psref": 80,
     "web_search": 70,

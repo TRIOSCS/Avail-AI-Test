@@ -42,13 +42,14 @@ class TestRevisionMetadata:
 
     def test_single_head(self):
         # The migration chain must converge to exactly one head (no unmerged branches).
+        # 092 and 093/094 chained off 091 on concurrent branches; merge_092_094 rejoins them.
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["092_spec_provenance"], f"expected single head 092, got {heads}"
+        assert list(heads) == ["merge_092_094"], f"expected single head merge_092_094, got {heads}"
 
 
 class TestRoundTrip:

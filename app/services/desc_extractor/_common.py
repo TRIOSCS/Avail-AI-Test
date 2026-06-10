@@ -10,9 +10,10 @@ from dataclasses import dataclass, field
 
 # Source tag + confidence for everything this extractor writes (see record_spec).
 DESC_SOURCE = "desc_parse"
-DESC_CONFIDENCE = 0.90  # deterministic token grammar — sits between mpn_decode (0.95)
-# and the AI spec reader (0.85); record_spec never lets it overwrite a protected
-# vendor-API value, and the writer skips keys already held at higher confidence.
+DESC_CONFIDENCE = 0.90  # deterministic token grammar. Arbitration is by the F1 tier
+# ladder (spec_tiers.SOURCE_TIER: desc_parse=83, between mpn_decode 85 and the AI
+# spec reader 60) — record_spec rejects any write that loses the ladder, so this
+# confidence is provenance metadata, not the cross-source conflict rule.
 
 # The only commodities the extractor fills specs for — single source of truth shared
 # by extract_desc (routing) and writer.py (card eligibility). Other inferred

@@ -128,9 +128,9 @@ async def enrich_card_specs(
     gate is a correctness invariant and applies even when ``force=True`` (force only bypasses
     the ``specs_enriched_at`` re-process filter). Cards are grouped by category; each category
     uses its own prompt/schema. Specs with confidence >= FACET_MIN_CONF are written via
-    record_spec (JSONB + facet), EXCEPT keys an earlier pass already holds at strictly higher
-    confidence (the deterministic mpn_decode 0.95 / desc_parse 0.90 tiers) — those are skipped
-    so this AI pass never clobbers a deterministic value it under-claims against. Every
+    record_spec (JSONB + facet); record_spec's F1 tier ladder (spec_tiers.SOURCE_TIER)
+    arbitrates conflicts — spec_extraction is tier 60, so it can never clobber a
+    deterministic mpn_decode (85) / desc_parse (83) or vendor-API (90) prior. Every
     processed card gets specs_enriched_at stamped so it is not reprocessed.
     """
     from app.utils.claude_client import claude_structured  # lazy: tests patch at source
@@ -189,21 +189,16 @@ async def enrich_card_specs(
                 stats["cards_processed"] += 1
                 wrote_any = False
                 if ai_part:
-                    prior_specs = c.specs_structured or {}
                     for spec in spec_defs:
                         value = ai_part.get(spec["key"])
                         conf = ai_part.get(f"{spec['key']}_confidence", 0.0)
                         if value is not None and conf >= FACET_MIN_CONF:
-                            # Confidence-ladder guard (mirrors desc_extractor/writer.py):
-                            # keys already held at strictly higher confidence — the
-                            # deterministic mpn_decode (0.95) / desc_parse (0.90) tiers
-                            # written earlier in the same batch — are skipped, because
-                            # record_spec's cross-source rule is latest-write-wins. An AI
-                            # value claiming conf >= the prior still overwrites, until the
-                            # SP2 source-tier ladder lands in record_spec.
-                            prior = prior_specs.get(spec["key"])
-                            if prior and float(prior.get("confidence") or 0.0) > float(conf):
-                                continue
+                            # No prior-confidence pre-gate here: record_spec's F1 tier
+                            # ladder (spec_tiers.SOURCE_TIER) arbitrates — spec_extraction
+                            # is tier 60, so it can never overwrite mpn_decode (85) /
+                            # desc_parse (83) / vendor-API (90) priors regardless of the
+                            # confidence it claims. FACET_MIN_CONF above is an AI output
+                            # quality floor, not cross-source arbitration.
                             if record_spec(
                                 db,
                                 int(c.id),

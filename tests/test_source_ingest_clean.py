@@ -98,3 +98,12 @@ def test_clean_maps_category_canonical_or_none():
     assert clean_record(_rec(raw_mpn="REAL123", category="HDD")).category == "hdd"
     assert clean_record(_rec(raw_mpn="REAL123", category="VPD Card")).category is None
     assert clean_record(_rec(raw_mpn="REAL123", category=None)).category is None
+
+
+def test_clean_resolves_trio_scoped_commodity_codes():
+    # The ingest routes through normalize_trio_category: codes that are only unambiguous
+    # inside TRIO's SFDC export (bare "Memory" is always a DRAM module there) resolve via
+    # the TRIO-scoped map, and global codes still fall through to the shared alias path.
+    assert clean_record(_rec(raw_mpn="REAL123", category="Memory")).category == "dram"
+    assert clean_record(_rec(raw_mpn="REAL123", category="Hard Drive")).category == "hdd"
+    assert clean_record(_rec(raw_mpn="REAL123", category="Main Board")).category == "motherboards"

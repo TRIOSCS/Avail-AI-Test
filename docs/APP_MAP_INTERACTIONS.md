@@ -766,30 +766,30 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> Stamps material_cards.enriched_at
 
 Worker second-pass ordering (run_one_batch, same shared post-await session, one
-commit; the ordering realizes the confidence tiering — each deterministic layer
-lands before the next, and each downstream writer carries its own guard that
-skips keys already held at STRICTLY higher confidence. record_spec itself only
-protects vendor-API values — its cross-source rule is otherwise latest-write-wins —
-so a writer claiming confidence >= a prior still overwrites it (e.g. an AI value
-self-reported at 0.95 can replace an mpn_decode 0.95) until the SP2 source-tier
-ladder lands in record_spec):
+commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
+every write through the F1 source-tier ladder (app/services/spec_tiers.py —
+mpn_decode 85 > desc_parse 83 > spec_extraction 60; vendor APIs 90, trio_source 95,
+manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
+of the confidence it claims or which pass ran first, so the old per-writer
+"skip keys already held at higher confidence" pre-gates are REMOVED — the ladder
+owns arbitration in one place:
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
-       decode, source="mpn_decode", confidence 0.95 (settings.mpn_decode_enabled).
+       decode, source="mpn_decode" (tier 85), confidence 0.95
+       (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
     2. desc_extractor/writer.py::extract_and_record_specs — deterministic
        description→spec token grammar (storage + DRAM; TRIO part-master/inventory
        descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
-       "desc_parse", confidence 0.90 (settings.desc_parse_enabled). Zero LLM/network;
-       extraction is suppressed on foreign commodity labels ("Other,"/"Tray,"…) and
-       conflicting tokens; only already-categorized hdd/ssd/dram cards are written
-       (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The writer skips keys already held at higher confidence, so mpn_decode 0.95
-       and vendor-API values stay authoritative.
+       "desc_parse" (tier 83), confidence 0.90 (settings.desc_parse_enabled).
+       Zero LLM/network; extraction is suppressed on foreign commodity labels
+       ("Other,"/"Tray,"…) and conflicting tokens; only already-categorized
+       hdd/ssd/dram cards are written (NEVER categorizes — a description is not
+       a regex-gated commodity proof).
     3. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
-       source="spec_extraction", facets gated at confidence >= 0.85. Applies the
-       same strictly-higher-confidence skip guard, so it never clobbers an
-       mpn_decode/desc_parse key it under-claims against (an AI confidence >= the
-       deterministic prior still wins — see the tiering caveat above).
+       source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
+       (FACET_MIN_CONF — an AI output-quality floor, not cross-source
+       arbitration). The ladder guarantees it never clobbers an
+       mpn_decode/desc_parse/vendor key, even when it self-reports 0.95+.
 
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
@@ -830,7 +830,8 @@ The single authoritative "which source wins" rule, so source-execution ORDER is 
 load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest write wins").
 
 ```
-SOURCE_TIER  manual:100 · {digikey,mouser,nexar,element14,oemsecrets}_api:90 · mpn_decode:85
+SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
+             · trio_source_ai:88 · mpn_decode:85 · desc_parse:83
              · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
              · spec_extraction:60 · {ai_guess,claude_opus_inferred}:40   (unknown → 0)
 
@@ -851,10 +852,13 @@ set_category(card, value, source, confidence) -> bool   # the ONE DB-touching he
 ```
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
-`mpn_decoder/writer.py` (decode category via `set_category`, tier 85). The 4 remaining
-category writers (enrichment / authoritative / material-enrichment) route through
-`set_category` in SP3. The deterministic decode is now protected by its tier (85), not by
-running before the AI spec pass.
+`mpn_decoder/writer.py` (decode category via `set_category`, tier 85), and the SP-Ingest
+pipeline (`source_ingest/ingest.py` — TRIO part-master categories via `set_category` at
+trio_source:95 / trio_source_ai:88, specs via `record_spec`). The 4 remaining category
+writers (enrichment / authoritative / material-enrichment) route through `set_category`
+in SP3. The deterministic decode is now protected by its tier (85), not by running before
+the desc-parse (83) or AI spec (60) passes — their old per-writer confidence pre-gates
+are removed.
 
 ```
 Startup backfill:
