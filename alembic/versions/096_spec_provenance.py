@@ -21,10 +21,10 @@ What: Adds the F2 provenance columns so every spec/category write can record whe
       JSONB extract is skipped, so the schema migration stays testable on the in-memory engine
       (SQLite masks PG JSON ops; verify the backfill against live PG per feedback_sqlite_masks_postgres).
 Called by: alembic (upgrade/downgrade).
-Depends on: 094_fru_links (current single head); material_cards, material_spec_facets tables.
+Depends on: 095_wechat_id (current single head); material_cards, material_spec_facets tables.
 
 Revision ID: 096_spec_provenance
-Revises: 094_fru_links
+Revises: 095_wechat_id
 Create Date: 2026-06-09
 """
 
@@ -47,7 +47,7 @@ _LEGACY_CATEGORY_CONFIDENCE = 0.5
 _LEGACY_CATEGORY_TIER = 50
 
 # SQL CASE snapshot of app.services.spec_tiers.SOURCE_TIER (the FULL map — including
-# sources that cannot appear in pre-095 data, so the snapshot equals the dict exactly).
+# sources that cannot appear in pre-096 data, so the snapshot equals the dict exactly).
 # Migrations must NOT import app code (it may drift after this runs); instead
 # tests/test_migration_096_spec_provenance.py parses this literal and asserts it matches
 # SOURCE_TIER key-for-key, so adding a ladder source without updating this CASE fails CI.

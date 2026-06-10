@@ -27,9 +27,14 @@ class TestReenrichMain:
         mock_db.query.return_value.filter.return_value.all.return_value = []
         mock_session_cls = MagicMock(return_value=mock_db)
 
+        # NOTE: do NOT patch("app.models.MaterialCard", MagicMock()) here — main() lazily
+        # imports app.services.spec_write_service, and if that module's FIRST import in
+        # this xdist worker happens inside such a patch window, its module-level
+        # `from app.models import MaterialCard` captures the MagicMock permanently,
+        # breaking every later record_spec test on the same worker. The mocked db makes
+        # the patch unnecessary anyway.
         with (
             patch("app.database.SessionLocal", mock_session_cls),
-            patch("app.models.MaterialCard", MagicMock()),
             patch(
                 "app.services.material_enrichment_service.enrich_material_cards",
                 new_callable=AsyncMock,
@@ -195,6 +200,49 @@ class TestReenrichMain:
         assert call.args[3] == "TO-92"
         assert call.kwargs.get("source") == "spec_extraction"
         assert call.kwargs.get("confidence") == 0.85
+
+    @pytest.mark.asyncio
+    async def test_main_preserves_explicit_zero_confidence(self):
+        """An entry with stored confidence 0.0 re-records at 0.0 — a falsy-`or` fallback
+        would inflate it to 0.85, and the same-source equal-tier re-record would then
+        PERSIST that manufactured confidence (0.85 > 0.0 wins the ladder), letting the
+        entry beat same-tier sources it never legitimately outranked.
+
+        The 0.85 default applies only to entries with NO stored confidence.
+        """
+        mock_db = MagicMock()
+
+        card = MagicMock()
+        card.id = 50
+        card.category = "dram"
+        card.specs_structured = {
+            "ddr_type": {"value": "DDR4", "source": "spec_extraction", "confidence": 0.0},
+            "capacity_gb": {"value": 16, "source": "spec_extraction"},  # no confidence key
+        }
+
+        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            (50,)
+        ]
+        mock_db.query.return_value.filter.return_value.all.return_value = [card]
+        mock_session_cls = MagicMock(return_value=mock_db)
+
+        with (
+            patch("app.database.SessionLocal", mock_session_cls),
+            patch(
+                "app.services.material_enrichment_service.enrich_material_cards",
+                new_callable=AsyncMock,
+                return_value={"enriched": 1},
+            ),
+            patch("app.services.spec_write_service.record_spec") as mock_record,
+        ):
+            from app.management.reenrich import main
+
+            await main()
+
+        assert mock_record.call_count == 2
+        by_key = {call.args[2]: call for call in mock_record.call_args_list}
+        assert by_key["ddr_type"].kwargs["confidence"] == 0.0  # preserved, NOT inflated
+        assert by_key["capacity_gb"].kwargs["confidence"] == 0.85  # default only when absent
 
     @pytest.mark.asyncio
     async def test_main_db_always_closed(self):

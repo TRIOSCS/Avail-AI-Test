@@ -129,11 +129,15 @@ async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
     continues — EXCEPT for deterministic config/auth errors (ClaudeUnavailableError: no API
     key; ClaudeAuthError: 401/403), which are re-raised immediately because every remaining
     part would fail identically, and a streak of ``_MAX_CONSECUTIVE_FAILURES`` failures, which
-    aborts the run as systematic. Confidence-bearing specs flow to ingest.py via
-    ``part.ai_specs``.
+    aborts the run as systematic. An EMPTY structured result (claude_structured returns None
+    when the response has no tool_use block — it does not raise) counts as a failure too: it
+    applied zero corrections, so counting it "corrected" would hide a model that consistently
+    returns nothing from both the operator report and the consecutive-failure abort.
+    Confidence-bearing specs flow to ingest.py via ``part.ai_specs``.
 
     Returns ``{"corrected": N, "failed": M}`` so the CLI report can distinguish "AI corrected
-    everything" from "AI failed on 100% of parts".
+    everything" from "AI failed on 100% of parts". ``corrected`` counts only parts where a
+    structured result was actually applied.
     """
     canonical_keys = sorted(get_all_commodities())
     schema = _schema(canonical_keys)
@@ -142,6 +146,7 @@ async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
     stats = {"corrected": 0, "failed": 0}
     consecutive_failures = 0
     for part in parts:
+        result = None
         try:
             payload = _part_payload(part)
             prompt = f"{vocab_line}\n\nSource row (clean ONLY what this text states, null otherwise):\n{payload}"
@@ -152,10 +157,13 @@ async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
                 model_tier="smart",
                 max_tokens=1024,
             )
-            if result:
-                _apply_result(part, result)
-            stats["corrected"] += 1
-            consecutive_failures = 0
+            if not result:
+                # No tool_use block in the response — claude_structured logs and returns
+                # None instead of raising. Nothing was applied, so it is a failure.
+                logger.warning(
+                    "ai_correct: empty structured result for mpn={} — keeping non-AI values",
+                    part.normalized_mpn,
+                )
         except (ClaudeUnavailableError, ClaudeAuthError):
             # Deterministic: a missing/invalid API key fails EVERY part. Fail fast instead
             # of grinding through the whole input logging one traceback per part.
@@ -168,15 +176,22 @@ async def ai_correct(parts: list[ConsolidatedPart]) -> dict:
             )
             raise
         except Exception:
-            stats["failed"] += 1
-            consecutive_failures += 1
             logger.exception(
                 "ai_correct: failed on mpn={} — keeping non-AI values",
                 part.normalized_mpn,
             )
+
+        if not result:
+            stats["failed"] += 1
+            consecutive_failures += 1
             if consecutive_failures >= _MAX_CONSECUTIVE_FAILURES:
                 raise RuntimeError(
                     f"ai_correct: {consecutive_failures} consecutive part failures — systematic "
                     f"failure, aborting ({stats['corrected']} corrected, {stats['failed']} failed)"
                 )
+            continue
+
+        _apply_result(part, result)
+        stats["corrected"] += 1
+        consecutive_failures = 0
     return stats

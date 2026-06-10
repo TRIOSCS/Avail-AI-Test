@@ -124,6 +124,37 @@ async def test_ai_correct_aborts_after_consecutive_failure_streak(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_ai_correct_counts_empty_result_as_failed(monkeypatch):
+    # claude_structured returns None (no tool_use block) WITHOUT raising. Nothing was
+    # applied, so the part must count as failed — counting it "corrected" would report
+    # "N ok / 0 failed" while applying zero corrections.
+    async def empty(prompt, schema, **kw):
+        return None
+
+    monkeypatch.setattr(ai_mod, "claude_structured", empty)
+    part = _part()
+    stats = await ai_correct([part])
+    assert stats == {"corrected": 0, "failed": 1}
+    assert part.ai_description is None
+    assert part.ai_category is None
+    assert part.ai_specs == {}
+
+
+@pytest.mark.asyncio
+async def test_ai_correct_empty_results_trip_consecutive_failure_abort(monkeypatch):
+    # A model that consistently returns no structured block is a systematic failure —
+    # it must hit the consecutive-failure abort exactly like a raising failure would.
+    async def empty(prompt, schema, **kw):
+        return None
+
+    monkeypatch.setattr(ai_mod, "claude_structured", empty)
+    monkeypatch.setattr(ai_mod, "_MAX_CONSECUTIVE_FAILURES", 3)
+    parts = [_part(normalized_mpn=f"p{i}", raw_mpn=f"P{i}") for i in range(10)]
+    with pytest.raises(RuntimeError, match="consecutive"):
+        await ai_correct(parts)
+
+
+@pytest.mark.asyncio
 async def test_ai_correct_returns_null_when_source_silent(monkeypatch):
     # The headline guardrail: source lacks specs → model returns all-null → nothing fabricated.
     async def fake(prompt, schema, **kw):

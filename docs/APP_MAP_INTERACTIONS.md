@@ -914,10 +914,10 @@ owns arbitration in one place:
        token (NVIDIA/GDDR/HBM/family hit), so NIC "10GB"/"100GbE" rows emit nothing.
        Only cards already categorized to one of the eight commodities are written
        (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The writer skips keys already held at higher confidence, so mpn_decode 0.95,
-       fru_matrix_decode 0.93 and vendor-API values stay authoritative. The five
-       phase-2 commodities have no MPN decoders, so desc_parse is their top
-       non-vendor deterministic source.
+       The F1 ladder (desc_parse 83 < fru_matrix_decode 84 < mpn_decode 85 <
+       vendor 90) keeps decode/vendor values authoritative — no per-writer
+       pre-gate. The five phase-2 commodities have no MPN decoders, so
+       desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -971,7 +971,7 @@ SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oem
                floor for a valued category with NULL provenance) ·
                {ai_guess,claude_opus_inferred,claude_haiku}:40
              (unknown → 0 with a once-per-source WARNING — an unregistered writer loses
-              every conflict; migration 095 carries a CASE snapshot of this map, pinned by
+              every conflict; migration 096 carries a CASE snapshot of this map, pinned by
               a sync test)
 
 tier_for(source) -> int                 # SOURCE_TIER.get(source, 0); warns once on unknown
@@ -1002,7 +1002,11 @@ Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `
 `mpn_decoder/writer.py` (decode category via `set_category`, tier 85),
 `fru_crosswalk_enrich.py` (tier 84), the SP-Ingest pipeline (`source_ingest/ingest.py` —
 TRIO part-master categories via `set_category` at trio_source:95 / trio_source_ai:88,
-specs via `record_spec` + dry-run parity via `spec_would_write`), and ALL three remaining
+specs via `record_spec` + dry-run parity via `spec_would_write`), the manual edit
+endpoint `routers/htmx_views.py::update_material_card` (manual:100 — a deliberate human
+change always wins and purges the old commodity's facets; an UNCHANGED re-submitted value
+is NOT re-stamped manual, and off-vocab/blank values are rejected with a `showToast`
+warning instead of persisting), and ALL three remaining
 category writers — `enrichment.py` (connector `{name}_api` tiers), `material_enrichment_
 service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
 (claude_opus_inferred:40) — now route through `set_category` (no direct `card.category`
@@ -1035,7 +1039,9 @@ consolidate.py — group by normalized_mpn → ConsolidatedPart per MPN (longest
 ai_correct.py  — OPTIONAL (--ai-correct): one Claude call per part under the
     |            no-fabrication guardrail; per-PART failure isolation, fail-fast on
     |            ClaudeUnavailable/Auth, consecutive-failure abort; returns
-    |            {corrected, failed} for the report
+    |            {corrected, failed} for the report — an EMPTY structured result
+    |            (claude_structured → None, no tool_use block) counts as failed and
+    |            toward the abort streak; corrected counts only applied results
     v
 ingest.py      — AUGMENT material_cards: category via set_category (trio_source:95 /
                  trio_source_ai:88), specs via record_spec, description/condition

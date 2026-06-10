@@ -184,14 +184,17 @@ class TestMaterialUpdate:
         card = material_cards[0]  # LM317T
         resp = client.put(
             f"/v2/partials/materials/{card.id}",
-            data={"manufacturer": "Texas Instruments", "category": "Linear Regulator"},
+            data={"manufacturer": "Texas Instruments", "category": "voltage_regulators"},
         )
         assert resp.status_code == 200
         assert "Texas Instruments" in resp.text
 
         db_session.refresh(card)
         assert card.manufacturer == "Texas Instruments"
-        assert card.category == "Linear Regulator"
+        # Category routes through the F1 ladder (set_category) — it lands canonical with
+        # manual provenance; off-vocab free text like "Linear Regulator" would be rejected.
+        assert card.category == "voltage_regulators"
+        assert card.category_source == "manual"
 
     def test_update_lifecycle(self, client: TestClient, db_session: Session, material_cards):
         card = material_cards[0]

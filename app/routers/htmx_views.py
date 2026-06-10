@@ -7586,7 +7586,6 @@ async def update_material_card(
     updatable = [
         "manufacturer",
         "description",
-        "category",
         "package_type",
         "lifecycle_status",
         "rohs_status",
@@ -7602,9 +7601,42 @@ async def update_material_card(
                     val = None
             setattr(card, field, val or None)
 
+    # Category NEVER goes through raw setattr: a raw write would leave the OLD
+    # provenance columns attached to the NEW value (the next enrichment pass would
+    # silently revert the human's correction), skip the stale-commodity facet purge,
+    # and persist off-vocab free text. Route it through the F1 ladder instead —
+    # "manual" is tier 100, so a deliberate human change always wins, gets provenance
+    # stamped, and purges the old commodity's facets.
+    category_toast: str | None = None
+    if "category" in form:
+        from ..services.category_normalizer import normalize_category
+        from ..services.spec_tiers import set_category
+
+        raw_category = (str(form["category"]) if form["category"] else "").strip()
+        canonical = normalize_category(raw_category)
+        if canonical is not None and canonical != card.category:
+            set_category(card, canonical, "manual", 1.0)
+        elif canonical is None and raw_category:
+            # Off-vocab free text — never persisted (it would be invisible to every
+            # commodity filter). Tell the user instead of silently dropping the edit.
+            category_toast = (
+                f'Category "{raw_category}" is not a recognized commodity — kept '
+                f'"{card.category or "none"}". Use a canonical key like hdd, ssd or dram.'
+            )
+        elif not raw_category and card.category:
+            # The ladder never blanks an existing category (set_category contract).
+            category_toast = f'Category can\'t be cleared — kept "{card.category}".'
+        # canonical == card.category → no-op: an unchanged value must NOT be re-stamped
+        # as a manual (tier 100) edit just because the user saved another field.
+
     db.commit()
     logger.info("Material card {} updated by {}", card_id, user.email)
-    return await material_detail_partial(request, card_id, user, db)
+    response = await material_detail_partial(request, card_id, user, db)
+    if category_toast:
+        # Surface the rejection WITHOUT breaking the partial swap, via the existing
+        # showToast HX-Trigger convention bridged to $store.toast (htmx_app.js).
+        response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": category_toast, "type": "warning"}})
+    return response
 
 
 # ── Quotes partials ───────────────────────────────────────────────────

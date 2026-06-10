@@ -75,7 +75,7 @@ SOURCE_TIER: dict[str, int] = {
 # Provenance stamped on valued-but-unprovenanced data (categories that pre-date the
 # ladder, or rows written by a not-yet-routed writer). Mid-tier by design: a real future
 # source (decode 85, vendor 90) overrides it, but a stray AI guess (40) cannot silently
-# flip it. Shared by migration 095's category backfill and set_category's runtime
+# flip it. Shared by migration 096's category backfill and set_category's runtime
 # default so "existed at migration time" and "written a minute later" rank identically.
 LEGACY_BACKFILL_SOURCE = "legacy_backfill"
 LEGACY_BACKFILL_TIER = SOURCE_TIER[LEGACY_BACKFILL_SOURCE]

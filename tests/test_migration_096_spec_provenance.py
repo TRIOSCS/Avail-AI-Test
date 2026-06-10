@@ -1,11 +1,11 @@
-"""Structural + SQLite round-trip tests for migration 095 (SP2 spec/category
+"""Structural + SQLite round-trip tests for migration 096 (SP2 spec/category
 provenance).
 
-Asserts the migration's revision metadata (id <=32 chars, chains off 094_fru_links,
+Asserts the migration's revision metadata (id <=32 chars, chains off 095_wechat_id,
 single head), that its SQL CASE tier snapshot stays in sync with the live
 spec_tiers.SOURCE_TIER map, and that its seven add_column / drop_column calls round-trip
-via the real alembic CLI machinery on a SQLite file DB (stamped at 094, then
-upgrade→downgrade→upgrade of the 095 step). The PG-only JSONB/category backfill is NOT
+via the real alembic CLI machinery on a SQLite file DB (stamped at 095, then
+upgrade→downgrade→upgrade of the 096 step). The PG-only JSONB/category backfill is NOT
 executed here — SQLite has no JSONB operators and the migration guards the data step to
 PostgreSQL (project rule feedback_sqlite_masks_postgres: SQLite masks PG JSON ops, so the
 backfill SQL is verified against live Postgres, not on SQLite).
@@ -25,7 +25,7 @@ from sqlalchemy import inspect
 # Load the migration module directly (alembic/versions has no __init__.py).
 _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
 _MIGRATION_PATH = os.path.join(_REPO_ROOT, "alembic", "versions", "096_spec_provenance.py")
-_spec = importlib.util.spec_from_file_location("migration_095", _MIGRATION_PATH)
+_spec = importlib.util.spec_from_file_location("migration_096", _MIGRATION_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
@@ -39,8 +39,8 @@ class TestRevisionMetadata:
         assert len(_mod.revision) <= 32
 
     def test_down_revision_chains_off_wechat_id(self):
-        # Re-parented onto main's 094 head (was 091 pre-merge) — re-parenting beats a
-        # no-op merge revision for a not-yet-deployed migration.
+        # Re-parented onto main's 095_wechat_id head (was 091, then 094, pre-merge) —
+        # re-parenting beats a no-op merge revision for a not-yet-deployed migration.
         assert _mod.down_revision == "095_wechat_id"
 
     def test_single_head(self):
@@ -52,7 +52,7 @@ class TestRevisionMetadata:
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
         heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert list(heads) == ["096_spec_provenance"], f"expected single head 095, got {heads}"
+        assert list(heads) == ["096_spec_provenance"], f"expected single head 096_spec_provenance, got {heads}"
 
     def test_source_tier_sql_case_matches_live_ladder(self):
         # The migration cannot import app code, so its CASE is a literal snapshot of
@@ -74,10 +74,10 @@ class TestRoundTrip:
     """Drive the migration through the real alembic CLI machinery on a SQLite file DB.
 
     The full migration chain cannot replay on SQLite (the 001 baseline issues
-    ``CREATE EXTENSION pg_trgm``), so we instead create only the two tables 095 touches,
-    ``stamp`` the DB at 094_fru_links (stamping records the version
-    WITHOUT executing it), then ``upgrade``/``downgrade`` exactly the 095 step. This is a
-    genuine ``alembic upgrade → downgrade → upgrade`` of 095's DDL, not a hand-rolled op
+    ``CREATE EXTENSION pg_trgm``), so we instead create only the two tables 096 touches,
+    ``stamp`` the DB at 095_wechat_id (stamping records the version
+    WITHOUT executing it), then ``upgrade``/``downgrade`` exactly the 096 step. This is a
+    genuine ``alembic upgrade → downgrade → upgrade`` of 096's DDL, not a hand-rolled op
     invocation, so it exercises the real add_column/drop_column the deploy will run. The
     PG-only JSONB/category backfill is guarded inside the migration and no-ops on SQLite.
     """
@@ -114,7 +114,7 @@ class TestRoundTrip:
         cfg.set_main_option("sqlalchemy.url", url)
         prev_url = os.environ.get("DATABASE_URL")
         os.environ["DATABASE_URL"] = url
-        # Record 094_fru_links as applied WITHOUT running it (stamp never executes).
+        # Record 095_wechat_id (the down-revision) as applied WITHOUT running it (stamp never executes).
         command.stamp(cfg, _mod.down_revision)
         try:
             yield engine, cfg, command

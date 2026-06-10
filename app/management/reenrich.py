@@ -51,7 +51,14 @@ async def main(limit: int = 500, batch_size: int = 30):
                 if isinstance(spec_data, dict):
                     value = spec_data.get("value")
                     entry_source = str(spec_data.get("source") or "spec_extraction")
-                    entry_confidence = float(spec_data.get("confidence") or 0.85)
+                    # Explicit-None check, NOT `or`: a stored confidence of 0.0 is a
+                    # legitimate value — `or` would inflate it to 0.85, and the same-source
+                    # equal-tier re-record would then PERSIST that manufactured confidence
+                    # (0.85 > 0.0 wins the ladder), letting the entry beat other same-tier
+                    # sources it never legitimately outranked. The 0.85 default applies
+                    # only to entries with NO stored confidence.
+                    conf = spec_data.get("confidence")
+                    entry_confidence = float(conf) if conf is not None else 0.85
                 else:
                     value = spec_data
                     entry_source = "spec_extraction"

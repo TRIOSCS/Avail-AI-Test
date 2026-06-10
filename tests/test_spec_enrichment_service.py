@@ -87,6 +87,61 @@ async def test_writes_high_conf_facet_and_marks_card(db: Session, _schemas):
 
 
 @pytest.mark.asyncio
+async def test_ladder_arbitration_and_provenance_through_writer(db: Session, _schemas):
+    """End-to-end F1 ladder pin for THIS writer (the other four record_spec writers have
+    one): a higher-tier mpn_decode prior survives a conflicting AI extraction that self-
+    reports EQUAL confidence, while a fresh key persists with the writer's registered
+    provenance (source="spec_extraction", tier=60).
+
+    Pins (a) the writer's source literal staying registered in spec_tiers.SOURCE_TIER —
+    an unregistered literal would rank EVERY AI spec write at tier 0 (silently
+    clobberable by ai_guess 40) with no other test failing — and (b) the absence of any
+    per-writer pre-gate (arbitration belongs to record_spec alone, so run order is not
+    load-bearing).
+    """
+    from app.services.spec_enrichment_service import enrich_card_specs
+    from app.services.spec_tiers import SOURCE_TIER
+    from app.services.spec_write_service import record_spec
+
+    card = _mc(db, "STM32G474")
+    # Higher-tier deterministic prior: the decode says the part has NO USB.
+    assert record_spec(db, card.id, "has_usb", False, source="mpn_decode", confidence=0.95) is True
+    db.commit()
+
+    payload = {
+        "parts": [
+            {
+                "mpn": "STM32G474",
+                "has_usb": True,  # conflicts with the tier-85 decode prior
+                "has_usb_confidence": 0.95,  # equal confidence — TIER must decide, not confidence
+                "has_uart": True,  # fresh key — must land at spec_extraction/60
+                "has_uart_confidence": 0.95,
+            }
+        ]
+    }
+    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=payload):
+        stats = await enrich_card_specs([card.id], db)
+
+    db.refresh(card)
+    # The decode prior survives untouched — facet AND JSONB provenance.
+    usb = db.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="has_usb").one()
+    assert usb.value_text == "false"
+    assert usb.source == "mpn_decode"
+    assert usb.tier == SOURCE_TIER["mpn_decode"]
+    assert card.specs_structured["has_usb"]["source"] == "mpn_decode"
+    assert card.specs_structured["has_usb"]["tier"] == SOURCE_TIER["mpn_decode"]
+    # The fresh key lands with the writer's registered provenance (literal pinned to 60).
+    uart = db.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="has_uart").one()
+    assert uart.value_text == "true"
+    assert uart.source == "spec_extraction"
+    assert uart.tier == SOURCE_TIER["spec_extraction"] == 60
+    assert uart.confidence == 0.95
+    assert card.specs_structured["has_uart"]["source"] == "spec_extraction"
+    assert card.specs_structured["has_uart"]["tier"] == 60
+    assert stats["specs_written"] == 1  # only the fresh key — the conflict was rejected
+
+
+@pytest.mark.asyncio
 async def test_skips_already_enriched_unless_forced(db: Session, _schemas):
     from datetime import datetime, timezone
 
