@@ -130,6 +130,11 @@ class Settings(BaseSettings):
     # zero-LLM. Runs between mpn-decode (0.95) and the AI spec reader (0.85). Safe to leave
     # on — values are enum-validated by record_spec. See app/services/desc_extractor.
     desc_parse_enabled: bool = True
+    # Deterministic FRU crosswalk decode (IBM/Lenovo FRU → approved mfg models): zero-network,
+    # zero-LLM — strict-intersects the regex-gated decodes of a FRU's mfg_model links. Runs
+    # between mpn-decode (0.95) and desc-parse (0.90) at 0.93. Safe to leave on — values are
+    # enum-validated by record_spec. See app/services/fru_crosswalk_enrich.
+    fru_crosswalk_enrich_enabled: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90
