@@ -242,6 +242,18 @@ _CPU_WEAK = re.compile(
 _SUBORDINATE_UNDER: dict[str, frozenset[str]] = {"cpu": frozenset({"dram"})}
 
 
+# Bit-unit neutralization (MUST run before the upper-casing below, which destroys the
+# casing signal): "2Gb, 128*16" is a DRAM *component density* in gigaBITS — uppercase
+# letter + lowercase "b" is the SI bit-unit casing — and upper-casing collapses it into
+# the "2GB" gigaBYTE shape, recording an 8× wrong capacity (facet-accuracy audit, card
+# 74143). Bit tokens are rewritten to "<n><K|M|G|T>BIT", which no capacity/memory regex
+# matches: component densities are deliberately NOT a seeded spec, so they are skipped,
+# never ÷8-converted. "Gbps"/"Gbit"/"Gb/s" forms are already inert after upper-casing
+# (no word boundary / the trailing-"/S" checks); all-lowercase "2gb" stays untouched —
+# sloppy lower-case descriptions mean bytes in this corpus.
+_BIT_UNITS = re.compile(r"\b(\d+(?:\.\d+)?)\s?([KMGT])b(?![A-Za-z])")
+
+
 def _is_neutral_lead(label: str) -> bool:
     if label.startswith("SPS"):
         return True
@@ -283,7 +295,8 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
     """
     if not description:
         return None
-    text = re.sub(r"\s+", " ", description).strip().upper()
+    text = _BIT_UNITS.sub(r"\1\2BIT", description)  # before .upper() — see _BIT_UNITS
+    text = re.sub(r"\s+", " ", text).strip().upper()
     if not text:
         return None
 

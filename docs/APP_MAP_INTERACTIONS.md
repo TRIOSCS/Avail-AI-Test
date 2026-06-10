@@ -951,7 +951,13 @@ owns arbitration in one place:
        structural guards: wattage exists only on the power_supplies route while the
        cpu route emits tdp_watts (CPU "135W" TDP can never land in wattage), gpu
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
-       "10GB"/"100GbE" rows emit nothing, and cpu bare cores/TDP tokens AND
+       "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
+       (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
+       to GeForce and reserves the seeded "RTX" member for the professional
+       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
+       neutralized BEFORE the upper-casing so bits are never recorded as GB
+       capacity (skipped, never ÷8-converted), and cpu bare cores/TDP tokens AND
        codename-only architecture require a CPU-context signal (MPN-echo descs
        and chassis rows emit nothing). Hinted extraction adds a body-token
        contradiction guard (a cpu-hinted motherboard FRU returns None; dram
@@ -1129,8 +1135,8 @@ Vendor/scheme inventory (module → gate → decoded keys):
 
 | Module | Vendor | Scheme gate (examples) | Decodes |
 |---|---|---|---|
-| storage.py | Seagate | `ST<GB><family>` (ST4000NM0035) | capacity, form_factor, usage_class |
-| storage.py | Western Digital | `WD<TB×10><family>` (WD40EFRX) | capacity, usage_class+form for known 3.5" families |
+| storage.py | Seagate | `ST<GB><family><0-led tail>$` (ST4000NM0035, ST300MM0006) — the structured 0-led tail is the era gate; legacy `ST<ff><digits><iface>` shapes (ST39103FC, ST373207LC) and STMicroelectronics order codes (ST232BDR, STM32… — explicit `_STMICRO_DENY`) return None | capacity, form_factor+usage_class for mapped families |
+| storage.py | Western Digital | era split by SUFFIX SHAPE: legacy `WD<digits><exactly 2 letters>` = decimal-GB (WD800BB = 80 GB, WD64AA = 6.4 GB, capacity only); modern `WD<2-3 digits><4+ letters>` = TB×10 (WD40EFRX), 3-digit forms only with a recognized family token (unrecognized 3-digit+4-letter and ALL 4-digit+4-letter shapes are era-ambiguous → None) | capacity, usage_class+form for known 3.5" families |
 | storage.py | Toshiba | `(MG\|MN\|MD\|MQ\|DT)\d{2}[A-Z]{3}` (MG08ACA16TE) | form_factor, usage_class, capacity from `<n>T` token |
 | storage.py | HGST/Hitachi | `HUH\|HUS(?=\d)\|HUC\|HTS\|HDN\|HDS\|HMS` | form_factor, usage_class, capacity from `<n>T` token; HUSMM/HUSSL SAS SSDs excluded |
 | ssd.py | Samsung | retail `MZ-<fam><cap>` (MZ-V8P2T0B/AM) + OEM `MZ<fam><cap>` (MZVL21T0HCLR, MZ7LH1T9HMLT, MZQL21T9HCJR, MZILT3T8HBLS) | capacity, form_factor (2.5"/M.2 2280/M.2 22110/U.2/mSATA), interface (SATA/SAS; NVMe gen only via pinned family tables), nand_type for retail EVO/QVO + V-table only |
@@ -1148,7 +1154,11 @@ Never guessed: NVMe PCIe generation outside the pinned tables (seeded `interface
 no bare "NVMe"), nand_type outside Samsung retail EVO/QVO/V-table, DDR5 voltage (1.1 V is
 deliberately not emitted), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes, Kingston
 KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 rank token must
-never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+never be misread as DDR4), legacy Seagate `ST<ff><digits><iface>` capacities (the digit
+string mixes a form-factor digit with MB digits and the pre-~1996 era encodes UNFORMATTED
+MB — no pattern-only era split exists, so those shapes return None; facet-accuracy audit
+2026-06-10, `tests/test_mpn_decoder_storage.py` pins the audit cards), and era-ambiguous
+WD shapes (3-digit+4-letter without a known modern family token, all 4-digit+4-letter). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
 `commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
 `tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
 aggregate WARNING for BOTH of `record_spec`'s silent vocabulary drops — a decoded key with
@@ -1159,6 +1169,17 @@ their existing category conflicts with the decoded commodity are counted too
 (`skipped_category_conflict` in the per-batch stats, plus a WARNING with the
 `card_category->decoded_commodity` pairs — the number that says whether the
 category-alias map needs another entry).
+
+Reconciliation after a decoder/extractor fix: `python -m app.management.
+reconcile_decoded_facets [--apply] [--limit N]` re-runs the fixed decode + desc
+extraction over every card owning a facet row with source IN (mpn_decode,
+desc_parse) for the audit-affected spec_keys (capacity_gb/gpu_family/memory_gb).
+A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
+source (the F1 newest-timestamp tie-break lets the re-run win its own stale
+entry); a key the fixed extractor no longer yields is DELETED from both
+material_spec_facets and specs_structured (wrong is worse than missing —
+provenance stays honest). Dry-run by default with per-failure-class tallies
+(legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family); SAVEPOINT per card.
 
 ## Cross-Reference Caching
 
