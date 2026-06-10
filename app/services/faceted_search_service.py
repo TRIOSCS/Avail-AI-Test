@@ -94,14 +94,20 @@ def _apply_facet_filters(
 
 
 def get_commodity_counts(db: Session) -> dict[str, int]:
-    """Return {commodity_key: count} for all non-deleted material cards."""
+    """Return {commodity_key: count} for all non-deleted material cards.
+
+    Filters and counts ONLY on the lower(trim(category)) expression (not the raw
+    column) with count(*) so PostgreSQL can answer the whole GROUP BY from an
+    index-only scan over ix_mc_cat_order_live (098_materials_perf_idx) — referencing
+    the raw ``category`` column or ``count(id)`` would force heap fetches. Equivalent
+    semantics: lower(trim(x)) IS NOT NULL iff x IS NOT NULL (both functions are
+    strict), and id is the non-null PK so count(id) == count(*).
+    """
+    cat_expr = func.lower(func.trim(MaterialCard.category))
     rows = (
-        db.query(
-            func.lower(func.trim(MaterialCard.category)),
-            func.count(MaterialCard.id),
-        )
-        .filter(MaterialCard.deleted_at.is_(None), MaterialCard.category.isnot(None))
-        .group_by(func.lower(func.trim(MaterialCard.category)))
+        db.query(cat_expr, func.count())
+        .filter(MaterialCard.deleted_at.is_(None), cat_expr.isnot(None))
+        .group_by(cat_expr)
         .all()
     )
     return {cat: count for cat, count in rows if cat}
