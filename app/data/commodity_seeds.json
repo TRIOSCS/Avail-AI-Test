@@ -60,6 +60,43 @@
         "DIMM"
       ],
       "sort_order": 5
+    },
+    {
+      "spec_key": "rank",
+      "display_name": "Rank",
+      "data_type": "enum",
+      "enum_values": [
+        "1Rx4",
+        "1Rx8",
+        "2Rx4",
+        "2Rx8",
+        "4Rx4",
+        "8Rx4"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "registered",
+      "display_name": "Buffering",
+      "data_type": "enum",
+      "enum_values": [
+        "Registered",
+        "Unbuffered",
+        "Load-Reduced"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "voltage",
+      "display_name": "Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "numeric_range": {
+        "min": 1,
+        "max": 2.5
+      },
+      "sort_order": 8
     }
   ],
   "transformers": [

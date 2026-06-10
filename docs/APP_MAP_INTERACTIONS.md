@@ -832,9 +832,13 @@ Vendor/scheme inventory (module → gate → decoded keys):
 
 Never guessed: NVMe PCIe generation outside the pinned tables (seeded `interface` enum has
 no bare "NVMe"), nand_type outside Samsung retail EVO/QVO/V-table, DDR5 voltage (1.1 V is
-out of vocabulary), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes. `rank`/
-`registered`/`voltage` values out of the seeded vocabulary are dropped by `record_spec`
-until the seeds land (defense-in-depth).
+deliberately not emitted), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes, Kingston
+KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 rank token must
+never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+`commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
+`tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
+aggregate WARNING if a decoded key ever has no schema row, so a drift can never silently
+zero the feature (`record_spec` drops schema-less keys at DEBUG only).
 
 ## Cross-Reference Caching
 

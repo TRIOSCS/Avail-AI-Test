@@ -109,6 +109,31 @@ def test_nand_type_omitted_when_not_encoded():
         assert result is not None and "nand_type" not in result.specs, mpn
 
 
+PARTIAL_CASES = [
+    # The "omit, never guess" fallback edges: each branch keeps only what the scheme still
+    # pins and emits NOTHING else (asserted exactly — a guessed extra key fails the test).
+    # WD suffix outside _WD_SSD_SUFFIX → capacity only (a regression to dict indexing
+    # would KeyError here and crash the dry-run script).
+    ("WDS100T3Z0Z", {"capacity_gb": 1000}),
+    # Kioxia enterprise generation outside the pinned table (CM7) → capacity only.
+    ("KCM71RUL3T84", {"capacity_gb": 3840}),
+    # Intel T-token outside _INTEL_TB → form factor + interface kept, capacity omitted.
+    ("SSDPE2KX050T8", {"form_factor": "U.2", "interface": "NVMe PCIe 3.0"}),
+    # Samsung *retail* V family outside _SAMSUNG_RETAIL_V (950 PRO) → form factor (+ the
+    # always-positional capacity), no guessed interface/nand (retail branch, distinct
+    # from the OEM-side MZVPW… case below).
+    ("MZ-V5P512BW", {"capacity_gb": 512, "form_factor": "M.2 2280"}),
+]
+
+
+@pytest.mark.parametrize("mpn,expected", PARTIAL_CASES)
+def test_conservative_partial_decode(mpn, expected):
+    result = decode_mpn(mpn)
+    assert result is not None, f"{mpn} did not decode"
+    assert result.commodity == "ssd"
+    assert result.specs == expected, f"{mpn}: expected exactly {expected!r}, got {result.specs!r}"
+
+
 def test_unknown_pcie_gen_omits_interface():
     # Samsung OEM family not in the pinned-generation table → form factor only, no
     # guessed NVMe generation (the seeded interface enum has no bare "NVMe").
