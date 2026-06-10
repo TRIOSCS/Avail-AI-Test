@@ -16,11 +16,15 @@ inventory. See docs/superpowers/specs/2026-06-08-mpn-decode-enrichment-design.md
 
 from app.services.mpn_decoder._common import DecodeResult
 from app.services.mpn_decoder.memory import decode_memory
+from app.services.mpn_decoder.ssd import decode_ssd
 from app.services.mpn_decoder.storage import decode_storage
 from app.utils.normalization import normalize_mpn
 
-# Ordered: storage first, then memory. Each returns a DecodeResult or None.
-_DECODERS = (decode_storage, decode_memory)
+# Ordered: HDD, then SSD, then memory. The vendor gates are mutually exclusive by
+# construction (WD HDD ^WD\d vs WD SSD ^WDS, Toshiba HDD MG/MN/MD/MQ/DT vs Kioxia
+# KXG/KPM/KCM/KCD, Samsung DRAM ^M\d{3} vs SSD ^MZ, Micron DRAM ^MT[AC]\d or
+# ^MT\d{1,2}[JK]SF vs SSD ^MTFD), so the order only sets scan priority, never the winner.
+_DECODERS = (decode_storage, decode_ssd, decode_memory)
 
 
 def decode_mpn(mpn: str | None, manufacturer: str | None = None) -> DecodeResult | None:

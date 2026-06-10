@@ -151,7 +151,7 @@ def _mock_db():
 
 
 async def test_main_runs_one_batch_then_shuts_down():
-    """main() does startup heartbeat, runs one batch, exits on shutdown."""
+    """Runs main(): startup heartbeat, one batch, then exits on shutdown."""
     import app.services.enrichment_worker.worker as w
 
     original = w._shutdown_requested
@@ -390,6 +390,7 @@ def test_main_module_entry_point_calls_asyncio_run():
     mod_key = "app.services.enrichment_worker.__main__"
     saved = sys.modules.pop(mod_key, None)
     try:
+
         def close_coro(coro):
             try:
                 coro.close()

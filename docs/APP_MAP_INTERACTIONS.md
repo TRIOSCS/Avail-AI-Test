@@ -820,6 +820,44 @@ Startup backfill:
 Env: MATERIAL_ENRICHMENT_ENABLED=true
 ```
 
+### Deterministic MPN decode (worker second pass, BEFORE the AI spec pass)
+
+`enrichment_worker/worker.py::run_one_batch` → `mpn_decoder/writer.py::decode_and_record_specs`
+(gated by `settings.mpn_decode_enabled`, default on) → `decode_mpn()` in
+`app/services/mpn_decoder/` → `record_spec(source="mpn_decode", confidence=0.95)`.
+Zero network/LLM; strict per-vendor regex gates; anything unrecognized returns None.
+Coverage report: `scripts/decode_mpn_dryrun.py` (read-only; per-vendor/commodity counts;
+`--apply` backfills). Category conflicts skip; NULL categories are set from the decode.
+
+Vendor/scheme inventory (module → gate → decoded keys):
+
+| Module | Vendor | Scheme gate (examples) | Decodes |
+|---|---|---|---|
+| storage.py | Seagate | `ST<GB><family>` (ST4000NM0035) | capacity, form_factor, usage_class |
+| storage.py | Western Digital | `WD<TB×10><family>` (WD40EFRX) | capacity, usage_class+form for known 3.5" families |
+| storage.py | Toshiba | `(MG\|MN\|MD\|MQ\|DT)\d{2}[A-Z]{3}` (MG08ACA16TE) | form_factor, usage_class, capacity from `<n>T` token |
+| storage.py | HGST/Hitachi | `HUH\|HUS(?=\d)\|HUC\|HTS\|HDN\|HDS\|HMS` | form_factor, usage_class, capacity from `<n>T` token; HUSMM/HUSSL SAS SSDs excluded |
+| ssd.py | Samsung | retail `MZ-<fam><cap>` (MZ-V8P2T0B/AM) + OEM `MZ<fam><cap>` (MZVL21T0HCLR, MZ7LH1T9HMLT, MZQL21T9HCJR, MZILT3T8HBLS) | capacity, form_factor (2.5"/M.2 2280/M.2 22110/U.2/mSATA), interface (SATA/SAS; NVMe gen only via pinned family tables), nand_type for retail EVO/QVO + V-table only |
+| ssd.py | Micron | `MTFD<code><cap>` (MTFDKBA960TFR, MTFDDAK1T9TDS) | capacity, form_factor+interface from verified code table (DAK/DAV/KBA/KBG/KBK/KCB/KCC/HBA/HAL); unknown codes → None |
+| ssd.py | Intel/Solidigm | `SSD(SC2\|SCK\|PE2\|PEK\|PF2)…<nnn>[GT]` (SSDPE2KX040T8) | capacity (G literal, T via decimal-TB table), form_factor, interface (E=PCIe 3.0, F=PCIe 4.0) |
+| ssd.py | Kioxia | `KXG<gen>` (XG M.2), `KPM<gen>` (PM SAS 2.5"), `K(CM\|CD)<gen>` (CM/CD U.2/U.3) | capacity via verified tokens (1T02=1024, 3T84=3840…), form_factor, interface (gen 5=PCIe 3.0, 6=PCIe 4.0; later gens capacity-only) |
+| ssd.py | WD | `WDS<nnn>[GT]<rev><suffix>` (WDS100T1X0E) | capacity, form_factor+interface from suffix table (B0A/R0A/G0A/B0B/G0B/B0C/X0C/R0C/X0E) |
+| memory.py | Samsung | `M<code><gen>` (M393A2K43DB3-CWE) | ddr_type, form_factor, ecc, registered; DDR4: voltage 1.2, capacity from density digit, rank via verified org-token table (ambiguous 8G40 omitted); DDR3 voltage from -C/-H/-Y suffix |
+| memory.py | SK Hynix | `HM(A\|T\|CG\|CT)` (HMA84GR7AFR4N-UH) | ddr_type, form_factor, ecc, registered; DDR4: voltage 1.2, capacity+rank from die×width math (R/U modules only — LRDIMM/3DS excluded) |
+| memory.py | Micron | `MTA…G(64\|72)<mod>Z` + DDR3 `MT<n>(J\|K)SF…` (MTA18ASF2G72PZ-2G6E1, MT36KSF2G72PZ-1G6M1) | ddr_type, ecc, capacity (n×8), form_factor+registered from module letter, rank from device count (two-letter module codes omit rank), voltage (DDR4 1.2; DDR3 J=1.5/K=1.35) |
+| memory.py | Kingston | `KVR/KSM<speed><L?><module>` (+KCP/KTH/KTD cap-only) | speed, ddr_type from speed code (13-18=DDR3, 21-32=DDR4, 48-64=DDR5 — NOT the D4 rank token), form_factor, ecc, registered, rank from S/D/Q×4/8 token, voltage (DDR4 1.2; DDR3 1.5, L-flag 1.35), capacity from `/<n>` (die-rev suffixes tolerated) |
+| memory.py | Crucial | `CT<cap>G<gen><form>` (CT16G4RFD8266) | capacity, ddr_type, form_factor (incl. L=LRDIMM), ecc, registered, rank from `F[SDQ][48]` token, speed, voltage (DDR4 1.2) |
+
+Never guessed: NVMe PCIe generation outside the pinned tables (seeded `interface` enum has
+no bare "NVMe"), nand_type outside Samsung retail EVO/QVO/V-table, DDR5 voltage (1.1 V is
+deliberately not emitted), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes, Kingston
+KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 rank token must
+never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+`commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
+`tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
+aggregate WARNING if a decoded key ever has no schema row, so a drift can never silently
+zero the feature (`record_spec` drops schema-less keys at DEBUG only).
+
 ## Cross-Reference Caching
 
 ```
@@ -883,6 +921,25 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
     |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
     |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
+    +---> "Sourcing signals" (collapsed, $persist sourcingOpen; active-count badge) —
+    |     Layer-3 operational filters, all top-level params on
+    |     /v2/partials/materials/faceted → search_materials_faceted():
+    |       has_stock   (EXISTS MaterialVendorHistory row)
+    |       has_price   (EXISTS row with last_price IS NOT NULL)
+    |       has_crosses (cross_references holds a non-empty list; portable text-cast
+    |                    predicate — identical on PG JSONB and SQLite JSON-as-text)
+    |       internal    (tri-state all|standard|internal on is_internal_part; default
+    |                    `all` — deliberately not `standard` — so first load never
+    |                    silently drops rows)
+    |       searched_within (7d|30d|90d|any chips on last_searched_at)
+    |       min_searches    (int ≥ 0 on search_count)
+    |     Unknown/invalid values (incl. non-numeric or negative min_searches) degrade
+    |     to the no-op default with a WARNING log (hand-edited URLs never 500/422; the
+    |     log surfaces frontend/backend vocabulary drift). Vocabularies are owned by
+    |     faceted_search_service (INTERNAL_FILTER_VALUES / SEARCHED_WITHIN_VALUES,
+    |     derived from the maps that drive the query branches); the JS twin is
+    |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
+    |     Static section (no per-value counts → no HTMX reload).
     +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
     |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
     |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
@@ -890,6 +947,20 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
+
+Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
+SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
+    +---> Sub-filters panel header shows "N of M parts in <commodity> have filterable
+    |     specs" so thin parametric results are explained before filtering.
+    +---> Zero results + active parametric sub_filters + N < M → list.html renders the
+    |     "not yet spec-enriched" nudge instead of the generic empty state.
+Result-row upgrades (list.html, server-side in materials_faceted_partial):
+    +---> Spec chips also render WITHOUT a commodity: each card's own category's
+    |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
+    |     3 scalar specs_structured entries, formatted "label: value".
+    +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
+    |     "N alternates" badge when cross_references is non-empty; condition badge
+    |     styled like the lifecycle palette.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

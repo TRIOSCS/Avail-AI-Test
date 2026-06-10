@@ -483,3 +483,327 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
         "Dollar-prefixed price not rendered for mixed-currency card; "
         "_best_currency should be None for mixed currencies (falls back to '$')"
     )
+
+
+# --- Operational (Layer-3) filter params on the faceted route ---
+
+
+def _op_card(db, mpn, **kw):
+    from app.models.intelligence import MaterialCard
+
+    card = MaterialCard(
+        normalized_mpn=mpn.lower(),
+        display_mpn=mpn.upper(),
+        category=kw.pop("category", "resistors"),
+        created_at=datetime.now(timezone.utc),
+        **kw,
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def test_faceted_operational_params_filter(client, db_session: Session):
+    """?has_crosses / ?internal / ?min_searches narrow the result set."""
+    _op_card(
+        db_session,
+        "op-keep",
+        cross_references=[{"mpn": "ALT-1"}],
+        is_internal_part=False,
+        search_count=5,
+    )
+    _op_card(db_session, "op-no-cross", cross_references=[], is_internal_part=False, search_count=5)
+    _op_card(
+        db_session,
+        "op-internal",
+        cross_references=[{"mpn": "ALT-2"}],
+        is_internal_part=True,
+        search_count=5,
+    )
+    _op_card(db_session, "op-cold", cross_references=[{"mpn": "ALT-3"}], is_internal_part=False, search_count=1)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted?has_crosses=true&internal=standard&min_searches=5")
+    assert resp.status_code == 200
+    assert "OP-KEEP" in resp.text
+    assert "OP-NO-CROSS" not in resp.text
+    assert "OP-INTERNAL" not in resp.text
+    assert "OP-COLD" not in resp.text
+
+
+def test_faceted_has_stock_and_price_params(client, db_session: Session):
+    from app.models.intelligence import MaterialVendorHistory
+
+    with_price = _op_card(db_session, "vh-price")
+    db_session.add(MaterialVendorHistory(material_card_id=with_price.id, vendor_name="V", last_price=2.5))
+    no_price = _op_card(db_session, "vh-stock")
+    db_session.add(MaterialVendorHistory(material_card_id=no_price.id, vendor_name="V", last_price=None))
+    _op_card(db_session, "vh-none")
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted?has_stock=true")
+    assert "VH-PRICE" in resp.text and "VH-STOCK" in resp.text and "VH-NONE" not in resp.text
+
+    resp = client.get("/v2/partials/materials/faceted?has_price=true")
+    assert "VH-PRICE" in resp.text and "VH-STOCK" not in resp.text and "VH-NONE" not in resp.text
+
+
+def test_faceted_searched_within_param(client, db_session: Session):
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    _op_card(db_session, "sw-fresh", last_searched_at=now - timedelta(days=2))
+    _op_card(db_session, "sw-stale", last_searched_at=now - timedelta(days=60))
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted?searched_within=7d")
+    assert "SW-FRESH" in resp.text and "SW-STALE" not in resp.text
+
+    resp = client.get("/v2/partials/materials/faceted?searched_within=90d")
+    assert "SW-FRESH" in resp.text and "SW-STALE" in resp.text
+
+
+def test_faceted_bogus_operational_params_degrade(client, db_session: Session):
+    """Unknown/invalid values on hand-edited URLs degrade to no-ops, never 500/422."""
+    _op_card(db_session, "deg-1", is_internal_part=True)
+    _op_card(db_session, "deg-2", is_internal_part=False)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted?internal=bogus&searched_within=yesterday")
+    assert resp.status_code == 200
+    assert "DEG-1" in resp.text and "DEG-2" in resp.text
+
+    # min_searches follows the same contract: non-numeric and negative values degrade
+    # to the 0 no-op (NOT a FastAPI 422, which htmx would silently refuse to swap).
+    for bad in ("-1", "abc"):
+        resp = client.get(f"/v2/partials/materials/faceted?min_searches={bad}")
+        assert resp.status_code == 200
+        assert "DEG-1" in resp.text and "DEG-2" in resp.text
+
+
+def test_workspace_renders_sourcing_signals_section(client):
+    """The rail's Sourcing-signals section renders with all Layer-3 controls wired."""
+    resp = client.get("/v2/partials/materials/workspace")
+    assert resp.status_code == 200
+    assert "Sourcing signals" in resp.text
+    assert "toggleSourcingFlag('hasStock')" in resp.text
+    assert "toggleSourcingFlag('hasPrice')" in resp.text
+    assert "toggleSourcingFlag('hasCrosses')" in resp.text
+    assert "setInternal(" in resp.text
+    assert "setSearchedWithin(" in resp.text
+    assert "setMinSearches(" in resp.text
+
+
+# --- Coverage-aware empty states ---
+
+
+def _dram_with_facet(db, mpn):
+    card = MaterialCard(
+        normalized_mpn=mpn.lower(),
+        display_mpn=mpn.upper(),
+        category="dram",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.flush()
+    db.add(MaterialSpecFacet(material_card_id=card.id, category="dram", spec_key="ddr_type", value_text="DDR4"))
+    return card
+
+
+def _seed_ddr_schema(db):
+    db.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="ddr_type",
+            display_name="DDR Type",
+            data_type="enum",
+            enum_values=["DDR4", "DDR5"],
+            sort_order=1,
+            is_filterable=True,
+            is_primary=False,
+        )
+    )
+    db.flush()
+
+
+def test_subfilters_panel_shows_coverage_line(client, db_session: Session):
+    """'N of M parts in <commodity> have filterable specs' renders in the panel."""
+    _seed_ddr_schema(db_session)
+    _dram_with_facet(db_session, "cov-a")
+    _op_card(db_session, "cov-b", category="dram")  # no facet rows
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/filters/sub?commodity=dram")
+    assert resp.status_code == 200
+    assert "1 of 2 parts in" in resp.text
+    assert "have filterable specs" in resp.text
+
+
+def test_faceted_empty_state_coverage_nudge(client, db_session: Session):
+    """Parametric zero-result + partial coverage → the 'not yet spec-enriched' copy."""
+    import json
+
+    _seed_ddr_schema(db_session)
+    _dram_with_facet(db_session, "nudge-a")  # DDR4 — filtered out below
+    _op_card(db_session, "nudge-b", category="dram")  # not spec-enriched
+    db_session.commit()
+
+    filters_json = json.dumps({"ddr_type": ["DDR5"]})
+    resp = client.get(f"/v2/partials/materials/faceted?commodity=dram&sub_filters={filters_json}")
+    assert resp.status_code == 200
+    assert (
+        "No matches &mdash; but most parts here haven&#39;t been spec-enriched yet." in resp.text
+        or "No matches — but most parts here haven't been spec-enriched yet." in resp.text
+    )
+    assert "Try clearing parametric filters." in resp.text
+
+
+def test_faceted_empty_state_generic_when_coverage_full(client, db_session: Session):
+    """Full coverage (every card has facets) → the generic empty state, not the
+    nudge."""
+    import json
+
+    _seed_ddr_schema(db_session)
+    _dram_with_facet(db_session, "full-a")
+    db_session.commit()
+
+    filters_json = json.dumps({"ddr_type": ["DDR5"]})
+    resp = client.get(f"/v2/partials/materials/faceted?commodity=dram&sub_filters={filters_json}")
+    assert resp.status_code == 200
+    assert "No results match your filters" in resp.text
+    assert "spec-enriched" not in resp.text
+
+
+def test_faceted_empty_state_generic_without_parametric_filters(client, db_session: Session):
+    """Zero results WITHOUT parametric filters → generic empty state (no nudge)."""
+    resp = client.get("/v2/partials/materials/faceted?commodity=dram")
+    assert resp.status_code == 200
+    assert "No results match your filters" in resp.text
+    assert "spec-enriched" not in resp.text
+
+
+def test_faceted_empty_state_generic_when_commodity_has_no_cards(client, db_session: Session):
+    """Parametric filters on a commodity with ZERO cards (coverage 0/0) → generic empty
+    state; the nonsensical 'Only 0 of 0 parts' nudge must never render."""
+    import json
+
+    _seed_ddr_schema(db_session)  # schema exists, but no dram cards are seeded
+    db_session.commit()
+
+    filters_json = json.dumps({"ddr_type": ["DDR5"]})
+    resp = client.get(f"/v2/partials/materials/faceted?commodity=dram&sub_filters={filters_json}")
+    assert resp.status_code == 200
+    assert "No results match your filters" in resp.text
+    assert "spec-enriched" not in resp.text
+
+
+# --- Material-card (result row) upgrades ---
+
+
+def test_faceted_row_datasheet_and_condition_badges(client, db_session: Session):
+    _op_card(
+        db_session,
+        "row-rich",
+        datasheet_url="https://example.com/ds.pdf",
+        condition="New",
+        cross_references=[{"mpn": "ALT-1"}, {"mpn": "ALT-2"}],
+    )
+    _op_card(db_session, "row-bare", cross_references=[])
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    # Datasheet indicator: new-tab link with noopener.
+    assert 'href="https://example.com/ds.pdf" target="_blank" rel="noopener"' in resp.text
+    assert "Open datasheet" in resp.text
+    # Crosses badge with count.
+    assert "2 alternates" in resp.text
+    # Condition badge styled like the lifecycle palette.
+    assert ">NEW<" in resp.text.replace("\n", "").replace("  ", "")
+    # Bare card renders without the datasheet indicator leaking onto it.
+    assert resp.text.count('title="Open datasheet"') == 1
+
+
+def test_faceted_row_crosses_badge_singular(client, db_session: Session):
+    _op_card(db_session, "row-one-alt", cross_references=[{"mpn": "ALT-1"}])
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted")
+    assert "1 alternate" in resp.text
+    assert "1 alternates" not in resp.text
+
+
+def test_faceted_spec_chips_without_commodity_use_schema_primaries(client, db_session: Session):
+    """No-commodity rows chip their own category's is_primary specs as 'label:
+
+    value'.
+    """
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="capacity_gb",
+            display_name="Capacity (GB)",
+            data_type="numeric",
+            sort_order=1,
+            is_filterable=True,
+            is_primary=True,
+        )
+    )
+    _op_card(db_session, "chip-known", category="dram", specs_structured={"capacity_gb": {"value": 32}})
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    assert "Capacity (GB): 32" in resp.text
+
+
+def test_faceted_spec_chips_without_commodity_fallback_first_scalars(client, db_session: Session):
+    """Cards in a schema-less category fall back to the first 3 scalar spec entries."""
+    _op_card(
+        db_session,
+        "chip-fallback",
+        category="widgets",
+        specs_structured={
+            "speed_mhz": {"value": 3200},
+            "rank": "2R",
+            "nested_junk": {"value": {"a": 1}},  # non-scalar — skipped
+            "voltage": 1.2,
+            "fourth_key": "chip4-overflow-value",  # 4th scalar — beyond the 3-chip cap
+        },
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted")
+    assert resp.status_code == 200
+    assert "speed mhz: 3200" in resp.text
+    assert "rank: 2R" in resp.text
+    assert "voltage: 1.2" in resp.text
+    assert "nested junk:" not in resp.text
+    assert "chip4-overflow-value" not in resp.text
+
+
+def test_faceted_spec_chips_in_commodity_context_unchanged(client, db_session: Session):
+    """With a commodity selected, chips stay value-only (no 'label:' prefix)."""
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="capacity_gb",
+            display_name="Capacity (GB)",
+            data_type="numeric",
+            sort_order=1,
+            is_filterable=True,
+            is_primary=True,
+        )
+    )
+    _op_card(db_session, "chip-ctx", category="dram", specs_structured={"capacity_gb": {"value": 64}})
+    # Raw-scalar primary spec (no {"value": ...} wrapper) — the pre-_spec_scalar code
+    # raised AttributeError (HTTP 500) on this shape in commodity context; it must now
+    # render the chip gracefully.
+    _op_card(db_session, "chip-ctx-raw", category="dram", specs_structured={"capacity_gb": 32})
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/faceted?commodity=dram")
+    assert resp.status_code == 200
+    compact = resp.text.replace("\n", "").replace(" ", "")
+    assert ">64<" in compact
+    assert ">32<" in compact
+    assert "Capacity (GB): 64" not in resp.text
