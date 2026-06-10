@@ -223,12 +223,16 @@ def get_global_facet_counts(
     rohs_counts = _count_col(MaterialCard.rohs_status)
     condition_counts = _count_col(MaterialCard.condition)
     has_ds = base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.datasheet_url.isnot(None)).scalar()
+    needs_review = (
+        base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.has_validation_conflict.is_(True)).scalar()
+    )
 
     return {
         "lifecycle": lifecycle_counts,
         "rohs": rohs_counts,
         "condition": condition_counts,
         "has_datasheet": {"true": has_ds or 0},
+        "needs_review": {"true": needs_review or 0},
     }
 
 
@@ -245,6 +249,7 @@ def search_materials_faceted(
     rohs: list[str] | None = None,
     condition: list[str] | None = None,
     has_datasheet: bool = False,
+    has_validation_conflict: bool = False,
     has_stock: bool = False,
     has_price: bool = False,
     has_crosses: bool = False,
@@ -271,6 +276,9 @@ def search_materials_faceted(
             (OR-within, e.g. ``["active", "eol"]``).
         rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
         has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
+        has_validation_conflict: When True, restrict to cards flagged "needs review" —
+            a tier>=80 authoritative source contradicted a manual value (the partial
+            index ix_material_cards_needs_review backs this predicate).
         has_stock: When True, restrict to cards with at least one vendor-history row
             ("has vendor sightings / stock seen").
         has_price: When True, restrict to cards with a vendor-history row carrying a
@@ -354,6 +362,8 @@ def search_materials_faceted(
         query = query.filter(MaterialCard.condition.in_(condition))
     if has_datasheet:
         query = query.filter(MaterialCard.datasheet_url.isnot(None))
+    if has_validation_conflict:
+        query = query.filter(MaterialCard.has_validation_conflict.is_(True))
 
     # Operational (Layer-3) sourcing filters — MaterialCard columns + vendor history.
     if has_stock:

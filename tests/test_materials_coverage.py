@@ -523,12 +523,14 @@ class TestUpdateMaterialAllFields:
 
     def test_update_all_enrichment_fields(self, client, db_session, test_material_card):
         """PUT /api/materials/{id} with all enrichment fields updates them."""
+        # Category must be canonical — off-vocab values now 422 instead of silently
+        # dropping (rejection contract: tests/test_on_add_enrichment.py).
         resp = client.put(
             f"/api/materials/{test_material_card.id}",
             json={
                 "lifecycle_status": "eol",
                 "package_type": "SOIC-8",
-                "category": "Analog",
+                "category": "dram",
                 "rohs_status": "compliant",
                 "pin_count": 8,
                 "datasheet_url": "https://example.com/ds.pdf",
@@ -554,12 +556,16 @@ class TestUpdateMaterialAllFields:
         db_session.add(mc)
         db_session.commit()
 
+        # Category goes through the F1 ladder now (set_category, manual/100) — it must
+        # be a canonical commodity; off-vocab values are no longer persisted as junk.
         resp = client.put(
             f"/api/materials/{mc.id}",
-            json={"category": "MCU"},
+            json={"category": "dram"},
         )
         assert resp.status_code == 200
-        assert resp.json()["enrichment_source"] == "manual"
+        data = resp.json()
+        assert data["enrichment_source"] == "manual"
+        assert data["category"] == "dram"
 
     def test_update_does_not_overwrite_existing_enrichment_source(self, client, db_session):
         """PUT does not overwrite an existing enrichment_source."""
@@ -576,7 +582,7 @@ class TestUpdateMaterialAllFields:
 
         resp = client.put(
             f"/api/materials/{mc.id}",
-            json={"category": "MCU"},
+            json={"category": "ssd"},  # canonical — off-vocab now 422s
         )
         assert resp.status_code == 200
         # enrichment_source stays claude_agent (not overwritten to manual)

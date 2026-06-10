@@ -50,7 +50,177 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["vendors"])
 
 
+def _stamp_manual_provenance(card: MaterialCard, fields: list[str]) -> None:
+    """Stamp manual/100 (confidence 1.0) per-field provenance entries on the card.
+
+    Every human-supplied field write (Add-part modal, PUT update) records where the
+    value came from, so the enrichment worker / spec passes can rank it on the F1 ladder
+    and the validation contract can detect contradictions later.
+    """
+    if not fields:
+        return
+    now_iso = datetime.now(timezone.utc).isoformat()
+    prov = dict(card.enrichment_provenance or {})
+    for field in fields:
+        prov[field] = {"source": "manual", "tier": 100, "confidence": 1.0, "fetched_at": now_iso}
+    card.enrichment_provenance = prov
+
+
+def render_add_modal(
+    request: Request, *, errors: dict | None = None, values: dict | None = None, status_code: int = 200
+):
+    """Render the Add-part modal partial (shared by the GET form route and the 422 re-
+    render of POST /api/materials/add)."""
+    from ..constants import MaterialCondition
+    from ..services.commodity_registry import get_all_commodities, get_display_name
+    from ..template_env import template_response
+
+    ctx = {
+        "request": request,
+        "commodities": sorted(((k, get_display_name(k)) for k in get_all_commodities()), key=lambda kv: kv[1]),
+        "conditions": [c.value for c in MaterialCondition],
+        "errors": errors or {},
+        "values": values or {},
+    }
+    return template_response("htmx/partials/materials/add_modal.html", ctx, status_code=status_code)
+
+
 # -- Material Card CRUD -------------------------------------------------------
+
+
+@router.post("/api/materials/add")
+async def add_material(
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Single-part Add — create (or resolve) a MaterialCard from the Add-part modal.
+
+    Fields (exactly five): mpn (required), manufacturer, description, category,
+    condition. User-supplied values enter the F1 ladder at manual/100; blank = blank
+    (omitted fields stay NULL for enrichment to fill — never defaulted or guessed).
+    On create: runs the three inline deterministic passes (decode / FRU crosswalk /
+    desc-parse) in this request, then stamps ``enrich_requested_at`` so the enrichment
+    worker's priority lane picks the card up next (single-add only — bulk/stock
+    imports never stamp). V3 intake validation is blocking: invalid MPN / category /
+    condition → 422 with the modal re-rendered carrying per-field messages.
+    Success → HX-Redirect to the card detail.
+    """
+    from ..constants import MaterialCondition, MaterialEnrichmentStatus
+    from ..search_service import resolve_material_card, run_deterministic_passes
+    from ..services.category_normalizer import normalize_category
+    from ..services.spec_tiers import clear_validation_conflicts, set_category
+    from ..utils.normalization import normalize_mpn
+
+    form = await request.form()
+    mpn = str(form.get("mpn") or "").strip()
+    manufacturer = str(form.get("manufacturer") or "").strip()
+    description = str(form.get("description") or "").strip()
+    category = str(form.get("category") or "").strip()
+    condition = str(form.get("condition") or "").strip()
+
+    # V3 intake validation — blocking, never silent. 422 re-renders the modal with
+    # per-field messages (htmx_app.js allows 422 swaps into #modal-content).
+    errors: dict[str, str] = {}
+    if not normalize_mpn(mpn):
+        errors["mpn"] = "Enter a valid MPN (at least 3 characters)."
+    canonical_category = None
+    if category:
+        canonical_category = normalize_category(category)
+        if canonical_category is None:
+            errors["category"] = f'"{category}" is not a recognized commodity.'
+    if condition:
+        try:
+            condition = MaterialCondition(condition).value
+        except ValueError:
+            errors["condition"] = f'"{condition}" is not a valid condition.'
+    if errors:
+        values = {
+            "mpn": mpn,
+            "manufacturer": manufacturer,
+            "description": description,
+            "category": category,
+            "condition": condition,
+        }
+        return render_add_modal(request, errors=errors, values=values, status_code=422)
+
+    norm = normalize_mpn_key(mpn)
+    created = (
+        db.query(MaterialCard.id).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
+        is None
+    )
+    card = resolve_material_card(mpn, db)
+    if card is None:
+        # Reachable: normalize_mpn (display normalizer, keeps punctuation) passed but
+        # normalize_mpn_key (dedup key, strips ALL non-alphanumerics) emptied — e.g. a
+        # punctuation-only "MPN" like "---". Re-render the modal like every other 422;
+        # a raw HTTPException body would be swapped into #modal-content as JSON text
+        # (htmx_app.js force-allows 422 swaps targeted there).
+        return render_add_modal(
+            request,
+            errors={"mpn": "Enter a valid MPN."},
+            values={
+                "mpn": mpn,
+                "manufacturer": manufacturer,
+                "description": description,
+                "category": category,
+                "condition": condition,
+            },
+            status_code=422,
+        )
+
+    # Manual/100 writes — blank = blank (never default, suggest, or copy values).
+    written: list[str] = []
+    if manufacturer:
+        # Through the F1 ladder at manual/100 — same durability contract as the PUT
+        # path: a direct write would leave NULL provenance (legacy floor 50) and be
+        # silently reverted by the next decode/ingest. Canonicalizes via the alias table.
+        if set_manufacturer(card, manufacturer, "manual", 1.0):
+            written.append("manufacturer")
+            # A manual (re-)assertion resolves any recorded manufacturer conflict —
+            # same clearing semantics as category below.
+            clear_validation_conflicts(card, "manufacturer")
+    if description:
+        card.description = description
+        written.append("description")
+    if condition:
+        card.condition = condition  # validated MaterialCondition vocabulary above
+        written.append("condition")
+    if canonical_category:
+        if set_category(card, canonical_category, "manual", 1.0):
+            written.append("category")
+            # A manual (re-)assertion resolves any recorded category conflict — same
+            # clearing semantics as both PUT paths (a re-add through the modal is a
+            # re-assertion too; the stale "Needs review" badge must not survive it).
+            clear_validation_conflicts(card, "category")
+    if written:
+        _stamp_manual_provenance(card, written)
+        if not card.enrichment_source:
+            card.enrichment_source = "manual"
+
+    db.flush()
+    # Inline deterministic passes — decoded facets/category are visible in the create
+    # response, before the worker ever sees the card.
+    run_deterministic_passes(db, [card.id])
+    # Priority lane: single-add only — a user is actively waiting on this card. The
+    # worker FIFOs stamped cards ahead of the backlog and clears the stamp per batch.
+    # Stamp ONLY cards select_batch can actually pick (unenriched / not_found /
+    # not_catalogued): run_one_batch clearing is the sole clearing mechanism, so a
+    # stamp on an already-enriched re-add would persist forever and front-run the
+    # FIFO if the card ever re-entered eligibility.
+    if card.enrichment_status in (
+        MaterialEnrichmentStatus.UNENRICHED,
+        MaterialEnrichmentStatus.NOT_FOUND,
+        MaterialEnrichmentStatus.NOT_CATALOGUED,
+    ):
+        card.enrich_requested_at = datetime.now(timezone.utc)
+    db.commit()
+    invalidate_prefix("material_list")
+
+    response = JSONResponse({"ok": True, "card_id": card.id, "created": created})
+    # The modal redirects to the card detail (full-page deep link).
+    response.headers["HX-Redirect"] = f"/v2/materials/{card.id}"
+    return response
 
 
 @router.get("/api/materials")
@@ -227,25 +397,36 @@ async def update_material(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    from ..services.spec_tiers import clear_validation_conflicts, set_category
+
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
+    written: list[str] = []
     if data.manufacturer is not None:
         # Through the F1 ladder at manual/100 (the top tier): a human correction must be
         # DURABLE — a direct `card.manufacturer = ...` write would leave NULL provenance,
         # rank at the legacy floor (50), and be silently reverted by the next decode (85)
         # or trio re-ingest (95). set_manufacturer also canonicalizes via the alias table
         # and rejects empty/whitespace (a write can never blank a value).
-        set_manufacturer(card, data.manufacturer, "manual", 1.0)
+        if set_manufacturer(card, data.manufacturer, "manual", 1.0):
+            written.append("manufacturer")
+            # A manual (re-)assertion resolves any recorded manufacturer conflict —
+            # same clearing contract as category below.
+            clear_validation_conflicts(card, "manufacturer")
     if data.description is not None:
         card.description = data.description
+        written.append("description")
     if data.display_mpn is not None and data.display_mpn.strip():
         card.display_mpn = data.display_mpn.strip()
-    # Enrichment fields
+        written.append("display_mpn")
+    # Enrichment fields. Category is handled separately below — NEVER via raw setattr:
+    # a raw write bypasses the F1 ladder, leaving the OLD provenance columns attached
+    # to the NEW value (the next enrichment pass would silently revert the human's
+    # correction) and skipping the stale-commodity facet purge.
     for field in (
         "lifecycle_status",
         "package_type",
-        "category",
         "rohs_status",
         "pin_count",
         "datasheet_url",
@@ -255,8 +436,31 @@ async def update_material(
         val = getattr(data, field, None)
         if val is not None:
             setattr(card, field, val)
-            if not card.enrichment_source:
-                card.enrichment_source = "manual"
+            written.append(field)
+    if data.category is not None:
+        # F1 ladder: a human edit is manual/100 — it wins, gets provenance stamped,
+        # and purges the old commodity's facets. Off-vocab values are never persisted,
+        # and the JSON API must SAY so (a 200 with the edit silently dropped is
+        # indistinguishable from acceptance — the htmx PUT path surfaces the same
+        # rejection as a toast). 422 reverts the whole request (nothing committed).
+        from ..services.category_normalizer import normalize_category
+
+        raw_category = data.category.strip()
+        canonical = normalize_category(raw_category)
+        if canonical is None:
+            if raw_category:
+                raise HTTPException(422, f'"{raw_category}" is not a recognized commodity.')
+            # The ladder never blanks an existing category (set_category contract).
+            raise HTTPException(422, f'Category can\'t be cleared — kept "{card.category or "none"}".')
+        if set_category(card, canonical, "manual", 1.0):
+            written.append("category")
+            # A canonical re-assertion clears any recorded conflict for the key
+            # (even an unchanged value: the human looked and confirmed it).
+            clear_validation_conflicts(card, "category")
+    if written:
+        _stamp_manual_provenance(card, written)
+        if not card.enrichment_source:
+            card.enrichment_source = "manual"
     db.commit()
     invalidate_prefix("material_list")
     return material_card_to_dict(card, db)
@@ -400,8 +604,9 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
     """
     import os as _os
 
-    from ..file_utils import extract_mpns, parse_tabular_file
-    from ..search_service import resolve_material_card
+    from ..file_utils import extract_mpns_with_rows, parse_tabular_file
+    from ..search_service import resolve_material_card, run_deterministic_passes
+    from ..utils.normalization import normalize_mpn
 
     form = await request.form()
     file = form.get("file")
@@ -415,27 +620,44 @@ async def import_part_numbers(request: Request, user: User = Depends(require_buy
         raise HTTPException(413, "File too large -- 10MB maximum")
 
     rows = parse_tabular_file(content, file.filename or "")
-    mpns = extract_mpns(rows)
-    if not mpns:
+    mpn_rows = extract_mpns_with_rows(rows)
+    if not mpn_rows:
         raise HTTPException(400, "No part numbers found in file")
 
     created = existing = skipped = 0
-    for mpn in mpns:
+    card_ids: list[int] = []
+    warnings: list[dict] = []
+    # row numbers are 1-based SOURCE-file rows (header = row 1) so a warning's `row`
+    # points at the spreadsheet line the user can actually open and fix.
+    for row_no, mpn in mpn_rows:
+        # V3 normalization gate — never silent: surface the row + reason. normalize_mpn
+        # (not the dedup key) owns the >=3-chars rule.
+        if not normalize_mpn(mpn):
+            skipped += 1
+            warnings.append({"row": row_no, "field": "mpn", "reason": f"invalid MPN {mpn!r} (min 3 chars)"})
+            continue
         card = resolve_material_card(mpn, db)
         if card is None:
             skipped += 1
+            warnings.append({"row": row_no, "field": "mpn", "reason": f"could not create card for {mpn!r}"})
             continue
+        card_ids.append(card.id)
         # resolve_material_card logs created vs resolved; detect new by enrichment_status default
         if card.enrichment_status == "unenriched" and card.enriched_at is None and card.search_count == 0:
             created += 1
         else:
             existing += 1
+    # Inline deterministic passes over every touched card — same session, committed
+    # together. NO enrich_requested_at stamp: bulk imports ride the created_at fast
+    # lane (a 1,800-row import must not monopolize the worker's priority lane).
+    run_deterministic_passes(db, card_ids)
     db.commit()
     return {
         "created": created,
         "existing": existing,
         "skipped": skipped,
-        "total_rows": len(mpns),
+        "total_rows": len(mpn_rows),
+        "warnings": warnings,
     }
 
 
@@ -507,16 +729,26 @@ async def import_stock_list_standalone(
 
     imported = 0
     skipped = 0
+    card_ids: list[int] = []
+    warnings: list[dict] = []
 
-    for raw_row in rows:
+    # row numbers are 1-based SOURCE-file rows (the header occupies file row 1) so a
+    # warning's `row` points at the spreadsheet line the user can actually open and fix.
+    for row_no, raw_row in enumerate(rows, start=2):
         parsed = normalize_stock_row(raw_row)
         if not parsed:
             skipped += 1
+            warnings.append({"row": row_no, "field": "mpn", "reason": "no part number recognized in row"})
             continue
 
+        from ..utils.normalization import normalize_mpn as _normalize_mpn
+
         norm = normalize_mpn_key(parsed["mpn"])
-        if not norm:
+        if not norm or not _normalize_mpn(parsed["mpn"]):
+            # V3 normalization rejection — never silent: surface the row + reason.
+            # normalize_mpn (not the dedup key) owns the >=3-chars rule.
             skipped += 1
+            warnings.append({"row": row_no, "field": "mpn", "reason": f"invalid MPN {parsed['mpn']!r} (min 3 chars)"})
             continue
 
         # Upsert MaterialCard
@@ -535,7 +767,9 @@ async def import_stock_list_standalone(
                 card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
                 if not card:
                     skipped += 1
+                    warnings.append({"row": row_no, "field": "mpn", "reason": f"could not create card for {norm!r}"})
                     continue
+        card_ids.append(card.id)
 
         # Upsert MaterialVendorHistory
         mvh = db.query(MaterialVendorHistory).filter_by(material_card_id=card.id, vendor_name=norm_vendor).first()
@@ -574,6 +808,13 @@ async def import_stock_list_standalone(
 
         imported += 1
 
+    # Inline deterministic passes over every touched card — same session, committed
+    # together. NO enrich_requested_at stamp: stock imports ride the created_at fast
+    # lane (a large vendor list must not monopolize the worker's priority lane).
+    from ..search_service import run_deterministic_passes
+
+    run_deterministic_passes(db, card_ids)
+
     vendor_card.sighting_count = (vendor_card.sighting_count or 0) + imported
     db.commit()
     invalidate_prefix("material_list")
@@ -596,4 +837,5 @@ async def import_stock_list_standalone(
         "total_rows": len(rows),
         "vendor_name": vendor_name,
         "enrich_triggered": enrich_triggered,
+        "warnings": warnings,
     }

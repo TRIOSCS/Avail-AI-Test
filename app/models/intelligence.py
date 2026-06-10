@@ -96,6 +96,24 @@ class MaterialCard(Base):
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
+    # Worker priority-lane stamp (on-add enrichment, migration 099). Set ONLY by the
+    # single-add endpoint (a user is actively waiting); the enrichment worker's
+    # select_batch orders stamped cards first (FIFO by stamp) and run_one_batch clears
+    # the stamp on every batch card so a terminal not_found card cannot pin the lane.
+    # Bulk/stock/email/search creation paths never stamp (created_at fast lane instead).
+    enrich_requested_at = Column(UTCDateTime, index=True)
+
+    # Validation conflicts (migration 099): evidence from a tier>=80 authoritative
+    # source that contradicted a manual (tier 100) value. The ladder KEEPS the manual
+    # value; spec_tiers.record_validation_conflict persists the contradiction here.
+    # List entries: {"key": <spec_key|"category">, "manual": {"value", "updated_at"},
+    #   "evidence": {"source", "tier", "confidence", "value", "observed_at"}}
+    # — de-duped per (key, evidence.source), newest evidence replaces.
+    validation_conflicts = Column(JSONB)
+    # Review-queue filter flag — True iff validation_conflicts is non-empty. Backed by
+    # the partial index ix_material_cards_needs_review (WHERE has_validation_conflict).
+    has_validation_conflict = Column(Boolean, nullable=False, default=False, server_default="false")
+
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
@@ -103,6 +121,18 @@ class MaterialCard(Base):
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        # Partial index for the review-queue filter (conflicted cards are a tiny
+        # minority — a full index would be ~all-false dead weight). sqlite_where keeps
+        # the test engine's create_all in step with migration 099.
+        Index(
+            "ix_material_cards_needs_review",
+            "has_validation_conflict",
+            postgresql_where=Column("has_validation_conflict"),
+            sqlite_where=Column("has_validation_conflict"),
+        ),
     )
 
     # --- Validators ---

@@ -138,6 +138,130 @@ def _prov_key(entry: dict) -> tuple[int, float, str]:
     )
 
 
+# ── Validation conflicts (on-add enrichment, migration 099) ──────────────────────────
+# A manual (tier 100) value is NEVER overwritten by the system — but when a source in
+# the deterministic/authoritative band contradicts it, that contradiction is recorded on
+# the card (validation_conflicts JSONB + has_validation_conflict flag) so a human can
+# review it. Tier >= 80 = the authoritative band (trio_source 95, connector APIs 90,
+# trio_source_ai 88, mpn_decode 85, fru_matrix_decode 84, desc_parse 83,
+# fru_desc_parse 82, partsurfer/psref 80). web_search 70 / brokerbin 65 / ai_guess 40
+# never flag — too noisy to challenge a human.
+CONFLICT_EVIDENCE_MIN_TIER = 80
+
+
+def _conflict_value_key(value) -> str:
+    """Normalize a value for conflict comparison.
+
+    Numerics compare as floats (so 16 == 16.0 == "16"); everything else compares case-
+    insensitively with whitespace stripped (so "DDR4" == "ddr4", True == "true").
+    """
+    text = str(value).strip()
+    try:
+        return repr(float(text))
+    except (TypeError, ValueError):
+        return text.casefold()
+
+
+def record_validation_conflict(
+    card: "MaterialCard",
+    key: str,
+    existing_prov: dict | None,
+    incoming_prov: dict,
+    incoming_value,
+) -> bool:
+    """Record that authoritative evidence contradicts a manual value. Single choke
+    point.
+
+    Called from the LOSE branches of ``record_spec`` (spec_write_service) and
+    ``_set_provenanced_column`` (category, brand, manufacturer) — i.e. after the F1
+    ladder already KEPT the existing value. Gates (all enforced here so call sites
+    stay dumb):
+      - the existing entry is a ``manual`` (tier 100) value;
+      - the incoming source ranks in the authoritative band (tier >= 80);
+      - the two values actually differ after normalization (corroboration is not stored).
+
+    Persists an entry into ``card.validation_conflicts`` de-duped per
+    ``(key, evidence.source)`` — newest evidence replaces, and a same-source
+    observation that now AGREES with the manual value removes that source's stale
+    entry (deterministic sources re-fire on every pass; a fixed decoder must not
+    leave the card flagged forever) — and sets ``card.has_validation_conflict``.
+    Returns True iff an entry was written.
+    """
+    existing_prov = existing_prov or {}
+    incoming_prov = incoming_prov or {}
+    if existing_prov.get("source") != "manual":
+        return False
+    incoming_source = incoming_prov.get("source", "")
+    incoming_tier = incoming_prov.get("tier")
+    if incoming_tier is None:
+        incoming_tier = tier_for(incoming_source)
+    if int(incoming_tier) < CONFLICT_EVIDENCE_MIN_TIER:
+        return False
+    manual_value = existing_prov.get("value")
+    if _conflict_value_key(manual_value) == _conflict_value_key(incoming_value):
+        # Corroboration: this source's NEWEST observation agrees with the manual
+        # value. "Newest evidence replaces" includes replacing-with-nothing — drop
+        # any stale contradiction this source recorded earlier and recompute the flag.
+        stale = [
+            c
+            for c in (card.validation_conflicts or [])
+            if c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source
+        ]
+        if stale:
+            kept = [c for c in (card.validation_conflicts or []) if c not in stale]
+            card.validation_conflicts = kept
+            card.has_validation_conflict = bool(kept)
+        return False
+
+    entry = {
+        "key": key,
+        "manual": {
+            "value": manual_value,
+            "updated_at": existing_prov.get("updated_at") or "",
+        },
+        "evidence": {
+            "source": incoming_source,
+            "tier": int(incoming_tier),
+            "confidence": incoming_prov.get("confidence"),
+            "value": incoming_value,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    conflicts = [
+        c
+        for c in (card.validation_conflicts or [])
+        if not (c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source)
+    ]
+    conflicts.append(entry)
+    card.validation_conflicts = conflicts
+    card.has_validation_conflict = True
+    logger.info(
+        "validation conflict: card={} key={} manual={!r} kept; {} (tier {}) reported {!r}",
+        getattr(card, "id", None),
+        key,
+        manual_value,
+        incoming_source,
+        incoming_tier,
+        incoming_value,
+    )
+    return True
+
+
+def clear_validation_conflicts(card: "MaterialCard", key: str) -> bool:
+    """Drop every conflict entry for *key* (a human re-asserted or accepted a value).
+
+    Recomputes ``has_validation_conflict`` (empty list → False). Returns True iff
+    anything was removed.
+    """
+    conflicts = list(card.validation_conflicts or [])
+    kept = [c for c in conflicts if c.get("key") != key]
+    if len(kept) == len(conflicts):
+        return False
+    card.validation_conflicts = kept
+    card.has_validation_conflict = bool(kept)
+    return True
+
+
 def resolve(existing: dict | None, incoming: dict) -> bool:
     """Return ``True`` iff *incoming* wins over *existing* under the F1 ladder.
 
@@ -163,6 +287,12 @@ def _purge_stale_commodity_data(card: "MaterialCard", new_category: str, source:
     facet row whose ``category`` differs from the new one is deleted, and the matching
     ``specs_structured`` entries (record_spec always writes both) are dropped so the
     winning sources re-assert their specs under the new commodity's schema.
+
+    ``validation_conflicts`` entries keyed by the purged spec keys are dropped too
+    (and ``has_validation_conflict`` recomputed): the manual values they reference no
+    longer exist on the card, the new commodity has no schema for them, so accepting
+    one could never write anything — they would be dead review items. ``category``
+    entries are untouched (never a facet spec key).
 
     No-op when the card has no session (a brand-new, not-yet-added card has no facet
     rows to purge).
@@ -190,6 +320,16 @@ def _purge_stale_commodity_data(card: "MaterialCard", new_category: str, source:
     specs = dict(card.specs_structured or {})
     removed = [k for k in stale_keys if specs.pop(k, None) is not None]
     card.specs_structured = specs
+    # Conflict entries for purged spec keys are orphans — the manual value they point
+    # at was just removed, and the new commodity has no schema for the key (accepting
+    # would no-op). Drop them with the specs they describe; recompute the flag.
+    conflicts = list(card.validation_conflicts or [])
+    if conflicts:
+        stale_key_set = set(stale_keys)
+        kept_conflicts = [c for c in conflicts if c.get("key") not in stale_key_set]
+        if len(kept_conflicts) != len(conflicts):
+            card.validation_conflicts = kept_conflicts
+            card.has_validation_conflict = bool(kept_conflicts)
     logger.info(
         "set_category: card={} re-categorized {!r} → {!r} (source={}) — purged {} stale "
         "facet row(s) {} and {} matching specs_structured entr(ies) from the old commodity",
@@ -233,6 +373,12 @@ def _set_provenanced_column(
     before a win that CHANGES an existing value is written — set_category uses it to
     purge the old commodity's stale facet data. ``write=False`` is the read-only twin
     for dry-run accounting: every check runs, the same bool returns, nothing is mutated.
+
+    LOSE branch (write=True only): when the kept value is a ``manual`` edit and the
+    losing source is authoritative (tier >= ``CONFLICT_EVIDENCE_MIN_TIER``) reporting a
+    DIFFERENT value, the contradiction is persisted via ``record_validation_conflict``
+    for human review. The hook lives here because this is where ladder losses for ALL
+    provenanced columns (category, brand, manufacturer) are decided.
     """
     confidence = min(max(float(confidence or 0.0), 0.0), 1.0)
     now = datetime.now(timezone.utc)
@@ -271,6 +417,26 @@ def _set_provenanced_column(
         }
 
     if not resolve(existing, incoming):
+        if write:
+            # The ladder kept the existing value. If that value is a manual edit and
+            # the loser is an authoritative source reporting something ELSE, persist
+            # the contradiction for human review (the helper gates manual/tier>=80/
+            # value-differs). This hook lives HERE — the single point where ladder
+            # losses for provenanced columns are decided — so it fires for category
+            # AND brand/manufacturer: manual maker edits exist (update_material routes
+            # them through set_brand/set_manufacturer with source="manual"), so they
+            # carry the same contradiction-flagging contract as category and spec keys.
+            record_validation_conflict(
+                card,
+                attr,
+                {
+                    "source": existing_source,
+                    "value": current,
+                    "updated_at": existing["updated_at"] if existing else "",
+                },
+                {"source": source, **incoming},
+                value,
+            )
         logger.debug(
             "set_{}: card={} kept existing {}={!r} (incoming {!r}@{} lost)",
             attr,

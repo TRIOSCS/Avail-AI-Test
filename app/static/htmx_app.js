@@ -355,6 +355,17 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
     }
 });
 
+// ── 422 validation re-renders into the modal ───────────────
+// Modal forms (e.g. Add part) answer 422 with the form re-rendered carrying
+// per-field error messages. htmx treats 4xx as no-swap by default — allow the
+// swap ONLY for responses targeted at #modal-content so the errors render.
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    if (evt.detail.xhr.status === 422 && evt.detail.target && evt.detail.target.id === 'modal-content') {
+        evt.detail.shouldSwap = true;
+        evt.detail.isError = false;
+    }
+});
+
 /**
  * splitPanel — Alpine.js component for resizable split-panel layout.
  * Left panel is a scrollable list; right panel is a detail view.
@@ -693,6 +704,8 @@ Alpine.data('materialsFilter', () => ({
   rohs: [],
   condition: [],
   hasDatasheet: false,
+  // Review queue — has_validation_conflict (authoritative evidence contradicts a manual value).
+  needsReview: false,
   // Sourcing signals (Layer-3 operational filters) — MaterialCard + vendor history.
   hasStock: false,
   hasPrice: false,
@@ -800,6 +813,7 @@ Alpine.data('materialsFilter', () => ({
     count += this.rohs.length;
     count += this.condition.length;
     if (this.hasDatasheet) count += 1;
+    if (this.needsReview) count += 1;
     count += this.sourcingActiveCount;
     return count;
   },
@@ -808,6 +822,7 @@ Alpine.data('materialsFilter', () => ({
   get attributesActiveCount() {
     return this.lifecycle.length + this.rohs.length + this.condition.length
       + (this.hasDatasheet ? 1 : 0)
+      + (this.needsReview ? 1 : 0)
       + (Array.isArray(this.subFilters.manufacturers) ? this.subFilters.manufacturers.length : 0);
   },
 
@@ -819,6 +834,7 @@ Alpine.data('materialsFilter', () => ({
     this.rohs = [];
     this.condition = [];
     this.hasDatasheet = false;
+    this.needsReview = false;
     this.hasStock = false;
     this.hasPrice = false;
     this.hasCrosses = false;
@@ -884,6 +900,7 @@ Alpine.data('materialsFilter', () => ({
       this.rohs = (params.get('rohs') || '').split(',').filter(s => s !== '');
       this.condition = (params.get('condition') || '').split(',').filter(s => s !== '');
       this.hasDatasheet = params.get('has_datasheet') === 'true';
+      this.needsReview = params.get('has_validation_conflict') === 'true';
       this.hasStock = params.get('has_stock') === 'true';
       this.hasPrice = params.get('has_price') === 'true';
       this.hasCrosses = params.get('has_crosses') === 'true';
@@ -926,6 +943,7 @@ Alpine.data('materialsFilter', () => ({
       this.rohs = [];
       this.condition = [];
       this.hasDatasheet = false;
+      this.needsReview = false;
       this.hasStock = false;
       this.hasPrice = false;
       this.hasCrosses = false;
@@ -950,6 +968,7 @@ Alpine.data('materialsFilter', () => ({
     if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
     if (this.condition.length > 0) params.set('condition', this.condition.join(','));
     if (this.hasDatasheet) params.set('has_datasheet', 'true');
+    if (this.needsReview) params.set('has_validation_conflict', 'true');
     if (this.hasStock) params.set('has_stock', 'true');
     if (this.hasPrice) params.set('has_price', 'true');
     if (this.hasCrosses) params.set('has_crosses', 'true');
@@ -1000,6 +1019,12 @@ Alpine.data('materialsFilter', () => ({
 
   toggleDatasheet() {
     this.hasDatasheet = !this.hasDatasheet;
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Review-queue toggle — has_validation_conflict (needs human conflict review).
+  toggleNeedsReview() {
+    this.needsReview = !this.needsReview;
     if (window.innerWidth >= 1024) this.applyFilters();
   },
 

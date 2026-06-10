@@ -39,6 +39,16 @@
             RoHS: {{ card.rohs_status|capitalize }}
           </span>
           {% endif %}
+          {% if card.has_validation_conflict %}
+          {% set conflict_count = (card.validation_conflicts or [])|length %}
+          <span class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
+                title="An authoritative source contradicts a manual value — see Specifications">
+            <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+            </svg>
+            Needs review — {{ conflict_count }} conflict{{ '' if conflict_count == 1 else 's' }}
+          </span>
+          {% endif %}
         </div>
         {% if card.description %}
         <p class="text-sm text-gray-500 mt-2">{{ card.description }}</p>
@@ -49,14 +59,9 @@
         {% if card.last_searched_at %}
         <p class="text-xs text-gray-400">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
         {% endif %}
-        {% if card.enriched_at %}
-        <p class="inline-flex items-center gap-1 text-xs text-emerald-600">
-          <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-          </svg>
-          Enriched {{ card.enriched_at.strftime('%b %d, %Y') }}
-        </p>
-        {% endif %}
+        {# Enrichment-status badge — polls itself while the card is queued (HTTP 286
+           stops the poll once the worker lands a terminal status). #}
+        {% include "htmx/partials/materials/enrich_status.html" %}
         <button hx-post="/v2/partials/materials/{{ card.id }}/enrich"
                 hx-target="this"
                 hx-swap="outerHTML"
@@ -92,6 +97,43 @@
     </div>
 
     <div x-show="specsOpen" x-transition x-cloak class="px-6 pb-6">
+      {# ── Validation conflicts (needs review) ─────────────────────────
+         The F1 ladder KEPT the manual value; an authoritative (tier>=80) source
+         reported something else. One row per (key, evidence source); "Use this value"
+         accepts the evidence as a manual/100 decision and clears the key's entries. #}
+      {% if card.has_validation_conflict and card.validation_conflicts %}
+      <div class="mb-4 border border-amber-200 bg-amber-50 rounded-lg p-3 space-y-2">
+        {% for conflict in card.validation_conflicts %}
+        {% set ev = conflict.get('evidence', {}) %}
+        <div class="flex items-center justify-between gap-3 text-sm">
+          <div class="flex items-center gap-2 min-w-0">
+            <svg class="h-4 w-4 text-amber-500 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+              <title>Manual value kept. {{ ev.get('source') }} reported {{ ev.get('value') }} (conf {{ ev.get('confidence') }}) on {{ (ev.get('observed_at') or '')[:10] }}</title>
+              <path fill-rule="evenodd" d="M8.485 2.495c.673-1.167 2.357-1.167 3.03 0l6.28 10.875c.673 1.167-.17 2.625-1.516 2.625H3.72c-1.347 0-2.189-1.458-1.515-2.625L8.485 2.495zM10 5a.75.75 0 01.75.75v3.5a.75.75 0 01-1.5 0v-3.5A.75.75 0 0110 5zm0 9a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/>
+            </svg>
+            <span class="truncate"
+                  title="Manual value kept. {{ ev.get('source') }} reported {{ ev.get('value') }} (conf {{ ev.get('confidence') }}) on {{ (ev.get('observed_at') or '')[:10] }}">
+              <span class="font-medium text-gray-900">{{ conflict.get('key', '')|replace('_', ' ') }}</span>:
+              manual <span class="font-mono">{{ conflict.get('manual', {}).get('value') }}</span> kept —
+              {{ ev.get('source') }} reported <span class="font-mono">{{ ev.get('value') }}</span>
+              <span class="text-gray-500">(conf {{ ev.get('confidence') }}{% if ev.get('observed_at') %}, {{ ev.get('observed_at')[:10] }}{% endif %})</span>
+            </span>
+          </div>
+          {# hx-vals quoting is intentional: SINGLE-quoted attribute + |tojson is the
+             canonical safe pattern (tojson emits a double-quoted JSON string and
+             escapes any ' as ') — do not "fix" to double quotes. #}
+          <button hx-post="/v2/partials/materials/{{ card.id }}/conflicts/{{ conflict.get('key') }}/accept"
+                  hx-vals='{"source": {{ ev.get('source', '')|tojson }}}'
+                  hx-target="#main-content"
+                  data-loading-disable
+                  class="flex-shrink-0 px-2.5 py-1 text-xs font-medium text-amber-700 bg-white border border-amber-300 rounded-lg hover:bg-amber-100 transition-colors">
+            Use this value
+          </button>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
       {# Display mode #}
       <div x-show="!editing" x-cloak class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>

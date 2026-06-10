@@ -269,6 +269,21 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
           </svg>
         </div>
+
+        {# Add part — opens the single-add modal (on-add auto-enrichment). Buyer-gated:
+           POST /api/materials/add is require_buyer, so non-buyer roles never see the
+           button (their submit would 403 with no visible feedback in the modal). #}
+        {% if can_add_parts %}
+        <button @click="$dispatch('open-modal')"
+                hx-get="/v2/partials/materials/add-form"
+                hx-target="#modal-content"
+                data-loading-disable
+                class="flex items-center gap-1.5 px-3 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors flex-shrink-0">
+          <svg data-loading class="h-4 w-4 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+          <svg data-loading-remove class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          <span class="hidden sm:inline">Add part</span>
+        </button>
+        {% endif %}
       </div>
 
       {# AI interpretation chip (populated via OOB swap from ai_interpret.html) #}
@@ -277,7 +292,7 @@
       <div id="ai-script-container"></div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet || sourcingActiveCount > 0" x-cloak>
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet || needsReview || sourcingActiveCount > 0" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
@@ -318,6 +333,13 @@
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
               Has datasheet
               <button @click="hasDatasheet = false; applyFilters()" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# Needs-review chip — validation-conflict review queue #}
+          <template x-if="needsReview" x-cloak>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">
+              Needs review
+              <button @click="needsReview = false; applyFilters()" class="hover:text-amber-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
           {# Sourcing-signal chips #}
@@ -398,6 +420,7 @@
            "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
            "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
            "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
+           "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
            "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
            "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
            "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,

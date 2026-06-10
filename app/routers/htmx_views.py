@@ -41,7 +41,7 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, require_admin, require_user
+from ..dependencies import get_user, has_buyer_role, require_admin, require_buyer, require_user
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -7031,6 +7031,9 @@ async def materials_workspace_partial(
     ctx["total_materials"] = total_materials
     ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
     ctx["global_facet_counts"] = get_global_facet_counts(db)
+    # The workspace is require_user, but POST /api/materials/add is require_buyer —
+    # hide the "Add part" button from roles whose submit would 403 (dead-end otherwise).
+    ctx["can_add_parts"] = has_buyer_role(user)
     return template_response("htmx/partials/materials/workspace.html", ctx)
 
 
@@ -7227,6 +7230,7 @@ async def materials_faceted_partial(
     rohs: str = Query(""),
     condition: str = Query(""),
     has_datasheet: str = Query("false"),
+    has_validation_conflict: str = Query("false"),
     has_stock: str = Query("false"),
     has_price: str = Query("false"),
     has_crosses: str = Query("false"),
@@ -7270,6 +7274,7 @@ async def materials_faceted_partial(
         return False
 
     has_datasheet_flag = _flag("has_datasheet", has_datasheet)
+    has_validation_conflict_flag = _flag("has_validation_conflict", has_validation_conflict)
     has_stock_flag = _flag("has_stock", has_stock)
     has_price_flag = _flag("has_price", has_price)
     has_crosses_flag = _flag("has_crosses", has_crosses)
@@ -7302,6 +7307,7 @@ async def materials_faceted_partial(
         rohs=parsed_rohs,
         condition=parsed_condition,
         has_datasheet=has_datasheet_flag,
+        has_validation_conflict=has_validation_conflict_flag,
         has_stock=has_stock_flag,
         has_price=has_price_flag,
         has_crosses=has_crosses_flag,
@@ -7450,6 +7456,137 @@ async def materials_faceted_partial(
         }
     )
     return template_response("htmx/partials/materials/list.html", ctx)
+
+
+@router.get("/v2/partials/materials/add-form", response_class=HTMLResponse)
+async def material_add_form_partial(
+    request: Request,
+    user: User = Depends(require_buyer),
+):
+    """Render the Add-part modal form (loaded into #modal-content).
+
+    require_buyer matches POST /api/materials/add — the form must never render for a
+    role whose submit would 403 (the workspace also hides the button via
+    has_buyer_role).
+    NOTE: must stay registered BEFORE /v2/partials/materials/{card_id} — the path
+    would otherwise be captured by the card_id route.
+    """
+    from .materials import render_add_modal
+
+    return render_add_modal(request)
+
+
+@router.get("/v2/partials/materials/{card_id}/enrich-status", response_class=HTMLResponse)
+async def material_enrich_status_partial(
+    request: Request,
+    card_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the enrichment-status badge for the card detail header.
+
+    While the card is still ``unenriched`` the badge polls this route every 15s
+    ("Queued for enrichment"). Once enrichment_status leaves ``unenriched`` the route
+    answers HTTP 286 — htmx swaps the final badge and STOPS polling.
+    """
+    from ..constants import MaterialEnrichmentStatus
+    from ..models.intelligence import MaterialCard
+
+    card = db.get(MaterialCard, card_id)
+    if not card or card.deleted_at is not None:
+        # Polling sub-resource, not a navigable page: htmx neither swaps nor cancels
+        # an `every 15s` poll on a 4xx, so a 404 would leave a detail view open after
+        # the card is deleted hammering this route forever. 286 stops the poll; the
+        # empty body clears the badge.
+        return HTMLResponse("", status_code=286)
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx["card"] = card
+    response = template_response("htmx/partials/materials/enrich_status.html", ctx)
+    if card.enrichment_status != MaterialEnrichmentStatus.UNENRICHED:
+        # 286: htmx's stop-polling status — the final badge still swaps in.
+        response.status_code = 286
+    return response
+
+
+@router.post("/v2/partials/materials/{card_id}/conflicts/{key}/accept", response_class=HTMLResponse)
+async def material_conflict_accept(
+    request: Request,
+    card_id: int,
+    key: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Accept a validation conflict's evidence value — a human decision.
+
+    Writes the evidence value at manual/100 (set_category for ``category``,
+    set_brand/set_manufacturer for the dual-brand columns, record_spec for spec
+    keys) and clears that key's conflict entries. An optional ``source`` form field
+    selects among multiple evidence entries for the key (de-dupe is per
+    (key, source)); without it the highest-(tier, confidence) entry wins. Returns
+    the refreshed detail partial.
+    """
+    from ..models.intelligence import MaterialCard
+    from ..services.spec_tiers import clear_validation_conflicts, set_brand, set_category, set_manufacturer
+    from ..services.spec_write_service import record_spec
+
+    card = db.get(MaterialCard, card_id)
+    if not card or card.deleted_at is not None:
+        raise HTTPException(404, "Material card not found")
+
+    entries = [c for c in (card.validation_conflicts or []) if c.get("key") == key]
+    if not entries:
+        raise HTTPException(404, f"No validation conflict recorded for {key!r}")
+
+    form = await request.form()
+    source = str(form.get("source") or "").strip()
+    chosen = next((c for c in entries if (c.get("evidence") or {}).get("source") == source), None)
+    if chosen is None:
+        chosen = max(
+            entries,
+            key=lambda c: (
+                (c.get("evidence") or {}).get("tier") or 0,
+                (c.get("evidence") or {}).get("confidence") or 0.0,
+            ),
+        )
+    value = (chosen.get("evidence") or {}).get("value")
+
+    if key == "category":
+        wrote = set_category(card, value, "manual", 1.0)
+    elif key == "brand":
+        wrote = set_brand(card, value, "manual", 1.0)
+    elif key == "manufacturer":
+        wrote = set_manufacturer(card, value, "manual", 1.0)
+    else:
+        wrote = record_spec(db, card.id, key, value, source="manual", confidence=1.0)
+    if not wrote:
+        # The accepted value could not be written — off-vocab category, schema gone
+        # after a commodity flip, or enum/numeric rejection. KEEP the conflict entry
+        # (it is the only persisted record of the contradiction) and surface the
+        # failure instead of silently pretending the decision was applied.
+        logger.warning(
+            "Material card {} conflict-accept on {!r}: value {!r} could not be written — entry kept",
+            card_id,
+            key,
+            value,
+        )
+        response = await material_detail_partial(request, card_id, user, db)
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {
+                    "message": (
+                        f'Couldn\'t apply "{value}" to {key} — the value no longer fits '
+                        "this card's schema. The conflict was kept."
+                    ),
+                    "type": "warning",
+                }
+            }
+        )
+        return response
+    clear_validation_conflicts(card, key)
+    db.commit()
+    logger.info("Material card {} conflict on {!r} accepted ({!r}) by {}", card_id, key, value, user.email)
+    return await material_detail_partial(request, card_id, user, db)
 
 
 @router.get("/v2/partials/materials/fru-lookup", response_class=HTMLResponse)
@@ -7630,10 +7767,15 @@ async def update_material_card(
     category_toast: str | None = None
     if "category" in form:
         from ..services.category_normalizer import normalize_category
-        from ..services.spec_tiers import set_category
+        from ..services.spec_tiers import clear_validation_conflicts, set_category
 
         raw_category = (str(form["category"]) if form["category"] else "").strip()
         canonical = normalize_category(raw_category)
+        if canonical is not None:
+            # A PUT carrying a canonical category is a re-assertion — clear any
+            # recorded validation conflict for it (even unchanged: the human looked
+            # and confirmed their value).
+            clear_validation_conflicts(card, "category")
         if canonical is not None and canonical != card.category:
             set_category(card, canonical, "manual", 1.0)
         elif canonical is None and raw_category:
