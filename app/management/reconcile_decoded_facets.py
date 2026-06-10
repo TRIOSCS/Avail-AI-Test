@@ -150,7 +150,11 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
 
             # Per-card SAVEPOINT (apply mode): record_spec flushes, so a DB-level
             # failure would otherwise poison the shared transaction for every later
-            # card. Dry-run opens none — it never writes.
+            # card. Dry-run opens none — it never writes. Tallies are BUFFERED and
+            # merged only after a clean release, so a mid-card failure (savepoint
+            # rolled back) can never leave the counters claiming work that was
+            # undone — same honesty rule as mpn_decoder/writer.py.
+            pending: list[tuple[str, str]] = []  # (class, action) per facet
             ctx = db.begin_nested() if apply else None
             try:
                 for facet in facets:
@@ -165,18 +169,15 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
                         specs = dict(card.specs_structured or {})
                         entry = specs.get(facet.spec_key)
                         if entry is not None and entry.get("source") != facet.source:
-                            tallies[klass]["skipped_provenance_mismatch"] += 1
-                            totals["skipped"] += 1
+                            pending.append((klass, "skipped_provenance_mismatch"))
                             continue
                         if apply:
                             specs.pop(facet.spec_key, None)
                             card.specs_structured = specs
                             db.delete(facet)
-                        tallies[klass]["deleted"] += 1
-                        totals["deleted"] += 1
+                        pending.append((klass, "deleted"))
                     elif _facet_matches(facet, schema, new_value):
-                        tallies[klass]["unchanged"] += 1
-                        totals["unchanged"] += 1
+                        pending.append((klass, "unchanged"))
                     else:
                         confidence = _CONFIDENCE[facet.source]
                         if apply:
@@ -200,15 +201,17 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
                                 confidence=confidence,
                                 schema_cache=cache,
                             )
-                        action = "corrected" if written else "skipped_ladder"
-                        tallies[klass][action] += 1
-                        totals["corrected" if written else "skipped"] += 1
+                        pending.append((klass, "corrected" if written else "skipped_ladder"))
                 if ctx is not None:
                     ctx.commit()
             except BaseException:
                 if ctx is not None:
                     ctx.rollback()
                 raise
+            # Reached only on a clean savepoint release (or dry-run) — merge the buffer.
+            for klass, action in pending:
+                tallies[klass][action] += 1
+                totals[action if action in ("corrected", "deleted", "unchanged") else "skipped"] += 1
             totals["cards"] += 1
         except Exception:
             totals["failed"] += 1
