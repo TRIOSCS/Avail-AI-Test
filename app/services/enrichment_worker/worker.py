@@ -310,8 +310,10 @@ async def run_one_batch(
     # Deterministic FRU crosswalk decode: FRU spare PNs (IBM/Lenovo) inherit the
     # strict-intersected decode of their approved mfg_model links, source=
     # "fru_matrix_decode" at 0.93 — between mpn-decode (0.95, first-party decode is
-    # stronger evidence) and desc-parse (0.90; the crosswalk can also SET a missing
-    # category, letting desc-parse pick the card up in the SAME batch). Scope is the
+    # stronger evidence) and desc-parse (0.90; for cards in enriched_ids, a missing
+    # category the crosswalk fills lets desc-parse pick them up in the SAME batch —
+    # not_found FRU spares are NOT in enriched_ids, so they only benefit from the
+    # crosswalk itself this batch). Scope is the
     # FULL batch (batch_ids, not enriched_ids): not_found/quarantined cards are safe to
     # include — the pass is deterministic and free, and it never touches
     # enrichment_status. Same session, committed together below.

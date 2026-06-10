@@ -17,6 +17,7 @@ _FRU_ZERO = {
     "decoded": 0,
     "written": 0,
     "categorized": 0,
+    "failed": 0,
     "dropped_conflict": 0,
     "commodity_conflict": 0,
     "category_mismatch": 0,
@@ -72,7 +73,7 @@ def test_crosswalk_gated_by_settings_flag(db_session, monkeypatch):
 
 
 def test_not_found_card_still_receives_crosswalk(db_session):
-    # D6: scope is the FULL batch, not enriched_ids — a FRU spare PN that every
+    # Scope is the FULL batch, not enriched_ids — a FRU spare PN that every
     # connector misses (not_found) is precisely this feature's primary target.
     card = _seed_card(db_session, "00AJ141")
 
@@ -102,8 +103,8 @@ def test_crosswalk_receives_full_batch_ids(db_session):
 
 
 def test_passes_run_decode_then_crosswalk_then_desc_then_ai(db_session):
-    # D6 ordering IS the confidence tiering: 0.95 decode, 0.93 crosswalk, 0.90 desc,
-    # 0.85 AI.
+    # The pass ordering IS the confidence tiering: 0.95 decode, 0.93 crosswalk,
+    # 0.90 desc, 0.85 AI.
     _seed_card(db_session, "00AJ141")
     order: list[str] = []
     decode_mock = Mock(

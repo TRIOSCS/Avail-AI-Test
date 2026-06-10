@@ -1,7 +1,7 @@
 """Writer — crosswalk_and_record_specs: FRU cards inherit the strict-intersected decode
 of their approved mfg_model links via record_spec (source="fru_matrix_decode",
-confidence 0.93), with the category fill / mismatch-skip / savepoint / single-query
-guarantees of the spec (D1–D5, D7, D9–D11)."""
+confidence 0.93), with the category fill / mismatch-skip / per-FRU + per-card isolation
+/ single-query guarantees stated inline on each test."""
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ ZERO_STATS = {
     "decoded": 0,
     "written": 0,
     "categorized": 0,
+    "failed": 0,
     "dropped_conflict": 0,
     "commodity_conflict": 0,
     "category_mismatch": 0,
@@ -71,6 +72,7 @@ def test_writer_writes_intersected_specs_with_source_and_confidence(db_session: 
         "decoded": 1,
         "written": 2,
         "categorized": 0,
+        "failed": 0,
         "dropped_conflict": 1,  # capacity_gb 4000 vs 8000
         "commodity_conflict": 0,
         "category_mismatch": 0,
@@ -138,7 +140,7 @@ def test_commodity_conflict_skips_card(db_session: Session):
 
 
 def test_card_manufacturer_never_written(db_session: Session):
-    # D4: the FRU card keeps its IBM/Lenovo manufacturer context — the drive vendor on
+    # The FRU card keeps its IBM/Lenovo manufacturer context — the drive vendor on
     # the link (Seagate) is display-only and never copied onto the card.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "00AJ141", category="hdd", manufacturer="IBM")
@@ -152,7 +154,7 @@ def test_card_manufacturer_never_written(db_session: Session):
 
 
 def test_confidence_guard_skips_higher_prior_overwrites_lower(db_session: Session):
-    # D7: a prior key held at confidence > 0.93 (mpn_decode 0.95) is skipped; a prior
+    # A prior key held at confidence > 0.93 (mpn_decode 0.95) is skipped; a prior
     # held lower (spec_extraction 0.85) is overwritten — record_spec alone is
     # latest-write-wins, so this pre-gate is what keeps the decode baseline authoritative.
     seed_commodity_schemas(db_session)
@@ -205,7 +207,7 @@ def test_duplicate_links_across_sheets_decode_once(db_session: Session, monkeypa
 
 
 def test_non_mfg_model_links_excluded(db_session: Session):
-    # D1: drive_pn (and every other rel_kind) is out of scope this wave — a FRU with
+    # drive_pn (and every other rel_kind) is out of scope this wave — a FRU with
     # only non-mfg_model links is not even "matched".
     seed_commodity_schemas(db_session)
     card = _card(db_session, "00AJ141", category="hdd")
@@ -219,7 +221,7 @@ def test_non_mfg_model_links_excluded(db_session: Session):
 
 
 def test_reverse_only_card_gets_nothing(db_session: Session):
-    # D5: a card whose norm matches only related_norm (it IS a mfg_model) inherits
+    # A card whose norm matches only related_norm (it IS a mfg_model) inherits
     # nothing — its own MPN already decodes directly via the mpn_decode pass.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "ST4000NM0035", category="hdd")
@@ -247,7 +249,7 @@ def test_no_link_batch_zero_stats_and_no_decode_calls(db_session: Session, monke
 
 
 def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
-    # D9: a record_spec failure on card 2 of 3 rolls back ONLY that card (including a
+    # A record_spec failure on card 2 of 3 rolls back ONLY that card (including a
     # categorize-from-null) without poisoning the shared transaction — siblings persist,
     # the counters stay honest, and the session still commits.
     import app.services.fru_crosswalk_enrich as mod
@@ -275,6 +277,7 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
     assert stats["matched"] == 3
     assert stats["decoded"] == 2  # only the clean cards
+    assert stats["failed"] == 1  # the rolled-back card surfaces in the aggregate
     assert stats["categorized"] == 2
     assert stats["written"] == 6
     assert _facets(db_session, card1.id)["capacity_gb"] == 4000
@@ -284,7 +287,7 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
 
 def test_links_resolved_via_exactly_one_select(db_session: Session):
-    # D10: the whole batch resolves its links through ONE fru_links SELECT — no N+1.
+    # The whole batch resolves its links through ONE fru_links SELECT — no N+1.
     engine = db_session.get_bind()
 
     seed_commodity_schemas(db_session)
@@ -310,3 +313,178 @@ def test_links_resolved_via_exactly_one_select(db_session: Session):
     assert len(fru_link_selects) == 1, fru_link_selects
     assert stats["matched"] == 3
     assert stats["written"] == 9
+
+
+def test_single_survivor_passthrough_with_undecodable_sibling(db_session: Session):
+    # FRU matrices routinely link models outside the storage/ssd/memory decoder
+    # registry. Undecodable links contribute NO evidence — they are filtered, not
+    # treated as conflicts — so when exactly one link decodes, ALL of its specs pass
+    # through at 0.93: one-of-N agreement is the contract, not all-of-N.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category="hdd")
+    _link(db_session, "00AJ141", "ST4000NM0035")
+    _link(db_session, "00AJ141", "00AJ144X", mfg="IBM")  # outside the decoder registry
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats["matched"] == 1
+    assert stats["decoded"] == 1
+    assert stats["written"] == 3
+    assert stats["commodity_conflict"] == 0
+    assert stats["failed"] == 0
+    f = _facets(db_session, card.id)
+    assert f == {"capacity_gb": 4000, "form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}
+    assert card.specs_structured["capacity_gb"]["source"] == FRU_DECODE_SOURCE
+
+
+def test_all_links_undecodable_is_a_no_evidence_noop(db_session: Session):
+    # The sibling branch: EVERY link is outside the decoder registry → the card is
+    # matched but never decoded, nothing is asserted, and the no-evidence FRU is NOT
+    # misreported as a commodity conflict.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "00AJ141", category=None)
+    _link(db_session, "00AJ141", "00AJ144X", mfg="IBM")
+
+    stats = crosswalk_and_record_specs(db_session, [card.id])
+
+    assert stats["matched"] == 1
+    assert stats["decoded"] == 0
+    assert stats["written"] == 0
+    assert stats["commodity_conflict"] == 0
+    assert stats["failed"] == 0
+    assert card.category is None
+    assert _facets(db_session, card.id) == {}
+
+
+def test_cards_sharing_one_normalized_key_all_enriched(db_session: Session, monkeypatch):
+    # key_to_card_ids is a dict of LISTS: dash/spacing MPN variants collapse to one
+    # normalized key, and EVERY card on that key receives the FRU's agreed specs
+    # while each unique model decodes exactly once. The intersection (and its
+    # dropped-keys count) is computed once per FRU — the conflicting capacity key
+    # reports dropped_conflict=1, not once per card sharing the key.
+    import app.services.fru_crosswalk_enrich as mod
+
+    seed_commodity_schemas(db_session)
+    card_a = _card(db_session, "00AJ141", category="hdd")
+    card_b = _card(db_session, "00-AJ-141", category="hdd")
+    assert normalize_mpn_key(card_a.normalized_mpn) == normalize_mpn_key(card_b.normalized_mpn)
+    _link(db_session, "00AJ141", "ST4000NM0035")
+    _link(db_session, "00AJ141", "ST8000NM0055")
+
+    calls: list[str] = []
+    real_decode = mod.decode_mpn
+
+    def counting(mpn, manufacturer=None):
+        calls.append(mpn)
+        return real_decode(mpn, manufacturer)
+
+    monkeypatch.setattr(mod, "decode_mpn", counting)
+
+    stats = crosswalk_and_record_specs(db_session, [card_a.id, card_b.id])
+    db_session.commit()
+
+    assert sorted(calls) == ["ST4000NM0035", "ST8000NM0055"]  # one decode per model, not per card
+    assert stats["matched"] == 2
+    assert stats["decoded"] == 2
+    assert stats["written"] == 4  # 2 agreed keys x 2 cards
+    assert stats["dropped_conflict"] == 1  # capacity conflict counted once per FRU, not per card
+    for card in (card_a, card_b):
+        assert _facets(db_session, card.id) == {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}
+
+
+def test_decode_exception_on_one_fru_does_not_abort_the_rest(db_session: Session, monkeypatch):
+    # decode/intersect runs per FRU OUTSIDE the per-card savepoint — a decoder
+    # exception on one weird workbook string must fail ONLY that FRU's cards
+    # (surfaced in `failed`), never the remaining FRUs or the stats dict.
+    import app.services.fru_crosswalk_enrich as mod
+
+    seed_commodity_schemas(db_session)
+    card1 = _card(db_session, "00AJ141", category="hdd")
+    card2 = _card(db_session, "00AJ142", category="hdd")
+    card3 = _card(db_session, "00AJ143", category="ssd")
+    _link(db_session, "00AJ141", "ST4000NM0035")
+    _link(db_session, "00AJ142", "ST8000NM0055")
+    _link(db_session, "00AJ143", "MZQL21T9HCJR", mfg="Samsung")
+
+    real_decode = mod.decode_mpn
+
+    def exploding(mpn, manufacturer=None):
+        if mpn == "ST8000NM0055":
+            raise RuntimeError("simulated decoder failure")
+        return real_decode(mpn, manufacturer)
+
+    monkeypatch.setattr(mod, "decode_mpn", exploding)
+
+    stats = crosswalk_and_record_specs(db_session, [card1.id, card2.id, card3.id])
+    db_session.commit()  # the failing FRU must not poison the shared transaction
+
+    assert stats["matched"] == 3
+    assert stats["failed"] == 1  # every card on the raising FRU counts as failed
+    assert stats["decoded"] == 2
+    assert stats["written"] == 6
+    assert _facets(db_session, card1.id)["capacity_gb"] == 4000
+    assert _facets(db_session, card3.id)["capacity_gb"] == 1920
+    assert _facets(db_session, card2.id) == {}
+
+
+def test_writer_warns_when_crosswalk_key_has_no_schema(db_session: Session):
+    # record_spec drops a value with no commodity_spec_schemas row at DEBUG only
+    # (invisible at the production INFO level) — the crosswalk writer must surface
+    # the discard as an aggregate WARNING exactly like mpn_decoder's writer, or a
+    # post-deploy schema lag silently zeroes the pass (decoded=N, written=0 with no
+    # production-visible explanation).
+    from loguru import logger as loguru_logger
+
+    from app.models import CommoditySpecSchema
+
+    seed_commodity_schemas(db_session)
+    db_session.query(CommoditySpecSchema).filter_by(commodity="hdd", spec_key="usage_class").delete()
+    db_session.flush()
+    card = _card(db_session, "00AJ141", category="hdd")
+    _link(db_session, "00AJ141", "ST4000NM0035")
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = crosswalk_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any("hdd.usage_class" in w and "dropped" in w for w in warnings), warnings
+    f = _facets(db_session, card.id)
+    assert "usage_class" not in f  # dropped (no schema)
+    assert f["capacity_gb"] == 4000  # sibling keys still written
+    assert stats["written"] == 2
+
+
+def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
+    # record_spec's OTHER silent vocabulary drop: a schema row exists but the agreed
+    # value is not in its LIVE enum_values (a stale DB row after a failed/lagging
+    # reseed). The writer must surface this drop in the same aggregate WARNING as
+    # the no-schema case, mirroring mpn_decoder's writer.
+    from loguru import logger as loguru_logger
+
+    from app.models import CommoditySpecSchema
+
+    seed_commodity_schemas(db_session)
+    schema = db_session.query(CommoditySpecSchema).filter_by(commodity="hdd", spec_key="form_factor").one()
+    schema.enum_values = ['2.5"']  # simulate live-DB enum drift: 3.5" removed
+    db_session.flush()
+    card = _card(db_session, "00AJ141", category="hdd")
+    _link(db_session, "00AJ141", "ST4000NM0035")
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        stats = crosswalk_and_record_specs(db_session, [card.id])
+    finally:
+        loguru_logger.remove(sink_id)
+    db_session.commit()
+
+    assert any('hdd.form_factor=3.5"' in w and "dropped" in w for w in warnings), warnings
+    f = _facets(db_session, card.id)
+    assert "form_factor" not in f  # dropped (out-of-enum), exactly mirroring record_spec
+    assert f["capacity_gb"] == 4000  # sibling keys still written
+    assert stats["written"] == 2

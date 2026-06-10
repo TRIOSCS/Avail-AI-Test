@@ -1,9 +1,11 @@
-"""Unit — intersect_decodes: the pure D2 strict-intersection rule of the FRU crosswalk
-pass (no DB).
+"""Unit — intersect_decodes: the pure strict-intersection rule of the FRU crosswalk pass
+(no DB).
 
 Specs all approved substitutes share are FRU-level truths; anything they differ on (or
 that any one of them omits) is never asserted.
 """
+
+import pytest
 
 from app.services.fru_crosswalk_enrich import intersect_decodes
 from app.services.mpn_decoder import DecodeResult
@@ -66,8 +68,12 @@ def test_single_decode_is_passthrough():
     assert dropped == 0
 
 
-def test_empty_list_is_noop():
-    assert intersect_decodes([]) == (None, {}, 0)
+def test_empty_list_raises():
+    # No evidence is the CALLER's case to handle (it filters undecodable links
+    # before calling) — raising here keeps a None commodity unambiguous: it always
+    # means contradicting evidence, never missing evidence.
+    with pytest.raises(ValueError):
+        intersect_decodes([])
 
 
 def test_three_way_intersection_requires_all_to_agree():

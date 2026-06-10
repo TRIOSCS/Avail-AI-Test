@@ -789,7 +789,11 @@ ladder lands in record_spec):
        writes the reverse direction (a card that IS a mfg_model already decodes
        first-party at 0.95). Pre-gates each key on the prior entry's confidence
        (> 0.93 skipped) like desc_parse, so mpn_decode/vendor-API values stay
-       authoritative.
+       authoritative. Isolation is two-level: decode/intersect failures are caught
+       per FRU, write failures per card (SAVEPOINT) — both surface in the returned
+       `failed` count so the worker's stats line distinguishes a no-op batch from a
+       crashed one. Schema-drift drops (no schema row / out-of-enum value) emit the
+       same aggregate WARNING as the mpn-decode writer.
     3. desc_extractor/writer.py::extract_and_record_specs — deterministic
        description→spec token grammar (storage + DRAM; TRIO part-master/inventory
        descriptions like `HD, 450GB, 15KRPM, 3.5", Fibre Channel`), source=
