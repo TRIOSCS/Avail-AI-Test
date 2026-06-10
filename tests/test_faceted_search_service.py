@@ -89,6 +89,44 @@ def test_get_commodity_counts(db_session: Session):
     assert counts["capacitors"] == 1
 
 
+def test_get_commodity_counts_expression_equivalence(db_session: Session):
+    """Pin the semantics of the 098 query-shape rewrite (filter + GROUP BY on
+    lower(trim(category)) with count(*), for an index-only scan over
+    ix_mc_cat_order_live):
+
+    - NULL, empty, and whitespace-only categories are all dropped (lower/trim are
+      strict, so the expression filter selects the same rows as the raw column;
+      whitespace-only collapses to '' and dies in the ``if cat`` comprehension);
+    - case/padding variants merge into one key (' ddr4 ' + 'DDR4' -> 'ddr4');
+    - soft-deleted rows are excluded;
+    - count(*) over those groups equals the row counts (id is the non-null PK).
+    """
+    now = datetime.now(timezone.utc)
+    rows = [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("DDR4", None),
+        (" ddr4 ", None),
+        ("Capacitors", None),
+        ("DDR4", now),  # soft-deleted — must not be counted
+    ]
+    for i, (category, deleted_at) in enumerate(rows):
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=f"eq-{i:03d}",
+                display_mpn=f"EQ-{i:03d}",
+                manufacturer="TestCo",
+                category=category,
+                created_at=now,
+                deleted_at=deleted_at,
+            )
+        )
+    db_session.flush()
+
+    assert get_commodity_counts(db_session) == {"ddr4": 2, "capacitors": 1}
+
+
 # --- Facet counts ---
 
 
