@@ -6,9 +6,11 @@ backdated so the re-run's newer timestamp wins the same-tier ladder), and assert
 reconcile command corrects, deletes, or leaves each row per its failure class.
 """
 
+from unittest.mock import MagicMock, patch
+
 from sqlalchemy.orm import Session
 
-from app.management.reconcile_decoded_facets import reconcile
+from app.management.reconcile_decoded_facets import _classify, _facet_matches, reconcile
 from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
 from app.services.spec_write_service import record_spec
@@ -220,3 +222,337 @@ def test_untargeted_sources_and_keys_are_never_selected(db_session: Session):
     db_session.expire_all()
     assert _facets(db_session, card.id)["capacity_gb"] == 80
     assert card.specs_structured["capacity_gb"]["source"] == "manual"
+
+
+# ── _classify unit tests ──────────────────────────────────────────────────────
+
+
+def test_classify_other_mpn_decode_non_wd_st(db_session: Session):
+    """Line 85: DECODE_SOURCE + non-WD/ST/STMicro MPN returns 'other_mpn_decode'."""
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "K4B2G1646F", "dram", "DDR3 DRAM Samsung")
+    _seed_wrong(db_session, card, "capacity_gb", 2, "mpn_decode")
+    db_session.commit()
+
+    facet = db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="capacity_gb").one()
+    result = _classify(facet, card)
+    assert result == "other_mpn_decode"
+
+
+def test_classify_other_desc_parse(db_session: Session):
+    """Line 93: DESC_SOURCE + non-gpu_family, non-nand, no bit-token → 'other_desc_parse'."""
+    seed_commodity_schemas(db_session)
+    # Use dram category with a plain description — no bit token, no NAND context.
+    card = _card(db_session, "MT16KTF1G64AZ", "dram", "DDR4 Module 16GB")
+    _seed_wrong(db_session, card, "capacity_gb", 16, "desc_parse")
+    db_session.commit()
+
+    facet = db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="capacity_gb").one()
+    result = _classify(facet, card)
+    assert result == "other_desc_parse"
+
+
+# ── _facet_matches unit tests ─────────────────────────────────────────────────
+
+
+def _make_schema(data_type: str):
+    """Return a minimal mock schema object with the requested data_type."""
+    schema = MagicMock()
+    schema.data_type = data_type
+    return schema
+
+
+def _make_facet(*, value_numeric=None, value_text=None):
+    """Build a minimal mock MaterialSpecFacet projection."""
+    facet = MagicMock(spec=MaterialSpecFacet)
+    facet.value_numeric = value_numeric
+    facet.value_text = value_text
+    return facet
+
+
+def test_facet_matches_boolean_true():
+    """Line 130: boolean schema — stored 'true' matches a truthy new_value."""
+    facet = _make_facet(value_text="true")
+    schema = _make_schema("boolean")
+    assert _facet_matches(facet, schema, True) is True
+
+
+def test_facet_matches_boolean_false():
+    """Line 130: boolean schema — stored 'false' matches a falsy new_value."""
+    facet = _make_facet(value_text="false")
+    schema = _make_schema("boolean")
+    assert _facet_matches(facet, schema, False) is True
+
+
+def test_facet_matches_boolean_mismatch():
+    """Line 130: boolean schema — stored 'true' does NOT match False."""
+    facet = _make_facet(value_text="true")
+    schema = _make_schema("boolean")
+    assert _facet_matches(facet, schema, False) is False
+
+
+def test_facet_matches_text_equal():
+    """Line 131: text schema (or no schema) — value_text matches str(new_value)."""
+    facet = _make_facet(value_text="GeForce")
+    schema = _make_schema("text")
+    assert _facet_matches(facet, schema, "GeForce") is True
+
+
+def test_facet_matches_text_mismatch():
+    """Line 131: text schema — stored value differs."""
+    facet = _make_facet(value_text="RTX")
+    schema = _make_schema("text")
+    assert _facet_matches(facet, schema, "GeForce") is False
+
+
+def test_facet_matches_no_schema_uses_text_fallback():
+    """When schema is None the function falls through to the text comparison."""
+    facet = _make_facet(value_text="4000")
+    assert _facet_matches(facet, None, 4000) is True  # str(4000) == "4000"
+
+
+# ── limit parameter (line 156) ───────────────────────────────────────────────
+
+
+def test_reconcile_limit_restricts_cards_processed(db_session: Session):
+    """limit=1 causes only the first card to be processed."""
+    seed_commodity_schemas(db_session)
+    c1 = _card(db_session, "WD800BB", "hdd")
+    c2 = _card(db_session, "WD1200BB", "hdd")
+    _seed_wrong(db_session, c1, "capacity_gb", 80000, "mpn_decode")
+    _seed_wrong(db_session, c2, "capacity_gb", 120000, "mpn_decode")
+    db_session.commit()
+
+    summary = reconcile(db_session, apply=False, limit=1)
+
+    # With limit=1 only one card_id is in the working set.
+    assert summary["cards"] == 1
+    # Facets count reflects only the limited card set, not the full 2.
+    assert summary["facets"] == 1
+
+
+# ── schema_caches miss path (lines 167-168) ──────────────────────────────────
+
+
+def test_reconcile_two_cards_different_categories_loads_schema_cache(db_session: Session):
+    """Each new category triggers a schema_cache load — exercises the cache-miss branch."""
+    seed_commodity_schemas(db_session)
+    hdd_card = _card(db_session, "WD800BB", "hdd")
+    dram_card = _card(db_session, "K4B2G1646F", "dram", "Mem, DDR3, 2Gb, 128*16, Samsung")
+    _seed_wrong(db_session, hdd_card, "capacity_gb", 80000, "mpn_decode")
+    _seed_wrong(db_session, dram_card, "capacity_gb", 2, "desc_parse")
+    db_session.commit()
+
+    # Dry-run should classify both cards without error, hitting the cache-miss path
+    # for each distinct category.
+    summary = reconcile(db_session, apply=False)
+    assert summary["cards"] == 2
+
+
+# ── SAVEPOINT rollback on record_spec exception (lines 231-234) ──────────────
+
+
+def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Session, monkeypatch):
+    """When record_spec raises inside apply mode the savepoint is rolled back and
+    the card is counted as failed (lines 231-234, 240-242)."""
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "WD800BB", "hdd")
+    _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
+    db_session.commit()
+
+    call_count = 0
+
+    def _exploding_record_spec(*args, **kwargs):  # noqa: ANN002, ANN003
+        nonlocal call_count
+        call_count += 1
+        raise RuntimeError("simulated record_spec failure")
+
+    with patch("app.management.reconcile_decoded_facets.record_spec", side_effect=_exploding_record_spec):
+        summary = reconcile(db_session, apply=True)
+
+    assert summary["failed"] == 1
+    assert summary["corrected"] == 0
+
+
+# ── outer exception handler (lines 240-242) ──────────────────────────────────
+
+
+def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkeypatch):
+    """When db.get raises for a card_id the outer handler increments totals['failed']."""
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "WD800BB", "hdd")
+    _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
+    db_session.commit()
+
+    original_get = db_session.get
+
+    def _failing_get(model, pk, *args, **kwargs):  # noqa: ANN002, ANN003
+        if model is MaterialCard:
+            raise RuntimeError("simulated db.get failure")
+        return original_get(model, pk, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", _failing_get)
+
+    summary = reconcile(db_session, apply=False)
+    assert summary["failed"] == 1
+
+
+# ── main() function (lines 263-283) ──────────────────────────────────────────
+
+
+def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
+    """main() with no --apply calls reconcile(apply=False) and then rollback."""
+
+    from app.management import reconcile_decoded_facets as mod
+
+    reconcile_calls: list[dict] = []
+
+    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit})
+        return {
+            "mode": "dry-run",
+            "corrected": 0,
+            "deleted": 0,
+            "unchanged": 0,
+            "failed": 0,
+            "skipped": 0,
+            "cards": 0,
+            "facets": 0,
+            "by_class": {},
+        }
+
+    rollback_called: list[bool] = []
+
+    class _FakeSession:
+        def rollback(self):
+            rollback_called.append(True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    import app.database as db_mod
+
+    monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
+
+    mod.main.__globals__["__name__"]  # touch to ensure import is live
+    # Call main() directly by reproducing its argv parsing (no sys.argv mutation needed).
+    import sys
+
+    old_argv = sys.argv
+    try:
+        sys.argv = ["reconcile_decoded_facets"]
+        mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert len(reconcile_calls) == 1
+    assert reconcile_calls[0]["apply"] is False
+    assert rollback_called  # dry-run always calls rollback
+
+
+def test_reconcile_main_apply(db_session: Session, monkeypatch):
+    """main() with --apply calls reconcile(apply=True) and skips rollback."""
+    from app.management import reconcile_decoded_facets as mod
+
+    reconcile_calls: list[dict] = []
+
+    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit})
+        return {
+            "mode": "apply",
+            "corrected": 0,
+            "deleted": 0,
+            "unchanged": 0,
+            "failed": 0,
+            "skipped": 0,
+            "cards": 0,
+            "facets": 0,
+            "by_class": {},
+        }
+
+    rollback_called: list[bool] = []
+
+    class _FakeSession:
+        def rollback(self):
+            rollback_called.append(True)
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    import app.database as db_mod
+
+    monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
+
+    import sys
+
+    old_argv = sys.argv
+    try:
+        sys.argv = ["reconcile_decoded_facets", "--apply"]
+        mod.main()
+    finally:
+        sys.argv = old_argv
+
+    assert len(reconcile_calls) == 1
+    assert reconcile_calls[0]["apply"] is True
+    assert not rollback_called  # apply mode skips rollback
+
+
+# ── _facet_matches: numeric schema sub-branches (lines 124, 127-128) ─────────
+
+
+def test_facet_matches_numeric_value_numeric_none():
+    """Line 124: numeric schema but value_numeric is None → False."""
+    facet = _make_facet(value_numeric=None, value_text=None)
+    schema = _make_schema("numeric")
+    assert _facet_matches(facet, schema, 4000) is False
+
+
+def test_facet_matches_numeric_match():
+    """Lines 126-127: numeric schema — stored value equals new_value within epsilon."""
+    facet = _make_facet(value_numeric=4000.0)
+    schema = _make_schema("numeric")
+    assert _facet_matches(facet, schema, 4000) is True
+
+
+def test_facet_matches_numeric_mismatch():
+    """Lines 126-127: numeric schema — stored value differs from new_value."""
+    facet = _make_facet(value_numeric=80.0)
+    schema = _make_schema("numeric")
+    assert _facet_matches(facet, schema, 4000) is False
+
+
+def test_facet_matches_numeric_conversion_error():
+    """Lines 127-128: numeric schema — TypeError/ValueError on bad value → False."""
+    facet = _make_facet(value_numeric="not-a-number")
+    schema = _make_schema("numeric")
+    # float("not-a-number") raises ValueError → returns False
+    assert _facet_matches(facet, schema, 4000) is False
+
+
+# ── reconcile: orphaned facet (card deleted, lines 167-168) ──────────────────
+
+
+def test_reconcile_orphaned_facet_row_is_skipped(db_session: Session, monkeypatch):
+    """Lines 167-168: when db.get returns None for a card_id the facets are skipped."""
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "WD800BB", "hdd")
+    _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
+    db_session.commit()
+
+    # Patch db.get to return None for MaterialCard lookups, simulating orphaned facets.
+    original_get = db_session.get
+
+    def _none_for_card(model, pk, *args, **kwargs):
+        if model is MaterialCard:
+            return None
+        return original_get(model, pk, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "get", _none_for_card)
+
+    summary = reconcile(db_session, apply=False)
+
+    # The orphaned facet's card was not found — 1 facet counted as skipped, not failed.
+    assert summary["skipped"] >= 1
+    assert summary["failed"] == 0

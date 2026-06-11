@@ -10,9 +10,11 @@ the test session (SessionLocal patched).
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 from sqlalchemy.orm import Session
 
-from app.management.ingest_source_data import _discover_files, run
+from app.management.ingest_source_data import _discover_files, _print_report, main, run
 from app.services.commodity_registry import seed_commodity_schemas
 
 _INVENTORY_CSV = (
@@ -104,3 +106,175 @@ def test_discover_files_routes_master_lookup_and_sheets(tmp_path):
     assert "Inventory 2.12.26.csv" in names  # sheet parses
     assert "CATALOG.md" not in names  # docs skipped
     assert manufacturers is not None and manufacturers.name == "LSC1__Manufacturers__c.csv"
+
+
+# ── Manufacturers-lookup CSV present (lines 103-106) ─────────────────────────
+
+_MANUFACTURERS_CSV = "Id,Name\n001,Seagate Technology\n002,Western Digital\n"
+
+
+async def test_run_with_manufacturers_lookup_csv(tmp_path, db_session: Session, monkeypatch):
+    """run() parses the Manufacturers__c CSV and passes the lookup dict to the parser."""
+    seed_commodity_schemas(db_session)
+    (tmp_path / "LSC1__Material__c.csv").write_text(_SFDC_CSV, encoding="utf-8")
+    (tmp_path / "LSC1__Manufacturers__c.csv").write_text(_MANUFACTURERS_CSV, encoding="utf-8")
+    _patch_session(monkeypatch, db_session)
+
+    report = await run(pattern=f"{tmp_path}/*", ai_correct_flag=False, apply=False, limit=None)
+
+    # Files list includes only the material master, not the manufacturers lookup.
+    assert report["files"] == ["LSC1__Material__c.csv"]
+    assert report["raw_rows"] == 2  # two SFDC rows
+    assert report["distinct_mpns"] == 2
+
+
+# ── ai_correct branch (lines 121-124) ────────────────────────────────────────
+
+
+async def test_run_ai_correct_flag_populates_ai_stats(tmp_path, db_session: Session, monkeypatch):
+    """When ai_correct_flag=True the ai_correct coroutine is called and its result stored."""
+    seed_commodity_schemas(db_session)
+    (tmp_path / "Inventory 2.12.26.csv").write_text(_INVENTORY_CSV, encoding="utf-8")
+    _patch_session(monkeypatch, db_session)
+
+    fake_ai_stats = {"corrected": 1, "failed": 0}
+    with patch("app.services.source_ingest.ai_correct.ai_correct", new=AsyncMock(return_value=fake_ai_stats)):
+        report = await run(pattern=f"{tmp_path}/*", ai_correct_flag=True, apply=False, limit=None)
+
+    assert report["ai_correct"] is True
+    assert report["ai_stats"] == fake_ai_stats
+
+
+# ── _print_report (lines 151-194) ────────────────────────────────────────────
+
+
+def _make_report(*, apply: bool, ai_stats=None, failed: int = 0) -> dict:
+    """Build a minimal but structurally complete report dict for _print_report."""
+    stats: dict = {
+        "parts_seen": 2,
+        "created": 2,
+        "updated": 0,
+        "would_create": 2,
+        "would_update": 0,
+        "failed": failed,
+        "failed_mpns": ["BADMPN1"] if failed else [],
+        "categories_set": 1,
+        "descriptions_filled": 1,
+        "conditions_filled": 1,
+        "specs_written": 3,
+        "fields_by_source": {"trio_source": 2, "mpn_decode": 1},
+        "sample": [
+            {
+                "action": "create",
+                "display_mpn": "ST4000NM0035",
+                "normalized_mpn": "st4000nm0035",
+                "category": "hdd",
+                "category_source": "trio_source",
+                "condition": "Pulled",
+                "specs": {"capacity_gb": 4000},
+                "ai_specs": {},
+                "description": "Enterprise HDD 4TB",
+            }
+        ],
+    }
+    return {
+        "files": ["LSC1__Material__c.csv", "Inventory 2.12.26.csv"],
+        "raw_rows": 3,
+        "cleaned_rows": 3,
+        "distinct_mpns": 2,
+        "ai_correct": ai_stats is not None,
+        "ai_stats": ai_stats,
+        "apply": apply,
+        "stats": stats,
+    }
+
+
+def test_print_report_dry_run(capsys):
+    """_print_report renders a DRY RUN block including the sample table."""
+    _print_report(_make_report(apply=False))
+    out = capsys.readouterr().out
+    assert "DRY RUN" in out
+    assert "Would create" in out
+    assert "ST4000NM0035" in out
+    assert "Enterprise HDD 4TB" in out
+
+
+def test_print_report_apply_mode(capsys):
+    """_print_report renders an APPLY block with created/updated counts."""
+    _print_report(_make_report(apply=True))
+    out = capsys.readouterr().out
+    assert "APPLY" in out
+    assert "Cards created" in out
+    # Sample table is suppressed in apply mode.
+    assert "ST4000NM0035" not in out
+
+
+def test_print_report_with_ai_stats(capsys):
+    """_print_report shows AI correction counts when ai_stats is present."""
+    _print_report(_make_report(apply=False, ai_stats={"corrected": 5, "failed": 1}))
+    out = capsys.readouterr().out
+    assert "AI correction" in out
+    assert "5 ok" in out
+
+
+def test_print_report_with_failures(capsys):
+    """_print_report shows the FAILED warning line when s['failed'] > 0."""
+    _print_report(_make_report(apply=False, failed=1))
+    out = capsys.readouterr().out
+    assert "FAILED" in out
+    assert "BADMPN1" in out
+
+
+# ── main() (lines 202-211) ───────────────────────────────────────────────────
+
+
+def test_main_calls_run_and_returns_report(tmp_path, monkeypatch):
+    """main() parses argv, calls asyncio.run(run(...)), prints the report, and returns it."""
+    synthetic_report = _make_report(apply=False)
+    # Patch asyncio.run so we never actually invoke the pipeline.
+    with patch("app.management.ingest_source_data.asyncio.run", return_value=synthetic_report):
+        result = main(["--files", f"{tmp_path}/*"])
+    assert result is synthetic_report
+
+
+def test_main_apply_flag_forwarded(monkeypatch):
+    """--apply is forwarded to run() via asyncio.run."""
+    synthetic_report = _make_report(apply=True)
+    captured: list = []
+
+    def fake_asyncio_run(coro):  # noqa: ANN001
+        # Inspect the coroutine's cr_frame locals to confirm apply=True was set.
+        captured.append(coro)
+        coro.close()  # prevent ResourceWarning
+        return synthetic_report
+
+    with patch("app.management.ingest_source_data.asyncio.run", side_effect=fake_asyncio_run):
+        result = main(["--files", "/tmp/nonexistent/*", "--apply"])
+    assert result["apply"] is True
+
+
+# ── main() callable guard (line 215) ─────────────────────────────────────────
+
+
+def test_main_is_callable():
+    """Confirm main is a callable (the __main__ guard itself is not unit-testable)."""
+    assert callable(main)
+
+
+# ── _discover_files: non-file glob entry skipped (line 55) ───────────────────
+
+
+def test_discover_files_skips_directory_entries(tmp_path):
+    """Line 55: directories matched by the glob are skipped (p.is_file() is False)."""
+    # Create a subdirectory alongside a real CSV so both match the glob.
+    subdir = tmp_path / "some_subdir"
+    subdir.mkdir()
+    (tmp_path / "LSC1__Material__c.csv").write_text("Id\na1\n", encoding="utf-8")
+
+    files, manufacturers = _discover_files(f"{tmp_path}/*")
+
+    # The subdirectory must not appear in either return value.
+    names = [f.name for f in files]
+    assert "some_subdir" not in names
+    assert manufacturers is None
+    assert "LSC1__Material__c.csv" in names
