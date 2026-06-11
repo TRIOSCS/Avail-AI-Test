@@ -25,3 +25,4 @@
 098 perf/materials-post-ingest materials perf indexes (PR #262, MERGED to main)
 099 feat/on-add-enrichment on-add enrichment conflicts (PR #264, open — RE-CHAINED: #263 merged first, so down_revision now 097_dual_brand; chain runs 096 -> 098 -> 097 -> 099; single head verified via `alembic heads`)
 100 feat/ladder-monopoly distributor-taxonomy alias backfill (post-093 aliases hard drives/internal hard drives -> hdd, memory module(s) -> dram; data-only, no-op downgrade)
+101 feat/oem-web-resolution oem_crosswalk table (PartSurfer/PSREF spare->canonical cache incl negative rows — RE-NUMBERED from 100: feat/ladder-monopoly claimed 100 and merged first; re-chained onto 100_taxonomy_alias_backfill, chain runs 096 -> 098 -> 097 -> 099 -> 100 -> 101)

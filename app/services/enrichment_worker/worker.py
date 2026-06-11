@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy import and_, or_
+from sqlalchemy.exc import DataError, IntegrityError
 from sqlalchemy.orm import Session
 
 from app.cache import intel_cache
@@ -161,6 +162,132 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     )
 
 
+async def _oem_resolution_pass(
+    db: Session,
+    batch: list,
+    config: "EnrichmentWorkerConfig",
+    breaker: "EnrichmentCircuitBreaker",
+    web_state: dict[str, int],
+    web_calls_today: int,
+    web_cache_key: str,
+    today_str: str,
+) -> int:
+    """Pass A — paced OEM spare→canonical resolution over this batch (network).
+
+    Candidates are batch cards classified ``hpe`` (Phase A) with no fresh
+    ``oem_crosswalk`` row (resolved rows are permanent; no_match rows block for 90
+    days). At most ``config.oem_resolve_per_batch`` resolves per batch, each gated on
+    BOTH daily caps — the web cap (every resolve is a billable web call, counted
+    INSIDE ``web_daily_cap``) and the OEM sub-cap (``oem_resolve_daily_cap``, tallied
+    at ``enrichment_worker:oem_resolves:{date}`` with the same max-of-cache-and-
+    in-process defense as the web counter). Both counters are billed BEFORE the await
+    via the atomic ``intel_cache.incr_count`` (safe against the concurrently-running
+    drain CLI — no read-modify-write lost updates) and mirrored into ``web_state``
+    up front, so a call that bills then raises — or a pass that dies mid-flight — is
+    already counted everywhere.
+
+    Outcomes are upserted into ``oem_crosswalk`` via the shared
+    ``apply_resolution`` writer inside a SAVEPOINT: the flush is the one realistic
+    non-ClaudeError raise site (a unique-key race with the drain CLI committing the
+    same edge during the await, or a PG-only DataError) and must never poison the
+    shared batch session — the savepoint rolls back only that row and the spare is
+    skipped (the concurrent writer's row IS the desired end state).
+    ``ClaudeError`` → ``breaker.record_claude_error``, NO row (the spare retries next
+    batch for free). Worker-level queries between awaits are the established
+    crosswalk-pass pattern — ``enrich_card``'s per-card no-query-after-await
+    invariant is untouched.
+
+    Returns the updated ``web_calls_today`` (also persisted into ``web_state``).
+    """
+    from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
+    from app.services.enrichment_worker.oem_crosswalk_resolver import resolve_oem_spare
+    from app.services.oem_crosswalk_enrich import apply_resolution, pending_resolution
+    from app.utils.normalization import normalize_mpn_key
+
+    # Phase A: HP/HPE only. Dedupe by spare norm (one resolve covers every card
+    # sharing it, forever).
+    candidates: dict[str, str] = {}
+    for card in batch:
+        if classify_oem_vendor(card.display_mpn) == "hpe":
+            norm = normalize_mpn_key(card.display_mpn)
+            if norm and norm not in candidates:
+                candidates[norm] = card.display_mpn
+    if not candidates:
+        return web_calls_today
+
+    pending = pending_resolution(db, candidates.keys(), "hpe")
+    if not pending:
+        return web_calls_today
+
+    oem_cache_key = f"enrichment_worker:oem_resolves:{today_str}"
+    # Same defense in depth as the web counter: max of the cross-restart cache value
+    # and the in-process tally, so the sub-cap holds even when the cache no-ops.
+    oem_resolves_today = max(intel_cache.get_count(oem_cache_key), web_state.get("oem_resolves", 0))
+
+    taken = 0
+    for norm, stale_row in pending.items():
+        if taken >= config.oem_resolve_per_batch:
+            break
+        if web_calls_today >= config.web_daily_cap:
+            logger.info(
+                "ENRICH_WORKER: oem-resolve skipped — web daily cap reached ({}/{})",
+                web_calls_today,
+                config.web_daily_cap,
+            )
+            break
+        if oem_resolves_today >= config.oem_resolve_daily_cap:
+            logger.info(
+                "ENRICH_WORKER: oem-resolve daily cap reached ({}/{}) — pass no-ops until reset",
+                oem_resolves_today,
+                config.oem_resolve_daily_cap,
+            )
+            break
+        taken += 1
+        display_mpn = candidates[norm]
+        # Bill BEFORE the await (the WebMeter reserve discipline, made durable):
+        # incr_count advances the shared date counters atomically (no lost updates
+        # against the drain CLI) and web_state mirrors them up front, so a call that
+        # bills then raises — or a pass that dies mid-flight — is already counted.
+        web_calls_today = max(intel_cache.incr_count(web_cache_key, ttl_days=1.0), web_calls_today + 1)
+        oem_resolves_today = max(intel_cache.incr_count(oem_cache_key, ttl_days=1.0), oem_resolves_today + 1)
+        web_state["web_calls"] = web_calls_today
+        web_state["oem_resolves"] = oem_resolves_today
+        try:
+            result = await resolve_oem_spare(display_mpn, norm, "hpe")
+        except ClaudeError as e:
+            # Transient backend failure (incl. an unparseable response): feed the
+            # breaker, write NO row — the spare is retried next batch for free.
+            logger.warning("ENRICH_WORKER: oem-resolve Claude error for {}: {}", display_mpn, type(e).__name__)
+            breaker.record_claude_error()
+            continue
+        breaker.record_claude_success()
+
+        # Upsert via the shared writer (a stale no_match row is updated in place;
+        # otherwise insert), inside a SAVEPOINT: the flush can raise IntegrityError
+        # when the drain CLI committed the same edge during the await (or DataError
+        # on PG), and that must roll back ONLY this row — never poison the shared
+        # batch session. The batch-final commit owns durability.
+        try:
+            with db.begin_nested():
+                row = apply_resolution(stale_row, result, display_mpn=display_mpn, spare_norm=norm, vendor="hpe")
+                if stale_row is None:
+                    db.add(row)
+                # Flush so Pass B (same batch, same session) sees the row even on
+                # autoflush=False sessions — a spare resolved this batch gets its
+                # specs written in the SAME batch.
+                db.flush()
+        except (IntegrityError, DataError) as e:
+            logger.warning(
+                "ENRICH_WORKER: oem-resolve upsert for {} lost a write race or failed validation ({}) — "
+                "skipping (a concurrent writer's row is the desired end state)",
+                display_mpn,
+                type(e).__name__,
+            )
+            continue
+        logger.info("ENRICH_WORKER: oem-resolve {} -> {} ({})", display_mpn, result.status, result.canonical_mpn)
+    return web_calls_today
+
+
 async def run_one_batch(
     db: Session,
     config: "EnrichmentWorkerConfig",
@@ -232,11 +359,57 @@ async def run_one_batch(
 
     today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     web_cache_key = f"enrichment_worker:web_calls:{today_str}"
-    cached_web = intel_cache.get_cached(web_cache_key)
-    cache_count = int(cached_web.get("count", 0)) if isinstance(cached_web, dict) else 0
-    # Defense in depth: take the max of the (cross-restart) cache value and the in-process
-    # tally so the cap holds even when the cache is unavailable and silently no-ops.
-    web_calls_today = max(cache_count, web_state.get("web_calls", 0))
+    # Defense in depth: take the max of the (cross-restart, cross-process) cache value
+    # and the in-process tally so the cap holds even when the cache is unavailable and
+    # silently no-ops.
+    web_calls_today = max(intel_cache.get_count(web_cache_key), web_state.get("web_calls", 0))
+
+    # OEM web-resolution crosswalk (Pass A + Pass B) — BEFORE the per-card core loop,
+    # per the crosswalk-pass pattern (worker-level queries between awaits are fine;
+    # enrich_card's per-card no-query-after-await invariant is untouched).
+    #
+    # Pass A — paced resolution (network): resolve uncached HP/HPE spare PNs in this
+    # batch via Claude-grounded PartSurfer lookup and upsert oem_crosswalk rows
+    # (incl. 90-day-negative no_match rows). Bounded by oem_resolve_per_batch and
+    # BOTH daily caps; every call bills the web counter (counted INSIDE web_daily_cap).
+    #
+    # Pass B — deterministic writer (zero network): cards whose display_mpn norm has a
+    # resolved oem_crosswalk row inherit category + specs from the canonical MPN at
+    # source partsurfer/psref (F1 ladder tier 80 — below fru_desc_parse 82, above
+    # web_search 70; the ladder arbitrates, not run order) and get upgraded to
+    # oem_sourced — which short-circuits enrich_card's early-return below and saves
+    # up to 3 web calls per card. Same session, committed with the batch below.
+    if batch_ids:
+        from app.config import settings
+
+        if settings.oem_crosswalk_enrich_enabled:
+            try:
+                web_calls_today = await _oem_resolution_pass(
+                    db, batch, config, breaker, web_state, web_calls_today, web_cache_key, today_str
+                )
+            except Exception:
+                logger.exception("ENRICH_WORKER: oem-resolve pass failed over {} cards", len(batch_ids))
+                if not db.is_active:
+                    # The session is pending-rollback (a DB error escaped the pass's
+                    # savepoint) — restore it so Pass B / _connectors_in_order / the
+                    # core loop don't die on PendingRollbackError and abort the whole
+                    # batch; then re-apply the stamp clears the rollback discarded.
+                    db.rollback()
+                    for card in batch:
+                        if card.enrich_requested_at is not None:
+                            card.enrich_requested_at = None
+            # The pass bills the counters into web_state BEFORE each await — re-sync
+            # the local tally so a swallowed pass exception can't clobber the OEM
+            # increments at the per-card flushes / the web_state reconciliation below
+            # (the in-process backstop must never under-count).
+            web_calls_today = max(web_calls_today, web_state.get("web_calls", 0))
+
+            from app.services.oem_crosswalk_enrich import oem_crosswalk_and_record_specs
+
+            try:
+                logger.info("ENRICH_WORKER: oem-crosswalk {}", dict(oem_crosswalk_and_record_specs(db, batch_ids)))
+            except Exception:
+                logger.exception("ENRICH_WORKER: oem-crosswalk failed over {} cards", len(batch_ids))
 
     conns = _connectors_in_order(db)
     counts: dict[str, int] = {}
@@ -312,9 +485,13 @@ async def run_one_batch(
             # Bill every web call that was DISPATCHED, even if a later tier raised — the
             # meter reserves before each await, so calls that fired then failed are still
             # counted (otherwise WEB_DAILY_CAP drifts over on a ClaudeError mid-card).
+            # incr_count is atomic across processes (the drain CLI bills the same key);
+            # the max() keeps the in-process floor when the cache no-ops.
             if card_meter.web_calls > 0:
-                web_calls_today += card_meter.web_calls
-                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
+                web_calls_today = max(
+                    intel_cache.incr_count(web_cache_key, card_meter.web_calls, ttl_days=1.0),
+                    web_calls_today + card_meter.web_calls,
+                )
 
     web_state["web_calls"] = web_calls_today
 
@@ -437,9 +614,10 @@ async def main() -> None:
     # quota/auth wall and the "web_search" flag once the daily web budget is spent —
     # so they stay disabled instead of being re-tried (and re-logged) every loop.
     disabled: set[str] = set()
-    # In-process web-call tally — the durable backstop for WEB_DAILY_CAP if the cache
-    # is unavailable. Reset at the daily reset alongside the cache's date-keyed counter.
-    web_state: dict[str, int] = {"web_calls": 0}
+    # In-process web-call + oem-resolve tallies — the durable backstop for
+    # WEB_DAILY_CAP / OEM_RESOLVE_DAILY_CAP if the cache is unavailable. Reset at the
+    # daily reset alongside the cache's date-keyed counters.
+    web_state: dict[str, int] = {"web_calls": 0, "oem_resolves": 0}
 
     # Running totals for today
     enriched_today = 0
@@ -530,10 +708,11 @@ async def main() -> None:
                     not_catalogued_today = 0
                     last_stats_date = today_date
                     # New day: quotas/budgets reset, so re-enable disabled sources and the
-                    # web tier, and zero the in-process web tally (the cache counter is
-                    # date-keyed and resets on its own).
+                    # web tier, and zero the in-process web + oem-resolve tallies (the
+                    # cache counters are date-keyed and reset on their own).
                     disabled.clear()
                     web_state["web_calls"] = 0
+                    web_state["oem_resolves"] = 0
 
                 # Daily cap check — long sleep when exhausted
                 if enriched_today >= config.daily_cap:

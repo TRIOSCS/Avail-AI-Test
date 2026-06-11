@@ -1,0 +1,9 @@
+{
+  "_comment": "Recorded-style PartSurfer resolution (scrubbed): HP 4TB 12G SAS 7.2K LFF spare -> Seagate model. Drives the resolver storage path.",
+  "canonical_mpn": "ST4000NM0035",
+  "manufacturer": "Seagate",
+  "title": "4TB 12G SAS 7.2K rpm LFF (3.5-inch) Midline hard drive",
+  "quote": "695510-B21 HP 4TB 12G SAS 7.2K LFF Midline hard drive Seagate ST4000NM0035",
+  "confidence": 0.95,
+  "source_url": "https://partsurfer.hp.com/Search.aspx?SearchText=695510-B21"
+}

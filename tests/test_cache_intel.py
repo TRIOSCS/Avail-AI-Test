@@ -282,3 +282,65 @@ class TestGetRedisNonTesting:
             with patch("redis.from_url", return_value=mock_client):
                 result = _get_redis()
                 assert result is mock_client
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  get_count / incr_count — atomic day-counters (worker + drain CLI billers)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGetCount:
+    @patch("app.cache.intel_cache.get_cached")
+    def test_reads_legacy_dict_shape(self, mock_get_cached):
+        mock_get_cached.return_value = {"count": 7}
+        assert cache_mod.get_count("enrichment_worker:web_calls:2026-06-10") == 7
+
+    @patch("app.cache.intel_cache.get_cached")
+    def test_reads_plain_integer_shape(self, mock_get_cached):
+        # Redis INCRBY stores a bare integer — json.loads("7") → 7.
+        mock_get_cached.return_value = 7
+        assert cache_mod.get_count("k") == 7
+
+    @patch("app.cache.intel_cache.get_cached")
+    def test_miss_and_garbage_read_as_zero(self, mock_get_cached):
+        for value in (None, {"count": "junk"}, ["nope"], "nope"):
+            mock_get_cached.return_value = value
+            assert cache_mod.get_count("k") == 0
+
+
+class TestIncrCount:
+    @patch("app.cache.intel_cache._get_redis")
+    def test_redis_incrby_is_used_atomically(self, mock_get_redis):
+        # The whole point: INCRBY (atomic across the worker + drain CLI processes),
+        # never a read-modify-write that loses concurrent updates.
+        mock_redis = MagicMock()
+        mock_redis.incrby.return_value = 42
+        mock_get_redis.return_value = mock_redis
+
+        assert cache_mod.incr_count("enrichment_worker:web_calls:2026-06-10", 2, ttl_days=1.0) == 42
+        mock_redis.incrby.assert_called_once_with("intel:enrichment_worker:web_calls:2026-06-10", 2)
+        mock_redis.expire.assert_called_once_with("intel:enrichment_worker:web_calls:2026-06-10", 86400)
+
+    @patch("app.cache.intel_cache.set_cached")
+    @patch("app.cache.intel_cache.get_cached")
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_redis_down_falls_back_to_read_modify_write(self, _mock_redis, mock_get_cached, mock_set_cached):
+        mock_get_cached.return_value = {"count": 5}
+
+        assert cache_mod.incr_count("k", 1, ttl_days=1.0) == 6
+        mock_set_cached.assert_called_once_with("k", {"count": 6}, ttl_days=1.0)
+
+    @patch("app.cache.intel_cache.set_cached")
+    @patch("app.cache.intel_cache.get_cached")
+    @patch("app.cache.intel_cache._get_redis")
+    def test_redis_error_falls_back_to_read_modify_write(self, mock_get_redis, mock_get_cached, mock_set_cached):
+        # A legacy {"count": N} JSON value makes INCRBY raise — the fallback still
+        # advances the counter (non-atomic for that one transition day; the date-
+        # scoped key self-heals at rollover).
+        mock_redis = MagicMock()
+        mock_redis.incrby.side_effect = Exception("value is not an integer")
+        mock_get_redis.return_value = mock_redis
+        mock_get_cached.return_value = {"count": 9}
+
+        assert cache_mod.incr_count("k") == 10
+        mock_set_cached.assert_called_once_with("k", {"count": 10}, ttl_days=1.0)

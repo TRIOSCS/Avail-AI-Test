@@ -137,6 +137,52 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
         logger.warning("Cache write error for {}: {}", cache_key, e)
 
 
+def get_count(cache_key: str) -> int:
+    """Read an integer day-counter (e.g. ``enrichment_worker:web_calls:{date}``).
+
+    Tolerates BOTH value shapes: the plain integer ``incr_count`` writes on Redis, and
+    the legacy ``{"count": N}`` dict written by ``set_cached`` (the PG fallback and
+    pre-existing rows). Returns 0 on miss/unreadable.
+    """
+    data = get_cached(cache_key)
+    if isinstance(data, dict):
+        try:
+            return int(data.get("count", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
+    if isinstance(data, (int, float)):
+        return int(data)
+    return 0
+
+
+def incr_count(cache_key: str, amount: int = 1, ttl_days: float = 1.0) -> int:
+    """Atomically add *amount* to an integer counter; returns the new value.
+
+    Redis path: INCRBY + EXPIRE — atomic across processes, so two concurrent billers
+    of the shared daily budget counters (the enrichment worker and the
+    backfill_oem_crosswalk drain CLI) never lose each other's updates the way the old
+    get_cached → max → set_cached read-modify-write did. Fallback (Redis down, or a
+    legacy ``{"count": N}``-shaped value INCRBY rejects): non-atomic read-modify-write
+    via ``get_count``/``set_cached`` — single-writer-safe only; in that degraded mode
+    cross-process drift is bounded by each biller's in-process floor (callers compose
+    the return value with ``max(local + amount, ...)``), and the date-scoped keys
+    self-heal at the daily rollover. The returned value is best-effort when BOTH
+    backends are down (set_cached swallows failures) — the callers' in-process tallies
+    are the durable backstop for the caps.
+    """
+    r = _get_redis()
+    if r:
+        try:
+            new = int(r.incrby(f"{_REDIS_PREFIX}{cache_key}", amount))
+            r.expire(f"{_REDIS_PREFIX}{cache_key}", int(ttl_days * 86400))
+            return new
+        except Exception as e:
+            logger.warning("Redis incr error for {}: {} — falling back to read-modify-write", cache_key, e)
+    new = get_count(cache_key) + amount
+    set_cached(cache_key, {"count": new}, ttl_days=ttl_days)
+    return new
+
+
 def cleanup_expired() -> int:
     """Remove expired cache entries in batches. Returns count deleted.
 

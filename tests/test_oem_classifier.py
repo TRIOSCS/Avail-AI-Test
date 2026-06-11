@@ -22,6 +22,10 @@ from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
         ("486301-001", "hpe"),
         ("628668-001", "hpe"),
         ("902499-856", "hpe"),
+        ("819203-B21", "hpe"),  # option-kit shape (oem-web-resolution Phase A)
+        ("875942-B21", "hpe"),
+        ("L15335-001", "hpe"),  # L-series spare shape (oem-web-resolution Phase A)
+        ("L23456-002", "hpe"),
         ("NB.MBC11.003", "acer"),
         ("KT.00403.025", "acer"),
         ("33.G55N7.002", "acer"),

@@ -135,6 +135,12 @@ class Settings(BaseSettings):
     # between mpn-decode (0.95) and desc-parse (0.90) at 0.93. Safe to leave on — values are
     # enum-validated by record_spec. See app/services/fru_crosswalk_enrich.
     fru_crosswalk_enrich_enabled: bool = True
+    # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache): gates BOTH
+    # worker passes — Pass B (the deterministic tier-80 writer over cached oem_crosswalk rows:
+    # zero-network, zero-LLM, safe-on) and Pass A (the paced Claude-grounded resolution, which
+    # is ADDITIONALLY inert until the per-batch/daily caps allow — see EnrichmentWorkerConfig
+    # oem_resolve_per_batch / oem_resolve_daily_cap). See app/services/oem_crosswalk_enrich.
+    oem_crosswalk_enrich_enabled: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90
