@@ -529,7 +529,7 @@ CDC_PENDING = "cdc_pending"
 
 
 class OemCrosswalkStatus(StrEnum):
-    """Status of an ``oem_crosswalk`` cache row (OEM web resolution, migration 100).
+    """Status of an ``oem_crosswalk`` cache row (OEM web resolution, migration 101).
 
     Single source of truth for the only two valid states — a resolver trust-gate
     failure IS ``no_match`` (there is no separate "gate_failed" state). ``resolved``

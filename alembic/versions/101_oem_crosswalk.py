@@ -14,20 +14,22 @@ deterministic tier-80 writer pass).
 Downgrade drops the indexes + table (data is re-fetchable via the resolver; acceptable
 loss on rollback).
 
-Revision ID: 100_oem_crosswalk
-Revises: 099_on_add_enrich
+Revision ID: 101_oem_crosswalk
+Revises: 100_taxonomy_alias_backfill
 Create Date: 2026-06-10
 
 NOTE: 092 is permanently retired (pre-registry reservation noted in 094's header) — the
-chain runs 096 -> 098 -> 097 -> 099 -> 100 (re-chains kept the claimed numbers).
+chain runs 096 -> 098 -> 097 -> 099 -> 100 -> 101. This migration was RE-NUMBERED from
+100: feat/ladder-monopoly claimed 100 (taxonomy alias backfill) and merged first, so
+this branch took the next free number and re-chained per the registry protocol.
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "100_oem_crosswalk"
-down_revision = "099_on_add_enrich"
+revision = "101_oem_crosswalk"
+down_revision = "100_taxonomy_alias_backfill"
 branch_labels = None
 depends_on = None
 

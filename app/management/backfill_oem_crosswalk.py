@@ -25,7 +25,7 @@ survives interruption. Stops after 5 consecutive ClaudeErrors (a backend outage 
 not burn the day's budget on failures). --dry-run prints the ordered candidate list and
 exits without any web call.
 
-Called by: an operator (manually, post-deploy of migration 100 — NOT at startup).
+Called by: an operator (manually, post-deploy of migration 101 — NOT at startup).
 Depends on: app.database.SessionLocal, enrichment_worker.config.EnrichmentWorkerConfig,
       enrichment_worker.oem_classifier.classify_oem_vendor,
       enrichment_worker.oem_crosswalk_resolver.resolve_oem_spare,

@@ -586,3 +586,59 @@ def test_set_brand_on_detached_card_warns_and_writes_verbatim(db_session: Sessio
     finally:
         loguru_logger.remove(sink_id)
     assert not any("not session-attached" in w for w in warnings2), warnings2
+
+
+def test_set_category_non_manual_rejection_logs_at_info(db_session: Session):
+    # Visibility rule (mirrors record_spec): a NON-manual writer that loses arbitration
+    # must be visible at production log levels (INFO) for EVERY provenanced column —
+    # category AND brand/manufacturer. The W8 enrichment writers (apply_authoritative /
+    # apply_cross_ref_verified / apply_oem_sourced / apply_web_sourced) carry no
+    # aggregate maker-conflict counter, so a DEBUG-only maker loss (e.g. a tier-90
+    # connector maker losing to trio_source/95, or web_search/70 losing to decode/85
+    # — below the conflict band when the prior isn't manual) would be
+    # production-invisible. Only manual submissions stay at DEBUG (the human gets
+    # endpoint feedback — toast/422).
+    from loguru import logger as loguru_logger
+
+    card = _card(
+        db_session,
+        normalized_mpn="info-loss",
+        category="dram",
+        category_source="trio_source",
+        category_confidence=1.0,
+        category_tier=95,
+        manufacturer="Seagate",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+
+    infos: list[str] = []
+    sink_id = loguru_logger.add(lambda message: infos.append(str(message)), level="INFO")
+    try:
+        # Non-manual category loss → INFO.
+        assert set_category(card, "hdd", "digikey_api", 1.0) is False
+        assert any("set_category" in m and "kept existing" in m for m in infos), infos
+        # Non-manual manufacturer loss (vs a manual prior) → INFO too.
+        infos.clear()
+        from app.services.spec_tiers import set_manufacturer
+
+        assert set_manufacturer(card, "Samsung", "mpn_decode", 0.9) is False
+        assert any("set_manufacturer" in m and "kept existing" in m for m in infos), infos
+        # A non-manual maker loss against a NON-manual prior fires NO validation
+        # conflict (existing isn't manual) — this INFO line is its only production
+        # trace, the exact gap the rule closes (tier-90 connector maker vs trio/95).
+        card2 = _card(
+            db_session,
+            normalized_mpn="info-loss-2",
+            manufacturer="Samsung",
+            manufacturer_source="trio_source",
+            manufacturer_confidence=1.0,
+            manufacturer_tier=95,
+        )
+        infos.clear()
+        assert set_manufacturer(card2, "Seagate Technology", "digikey_api", 1.0) is False
+        assert any("set_manufacturer" in m and "kept existing" in m for m in infos), infos
+        assert not card2.has_validation_conflict  # no conflict entry — INFO is the only trace
+    finally:
+        loguru_logger.remove(sink_id)

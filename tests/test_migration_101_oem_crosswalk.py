@@ -1,11 +1,11 @@
-"""Tests for migration 100 (oem_crosswalk table).
+"""Tests for migration 101 (oem_crosswalk table).
 
-What: Revision metadata checks (id length vs PG VARCHAR(32), chain wiring onto 099)
+What: Revision metadata checks (id length vs PG VARCHAR(32), chain wiring onto 100)
       plus an executable upgrade → downgrade → upgrade pass against a scratch
       in-memory SQLite engine — the migration only uses portable create/drop DDL,
       so executing it here is honest coverage on both engines.
 Called by: pytest
-Depends on: alembic/versions/100_oem_crosswalk.py
+Depends on: alembic/versions/101_oem_crosswalk.py
 """
 
 import importlib.util
@@ -17,15 +17,15 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.pool import StaticPool
 
 # Load the migration module directly since alembic/versions has no __init__.py.
-_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "100_oem_crosswalk.py")
-_spec = importlib.util.spec_from_file_location("migration_100", _MIGRATION_PATH)
+_MIGRATION_PATH = os.path.join(os.path.dirname(__file__), "..", "alembic", "versions", "101_oem_crosswalk.py")
+_spec = importlib.util.spec_from_file_location("migration_101", _MIGRATION_PATH)
 _mod = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_mod)
 
 
 class TestRevisionMetadata:
     def test_revision_id(self):
-        assert _mod.revision == "100_oem_crosswalk"
+        assert _mod.revision == "101_oem_crosswalk"
 
     def test_revision_id_within_pg_version_num_limit(self):
         # alembic_version.version_num is VARCHAR(32) on Postgres; SQLite ignores the
@@ -33,7 +33,7 @@ class TestRevisionMetadata:
         assert len(_mod.revision) <= 32
 
     def test_down_revision(self):
-        assert _mod.down_revision == "099_on_add_enrich"
+        assert _mod.down_revision == "100_taxonomy_alias_backfill"
 
 
 class TestExecution:
