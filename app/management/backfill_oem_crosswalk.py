@@ -8,6 +8,7 @@ display_mpn classifies as *vendor*, ordered demand-first:
   (1) CPU-commodity cards with search_count > 0,
   (2) remaining CPU-commodity cards,
   (3) other commodities,
+newest spare numbers first within each bucket (see select_candidates),
 then resolves each via the Claude-grounded resolver and UPSERTS oem_crosswalk rows only
 (resolved or 90-day-negative no_match) — NO spec writes: the enrichment worker's Pass B
 back-fills cards deterministically as batches cycle. Designed to run ALONGSIDE the live
@@ -60,9 +61,13 @@ def select_candidates(db, vendor: str) -> list[tuple[str, str]]:
 
     Demand-first ordering per spec §5: (1) CPU-commodity cards with search_count > 0,
     (2) remaining CPU-commodity cards, (3) other commodities; search_count DESC then
-    norm within each bucket for determinism. Distinct by norm (a norm keeps its best
-    bucket across the cards sharing it). Does NOT filter by cache freshness — the
-    caller intersects with ``pending_resolution``.
+    norm DESCENDING within each bucket. Descending because OEM spare numbering grows
+    monotonically — L/P-series and high six-digit spares (modern, PartSurfer-covered,
+    tradeable) sort lexicographically AFTER 1990s Compaq-era numbers, which resolve to
+    near-universal no_match; ascending order front-loads the daily resolve budget with
+    dead stock for weeks. Distinct by norm (a norm keeps its best bucket across the
+    cards sharing it). Does NOT filter by cache freshness — the caller intersects with
+    ``pending_resolution``.
     """
     rows = (
         db.query(MaterialCard.display_mpn, MaterialCard.category, MaterialCard.search_count)
@@ -82,7 +87,11 @@ def select_candidates(db, vendor: str) -> list[tuple[str, str]]:
         key = (bucket, -searches, norm, str(display_mpn))
         if norm not in best or key < best[norm]:
             best[norm] = key
-    return [(norm, display) for _b, _s, norm, display in sorted(best.values())]
+    # Newest spares first within each bucket: norm DESC, then a stable re-sort on
+    # (bucket, -search_count) so bucket priority still dominates.
+    ordered = sorted(best.values(), key=lambda k: k[2], reverse=True)
+    ordered.sort(key=lambda k: (k[0], k[1]))
+    return [(norm, display) for _b, _s, norm, display in ordered]
 
 
 async def run(vendor: str, limit: int | None, dry_run: bool) -> int:
