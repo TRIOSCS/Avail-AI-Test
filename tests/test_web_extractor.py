@@ -95,3 +95,16 @@ async def test_missing_manufacturer_rejected(mock_cj):
     """Gate 4: a missing manufacturer → failed (we never accept web data without a maker)."""
     mock_cj.return_value = {**_GOOD, "manufacturer": ""}
     assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
+
+
+def test_prompt_constrains_category_to_canonical_vocabulary():
+    """The extracted category routes through the F1 ladder's normalize_category (off-
+    vocab → silently dropped), so the prompt must solicit ladder-admissible keys — a
+    free-text ``"category": str`` would suppress the web tier's category fill-rate."""
+    from app.services.commodity_registry import get_all_commodities
+    from app.services.enrichment_worker.web_extractor import _PROMPT
+
+    assert "category MUST be one of" in _PROMPT
+    for key in ("hdd", "ssd", "dram"):
+        assert key in _PROMPT
+    assert all(key in _PROMPT for key in get_all_commodities())

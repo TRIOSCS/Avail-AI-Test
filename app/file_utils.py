@@ -131,8 +131,14 @@ _MPN_COLUMN_NAMES = (
 )
 
 
-def extract_mpns(rows: list[dict]) -> list[str]:
-    """Pull part numbers from parsed rows.
+def extract_mpns_with_rows(rows: list[dict]) -> list[tuple[int, str]]:
+    """Pull ``(file_row, part_number)`` pairs from parsed rows.
+
+    ``file_row`` is the 1-based row in the SOURCE file (header = row 1, first data
+    row = 2) so import warnings point at the spreadsheet line the user can actually
+    open and fix. Blank MPN cells are skipped WITH their row number (numbering does
+    not compress); only lines the parser dropped entirely (fully blank rows) are
+    uncounted, so numbering can drift by those on malformed files.
 
     Prefers a recognized column name; otherwise uses the single column present.
     Preserves order, drops blanks.
@@ -146,11 +152,16 @@ def extract_mpns(rows: list[dict]) -> list[str]:
     if col is None:
         return []
     out = []
-    for r in rows:
+    for file_row, r in enumerate(rows, start=2):  # the header occupies file row 1
         v = (r.get(col) or "").strip()
         if v:
-            out.append(v)
+            out.append((file_row, v))
     return out
+
+
+def extract_mpns(rows: list[dict]) -> list[str]:
+    """Pull part numbers from parsed rows (order preserved, blanks dropped)."""
+    return [mpn for _file_row, mpn in extract_mpns_with_rows(rows)]
 
 
 # ── Stock list row normalization ────────────────────────────────────────

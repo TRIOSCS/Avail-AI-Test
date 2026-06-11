@@ -35,11 +35,18 @@ def _report(rows, samples_n: int) -> None:
     by_vendor: Counter = Counter()
     by_commodity: Counter = Counter()
     spec_coverage: Counter = Counter()
+    dropped_only: Counter = Counter()
     samples: list = []
 
     for _id, mpn, mfr, category in rows:
         result = decode_mpn(mpn, mfr)
         if result is None:
+            continue
+        if not result.specs:
+            # Every decoded value failed a plausibility gate (grid/envelope) — the
+            # writer would persist nothing for this card; surface it separately.
+            for spec_key, value in result.dropped.items():
+                dropped_only[f"{result.commodity}.{spec_key}={value}"] += 1
             continue
         decoded += 1
         # vendor/commodity pairs: WD HDD vs WD SSD, Samsung DRAM vs Samsung SSD, … stay distinct
@@ -63,6 +70,8 @@ def _report(rows, samples_n: int) -> None:
     print(f"By vendor:    {dict(by_vendor.most_common())}")
     print(f"By commodity: {dict(by_commodity.most_common())}")
     print(f"Spec coverage: {dict(spec_coverage.most_common())}")
+    if dropped_only:
+        print(f"Dropped-only (plausibility-gated, nothing writable): {dict(dropped_only.most_common())}")
     print("Samples:")
     for mpn, vendor, commodity, cat, is_conflict, specs in samples:
         if is_conflict:

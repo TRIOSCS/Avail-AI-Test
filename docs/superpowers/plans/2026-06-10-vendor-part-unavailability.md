@@ -21,10 +21,10 @@ Also read `CLAUDE.md` (migration rules, Alpine landmines, response formats).
 Shipped: `UnavailabilityReason` StrEnum (6 reasons, `.label` property) in
 `app/constants.py`; `VendorPartUnavailability` model (unique vendor_norm+mpn pair,
 reason/note/provenance, created_by SET NULL); migration
-`097_vendor_part_unavailability` (round-tripped PG + SQLite, single head); model +
+`101_vendor_part_unavailability` (renumbered from 097 when the concurrent 097-100 chain landed on main; round-tripped PG + SQLite, single head); model +
 enum tests in `tests/test_vendor_unavailability.py`.
 
-> Task 2b retrofits this model with the policy + provenance columns (migration 098).
+> Task 2b retrofits this model with the policy + provenance columns (migration 102, renumbered from 098).
 
 ### Task 2: Service module + status computation (v1) — ✅ COMPLETED (commit `0b7675e5`)
 
@@ -37,11 +37,11 @@ anchoring; upsert/clear/keys/ActivityLog/suffixed-vendor + status tests.
 > rewrite, and the silent-failure hardening (some v1 behaviors are deliberately
 > superseded — e.g. the v1 unconditional OR in Batch 4 becomes the rows-win rule).
 
-### Task 2b: Silent-failure hardening + temporal policy (service + model + migration 098)
+### Task 2b: Silent-failure hardening + temporal policy (service + model + migration 098, since renumbered to 102)
 
 **Files:**
 - Modify: `app/models/vendor_part_unavailability.py` — four nullable columns per the spec's Data model table: `qty_at_mark` (Integer), `released_at` (UTCDateTime), `release_trigger` (String(32)), `requirement_id` (FK `requirements.id`, indexed, `ondelete="SET NULL"`)
-- Create: migration **098** via autogenerate — ONLY these four columns, revision id ≤32 chars, downgrade drops them, `alembic heads` → single head; no backfill (NULL `qty_at_mark` ⇒ O2 never fires for legacy records — fail-closed)
+- Create: migration **098** (since renumbered to **102** at merge-with-main) via autogenerate — ONLY these four columns, revision id ≤32 chars, downgrade drops them, `alembic heads` → single head; no backfill (NULL `qty_at_mark` ⇒ O2 never fires for legacy records — fail-closed)
 - Modify: `app/config.py` — the three validated knobs (`unavailability_suppress_days` ge=1 default 30, `unavailability_listing_suppress_days` ge=1 default 180, `unavailability_qty_jump_factor` ge=1.0 default 2.0) with the retroactivity comment
 - Modify: `app/services/vendor_unavailability.py` —
   - policy helpers: `LOT_REASONS`/`LIVE_SOURCES`/`HUMAN_DIRECT_SOURCES` `Final`s, `_source_class()` (listing-class default), `_window_days()` (`different_part` → None), `is_active(record, now)` (THE shared predicate), `_override(record, sighting)` (O1/O2)

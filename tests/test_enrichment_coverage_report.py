@@ -168,6 +168,38 @@ class TestCollectMetrics:
         assert list(m["spec_sources"]) == ["mpn_decode", "(none)", "desc_parse", "spec_extraction"]
         assert m["spec_entries_total"] == 5
 
+    def test_provenance_defaults_to_none_buckets(self, seeded):
+        # Fixture has no provenance anywhere: every categorized card / facet row lands
+        # in "(none)", and nothing is unregistered.
+        m = collect_metrics(seeded)
+        assert m["category_sources"] == {"(none)": 4}
+        assert m["facet_sources"] == {"(none)": 3}  # deleted card's facet row excluded
+        assert m["unregistered_sources"] == []
+
+    def test_provenance_sources_and_unregistered_callout(self, seeded):
+        a = seeded.query(MaterialCard).filter_by(normalized_mpn="MPN-A").one()
+        b = seeded.query(MaterialCard).filter_by(normalized_mpn="MPN-B").one()
+        a.category_source, a.category_tier = "mpn_decode", 85
+        b.category_source, b.category_tier = "typo_writer", 0  # NOT in SOURCE_TIER
+        facet = (
+            seeded.query(MaterialSpecFacet)
+            .filter(MaterialSpecFacet.material_card_id == a.id, MaterialSpecFacet.spec_key == "ddr_type")
+            .one()
+        )
+        facet.source = "mpn_decode"
+        seeded.commit()
+
+        m = collect_metrics(seeded)
+        assert m["category_sources"] == {"(none)": 2, "mpn_decode": 1, "typo_writer": 1}
+        assert m["facet_sources"] == {"(none)": 2, "mpn_decode": 1}
+        # Observed in category provenance but absent from SOURCE_TIER → tier-0 callout.
+        assert m["unregistered_sources"] == ["typo_writer"]
+
+        report = format_report(m)
+        assert "Category sources: " in report
+        assert "Facet sources: " in report
+        assert "WARNING unregistered sources (tier 0 — every write loses conflicts): typo_writer" in report
+
     def test_status_and_fru(self, seeded):
         m = collect_metrics(seeded)
         assert m["enrichment_status"] == {
@@ -191,6 +223,9 @@ class TestCollectMetrics:
         }
         assert m["spec_sources"] == {}
         assert m["spec_entries_total"] == 0
+        assert m["category_sources"] == {}
+        assert m["facet_sources"] == {}
+        assert m["unregistered_sources"] == []
         assert m["enrichment_status"] == {}
         assert m["fru_links"] == {"rows": 0, "distinct_frus": 0}
 
@@ -373,6 +408,9 @@ class TestMain:
             "facets",
             "spec_sources",
             "spec_entries_total",
+            "category_sources",
+            "facet_sources",
+            "unregistered_sources",
             "enrichment_status",
             "fru_links",
         }

@@ -125,3 +125,23 @@ def test_consolidate_warns_and_counts_uncleaned_records():
 
     assert len(parts) == 1  # the un-cleaned record never becomes a part
     assert any("bypassed clean_record" in w for w in warnings), warnings
+
+
+def test_consolidate_modal_brand_with_provenance():
+    # Dual-brand: brand (OEM label) is picked exactly like manufacturer — modal
+    # non-empty with source-kind priority tie-break — and recorded in field_sources.
+    parts = consolidate(
+        [
+            _rec(brand="IBM"),
+            _rec(brand="IBM"),
+            _rec(brand="Dell"),
+        ]
+    )
+    assert parts[0].brand == "IBM"  # modal
+    assert parts[0].field_sources["brand"] == SOURCE_KIND_INVENTORY_SHEET
+
+
+def test_consolidate_brand_absent_stays_none():
+    parts = consolidate([_rec(), _rec()])
+    assert parts[0].brand is None
+    assert "brand" not in parts[0].field_sources

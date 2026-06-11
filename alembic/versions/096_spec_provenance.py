@@ -68,6 +68,7 @@ _SOURCE_TIER_SQL_CASE = (
     "WHEN 'fru_desc_parse' THEN 82 "
     "WHEN 'partsurfer' THEN 80 "
     "WHEN 'psref' THEN 80 "
+    "WHEN 'oem_official' THEN 80 "
     "WHEN 'web_search' THEN 70 "
     "WHEN 'brokerbin' THEN 65 "
     "WHEN 'spec_extraction' THEN 60 "

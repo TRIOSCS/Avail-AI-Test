@@ -119,11 +119,12 @@ def intersect_decodes(
 
     Shared contract: every member must carry NON-EMPTY ``specs``. A spec-less member
     makes the strict intersection vacuously empty (absence is not agreement — it
-    would silently veto every key of its rich siblings with dropped_count 0). The
-    decoders uphold this themselves (they return None instead of an empty result),
-    but desc_extractor returns commodity-only DescResults for spec-less prose, so
-    the desc caller filters those out of the key intersection (keeping them in its
-    own commodity-agreement check) before calling.
+    would silently veto every key of its rich siblings with dropped_count 0). BOTH
+    callers must filter: decode_mpn can return a specs-empty result whose only
+    content is the observability ``dropped`` dict (every value failed a plausibility
+    gate), and desc_extractor returns commodity-only DescResults for spec-less
+    prose (the desc caller keeps those in its own commodity-agreement check) —
+    each caller drops spec-less members from the key intersection before calling.
     """
     if not results:
         raise ValueError("intersect_decodes requires at least one result")
@@ -154,10 +155,12 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     desc_category_mismatch}:
 
     - matched: cards with ≥1 mfg_model or drive_pn link.
-    - decoded: matched cards whose substitutes produced ≥1 decode AND that were not
-      lost to a failure/rollback (conflict-/mismatch-skipped cards count — their
-      decode reached a verdict; rolled-back cards do not). Desc-only evidence does
-      NOT count as decoded.
+    - decoded: matched cards whose substitutes produced ≥1 decode that AGREED on a
+      commodity AND that were not lost to a failure/rollback — truly-decoded cards
+      only. Mismatch-skipped cards count (the substitutes reached an agreed verdict;
+      the card's existing category blocked the writes); commodity-conflict cards do
+      NOT (contradicting substitutes never produced a decoded verdict); rolled-back
+      cards do not. Desc-only evidence does NOT count as decoded.
     - written: fru_matrix_decode specs persisted.
     - categorized: NULL-category cards categorized from the agreed decode commodity
       (the desc channel never categorizes).
@@ -183,7 +186,7 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
       write failure after the intersection does not uncount).
     - commodity_conflict: cards skipped entirely on decode commodity disagreement
       (the desc channel is skipped for them too — substitutes that can't agree on
-      what the part IS poison both channels).
+      what the part IS poison both channels; never counted in ``decoded``).
     - desc_commodity_conflict: cards whose desc channel was skipped because their
       linked descriptions disagree among THEMSELVES on the commodity (per card,
       like every desc-side counter).
@@ -268,7 +271,15 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             # Decode + intersect once per FRU (pure, no DB); sorted for a deterministic
             # result order. None results (unrecognized schemes) contribute no evidence.
             models = models_by_fru.get(fru_norm, set())
-            results = [r for raw, mfg in sorted(models, key=lambda m: m[0]) if (r := decode_mpn(raw, mfg)) is not None]
+            # `and r.specs`: decode_mpn can return a specs-EMPTY result whose only
+            # content is the observability `dropped` dict (every decoded value failed
+            # a plausibility gate) — it carries no evidence and, left in, would
+            # vacuously veto every key of the strict intersection below.
+            results = [
+                r
+                for raw, mfg in sorted(models, key=lambda m: m[0])
+                if (r := decode_mpn(raw, mfg)) is not None and r.specs
+            ]
         except Exception:
             stats["failed"] += len(fru_card_ids)
             logger.exception("fru-crosswalk: decode failed for fru_norm={}", fru_norm)
@@ -281,8 +292,9 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             if commodity is None:
                 # Substitutes disagree on what the part IS — assert nothing, from
                 # EITHER channel (the linked descriptions describe those same
-                # contradicting substitutes).
-                stats["decoded"] += len(fru_card_ids)
+                # contradicting substitutes). NOT counted in `decoded`: contradicting
+                # substitutes never produced a decoded verdict, and counting them
+                # would make a fully-conflicted batch read as healthily decoded.
                 stats["commodity_conflict"] += len(fru_card_ids)
                 continue
         elif not descriptions:

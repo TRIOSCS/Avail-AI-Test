@@ -131,6 +131,40 @@ CASES = [
         "ssd",
         {"capacity_gb": 128},
     ),
+    (
+        # Re-audit 2026-06-10 class 3: NAND-die context turns a bare "512G" into a
+        # gigaBIT die density (512 Gbit) — never a drive capacity. Deliberate NO-WRITE.
+        "SSD, Nand, 512G, MLC, Micron",
+        "ssd",
+        {},
+    ),
+    (
+        # …but an EXPLICIT GB token stays gigabytes even when the desc names its flash
+        # type — real drives advertise TLC/MLC constantly.
+        "SSD, 960GB, TLC, SATA, Samsung",
+        "ssd",
+        {"capacity_gb": 960, "interface": "SATA"},
+    ),
+    (
+        # …and so does a BARE-G capacity next to a flash-type token: TLC/MLC alone is
+        # ordinary SSD product copy, not proof of a NAND die (the die guard requires
+        # the NAND word or an MT29 die MPN) — broker shorthand "480G" is 480 GB.
+        "SSD, 480G, MLC, SATA, Intel",
+        "ssd",
+        {"capacity_gb": 480, "interface": "SATA"},
+    ),
+    (
+        "SSD 256G TLC SATA",  # same class, comma-less grammar
+        "ssd",
+        {"capacity_gb": 256, "interface": "SATA"},
+    ),
+    (
+        # A spaced PCIe lane-width token ("X8") must not be read as NAND-die context
+        # either — the bare-G capacity survives (NVMe is not seeded for ssd interface).
+        "SSD, 800G, NVME, PCIE X8",
+        "ssd",
+        {"capacity_gb": 800},
+    ),
 ]
 
 

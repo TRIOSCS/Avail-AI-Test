@@ -1,0 +1,29 @@
+# MIGRATION_NUMBERS_IN_FLIGHT — alembic migration-number coordination log.
+#
+# Why: numbered migrations are claimed manually, and two open branches that both pick
+# the next free number (each chaining onto the same parent) create two alembic heads
+# the moment the second one merges — `alembic upgrade head` then fails at deploy time.
+# tests/test_migration_chain.py turns that into a CI failure on whichever branch lands
+# second, but only AFTER the collision exists; this file is the discovery path that
+# prevents it (a branch author cannot otherwise know which numbers are in flight
+# without trawling every open PR).
+#
+# Protocol (checked by tests/test_migration_numbers_in_flight.py):
+#   1. Before creating alembic/versions/NNN_*.py, take the lowest 3-digit number not
+#      listed below and not already present in alembic/versions/.
+#   2. Append a claim line in the SAME PR/commit that adds the migration:
+#         NNN  <branch-name>  <one-line description>
+#   3. Claim lines are append-only and permanent — never renumber or delete one. If
+#      the later-merging branch finds its parent superseded (a newer migration landed
+#      on main first), re-chain its down_revision onto the new head (or add an
+#      `alembic merge heads` revision); the claimed number stays the same.
+#   Two branches claiming the same number now collide HERE (a git conflict on the same
+#   appended line, or the duplicate-number test) instead of at deploy time.
+#
+# Format: <3-digit number> <branch> <notes...>  — lines starting with '#' are ignored.
+097 feat/dual-brand-filters dual-brand columns (PR #263, open — RE-CHAINED: down_revision now 098_materials_perf_idx, chain runs 096 -> 098 -> 097; number kept per protocol)
+098 perf/materials-post-ingest materials perf indexes (PR #262, MERGED to main)
+099 feat/on-add-enrichment on-add enrichment conflicts (PR #264, open — RE-CHAINED: #263 merged first, so down_revision now 097_dual_brand; chain runs 096 -> 098 -> 097 -> 099; single head verified via `alembic heads`)
+100 feat/ladder-monopoly distributor-taxonomy alias backfill (post-093 aliases hard drives/internal hard drives -> hdd, memory module(s) -> dram; data-only, no-op downgrade)
+101 feat/vendor-part-unavailability vendor_part_unavailability table (PR #270; renumbered from 097 at merge-with-main — 097-100 were claimed/landed by concurrent branches; chained onto 100_taxonomy_alias_backfill)
+102 feat/vendor-part-unavailability unavailability temporal-policy + provenance columns (PR #270; renumbered from 098, chains onto 101)

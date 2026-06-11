@@ -135,6 +135,22 @@ def test_ai_inferred_category_uses_trio_source_ai_tier(db_session: Session):
     assert card.category_tier == 88
 
 
+def test_ai_description_fill_credits_trio_source_ai(db_session: Session):
+    # A Claude-standardized description filling an empty card must be credited to
+    # trio_source_ai in the by-source report — not claimed as raw trio_source ground
+    # truth. Apply mode and dry run must attribute identically.
+    seed_commodity_schemas(db_session)
+    part = _part(category=None, description="raw text", ai_description="AI standardized text")
+    dry = ingest(db_session, [part], apply=False)
+    stats = ingest(db_session, [part], apply=True)
+
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.description == "AI standardized text"
+    for s in (dry, stats):
+        assert s["descriptions_filled"] == 1
+        assert s["fields_by_source"] == {"trio_source_ai": 1}  # nothing credited to trio_source
+
+
 def test_ai_specs_written_at_trio_source_ai(db_session: Session):
     seed_commodity_schemas(db_session)
     part = _part(ai_specs={"rpm": {"value": "7200", "confidence": 0.9}})
@@ -338,3 +354,145 @@ def test_dry_run_does_not_count_specs_without_resolvable_category(db_session: Se
     applied = ingest(db_session, [part], apply=True)
     assert dry["specs_written"] == applied["specs_written"] == 0
     assert dry["categories_set"] == applied["categories_set"] == 0
+
+
+# --- Dual-brand W6: brand/manufacturer through the ladder at trio_source/0.9 ---
+
+
+def test_new_card_manufacturer_written_via_ladder_with_provenance(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part(manufacturer="Seagate")], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.manufacturer == "Seagate"  # verbatim — manufacturers table unseeded here
+    assert card.manufacturer_source == "trio_source"
+    assert card.manufacturer_tier == 95
+    assert card.manufacturer_confidence == 0.9
+    assert stats["manufacturers_set"] == 1
+
+
+def test_brand_written_via_ladder(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part(brand="IBM", manufacturer="Seagate")], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.brand == "IBM"
+    assert card.brand_source == "trio_source"
+    assert card.brand_tier == 95
+    assert card.manufacturer == "Seagate"
+    assert stats["brands_set"] == 1
+    assert stats["manufacturers_set"] == 1
+
+
+def test_none_brand_and_manufacturer_are_noops(db_session: Session):
+    seed_commodity_schemas(db_session)
+    stats = ingest(db_session, [_part()], apply=True)
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.brand is None
+    assert card.manufacturer is None
+    assert stats["brands_set"] == 0
+    assert stats["manufacturers_set"] == 0
+
+
+def test_higher_tier_manufacturer_not_overwritten_by_ingest(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(manufacturer="WrongCo")], apply=True)
+    db_session.refresh(card)
+    assert card.manufacturer == "Seagate Technology"  # manual(100) resists trio(95)
+    assert stats["manufacturers_set"] == 0
+    # The tier-95 loss to a DIFFERENT value is a data-conflict signal — counted, not silent.
+    assert stats["manufacturer_conflicts"] == 1
+
+
+def test_dual_brand_dry_run_parity(db_session: Session):
+    # Dry-run tallies for brands_set/manufacturers_set must equal apply tallies —
+    # including the loss against a higher-tier existing manufacturer.
+    seed_commodity_schemas(db_session)
+    blocked = MaterialCard(
+        normalized_mpn="blockedmpn",
+        display_mpn="BLOCKEDMPN",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(blocked)
+    db_session.flush()
+
+    parts = [
+        _part(brand="IBM", manufacturer="Seagate"),
+        _part(normalized_mpn="blockedmpn", raw_mpn="BLOCKEDMPN", manufacturer="WrongCo", brand="Dell"),
+    ]
+    dry = ingest(db_session, parts, apply=False)
+    applied = ingest(db_session, parts, apply=True)
+
+    for key in ("brands_set", "manufacturers_set", "fields_by_source"):
+        assert dry[key] == applied[key], f"dry/apply diverged on {key}: {dry[key]} != {applied[key]}"
+    assert applied["manufacturers_set"] == 1  # only the fresh card's maker landed
+    assert applied["brands_set"] == 2  # both brands landed (no existing brand anywhere)
+    # Conflict counters share the parity contract: the manual-100 card's WrongCo loss
+    # counts in BOTH modes.
+    assert dry["manufacturer_conflicts"] == applied["manufacturer_conflicts"] == 1
+    assert dry["brand_conflicts"] == applied["brand_conflicts"] == 0
+
+
+def test_trio_brand_maker_ladder_losses_are_warned(db_session: Session):
+    # The ladder's losing path logs at DEBUG only — the batch must surface trio_source
+    # losses as an aggregate WARNING (a tier-95 value losing to a different value is a
+    # genuine data-conflict signal: trio should essentially only lose to manual/100).
+    from loguru import logger as loguru_logger
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        ingest(db_session, [_part(manufacturer="WrongCo")], apply=True)
+    finally:
+        loguru_logger.remove(sink_id)
+
+    assert any("manufacturer_conflicts=1" in w for w in warnings), warnings
+
+
+def test_trio_same_value_loss_is_agreement_not_conflict(db_session: Session):
+    # A manual-100 manufacturer that AGREES with the incoming trio value: the write
+    # returns False (95 < 100) but no conflict is counted — the counter must stay a
+    # pure data-conflict signal.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    stats = ingest(db_session, [_part(manufacturer="Seagate Technology")], apply=True)
+    assert stats["manufacturers_set"] == 0
+    assert stats["manufacturer_conflicts"] == 0

@@ -96,7 +96,12 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
       ``not_catalogued_retry_days`` (long backoff — uncatalogued OEM service parts
       rarely become catalogued, so re-check infrequently).
     - ``is_internal_part``, ``deleted_at`` are excluded.
-    - Ordered by ``status=unenriched DESC, search_count DESC, created_at DESC``:
+    - Ordered by ``enrich_requested_at IS NOT NULL DESC, enrich_requested_at ASC NULLS
+      LAST, status=unenriched DESC, search_count DESC, created_at DESC``: the priority
+      lane first — cards a user explicitly added (single-add stamps
+      ``enrich_requested_at``; bulk/stock/email/search creation never does), FIFO among
+      themselves so no stamped card starves another; ``run_one_batch`` clears the stamp
+      on every batch card so a terminal ``not_found`` card cannot pin the lane. Then
       never-resolved parts drain before re-checks of already-terminal cards (so old,
       low-demand ``unenriched`` parts aren't starved by the daily ``not_found``
       re-check churn); then demand wins (high-demand first); then, among equal
@@ -138,6 +143,11 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
             ),
         )
         .order_by(
+            # Priority lane: user-requested cards (single-add stamps enrich_requested_at)
+            # jump the whole queue, FIFO among themselves. run_one_batch clears the stamp
+            # on every batch card, so a terminal not_found card cannot pin the lane.
+            MaterialCard.enrich_requested_at.isnot(None).desc(),
+            MaterialCard.enrich_requested_at.asc().nullslast(),
             # Never-resolved parts drain before re-checks of already-terminal ones.
             # Without this, old low-demand `unenriched` cards are starved: they share
             # search_count=0 with the daily `not_found` re-check churn, and created_at
@@ -165,9 +175,17 @@ async def run_one_batch(
     second-pass PARAMETRIC SPEC extraction (``enrich_card_specs``) for the cards that
     landed a real category this batch (verified / web_sourced / ai_inferred) — so the
     materials filter tree gets MaterialSpecFacet + specs_structured data. It runs ONCE
-    per batch (the extractor groups by category internally) and shares the same session
-    and final commit, so core attrs and specs persist together. Bounded by the worker's
-    daily_cap (≤ daily_cap cards/day receive a spec pass).
+    per batch (the extractor groups by category internally) on the same shared session.
+    NOTE: ``enrich_card_specs`` commits PER CHUNK on that shared session (load-bearing —
+    see the commit comment in spec_enrichment_service: long awaited Claude calls between
+    chunks, and three callers with no commit of their own), so the batch's pending
+    core-attr writes persist with its FIRST chunk commit; the batch-final commit below
+    is the safety net for batches where the spec pass raises early or processes zero
+    chunks — but NOT for a failed first-chunk COMMIT (the spec pass's rollback discards
+    the batch's pending writes with it, leaving nothing for the safety net; those cards
+    re-enter via the next batch's re-selection because enrichment_status rolled back
+    too). Bounded by the worker's daily_cap (≤ daily_cap cards/day receive a spec
+    pass).
 
     Returns an empty dict if the batch is empty (caller should idle-sleep).
 
@@ -197,6 +215,15 @@ async def run_one_batch(
     # batch (not enriched_ids) — FRU spare PNs are precisely the population connectors
     # miss, so they finish not_found and never reach enriched_ids.
     batch_ids = [int(c.id) for c in batch]
+
+    # Clear the priority-lane stamp on EVERY batch card immediately — attribute writes
+    # on already-loaded ORM objects, BEFORE the first await (the worker's
+    # no-query-after-await discipline) — so a card that finishes terminal (not_found)
+    # cannot keep its stamp and pin the lane forever. Persisted by the batch-final
+    # commit below, together with the enrichment results.
+    for card in batch:
+        if card.enrich_requested_at is not None:
+            card.enrich_requested_at = None
 
     if disabled is None:
         disabled = set()
@@ -355,7 +382,11 @@ async def run_one_batch(
 
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
-    # session, so specs persist together with core attrs at the commit below.
+    # session. enrich_card_specs commits PER CHUNK (load-bearing — see its commit comment),
+    # so the batch's pending writes above persist with its first chunk commit; the
+    # batch-final commit below covers an early raise / zero-chunk run (NOT a failed
+    # first-chunk commit — that rollback discards the batch's pending writes, and the
+    # cards re-select next batch).
     if enriched_ids:
         from app.services.spec_enrichment_service import enrich_card_specs
 

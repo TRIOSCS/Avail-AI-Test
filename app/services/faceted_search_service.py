@@ -94,14 +94,20 @@ def _apply_facet_filters(
 
 
 def get_commodity_counts(db: Session) -> dict[str, int]:
-    """Return {commodity_key: count} for all non-deleted material cards."""
+    """Return {commodity_key: count} for all non-deleted material cards.
+
+    Filters and counts ONLY on the lower(trim(category)) expression (not the raw
+    column) with count(*) so PostgreSQL can answer the whole GROUP BY from an
+    index-only scan over ix_mc_cat_order_live (098_materials_perf_idx) — referencing
+    the raw ``category`` column or ``count(id)`` would force heap fetches. Equivalent
+    semantics: lower(trim(x)) IS NOT NULL iff x IS NOT NULL (both functions are
+    strict), and id is the non-null PK so count(id) == count(*).
+    """
+    cat_expr = func.lower(func.trim(MaterialCard.category))
     rows = (
-        db.query(
-            func.lower(func.trim(MaterialCard.category)),
-            func.count(MaterialCard.id),
-        )
-        .filter(MaterialCard.deleted_at.is_(None), MaterialCard.category.isnot(None))
-        .group_by(func.lower(func.trim(MaterialCard.category)))
+        db.query(cat_expr, func.count())
+        .filter(MaterialCard.deleted_at.is_(None), cat_expr.isnot(None))
+        .group_by(cat_expr)
         .all()
     )
     return {cat: count for cat, count in rows if cat}
@@ -160,27 +166,33 @@ def get_manufacturer_options(
     commodity: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
-    """Return distinct manufacturers sorted by card count (descending).
+    """Return distinct brand/maker names sorted by card count (descending).
+
+    Dual-brand (migration 097): the "Brand" facet is ONE combined facet over BOTH
+    columns — ``brand`` (OEM label: IBM, Dell Technologies) and ``manufacturer``
+    (actual maker: Seagate Technology). UNION ALL over the two columns, deduped by
+    card (a card with ``brand == manufacturer`` counts once via COUNT(DISTINCT id)).
 
     Args:
-        commodity: If set, scope to this commodity only.
+        commodity: If set, scope to this commodity only (applied inside BOTH branches).
         limit: Max results to return (default 20 per spec).
 
     Returns: [{"name": str, "count": int}, ...]
     """
-    query = db.query(
-        MaterialCard.manufacturer,
-        func.count(MaterialCard.id).label("cnt"),
-    ).filter(
-        MaterialCard.deleted_at.is_(None),
-        MaterialCard.manufacturer.isnot(None),
-        MaterialCard.manufacturer != "",
-    )
 
-    if commodity:
-        query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+    def _branch(column):
+        q = db.query(MaterialCard.id.label("card_id"), column.label("name")).filter(
+            MaterialCard.deleted_at.is_(None),
+            column.isnot(None),
+            column != "",
+        )
+        if commodity:
+            q = q.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+        return q
 
-    rows = query.group_by(MaterialCard.manufacturer).order_by(func.count(MaterialCard.id).desc()).limit(limit).all()
+    union = _branch(MaterialCard.brand).union_all(_branch(MaterialCard.manufacturer)).subquery()
+    cnt = func.count(func.distinct(union.c.card_id))
+    rows = db.query(union.c.name, cnt.label("cnt")).group_by(union.c.name).order_by(cnt.desc()).limit(limit).all()
     return [{"name": name, "count": count} for name, count in rows]
 
 
@@ -211,12 +223,16 @@ def get_global_facet_counts(
     rohs_counts = _count_col(MaterialCard.rohs_status)
     condition_counts = _count_col(MaterialCard.condition)
     has_ds = base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.datasheet_url.isnot(None)).scalar()
+    needs_review = (
+        base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.has_validation_conflict.is_(True)).scalar()
+    )
 
     return {
         "lifecycle": lifecycle_counts,
         "rohs": rohs_counts,
         "condition": condition_counts,
         "has_datasheet": {"true": has_ds or 0},
+        "needs_review": {"true": needs_review or 0},
     }
 
 
@@ -233,6 +249,7 @@ def search_materials_faceted(
     rohs: list[str] | None = None,
     condition: list[str] | None = None,
     has_datasheet: bool = False,
+    has_validation_conflict: bool = False,
     has_stock: bool = False,
     has_price: bool = False,
     has_crosses: bool = False,
@@ -248,7 +265,9 @@ def search_materials_faceted(
         commodity: Filter by commodity category (lowercased)
         q: Text search on MPN/manufacturer/description
         sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
-        manufacturers: Restrict to these manufacturer names
+        manufacturers: Restrict to cards whose manufacturer OR brand is in this list
+            (the combined dual-brand facet — OR-within, AND-across-facets; the wire
+            param keeps its legacy "manufacturers" name for back-compat)
         verified_only: Legacy boolean — when True (and ``statuses`` is empty), return only
             cards with enrichment_status == "verified"
         statuses: When provided, restrict to cards whose enrichment_status is in this list.
@@ -257,6 +276,9 @@ def search_materials_faceted(
             (OR-within, e.g. ``["active", "eol"]``).
         rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
         has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
+        has_validation_conflict: When True, restrict to cards flagged "needs review" —
+            a tier>=80 authoritative source contradicted a manual value (the partial
+            index ix_material_cards_needs_review backs this predicate).
         has_stock: When True, restrict to cards with at least one vendor-history row
             ("has vendor sightings / stock seen").
         has_price: When True, restrict to cards with a vendor-history row carrying a
@@ -312,7 +334,16 @@ def search_materials_faceted(
             )
 
     if manufacturers:
-        query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
+        # Dual-brand: the combined "Brand" facet ORs across both columns — a buyer
+        # filtering "IBM" matches an IBM-labeled drive made by Seagate (brand=IBM) AND
+        # filtering "Seagate Technology" matches the same card (manufacturer). Strict
+        # superset of the old single-column match, so old bookmarks keep working.
+        query = query.filter(
+            or_(
+                MaterialCard.manufacturer.in_(manufacturers),
+                MaterialCard.brand.in_(manufacturers),
+            )
+        )
 
     # `statuses` (multi-select) takes precedence over the legacy `verified_only` boolean.
     # ANDing both would yield an impossible filter (e.g. status==verified AND status IN
@@ -331,6 +362,8 @@ def search_materials_faceted(
         query = query.filter(MaterialCard.condition.in_(condition))
     if has_datasheet:
         query = query.filter(MaterialCard.datasheet_url.isnot(None))
+    if has_validation_conflict:
+        query = query.filter(MaterialCard.has_validation_conflict.is_(True))
 
     # Operational (Layer-3) sourcing filters — MaterialCard columns + vendor history.
     if has_stock:

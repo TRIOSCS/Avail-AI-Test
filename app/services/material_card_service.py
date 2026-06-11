@@ -254,8 +254,31 @@ def merge_material_cards(db: Session, source_id: int, target_id: int, user_email
 
     # 3. Merge card metadata
     target.search_count = (target.search_count or 0) + (source.search_count or 0)
-    if not target.manufacturer and source.manufacturer:
-        target.manufacturer = source.manufacturer
+    # Brand + manufacturer arbitrate through the F1 ladder with the SOURCE card's STORED
+    # provenance (legacy floor when unprovenanced) — the source card is deleted below, so
+    # a fill-only-when-empty copy would silently destroy its tier-95 trio evidence (or
+    # strand a copied value provenance-less, downgraded to the legacy-50 floor at the next
+    # arbitration). Outcomes are logged at INFO: the losing value dies with its card.
+    from .spec_tiers import LEGACY_BACKFILL_CONFIDENCE, LEGACY_BACKFILL_SOURCE, set_brand, set_manufacturer
+
+    brand_mfr_outcomes = {}
+    for attr, setter in (("manufacturer", set_manufacturer), ("brand", set_brand)):
+        value = getattr(source, attr)
+        if not value:
+            continue
+        src_source = getattr(source, f"{attr}_source") or LEGACY_BACKFILL_SOURCE
+        src_conf = getattr(source, f"{attr}_confidence")
+        if src_conf is None:
+            src_conf = LEGACY_BACKFILL_CONFIDENCE
+        brand_mfr_outcomes[attr] = setter(target, value, src_source, src_conf)
+    if brand_mfr_outcomes:
+        logger.info(
+            "merge_material_cards: source={} target={} brand/manufacturer ladder outcomes={} "
+            "(False = the target's existing value won; the source value is destroyed with its card)",
+            source_id,
+            target_id,
+            brand_mfr_outcomes,
+        )
     if not target.description and source.description:
         target.description = source.description
     for field in (

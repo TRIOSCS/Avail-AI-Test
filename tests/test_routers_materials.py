@@ -311,6 +311,49 @@ def test_update_material(client, db_session, test_material_card):
     assert data["manufacturer"] == "STMicroelectronics"
 
 
+def test_update_material_manufacturer_is_manual_tier_and_durable(client, db_session, test_material_card):
+    """The manual edit routes through the F1 ladder at manual/100: provenance is
+    stamped, so a later background writer (decode 85 / trio re-ingest 95) can never
+    silently revert the human's correction — the durability regression a direct
+    `card.manufacturer = ...` write would reintroduce."""
+    from app.services.spec_tiers import set_manufacturer
+
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "Seagate Technology"},
+    )
+    assert resp.status_code == 200
+
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Seagate Technology"
+    assert test_material_card.manufacturer_source == "manual"
+    assert test_material_card.manufacturer_tier == 100
+    assert test_material_card.manufacturer_confidence == 1.0
+
+    # A trio re-ingest (95) and a decode (85) both LOSE against the manual edit.
+    assert set_manufacturer(test_material_card, "IBM", "trio_source", 0.9) is False
+    assert set_manufacturer(test_material_card, "Samsung", "mpn_decode", 0.9) is False
+    assert test_material_card.manufacturer == "Seagate Technology"
+
+
+def test_update_material_empty_manufacturer_never_blanks(client, db_session, test_material_card):
+    """A write can never blank a value: an empty/whitespace manufacturer in the manual
+    edit is a no-op (set_manufacturer rejects it), never a silent blanking."""
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "Seagate Technology"},
+    )
+    assert resp.status_code == 200
+
+    resp = client.put(
+        f"/api/materials/{test_material_card.id}",
+        json={"manufacturer": "   "},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Seagate Technology"  # unchanged
+
+
 def test_update_material_not_found(client):
     """PUT /api/materials/99999 returns 404."""
     resp = client.put(
@@ -369,7 +412,7 @@ def test_update_material_enrichment_fields(client, db_session, test_material_car
         json={
             "lifecycle_status": "active",
             "package_type": "DIP-8",
-            "category": "Voltage Regulator",
+            "category": "voltage_regulators",  # canonical key — off-vocab now 422s (ladder PUT fix)
             "rohs_status": "compliant",
             "pin_count": 8,
             "datasheet_url": "https://ti.com/ds/lm317t.pdf",
@@ -440,7 +483,12 @@ def test_update_material_sets_manual_enrichment_source(client, db_session):
 
 
 def test_enrich_material(client, db_session, test_material_card):
-    """POST /api/materials/{id}/enrich applies enrichment data."""
+    """POST /api/materials/{id}/enrich applies enrichment data.
+
+    manufacturer routes through the F1 ladder: "claude_agent" is unregistered →
+    ai_guess (40), which loses to the fixture card's existing valued-but-unprovenanced
+    maker (legacy floor, 50) — updated_fields honestly omits the rejected write.
+    """
     resp = client.post(
         f"/api/materials/{test_material_card.id}/enrich",
         json={
@@ -455,7 +503,9 @@ def test_enrich_material(client, db_session, test_material_card):
     assert data["ok"] is True
     assert "lifecycle_status" in data["updated_fields"]
     assert "package_type" in data["updated_fields"]
-    assert "manufacturer" in data["updated_fields"]
+    assert "manufacturer" not in data["updated_fields"]  # ladder kept the existing maker
+    db_session.refresh(test_material_card)
+    assert test_material_card.manufacturer == "Texas Instruments"
 
 
 def test_enrich_material_no_fields(client, db_session, test_material_card):

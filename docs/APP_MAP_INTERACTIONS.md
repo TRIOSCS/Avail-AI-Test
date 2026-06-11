@@ -967,11 +967,14 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
 authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |
     +---> Tier 1: distributor connector fanout (fetch_authoritative → merge_authoritative)
-    |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle.
+    |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle;
+    |              category + manufacturer route through the F1 ladder at {connector}_api/90
+    |              (ladder-rejected writes are dropped from enrichment_provenance).
     |       MISS → fall through.
     |
     +---> Tier 2: distributor/manufacturer web search (extract_part_from_web, web_meter +1)
-    |       HIT (web_sourced)  → apply_web_sourced(); done.
+    |       HIT (web_sourced)  → apply_web_sourced(); category + manufacturer through the
+    |              F1 ladder at web_search/70; done.
     |       MISS → fall through.
     |
     +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call.
@@ -984,9 +987,11 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         (3) resolved_mpn != original (no echo)
     |         (4) confidence ≥ 0.90
     |       RESOLVED → fetch_authoritative(resolved_mpn) double-verify against distributors
-    |         CONFIRMED → apply_cross_ref_verified(): writes distributor data onto card,
-    |                     records FRU→MPN linkage in cross_references JSONB +
-    |                     cross_ref provenance block; status=verified.
+    |         CONFIRMED → apply_cross_ref_verified(): writes distributor data onto card
+    |                     (category + manufacturer through the F1 ladder at
+    |                     {connector}_api/90, same as Tier 1), records FRU→MPN linkage in
+    |                     cross_references JSONB + cross_ref provenance block;
+    |                     status=verified.
     |         UNCONFIRMED → discard candidate, fall through.
     |       FAILED → fall through.
     |
@@ -997,7 +1002,8 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         (3) confidence ≥ 0.90
     |         (4) description ≥ 10 chars + manufacturer present
     |       HIT → apply_oem_sourced(): writes description/category/datasheet + oem_sourced
-    |             provenance; status=oem_sourced.
+    |             provenance (category + manufacturer through the F1 ladder at
+    |             oem_official/80); status=oem_sourced.
     |       MISS → fall through.
     |
     +---> Tier 5: AI inference fallback (infer_part via ai_inference_fallback,
@@ -1028,8 +1034,16 @@ Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     +---> search_vector trigger auto-updates TSVECTOR with new description/category
     +---> Stamps material_cards.enriched_at
 
-Worker second-pass ordering (run_one_batch, same shared post-await session, one
-commit). As of SP2 the run ORDER is no longer load-bearing: record_spec arbitrates
+Worker second-pass ordering (run_one_batch, same shared post-await session; passes 1-3
+share the batch session and normally persist with pass 4's FIRST per-chunk commit —
+pass 4, enrich_card_specs, commits PER CHUNK on that shared session because its chunks
+are separated by long awaited Claude calls and three of its callers have no commit of
+their own — see the load-bearing commit comment in spec_enrichment_service.py; the
+batch-final commit is the safety net when pass 4 is skipped (no enriched_ids), raises
+early, or processes zero chunks — but not for a failed first-chunk COMMIT, whose
+rollback discards the batch's pending writes and lets the cards re-select next batch).
+As of SP2 the run ORDER is
+no longer load-bearing: record_spec arbitrates
 every write through the F1 source-tier ladder (app/services/spec_tiers.py —
 mpn_decode 85 > fru_matrix_decode 84 > desc_parse 83 > fru_desc_parse 82 >
 spec_extraction 60; vendor APIs 90, trio_source 95, manual 100). A lower-tier writer can never overwrite a higher-tier prior regardless
@@ -1039,7 +1053,17 @@ owns arbitration in one place:
 
     1. mpn_decoder/writer.py::decode_and_record_specs   — deterministic MPN→spec
        decode, source="mpn_decode" (tier 85), confidence 0.95
-       (settings.mpn_decode_enabled). Category via spec_tiers.set_category.
+       (settings.mpn_decode_enabled). Category via spec_tiers.set_category; the
+       decode's vendor (the actual MAKER — the regex gate is manufacturer-scheme-
+       specific) via spec_tiers.set_manufacturer at mpn_decode/0.9 (dual-brand W4).
+       The maker write shares the specs' cross-commodity guard: when the decoded
+       commodity LOSES the category ladder, the regex match itself is suspect, so
+       the decode contributes NOTHING (no specs, no maker). A maker write that loses
+       arbitration against a DIFFERENT existing value is counted
+       (skipped_maker_conflict) and WARNed after the batch, mirroring
+       skipped_category_conflict. Per-card exceptions are counted in `failed` and
+       surfaced in the batch summary log (same ops vocabulary as the desc/crosswalk
+       writers — a crashed card never hides inside a healthy-looking line).
     2. fru_crosswalk_enrich.py::crosswalk_and_record_specs — deterministic FRU
        crosswalk enrichment: ONE pass, TWO evidence channels over the same single
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
@@ -1104,7 +1128,23 @@ owns arbitration in one place:
        structural guards: wattage exists only on the power_supplies route while the
        cpu route emits tdp_watts (CPU "135W" TDP can never land in wattage), gpu
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
-       "10GB"/"100GbE" rows emit nothing, and cpu bare cores/TDP tokens AND
+       "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
+       (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
+       to GeForce and reserves the seeded "RTX" member for the professional
+       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
+       neutralized BEFORE the upper-casing so bits are never recorded as GB
+       capacity (skipped, never ÷8-converted), NAND-die context (_common.
+       nand_die_context: the NAND word or an MT29-series die MPN — DIE-SPECIFIC
+       signals only; cell-type tokens (SLC/MLC/TLC/QLC) and spaced x8/x16 tokens
+       are deliberately NOT triggers because they appear on ordinary SSD/module
+       listings whose bare "<n>G" IS a capacity ("SSD, 480G, TLC, SATA",
+       "16G, 2R X8, DDR4") — re-audit 2026-06-10 + round-2 re-review) makes a
+       BARE "<n>G" token a gigaBIT die density on the dram and hdd/ssd routes
+       ("Nand, 512G, MLC" = 512 Gbit, deliberate no-write — explicit GB/TB
+       tokens unaffected; the cat=dram miscategorization of NAND dies is a
+       separate, still-open defect), and
+       cpu bare cores/TDP tokens AND
        codename-only architecture require a CPU-context signal (MPN-echo descs
        and chassis rows emit nothing). Hinted extraction adds a body-token
        contradiction guard (a cpu-hinted motherboard FRU returns None; dram
@@ -1132,8 +1172,9 @@ After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
   OR
 enrichment_worker/worker.py::run_one_batch -> enrich_card_specs(<this batch's
-    newly core-enriched card ids>)  [paced, once per batch, same session + commit;
-    only verified/web_sourced/ai_inferred cards — never not_found]
+    newly core-enriched card ids>)  [paced, once per batch, same session; commits per
+    chunk (load-bearing — see above); only verified/web_sourced/ai_inferred cards —
+    never not_found]
   OR
 POST /v2/partials/materials/{id}/enrich (Enrich button) -> enrich_card_specs([id], force=True)
   OR
@@ -1171,7 +1212,9 @@ SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oem
              · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
              · fru_desc_parse:82 (FRU-linked qual-sheet descriptions — below the card's
                OWN description, above the OEM scrapers)
-             · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
+             · {partsurfer,psref,oem_official}:80 (the named OEM scrapers and the broader
+               oem_official umbrella — authoritative_enrichment_service's OEM-domain
+               extractor — are the same evidence class) · web_search:70 · brokerbin:65
              · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
                floor for a valued category with NULL provenance) ·
                {ai_guess,claude_opus_inferred,claude_haiku}:40
@@ -1201,23 +1244,227 @@ set_category(card, value, source, confidence, write=True) -> bool   # the ONE DB
     |     must not keep matching the old commodity's deep-filters
     +---> write=False = read-only twin (same verdict, zero mutation) — used by the
           SP-Ingest dry run so its report can't drift from --apply
+
+set_brand(card, value, source, confidence, write=True) -> bool        # dual-brand, mig 097
+set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-brand, mig 097
+    +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
+    |     manufacturer = the ACTUAL MAKER (Seagate Technology, Hitachi/IBM verbatim)
+    +---> None/empty/whitespace → no-op False (a write can never blank a value)
+    +---> normalize_brand_name(db, value) (manufacturer_normalizer.py — manufacturers-
+    |     table canonical_name+aliases, per-process cache, miss → verbatim strip;
+    |     writers NEVER normalize themselves)
+    +---> identical F1 ladder via the shared _set_provenanced_column (generic over the
+          column prefix — set_category delegates to it too, behavior unchanged incl.
+          the stale-commodity purge); valued-but-NULL-provenance existing ranks at the
+          legacy floor 50; write=False dry-run twins. No new SOURCE_TIER entries —
+          all dual-brand writers use already-registered sources.
+
+record_validation_conflict(card, key, existing_prov, incoming_prov, incoming_value) -> bool
+    # The validation-contract choke point (on-add enrichment, migration 099). Called from
+    # the LOSE branches of record_spec (spec_write_service) and _set_provenanced_column
+    # (write=True only) — i.e. AFTER the ladder already kept the existing value. The hook
+    # lives in _set_provenanced_column because that is where ladder losses for ALL
+    # provenanced columns are decided, so it covers category AND brand/manufacturer
+    # (manual maker edits exist — update_material/add_material route them through
+    # set_manufacturer at manual/100 — so they carry the same flagging contract).
+    # Gates (all here, so call sites stay dumb): existing source == "manual"; incoming
+    # tier >= 80 (the authoritative band — web 70 / brokerbin 65 / ai 40 never challenge
+    # a human); normalized values differ (numerics as float, strings casefolded —
+    # corroboration is never stored, and a same-source observation that now AGREES with
+    # the manual value REMOVES that source's stale entry: deterministic sources re-fire
+    # every pass, so a fixed decoder/corrected description unflags the card). Appends to
+    # card.validation_conflicts (de-dupe per (key, evidence.source), newest replaces) +
+    # sets has_validation_conflict. Arbitration is UNCHANGED — the manual value always
+    # survives; this only persists the contradiction.
+
+clear_validation_conflicts(card, key) -> bool
+    # Drops every entry for *key* and recomputes has_validation_conflict. Called by the
+    # PUT updates when the field is re-asserted (routers/materials.py::update_material —
+    # category + manufacturer, htmx_views::update_material_card — category), by POST
+    # /api/materials/add when an existing card's category or manufacturer is manually
+    # re-asserted through the modal, and by the conflict-accept route (only after a
+    # SUCCESSFUL write — see below). A commodity flip's _purge_stale_commodity_data also
+    # drops entries keyed by the purged spec keys (orphans — their manual values were
+    # just removed) and recomputes the flag.
 ```
+
+Dual-brand writers (W1-W7 — every write regex-gated or source-backed, never guessed):
+| # | Evidence | Field | Source/tier | Conf | Where |
+|---|---|---|---|---|---|
+| W1 | `fru_links` `rel_kind='mfg_model'` rows with a manufacturer, joined on `normalized_mpn = related_norm` | manufacturer | `trio_source`/95 | 0.9 | backfill B2 + ingest |
+| W2 | Description trailing token ∈ `OEM_TRAILING_RE` (IBM\|Dell\|HP\|HPE\|Lenovo) | brand | `desc_parse`/83 | 0.85 | backfill B3 + clean.py routing |
+| W3 | Description trailing token ∈ `MAKER_TRAILING_RE` (Seagate\|Kingston\|Samsung) | manufacturer | `desc_parse`/83 | 0.85 | backfill B3 |
+| W4 | Deterministic MPN decode vendor (skipped when the decode's commodity LOSES the category ladder — shared cross-commodity guard) | manufacturer | `mpn_decode`/85 | 0.9 | `mpn_decoder/writer.py` going-forward |
+| W5 | Legacy `manufacturer` value ∈ `OEM_BRANDS` | copy → brand (manufacturer NOT cleared) | `legacy_backfill`/50 | 0.5 | backfill B1 |
+| W6 | TRIO ingest sheet columns | both | `trio_source`/95 | 0.9 | `source_ingest/ingest.py` |
+| W7 | Manual edit (PUT `/api/materials/{id}`, PUT `/v2/partials/materials/{id}`, Add-part modal) | manufacturer | `manual`/100 | 1.0 | `routers/materials.py::update_material` + `add_material`, `routers/htmx_views.py::update_material_card` (wins also clear the key's validation conflicts — a manual re-assert resolves the flag; the htmx PUT clears on any non-empty re-assertion, mirrors its category path, and never re-stamps an unchanged value) |
+| W8 | Authoritative enrichment — exact-MPN distributor match (incl. cross-ref re-verification), OEM-official page, web extraction | manufacturer (+ category, same writers) | `{connector}_api`/90 · `oem_official`/80 · `web_search`/70 | 1.0 / result confidence | `authoritative_enrichment_service.py` apply_authoritative / apply_cross_ref_verified / apply_oem_sourced / apply_web_sourced — ladder-rejected writes are dropped from `enrichment_provenance` (it never claims a write that didn't land) |
+
+Ladder losses are NOT silent: every NON-manual rejection logs at INFO inside
+`_set_provenanced_column` (category, brand and manufacturer alike — W8's enrichment
+writers have no aggregate counter, so this per-loss INFO is their only production
+trace). On top of that, W4 surfaces `skipped_maker_conflict` (writer stats + batch
+WARNING) and W6 surfaces `brand_conflicts`/`manufacturer_conflicts` (ingest stats +
+batch WARNING) whenever a non-empty incoming value loses to a DIFFERENT existing value
+(same-value losses are agreement, not conflict). Card MERGE
+(`material_card_service.merge_material_cards`)
+carries the source card's brand + manufacturer through `set_brand`/`set_manufacturer`
+with the source card's STORED provenance (legacy floor when unprovenanced) — the ladder
+arbitrates target-vs-source and the outcome is logged at INFO (the losing value is
+destroyed with the merged-away card).
+
+Backfill command: `python -m app.management.backfill_dual_brand [--apply]` — dry-run by
+DEFAULT (write=False twins + an overlay mirroring apply's sequential writes, so dry
+tallies == apply tallies); four ordered passes B1→B2→B3→B4 with SAVEPOINT-per-card;
+soft-deleted cards are excluded from every pass; B2 reports winning link rows
+(`links_won`) AND distinct cards (`manufacturers_set`); B3's `matched` ==
+brands_set+manufacturers_set+skipped+missing_cards+failed; B4 prints the 9 known
+dual-coverage cards and exits non-zero unless ST300MP0016 ends brand=IBM ∧
+manufacturer=Seagate Technology. Run post-merge-deploy, never at startup.
+
+Facet flow (combined "Brand" facet — heading-only rename of the manufacturers partial):
+`get_manufacturer_options()` = UNION ALL over brand+manufacturer, COUNT(DISTINCT id)
+(a card with brand == manufacturer counts once; commodity scope applies inside BOTH
+branches); `search_materials_faceted(manufacturers=[...])` ORs
+`manufacturer.in_() | brand.in_()` — OR-within-facet, AND-across-facets. Wire format
+unchanged (`sub_filters={"manufacturers":[...]}`; the router pop and Alpine
+`subFilters.manufacturers` are untouched — old bookmarks are a strict superset match).
+Result rows render `brand · manufacturer` ("IBM · Seagate Technology") when both set
+and DIFFERENT COMPANIES — the view (htmx_views materials list) compares NORMALIZED
+forms (`normalize_brand_name`) and annotates `_show_maker_suffix`, so a B1 alias pair
+("Hewlett Packard Enterprise" in brand, raw "HP" in manufacturer) renders once, never
+as a tautological dual display (materials/list.html).
 
 Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
 `mpn_decoder/writer.py` (decode category via `set_category`, tier 85),
 `fru_crosswalk_enrich.py` (tier 84), the SP-Ingest pipeline (`source_ingest/ingest.py` —
 TRIO part-master categories via `set_category` at trio_source:95 / trio_source_ai:88,
 specs via `record_spec` + dry-run parity via `spec_would_write`), the manual edit
-endpoint `routers/htmx_views.py::update_material_card` (manual:100 — a deliberate human
-change always wins and purges the old commodity's facets; an UNCHANGED re-submitted value
-is NOT re-stamped manual, and off-vocab/blank values are rejected with a `showToast`
-warning instead of persisting), and ALL three remaining
-category writers — `enrichment.py` (connector `{name}_api` tiers), `material_enrichment_
-service.py` (claude_haiku:40), `authoritative_enrichment_service.py`
-(claude_opus_inferred:40) — now route through `set_category` (no direct `card.category`
-assignment remains; SP3 adds the `@validates` hardening). The deterministic decode is
-protected by its tier (85), not by running before the fru-crosswalk (84) / desc-parse
-(83) / AI spec (60) passes — the old per-writer confidence pre-gates are removed.
+endpoint `routers/htmx_views.py::update_material_card` (manual:100 for category AND
+manufacturer — a deliberate human change always wins, a category flip purges the old
+commodity's facets, a non-empty maker re-assertion clears its validation conflicts; an
+UNCHANGED re-submitted value is NOT re-stamped manual — the maker guard compares
+canonical to CANONICAL via `normalize_brand_name` on BOTH sides, since legacy cards
+store non-canonical aliases ("TI") that the edit form round-trips verbatim —
+off-vocab/blank categories AND a blank maker are rejected with a `showToast` warning
+instead of persisting/blanked silently), and ALL the enrichment category writers — `enrichment.py` (connector
+`{name}_api` tiers), `material_enrichment_service.py` (claude_haiku:40), and
+`authoritative_enrichment_service.py` (apply_authoritative + apply_cross_ref_verified
+at `{connector}_api`:90, apply_oem_sourced at oem_official:80, apply_web_sourced at
+web_search:70 — for BOTH category and manufacturer, with ladder-rejected writes dropped
+from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
+ladder monopoly is complete: every category/manufacturer writer routes through
+`set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
+`card.manufacturer` remains** (the only direct maker assignments left are
+fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
+at the legacy floor until a routed writer stamps real provenance; SP3 adds the
+`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
+systematically losing writer must be visible at production log levels; the W8
+enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
+losses there would be production-invisible). Only manual submissions stay DEBUG (the
+human gets endpoint feedback). The deterministic decode is protected by its tier (85), not by
+running before the fru-crosswalk (84) / desc-parse (83) / AI spec (60) passes — the old
+per-writer confidence pre-gates are removed.
+
+### On-add auto-enrichment (single-add modal, inline passes, priority lane, validation conflicts)
+
+Every card created by a user action gets (a) immediate deterministic enrichment,
+(b) prioritized worker enrichment, (c) ladder-safe validation of user input with
+persistent, surfaced conflicts. Manual values are NEVER overwritten by the system.
+
+```
+"Add part" button (materials workspace header; rendered ONLY for buyer-tier roles via
+    |   dependencies.has_buyer_role — POST /api/materials/add is require_buyer, so the
+    |   require_user workspace must not show an action whose submit would 403)
+    |   --hx-get--> GET /v2/partials/materials/add-form (require_buyer, same reason)
+    |   renders htmx/partials/materials/add_modal.html into #modal-content
+    v
+POST /api/materials/add  (routers/materials.py — exactly 5 fields: mpn required;
+    |                     manufacturer / description / category / condition optional)
+    +---> V3 intake validation, BLOCKING + never silent: normalize_mpn (>=3 chars),
+    |     category via category_normalizer → canonical commodity, condition in
+    |     MaterialCondition. Failure → 422 re-rendering the modal with per-field
+    |     messages (htmx_app.js allows 422 swaps targeted at #modal-content only).
+    |     The dedup-key gate (punctuation-only MPN → empty normalize_mpn_key) re-renders
+    |     the modal too — every 422 from this endpoint is a modal re-render, never JSON.
+    +---> resolve_material_card() create-or-resolve; manual values enter the F1 ladder
+    |     at manual/100 (category via set_category — a winning manual category also
+    |     clears any recorded category conflict, same re-assertion semantics as the PUT
+    |     paths; manufacturer/description/condition columns + manual/100/conf-1.0
+    |     entries in enrichment_provenance). Blank = blank — omitted fields stay NULL
+    |     for enrichment to fill, never defaulted or guessed.
+    +---> db.flush() → search_service.run_deterministic_passes(db, [card.id]) — the three
+    |     inline zero-network passes (decode 85 → fru-crosswalk 84 → desc-parse 83; same
+    |     feature flags as the worker; ladder arbitrates, order not load-bearing) so
+    |     deterministic facets/category are queryable in the create response. Each pass
+    |     runs inside its own SAVEPOINT (db.begin_nested) — a DB error escaping a
+    |     writer's internal per-card savepoints rolls back to the pass boundary instead
+    |     of poisoning the shared transaction (on PG that would fail the caller's commit
+    |     and lose the just-created card/import/sightings; SQLite tests can't reproduce
+    |     this — verify against live PG).
+    +---> stamps card.enrich_requested_at (PRIORITY LANE — single-add ONLY; bulk import,
+    |     stock import, email auto-import, source ingest and the search flow never stamp:
+    |     they ride the created_at fast lane + search_count demand ordering). Stamped
+    |     ONLY when enrichment_status is selectable by the worker (unenriched/not_found/
+    |     not_catalogued) — an already-enriched re-add must not hold a stamp nothing
+    |     clears (run_one_batch is the sole clearing mechanism).
+    +---> success → HX-Redirect: /v2/materials/{id} (the modal redirects to card detail).
+
+Bulk surfaces gain the same server-side pipeline (no UI changes):
+  POST /api/materials/import-part-numbers + /api/materials/import-stock → V3-invalid rows
+  are skipped + surfaced as response `warnings: [{row, field, reason}]` where `row` is
+  the 1-based SOURCE-file row (header = row 1; file_utils.extract_mpns_with_rows carries
+  it) so the user can open the exact spreadsheet line; all touched card ids run
+  run_deterministic_passes in the same session/commit. Search-driven creation
+  (search_requirement's write session) runs the passes over ALL searched card ids — a
+  deliberate deviation from the original spec ("newly created ids only"): the passes are
+  idempotent through the ladder and re-searching an old card backfills its decode.
+
+Worker priority lane (enrichment_worker/worker.py):
+  select_batch ORDER BY gains a leading pair — `enrich_requested_at IS NOT NULL DESC,
+  enrich_requested_at ASC NULLS LAST` — ahead of the existing (status=unenriched DESC,
+  search_count DESC, created_at DESC): FIFO among user-requested cards, then current
+  behavior. run_one_batch sets enrich_requested_at = None on EVERY batch card immediately
+  after select_batch returns (attribute writes pre-await — the worker's
+  no-query-after-await discipline; persisted by the batch-final commit), so a terminal
+  not_found card cannot pin the lane. SLA (worker healthy, caps not exhausted):
+  deterministic facets immediate; connector/web/AI tiers P50 <= 90s, P95 <= 5min.
+
+Status badge (card detail header): htmx/partials/materials/enrich_status.html — while
+  enrichment_status == unenriched it polls GET /v2/partials/materials/{id}/enrich-status
+  every 15s ("Queued for enrichment"); the route answers HTTP 286 once the status leaves
+  unenriched (htmx swaps the final tier badge + enriched_at and STOPS polling). A
+  missing/soft-deleted card answers 286 with an empty body too (NOT 404 — htmx neither
+  swaps nor cancels a poll on 4xx, so a detail view left open after deletion would poll
+  forever).
+
+Validation conflicts (storage: material_cards.validation_conflicts JSONB +
+  has_validation_conflict + partial index, migration 099; write hook:
+  spec_tiers.record_validation_conflict — see the spec_tiers contract above):
+  V1 decode-vs-manual spec keys (the decoder writes, the ladder rejects, the hook
+  records); V2 manual category/brand/manufacturer vs an authoritative writer
+  (_set_provenanced_column hook — covers every provenanced column, so manual maker
+  edits carry the same contract; the decoder's cross-commodity guard is unchanged);
+  V3 = the intake rejections above.
+  Surfacing: amber "Needs review — N conflict(s)" hero badge + per-key warning rows in
+  the detail Specifications panel with tooltip ("Manual value kept. <source> reported
+  <value> (conf <c>) on <date>") and an "Use this value" button →
+  POST /v2/partials/materials/{id}/conflicts/{key}/accept (writes the evidence value at
+  manual/100 — a human decision — via set_category / set_brand / set_manufacturer /
+  record_spec per key, and clears the key's entries ONLY when the write succeeded; a
+  no-op write — off-vocab category, schema gone after a commodity flip,
+  enum/numeric rejection — keeps the entry and surfaces a showToast warning instead of
+  silently destroying the only record of the contradiction). Clearing: any PUT
+  re-assertion of a conflicted field clears that key (the JSON PUT rejects off-vocab /
+  blank categories with 422 — never a silent drop; a manufacturer carried by the PUT
+  or the Add-part modal clears its key on a ladder win the same way); a re-add through
+  the modal clears the category key the same way; a commodity flip purges entries
+  keyed by the purged spec keys; empty list → flag false.
+  Review queue: "Needs review" checkbox in filters/global.html →
+  `has_validation_conflict=true` validated in the faceted route → query branch in
+  faceted_search_service (backed by the partial index).
+```
 
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
 
@@ -1234,10 +1481,14 @@ clean.py       — clean_record: MPN suffix strip + dedup key (normalize_mpn_key
     |            _x000D_/control scrub, condition → constants.MaterialCondition
     |            (None when the source carries none — NEVER a synthetic "Unknown"),
     |            normalize_trio_category (TRIO-scoped codes, e.g. bare "Memory"→dram),
-    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops
+    |            CPU-bucket pollution deny-list, "DO NOT USE"/short-MPN drops.
+    |            Dual-brand routing: a trailing description token matching
+    |            OEM_TRAILING_RE → record.brand (OEM label, never a maker); any other
+    |            plausible trailing token fills manufacturer when absent (legacy
+    |            behavior). Brand is never inferred beyond that literal regex.
     v
 consolidate.py — group by normalized_mpn → ConsolidatedPart per MPN (longest desc,
-    |            modal manufacturer/condition, highest-priority-kind category,
+    |            modal manufacturer/brand/condition, highest-priority-kind category,
     |            qty sum, sfdc_master>inventory_sheet spec merge); un-cleaned
     |            records (empty dedup key) are counted + WARNed, never silent
     v
@@ -1249,12 +1500,15 @@ ai_correct.py  — OPTIONAL (--ai-correct): one Claude call per part under the
     |            toward the abort streak; corrected counts only applied results
     v
 ingest.py      — AUGMENT material_cards: category via set_category (trio_source:95 /
-                 trio_source_ai:88), specs via record_spec, description/condition
-                 fill-only-when-empty ("Unknown" == empty). Per-card SAVEPOINTs;
-                 tallies merge only after a clean release; failed parts counted +
-                 sampled in the report. apply=False (DEFAULT) = dry run through the
-                 SAME gates (set_category(write=False) + spec_would_write) so the
-                 go/no-go report matches --apply exactly.
+                 trio_source_ai:88), manufacturer + brand via set_manufacturer/
+                 set_brand (trio_source:95, conf 0.9 — dual-brand W6; the new-card
+                 constructor no longer writes manufacturer directly), specs via
+                 record_spec, description/condition fill-only-when-empty ("Unknown"
+                 == empty). Per-card SAVEPOINTs; tallies merge only after a clean
+                 release; failed parts counted + sampled in the report. apply=False
+                 (DEFAULT) = dry run through the SAME gates (set_category/set_brand/
+                 set_manufacturer write=False + spec_would_write) so the go/no-go
+                 report matches --apply exactly.
 ```
 
 ```
@@ -1280,8 +1534,8 @@ Vendor/scheme inventory (module → gate → decoded keys):
 
 | Module | Vendor | Scheme gate (examples) | Decodes |
 |---|---|---|---|
-| storage.py | Seagate | `ST<GB><family>` (ST4000NM0035) | capacity, form_factor, usage_class |
-| storage.py | Western Digital | `WD<TB×10><family>` (WD40EFRX) | capacity, usage_class+form for known 3.5" families |
+| storage.py | Seagate | `ST<GB (3-5 digits)><family><0-led tail>$` (ST4000NM0035, ST300MM0006) — the structured 0-led tail is the era gate; the capacity must also sit inside the family's shipped envelope (`_SEAGATE_ENVELOPE` — re-audit 2026-06-10: a digit-dropped truncation like ST120MM0198 passes the SHAPE gate, so out-of-envelope OR an unlisted family ⇒ NO specs, never a best-effort capacity — the refused value rides `DecodeResult.dropped` (reason `out_of_envelope`) so the rejection stays observable; the closed table also keeps Nytro/Pulsar SAS SSD families FM/FP from taking an hdd decode); legacy `ST<ff><digits><iface>` shapes (ST39103FC, ST373207LC) and STMicroelectronics order codes (ST232BDR, STM32… — explicit `_STMICRO_DENY`) return None | capacity, form_factor+usage_class for mapped families |
+| storage.py | Western Digital | era split by SUFFIX SHAPE: legacy `WD<digits><exactly 2 letters>` = decimal-GB (WD800BB = 80 GB, WD64AA = 6.4 GB, capacity only); modern `WD<2-3 digits><4+ letters>` = revision-digit scheme (re-audit 2026-06-10): the FINAL digit of the numeric group is a revision/generation marker, capacity = leading digits as TB (WD40PURZ = WD42PURZ = 4 TB, WD101EFBX = 10 TB rev 1 — never 4.2/10.1 TB), sole exception the shipped Caviar-Green fractional points WD15/WD25 = 1.5/2.5 TB; 3-digit forms only with a recognized family token (unrecognized 3-digit+4-letter and ALL 4-digit+4-letter shapes are era-ambiguous → None) | capacity, usage_class+form for known 3.5" families |
 | storage.py | Toshiba | `(MG\|MN\|MD\|MQ\|DT)\d{2}[A-Z]{3}` (MG08ACA16TE) | form_factor, usage_class, capacity from `<n>T` token |
 | storage.py | HGST/Hitachi | `HUH\|HUS(?=\d)\|HUC\|HTS\|HDN\|HDS\|HMS` | form_factor, usage_class, capacity from `<n>T` token; HUSMM/HUSSL SAS SSDs excluded |
 | ssd.py | Samsung | retail `MZ-<fam><cap>` (MZ-V8P2T0B/AM) + OEM `MZ<fam><cap>` (MZVL21T0HCLR, MZ7LH1T9HMLT, MZQL21T9HCJR, MZILT3T8HBLS) | capacity, form_factor (2.5"/M.2 2280/M.2 22110/U.2/mSATA), interface (SATA/SAS; NVMe gen only via pinned family tables), nand_type for retail EVO/QVO + V-table only |
@@ -1299,17 +1553,55 @@ Never guessed: NVMe PCIe generation outside the pinned tables (seeded `interface
 no bare "NVMe"), nand_type outside Samsung retail EVO/QVO/V-table, DDR5 voltage (1.1 V is
 deliberately not emitted), Hynix DDR3 voltage, ranks on 3DS/ambiguous org codes, Kingston
 KVR/KSM generation when the speed code is unmapped (DDR2-era parts — the D4 rank token must
-never be misread as DDR4). `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
+never be misread as DDR4), legacy Seagate `ST<ff><digits><iface>` capacities (the digit
+string mixes a form-factor digit with MB digits and the pre-~1996 era encodes UNFORMATTED
+MB — no pattern-only era split exists, so those shapes return None; facet-accuracy audit
+2026-06-10, `tests/test_mpn_decoder_storage.py` pins the audit cards), era-ambiguous
+WD shapes (3-digit+4-letter without a known modern family token, all 4-digit+4-letter),
+fractional-TB reads of WD's modern revision digit (re-audit 2026-06-10: WD42PURZ is 4 TB
+rev 2, never 4.2 TB), out-of-envelope/unlisted-family modern Seagate capacities
+(truncated/malformed strings get NO specs), and ANY hdd capacity off the discrete
+shipped-capacity grid (`storage.HDD_SHIPPED_CAPACITY_GB` — applied in `decode_storage`
+to every hdd decoder; an off-grid value moves to `DecodeResult.dropped`, never `specs`,
+deliberately hdd-only: SSD capacities are near-continuous and ssd.py reads explicit
+size fields, so the digit-string failure class doesn't exist there). The grid is built
+with an INCLUDE-WHEN-UNCERTAIN bias: a false-accept of a possibly-real capacity costs
+nothing, while a false-delete destroys correct decodes (round-2 re-review restored the
+attested 15.3/27.3/90/140 GB WD Caviar points, 1.6 TB enterprise SAS, and 36 TB Exos M).
+Both plausibility gates keep the refusal observable even when it empties the decode:
+`decode_mpn` returns a specs-EMPTY result carrying `dropped` + a per-key
+`drop_reasons` tag (`off_grid` / `out_of_envelope`), so capacity-only decodes (all
+legacy WD, family-unmapped Seagate) never vanish as a bare None — write paths must
+gate on `result.specs`, never on result-is-None. `rank`/`registered`/`voltage` are seeded `dram` spec schemas in
 `commodity_seeds.json` (the boot seeder inserts them idempotently — no migration needed);
 `tests/test_mpn_decoder_seed_sync.py` pins decoder↔seed sync, and `writer.py` logs an
-aggregate WARNING for BOTH of `record_spec`'s silent vocabulary drops — a decoded key with
-no schema row AND an enum value outside the LIVE row's enum_values (the worker decodes
-against live DB rows, which can lag a deploy's reseed) — so a drift can never silently
-zero the feature (`record_spec` drops both cases at DEBUG only). Cards skipped because
+aggregate WARNING for all FOUR silent drop channels — a decoded key with
+no schema row, an enum value outside the LIVE row's enum_values (the worker decodes
+against live DB rows, which can lag a deploy's reseed), the decoder's off-grid
+capacity refusals, and its Seagate-envelope refusals (separate counters, split by
+`drop_reasons`, so an over-tight envelope is distinguishable from an incomplete
+grid) — so a drift or plausibility rejection can
+never silently zero the feature (`record_spec` drops its two cases at DEBUG only; the
+decoder drop is a pure function with no logging of its own). Cards skipped because
 their existing category conflicts with the decoded commodity are counted too
 (`skipped_category_conflict` in the per-batch stats, plus a WARNING with the
 `card_category->decoded_commodity` pairs — the number that says whether the
 category-alias map needs another entry).
+
+Reconciliation after a decoder/extractor fix: `python -m app.management.
+reconcile_decoded_facets [--apply] [--limit N]` re-runs the fixed decode + desc
+extraction over every card owning a facet row with source IN (mpn_decode,
+desc_parse) for the audit-affected spec_keys (capacity_gb/gpu_family/memory_gb).
+A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
+source (the F1 newest-timestamp tie-break lets the re-run win its own stale
+entry); a key the fixed extractor no longer yields is DELETED from both
+material_spec_facets and specs_structured (wrong is worse than missing —
+provenance stays honest). Dry-run by default with per-failure-class tallies
+(round 1: legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
+wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
+`dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
+capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
+fallback buckets); SAVEPOINT per card.
 
 ## Cross-Reference Caching
 
@@ -1404,8 +1696,9 @@ htmx/partials/materials/fru_section.html
 python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
     |   (read-only — single session, no writes; on PG all queries share one
     |    REPEATABLE READ snapshot so concurrent enrichment-worker writes can't
-    |    skew cross-metric ratios; intended as a daily ops cron — host-side,
-    |    not yet registered anywhere in this repo)
+    |    skew cross-metric ratios; daily ops cron via
+    |    scripts/enrichment_coverage_cron.sh — host crontab runs it inside the
+    |    app container, JSONL history persisted in the applogs volume)
     v
 collect_metrics(db) — a handful of aggregate queries over active cards
     |   (deleted_at IS NULL everywhere, incl. the facet joins)
@@ -1424,6 +1717,15 @@ collect_metrics(db) — a handful of aggregate queries over active cards
     |       to one streamed Python pass — keep all three branches in sync; when
     |       changing the PG SQL, run the opt-in parity test (set PG_TEST_DSN to
     |       a Postgres DSN) or verify against live PG
+    +---> Category provenance: categorized cards grouped by category_source
+    |       ("(none)" = NULL provenance — a writer bypassing set_category or
+    |       unbackfilled pre-096 data); spec-entry counts alone are WINS-only and
+    |       spec-only, so a category-only ingest is visible ONLY here
+    +---> Facet provenance: facet rows grouped by source ("(none)" = NULL rows
+    |       the guarded 096 backfill could not match to a JSONB entry)
+    +---> Unregistered-source callout: any observed source string (spec, category,
+    |       or facet) missing from spec_tiers.SOURCE_TIER — such a writer ranks at
+    |       tier 0 and silently loses every conflict; the report makes it trend
     +---> enrichment_status distribution; fru_links totals (rows + distinct
             fru_norm) only if the table exists
     |

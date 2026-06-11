@@ -70,16 +70,35 @@ def test_extract_trailing_oem():
     assert extract_trailing_oem('Cable, 3.5"') is None
 
 
-def test_clean_fills_manufacturer_from_trailing_oem():
+def test_clean_routes_trailing_oem_label_to_brand():
+    # Dual-brand: a trailing token in the literal OEM-label list (OEM_TRAILING_RE) is
+    # BRAND evidence, never a maker — manufacturer stays empty for B2/W4 to fill.
     c = clean_record(_rec(raw_mpn="00AR327", description="HDD, 1.2TB 10K HDD, IBM"))
     assert c is not None
-    assert c.manufacturer == "IBM"
+    assert c.brand == "IBM"
+    assert c.manufacturer is None
+
+
+def test_clean_fills_manufacturer_from_non_oem_trailing_token():
+    # A trailing token OUTSIDE the OEM-label list keeps the legacy behavior: it fills
+    # manufacturer when the source carried none (EMC is not an OEM_BRANDS member).
+    c = clean_record(_rec(raw_mpn="00AR327", description="SSD, 100GB SFF SAS SSD, EMC"))
+    assert c is not None
+    assert c.manufacturer == "EMC"
+    assert c.brand is None
 
 
 def test_clean_keeps_explicit_manufacturer_over_trailing():
     c = clean_record(_rec(raw_mpn="ST4000NM0035", manufacturer="Seagate", description="4TB HDD, IBM"))
     assert c is not None
-    assert c.manufacturer == "Seagate"  # explicit OEM wins; trailing token ignored
+    assert c.manufacturer == "Seagate"  # explicit maker kept
+    assert c.brand == "IBM"  # the trailing OEM label still lands as brand evidence
+
+
+def test_clean_explicit_brand_column_wins_over_trailing_token():
+    c = clean_record(_rec(raw_mpn="00AR327", brand="Dell", description="HDD, 1.2TB, IBM"))
+    assert c is not None
+    assert c.brand == "Dell"  # explicit source column beats the description regex
 
 
 def test_canonicalize_condition():

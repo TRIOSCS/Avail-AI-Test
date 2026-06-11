@@ -4,8 +4,9 @@ provenance).
 Asserts the migration's revision metadata (id <=32 chars, chains off 095_wechat_id,
 single head), that its SQL CASE tier snapshot stays in sync with the live
 spec_tiers.SOURCE_TIER map, and that its seven add_column / drop_column calls round-trip
-via the real alembic CLI machinery on a SQLite file DB (stamped at 095, then
-upgrade→downgrade→upgrade of the 096 step). The PG-only JSONB/category backfill is NOT
+(upgrade→downgrade→upgrade) on a scratch SQLite engine via the shared hermetic harness
+(tests/migration_harness.run_ops — see TestRoundTrip docstring for why the in-process
+alembic CLI was dropped). The PG-only JSONB/category backfill is NOT
 executed here — SQLite has no JSONB operators and the migration guards the data step to
 PostgreSQL (project rule feedback_sqlite_masks_postgres: SQLite masks PG JSON ops, so the
 backfill SQL is verified against live Postgres, not on SQLite).
@@ -16,11 +17,12 @@ Depends on: alembic/versions/096_spec_provenance.py
 
 import importlib.util
 import os
-import tempfile
 
-import pytest
 import sqlalchemy as sa
 from sqlalchemy import inspect
+from sqlalchemy.pool import StaticPool
+
+from tests.migration_harness import run_ops
 
 # Load the migration module directly (alembic/versions has no __init__.py).
 _REPO_ROOT = os.path.join(os.path.dirname(__file__), "..")
@@ -43,16 +45,22 @@ class TestRevisionMetadata:
         # re-parenting beats a no-op merge revision for a not-yet-deployed migration.
         assert _mod.down_revision == "095_wechat_id"
 
-    def test_single_head(self):
-        # The migration chain must converge to exactly one head (no unmerged branches) —
-        # a second head makes `alembic upgrade head` error out at deploy time.
+    def test_on_single_head_mainline(self):
+        # The migration chain must converge to exactly one head (no unmerged branches —
+        # test_migration_chain.py owns that invariant) AND 096 must sit on the mainline
+        # walked from that head. Asserting reachability instead of pinning the head name
+        # keeps this test from rotting every time a newer migration lands (it broke when
+        # 098 became the head).
         from alembic.config import Config
         from alembic.script import ScriptDirectory
 
         cfg = Config()
         cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        heads = ScriptDirectory.from_config(cfg).get_heads()
-        assert len(heads) == 1, f"expected a single migration head, got {heads}"
+        script = ScriptDirectory.from_config(cfg)
+        heads = script.get_heads()
+        assert len(heads) == 1, f"expected a single head, got {heads}"
+        mainline = {rev.revision for rev in script.iterate_revisions(heads[0], "base")}
+        assert "096_spec_provenance" in mainline, "096_spec_provenance fell off the mainline walked from the head"
 
     def test_source_tier_sql_case_matches_live_ladder(self):
         # The migration cannot import app code, so its CASE is a literal snapshot of
@@ -71,27 +79,23 @@ class TestRevisionMetadata:
 
 
 class TestRoundTrip:
-    """Drive the migration through the real alembic CLI machinery on a SQLite file DB.
+    """Upgrade → downgrade → upgrade of 096's own DDL on a scratch SQLite engine.
 
     The full migration chain cannot replay on SQLite (the 001 baseline issues
-    ``CREATE EXTENSION pg_trgm``), so we instead create only the two tables 096 touches,
-    ``stamp`` the DB at 095_wechat_id (stamping records the version
-    WITHOUT executing it), then ``upgrade``/``downgrade`` exactly the 096 step. This is a
-    genuine ``alembic upgrade → downgrade → upgrade`` of 096's DDL, not a hand-rolled op
-    invocation, so it exercises the real add_column/drop_column the deploy will run. The
-    PG-only JSONB/category backfill is guarded inside the migration and no-ops on SQLite.
+    ``CREATE EXTENSION pg_trgm``), so we create only the two tables 096 touches and
+    execute the migration module's upgrade()/downgrade() directly through the shared
+    hermetic harness (tests/migration_harness.run_ops). Previously this drove the
+    in-process alembic CLI (command.stamp/upgrade), but that path routes through
+    alembic/env.py + the alembic.op module's PROCESS-GLOBAL proxy and an os.environ
+    DATABASE_URL channel, which proved load-flaky under xdist (intermittent "table
+    missing" skips from env.py's idempotent wrappers while the full suite runs in
+    parallel). The PG-only JSONB/category backfill is guarded inside the migration and
+    no-ops on SQLite.
     """
 
-    @pytest.fixture
-    def alembic_on_sqlite(self):
-        from alembic.config import Config
-
-        from alembic import command
-
-        dbf = tempfile.NamedTemporaryFile(suffix=".db", delete=False).name
-        url = f"sqlite:///{dbf}"
-        engine = sa.create_engine(url)
-
+    @staticmethod
+    def _engine():
+        engine = sa.create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
         meta = sa.MetaData()
         sa.Table(
             "material_cards",
@@ -108,51 +112,37 @@ class TestRoundTrip:
             sa.Column("spec_key", sa.String(100)),
         )
         meta.create_all(engine)
+        return engine
 
-        cfg = Config()
-        cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        cfg.set_main_option("sqlalchemy.url", url)
-        prev_url = os.environ.get("DATABASE_URL")
-        os.environ["DATABASE_URL"] = url
-        # Record 095_wechat_id (the down-revision) as applied WITHOUT running it (stamp never executes).
-        command.stamp(cfg, _mod.down_revision)
-        try:
-            yield engine, cfg, command
-        finally:
-            if prev_url is None:
-                os.environ.pop("DATABASE_URL", None)
-            else:
-                os.environ["DATABASE_URL"] = prev_url
-            engine.dispose()
-            os.unlink(dbf)
+    _run = staticmethod(run_ops)
 
     def _columns(self, engine, table):
         return {c["name"] for c in inspect(engine).get_columns(table)}
 
-    def test_upgrade_adds_seven_columns(self, alembic_on_sqlite):
-        engine, cfg, command = alembic_on_sqlite
-        command.upgrade(cfg, _mod.revision)
+    def test_upgrade_adds_seven_columns(self):
+        engine = self._engine()
+        self._run(engine, _mod.upgrade)
 
         assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
         assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(
             engine, "material_cards"
         )
 
-    def test_downgrade_drops_seven_columns(self, alembic_on_sqlite):
-        engine, cfg, command = alembic_on_sqlite
-        command.upgrade(cfg, _mod.revision)
-        command.downgrade(cfg, _mod.down_revision)
+    def test_downgrade_drops_seven_columns(self):
+        engine = self._engine()
+        self._run(engine, _mod.upgrade)
+        self._run(engine, _mod.downgrade)
 
         assert self._columns(engine, "material_spec_facets").isdisjoint({"source", "confidence", "tier"})
         assert self._columns(engine, "material_cards").isdisjoint(
             {"category_source", "category_confidence", "category_tier", "category_updated_at"}
         )
 
-    def test_upgrade_downgrade_upgrade_round_trips(self, alembic_on_sqlite):
-        engine, cfg, command = alembic_on_sqlite
-        command.upgrade(cfg, _mod.revision)
-        command.downgrade(cfg, _mod.down_revision)
-        command.upgrade(cfg, _mod.revision)
+    def test_upgrade_downgrade_upgrade_round_trips(self):
+        engine = self._engine()
+        self._run(engine, _mod.upgrade)
+        self._run(engine, _mod.downgrade)
+        self._run(engine, _mod.upgrade)
 
         assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
         assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(

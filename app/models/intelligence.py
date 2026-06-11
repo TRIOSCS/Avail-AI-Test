@@ -28,7 +28,13 @@ class MaterialCard(Base):
     id = Column(Integer, primary_key=True)
     normalized_mpn = Column(String(255), nullable=False, unique=True, index=True)
     display_mpn = Column(String(255), nullable=False)
+    # Dual-brand semantics (migration 097): `manufacturer` = the ACTUAL MAKER (Seagate
+    # Technology, Kingston Technology, Hitachi/IBM); `brand` = the OEM LABEL on the part
+    # (IBM, Dell Technologies, Hewlett Packard Enterprise, Lenovo). Nullable — most cards
+    # never get a brand. Both are written ONLY via spec_tiers.set_manufacturer/set_brand
+    # (F1 ladder + normalize_brand_name); the combined "Brand" facet ORs across both.
     manufacturer = Column(String(255), index=True)
+    brand = Column(String(255), index=True)
     description = Column(String(1000))
     search_count = Column(Integer, default=0)
     last_searched_at = Column(UTCDateTime)
@@ -73,7 +79,40 @@ class MaterialCard(Base):
     category_tier = Column(Integer)
     category_updated_at = Column(UTCDateTime)  # when the category was last (re)written via the ladder
 
+    # Brand + manufacturer provenance (migration 097 — written via spec_tiers.set_brand /
+    # set_manufacturer, governed by the same F1 ladder as category_*). A valued
+    # manufacturer with NULL provenance (legacy data, or a writer that bypassed the
+    # helpers) ranks at the legacy_backfill floor (tier 50, conf 0.5) at runtime — so
+    # trio_source (95) maker evidence can displace an OEM name sitting in `manufacturer`
+    # from legacy data, but a stray AI guess (40) cannot.
+    brand_source = Column(String(50))
+    brand_confidence = Column(Float)
+    brand_tier = Column(Integer)
+    brand_updated_at = Column(UTCDateTime)
+    manufacturer_source = Column(String(50))
+    manufacturer_confidence = Column(Float)
+    manufacturer_tier = Column(Integer)
+    manufacturer_updated_at = Column(UTCDateTime)
+
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
+
+    # Worker priority-lane stamp (on-add enrichment, migration 099). Set ONLY by the
+    # single-add endpoint (a user is actively waiting); the enrichment worker's
+    # select_batch orders stamped cards first (FIFO by stamp) and run_one_batch clears
+    # the stamp on every batch card so a terminal not_found card cannot pin the lane.
+    # Bulk/stock/email/search creation paths never stamp (created_at fast lane instead).
+    enrich_requested_at = Column(UTCDateTime, index=True)
+
+    # Validation conflicts (migration 099): evidence from a tier>=80 authoritative
+    # source that contradicted a manual (tier 100) value. The ladder KEEPS the manual
+    # value; spec_tiers.record_validation_conflict persists the contradiction here.
+    # List entries: {"key": <spec_key|"category">, "manual": {"value", "updated_at"},
+    #   "evidence": {"source", "tier", "confidence", "value", "observed_at"}}
+    # — de-duped per (key, evidence.source), newest evidence replaces.
+    validation_conflicts = Column(JSONB)
+    # Review-queue filter flag — True iff validation_conflicts is non-empty. Backed by
+    # the partial index ix_material_cards_needs_review (WHERE has_validation_conflict).
+    has_validation_conflict = Column(Boolean, nullable=False, default=False, server_default="false")
 
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
@@ -82,6 +121,18 @@ class MaterialCard(Base):
         UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        # Partial index for the review-queue filter (conflicted cards are a tiny
+        # minority — a full index would be ~all-false dead weight). sqlite_where keeps
+        # the test engine's create_all in step with migration 099.
+        Index(
+            "ix_material_cards_needs_review",
+            "has_validation_conflict",
+            postgresql_where=Column("has_validation_conflict"),
+            sqlite_where=Column("has_validation_conflict"),
+        ),
     )
 
     # --- Validators ---

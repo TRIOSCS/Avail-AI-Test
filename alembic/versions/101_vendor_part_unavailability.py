@@ -7,7 +7,7 @@ unique constraint on the pair backs the upsert semantics in
 app/services/vendor_unavailability.py; the two single-column indexes serve the
 vendor-row intel lookup and the RFQ-suggestion exclusion query respectively.
 
-Generated via `alembic revision --autogenerate` against a scratch PG at 096, then
+Generated via `alembic revision --autogenerate` against a scratch PG at 096 (renumbered 097->101 after the concurrent 097-100 chain landed on main), then
 hand-reviewed: unrelated autogen noise stripped (runtime trgm/FTS indexes, dead-table
 drops — none of it belongs to this change), table DDL kept verbatim except created_at,
 which uses sa.DateTime(timezone=True) to match UTCDateTime's dialect impl
@@ -15,8 +15,8 @@ which uses sa.DateTime(timezone=True) to match UTCDateTime's dialect impl
 
 Downgrade drops the table (the activity timeline keeps the human-readable history).
 
-Revision ID: 097_vendor_part_unavailability
-Revises: 096_spec_provenance
+Revision ID: 101_vendor_part_unavailability
+Revises: 100_taxonomy_alias_backfill
 Create Date: 2026-06-10
 """
 
@@ -24,8 +24,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "097_vendor_part_unavailability"
-down_revision = "096_spec_provenance"
+revision = "101_vendor_part_unavailability"
+down_revision = "100_taxonomy_alias_backfill"
 branch_labels = None
 depends_on = None
 

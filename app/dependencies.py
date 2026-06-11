@@ -90,6 +90,17 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
     return user
 
 
+# Roles allowed through require_buyer. Single source of truth — templates that hide
+# buyer-only UI (e.g. the materials workspace "Add part" button) check the SAME set
+# via has_buyer_role, so the surface can never show an action the POST would 403.
+BUYER_ROLES = frozenset({UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN})
+
+
+def has_buyer_role(user: User | None) -> bool:
+    """True when *user* holds a buyer-tier role (require_buyer's allowed set)."""
+    return user is not None and user.role in BUYER_ROLES
+
+
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires a buyer-tier role for RFQ actions.
 
@@ -98,7 +109,7 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     (require_user-level) endpoints — never RFQ/buyer actions.
     """
     user = require_user(request, db)
-    if user.role not in (UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
+    if not has_buyer_role(user):
         raise HTTPException(403, "Buyer role required for this action")
     return user
 

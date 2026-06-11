@@ -13,7 +13,7 @@ silent-failure hardening (design spec IMPORTANT-3):
 - requirement_id: clear-time provenance FK (SET NULL — knowledge outlives
   requirements), indexed for the clear_unavailability provenance arm.
 
-Generated via `alembic revision --autogenerate` against a scratch PG at 097,
+Generated via `alembic revision --autogenerate` against a scratch PG at the unavailability-table migration (renumbered 098->102 alongside 097->101),
 then hand-reviewed: unrelated autogen noise stripped (runtime trgm/FTS indexes,
 dead-table drops — none of it belongs to this change). released_at uses
 sa.DateTime(timezone=True) to match UTCDateTime's dialect impl (TIMESTAMP WITH
@@ -22,8 +22,8 @@ named so downgrade can drop it deterministically.
 
 Downgrade drops the four columns (and the index/FK).
 
-Revision ID: 098_unavail_policy_columns
-Revises: 097_vendor_part_unavailability
+Revision ID: 102_unavail_policy_columns
+Revises: 101_vendor_part_unavailability
 Create Date: 2026-06-10
 """
 
@@ -31,8 +31,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "098_unavail_policy_columns"
-down_revision = "097_vendor_part_unavailability"
+revision = "102_unavail_policy_columns"
+down_revision = "101_vendor_part_unavailability"
 branch_labels = None
 depends_on = None
 

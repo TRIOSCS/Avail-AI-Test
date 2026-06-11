@@ -32,13 +32,17 @@ def decode_mpn(mpn: str | None, manufacturer: str | None = None) -> DecodeResult
 
     `manufacturer` is an optional hint; decoders gate on the MPN string itself, so a wrong
     or missing manufacturer never causes a misdecode (the regex gate is the source of truth).
+
+    A returned result may carry EMPTY specs with a populated `dropped` dict (every decoded
+    value failed a plausibility gate — see DecodeResult): callers must check `result.specs`
+    before persisting anything; `dropped` is observability-only (writer.py WARNs on it).
     """
     normalized = normalize_mpn(mpn)  # upper + strip quotes/whitespace/trailing punct; keeps -, /
     if not normalized:
         return None
     for decoder in _DECODERS:
         result = decoder(normalized, manufacturer)
-        if result is not None and result.specs:
+        if result is not None and (result.specs or result.dropped):
             return result
     return None
 

@@ -17,6 +17,14 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
   link-generation values (SAS/SATA/FC: 1/1.5/2/3/4/6/8/12/16/22.5/24/32) are
   discarded outright — so tiny legacy capacities in that set are deliberately missed
   rather than ever mistaking a link speed for a capacity.
+- Under NAND-die context (_common.nand_die_context: the NAND word or an MT29-series
+  die MPN — DIE-SPECIFIC signals only) a BARE ``<n>G`` token is the die-density
+  gigaBIT convention ("Nand, 512G, MLC" = 512 Gbit), never bytes — skipped,
+  deliberately not ÷8-converted (re-audit 2026-06-10 class 3; same rule as
+  desc_extractor/memory.py). Cell-type tokens (TLC/MLC/…) alone do NOT trigger the
+  guard: real SSD listings name their flash type while abbreviating capacity as bare
+  G ("SSD, 480G, TLC, SATA" = 480 GB), so both that form and the explicit-unit form
+  ("SSD, 960GB, TLC, SATA") still extract.
 - Conflicting signals for a key (two different capacities, 2.5" + 3.5", SAS + SATA)
   ⇒ that key is omitted, the rest still extract.
 - Speed-qualified interfaces ("6Gbps SAS") collapse to the bare seeded enum member
@@ -30,7 +38,7 @@ CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 
 import re
 
-from app.services.desc_extractor._common import SpecDict, unique_or_none
+from app.services.desc_extractor._common import SpecDict, nand_die_context, unique_or_none
 
 # Canonical enum strings — MUST match the hdd/ssd entries in app/data/commodity_seeds.json.
 _FF_BY_VALUE = {"2.5": '2.5"', "3.5": '3.5"', "1.8": '1.8"'}
@@ -62,8 +70,13 @@ _IFACE_PATTERNS = (
 def _capacity_gb(text: str) -> int | float | None:
     """Distinct surviving capacity candidate, or None (no token / conflict)."""
     values: set[float] = set()
+    nand = nand_die_context(text)
     for m in _CAPACITY.finditer(text):
         if text[m.end() : m.end() + 2] == "/S":  # "6Gb/s" — a link speed, not a size
+            continue
+        if nand and m.group(2) == "G":
+            # Bare "<n>G" under NAND-die context is a gigaBIT die density, not a
+            # drive capacity — deliberate no-write (see the module docstring).
             continue
         value = float(m.group(1))
         if m.group(2) == "TB":

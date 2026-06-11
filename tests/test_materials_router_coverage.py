@@ -189,12 +189,14 @@ class TestUpdateMaterial:
 
     def test_update_enrichment_fields(self, client, db_session):
         card = _make_card(db_session)
+        # Category must be canonical — off-vocab values now 422 instead of silently
+        # dropping (rejection contract: tests/test_on_add_enrichment.py).
         resp = client.put(
             f"/api/materials/{card.id}",
             json={
                 "lifecycle_status": "active",
                 "package_type": "DIP-8",
-                "category": "voltage regulator",
+                "category": "hdd",
                 "rohs_status": "compliant",
                 "pin_count": 8,
             },
@@ -248,21 +250,29 @@ class TestEnrichMaterial:
         assert data["updated_fields"] == []
 
     def test_enrich_sets_custom_source(self, client, db_session):
-        card = _make_card(db_session)
+        # Manufacturer-less card: the maker write goes through the F1 ladder (an
+        # unregistered "octopart" pusher ranks as ai_guess/40) and FILLS the empty
+        # column, so the body's source is recorded as enrichment_source.
+        card = _make_card(db_session, manufacturer=None)
         resp = client.post(
             f"/api/materials/{card.id}/enrich",
             json={"manufacturer": "NXP", "source": "octopart"},
         )
         assert resp.status_code == 200
         db_session.refresh(card)
+        assert card.manufacturer == "NXP"
+        assert card.manufacturer_source == "ai_guess"  # ladder provenance, tier 40
         assert card.enrichment_source == "octopart"
 
     def test_enrich_all_fields(self, client, db_session):
-        card = _make_card(db_session)
+        # category/manufacturer route through the F1 ladder: the canonical category
+        # ("transistors") and the maker land on this empty-column card at ai_guess/40;
+        # the other 8 fields keep their direct writes.
+        card = _make_card(db_session, manufacturer=None)
         payload = {
             "lifecycle_status": "nrnd",
             "package_type": "SOT-23",
-            "category": "transistor",
+            "category": "transistors",
             "rohs_status": "compliant",
             "pin_count": 3,
             "datasheet_url": "https://example.com/ds.pdf",
@@ -275,6 +285,130 @@ class TestEnrichMaterial:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["updated_fields"]) == 10
+        db_session.refresh(card)
+        assert card.category == "transistors"
+        assert card.category_source == "ai_guess"
+
+    def test_enrich_registered_source_honored_below_ground_truth(self, client, db_session):
+        # The OTHER branch of the source pre-mapping: a registered, sub-ground-truth
+        # source ("web_search", tier 70) is honored — it displaces an ai_guess/40 prior
+        # but still loses to a decode-85 prior (the ladder owns arbitration).
+        card = _make_card(db_session, manufacturer=None)
+        card.category = "ssd"
+        card.category_source = "ai_guess"
+        card.category_confidence = 0.5
+        card.category_tier = 40
+        card.category_updated_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "source": "web_search", "confidence": 0.9},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ladder_source"] == "web_search"
+        assert "category" in data["updated_fields"]
+        db_session.refresh(card)
+        assert card.category == "hdd"
+        assert card.category_source == "web_search"
+        assert card.category_tier == 70
+
+        # ...but a decode-85 prior keeps winning over the honored web_search/70.
+        card.category = "ssd"
+        card.category_source = "mpn_decode"
+        card.category_confidence = 0.95
+        card.category_tier = 85
+        card.category_updated_at = datetime.now(timezone.utc)
+        db_session.commit()
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "source": "web_search", "confidence": 0.99},
+        )
+        assert resp.status_code == 200
+        assert "category" in resp.json()["rejected_fields"]
+        db_session.refresh(card)
+        assert card.category == "ssd"
+        assert card.category_source == "mpn_decode"
+
+    @pytest.mark.parametrize("forged", ["manual", "trio_source"])
+    def test_enrich_ground_truth_source_demoted_to_ai_guess(self, client, db_session, forged):
+        # Tier-forgery guard: this endpoint exists for un-vouched external pushers, so
+        # a body source claiming the ground-truth band ("manual"/100, "trio_source"/95)
+        # is DEMOTED to ai_guess/40 — it can fill an empty column but can never
+        # displace real provenance or lock the column against future corrections.
+        card = _make_card(db_session, mpn=f"forge{forged}", display=f"FORGE-{forged}", manufacturer=None)
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "source": forged},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["ladder_source"] == "ai_guess"
+        db_session.refresh(card)
+        assert card.category == "hdd"
+        assert card.category_source == "ai_guess"  # never the forged ground-truth source
+        assert card.category_tier == 40
+
+    def test_enrich_forged_manual_cannot_displace_real_manual(self, client, db_session):
+        # The concrete harm the demotion prevents: an incoming body-"manual" with a
+        # newer timestamp would strictly beat an existing manual under the F1
+        # tie-break — demoted to ai_guess/40 it loses instead.
+        card = _make_card(db_session, mpn="forgewin", display="FORGE-WIN", manufacturer=None)
+        card.category = "ssd"
+        card.category_source = "manual"
+        card.category_confidence = 1.0
+        card.category_tier = 100
+        card.category_updated_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "source": "manual", "confidence": 1.0},
+        )
+        assert resp.status_code == 200
+        assert "category" in resp.json()["rejected_fields"]
+        db_session.refresh(card)
+        assert card.category == "ssd"  # the real human edit survives
+        assert card.category_source == "manual"
+
+    def test_enrich_explicit_zero_confidence_honored(self, client, db_session):
+        # An explicit confidence of 0.0 is a deliberate zero-trust signal — it must not
+        # be silently replaced by the 0.5 default ("or" treats 0.0 as missing).
+        card = _make_card(db_session, mpn="zeroconf", display="ZERO-CONF", manufacturer=None)
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "confidence": 0.0},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(card)
+        assert card.category == "hdd"  # still fills an empty column (None always loses)
+        assert card.category_confidence == 0.0
+
+    def test_enrich_non_numeric_confidence_is_422(self, client, db_session):
+        # The body is raw JSON with no schema — a non-numeric confidence must be a 422
+        # with an actionable message, never an unhandled ValueError 500.
+        card = _make_card(db_session, mpn="badconf", display="BAD-CONF", manufacturer=None)
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "hdd", "confidence": "high"},
+        )
+        assert resp.status_code == 422
+        assert "confidence" in resp.json()["error"]
+        db_session.refresh(card)
+        assert card.category is None  # nothing committed
+
+    def test_enrich_rejected_fields_reported(self, client, db_session):
+        # A ladder/normalizer refusal is reported in rejected_fields so the caller can
+        # distinguish "didn't land" from "wasn't sent" (updated_fields alone can't).
+        card = _make_card(db_session, mpn="rejrep", display="REJ-REP", manufacturer=None)
+        resp = client.post(
+            f"/api/materials/{card.id}/enrich",
+            json={"category": "Voltage Regulator", "description": "Adj regulator"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["rejected_fields"] == ["category"]
+        assert "description" in data["updated_fields"]
 
 
 # -- DELETE /api/materials/{card_id} ------------------------------------------
@@ -594,10 +728,12 @@ class TestDirectHandlerCoverage:
     async def test_enrich_material_direct_updates_fields(self, db_session):
         from app.routers.materials import enrich_material
 
+        # Manufacturer-less card: the F1-ladder maker write (ai_guess/40 for an
+        # unregistered pusher) fills the empty column and reports in updated_fields.
         card = MaterialCard(
             normalized_mpn="direct001",
             display_mpn="DIRECT001",
-            manufacturer="TI",
+            manufacturer=None,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(card)
@@ -610,6 +746,7 @@ class TestDirectHandlerCoverage:
         result = await enrich_material(card.id, req, user=user, db=db_session)
         assert result["ok"] is True
         assert "manufacturer" in result["updated_fields"]
+        assert card.manufacturer == "Microchip"
 
     async def test_enrich_material_direct_not_found(self, db_session):
         from app.routers.materials import enrich_material
@@ -682,10 +819,12 @@ class TestDirectHandlerCoverage:
 
         from app.schemas.vendors import MaterialCardUpdate
 
+        # Category must be canonical — off-vocab values now 422 instead of silently
+        # dropping (rejection contract: tests/test_on_add_enrichment.py).
         data = MaterialCardUpdate(
             lifecycle_status="active",
             package_type="SOT-23",
-            category="transistor",
+            category="cpu",
             rohs_status="compliant",
             pin_count=3,
             datasheet_url="https://example.com/ds.pdf",
