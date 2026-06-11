@@ -138,6 +138,19 @@ def test_select_candidates_demand_first_ordering(db_session: Session):
     assert [norm for norm, _ in ordered] == ["444444001", "333333001", "222222001", "111111001"]
 
 
+def test_select_candidates_newest_spares_first_within_bucket(db_session: Session):
+    # Equal bucket + search_count → norm DESCENDING: L-series before high six-digit
+    # before Compaq-era numbers (modern spares resolve; 1990s ones are near-universal
+    # no_match and must not front-load the daily budget).
+    _card(db_session, "013218-001", category="cpu", search_count=0)
+    _card(db_session, "873647-001", category="cpu", search_count=0)
+    _card(db_session, "L99783-001", category="cpu", search_count=0)
+
+    ordered = select_candidates(db_session, "hpe")
+
+    assert [norm for norm, _ in ordered] == ["l99783001", "873647001", "013218001"]
+
+
 def test_select_candidates_dedupes_norms_keeping_best_bucket(db_session: Session):
     # Two cards sharing a spare norm (display variants) collapse to ONE candidate in
     # the best (lowest) bucket.
@@ -283,12 +296,14 @@ def test_run_recheck_skips_norm_cached_by_concurrent_worker(db_session: Session)
     b = _hpe_card(db_session, "875941-001")
     assert a and b
 
+    # Norms drain newest-first, so 875941001 resolves first; the worker races in a
+    # row for the still-pending 875940001.
     async def racing_resolve(display, norm, vendor):
-        if norm == "875940001":
+        if norm == "875941001":
             db_session.add(
                 OemCrosswalk(
-                    spare_raw="875941-001",
-                    spare_norm="875941001",
+                    spare_raw="875940-001",
+                    spare_norm="875940001",
                     vendor="hpe",
                     status=OemCrosswalkStatus.NO_MATCH,
                     looked_up_at=datetime.now(timezone.utc),
@@ -303,7 +318,7 @@ def test_run_recheck_skips_norm_cached_by_concurrent_worker(db_session: Session)
 
     assert attempted == 1  # the second norm was skipped before billing
     assert resolve_mock.await_count == 1
-    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875941001").count() == 1
+    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875940001").count() == 1
     assert counters == {"web_calls": 1, "oem_resolves": 1}
 
 
@@ -317,12 +332,14 @@ def test_run_integrity_error_at_commit_rolls_back_and_continues(db_session: Sess
     _hpe_card(db_session, "875941-001")
 
     async def racing_resolve(display, norm, vendor):
-        if norm == "875940001":
+        # Norms drain newest-first: the collision hits the FIRST item (875941001) so
+        # the run's continuation to the next item is what gets exercised.
+        if norm == "875941001":
             # Same edge (spare_norm, vendor, source_domain) the CLI is about to write.
             db_session.execute(
                 text(
                     "INSERT INTO oem_crosswalk (spare_raw, spare_norm, vendor, status, canonical_mpn_raw, "
-                    "canonical_mpn_norm, source_domain, looked_up_at) VALUES ('875940-001', '875940001', 'hpe', "
+                    "canonical_mpn_norm, source_domain, looked_up_at) VALUES ('875941-001', '875941001', 'hpe', "
                     "'resolved', 'ST4000NM0035', 'st4000nm0035', 'partsurfer.hp.com', '2026-06-10')"
                 )
             )
@@ -337,5 +354,5 @@ def test_run_integrity_error_at_commit_rolls_back_and_continues(db_session: Sess
     # In this single-session simulation the rollback discards the racing row too (in
     # prod the worker committed it from its own session, so it survives); the pinned
     # contracts are: no duplicate edge, and the NEXT item still committed.
-    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875940001").count() == 0
-    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875941001").count() == 1
+    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875941001").count() == 0
+    assert db_session.query(OemCrosswalk).filter_by(spare_norm="875940001").count() == 1

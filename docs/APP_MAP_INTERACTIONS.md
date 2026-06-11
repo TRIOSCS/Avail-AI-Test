@@ -917,7 +917,9 @@ migration 100, spec: SPEC_OEM_WEB_RESOLUTION):
     (our code never opens an HTTP connection to the OEM; the only failure surface is
     the Claude API). The paced drain CLI `python -m
     app.management.backfill_oem_crosswalk --vendor hpe [--limit N] [--dry-run]`
-    resolves+upserts rows only (demand-first: cpu+searched, cpu, rest), billing the
+    resolves+upserts rows only (demand-first: cpu+searched, cpu, rest; newest spare
+    norms first within each bucket — Compaq-era numbers are near-universal no_match
+    and must not front-load the daily budget), billing the
     SAME two counters the same atomic way, re-checking pending_resolution per item
     (a norm the worker cached mid-run is skipped, not re-billed), tolerating
     IntegrityError at its per-row commit (rollback + continue), >=2s between calls,
