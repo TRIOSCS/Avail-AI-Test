@@ -112,6 +112,26 @@ CASES = [
         "Mem, 2GB DDR3 UDIMM",  # uppercase GB is gigaBYTES — capacity records normally
         {"capacity_gb": 2, "ddr_type": "DDR3", "form_factor": "UDIMM"},
     ),
+    (
+        # Re-audit 2026-06-10 class 3 (card 74115's grammar): NAND-die context makes a
+        # bare "512G" a gigaBIT die density (512 Gbit = 64 GB) — no casing signal exists
+        # for the round-1 Gb-guard, so the context gate must skip it. Deliberate
+        # NO-WRITE, never a ÷8 conversion.
+        "Mem, Nand, 512G, MLC, Micron",
+        {},
+    ),
+    (
+        "Mem, 16G DDR4 RDIMM",  # bare G WITHOUT NAND context stays gigaBYTES
+        {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
+    ),
+    (
+        # A SPACED rank/org token ("2R X8") is module grammar, not NAND-die context —
+        # the die guard requires the NAND word or an MT29 die MPN, so the bare-G module
+        # capacity survives. (The spaced form doesn't match the contiguous 2RX8 rank
+        # grammar, so rank itself is simply absent, never guessed.)
+        "Mem, 16G, 2R X8, DDR4, RDIMM",
+        {"capacity_gb": 16, "ddr_type": "DDR4", "form_factor": "RDIMM", "ecc": True},
+    ),
 ]
 
 
@@ -130,6 +150,17 @@ def test_ecc_is_a_real_bool():
     result = extract_desc("Mem, 16GB DDR4 2Rx4 PC4-2400T RDIMM")
     assert result is not None
     assert result.specs["ecc"] is True
+
+
+def test_nand_die_density_never_writes_capacity():
+    # Re-audit card 74115 verbatim: a Micron MT29F NAND die miscategorized as dram,
+    # whose description echoes the die MPN and the "512G" gigaBIT density. Under the
+    # dram hint the memory route must NOT write capacity_gb=512 (the right value would
+    # be 64 GB, but die densities are deliberately not converted — no capacity write at
+    # all). The cat=dram miscategorization itself (this is NAND flash, not DRAM) is a
+    # separate defect, out of scope for the extractor — noted, not fixed here.
+    result = extract_desc("MT29F512G08CBCAB, Micron, NAND, 512G, MLC", commodity_hint="dram")
+    assert result is None or "capacity_gb" not in result.specs
 
 
 def test_memory_hint_with_storage_text_is_a_conflict():

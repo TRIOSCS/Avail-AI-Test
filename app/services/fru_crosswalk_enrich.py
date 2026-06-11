@@ -119,11 +119,12 @@ def intersect_decodes(
 
     Shared contract: every member must carry NON-EMPTY ``specs``. A spec-less member
     makes the strict intersection vacuously empty (absence is not agreement — it
-    would silently veto every key of its rich siblings with dropped_count 0). The
-    decoders uphold this themselves (they return None instead of an empty result),
-    but desc_extractor returns commodity-only DescResults for spec-less prose, so
-    the desc caller filters those out of the key intersection (keeping them in its
-    own commodity-agreement check) before calling.
+    would silently veto every key of its rich siblings with dropped_count 0). BOTH
+    callers must filter: decode_mpn can return a specs-empty result whose only
+    content is the observability ``dropped`` dict (every value failed a plausibility
+    gate), and desc_extractor returns commodity-only DescResults for spec-less
+    prose (the desc caller keeps those in its own commodity-agreement check) —
+    each caller drops spec-less members from the key intersection before calling.
     """
     if not results:
         raise ValueError("intersect_decodes requires at least one result")
@@ -270,7 +271,15 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             # Decode + intersect once per FRU (pure, no DB); sorted for a deterministic
             # result order. None results (unrecognized schemes) contribute no evidence.
             models = models_by_fru.get(fru_norm, set())
-            results = [r for raw, mfg in sorted(models, key=lambda m: m[0]) if (r := decode_mpn(raw, mfg)) is not None]
+            # `and r.specs`: decode_mpn can return a specs-EMPTY result whose only
+            # content is the observability `dropped` dict (every decoded value failed
+            # a plausibility gate) — it carries no evidence and, left in, would
+            # vacuously veto every key of the strict intersection below.
+            results = [
+                r
+                for raw, mfg in sorted(models, key=lambda m: m[0])
+                if (r := decode_mpn(raw, mfg)) is not None and r.specs
+            ]
         except Exception:
             stats["failed"] += len(fru_card_ids)
             logger.exception("fru-crosswalk: decode failed for fru_norm={}", fru_norm)
