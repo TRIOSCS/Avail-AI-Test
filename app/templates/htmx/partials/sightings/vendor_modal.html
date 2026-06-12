@@ -1,7 +1,8 @@
 {# Vendor selection + email compose modal for batch RFQ with preview step.
    Called by: "Send to Vendors" action bar button via @open-modal dispatch
    Depends on: modal.html pattern, HTMX, Alpine.js, preview_inquiry.html
-   Context: suggested_vendors, requirement_ids, parts
+   Context: suggested_vendors, coverage (card id → {count, avg_score, mpns}),
+            requirement_ids, parts
 #}
 
 {# The component logic lives in the rfqVendorModal() factory in app/static/htmx_app.js.
@@ -29,6 +30,11 @@
                  class="rounded border-gray-300">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-700">{{ v.display_name }}</span>
+            {% set cov = coverage.get(v.id) %}
+            {% if cov %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
+                  title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
+            {% endif %}
             {% if v.response_rate %}
             <span class="ml-2 text-[10px] text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
             {% endif %}

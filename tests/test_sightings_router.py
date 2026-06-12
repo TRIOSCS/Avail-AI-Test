@@ -707,28 +707,33 @@ class TestRfqModalUnavailableExclusion:
     """RFQ vendor modal excludes vendors with an ACTIVE unavailability record on the
     selected requirements' primary MPN keys (alongside the blacklist filter)."""
 
-    def _card(self, db_session, normalized="good vendor", display="Good Vendor"):
-        db_session.add(
-            VendorCard(
-                normalized_name=normalized,
-                display_name=display,
-                is_blacklisted=False,
-                engagement_score=50.0,
-            )
+    def _card(self, db_session, normalized="good vendor", display="Good Vendor", link_summary=None):
+        """Create a card; optionally link an existing summary via the vendor_card_id FK
+        (the coverage query joins on the FK, not the legacy name join)."""
+        card = VendorCard(
+            normalized_name=normalized,
+            display_name=display,
+            is_blacklisted=False,
+            engagement_score=50.0,
         )
+        db_session.add(card)
+        db_session.flush()
+        if link_summary is not None:
+            link_summary.vendor_card_id = card.id
         db_session.commit()
+        return card
 
     def test_excludes_marked_vendor_for_that_requirement(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        self._card(db_session)
+        _, r, s = _seed_data(db_session)
+        self._card(db_session, link_summary=s)
         _unav_record(db_session, requirement_id=r.id)
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
         assert resp.status_code == 200
         assert "Good Vendor" not in resp.text
 
     def test_still_suggested_for_unrelated_requirement(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        self._card(db_session)
+        _, r, s = _seed_data(db_session)
+        card = self._card(db_session, link_summary=s)
         _unav_record(db_session, requirement_id=r.id)  # key testmpn001 only
         req2 = Requisition(name="Other RFQ", status="active", customer_name="Other Co")
         db_session.add(req2)
@@ -746,6 +751,7 @@ class TestRfqModalUnavailableExclusion:
                 vendor_name="Good Vendor",
                 listing_count=1,
                 score=60.0,
+                vendor_card_id=card.id,
             )
         )
         db_session.commit()
@@ -755,8 +761,8 @@ class TestRfqModalUnavailableExclusion:
 
     def test_expired_record_returns_vendor_to_modal(self, client, db_session):
         """Active-only exclusion: an expired record no longer suppresses suggestions."""
-        _, r, _ = _seed_data(db_session)
-        self._card(db_session)
+        _, r, s = _seed_data(db_session)
+        self._card(db_session, link_summary=s)
         _unav_record(db_session, age_days=45, requirement_id=r.id)  # LOT window is 30d
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
         assert resp.status_code == 200
@@ -771,8 +777,9 @@ class TestRfqModalUnavailableExclusion:
         _, r, _ = _seed_data(db_session)
         # Legacy card: normalized_name kept the suffix, so notin_({'good vendor'})
         # does NOT filter it at the SQL layer.
-        self._card(db_session, normalized="good vendor inc", display="Good Vendor, Inc.")
-        # Summary whose lower(trim(vendor_name)) matches the legacy card's join key.
+        card = self._card(db_session, normalized="good vendor inc", display="Good Vendor, Inc.")
+        # Summary FK-linked to the legacy card (the coverage query joins on
+        # vendor_card_id, not the vendor_name spelling).
         db_session.add(
             VendorSightingSummary(
                 requirement_id=r.id,
@@ -781,6 +788,7 @@ class TestRfqModalUnavailableExclusion:
                 listing_count=1,
                 score=70.0,
                 tier="Good",
+                vendor_card_id=card.id,
             )
         )
         db_session.commit()
@@ -788,6 +796,127 @@ class TestRfqModalUnavailableExclusion:
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
         assert resp.status_code == 200
         assert "Good Vendor, Inc." not in resp.text
+
+
+class TestVendorModalCoverageRanking:
+    """Spec Part 2 §1 (bulk RFQ composer): suggested vendors are coverage-ranked over
+    VendorSightingSummary joined via the vendor_card_id FK — covered-part count desc,
+    then engagement desc.
+
+    Each row renders `N/M parts` with the covered MPNs in title; VSS rows with NULL
+    vendor_card_id are excluded by design (known vendors only).
+    """
+
+    def _requirements(self, db_session, mpns):
+        req = Requisition(name="Coverage RFQ", status="active", customer_name="Cov Co")
+        db_session.add(req)
+        db_session.flush()
+        items = []
+        for mpn in mpns:
+            r = Requirement(
+                requisition_id=req.id,
+                primary_mpn=mpn,
+                target_qty=10,
+                sourcing_status="open",
+            )
+            db_session.add(r)
+            items.append(r)
+        db_session.flush()
+        return items
+
+    def _vendor(self, db_session, display, engagement=0.0):
+        card = VendorCard(
+            normalized_name=display.lower(),  # no legal suffixes in test names
+            display_name=display,
+            is_blacklisted=False,
+            engagement_score=engagement,
+        )
+        db_session.add(card)
+        db_session.flush()
+        return card
+
+    def _summary(self, db_session, requirement, card=None, vendor_name=None, score=50.0):
+        s = VendorSightingSummary(
+            requirement_id=requirement.id,
+            vendor_name=vendor_name or (card.display_name if card else "Mystery Vendor"),
+            listing_count=1,
+            score=score,
+            vendor_card_id=card.id if card else None,
+        )
+        db_session.add(s)
+        return s
+
+    def _modal(self, client, items):
+        ids = ",".join(str(r.id) for r in items)
+        return client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={ids}")
+
+    def _seed_ranking(self, db_session):
+        """4 parts; Broadline covers 3 with low engagement, Hotshot covers 1 with
+        high."""
+        items = self._requirements(db_session, ["CV-MPN-1", "CV-MPN-2", "CV-MPN-3", "CV-MPN-4"])
+        broad = self._vendor(db_session, "Broadline Parts", engagement=5.0)
+        hot = self._vendor(db_session, "Hotshot Parts", engagement=99.0)
+        for r in items[:3]:
+            self._summary(db_session, r, broad)
+        self._summary(db_session, items[0], hot)
+        db_session.commit()
+        return items
+
+    def test_coverage_outranks_engagement(self, client, db_session):
+        """A vendor covering 3/4 parts ranks above a 1/4 vendor with higher engagement —
+        coverage desc is the primary sort key."""
+        items = self._seed_ranking(db_session)
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Broadline Parts" in resp.text
+        assert "Hotshot Parts" in resp.text
+        assert resp.text.index("Broadline Parts") < resp.text.index("Hotshot Parts")
+
+    def test_n_of_m_parts_rendered_with_mpn_title(self, client, db_session):
+        """Each suggested row shows `N/M parts` (M = selected part count) and lists the
+        covered MPNs in the chip's title attribute."""
+        items = self._seed_ranking(db_session)
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "3/4 parts" in resp.text
+        assert "1/4 parts" in resp.text
+        assert 'title="Covers: CV-MPN-1, CV-MPN-2, CV-MPN-3"' in resp.text
+        assert 'title="Covers: CV-MPN-1"' in resp.text
+
+    def test_excluded_vendor_absent(self, client, db_session):
+        """Unavailability exclusion is preserved under the coverage query."""
+        items = self._requirements(db_session, ["CV-MPN-9"])
+        card = self._vendor(db_session, "Dodgy Vendor")
+        self._summary(db_session, items[0], card)
+        db_session.commit()
+        _unav_record(db_session, vendor_norm="dodgy vendor", key="cvmpn9", requirement_id=items[0].id)
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Dodgy Vendor" not in resp.text
+
+    def test_null_vendor_card_id_summary_excluded(self, client, db_session):
+        """A VSS row with NULL vendor_card_id never suggests a vendor — even when a card
+        matches by name (the legacy lower(trim) join is gone by design)."""
+        items = self._requirements(db_session, ["CV-MPN-7"])
+        self._vendor(db_session, "Phantom Vendor")  # card exists, name matches
+        self._summary(db_session, items[0], card=None, vendor_name="Phantom Vendor")
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Phantom Vendor" not in resp.text
+
+    def test_coverage_counts_distinct_requirements(self, client, db_session):
+        """Two VSS spellings of one vendor on the same requirement count as 1 covered
+        part (count distinct requirement_id), not 2."""
+        items = self._requirements(db_session, ["CV-MPN-5"])
+        card = self._vendor(db_session, "Dupe Vendor")
+        self._summary(db_session, items[0], card, vendor_name="Dupe Vendor")
+        self._summary(db_session, items[0], card, vendor_name="Dupe Vendor LLC")
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "1/1 parts" in resp.text
+        assert "2/1 parts" not in resp.text
 
 
 class TestSendInquiryUnavailableExclusion:
@@ -1198,17 +1327,18 @@ class TestSightingsVendorModal:
         fix routes the data through a single-quoted x-data invoking the rfqVendorModal()
         factory, so the attribute — and the vendor name inside it — parse intact.
         """
-        _, r, _ = _seed_data(db_session)
-        # VendorCard whose normalized_name matches lower(trim(vendor_name)) so the
-        # suggested_vendors join returns a non-empty list (the failing scenario).
-        db_session.add(
-            VendorCard(
-                normalized_name="good vendor",
-                display_name="Good Vendor",
-                is_blacklisted=False,
-                engagement_score=50.0,
-            )
+        _, r, s = _seed_data(db_session)
+        # VendorCard FK-linked to the seeded summary (the coverage query joins on
+        # vendor_card_id) so suggested_vendors is non-empty (the failing scenario).
+        card = VendorCard(
+            normalized_name="good vendor",
+            display_name="Good Vendor",
+            is_blacklisted=False,
+            engagement_score=50.0,
         )
+        db_session.add(card)
+        db_session.flush()
+        s.vendor_card_id = card.id
         db_session.commit()
 
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")

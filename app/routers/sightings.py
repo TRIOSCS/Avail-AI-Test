@@ -1327,12 +1327,24 @@ async def sightings_vendor_modal(
     excluded = excluded_vendor_norms(db, requirements) if requirements else set()
 
     suggested_vendors: list[VendorCard] = []
+    coverage: dict[int, dict[str, Any]] = {}
     if req_id_list:
+        # Coverage-ranked suggestions: one grouped query over VendorSightingSummary
+        # filtered to the selected requirements, joined to VendorCard via the
+        # vendor_card_id FK (indexed ix_vss_vendor_card) — NOT the legacy
+        # lower(trim(vendor_name)) name join. VSS rows with NULL vendor_card_id are
+        # excluded by design: the modal suggests known vendors (cards), never raw
+        # sighting names. Plain-column aggregates only (SQLite+PG safe).
+        covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
         vendor_query = (
-            db.query(VendorCard)
+            db.query(
+                VendorCard,
+                covered_count.label("covered_count"),
+                sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
+            )
             .join(
                 VendorSightingSummary,
-                sqlfunc.lower(sqlfunc.trim(VendorSightingSummary.vendor_name)) == VendorCard.normalized_name,
+                VendorSightingSummary.vendor_card_id == VendorCard.id,
             )
             .filter(
                 VendorSightingSummary.requirement_id.in_(req_id_list),
@@ -1341,9 +1353,44 @@ async def sightings_vendor_modal(
         )
         if excluded:
             vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
-        suggested_vendors = (
-            vendor_query.order_by(VendorCard.engagement_score.desc().nullslast()).distinct().limit(20).all()
+        rows = (
+            vendor_query.group_by(VendorCard.id)
+            .order_by(
+                covered_count.desc(),
+                VendorCard.engagement_score.desc().nullslast(),
+                VendorCard.id,
+            )
+            .limit(20)
+            .all()
         )
+        suggested_vendors = [card for card, _, _ in rows]
+        coverage = {
+            card.id: {
+                "count": int(n_covered),
+                "avg_score": float(avg_score) if avg_score is not None else None,
+                "mpns": "",
+            }
+            for card, n_covered, avg_score in rows
+        }
+        if coverage:
+            # Covered-MPN list per vendor (rendered in the row's `title`) — a second
+            # plain query; no string_agg/group_concat (SQLite vs PG divergence).
+            mpn_rows = (
+                db.query(VendorSightingSummary.vendor_card_id, Requirement.primary_mpn)
+                .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
+                .filter(
+                    VendorSightingSummary.requirement_id.in_(req_id_list),
+                    VendorSightingSummary.vendor_card_id.in_(list(coverage)),
+                )
+                .distinct()
+                .all()
+            )
+            mpns_by_card: dict[int, set[str]] = {}
+            for card_id, mpn in mpn_rows:
+                if mpn:
+                    mpns_by_card.setdefault(card_id, set()).add(mpn)
+            for card_id, mpns in mpns_by_card.items():
+                coverage[card_id]["mpns"] = ", ".join(sorted(mpns))
         if excluded:
             # Belt and braces: some legacy cards carry a normalized_name that predates
             # normalize_vendor_name (suffix kept) — re-check through the canonical
@@ -1353,10 +1400,12 @@ async def sightings_vendor_modal(
                 for v in suggested_vendors
                 if normalize_vendor_name(v.display_name or v.normalized_name or "") not in excluded
             ]
+            coverage = {v.id: coverage[v.id] for v in suggested_vendors}
 
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
+        "coverage": coverage,
         "requirement_ids": req_id_list,
         "parts": parts,
     }
