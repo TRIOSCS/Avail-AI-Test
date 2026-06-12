@@ -9,11 +9,11 @@ Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
-from sqlalchemy import Text, cast, exists, func, or_
+from sqlalchemy import Text, and_, cast, exists, func, or_
 from sqlalchemy.orm import Session
 
 from app.constants import MaterialEnrichmentStatus
-from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet, MaterialVendorHistory
+from app.models import CommoditySpecSchema, FruLink, MaterialCard, MaterialSpecFacet, MaterialVendorHistory
 from app.utils.search_builder import SearchBuilder
 
 # Max distinct values rendered for an open-vocabulary (no enum_values) enum facet.
@@ -38,6 +38,34 @@ _INTERNAL_MODE_PREDICATES = {
 INTERNAL_FILTER_VALUES = ("all", *_INTERNAL_MODE_PREDICATES)  # "all" = no-op sentinel
 SEARCHED_WITHIN_DAYS = {"7d": 7, "30d": 30, "90d": 90}
 SEARCHED_WITHIN_VALUES = ("any", *SEARCHED_WITHIN_DAYS)  # "any" = no-op sentinel
+
+
+def has_crosses_predicate():
+    """The single "Has alternates" predicate — share it across every count/list path.
+
+    A card has alternates when its ``normalized_mpn`` appears in the FRU crosswalk
+    (``fru_links``) in EITHER direction — as the FRU (``fru_norm``) or as the related
+    part (``related_norm``) — OR when its manual ``cross_references`` JSON holds a
+    non-empty list. Both sides of the fru_links join are key-normalized
+    (``normalize_mpn_key``): ``fru_norm``/``related_norm`` by the FRU-matrix ingest and
+    ``normalized_mpn`` by the card ingest, so direct equality is the canonical join
+    (same contract as fru_crosswalk_enrich / fru_matrix_service).
+
+    Two separate ORed EXISTS (not one EXISTS with an OR inside) is deliberate:
+    PostgreSQL turns each into a hashed SubPlan fed by a single index-only scan of
+    ix_fru_links_fru_norm / ix_fru_links_related_norm, instead of a per-row correlated
+    probe. The cross_references branch keeps the portable non-empty-JSON-list test:
+    PG jsonb::text renders an empty array as '[]' and a JSON null as 'null'; SQLite
+    stores json.dumps() output, which matches the same literals.
+    """
+    return or_(
+        exists().where(FruLink.fru_norm == MaterialCard.normalized_mpn),
+        exists().where(FruLink.related_norm == MaterialCard.normalized_mpn),
+        and_(
+            MaterialCard.cross_references.isnot(None),
+            cast(MaterialCard.cross_references, Text).notin_(("[]", "null", "")),
+        ),
+    )
 
 
 def _apply_facet_filters(
@@ -283,8 +311,9 @@ def search_materials_faceted(
             ("has vendor sightings / stock seen").
         has_price: When True, restrict to cards with a vendor-history row carrying a
             recorded last_price.
-        has_crosses: When True, restrict to cards whose cross_references JSON holds a
-            non-empty list (portable across PostgreSQL JSONB and SQLite JSON-as-text).
+        has_crosses: When True, restrict to cards with at least one known alternate —
+            a fru_links crosswalk edge on normalized_mpn (either direction) OR a
+            non-empty cross_references JSON list (see has_crosses_predicate).
         internal: Tri-state — "all" (no-op), "standard" (is_internal_part FALSE/NULL),
             "internal" (is_internal_part TRUE). Unknown values degrade to "all".
         searched_within: Recency bucket on last_searched_at — "7d" | "30d" | "90d" |
@@ -376,14 +405,7 @@ def search_materials_faceted(
             )
         )
     if has_crosses:
-        # Portable non-empty-JSON-list predicate: PG jsonb::text renders an empty array
-        # as '[]' and a JSON null as 'null'; SQLite stores json.dumps() output, which
-        # matches the same literals. Avoids PG-only jsonb_array_length() that SQLite
-        # tests would silently mis-handle.
-        query = query.filter(
-            MaterialCard.cross_references.isnot(None),
-            cast(MaterialCard.cross_references, Text).notin_(("[]", "null", "")),
-        )
+        query = query.filter(has_crosses_predicate())
     internal_predicate = _INTERNAL_MODE_PREDICATES.get(internal)
     if internal_predicate is not None:
         query = query.filter(internal_predicate())

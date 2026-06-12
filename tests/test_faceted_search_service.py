@@ -816,3 +816,106 @@ def test_get_commodity_spec_coverage(db_session: Session):
     # Case-insensitive commodity key, and an unknown commodity yields zeros.
     assert get_commodity_spec_coverage(db_session, "  DRAM ") == SpecCoverage(with_specs=1, total=2)
     assert get_commodity_spec_coverage(db_session, "nonexistent_xyz") == SpecCoverage(with_specs=0, total=0)
+
+
+# --- "Has alternates" (has_crosses): fru_links crosswalk OR manual cross_references ---
+
+
+def _cross_card(db, mpn, **kw):
+    card = MaterialCard(
+        normalized_mpn=mpn,
+        display_mpn=mpn.upper(),
+        category=kw.pop("category", "hdd"),
+        created_at=datetime.now(timezone.utc),
+        **kw,
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def _fru_edge(db, fru_norm, related_norm, kind=None):
+    from app.constants import FruLinkKind
+    from app.models import FruLink
+
+    link = FruLink(
+        fru_raw=fru_norm.upper(),
+        fru_norm=fru_norm,
+        related_raw=related_norm.upper(),
+        related_norm=related_norm,
+        rel_kind=(kind or FruLinkKind.MFG_MODEL).value,
+        source_sheet="Main",
+    )
+    db.add(link)
+    db.flush()
+    return link
+
+
+def test_has_crosses_matches_fru_links_both_directions(db_session: Session):
+    """A card matches when its normalized_mpn sits on EITHER side of a fru_links
+    edge."""
+    _cross_card(db_session, "00aj001")  # FRU side (fru_norm)
+    _cross_card(db_session, "st9300603ss")  # related side (related_norm)
+    _cross_card(db_session, "lonely001")  # no edges, no cross_references
+    _fru_edge(db_session, "00aj001", "st9300603ss")
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, has_crosses=True)
+    assert total == 2
+    assert {r.normalized_mpn for r in results} == {"00aj001", "st9300603ss"}
+
+
+def test_has_crosses_keeps_manual_cross_references_branch(db_session: Session):
+    """A card with manual cross_references but NO fru_links edge still matches (OR
+    branch)."""
+    _cross_card(db_session, "manualx01", cross_references=[{"mpn": "ALT-1"}])
+    _cross_card(db_session, "emptycross", cross_references=[])  # empty list is NOT an alternate
+    _cross_card(db_session, "nullcross", cross_references=None)
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, has_crosses=True)
+    assert total == 1
+    assert results[0].normalized_mpn == "manualx01"
+
+
+def test_has_crosses_excludes_unrelated_and_is_noop_when_false(db_session: Session):
+    """No fru_links edge + no cross_references -> excluded; has_crosses=False filters
+    nothing."""
+    _cross_card(db_session, "plain001")
+    _cross_card(db_session, "plain002")
+    db_session.flush()
+
+    _, total_filtered = search_materials_faceted(db_session, has_crosses=True)
+    assert total_filtered == 0
+
+    _, total_all = search_materials_faceted(db_session, has_crosses=False)
+    assert total_all == 2
+
+
+def test_has_crosses_count_consistent_and_dedups_overlap(db_session: Session):
+    """Total == len(results): a card matched by BOTH fru_links AND cross_references
+    counts once."""
+    _cross_card(db_session, "bothways1", cross_references=[{"mpn": "ALT-9"}])
+    _fru_edge(db_session, "bothways1", "wd4000fyyz")
+    # The edge's related side has no card row -- the EXISTS must not invent results.
+    _cross_card(db_session, "plain003")
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, has_crosses=True)
+    assert total == len(results) == 1
+    assert results[0].normalized_mpn == "bothways1"
+
+
+def test_has_crosses_predicate_shared_by_list_and_count(db_session: Session):
+    """The list rows and the total come from the same predicate under combined
+    filters."""
+    fru_card = _cross_card(db_session, "00fruhdd1", category="hdd")
+    _cross_card(db_session, "00fruram1", category="dram")  # crossed, wrong commodity
+    _cross_card(db_session, "nocross01", category="hdd")  # right commodity, no alternates
+    _fru_edge(db_session, "00fruhdd1", "st4000nm0023")
+    _fru_edge(db_session, "00fruram1", "m393a2g40db1")
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, commodity="hdd", has_crosses=True)
+    assert total == len(results) == 1
+    assert results[0].id == fru_card.id

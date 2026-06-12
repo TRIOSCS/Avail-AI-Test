@@ -1876,8 +1876,15 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     /v2/partials/materials/faceted → search_materials_faceted():
     |       has_stock   (EXISTS MaterialVendorHistory row)
     |       has_price   (EXISTS row with last_price IS NOT NULL)
-    |       has_crosses (cross_references holds a non-empty list; portable text-cast
-    |                    predicate — identical on PG JSONB and SQLite JSON-as-text)
+    |       has_crosses ("Has alternates" — has_crosses_predicate(), the single
+    |                    shared predicate for every list/count path: EXISTS fru_links
+    |                    on normalized_mpn in EITHER direction (fru_norm OR
+    |                    related_norm; two separate ORed EXISTS so PG plans hashed
+    |                    SubPlans over ix_fru_links_fru_norm/_related_norm — both
+    |                    sides are normalize_mpn_key form, direct equality is the
+    |                    canonical join) OR cross_references holds a non-empty list
+    |                    (portable text-cast predicate — identical on PG JSONB and
+    |                    SQLite JSON-as-text))
     |       internal    (tri-state all|standard|internal on is_internal_part; default
     |                    `all` — deliberately not `standard` — so first load never
     |                    silently drops rows)
