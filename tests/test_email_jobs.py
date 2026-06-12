@@ -1146,6 +1146,46 @@ class TestScanSentFolder:
             result = await scan_sent_folder(user, mock_db)
             assert len(result) >= 1
 
+    @pytest.mark.asyncio
+    async def test_scan_multi_token_subject_attributes_all_requisitions(self):
+        """A sent message tagged with TWO [ref:] tokens (cross-requisition RFQ) creates
+        one ActivityLog per token requisition."""
+        from app.jobs.email_jobs import scan_sent_folder
+
+        user = MagicMock()
+        user.id = 1
+        user.email = "buyer@trioscs.com"
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+
+        gc_mock = MagicMock()
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "msg-multi-001",
+                        "subject": "RFQ — 2 parts [ref:12] [ref:34]",
+                        "sentDateTime": "2026-06-01T10:00:00Z",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+                        "hasAttachments": False,
+                    }
+                ],
+                None,
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            result = await scan_sent_folder(user, mock_db)
+
+        assert len(result) == 2
+        assert sorted(log.requisition_id for log in result) == [12, 34]
+        # Both rows are the SAME message — shared external_id, same recipient
+        assert {log.external_id for log in result} == {"msg-multi-001"}
+        assert {log.contact_email for log in result} == {"vendor@arrow.com"}
+
 
 # ── detect_attachments ───────────────────────────────────────────────
 

@@ -910,11 +910,10 @@ async def scan_sent_folder(user, db):
         if recipients:
             first_recipient = recipients[0].get("emailAddress", {}).get("address", "")
 
-        # Check for [AVAIL-{id}] tag to link to requisition
-        requisition_id = None
-        tag_match = RFQ_SUBJECT_TAG_RE.search(subject)
-        if tag_match:
-            requisition_id = int(tag_match.group(1))
+        # Check for [ref:{id}]/[AVAIL-{id}] tags to link to requisitions. A
+        # cross-requisition RFQ carries one token per involved requisition —
+        # attribute the sent email to ALL of them (untagged → one unlinked row).
+        token_req_ids: list[int | None] = list(dict.fromkeys(int(t) for t in RFQ_SUBJECT_TAG_RE.findall(subject)))
 
         # Parse sentDateTime
         occurred_at = None
@@ -924,22 +923,24 @@ async def scan_sent_folder(user, db):
             except (ValueError, TypeError):
                 occurred_at = datetime.now(timezone.utc)
 
-        # Create ActivityLog entry
-        log_entry = ActivityLog(
-            user_id=user.id,
-            activity_type="email_sent",
-            channel="email",
-            direction="outbound",
-            event_type="email",
-            subject=subject[:500] if subject else None,
-            contact_email=first_recipient or None,
-            external_id=msg_id,
-            requisition_id=requisition_id,
-            auto_logged=True,
-            occurred_at=occurred_at,
-        )
-        db.add(log_entry)
-        created_logs.append(log_entry)
+        # Create one ActivityLog entry per token requisition (they share the
+        # message's external_id, so the dedup check above still skips re-scans)
+        for requisition_id in token_req_ids or [None]:
+            log_entry = ActivityLog(
+                user_id=user.id,
+                activity_type="email_sent",
+                channel="email",
+                direction="outbound",
+                event_type="email",
+                subject=subject[:500] if subject else None,
+                contact_email=first_recipient or None,
+                external_id=msg_id,
+                requisition_id=requisition_id,
+                auto_logged=True,
+                occurred_at=occurred_at,
+            )
+            db.add(log_entry)
+            created_logs.append(log_entry)
 
         # Check for file attachments (exclude inline images)
         if msg.get("hasAttachments"):

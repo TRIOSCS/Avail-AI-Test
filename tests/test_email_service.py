@@ -48,6 +48,8 @@ from app.models import (
     Contact,
     PendingBatch,
     ProcessedMessage,
+    Requirement,
+    Requisition,
     SyncState,
     User,
     VendorResponse,
@@ -945,6 +947,274 @@ class TestSendBatchRfq:
 
         # Both groups sent (no rephrase gating)
         assert mock_gc.post_json.call_count == 2
+
+
+# ── send_batch_rfq: cross-requisition tracking ───────────────────────
+
+
+def _two_requisitions(db_session, test_user):
+    """Two requisitions, one requirement each, for cross-requisition sends."""
+    reqs = []
+    for i, mpn in enumerate(["CROSS-MPN-A", "CROSS-MPN-B"]):
+        req = Requisition(
+            name=f"REQ-CROSS-{i}",
+            customer_name="Acme Electronics",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        db_session.add(
+            Requirement(
+                requisition_id=req.id,
+                primary_mpn=mpn,
+                target_qty=100 * (i + 1),
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        reqs.append(req)
+    db_session.commit()
+    return reqs
+
+
+class TestSendBatchRfqCrossRequisition:
+    """Per-requisition Contact fan-out (requisition_parts_map) in send_batch_rfq.
+
+    One email per vendor; one Contact per (requisition, vendor) sharing that email's
+    graph ids; subject carries one [ref:{id}] token per requisition in ascending
+    requisition-id order. The legacy scalar requisition_id shape (htmx_views.rfq_send)
+    stays byte-identical.
+    """
+
+    @pytest.mark.asyncio
+    async def test_multi_requisition_contact_fanout(self, db_session, test_user):
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+        expected_tokens = f"[ref:{req_a.id}] [ref:{req_b.id}]"
+        tagged = f"RFQ {expected_tokens}"
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        # One sent-message lookup per vendor — distinct graph ids per vendor.
+        mock_gc.get_json.side_effect = [
+            {"value": [{"id": "sent-a", "conversationId": "conv-vendor-a", "subject": tagged}]},
+            {"value": [{"id": "sent-b", "conversationId": "conv-vendor-b", "subject": tagged}]},
+        ]
+
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote please"},
+            {"vendor_name": "Vendor B", "vendor_email": "b@vendorb.com", "subject": "RFQ", "body": "Quote please"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        assert [r["status"] for r in results] == ["sent", "sent"]
+
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        assert len(contacts) == 4  # 2 requisitions x 2 vendors
+        pairs = {(c.requisition_id, c.vendor_name) for c in contacts}
+        assert pairs == {
+            (req_a.id, "Vendor A"),
+            (req_b.id, "Vendor A"),
+            (req_a.id, "Vendor B"),
+            (req_b.id, "Vendor B"),
+        }
+        for c in contacts:
+            # parts_included scoped to that contact's own requisition
+            assert c.parts_included == parts_map[c.requisition_id]
+            # every row carries the full multi-token subject
+            assert expected_tokens in c.subject
+        # Graph ids shared per vendor (same email), distinct across vendors.
+        by_vendor: dict = {}
+        for c in contacts:
+            by_vendor.setdefault(c.vendor_name, set()).add((c.graph_message_id, c.graph_conversation_id))
+        assert by_vendor["Vendor A"] == {("sent-a", "conv-vendor-a")}
+        assert by_vendor["Vendor B"] == {("sent-b", "conv-vendor-b")}
+
+    @pytest.mark.asyncio
+    async def test_subject_tokens_sorted_by_requisition_id(self, db_session, test_user):
+        """Token order is deterministic (ascending requisition id), regardless of map
+        insertion order."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        # Deliberately reversed insertion order.
+        parts_map = {
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+        }
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.return_value = {"value": []}
+
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        payload = mock_gc.post_json.call_args[0][1]
+        assert payload["message"]["subject"] == f"RFQ [ref:{req_a.id}] [ref:{req_b.id}]"
+
+    @pytest.mark.asyncio
+    async def test_legacy_scalar_requisition_id_shape_unchanged(self, db_session, test_user, test_requisition):
+        """Regression: the htmx_views.rfq_send call shape (scalar requisition_id,
+        parts as TEXT) is byte-identical — one Contact, single token, parts passed
+        through untouched, parts_count keeps its historical len() semantics."""
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.return_value = {"value": []}
+
+        vendor_groups = [
+            {
+                "vendor_name": "Vendor A",
+                "vendor_email": "a@vendora.com",
+                "parts": "LM317T x100",  # rfq_send passes a parts_summary STRING
+                "subject": "RFQ - Req",
+                "body": "Quote please",
+            }
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                requisition_id=test_requisition.id,
+                vendor_groups=vendor_groups,
+            )
+
+        contacts = db_session.query(Contact).all()
+        assert len(contacts) == 1
+        c = contacts[0]
+        assert c.requisition_id == test_requisition.id
+        assert c.parts_included == "LM317T x100"
+        assert c.subject == f"RFQ - Req [ref:{test_requisition.id}]"
+        assert results[0]["status"] == "sent"
+        assert results[0]["parts_count"] == len("LM317T x100")
+
+    @pytest.mark.asyncio
+    async def test_failed_send_creates_contact_per_requisition(self, db_session, test_user):
+        """A failed vendor send still records a Contact on EVERY involved requisition
+        (the failure must be visible on each one's history)."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.side_effect = Exception("SMTP Error")
+
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        assert len(results) == 1
+        assert results[0]["status"] == "failed"
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        assert len(contacts) == 2
+        assert {c.requisition_id for c in contacts} == {req_a.id, req_b.id}
+        for c in contacts:
+            assert c.status == "failed"
+            assert "SMTP Error" in c.error_message
+            assert c.parts_included == parts_map[c.requisition_id]
+
+    @pytest.mark.asyncio
+    async def test_tag_propagation_covers_all_requisitions(self, db_session, test_user):
+        """The tag-propagation block reads requirements from ALL involved requisitions,
+        not just one."""
+        from app.models import MaterialCard, VendorCard
+
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        cards = []
+        for req in (req_a, req_b):
+            card = MaterialCard(normalized_mpn=f"CARD-{req.id}", display_mpn=f"CARD-{req.id}")
+            db_session.add(card)
+            db_session.flush()
+            requirement = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).one()
+            requirement.material_card_id = card.id
+            cards.append(card)
+        db_session.add(
+            VendorCard(
+                normalized_name="vendor a",
+                display_name="Vendor A",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.commit()
+
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.return_value = {"value": []}
+        mock_propagate = MagicMock()
+
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("app.services.tagging.propagate_tags_to_entity", mock_propagate),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        propagated_card_ids = {call.args[2] for call in mock_propagate.call_args_list}
+        assert propagated_card_ids == {cards[0].id, cards[1].id}
 
 
 # ── parse_response_ai ────────────────────────────────────────────────
@@ -2211,6 +2481,205 @@ class TestPollInbox:
 
         # Should be unmatched (email_exact and domain maps are user-scoped)
         assert len(results) == 1
+
+
+# ── poll_inbox: cross-requisition reply fan-out ──────────────────────
+
+
+class TestPollInboxCrossRequisitionFanout:
+    """Reply matching against per-(requisition, vendor) Contact rows.
+
+    Tier-1: a conversation id maps to a LIST of Contacts — the reply is
+    attributed to ALL of them (one VendorResponse per message, every Contact
+    progressed). Tier-2: every [ref:] token in the subject is resolved.
+    """
+
+    def _make_inbox_message(
+        self,
+        msg_id="msg-1",
+        sender_email="vendor@parts.com",
+        subject="RE: RFQ",
+        conv_id="conv-1",
+    ):
+        return {
+            "id": msg_id,
+            "subject": subject,
+            "from": {"emailAddress": {"address": sender_email, "name": "Vendor"}},
+            "bodyPreview": "Quote attached",
+            "body": {"content": "<p>Quote attached</p>"},
+            "conversationId": conv_id,
+            "receivedDateTime": None,
+        }
+
+    def _fanout_contacts(self, db_session, test_user, conv_id=None):
+        """Two Contacts (one per requisition) for ONE vendor email — the rows a cross-
+        requisition send_batch_rfq writes."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        contacts = []
+        for req in (req_a, req_b):
+            c = Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="email",
+                vendor_name="Vendor A",
+                vendor_contact="vendor@parts.com",
+                graph_conversation_id=conv_id,
+                status="sent",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(c)
+            contacts.append(c)
+        db_session.commit()
+        return req_a, req_b, contacts
+
+    @pytest.mark.asyncio
+    async def test_tier1_reply_attributed_to_all_contacts_sharing_conversation(self, db_session, test_user):
+        req_a, req_b, (c1, c2) = self._fanout_contacts(db_session, test_user, conv_id="conv-shared")
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="vendor@parts.com",
+                    conv_id="conv-shared",
+                ),
+            ]
+        }
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        # Exactly ONE VendorResponse per message (per-message, not per-requisition)
+        vrs = db_session.query(VendorResponse).all()
+        assert len(vrs) == 1
+        assert vrs[0].contact_id == c1.id  # contacts[0] = earliest Contact
+        assert results[0]["matched_contact_id"] == c1.id
+        assert results[0]["matched_requisition_id"] == req_a.id
+        # BOTH contacts progressed (sent -> responded)
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "responded"
+        assert c2.status == "responded"
+
+    @pytest.mark.asyncio
+    async def test_tier2_multi_token_subject_matches_all_requisitions(self, db_session, test_user):
+        """A reply whose subject carries BOTH [ref:] tokens (no conversation-id match)
+        resolves every (token req, sender email) pair."""
+        req_a, req_b, (c1, c2) = self._fanout_contacts(db_session, test_user, conv_id=None)
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="vendor@parts.com",
+                    subject=f"RE: RFQ — 2 parts [ref:{req_a.id}] [ref:{req_b.id}]",
+                    conv_id="unrelated-conv",
+                ),
+            ]
+        }
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        assert len(db_session.query(VendorResponse).all()) == 1
+        assert results[0]["matched_contact_id"] == c1.id
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "responded"
+        assert c2.status == "responded"
+
+    @pytest.mark.asyncio
+    async def test_tier2_multi_token_no_email_match_assigns_first_token_req(self, db_session, test_user):
+        """Tokens found but unknown sender: the VendorResponse is assigned to the
+        first token's requisition (existing single-token behavior preserved)."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="unknown@vendor.com",
+                    subject=f"RE: RFQ [ref:{req_a.id}] [ref:{req_b.id}]",
+                    conv_id="no-match-conv",
+                ),
+            ]
+        }
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        assert results[0]["matched_contact_id"] is None
+        assert results[0]["matched_requisition_id"] == req_a.id
+
+    @pytest.mark.asyncio
+    async def test_send_then_reply_end_to_end(self, db_session, test_user):
+        """Full loop: cross-requisition send writes fan-out Contacts sharing a
+        conversation id; a reply on that conversation progresses ALL of them."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+        tagged = f"RFQ [ref:{req_a.id}] [ref:{req_b.id}]"
+
+        send_gc = AsyncMock()
+        send_gc.post_json.return_value = {}
+        send_gc.get_json.return_value = {"value": [{"id": "sent-e2e", "conversationId": "conv-e2e", "subject": tagged}]}
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "vendor@parts.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=send_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        assert len(contacts) == 2
+        assert all(c.graph_conversation_id == "conv-e2e" for c in contacts)
+
+        poll_gc = AsyncMock()
+        poll_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="vendor@parts.com",
+                    conv_id="conv-e2e",
+                ),
+            ]
+        }
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=poll_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        assert len(db_session.query(VendorResponse).all()) == 1
+        for c in contacts:
+            db_session.refresh(c)
+            assert c.status == "responded"
+        assert {c.requisition_id for c in contacts} == {req_a.id, req_b.id}
 
 
 # ── process_batch_results ────────────────────────────────────────────

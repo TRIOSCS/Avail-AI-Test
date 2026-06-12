@@ -40,7 +40,7 @@ def _build_html_body(plain_text: str) -> str:
 
 def _create_contact(
     db: Session,
-    requisition_id: int,
+    requisition_id: int | None,
     user_id: int,
     vendor_name: str,
     vendor_email: str,
@@ -80,8 +80,9 @@ async def send_batch_rfq(
     token: str,
     db: Session,
     user_id: int,
-    requisition_id: int,
-    vendor_groups: list[dict],
+    requisition_id: int | None = None,
+    vendor_groups: list[dict] | None = None,
+    requisition_parts_map: dict[int, list] | None = None,
 ) -> list[dict]:
     """Send one RFQ email per vendor group.
 
@@ -89,14 +90,41 @@ async def send_batch_rfq(
     Returns one result dict per requested vendor, each tagged ``status``:
     ``"sent"``, ``"failed"`` (a send was attempted but errored), or ``"skipped"``
     (no contact email on file — no email attempted, no Contact created).
+
+    Cross-requisition tracking: when ``requisition_parts_map`` ({requisition_id:
+    parts}) is provided, ONE email still goes out per vendor, but one Contact row
+    is written per (requisition, vendor) pair — each scoped to that requisition's
+    parts, all sharing the email's graph_message_id/graph_conversation_id — and
+    the subject carries one ``[ref:{id}]`` token per requisition (ascending id
+    order, so preview and send stay deterministic and identical).
+
+    Legacy shim: without the map, the scalar ``requisition_id`` behaves exactly
+    as before (one Contact per vendor, parts taken from each vendor group) —
+    callers like htmx_views.rfq_send need no change.
     """
     from app.utils.graph_client import GraphClient
+
+    vendor_groups = vendor_groups or []
+    # Legacy scalar shim: a missing/empty map means single-requisition mode where
+    # each Contact's parts come from its vendor group (byte-identical behavior).
+    parts_map: dict[int, list] = requisition_parts_map or {}
+    legacy_mode = not parts_map
+    req_ids: list[int | None] = [requisition_id] if legacy_mode else sorted(parts_map)
+
+    def _per_req_parts(group: dict) -> list[tuple[int | None, list]]:
+        """(requisition_id, parts) pairs to write Contacts for, per vendor."""
+        if legacy_mode:
+            return [(requisition_id, group.get("parts", []))]
+        return [(rid, parts_map[rid]) for rid in req_ids if rid is not None]
 
     gc = GraphClient(token)
     results = []
 
-    # Build payloads and send all emails in parallel
-    avail_token = f"[ref:{requisition_id}]"
+    # Build payloads and send all emails in parallel. One token per involved
+    # requisition, ascending id — identical to the sightings preview. A None
+    # requisition (degenerate legacy call) yields no token at all, matching the
+    # preview's untagged subject.
+    avail_token = " ".join(f"[ref:{rid}]" for rid in req_ids if rid is not None)
     send_tasks = []
     send_groups = []  # Track which groups we're sending for
 
@@ -147,8 +175,9 @@ async def send_batch_rfq(
 
     send_results = await asyncio.gather(*[_throttled_send(task) for task in send_tasks], return_exceptions=True)
 
-    # Process results: create Contact records, then batch-lookup sent message IDs
-    contacts_to_lookup = []  # (contact, tagged_subject) pairs
+    # Process results: create Contact records (one per involved requisition per
+    # vendor), then batch-lookup sent message IDs
+    contacts_to_lookup = []  # (contacts_for_one_vendor, tagged_subject) pairs
     for group, send_result in zip(send_groups, send_results):
         email = group["vendor_email"]
         tagged_subject = group.pop("_tagged_subject")
@@ -156,21 +185,24 @@ async def send_batch_rfq(
         if isinstance(send_result, Exception):
             logger.error(f"Send error to {email}: {send_result}")
             err_msg = str(send_result)[:500]
-            failed_contact = _create_contact(
-                db,
-                requisition_id,
-                user_id,
-                group["vendor_name"],
-                email,
-                group.get("parts", []),
-                tagged_subject,
-                group["body"],
-                "failed",
-                err_msg,
-            )
+            failed_contacts = [
+                _create_contact(
+                    db,
+                    rid,
+                    user_id,
+                    group["vendor_name"],
+                    email,
+                    parts,
+                    tagged_subject,
+                    group["body"],
+                    "failed",
+                    err_msg,
+                )
+                for rid, parts in _per_req_parts(group)
+            ]
             results.append(
                 {
-                    "id": failed_contact.id,
+                    "id": failed_contacts[0].id if failed_contacts else None,
                     "vendor_name": group["vendor_name"],
                     "vendor_email": email,
                     "status": "failed",
@@ -182,21 +214,24 @@ async def send_batch_rfq(
         if "error" in send_result:
             logger.error(f"Send failed to {email}: {send_result}")
             err_msg = str(send_result.get("detail", ""))[:500]
-            failed_contact = _create_contact(
-                db,
-                requisition_id,
-                user_id,
-                group["vendor_name"],
-                email,
-                group.get("parts", []),
-                tagged_subject,
-                group["body"],
-                "failed",
-                err_msg,
-            )
+            failed_contacts = [
+                _create_contact(
+                    db,
+                    rid,
+                    user_id,
+                    group["vendor_name"],
+                    email,
+                    parts,
+                    tagged_subject,
+                    group["body"],
+                    "failed",
+                    err_msg,
+                )
+                for rid, parts in _per_req_parts(group)
+            ]
             results.append(
                 {
-                    "id": failed_contact.id,
+                    "id": failed_contacts[0].id if failed_contacts else None,
                     "vendor_name": group["vendor_name"],
                     "vendor_email": email,
                     "status": "failed",
@@ -205,53 +240,67 @@ async def send_batch_rfq(
             )
             continue
 
-        contact = _create_contact(
-            db,
-            requisition_id,
-            user_id,
-            group["vendor_name"],
-            email,
-            group.get("parts", []),
-            tagged_subject,
-            group["body"],
-            "sent",
-        )
-        contacts_to_lookup.append((contact, tagged_subject))
+        contacts = [
+            _create_contact(
+                db,
+                rid,
+                user_id,
+                group["vendor_name"],
+                email,
+                parts,
+                tagged_subject,
+                group["body"],
+                "sent",
+            )
+            for rid, parts in _per_req_parts(group)
+        ]
+        if contacts:
+            contacts_to_lookup.append((contacts, tagged_subject))
         results.append(
             {
-                "id": contact.id,
-                "vendor_name": contact.vendor_name,
+                "id": contacts[0].id if contacts else None,
+                "vendor_name": group["vendor_name"],
                 "vendor_email": email,
-                "parts_count": len(contact.parts_included),
+                # Per-vendor total across all involved requisitions (legacy
+                # single-requisition: len of the group's parts, unchanged).
+                "parts_count": sum(len(c.parts_included or []) for c in contacts),
                 "status": "sent",
             }
         )
 
-    # Batch-lookup sent message IDs in parallel for reply matching
+    # Batch-lookup sent message IDs in parallel for reply matching. One email per
+    # vendor → all of that vendor's per-requisition Contacts share its graph ids.
     if contacts_to_lookup:
         lookup_results = await asyncio.gather(
             *[_find_sent_message(gc, subj) for _, subj in contacts_to_lookup],
             return_exceptions=True,
         )
-        for (contact, _), sent_msg in zip(contacts_to_lookup, lookup_results):
+        for (contacts, _), sent_msg in zip(contacts_to_lookup, lookup_results):
             if isinstance(sent_msg, dict) and sent_msg:
-                contact.graph_message_id = sent_msg.get("id")
-                contact.graph_conversation_id = sent_msg.get("conversationId")
+                for contact in contacts:
+                    contact.graph_message_id = sent_msg.get("id")
+                    contact.graph_conversation_id = sent_msg.get("conversationId")
 
     db.commit()
 
-    # Tag propagation: propagate tags for RFQ'd parts to vendor entities
+    # Tag propagation: propagate tags for ALL involved requisitions' RFQ'd parts
+    # to vendor entities (one pass per unique vendor)
     try:
         from .services.tagging import propagate_tags_to_entity
 
-        req_obj = db.get(Requisition, requisition_id)
-        if req_obj:
-            reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
+        valid_req_ids = [rid for rid in req_ids if rid is not None]
+        if valid_req_ids:
+            reqs = db.query(Requirement).filter(Requirement.requisition_id.in_(valid_req_ids)).all()
             card_ids = [r.material_card_id for r in reqs if r.material_card_id]
             if card_ids:  # pragma: no cover
-                for contact_obj, _ in contacts_to_lookup:
-                    if contact_obj.vendor_name_normalized:
-                        vc = db.query(VendorCard).filter_by(normalized_name=contact_obj.vendor_name_normalized).first()
+                seen_vendor_norms = set()
+                for contacts, _ in contacts_to_lookup:
+                    for contact_obj in contacts:
+                        norm = contact_obj.vendor_name_normalized
+                        if not norm or norm in seen_vendor_norms:
+                            continue
+                        seen_vendor_norms.add(norm)
+                        vc = db.query(VendorCard).filter_by(normalized_name=norm).first()
                         if vc:
                             for cid in card_ids:
                                 propagate_tags_to_entity("vendor_card", vc.id, cid, 0.5, db)
@@ -324,8 +373,10 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
     """Check inbox for vendor replies. Smart-matches to outbound RFQs.
 
     Matching priority:
-    1. conversationId — same email thread as a sent RFQ (global, exact)
-    2. Subject [AVAIL-{req_id}] token — explicit RFQ tag
+    1. conversationId — same email thread as a sent RFQ (global, exact; matches
+       ALL Contacts sharing the thread — cross-requisition fan-out)
+    2. Subject [ref:{req_id}] / [AVAIL-{req_id}] token(s) — explicit RFQ tags
+       (every token in a multi-requisition subject is resolved)
     3. Vendor email — sender matches a vendor we contacted (USER-SCOPED to avoid data leaks)
     4. Sender domain — vendor domain match (USER-SCOPED)
     5. Unmatched — saved for manual review
@@ -428,7 +479,9 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         )
         already_processed = {r[0] for r in vr_rows} | {r[0] for r in pm_rows}
 
-    # Pre-load outbound email contacts for matching (last 6 months)
+    # Pre-load outbound email contacts for matching (last 6 months). Ordered by
+    # id (= creation order) so the fan-out lists below are deterministic and the
+    # last-writer-wins maps genuinely keep the MOST RECENT contact.
     cutoff = datetime.now(timezone.utc) - timedelta(days=180)
     all_contacts = (
         db.query(Contact)
@@ -436,19 +489,27 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             Contact.contact_type == "email",
             Contact.created_at > cutoff,
         )
+        .order_by(Contact.id)
         .all()
     )
 
-    # ConversationId map is GLOBAL — thread-specific, unambiguous
-    conv_id_map = {}
+    # ConversationId map is GLOBAL — thread-specific, unambiguous. Cross-requisition
+    # sends write one Contact per (requisition, vendor) sharing a single
+    # graph_conversation_id, so each conversation maps to a LIST of contacts; a
+    # reply on the thread is attributed to ALL of them.
+    conv_id_map: dict[str, list[Contact]] = {}
     # Email and domain maps are USER-SCOPED to prevent cross-user data leaks
     email_map = {}  # vendor_email -> Contact (only this user's contacts)
     domain_map = {}  # vendor_domain -> Contact (only this user's contacts)
-    # O(1) lookup for Tier 2 subject-token matching: (req_id, email) -> Contact
+    # O(1) lookup for Tier 2 subject-token matching: (req_id, email) -> Contact.
+    # The setdefault is correct under the per-requisition fan-out: send_batch_rfq
+    # writes at most one Contact per (requisition, vendor email) pair per send, so
+    # keys are effectively unique; for historical duplicates (e.g. a re-send) it
+    # keeps the earliest contact, which is the long-standing behavior.
     req_email_map: dict[tuple[int, str], Contact] = {}
     for c in all_contacts:
         if c.graph_conversation_id:
-            conv_id_map[c.graph_conversation_id] = c
+            conv_id_map.setdefault(c.graph_conversation_id, []).append(c)
         # Build req+email map for Tier 2 (all contacts, not just this user's)
         if c.requisition_id and c.vendor_contact:
             req_email_map.setdefault((c.requisition_id, c.vendor_contact.lower()), c)
@@ -456,6 +517,9 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         if scanned_by_user_id and c.user_id == scanned_by_user_id:
             if c.vendor_contact:
                 email_lower = c.vendor_contact.lower()
+                # Last-writer-wins = most-recent contact BY DESIGN: Tier 3/4 are
+                # user-scoped fallback heuristics for untokenized replies, so they
+                # deliberately stay single-contact (no fan-out).
                 email_map[email_lower] = c
                 # Extract domain for domain-level matching
                 if "@" in email_lower:
@@ -487,46 +551,56 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             continue
 
         # ── 4-tier reply matching ──
-        matched_contact = None
+        # A cross-requisition RFQ writes one Contact per (requisition, vendor), so
+        # Tiers 1-2 can match SEVERAL contacts for one message. One VendorResponse
+        # is created per message (contact_id = first matched contact); every
+        # matched contact's status progresses below.
+        matched_contacts: list[Contact] = []
         matched_req_id = requisition_id
 
-        # Tier 1: ConversationId (exact thread, global)
+        # Tier 1: ConversationId (exact thread, global) — all contacts on the thread
         if conv_id and conv_id in conv_id_map:
-            matched_contact = conv_id_map[conv_id]
-            matched_req_id = matched_contact.requisition_id
+            matched_contacts = conv_id_map[conv_id]
+            matched_req_id = matched_contacts[0].requisition_id
 
-        # Tier 2: Subject [AVAIL-{id}] token
-        if not matched_contact:
-            token_match = RFQ_SUBJECT_TAG_RE.search(subj)
-            if token_match:
-                avail_req_id = int(token_match.group(1))
-                # O(1) dict lookup instead of O(n) list comprehension
-                req_contact = req_email_map.get((avail_req_id, email_addr))
-                if req_contact:
-                    matched_contact = req_contact
-                    matched_req_id = avail_req_id
+        # Tier 2: Subject [ref:]/[AVAIL-] tokens — iterate ALL tokens (cross-
+        # requisition subjects carry one token per involved requisition)
+        if not matched_contacts:
+            token_req_ids = list(dict.fromkeys(int(t) for t in RFQ_SUBJECT_TAG_RE.findall(subj)))
+            if token_req_ids:
+                # O(1) dict lookups instead of O(n) list comprehensions
+                matched_contacts = [
+                    req_contact
+                    for token_req_id in token_req_ids
+                    if (req_contact := req_email_map.get((token_req_id, email_addr)))
+                ]
+                if matched_contacts:
+                    matched_req_id = matched_contacts[0].requisition_id
                 else:
-                    # Token found but no exact email match — still assign to req
-                    matched_req_id = avail_req_id
+                    # Token(s) found but no exact email match — still assign to
+                    # the first token's requisition
+                    matched_req_id = token_req_ids[0]
 
-        # Tier 3: Exact email match (USER-SCOPED)
-        if not matched_contact and email_addr in email_map:
-            matched_contact = email_map[email_addr]
-            matched_req_id = matched_contact.requisition_id
+        # Tier 3: Exact email match (USER-SCOPED, most-recent contact by design)
+        if not matched_contacts and email_addr in email_map:
+            matched_contacts = [email_map[email_addr]]
+            matched_req_id = matched_contacts[0].requisition_id
 
-        # Tier 4: Domain match (USER-SCOPED)
-        if not matched_contact and "@" in email_addr:
+        # Tier 4: Domain match (USER-SCOPED, most-recent contact by design)
+        if not matched_contacts and "@" in email_addr:
             sender_domain = email_addr.split("@", 1)[1]
             if sender_domain in domain_map:
-                matched_contact = domain_map[sender_domain]
-                matched_req_id = matched_contact.requisition_id
+                matched_contacts = [domain_map[sender_domain]]
+                matched_req_id = matched_contacts[0].requisition_id
 
         try:
             # Use savepoint so a single message failure doesn't poison the session
             nested = db.begin_nested()
+            # ONE VendorResponse per message (it is per-message, not per-
+            # requisition); contact_id anchors to the first matched contact.
             vr = VendorResponse(
                 requisition_id=matched_req_id,
-                contact_id=matched_contact.id if matched_contact else None,
+                contact_id=matched_contacts[0].id if matched_contacts else None,
                 vendor_name=sender.get("name", email_addr),
                 vendor_email=email_addr,
                 subject=subj,
@@ -535,7 +609,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 graph_conversation_id=conv_id,
                 scanned_by_user_id=scanned_by_user_id,
                 received_at=msg.get("receivedDateTime"),
-                status="matched" if matched_contact else "new",
+                status="matched" if matched_contacts else "new",
                 created_at=datetime.now(timezone.utc),
             )
             db.add(vr)
@@ -568,8 +642,10 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 pending_parse.append(vr)
 
             # ── Contact status progression ──
-            if matched_contact:
-                _progress_contact_status(matched_contact, vr, db)
+            # Every matched contact progresses: a cross-requisition reply must
+            # advance the (requisition, vendor) row on EVERY involved requisition.
+            for mc in matched_contacts:
+                _progress_contact_status(mc, vr, db)
 
             nested.commit()
 
@@ -587,7 +663,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                     "confidence": vr.confidence,
                     "received_at": vr.received_at,
                     "message_id": msg_id,
-                    "matched_contact_id": matched_contact.id if matched_contact else None,
+                    "matched_contact_id": matched_contacts[0].id if matched_contacts else None,
                     "matched_requisition_id": matched_req_id,
                 }
             )

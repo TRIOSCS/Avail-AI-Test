@@ -873,6 +873,182 @@ class TestSendInquiryUnavailableExclusion:
         assert "unavailable" in resp.text.lower()
 
 
+def _seed_two_requisitions(db_session):
+    """Two requisitions, one OPEN requirement each — a cross-requisition selection."""
+    out = []
+    for i, mpn in enumerate(["CROSS-MPN-A", "CROSS-MPN-B"]):
+        req = Requisition(name=f"Cross RFQ {i}", status="active", customer_name="Acme Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            target_qty=100 * (i + 1),
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        out.append((req, r))
+    db_session.commit()
+    return out
+
+
+def _seed_vendor_with_email(db_session, normalized, display, email):
+    """VendorCard + VendorContact so send-inquiry resolves a contact email."""
+    vc = VendorCard(normalized_name=normalized, display_name=display)
+    db_session.add(vc)
+    db_session.flush()
+    db_session.add(VendorContact(vendor_card_id=vc.id, email=email, source="email"))
+    db_session.commit()
+    return vc
+
+
+class TestCrossRequisitionTracking:
+    """Part 1 of the bulk RFQ composer spec: a send spanning requisitions tracks
+    on EVERY involved requisition (per-requisition Contact rows, multi-token
+    subjects, preview/send lockstep)."""
+
+    def test_preview_renders_all_ref_tokens_sorted(self, client, db_session):
+        (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r_a.id), str(r_b.id)],
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        lo, hi = sorted([req_a.id, req_b.id])
+        # The exact subject the send will produce — both tokens, ascending req id.
+        assert f"RFQ — 2 parts [ref:{lo}] [ref:{hi}]" in resp.text
+
+    def test_send_passes_per_requisition_parts_map(self, client, db_session, monkeypatch):
+        (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
+        captured = {}
+
+        async def fake_send(**kwargs):
+            captured.update(kwargs)
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={
+                "requirement_ids": [str(r_a.id), str(r_b.id)],
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert captured["requisition_parts_map"] == {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+        # No scalar collapse to a single arbitrary requisition anymore.
+        assert captured.get("requisition_id") is None
+
+    def test_send_single_requisition_call_shape_regression(self, client, db_session, monkeypatch):
+        """Single-requisition sends keep working through the same path: the map
+        carries exactly one entry with all selected parts."""
+        _, r, _ = _seed_data(db_session)
+        captured = {}
+
+        async def fake_send(**kwargs):
+            captured.update(kwargs)
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert captured["requisition_parts_map"] == {r.requisition_id: [{"mpn": "TEST-MPN-001", "qty": 100}]}
+        assert resp.headers["X-RFQ-Sent"] == "1"
+        assert resp.headers["X-RFQ-Total"] == "1"
+
+    def test_send_two_requisitions_two_vendors_full_tracking(self, client, db_session):
+        """The core spec scenario: 2 requisitions x 2 vendors through the REAL
+        send_batch_rfq (Graph mocked) → 4 Contacts, shared graph ids per vendor,
+        per-requisition parts, both requirements progressed, activity per
+        requirement, X-RFQ-* headers unchanged."""
+        from unittest.mock import AsyncMock, patch
+
+        from app.models.offers import Contact
+
+        (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
+        _seed_vendor_with_email(db_session, "acme", "Acme", "sales@acme.com")
+        _seed_vendor_with_email(db_session, "globex", "Globex", "sales@globex.com")
+
+        lo, hi = sorted([req_a.id, req_b.id])
+        tagged = f"RFQ — 2 parts [ref:{lo}] [ref:{hi}]"
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.side_effect = [
+            {"value": [{"id": "sent-acme", "conversationId": "conv-acme", "subject": tagged}]},
+            {"value": [{"id": "sent-globex", "conversationId": "conv-globex", "subject": tagged}]},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": [str(r_a.id), str(r_b.id)],
+                    "vendor_names": ["Acme", "Globex"],
+                    "email_body": "Please quote.",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "2"
+        assert resp.headers["X-RFQ-Total"] == "2"
+        assert resp.headers["X-RFQ-Skipped"] == "0"
+        assert resp.headers["X-RFQ-Unavailable"] == "0"
+
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        assert len(contacts) == 4  # one per (requisition, vendor)
+        assert {(c.requisition_id, c.vendor_name) for c in contacts} == {
+            (req_a.id, "Acme"),
+            (req_b.id, "Acme"),
+            (req_a.id, "Globex"),
+            (req_b.id, "Globex"),
+        }
+        expected_parts = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+        for c in contacts:
+            assert c.subject == tagged  # identical to the preview subject
+            assert c.parts_included == expected_parts[c.requisition_id]
+        graph_ids = {}
+        for c in contacts:
+            graph_ids.setdefault(c.vendor_name, set()).add((c.graph_message_id, c.graph_conversation_id))
+        assert graph_ids["Acme"] == {("sent-acme", "conv-acme")}
+        assert graph_ids["Globex"] == {("sent-globex", "conv-globex")}
+
+        # Both requisitions' requirements auto-progressed OPEN → SOURCING.
+        db_session.refresh(r_a)
+        db_session.refresh(r_b)
+        assert r_a.sourcing_status == "sourcing"
+        assert r_b.sourcing_status == "sourcing"
+
+        # rfq_sent activity logged per requirement per vendor.
+        logs = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "rfq_sent").all()
+        assert sorted((entry.requisition_id, entry.requirement_id) for entry in logs) == sorted(
+            [(req_a.id, r_a.id), (req_a.id, r_a.id), (req_b.id, r_b.id), (req_b.id, r_b.id)]
+        )
+
+
 class TestSightingsVendorRowStatusTreatment:
     """Row-level visual treatment keyed off computed vendor status (spec
     2026-06-10-sightings-status-row-treatment-design.md)."""

@@ -1390,8 +1390,9 @@ async def sightings_preview_inquiry(
     excluded = excluded_vendor_norms(db, requirements)
     unavailable_vendors, vendor_names = _partition_by_unavailability(vendor_names, excluded)
 
-    requisition_ids = {r.requisition_id for r in requirements}
-    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
+    # LOCKSTEP with send-inquiry: one [ref:{id}] token per involved requisition,
+    # ascending requisition id — exactly what send_batch_rfq will append.
+    requisition_ids = sorted({r.requisition_id for r in requirements})
 
     # Batch-fetch vendor cards + contacts (same logic as send-inquiry)
     normalized_names = [normalize_vendor_name(vn) for vn in vendor_names]
@@ -1404,7 +1405,7 @@ async def sightings_preview_inquiry(
 
     from ..email_service import _build_html_body
 
-    avail_token = f"[ref:{requisition_id}]" if requisition_id else ""
+    avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
     previews = []
@@ -1472,8 +1473,12 @@ async def sightings_send_inquiry(
     excluded = excluded_vendor_norms(db, requirements)
     unavailable_vendors, sendable_vendors = _partition_by_unavailability(vendor_names, excluded)
 
-    requisition_ids = {r.requisition_id for r in requirements}
-    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
+    # Per-requisition parts map: NO collapse to one arbitrary requisition. Each
+    # involved requisition gets its own Contact rows (scoped to its parts) and
+    # its own [ref:{id}] subject token inside send_batch_rfq.
+    requisition_parts_map: dict[int, list] = {}
+    for r in requirements:
+        requisition_parts_map.setdefault(r.requisition_id, []).append({"mpn": r.primary_mpn, "qty": r.target_qty})
 
     # Batch-fetch vendor cards + contacts in two queries instead of N+1
     normalized_names = [normalize_vendor_name(vn) for vn in sendable_vendors]
@@ -1515,8 +1520,8 @@ async def sightings_send_inquiry(
                 token=token,
                 db=db,
                 user_id=user.id,
-                requisition_id=requisition_id,
                 vendor_groups=vendor_groups,
+                requisition_parts_map=requisition_parts_map,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check
