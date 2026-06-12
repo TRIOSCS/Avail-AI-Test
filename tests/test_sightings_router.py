@@ -919,6 +919,217 @@ class TestVendorModalCoverageRanking:
         assert "2/1 parts" not in resp.text
 
 
+class TestVendorAffinityOnDemand:
+    """Spec Part 2 §2 (bulk RFQ composer): `GET /v2/partials/sightings/vendor-affinity`
+    runs find_vendor_affinity per selected MPN (on a worker thread with its own
+    session), merges/dedupes by vendor keeping the highest confidence, drops vendors
+    already coverage-suggested or unavailability-excluded, caps at 10, and renders
+    checkbox rows that join the modal's existing Alpine selection state.
+
+    find_vendor_affinity is mocked at its SOURCE module (the route imports it lazily) so
+    no L1/L2 queries or Anthropic L3 call ever run in tests.
+    """
+
+    URL = "/v2/partials/sightings/vendor-affinity"
+    PATCH_TARGET = "app.services.vendor_affinity_service.find_vendor_affinity"
+
+    def _requirements(self, db_session, mpns):
+        req = Requisition(name="Affinity RFQ", status="active", customer_name="Aff Co")
+        db_session.add(req)
+        db_session.flush()
+        items = []
+        for mpn in mpns:
+            r = Requirement(
+                requisition_id=req.id,
+                primary_mpn=mpn,
+                target_qty=10,
+                sourcing_status="open",
+            )
+            db_session.add(r)
+            items.append(r)
+        db_session.commit()
+        return items
+
+    def _get(self, client, items):
+        ids = ",".join(str(r.id) for r in items)
+        return client.get(f"{self.URL}?requirement_ids={ids}")
+
+    @staticmethod
+    def _match(name, confidence, reasoning="Vendor supplied 3 other MPN(s) from AffMfr"):
+        """Shape returned by find_vendor_affinity (score_affinity_matches output)."""
+        return {
+            "vendor_name": name,
+            "vendor_id": None,
+            "mpn_count": 3,
+            "manufacturer": "AffMfr",
+            "level": 1,
+            "confidence": confidence,
+            "reasoning": reasoning,
+        }
+
+    def test_merges_and_dedupes_keeping_highest_confidence(self, client, db_session):
+        """The same vendor returned for two MPNs renders ONCE, with the higher
+        confidence; rows sort confidence-desc."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-1", "AF-MPN-2"])
+        per_mpn = {
+            "AF-MPN-1": [self._match("Acme Components", 0.40)],
+            "AF-MPN-2": [self._match("Acme Components", 0.65), self._match("Beta Parts", 0.50)],
+        }
+        with patch(self.PATCH_TARGET, side_effect=lambda mpn, db: per_mpn[mpn]) as mock_fva:
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert mock_fva.call_count == 2
+        assert resp.text.count("Acme Components") == 1
+        assert "65%" in resp.text
+        assert "40%" not in resp.text
+        # Confidence-desc ordering: Acme (0.65) before Beta (0.50)
+        assert resp.text.index("Acme Components") < resp.text.index("Beta Parts")
+
+    def test_drops_already_suggested_vendors(self, client, db_session):
+        """Vendors the modal already suggests (same coverage query, recomputed server-
+        side) are dropped from the affinity rows."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-3"])
+        card = VendorCard(
+            normalized_name="covered vendor",
+            display_name="Covered Vendor",
+            is_blacklisted=False,
+            engagement_score=10.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id,
+                vendor_name="Covered Vendor",
+                listing_count=1,
+                score=60.0,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.commit()
+        matches = [self._match("Covered Vendor", 0.70), self._match("Fresh Vendor", 0.45)]
+        with patch(self.PATCH_TARGET, return_value=matches):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Fresh Vendor" in resp.text
+        assert "Covered Vendor" not in resp.text
+
+    def test_drops_excluded_vendors(self, client, db_session):
+        """Vendors with an ACTIVE unavailability record on a selected MPN key are
+        dropped."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-4"])
+        _unav_record(db_session, vendor_norm="dead vendor", key="afmpn4", requirement_id=items[0].id)
+        matches = [self._match("Dead Vendor", 0.70), self._match("Live Vendor", 0.45)]
+        with patch(self.PATCH_TARGET, return_value=matches):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Live Vendor" in resp.text
+        assert "Dead Vendor" not in resp.text
+
+    def test_renders_chip_confidence_and_selection_wiring(self, client, db_session):
+        """Each row: bordered indigo 'affinity' chip, confidence %, reasoning in title,
+        and a checkbox wired to the modal's isSelected/toggleVendor Alpine state."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-5"])
+        matches = [self._match("Gamma Supply", 0.55, reasoning="Vendor shares commodity tags (3 matching tag(s))")]
+        with patch(self.PATCH_TARGET, return_value=matches):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Gamma Supply" in resp.text
+        assert "border border-indigo-200 bg-indigo-50 text-indigo-700" in resp.text
+        assert ">affinity</span>" in resp.text
+        assert "55%" in resp.text
+        assert 'title="Vendor shares commodity tags (3 matching tag(s))"' in resp.text
+        # Same Alpine selection mechanism as the modal's existing rows (normalized key)
+        assert 'isSelected("gamma supply")' in resp.text
+        assert 'toggleVendor("gamma supply")' in resp.text
+
+    def test_caps_at_ten_rows(self, client, db_session):
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-6", "AF-MPN-7"])
+        per_mpn = {
+            "AF-MPN-6": [self._match(f"Vendor Six {i}", 0.30 + i / 100) for i in range(8)],
+            "AF-MPN-7": [self._match(f"Vendor Seven {i}", 0.30 + i / 100) for i in range(8)],
+        }
+        with patch(self.PATCH_TARGET, side_effect=lambda mpn, db: per_mpn[mpn]):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert resp.text.count(">affinity</span>") == 10
+
+    def test_response_has_no_suggest_button(self, client, db_session):
+        """No-duplicate pin: the swap replaces the button with the rows, so the
+        response itself must never re-render 'Suggest more vendors'."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-8"])
+        with patch(self.PATCH_TARGET, return_value=[self._match("Delta Parts", 0.40)]):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Suggest more vendors" not in resp.text
+
+    def test_empty_requirement_ids_returns_200_empty_state(self, client, db_session):
+        from unittest.mock import patch
+
+        with patch(self.PATCH_TARGET) as mock_fva:
+            resp = client.get(f"{self.URL}?requirement_ids=")
+        assert resp.status_code == 200
+        mock_fva.assert_not_called()
+        assert "No additional vendors" in resp.text
+
+    def test_no_matches_renders_empty_state(self, client, db_session):
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-9"])
+        with patch(self.PATCH_TARGET, return_value=[]):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "No additional vendors" in resp.text
+
+    def test_thread_calls_get_their_own_session(self, client, db_session):
+        """SQLAlchemy sessions are not thread-safe: each to_thread call must receive a
+        fresh short-lived SessionLocal, never the request session. Duplicate MPNs
+        across requirements collapse to one call (no double L3 spend)."""
+        from unittest.mock import patch
+
+        from sqlalchemy.orm import Session as SASession
+
+        items = self._requirements(db_session, ["AF-MPN-10", "AF-MPN-10", "AF-MPN-11"])
+        seen_sessions = []
+
+        def _capture(mpn, db):
+            seen_sessions.append(db)
+            return []
+
+        with patch(self.PATCH_TARGET, side_effect=_capture) as mock_fva:
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert mock_fva.call_count == 2  # AF-MPN-10 deduped
+        for sess in seen_sessions:
+            assert isinstance(sess, SASession)
+            assert sess is not db_session
+
+    def test_modal_renders_affinity_section_with_button(self, client, db_session):
+        """vendor_modal.html: 'Suggest more vendors' button lives inside the stable-id
+        #rfq-affinity-section sub-container and targets IT (never the x-data wrapper —
+        re-init would wipe selection state)."""
+        items = self._requirements(db_session, ["AF-MPN-12"])
+        ids = ",".join(str(r.id) for r in items)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={ids}")
+        assert resp.status_code == 200
+        assert 'id="rfq-affinity-section"' in resp.text
+        assert "Suggest more vendors" in resp.text
+        assert f'hx-get="/v2/partials/sightings/vendor-affinity?requirement_ids={ids}"' in resp.text
+        assert 'hx-target="#rfq-affinity-section"' in resp.text
+
+
 class TestSendInquiryUnavailableExclusion:
     """Send/preview re-validate submitted vendor_names against active-only
     excluded_vendor_norms at request time — excluded vendors are dropped and the skip is

@@ -45,6 +45,30 @@
         </label>
         {% endfor %}
       </div>
+
+      {# Affinity suggestions (on demand): a stable-id sub-container INSIDE the x-data
+         wrapper — the hx-get targets THIS div, never the wrapper (re-initializing
+         rfqVendorModal would wipe the runtime selection state). The button sits inside
+         the target, so the innerHTML swap replaces it with the rows — a second click
+         is impossible (no-duplicate guarantee). #}
+      {% if requirement_ids %}
+      <div id="rfq-affinity-section" class="mt-2">
+        <button type="button"
+                hx-get="/v2/partials/sightings/vendor-affinity?requirement_ids={{ requirement_ids|join(',') }}"
+                hx-target="#rfq-affinity-section"
+                hx-swap="innerHTML"
+                hx-indicator="#rfq-affinity-spinner"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-lg hover:bg-brand-50 transition-colors">
+          <span id="rfq-affinity-spinner" class="htmx-indicator">
+            <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+          </span>
+          Suggest more vendors
+        </button>
+      </div>
+      {% endif %}
     </div>
 
     {# Parts reference (read-only) #}

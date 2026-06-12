@@ -1299,6 +1299,80 @@ async def sightings_log_activity(
     return resp
 
 
+def _coverage_ranked_vendor_rows(
+    db: Session, req_id_list: list[int], excluded: set[str]
+) -> list[tuple[VendorCard, int, float | None]]:
+    """Coverage-ranked suggested vendors — the single source shared by the vendor modal
+    and the affinity endpoint (which must drop already-suggested vendors computed the
+    SAME way, so it stays self-contained).
+
+    One grouped query over VendorSightingSummary filtered to the selected
+    requirements, joined to VendorCard via the vendor_card_id FK (indexed
+    ix_vss_vendor_card) — NOT the legacy lower(trim(vendor_name)) name join. VSS rows
+    with NULL vendor_card_id are excluded by design: the modal suggests known vendors
+    (cards), never raw sighting names. Plain-column aggregates only (SQLite+PG safe).
+    Returns (card, covered_count, avg_score) rows, coverage desc then engagement
+    desc, capped at 20.
+    """
+    covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
+    vendor_query = (
+        db.query(
+            VendorCard,
+            covered_count.label("covered_count"),
+            sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
+        )
+        .join(
+            VendorSightingSummary,
+            VendorSightingSummary.vendor_card_id == VendorCard.id,
+        )
+        .filter(
+            VendorSightingSummary.requirement_id.in_(req_id_list),
+            VendorCard.is_blacklisted.is_(False),
+        )
+    )
+    if excluded:
+        vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
+    rows = (
+        vendor_query.group_by(VendorCard.id)
+        .order_by(
+            covered_count.desc(),
+            VendorCard.engagement_score.desc().nullslast(),
+            VendorCard.id,
+        )
+        .limit(20)
+        .all()
+    )
+    if excluded:
+        # Belt and braces: some legacy cards carry a normalized_name that predates
+        # normalize_vendor_name (suffix kept) — re-check through the canonical
+        # normalizer so "X, Inc." cards can't slip past the column filter.
+        rows = [
+            (card, n_covered, avg_score)
+            for card, n_covered, avg_score in rows
+            if normalize_vendor_name(card.display_name or card.normalized_name or "") not in excluded
+        ]
+    return rows
+
+
+def _find_affinity_in_thread(mpn: str) -> list[dict]:
+    """Run the SYNC find_vendor_affinity on a worker thread with its OWN session.
+
+    SQLAlchemy sessions are not thread-safe, so the request session never crosses the
+    to_thread boundary — each call opens and closes a fresh SessionLocal (the
+    established thread-work pattern: description_service._collect_db_descriptions,
+    jobs/tagging_jobs). find_vendor_affinity is imported lazily so tests mock it at
+    the source module (app.services.vendor_affinity_service), never the import site.
+    """
+    from ..database import SessionLocal
+    from ..services.vendor_affinity_service import find_vendor_affinity
+
+    thread_db = SessionLocal()
+    try:
+        return find_vendor_affinity(mpn, thread_db)
+    finally:
+        thread_db.close()
+
+
 @router.get("/v2/partials/sightings/vendor-modal", response_class=HTMLResponse)
 async def sightings_vendor_modal(
     request: Request,
@@ -1329,40 +1403,7 @@ async def sightings_vendor_modal(
     suggested_vendors: list[VendorCard] = []
     coverage: dict[int, dict[str, Any]] = {}
     if req_id_list:
-        # Coverage-ranked suggestions: one grouped query over VendorSightingSummary
-        # filtered to the selected requirements, joined to VendorCard via the
-        # vendor_card_id FK (indexed ix_vss_vendor_card) — NOT the legacy
-        # lower(trim(vendor_name)) name join. VSS rows with NULL vendor_card_id are
-        # excluded by design: the modal suggests known vendors (cards), never raw
-        # sighting names. Plain-column aggregates only (SQLite+PG safe).
-        covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
-        vendor_query = (
-            db.query(
-                VendorCard,
-                covered_count.label("covered_count"),
-                sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
-            )
-            .join(
-                VendorSightingSummary,
-                VendorSightingSummary.vendor_card_id == VendorCard.id,
-            )
-            .filter(
-                VendorSightingSummary.requirement_id.in_(req_id_list),
-                VendorCard.is_blacklisted.is_(False),
-            )
-        )
-        if excluded:
-            vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
-        rows = (
-            vendor_query.group_by(VendorCard.id)
-            .order_by(
-                covered_count.desc(),
-                VendorCard.engagement_score.desc().nullslast(),
-                VendorCard.id,
-            )
-            .limit(20)
-            .all()
-        )
+        rows = _coverage_ranked_vendor_rows(db, req_id_list, excluded)
         suggested_vendors = [card for card, _, _ in rows]
         coverage = {
             card.id: {
@@ -1391,16 +1432,6 @@ async def sightings_vendor_modal(
                     mpns_by_card.setdefault(card_id, set()).add(mpn)
             for card_id, mpns in mpns_by_card.items():
                 coverage[card_id]["mpns"] = ", ".join(sorted(mpns))
-        if excluded:
-            # Belt and braces: some legacy cards carry a normalized_name that predates
-            # normalize_vendor_name (suffix kept) — re-check through the canonical
-            # normalizer so "X, Inc." cards can't slip past the column filter.
-            suggested_vendors = [
-                v
-                for v in suggested_vendors
-                if normalize_vendor_name(v.display_name or v.normalized_name or "") not in excluded
-            ]
-            coverage = {v.id: coverage[v.id] for v in suggested_vendors}
 
     ctx = {
         "request": request,
@@ -1410,6 +1441,65 @@ async def sightings_vendor_modal(
         "parts": parts,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
+
+
+@router.get("/v2/partials/sightings/vendor-affinity", response_class=HTMLResponse)
+async def sightings_vendor_affinity(
+    request: Request,
+    requirement_ids: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """On-demand affinity vendor suggestions for the RFQ vendor modal.
+
+    Called by: vendor_modal.html "Suggest more vendors" button (hx-get swaps the
+    rows into #rfq-affinity-section, replacing the button — second click impossible).
+    Runs find_vendor_affinity per selected primary MPN, merges/dedupes by vendor
+    keeping the highest confidence, drops vendors already coverage-suggested (same
+    query as the modal — self-contained) or unavailability-excluded, caps at 10.
+
+    THREADING: find_vendor_affinity is SYNC with a blocking Anthropic L3 call inside
+    (3-12s for 6 parts) — each per-MPN call runs via asyncio.to_thread with its own
+    short-lived session (_find_affinity_in_thread), gathered under a Semaphore(3) so
+    a wide selection can't exhaust the thread pool. Never call it bare from this
+    async route: it would block the uvicorn worker.
+    """
+    req_id_list = [int(x) for x in requirement_ids.split(",") if x.strip().isdigit()]
+    requirements = (db.query(Requirement).filter(Requirement.id.in_(req_id_list)).all()) if req_id_list else []
+
+    affinity_vendors: list[dict] = []
+    if requirements:
+        excluded = excluded_vendor_norms(db, requirements)
+        suggested_norms: set[str] = set()
+        for card, _, _ in _coverage_ranked_vendor_rows(db, req_id_list, excluded):
+            # Both spellings: the stored normalized_name (may be legacy-suffixed) and
+            # the canonical re-normalization — affinity matches are compared canonically.
+            suggested_norms.add(card.normalized_name or "")
+            suggested_norms.add(normalize_vendor_name(card.display_name or card.normalized_name or ""))
+
+        # One affinity call per UNIQUE primary MPN (order-preserving dedupe — no
+        # double L3 spend when requirements share an MPN).
+        mpns = list(dict.fromkeys(r.primary_mpn for r in requirements if r.primary_mpn))
+        sem = asyncio.Semaphore(3)
+
+        async def _bounded(mpn: str) -> list[dict]:
+            async with sem:
+                return await asyncio.to_thread(_find_affinity_in_thread, mpn)
+
+        per_mpn_matches = await asyncio.gather(*(_bounded(m) for m in mpns))
+
+        best: dict[str, dict] = {}
+        for matches in per_mpn_matches:
+            for match in matches:
+                norm = normalize_vendor_name(match.get("vendor_name") or "")
+                if not norm or norm in suggested_norms or norm in excluded:
+                    continue
+                if norm not in best or match["confidence"] > best[norm]["confidence"]:
+                    best[norm] = {**match, "normalized_name": norm}
+        affinity_vendors = sorted(best.values(), key=lambda m: m["confidence"], reverse=True)[:10]
+
+    ctx = {"request": request, "affinity_vendors": affinity_vendors}
+    return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
 
 
 @router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)
