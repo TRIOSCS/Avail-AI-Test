@@ -1130,6 +1130,185 @@ class TestVendorAffinityOnDemand:
         assert 'hx-target="#rfq-affinity-section"' in resp.text
 
 
+class TestComposerVendor:
+    """Spec Part 2 §3/§4 (bulk RFQ composer): `POST /v2/partials/sightings/ composer-
+    vendor` resolves-or-creates a vendor for the any-vendor picker and the inline "Add
+    new vendor" mini-form.
+
+    A confident duplicate (EXACT normalized-name match per the extracted
+    check_vendor_duplicate service — fuzzy >= 80 are suggestions, not dupes) returns the
+    EXISTING vendor as a selected row with a "matched existing vendor" notice and NO new
+    DB row. Otherwise the minimal VendorCard (+ VendorContact when an email is given) is
+    created, committed, and _background_enrich_vendor fires post-commit (mocked at its
+    SOURCE module — the route imports it lazily). An unavailability-excluded vendor
+    renders the rose chip with a DISABLED checkbox.
+    """
+
+    URL = "/v2/partials/sightings/composer-vendor"
+
+    def _requirements(self, db_session, mpns):
+        req = Requisition(name="Composer RFQ", status="active", customer_name="Comp Co")
+        db_session.add(req)
+        db_session.flush()
+        items = []
+        for mpn in mpns:
+            r = Requirement(
+                requisition_id=req.id,
+                primary_mpn=mpn,
+                target_qty=10,
+                sourcing_status="open",
+            )
+            db_session.add(r)
+            items.append(r)
+        db_session.commit()
+        return items
+
+    def _card(self, db_session, display, normalized=None):
+        card = VendorCard(
+            normalized_name=normalized or display.lower(),
+            display_name=display,
+            is_blacklisted=False,
+        )
+        db_session.add(card)
+        db_session.commit()
+        return card
+
+    def test_exact_duplicate_returns_existing_selected_row_no_new_db_row(self, client, db_session):
+        """A name that normalizes to an existing card is a confident duplicate: the
+        EXISTING vendor comes back as a selected row with the 'matched existing
+        vendor' notice — no new VendorCard, no VendorContact."""
+        card = self._card(db_session, "Known Vendor")
+        resp = client.post(self.URL, data={"vendor_name": "Known Vendor, Inc.", "email": "x@known.com"})
+        assert resp.status_code == 200
+        assert "Known Vendor" in resp.text
+        assert "matched existing vendor" in resp.text
+        # Selected row: joins the modal's Alpine selection state checked
+        assert 'selectVendor("known vendor")' in resp.text
+        assert 'isSelected("known vendor")' in resp.text
+        assert 'toggleVendor("known vendor")' in resp.text
+        # No new DB rows — the duplicate path never writes
+        assert db_session.query(VendorCard).filter_by(normalized_name="known vendor").count() == 1
+        assert db_session.query(VendorContact).filter_by(vendor_card_id=card.id).count() == 0
+
+    def test_new_vendor_creates_card_contact_and_fires_enrichment(self, client, db_session):
+        """No duplicate → minimal VendorCard (normalized_name, display_name, domain
+        parsed from website) + VendorContact for the email, committed, then
+        _background_enrich_vendor fires post-commit (source-module mock)."""
+        from unittest.mock import AsyncMock, patch
+
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.utils.vendor_helpers._background_enrich_vendor", new_callable=AsyncMock) as mock_enrich,
+        ):
+            resp = client.post(
+                self.URL,
+                data={
+                    "vendor_name": "Fresh Vendor",
+                    "website": "https://www.freshvendor.com/about",
+                    "email": "sales@freshvendor.com",
+                },
+            )
+        assert resp.status_code == 200
+        card = db_session.query(VendorCard).filter_by(normalized_name="fresh vendor").one()
+        assert card.display_name == "Fresh Vendor"
+        assert card.domain == "freshvendor.com"
+        contact = db_session.query(VendorContact).filter_by(vendor_card_id=card.id).one()
+        assert contact.email == "sales@freshvendor.com"
+        assert contact.source == "rfq_manual"
+        assert mock_enrich.call_count == 1
+        assert mock_enrich.call_args[0] == (card.id, "freshvendor.com", "Fresh Vendor")
+        # New row comes back selected, wired to the modal's selection state
+        assert "matched existing vendor" not in resp.text
+        assert 'selectVendor("fresh vendor")' in resp.text
+        assert 'toggleVendor("fresh vendor")' in resp.text
+
+    def test_new_vendor_without_email_or_website_creates_bare_card(self, client, db_session):
+        """Optional fields stay optional: a bare name creates the card only — no
+        contact, no domain, no enrichment fired (nothing to enrich from)."""
+        from unittest.mock import AsyncMock, patch
+
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.utils.vendor_helpers._background_enrich_vendor", new_callable=AsyncMock) as mock_enrich,
+        ):
+            resp = client.post(self.URL, data={"vendor_name": "Bare Vendor"})
+        assert resp.status_code == 200
+        card = db_session.query(VendorCard).filter_by(normalized_name="bare vendor").one()
+        assert card.domain is None
+        assert db_session.query(VendorContact).filter_by(vendor_card_id=card.id).count() == 0
+        mock_enrich.assert_not_called()
+
+    def test_fuzzy_match_is_not_a_confident_duplicate(self, client, db_session):
+        """Pins the threshold semantics: the duplicate-check service classifies only
+        EXACT normalized-name matches as confident; a fuzzy >= 80 candidate (typo) is
+        a suggestion, so the composer still creates the new card."""
+        self._card(db_session, "Arrow Electronics Co")
+        resp = client.post(self.URL, data={"vendor_name": "Arrow Electronisc Co"})
+        assert resp.status_code == 200
+        assert "matched existing vendor" not in resp.text
+        assert db_session.query(VendorCard).filter_by(normalized_name="arrow electronisc co").count() == 1
+
+    def test_empty_name_returns_400_json_error(self, client, db_session):
+        """Empty/whitespace vendor_name → 400 in the repo JSON error format ({"error":
+
+        ...}, not {"detail": ...}); nothing written.
+        """
+        before = db_session.query(VendorCard).count()
+        resp = client.post(self.URL, data={"vendor_name": "   "})
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["error"]
+        assert body["status_code"] == 400
+        assert db_session.query(VendorCard).count() == before
+
+    def test_name_normalizing_to_nothing_returns_400_json_error(self, client, db_session):
+        """A name that is all legal suffix ('Inc.') normalizes to '' — reject with the
+        same 400 JSON error instead of writing a junk empty-norm card."""
+        resp = client.post(self.URL, data={"vendor_name": "Inc."})
+        assert resp.status_code == 400
+        assert resp.json()["error"]
+        assert db_session.query(VendorCard).filter_by(normalized_name="").count() == 0
+
+    def test_excluded_vendor_renders_rose_chip_and_disabled_checkbox(self, client, db_session):
+        """An existing vendor with an ACTIVE unavailability record on the selected parts
+        renders the rose 'marked unavailable' chip and a DISABLED, unchecked checkbox —
+        it never joins the selection (send-time re-validation stays the backstop)."""
+        items = self._requirements(db_session, ["CP-MPN-1"])
+        self._card(db_session, "Dead Vendor")
+        _unav_record(db_session, vendor_norm="dead vendor", key="cpmpn1", requirement_id=items[0].id)
+        resp = client.post(
+            self.URL,
+            data={"vendor_name": "Dead Vendor", "requirement_ids": str(items[0].id)},
+        )
+        assert resp.status_code == 200
+        assert "marked unavailable" in resp.text
+        assert "bg-rose-100 text-rose-700" in resp.text
+        assert "disabled" in resp.text
+        # Never selected, never toggleable
+        assert "selectVendor(" not in resp.text
+        assert "toggleVendor(" not in resp.text
+
+    def test_modal_renders_picker_added_container_and_inline_form(self, client, db_session):
+        """vendor_modal.html: the vendor panel carries a stable id; the any-vendor
+        autocomplete, the #rfq-added-vendors append target, and the 'Add new vendor'
+        toggle all live INSIDE the rfqVendorModal x-data wrapper (appends target the
+        sub-container, never the wrapper — re-init would wipe selection state)."""
+        items = self._requirements(db_session, ["CP-MPN-2"])
+        ids = ",".join(str(r.id) for r in items)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={ids}")
+        assert resp.status_code == 200
+        assert 'id="rfq-vendor-panel"' in resp.text
+        assert 'id="rfq-added-vendors"' in resp.text
+        assert "Find any vendor" in resp.text
+        assert "Add new vendor" in resp.text
+        # Inside the x-data wrapper: the wrapper opens before the sub-containers
+        wrapper_at = resp.text.index("rfqVendorModal(")
+        assert wrapper_at < resp.text.index('id="rfq-added-vendors"')
+        assert wrapper_at < resp.text.index("Find any vendor")
+        # Debounced autocomplete input per the established Alpine pattern
+        assert "@input.debounce.300ms" in resp.text
+
+
 class TestSendInquiryUnavailableExclusion:
     """Send/preview re-validate submitted vendor_names against active-only
     excluded_vendor_norms at request time — excluded vendors are dropped and the skip is

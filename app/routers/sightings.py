@@ -48,6 +48,7 @@ from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
+from ..services.vendor_duplicates import check_vendor_duplicate
 from ..services.vendor_unavailability import (
     clear_unavailability,
     excluded_vendor_norms,
@@ -1500,6 +1501,116 @@ async def sightings_vendor_affinity(
 
     ctx = {"request": request, "affinity_vendors": affinity_vendors}
     return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
+
+
+@router.post("/v2/partials/sightings/composer-vendor", response_class=HTMLResponse)
+async def sightings_composer_vendor(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Resolve-or-create a vendor for the RFQ composer's any-vendor picker.
+
+    Called by: vendor_modal.html — both the "Find any vendor" autocomplete pick and
+    the "Add new vendor" inline mini-form POST here (form fields: vendor_name
+    required; website, email, requirement_ids optional); the returned row is
+    appended into the stable-id #rfq-added-vendors sub-container.
+
+    Flow: check_vendor_duplicate (the extracted service — direct call, never
+    loopback HTTP). A confident duplicate is an EXACT normalized-name match (the
+    service's own classification: exact short-circuits at score 100; fuzzy >= 80
+    are suggestions, not dupes) → return the EXISTING vendor as a selected row with
+    a "matched existing vendor" notice, no new DB row. Otherwise create the minimal
+    VendorCard (normalized_name, display_name, optional domain parsed from the
+    website — the crm/offers manual-entry pattern) plus a VendorContact when an
+    email was given, commit, then fire _background_enrich_vendor post-commit
+    (identical to the materials.py / vendor_contacts.py patterns; imports are lazy
+    so tests mock both gates at their source modules).
+
+    If the resolved vendor is unavailability-excluded for the selected
+    requirement_ids, the row renders the rose "marked unavailable" chip with a
+    DISABLED checkbox — send-time re-validation stays the backstop.
+    """
+    form = await request.form()
+    vendor_name = str(form.get("vendor_name") or "").strip()
+    norm = normalize_vendor_name(vendor_name)
+    if not vendor_name or not norm:
+        raise HTTPException(status_code=400, detail="vendor_name required")
+    website = str(form.get("website") or "").strip()
+    email = str(form.get("email") or "").strip()
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="invalid contact email")
+    req_id_list = [int(x) for x in form.getlist("requirement_ids") if str(x).strip().isdigit()]
+
+    matches = check_vendor_duplicate(vendor_name, db)
+    matched_existing = bool(matches) and matches[0]["match"] == "exact"
+
+    if matched_existing:
+        # Confident duplicate: hand back the existing card — no new DB row at all.
+        card = db.get(VendorCard, matches[0]["id"])
+    else:
+        domain = ""
+        if website:
+            domain = website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
+        card = VendorCard(
+            normalized_name=norm,
+            display_name=vendor_name,
+            domain=domain or None,
+            emails=[],
+            phones=[],
+        )
+        db.add(card)
+        db.flush()
+        if email:
+            db.add(
+                VendorContact(
+                    vendor_card_id=card.id,
+                    email=email,
+                    contact_type="company",
+                    source="rfq_manual",
+                    confidence=80,
+                    is_verified=False,
+                )
+            )
+        db.commit()
+
+        # Post-commit background enrichment when a usable domain came with the
+        # website. Lazy imports: tests mock _background_enrich_vendor and
+        # get_credential_cached at their SOURCE modules (CLAUDE.md), and the
+        # coroutine opens its own session (never the request session).
+        if card.domain and not card.last_enriched_at:
+            from ..services.credential_service import get_credential_cached
+
+            if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
+                "anthropic_ai", "ANTHROPIC_API_KEY"
+            ):
+                from ..utils.async_helpers import safe_background_task
+                from ..utils.vendor_helpers import _background_enrich_vendor
+
+                await safe_background_task(
+                    _background_enrich_vendor(card.id, card.domain, card.display_name),
+                    task_name="enrich_vendor_from_composer",
+                )
+
+    # Active-only unavailability re-check for the selected parts: an excluded
+    # vendor renders the rose chip with a DISABLED checkbox and never joins the
+    # selection. Both norm spellings are checked (stored normalized_name may be
+    # legacy-suffixed), same belt-and-braces as _coverage_ranked_vendor_rows.
+    is_excluded = False
+    if req_id_list:
+        requirements = db.query(Requirement).filter(Requirement.id.in_(req_id_list)).all()
+        if requirements:
+            excluded = excluded_vendor_norms(db, requirements)
+            canonical = normalize_vendor_name(card.display_name or card.normalized_name or "")
+            is_excluded = canonical in excluded or (card.normalized_name or "") in excluded
+
+    ctx = {
+        "request": request,
+        "vendor": card,
+        "matched_existing": matched_existing,
+        "is_excluded": is_excluded,
+    }
+    return template_response("htmx/partials/sightings/composer_vendor_row.html", ctx)
 
 
 @router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)

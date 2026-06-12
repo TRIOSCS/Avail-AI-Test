@@ -1742,6 +1742,16 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   previewing: false,
   sending: false,
 
+  // ── Any-vendor picker + inline create (bulk composer spec Part 2 §3/§4) ──
+  vendorQuery: '',
+  vendorResults: [],
+  searchOpen: false,
+  addingVendor: false,
+  addingVendorBusy: false,
+  newVendorName: '',
+  newVendorWebsite: '',
+  newVendorEmail: '',
+
   get selectedCount() {
     return Object.keys(this.selectedVendors).length;
   },
@@ -1751,6 +1761,86 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   toggleVendor(name) {
     if (this.selectedVendors[name]) delete this.selectedVendors[name];
     else this.selectedVendors[name] = true;
+  },
+  // Server-returned composer rows (composer_vendor_row.html) x-init through here so
+  // they arrive CHECKED — runtime-added keys flow into vendor_names via _form().
+  selectVendor(name) {
+    this.selectedVendors[name] = true;
+  },
+
+  // Debounced (template-side @input.debounce.300ms) lookup against the existing
+  // /api/autocomplete/names endpoint. It mixes vendors + customers — filter to
+  // vendors client-side; never fork the endpoint.
+  async searchVendors() {
+    const q = this.vendorQuery.trim();
+    if (q.length < 2) {
+      this.vendorResults = [];
+      this.searchOpen = false;
+      return;
+    }
+    try {
+      const resp = await fetch('/api/autocomplete/names?q=' + encodeURIComponent(q));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const items = await resp.json();
+      this.vendorResults = (items || []).filter((it) => it.type === 'vendor');
+      this.searchOpen = true;
+    } catch (err) {
+      console.error('[rfqVendorModal] vendor search failed', err);
+      this.vendorResults = [];
+      this.searchOpen = false;
+    }
+  },
+
+  async pickVendor(name) {
+    this.searchOpen = false;
+    this.vendorQuery = '';
+    this.vendorResults = [];
+    await this._addComposerVendor({ vendor_name: name });
+  },
+
+  async createVendor() {
+    if (!this.newVendorName.trim() || this.addingVendorBusy) return;
+    this.addingVendorBusy = true;
+    try {
+      const ok = await this._addComposerVendor({
+        vendor_name: this.newVendorName.trim(),
+        website: this.newVendorWebsite.trim(),
+        email: this.newVendorEmail.trim(),
+      });
+      if (ok) {
+        this.newVendorName = '';
+        this.newVendorWebsite = '';
+        this.newVendorEmail = '';
+        this.addingVendor = false;
+      }
+    } finally {
+      this.addingVendorBusy = false;
+    }
+  },
+
+  // POST to composer-vendor and append the returned row into the stable-id
+  // #rfq-added-vendors sub-container INSIDE this x-data wrapper (explicit target —
+  // swapping the wrapper would re-init rfqVendorModal and wipe selection state).
+  // The global htmx:configRequest listener adds the x-csrftoken header.
+  async _addComposerVendor(fields) {
+    const form = new FormData();
+    form.append('vendor_name', fields.vendor_name);
+    if (fields.website) form.append('website', fields.website);
+    if (fields.email) form.append('email', fields.email);
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    try {
+      await htmx.ajax('POST', '/v2/partials/sightings/composer-vendor', {
+        target: '#rfq-added-vendors',
+        swap: 'beforeend',
+        indicator: '#rfq-added-vendors-spinner',
+        values: form,
+      });
+      return true;
+    } catch (err) {
+      console.error('[rfqVendorModal] add vendor failed', err);
+      this._toast('Could not add vendor — please try again', 'error');
+      return false;
+    }
   },
 
   // Build a FormData with REPEATED keys for the multi-valued fields. (Object.fromEntries
