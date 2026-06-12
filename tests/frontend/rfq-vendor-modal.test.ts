@@ -243,6 +243,147 @@ describe('rfqVendorModal (real factory)', () => {
     });
   });
 
+  describe('_addComposerVendor / pickVendor (any-vendor picker)', () => {
+    function rowHtml(normalized: string) {
+      // Mirrors composer_vendor_row.html's selectable branch: x-init carries the
+      // server-normalized name as a tojson-quoted string in a single-quoted attr.
+      // Jinja's |tojson escapes ' < > & as \uXXXX so the attr can't break — mirror it.
+      const quoted = JSON.stringify(normalized)
+        .replace(/'/g, '\\u0027').replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+      return `<label x-init='selectVendor(${quoted})'><input type="checkbox"><span>row</span></label>`;
+    }
+    function htmlResponse(html: string, ok = true, status = 200) {
+      return { ok, status, text: () => Promise.resolve(html) };
+    }
+    function addContainer() {
+      const div = document.createElement('div');
+      div.id = 'rfq-added-vendors';
+      document.body.appendChild(div);
+      return div;
+    }
+
+    it('pickVendor posts to composer-vendor and appends the returned row', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [10, 11]);
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('new vendor co')));
+
+      await m.pickVendor('New Vendor Co');
+
+      const [url, opts] = (fetch as any).mock.calls[0];
+      expect(url).toBe('/v2/partials/sightings/composer-vendor');
+      expect(opts.method).toBe('POST');
+      expect(opts.headers['x-csrftoken']).toBe('testtoken');
+      expect(opts.body.get('vendor_name')).toBe('New Vendor Co');
+      expect(opts.body.getAll('requirement_ids')).toEqual(['10', '11']);
+      expect(container.children.length).toBe(1);
+      expect((htmx as any).process).toHaveBeenCalledWith(container);
+      expect(m.vendorQuery).toBe('');
+      expect(m.searchOpen).toBe(false);
+    });
+
+    it('skips the request entirely when the vendor is already selected (case-insensitive)', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+
+      await m.pickVendor('Mouser Electronics');
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(container.children.length).toBe(0);
+      expect(m.$store.toast.type).toBe('info');
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('skips the APPEND when the returned row resolves to an already-selected vendor', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+      // Display name differs from the normalized key, so the fast path misses and
+      // the request goes out — the server-normalized name in the row must dedupe.
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('mouser electronics')));
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Mouser Electronics, Inc.' });
+
+      expect(ok).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(container.children.length).toBe(0); // no duplicate visual row
+      expect(m.$store.toast.type).toBe('info');
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('still appends excluded rows (no x-init selection key)', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+      (fetch as any).mockResolvedValue(htmlResponse('<label><input type="checkbox" disabled><span>unavailable co</span></label>'));
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Unavailable Co' });
+
+      expect(ok).toBe(true);
+      expect(container.children.length).toBe(1);
+    });
+
+    it('a 4xx response keeps the inline create-form values and reports an error', async () => {
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      m.newVendorWebsite = 'acme.example';
+      m.newVendorEmail = 'not-an-email';
+      (fetch as any).mockResolvedValue(htmlResponse('', false, 400));
+
+      await m.createVendor();
+
+      expect(m.newVendorName).toBe('Acme Components'); // typed values preserved
+      expect(m.newVendorWebsite).toBe('acme.example');
+      expect(m.newVendorEmail).toBe('not-an-email');
+      expect(m.addingVendor).toBe(true); // form stays open
+      expect(m.addingVendorBusy).toBe(false);
+      expect(container.children.length).toBe(0);
+      expect(m.$store.toast.type).toBe('error');
+      expect(m.$store.toast.message).toBe('Could not add vendor — please try again');
+    });
+
+    it('a network failure also keeps the create-form values', async () => {
+      addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      (fetch as any).mockRejectedValue(new Error('offline'));
+
+      await m.createVendor();
+
+      expect(m.newVendorName).toBe('Acme Components');
+      expect(m.addingVendor).toBe(true);
+      expect(m.addingVendorBusy).toBe(false);
+      expect(m.$store.toast.type).toBe('error');
+    });
+
+    it('createVendor success appends the row, clears the form, and closes the panel', async () => {
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      m.newVendorWebsite = 'https://acme.example';
+      m.newVendorEmail = 'sales@acme.example';
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('acme components')));
+
+      await m.createVendor();
+
+      expect(container.children.length).toBe(1);
+      expect(m.newVendorName).toBe('');
+      expect(m.newVendorWebsite).toBe('');
+      expect(m.newVendorEmail).toBe('');
+      expect(m.addingVendor).toBe(false);
+      expect(m.addingVendorBusy).toBe(false);
+    });
+
+    it('_rowVendorName parses the tojson-quoted normalized name (and escapes)', () => {
+      const m = makeModal([], [1]);
+      expect(m._rowVendorName(rowHtml('digi-key'))).toBe('digi-key');
+      expect(m._rowVendorName(rowHtml("o'brien & co"))).toBe("o'brien & co");
+      expect(m._rowVendorName('<label><span>excluded</span></label>')).toBeNull();
+    });
+  });
+
   describe('_sendOutcome mapping', () => {
     it('maps full / partial / zero correctly', () => {
       const m = makeModal(['a'], [1]);

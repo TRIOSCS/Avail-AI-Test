@@ -1818,28 +1818,85 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
+  // Fast-path dedup: true when `name` matches a selection key case-insensitively.
+  // Keys are server-NORMALIZED names (suffixes stripped) while picker/typed names
+  // are display names, so this only catches exact/case matches — the authoritative
+  // check in _addComposerVendor re-tests the server's normalized name from the row.
+  _isVendorSelected(name) {
+    const q = (name || '').trim().toLowerCase();
+    return Object.keys(this.selectedVendors).some((k) => k.toLowerCase() === q);
+  },
+
+  // Extract the server-normalized vendor name from a composer_vendor_row.html
+  // payload: the selectable row x-inits selectVendor("<normalized>") with a
+  // |tojson-quoted string (json escapes embedded `"`). Excluded rows render no
+  // x-init → null. Parsed detached via DOMParser (no script execution, no insert).
+  _rowVendorName(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const xInit = doc.querySelector('[x-init]')?.getAttribute('x-init') || '';
+    const m = xInit.match(/selectVendor\(("(?:[^"\\]|\\.)*")\)/);
+    if (!m) return null;
+    try {
+      return JSON.parse(m[1]);
+    } catch {
+      return null;
+    }
+  },
+
   // POST to composer-vendor and append the returned row into the stable-id
-  // #rfq-added-vendors sub-container INSIDE this x-data wrapper (explicit target —
+  // #rfq-added-vendors sub-container INSIDE this x-data wrapper (explicit container —
   // swapping the wrapper would re-init rfqVendorModal and wipe selection state).
-  // The global htmx:configRequest listener adds the x-csrftoken header.
+  // Raw fetch + manual insert (mirrors confirmSend / customerPicker.lookupCompany)
+  // so a server 4xx is DETECTED: htmx.ajax resolves on HTTP errors, which used to
+  // clear the inline create form on a 400. Returns true only when the vendor ended
+  // up selected (row appended, or already present — duplicate picks skip the append
+  // so #rfq-added-vendors never shows the same vendor twice); false on any error so
+  // createVendor keeps the typed values.
   async _addComposerVendor(fields) {
+    if (this._isVendorSelected(fields.vendor_name)) {
+      this._toast('Vendor already added', 'info');
+      return true;
+    }
     const form = new FormData();
     form.append('vendor_name', fields.vendor_name);
     if (fields.website) form.append('website', fields.website);
     if (fields.email) form.append('email', fields.email);
     this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    const spinner = document.querySelector('#rfq-added-vendors-spinner');
+    spinner?.classList.add('htmx-request');
     try {
-      await htmx.ajax('POST', '/v2/partials/sightings/composer-vendor', {
-        target: '#rfq-added-vendors',
-        swap: 'beforeend',
-        indicator: '#rfq-added-vendors-spinner',
-        values: form,
+      // starlette_csrf requires the x-csrftoken header on POST (mirrors confirmSend).
+      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+      const resp = await fetch('/v2/partials/sightings/composer-vendor', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrf },
+        body: form,
       });
+      if (!resp.ok) {
+        console.error('[rfqVendorModal] add vendor failed: HTTP ' + resp.status);
+        this._toast('Could not add vendor — please try again', 'error');
+        return false;
+      }
+      const html = await resp.text();
+      // Authoritative dedup on the server-normalized name: picking
+      // "Mouser Electronics, Inc." when "mouser electronics" is already selected
+      // would append a duplicate row while selection state stays unchanged.
+      const normalized = this._rowVendorName(html);
+      if (normalized && this.selectedVendors[normalized]) {
+        this._toast('Vendor already added', 'info');
+        return true;
+      }
+      const container = document.querySelector('#rfq-added-vendors');
+      // Server HTML is trusted (same-origin, auth-protected endpoint).
+      container.insertAdjacentHTML('beforeend', html);
+      htmx.process(container);
       return true;
     } catch (err) {
       console.error('[rfqVendorModal] add vendor failed', err);
       this._toast('Could not add vendor — please try again', 'error');
       return false;
+    } finally {
+      spinner?.classList.remove('htmx-request');
     }
   },
 
