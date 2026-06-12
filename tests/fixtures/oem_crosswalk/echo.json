@@ -1,0 +1,9 @@
+{
+  "_comment": "Gate 3 failure: the model echoed the spare back as the canonical MPN.",
+  "canonical_mpn": "875942-001",
+  "manufacturer": "HPE",
+  "title": "Intel Xeon-Gold 6130 (2.1GHz/16-core/125W) FIO processor kit",
+  "quote": "875942-001 Intel Xeon-Gold 6130 processor kit 875942-001",
+  "confidence": 0.96,
+  "source_url": "https://partsurfer.hp.com/Search.aspx?SearchText=875942-001"
+}

@@ -72,6 +72,9 @@ from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
 
+# OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache)
+from .oem_crosswalk import OemCrosswalk  # noqa: F401
+
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
 

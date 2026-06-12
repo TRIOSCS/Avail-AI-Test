@@ -26,7 +26,7 @@ from loguru import logger as loguru_logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.constants import ActivityType, UnavailabilityReason
+from app.constants import ActivityType, ReleaseTrigger, UnavailabilityReason
 from app.models import User, VendorPartUnavailability
 from app.models.intelligence import ActivityLog
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -34,14 +34,13 @@ from app.services.vendor_unavailability import (
     HUMAN_DIRECT_SOURCES,
     LIVE_SOURCES,
     LOT_REASONS,
-    RELEASE_TRIGGER_OFFER_RECEIVED,
-    RELEASE_TRIGGER_VENDOR_EMAIL,
     UnavailabilityIntel,
     _keys_for_vendor,
     apply_to_fresh_sightings,
     clear_unavailability,
     excluded_vendor_norms,
     is_active,
+    maybe_release_on_offer,
     record_unavailability,
     release_on_offer,
     unavailability_for_requirement,
@@ -102,7 +101,9 @@ class TestVendorPartUnavailabilityModel:
 
         assert record.id is not None
         assert record.vendor_name_normalized == "acme components"
-        assert record.normalized_mpn == "ST3300657SS"
+        # @validates re-normalizes the key columns through the canonical helpers —
+        # the dashed/uppercase input is stored as normalize_mpn_key() output.
+        assert record.normalized_mpn == "st3300657ss"
         assert record.reason == UnavailabilityReason.BOUGHT_BY_US
         assert record.note == "PO 1234 cleared their stock"
         assert record.created_by_id == test_user.id
@@ -160,7 +161,8 @@ class TestVendorPartUnavailabilityModel:
         )
         db_session.commit()
 
-        rows = db_session.query(VendorPartUnavailability).filter_by(normalized_mpn="ST3300657SS").all()
+        # Stored under the canonical key (@validates re-normalization).
+        rows = db_session.query(VendorPartUnavailability).filter_by(normalized_mpn="st3300657ss").all()
         assert len(rows) == 2
 
 
@@ -488,8 +490,8 @@ class TestUnavailabilityForRequirement:
         assert intel["Acme Components, Inc."].record.id == newer.id
 
     def test_results_are_annotated_with_policy_state(self, db_session: Session):
-        """The intel entries carry computed policy state (is_active, age_days,
-        release_trigger) so templates never re-derive policy."""
+        """The intel entries carry computed policy state (is_active, age_days) plus the
+        record itself so templates never re-derive policy."""
         requirement = _make_requirement(db_session, primary_mpn="AAA-111")
         _make_record(
             db_session,
@@ -513,7 +515,7 @@ class TestUnavailabilityForRequirement:
             reason=UnavailabilityReason.NOT_REALLY_THERE,
             age_days=1,
             released_at=released_at,
-            release_trigger=RELEASE_TRIGGER_OFFER_RECEIVED,
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         db_session.commit()
 
@@ -525,7 +527,7 @@ class TestUnavailabilityForRequirement:
         assert isinstance(active, UnavailabilityIntel)
         assert active.is_active is True
         assert active.age_days == 3
-        assert active.release_trigger is None
+        assert active.record.release_trigger is None
 
         expired = intel["Globex Parts"]
         assert expired.is_active is False
@@ -533,7 +535,9 @@ class TestUnavailabilityForRequirement:
 
         released = intel["Initech Supply"]
         assert released.is_active is False
-        assert released.release_trigger == RELEASE_TRIGGER_OFFER_RECEIVED
+        # release_trigger is read through the record — the ORM object is the single
+        # source of truth (no copied field on the dataclass).
+        assert released.record.release_trigger == ReleaseTrigger.OFFER_RECEIVED
 
     def test_empty_vendor_names(self, db_session: Session):
         requirement = _make_requirement(db_session, primary_mpn="AAA-111")
@@ -585,8 +589,8 @@ class TestPolicyConstants:
         )
 
     def test_release_trigger_values(self):
-        assert RELEASE_TRIGGER_VENDOR_EMAIL == "vendor_email"
-        assert RELEASE_TRIGGER_OFFER_RECEIVED == "offer_received"
+        assert ReleaseTrigger.VENDOR_EMAIL == "vendor_email"
+        assert ReleaseTrigger.OFFER_RECEIVED == "offer_received"
 
 
 class TestIsActive:
@@ -628,7 +632,7 @@ class TestIsActive:
             UnavailabilityReason.DIFFERENT_PART,
             age_days=0,
             released_at=now,
-            release_trigger=RELEASE_TRIGGER_OFFER_RECEIVED,
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         assert is_active(rec, now) is False
 
@@ -641,6 +645,21 @@ class TestIsActive:
         assert is_active(rec, now) is True
         rec.created_at = (now - timedelta(days=31)).replace(tzinfo=None)
         assert is_active(rec, now) is False
+
+    def test_pre_flush_none_created_at_is_active(self):
+        """A just-created, not-yet-flushed record (Python default not applied yet) must
+        read as active for a windowed reason — a fail-closed `return False` here would
+        make a fresh mark invisible to same-session readers.
+
+        The column is NOT NULL, so a PERSISTED row can never reach this branch.
+        """
+        rec = VendorPartUnavailability(
+            vendor_name_normalized="acme components",
+            normalized_mpn="st3300657ss",
+            reason=UnavailabilityReason.BOUGHT_BY_US,
+        )
+        assert rec.created_at is None  # unflushed: dual default not applied yet
+        assert is_active(rec) is True
 
 
 class TestUnavailabilityKnobs:
@@ -734,7 +753,7 @@ class TestSuppressionMatrixWindows:
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
             age_days=1,
             released_at=datetime.now(timezone.utc),
-            release_trigger=RELEASE_TRIGGER_OFFER_RECEIVED,
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         row = _make_sighting(db_session, requirement, "Acme Components", mpn_matched="ST3300657SS")
 
@@ -984,7 +1003,7 @@ class TestOverrideO3VendorDocument:
         assert count == 0
         assert bool(row.is_unavailable) is False
         assert rec.released_at is not None
-        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
         entries = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.VENDOR_AVAILABLE).all()
         assert len(entries) == 1
         assert entries[0].requirement_id == requirement.id
@@ -1085,7 +1104,7 @@ class TestSourceClassDispatch:
         assert count == 0
         assert bool(row.is_unavailable) is False
         assert rec.released_at is not None
-        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
         entries = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.VENDOR_AVAILABLE).all()
         assert len(entries) == 1
         assert entries[0].requirement_id == requirement.id
@@ -1222,7 +1241,7 @@ class TestReMark:
 
         (rec,) = _records(db_session, "acme components")
         rec.released_at = datetime.now(timezone.utc) - timedelta(days=1)
-        rec.release_trigger = RELEASE_TRIGGER_OFFER_RECEIVED
+        rec.release_trigger = ReleaseTrigger.OFFER_RECEIVED
         rec.created_at = datetime.now(timezone.utc) - timedelta(days=40)
         db_session.flush()
         assert is_active(rec) is False
@@ -1268,7 +1287,7 @@ class TestReleaseOnOffer:
 
         assert released == 1
         assert lot_rec.released_at is not None
-        assert lot_rec.release_trigger == RELEASE_TRIGGER_OFFER_RECEIVED
+        assert lot_rec.release_trigger == ReleaseTrigger.OFFER_RECEIVED
         assert identity_rec.released_at is None  # identity knowledge survives offers
         entries = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.VENDOR_AVAILABLE).all()
         assert len(entries) == 1
@@ -1288,12 +1307,12 @@ class TestReleaseOnOffer:
             db_session,
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
             released_at=first_release,
-            release_trigger=RELEASE_TRIGGER_VENDOR_EMAIL,
+            release_trigger=ReleaseTrigger.VENDOR_EMAIL,
         )
         db_session.commit()
 
         assert release_on_offer(db_session, requirement, "Acme Components", test_user) == 0
-        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
 
     def test_no_match_returns_zero(self, db_session: Session, test_user: User):
         requirement = _make_requirement(db_session, primary_mpn="ST3300657SS")
@@ -1318,7 +1337,7 @@ class TestExcludedVendorNormsActiveOnly:
             db_session,
             reason=UnavailabilityReason.SOLD_ELSEWHERE,
             released_at=datetime.now(timezone.utc),
-            release_trigger=RELEASE_TRIGGER_OFFER_RECEIVED,
+            release_trigger=ReleaseTrigger.OFFER_RECEIVED,
         )
         db_session.commit()
 
@@ -1611,7 +1630,7 @@ class TestEmailAttachmentReapplication:
         assert bool(row.is_unavailable) is False  # O3 surfaces, never stamps
         db_session.refresh(rec)
         assert rec.released_at is not None
-        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
         assert not is_active(rec)
 
     def test_resent_attachment_dedup_updates_row_and_releases(self, db_session: Session, test_user: User):
@@ -1661,7 +1680,7 @@ class TestEmailAttachmentReapplication:
         assert float(existing.unit_price) == 0.50
         db_session.refresh(rec)
         assert rec.released_at is not None
-        assert rec.release_trigger == RELEASE_TRIGGER_VENDOR_EMAIL
+        assert rec.release_trigger == ReleaseTrigger.VENDOR_EMAIL
 
 
 class TestPickerReapplication:
@@ -1881,7 +1900,7 @@ def _assert_released(db_session: Session, rec: VendorPartUnavailability) -> None
     db_session.expire_all()
     rec = db_session.get(VendorPartUnavailability, rec.id)
     assert rec.released_at is not None
-    assert rec.release_trigger == RELEASE_TRIGGER_OFFER_RECEIVED
+    assert rec.release_trigger == ReleaseTrigger.OFFER_RECEIVED
 
 
 def _assert_not_released(db_session: Session, rec: VendorPartUnavailability) -> None:
@@ -2138,3 +2157,124 @@ class TestOfferHookExcludedPaths:
         cloned = db_session.query(Offer).filter_by(requisition_id=new_id).all()
         assert len(cloned) == 1 and cloned[0].requirement_id is not None
         _assert_not_released(db_session, rec)
+
+
+class TestMaybeReleaseOnOfferGuards:
+    """Direct tests of the gate's three documented no-op branches — Offer.requirement_id
+    is nullable, so requirement-less and orphaned-requirement offers are real states at
+    all nine call sites; a dropped guard would 500 every offer creation/approval."""
+
+    def test_none_requirement_id_no_ops(self, db_session: Session, test_user: User):
+        rec = _hook_record(db_session, "Arrow Electronics")
+        assert maybe_release_on_offer(db_session, None, "Arrow Electronics", test_user) == 0
+        _assert_not_released(db_session, rec)
+        assert db_session.query(ActivityLog).count() == 0
+
+    def test_blank_vendor_name_no_ops(self, db_session: Session, test_user: User):
+        requirement = _make_requirement(db_session, primary_mpn="LM317T")
+        rec = _hook_record(db_session, "Arrow Electronics")
+        assert maybe_release_on_offer(db_session, requirement.id, "   ", test_user) == 0
+        assert maybe_release_on_offer(db_session, requirement.id, None, test_user) == 0
+        _assert_not_released(db_session, rec)
+        assert db_session.query(ActivityLog).count() == 0
+
+    def test_dangling_requirement_id_no_ops_and_warns(self, db_session: Session, test_user: User):
+        """A non-null requirement_id resolving to no row is a caller anomaly — still 0,
+        but logged so the silently-skipped release is observable."""
+        rec = _hook_record(db_session, "Arrow Electronics")
+        with _capture_warnings() as warnings:
+            assert maybe_release_on_offer(db_session, 999999, "Arrow Electronics", test_user) == 0
+        assert any("requirement 999999 not found" in m for m in warnings)
+        _assert_not_released(db_session, rec)
+        assert db_session.query(ActivityLog).count() == 0
+
+
+class TestModelTransitionsAndConstraints:
+    """The released_at ⇔ release_trigger pair invariant (release()/re_arm() transitions
+    + the ck_vendor_part_unavail_release_pair CHECK), the ReleaseTrigger closed
+    vocabulary, the @validates re-normalization of the unique-key columns, and the
+    created_at NOT NULL guarantee."""
+
+    def _record(self, **kwargs) -> VendorPartUnavailability:
+        defaults = dict(
+            vendor_name_normalized="acme components",
+            normalized_mpn="st3300657ss",
+            reason=UnavailabilityReason.SOLD_ELSEWHERE,
+        )
+        defaults.update(kwargs)
+        return VendorPartUnavailability(**defaults)
+
+    def test_release_sets_the_pair_together(self):
+        rec = self._record()
+        now = datetime.now(timezone.utc)
+        rec.release(ReleaseTrigger.OFFER_RECEIVED, now)
+        assert rec.released_at == now
+        assert rec.release_trigger == ReleaseTrigger.OFFER_RECEIVED
+
+    def test_re_arm_nulls_the_pair_together(self):
+        rec = self._record()
+        rec.release(ReleaseTrigger.VENDOR_EMAIL, datetime.now(timezone.utc))
+        rec.re_arm()
+        assert rec.released_at is None
+        assert rec.release_trigger is None
+
+    def test_release_rejects_unknown_trigger(self):
+        with pytest.raises(ValueError):
+            self._record().release("manual_whim", datetime.now(timezone.utc))
+
+    def test_release_trigger_assignment_rejects_unknown_value(self):
+        rec = self._record()
+        with pytest.raises(ValueError):
+            rec.release_trigger = "manual_whim"
+
+    def test_half_released_record_is_unrepresentable(self, db_session: Session):
+        """released_at without a trigger would render as merely expired in the advisory
+        UI — the CHECK constraint makes the state impossible at rest."""
+        rec = self._record(released_at=datetime.now(timezone.utc))
+        db_session.add(rec)
+        with pytest.raises(IntegrityError):
+            db_session.flush()
+        db_session.rollback()
+
+    def test_orm_explicit_none_created_at_still_gets_a_value(self, db_session: Session):
+        """The ORM re-fires the Python default on explicit None — a NULL created_at
+        cannot be produced through the model at all."""
+        rec = self._record(created_at=None)
+        db_session.add(rec)
+        db_session.commit()
+        db_session.refresh(rec)
+        assert rec.created_at is not None
+
+    def test_raw_insert_null_created_at_is_rejected(self, db_session: Session):
+        """Only a raw INSERT can even attempt an explicit NULL (bypassing both defaults)
+        — NOT NULL rejects it, so a never-expiring corrupt row is unrepresentable at
+        rest."""
+        from sqlalchemy import insert
+
+        stmt = insert(VendorPartUnavailability.__table__).values(
+            vendor_name_normalized="acme components",
+            normalized_mpn="st3300657ss",
+            reason=UnavailabilityReason.SOLD_ELSEWHERE.value,
+            created_at=None,
+        )
+        with pytest.raises(IntegrityError):
+            db_session.execute(stmt)
+        db_session.rollback()
+
+    def test_key_columns_re_normalize_on_write(self):
+        """Un-normalized writes (display names, dashed MPNs) are canonicalized by
+        @validates — a row that record/clear/status lookups can't match is
+        unrepresentable (Requirement @validates precedent)."""
+        rec = self._record(
+            vendor_name_normalized="Acme Components, Inc.",
+            normalized_mpn="ST-3300657SS",
+        )
+        assert rec.vendor_name_normalized == normalize_vendor_name("Acme Components, Inc.")
+        assert rec.vendor_name_normalized == "acme components"
+        assert rec.normalized_mpn == normalize_mpn_key("ST-3300657SS")
+        assert rec.normalized_mpn == "st3300657ss"
+
+    @pytest.mark.parametrize("column", ["vendor_name_normalized", "normalized_mpn"])
+    def test_empty_key_normalization_raises(self, column: str):
+        with pytest.raises(ValueError):
+            self._record(**{column: "   "})

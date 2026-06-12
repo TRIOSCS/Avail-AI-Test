@@ -9,21 +9,26 @@ silent-failure hardening (design spec IMPORTANT-3):
   and they ride the suppression windows (fail-closed).
 - released_at / release_trigger: written ONLY by override O3 (buyer-routed
   vendor email → 'vendor_email') and the offer hook ('offer_received');
-  non-NULL ⇒ the record is no longer active.
+  non-NULL ⇒ the record is no longer active. The pair moves together — a CHECK
+  constraint enforces (released_at IS NULL) = (release_trigger IS NULL), so a
+  half-released record (advisory UI would render it as merely expired) is
+  unrepresentable at rest.
 - requirement_id: clear-time provenance FK (SET NULL — knowledge outlives
   requirements), indexed for the clear_unavailability provenance arm.
 
-Generated via `alembic revision --autogenerate` against a scratch PG at the unavailability-table migration (renumbered 098->102 alongside 097->101),
-then hand-reviewed: unrelated autogen noise stripped (runtime trgm/FTS indexes,
-dead-table drops — none of it belongs to this change). released_at uses
-sa.DateTime(timezone=True) to match UTCDateTime's dialect impl (TIMESTAMP WITH
-TIME ZONE) so future autogenerate runs see no type diff; the FK is explicitly
-named so downgrade can drop it deterministically.
+Generated via `alembic revision --autogenerate` against a scratch PG at the
+unavailability-table migration (renumbered 098->102->103 alongside that table
+migration — see MIGRATION_NUMBERS_IN_FLIGHT.txt), then hand-reviewed: unrelated
+autogen noise stripped (runtime trgm/FTS indexes, dead-table drops — none of it
+belongs to this change). released_at uses sa.DateTime(timezone=True) to match
+UTCDateTime's dialect impl (TIMESTAMP WITH TIME ZONE) so future autogenerate runs
+see no type diff; the FK and CHECK are explicitly named so downgrade can drop
+them deterministically.
 
-Downgrade drops the four columns (and the index/FK).
+Downgrade drops the four columns (and the index/FK/CHECK).
 
-Revision ID: 102_unavail_policy_columns
-Revises: 101_vendor_part_unavailability
+Revision ID: 103_unavail_policy_columns
+Revises: 102_vendor_part_unavailability
 Create Date: 2026-06-10
 """
 
@@ -31,8 +36,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "102_unavail_policy_columns"
-down_revision = "101_vendor_part_unavailability"
+revision = "103_unavail_policy_columns"
+down_revision = "102_vendor_part_unavailability"
 branch_labels = None
 depends_on = None
 
@@ -51,9 +56,18 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
+    # released_at ⇔ release_trigger move together (released_at is set only with a
+    # trigger; re-mark NULLs both) — DB-enforced so no future writer can produce a
+    # half-released record. Mirrored in the model's __table_args__.
+    op.create_check_constraint(
+        "ck_vendor_part_unavail_release_pair",
+        "vendor_part_unavailability",
+        "(released_at IS NULL) = (release_trigger IS NULL)",
+    )
 
 
 def downgrade() -> None:
+    op.drop_constraint("ck_vendor_part_unavail_release_pair", "vendor_part_unavailability", type_="check")
     op.drop_constraint("fk_vendor_part_unavail_requirement", "vendor_part_unavailability", type_="foreignkey")
     op.drop_index("ix_vendor_part_unavail_req", table_name="vendor_part_unavailability")
     op.drop_column("vendor_part_unavailability", "requirement_id")

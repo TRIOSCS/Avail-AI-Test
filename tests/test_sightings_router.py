@@ -762,6 +762,33 @@ class TestRfqModalUnavailableExclusion:
         assert resp.status_code == 200
         assert "Good Vendor" in resp.text
 
+    def test_legacy_suffixed_card_still_excluded(self, client, db_session):
+        """Pins the Python-side re-filter behind the SQL notin_ column filter: a legacy
+        VendorCard whose normalized_name predates normalize_vendor_name (suffix kept,
+        'good vendor inc') slips past the column filter — the canonical re-normalization
+        of display_name must still exclude it, or a durably-dead vendor gets
+        re-suggested to buyers."""
+        _, r, _ = _seed_data(db_session)
+        # Legacy card: normalized_name kept the suffix, so notin_({'good vendor'})
+        # does NOT filter it at the SQL layer.
+        self._card(db_session, normalized="good vendor inc", display="Good Vendor, Inc.")
+        # Summary whose lower(trim(vendor_name)) matches the legacy card's join key.
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Good Vendor Inc",
+                estimated_qty=150,
+                listing_count=1,
+                score=70.0,
+                tier="Good",
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, requirement_id=r.id)  # active, canonical norm 'good vendor'
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Good Vendor, Inc." not in resp.text
+
 
 class TestSendInquiryUnavailableExclusion:
     """Send/preview re-validate submitted vendor_names against active-only

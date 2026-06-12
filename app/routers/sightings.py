@@ -29,6 +29,7 @@ from ..config import settings
 from ..constants import (
     ActivityType,
     OfferStatus,
+    ReleaseTrigger,
     RequisitionStatus,
     SourcingStatus,
     UnavailabilityReason,
@@ -193,7 +194,10 @@ def _annotated_unavailability(
         annotated[vendor_name] = {
             "is_active": item.is_active,
             "age_days": item.age_days,
-            "release_trigger": item.release_trigger,
+            # Precomputed display fragment ("offer" / "vendor email") via the
+            # ReleaseTrigger enum's .label — templates never compare raw trigger
+            # strings (reason_label precedent).
+            "released_by": ReleaseTrigger(rec.release_trigger).label if rec.release_trigger else None,
             "reason": rec.reason,
             "reason_label": UnavailabilityReason(rec.reason).label,
             "note": rec.note,

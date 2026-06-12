@@ -562,3 +562,41 @@ _UNAVAILABILITY_REASON_LABELS: dict[UnavailabilityReason, str] = {
     UnavailabilityReason.DIFFERENT_PART: "Different part number",
     UnavailabilityReason.OTHER: "Other",
 }
+
+
+class ReleaseTrigger(StrEnum):
+    """How a VendorPartUnavailability record was released — the closed vocabulary for
+    ``release_trigger``.
+
+    Written ONLY by override O3 (buyer-routed vendor email) and the offer hook;
+    enforced via @validates on the model. ``.label`` is the display fragment the
+    advisory row hint renders ("released by <label>").
+    """
+
+    VENDOR_EMAIL = "vendor_email"
+    OFFER_RECEIVED = "offer_received"
+
+    @property
+    def label(self) -> str:
+        """Human display fragment for this trigger."""
+        return _RELEASE_TRIGGER_LABELS[self]
+
+
+_RELEASE_TRIGGER_LABELS: dict[ReleaseTrigger, str] = {
+    ReleaseTrigger.VENDOR_EMAIL: "vendor email",
+    ReleaseTrigger.OFFER_RECEIVED: "offer",
+}
+
+
+class OemCrosswalkStatus(StrEnum):
+    """Status of an ``oem_crosswalk`` cache row (OEM web resolution, migration 101).
+
+    Single source of truth for the only two valid states — a resolver trust-gate
+    failure IS ``no_match`` (there is no separate "gate_failed" state). ``resolved``
+    rows are permanent (never re-fetched); ``no_match`` rows block re-resolution for
+    90 days from ``looked_up_at`` and are updated in place on retry. Enforced via
+    @validates on OemCrosswalk.
+    """
+
+    RESOLVED = "resolved"
+    NO_MATCH = "no_match"

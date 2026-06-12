@@ -32,7 +32,7 @@ Called by: app/routers/sightings.py (mark-unavailable / mark-available routes),
            add-to-requisition picker, inventory jobs, manual stock-list
            import, ICS/NC queue-manager dedup clones)
 Depends on: VendorPartUnavailability, Sighting, ActivityLog models,
-            UnavailabilityReason/ActivityType/Channel constants,
+            UnavailabilityReason/ReleaseTrigger/ActivityType/Channel constants,
             settings (unavailability_* knobs),
             normalize_vendor_name (app/vendor_utils),
             normalize_mpn_key (app/utils/normalization)
@@ -41,14 +41,14 @@ Depends on: VendorPartUnavailability, Sighting, ActivityLog models,
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Final
+from typing import Final, Literal
 
 from loguru import logger
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import ActivityType, Channel, UnavailabilityReason
+from ..constants import ActivityType, Channel, ReleaseTrigger, UnavailabilityReason
 from ..models.auth import User
 from ..models.intelligence import ActivityLog
 from ..models.sourcing import Requirement, Sighting
@@ -71,35 +71,41 @@ LOT_REASONS: Final[frozenset[UnavailabilityReason]] = frozenset(
 )
 
 # Source trust classes, computed from source_type/is_authorized — NEVER the stored
-# evidence_tier (NULL on 4 of 6 persistence paths). Everything not LIVE or
-# HUMAN_DIRECT is listing-class by default: unknown source types can only be
-# stamped, never trigger a release.
+# evidence_tier (NULL on 6 of the 8 persistence paths: only search_service and the
+# add-to-requisition picker set it). Everything not LIVE or HUMAN_DIRECT is
+# listing-class by default: unknown source types can only be stamped, never
+# trigger a release.
 LIVE_SOURCES: Final[frozenset[str]] = frozenset({"digikey", "mouser", "element14"})
 HUMAN_DIRECT_SOURCES: Final[frozenset[str]] = frozenset({"email_attachment"})
 
-# The only two release_trigger values; written ONLY by override O3 and the offer hook.
-RELEASE_TRIGGER_VENDOR_EMAIL: Final[str] = "vendor_email"
-RELEASE_TRIGGER_OFFER_RECEIVED: Final[str] = "offer_received"
+# Literal vocabularies so mypy checks the dispatch sites — a future verdict/class
+# added to the alias without a handler fails the type check instead of silently
+# falling through to stamp.
+SourceClass = Literal["live", "human_direct", "listing"]
+OverrideVerdict = Literal["stamp", "surface", "release"]
 
-_CLASS_LIVE: Final[str] = "live"
-_CLASS_HUMAN_DIRECT: Final[str] = "human_direct"
-_CLASS_LISTING: Final[str] = "listing"
+_CLASS_LIVE: Final = "live"
+_CLASS_HUMAN_DIRECT: Final = "human_direct"
+_CLASS_LISTING: Final = "listing"
 
 # Per-(active record, fresh row) verdicts from _override_verdict.
-_VERDICT_STAMP: Final[str] = "stamp"  # no override fired — stamp is_unavailable
-_VERDICT_SURFACE: Final[str] = "surface"  # O1/O2 — leave row unstamped, no record mutation
-_VERDICT_RELEASE: Final[str] = "release"  # O3 — record-level release ('vendor_email')
+_VERDICT_STAMP: Final = "stamp"  # no override fired — stamp is_unavailable
+_VERDICT_SURFACE: Final = "surface"  # O1/O2 — leave row unstamped, no record mutation
+_VERDICT_RELEASE: Final = "release"  # O3 — record-level release ('vendor_email')
 
 
 @dataclass(frozen=True)
 class UnavailabilityIntel:
     """Template-facing annotation of a record — policy state precomputed so Jinja
-    renders the three row states without re-deriving any policy."""
+    renders the three row states without re-deriving any policy.
+
+    Record-derived fields (e.g. release_trigger) are read through ``record`` — the
+    ORM object is the single source of truth, never copied here.
+    """
 
     record: VendorPartUnavailability
     is_active: bool
     age_days: int
-    release_trigger: str | None
 
 
 # ── Policy helpers ────────────────────────────────────────────────────────────
@@ -132,13 +138,16 @@ def is_active(record: VendorPartUnavailability, now: datetime | None = None) -> 
     window = _window_days(UnavailabilityReason(record.reason))
     if window is None:
         return True
-    if record.created_at is None:  # pre-flush default not applied yet → just created
+    if record.created_at is None:
+        # Genuinely-unflushed object only: the column is NOT NULL with dual
+        # defaults (Python + server), so a PERSISTED row can never carry NULL —
+        # this branch covers the just-created, pre-flush window and nothing else.
         return True
     now = now or datetime.now(timezone.utc)
     return _as_utc(record.created_at) >= now - timedelta(days=window)
 
 
-def _source_class(sighting: Sighting) -> str:
+def _source_class(sighting: Sighting) -> SourceClass:
     """LIVE / HUMAN_DIRECT / listing-class (the default for everything else)."""
     if (sighting.source_type or "") in LIVE_SOURCES or sighting.is_authorized is True:
         return _CLASS_LIVE
@@ -147,7 +156,7 @@ def _source_class(sighting: Sighting) -> str:
     return _CLASS_LISTING
 
 
-def _override_verdict(record: VendorPartUnavailability, sighting: Sighting) -> str:
+def _override_verdict(record: VendorPartUnavailability, sighting: Sighting) -> OverrideVerdict:
     """Override verdict for one (active record, fresh row) pair — DISPATCHED BY SOURCE
     CLASS, never priority order.
 
@@ -287,10 +296,9 @@ def _release_record(
     user: User | None,
     now: datetime,
 ) -> None:
-    """Record-level release: stamp released_at/release_trigger + one ActivityLog
-    line."""
-    record.released_at = now
-    record.release_trigger = trigger
+    """Record-level release: stamp the released_at/release_trigger pair (via the
+    model's release() transition) + one ActivityLog line."""
+    record.release(trigger, now)
     _log_activity(
         db,
         requirement,
@@ -366,8 +374,7 @@ def record_unavailability(
             rec.created_at = now
             if snapshot is not None:  # keep-old-on-NULL: no cross-requirement clobber
                 rec.qty_at_mark = snapshot
-            rec.released_at = None
-            rec.release_trigger = None
+            rec.re_arm()  # NULL the release pair together — record suppresses again
             rec.requirement_id = requirement.id
         else:
             db.add(
@@ -467,9 +474,8 @@ def unavailability_for_requirement(
 
     Keys per vendor are that vendor's sighting MPN keys plus the requirement's primary
     key. One batched query — no N+1. Vendors with no matching record are absent from the
-    result. Each entry carries the computed policy state (is_active, age_days,
-    release_trigger) so templates render the three row states without re-deriving
-    policy.
+    result. Each entry carries the computed policy state (is_active, age_days) plus the
+    record itself so templates render the three row states without re-deriving policy.
     """
     norm_by_display = {vn: normalize_vendor_name(vn) for vn in vendor_names}
     norms = {n for n in norm_by_display.values() if n}
@@ -514,7 +520,6 @@ def unavailability_for_requirement(
                     record=rec,
                     is_active=is_active(rec, now),
                     age_days=max(0, age),
-                    release_trigger=rec.release_trigger,
                 )
                 break
     return result
@@ -579,13 +584,19 @@ def apply_to_fresh_sightings(
             if verdict == _VERDICT_SURFACE:  # O1 live truth / O2 restock — row-level only
                 continue
             if verdict == _VERDICT_RELEASE:
-                # O3 vendor document — safe to write here: this path is reached
-                # from a user-initiated router, not a background worker.
+                # O3 vendor document — RELEASE only fires for HUMAN_DIRECT rows
+                # (source_type='email_attachment'), which only the user-initiated
+                # sources.py attachment import creates today; background writers
+                # (brokerbin/ICS/NC/inventory/clones) use other source_types
+                # (inventory_jobs tags raw_data import_method='email_attachment'
+                # but its source_type is 'email_auto_import') and can never reach
+                # this branch — so the record mutation here is safe regardless of
+                # caller context.
                 _release_record(
                     db,
                     requirement,
                     rec,
-                    RELEASE_TRIGGER_VENDOR_EMAIL,
+                    ReleaseTrigger.VENDOR_EMAIL,
                     s.vendor_name or rec.vendor_name_normalized,
                     (
                         f"Vendor email shows qty {s.qty_available} for "
@@ -646,8 +657,7 @@ def release_on_offer(
             continue
         if not is_active(rec, now):
             continue
-        rec.released_at = now
-        rec.release_trigger = RELEASE_TRIGGER_OFFER_RECEIVED
+        rec.release(ReleaseTrigger.OFFER_RECEIVED, now)
         released += 1
     if released:
         _log_activity(
@@ -685,12 +695,20 @@ def maybe_release_on_offer(
     must NOT call this.
 
     Thin wrapper over ``release_on_offer``: resolves the requirement and no-ops (0)
-    when ``requirement_id`` or ``vendor_name`` is missing. Does NOT commit.
+    when ``requirement_id`` or ``vendor_name`` is missing. A non-null
+    ``requirement_id`` that resolves to no row is a caller anomaly (dangling id) —
+    still 0, but logged so a silently-skipped release is observable. Does NOT
+    commit.
     """
     if not requirement_id or not vendor_name or not vendor_name.strip():
         return 0
     requirement = db.get(Requirement, requirement_id)
     if requirement is None:
+        logger.warning(
+            "offer release hook: requirement {} not found — skipping release for vendor {}",
+            requirement_id,
+            vendor_name,
+        )
         return 0
     return release_on_offer(db, requirement, vendor_name, user)
 

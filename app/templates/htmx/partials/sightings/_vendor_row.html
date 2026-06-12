@@ -107,11 +107,13 @@
           </button>
           {% endif %}
           {# ── State 2 (expired/released advisory): gray italic hint + amber verify.
-                Amber appears ONLY on the verify link (collision rule); the verify
-                modal carries both actions — re-arm and mark-available. ── #}
+                Within the unavailability treatment, amber appears ONLY on the verify
+                link (collision rule) — the OOO pill above is also amber but is a
+                separate, pre-existing treatment. The verify modal carries both
+                actions — re-arm and mark-available. ── #}
           {% if unav_advisory %}
           <span class="text-gray-400 italic truncate max-w-[36ch] min-w-0"
-                title="Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label }}{% if unav.note %} — {{ unav.note }}{% endif %}{% if unav.marked_by %} · {{ unav.marked_by }}{% endif %}{% if unav.release_trigger == 'offer_received' %} · released by offer{% elif unav.release_trigger == 'vendor_email' %} · released by vendor email{% endif %}">
+                title="Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label }}{% if unav.note %} — {{ unav.note }}{% endif %}{% if unav.marked_by %} · {{ unav.marked_by }}{% endif %}{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}">
             Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label|lower }}
           </span>
           <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
@@ -174,7 +176,7 @@
         {% elif unav_advisory or unav_restock %}
         <div class="col-span-2">
           <span class="text-gray-400">History:</span>
-          <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.release_trigger == 'offer_received' %} · released by offer{% elif unav.release_trigger == 'vendor_email' %} · released by vendor email{% endif %}</span>
+          <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}</span>
         </div>
         {% if unav_restock %}
         <div class="col-span-2">

@@ -65,8 +65,8 @@ New `UnavailabilityReason(StrEnum)` in `app/constants.py`, with display labels v
 `NOT_REALLY_THERE = "not_really_there"` ("Not really in stock"),
 `DIFFERENT_PART = "different_part"` ("Different part number"), `OTHER = "other"` ("Other").
 
-**Migrations:** 101 (`101_vendor_part_unavailability`, shipped; renumbered from 097
-at merge time) creates the base table. **ONE new migration (102, renumbered from
+**Migrations:** 102 (`102_vendor_part_unavailability`, shipped; renumbered 097->101->102
+at merge time) creates the base table. **ONE new migration (103, renumbered from
 098)** adds the four nullable columns above
 (`qty_at_mark`, `released_at`, `release_trigger`, `requirement_id` — policy columns
 and the provenance column ride together): autogenerate, revision id ≤32 chars, verify

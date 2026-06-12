@@ -25,5 +25,6 @@
 098 perf/materials-post-ingest materials perf indexes (PR #262, MERGED to main)
 099 feat/on-add-enrichment on-add enrichment conflicts (PR #264, open — RE-CHAINED: #263 merged first, so down_revision now 097_dual_brand; chain runs 096 -> 098 -> 097 -> 099; single head verified via `alembic heads`)
 100 feat/ladder-monopoly distributor-taxonomy alias backfill (post-093 aliases hard drives/internal hard drives -> hdd, memory module(s) -> dram; data-only, no-op downgrade)
-101 feat/vendor-part-unavailability vendor_part_unavailability table (PR #270; renumbered from 097 at merge-with-main — 097-100 were claimed/landed by concurrent branches; chained onto 100_taxonomy_alias_backfill)
-102 feat/vendor-part-unavailability unavailability temporal-policy + provenance columns (PR #270; renumbered from 098, chains onto 101)
+101 feat/oem-web-resolution oem_crosswalk table (PartSurfer/PSREF spare->canonical cache incl negative rows — RE-NUMBERED from 100: feat/ladder-monopoly claimed 100 and merged first; re-chained onto 100_taxonomy_alias_backfill, chain runs 096 -> 098 -> 097 -> 099 -> 100 -> 101)
+102 feat/vendor-part-unavailability vendor_part_unavailability table (PR #270; RE-NUMBERED 097->101->102: feat/oem-web-resolution claimed 101 and merged first; chained onto 101_oem_crosswalk)
+103 feat/vendor-part-unavailability unavailability temporal-policy + provenance columns (PR #270; RE-NUMBERED 098->102->103 alongside the table migration; chains onto 102_vendor_part_unavailability)

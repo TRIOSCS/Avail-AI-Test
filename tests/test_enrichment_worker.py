@@ -784,10 +784,15 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
             web_meter.mark_claude_ok()
         return st
 
-    set_counts: list[int] = []
+    # Stateful shared-counter fake (what Redis INCRBY provides in prod): each
+    # billable card advances it atomically by its dispatched-call count.
+    counter = {"value": 0}
+    incr_amounts: list[int] = []
 
-    def fake_set(key, data, **kw):
-        set_counts.append(data["count"])
+    def fake_incr(key, amount=1, ttl_days=1.0):
+        incr_amounts.append(amount)
+        counter["value"] += amount
+        return counter["value"]
 
     cfg = EnrichmentWorkerConfig(batch_size=10, web_daily_cap=80)
     breaker = EnrichmentCircuitBreaker(cfg)
@@ -796,13 +801,14 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
     with (
         patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
         patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
-        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
-        patch("app.services.enrichment_worker.worker.intel_cache.set_cached", side_effect=fake_set),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_count", return_value=0),
+        patch("app.services.enrichment_worker.worker.intel_cache.incr_count", side_effect=fake_incr),
     ):
         asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), web_state))
 
     # 3 billable (web_sourced, ai_inferred, not_found); verified does not charge.
-    assert set_counts == [1, 2, 3]
+    assert incr_amounts == [1, 1, 1]
+    assert counter["value"] == 3  # the shared counter advanced once per billable card
     assert web_state["web_calls"] == 3
 
 

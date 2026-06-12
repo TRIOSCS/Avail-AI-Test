@@ -29,6 +29,11 @@ class EnrichmentWorkerConfig:
     not_found_retry_hours: int = 22
     not_catalogued_retry_days: int = 30
     circuit_breaker_errors: int = 5
+    # OEM web-resolution pass (Pass A): at most this many resolve_oem_spare calls per
+    # batch, and at most oem_resolve_daily_cap per day. The daily sub-cap is counted
+    # INSIDE web_daily_cap (every resolve bills the web counter too), not in addition.
+    oem_resolve_per_batch: int = 2
+    oem_resolve_daily_cap: int = 40
 
     @classmethod
     def from_env(cls) -> "EnrichmentWorkerConfig":
@@ -42,4 +47,6 @@ class EnrichmentWorkerConfig:
             not_found_retry_hours=int(os.environ.get("ENRICHMENT_NOT_FOUND_RETRY_HOURS", 22)),
             not_catalogued_retry_days=int(os.environ.get("ENRICHMENT_NOT_CATALOGUED_RETRY_DAYS", 30)),
             circuit_breaker_errors=int(os.environ.get("ENRICHMENT_CIRCUIT_BREAKER_ERRORS", 5)),
+            oem_resolve_per_batch=int(os.environ.get("ENRICHMENT_OEM_RESOLVE_PER_BATCH", 2)),
+            oem_resolve_daily_cap=int(os.environ.get("ENRICHMENT_OEM_RESOLVE_DAILY_CAP", 40)),
         )

@@ -88,20 +88,20 @@
 
 > **Router note:** `sightings_list()` and `sightings_detail()` in `app/routers/sightings.py` build a `link_map` dict (MPN string → MaterialCard.id) by querying `material_cards` with `normalize_mpn_key()`. The map is passed to the template context so the `mpn_chips` macro can link MPN chips to material card detail pages.
 
-**`vendor_part_unavailability`** — Durable vendor+part unavailability knowledge ("this vendor's stock of this part is gone"): one row per (normalized vendor, normalized MPN) pair recording why + note + provenance. Outlives scraped Sighting rows — every sighting-persistence path re-stamps fresh rows from these records, and RFQ suggestions exclude matching vendors while a record is active. `Sighting.is_unavailable` is **demoted to a render cache**: the `is_active` predicate in `app/services/vendor_unavailability.py` is the single authority on every read surface (see APP_MAP_INTERACTIONS § 2d). Migrations 097 (base table) + 098 (policy/provenance columns).
+**`vendor_part_unavailability`** — Durable vendor+part unavailability knowledge ("this vendor's stock of this part is gone"): one row per (normalized vendor, normalized MPN) pair recording why + note + provenance. Outlives scraped Sighting rows — every sighting-persistence path re-stamps fresh rows from these records, and RFQ suggestions exclude matching vendors while a record is active. `Sighting.is_unavailable` is **demoted to a render cache**: the `is_active` predicate in `app/services/vendor_unavailability.py` is the single authority on every read surface (see APP_MAP_INTERACTIONS § 2d). Migrations 102 (base table) + 103 (policy/provenance columns).
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
-| vendor_name_normalized | String 255, not null, indexed | via `normalize_vendor_name()` (app/vendor_utils.py) |
-| normalized_mpn | String 255, not null, indexed | via `normalize_mpn_key()` — same canonical dash-stripped key space offers use |
+| vendor_name_normalized | String 255, not null, indexed | via `normalize_vendor_name()` (app/vendor_utils.py); @validates re-normalizes on write (empty result raises) |
+| normalized_mpn | String 255, not null, indexed | via `normalize_mpn_key()` — same canonical dash-stripped key space offers use; @validates re-normalizes on write (empty result raises) |
 | reason | String 32, not null | `UnavailabilityReason` StrEnum (bought_by_us\|sold_elsewhere\|broken\|not_really_there\|different_part\|other), validated on write; display text via the enum's `.label` property (single source of truth) |
 | note | Text, nullable | free-text "what we learned" |
 | created_by_id | FK -> users, SET NULL | knowledge outlives accounts |
-| created_at | UTCDateTime | dual default (Python + server); also the temporal-policy window anchor — re-mark refreshes it |
-| qty_at_mark | Integer, nullable | 098. Per-key qty snapshot at mark/re-mark: max non-NULL `qty_available` over the vendor's sightings whose `normalize_mpn_key(mpn_matched)` equals THIS record's key (empty-MPN rows count toward the primary-key record); never cross-key. Re-mark keeps the old value when the new computation is NULL. Powers the O2 restock override; NULL ⇒ O2 never fires (fail-closed for legacy/pre-098 records) |
-| released_at | UTCDateTime, nullable | 098. Written ONLY by override O3 (buyer-routed vendor email) and the offer hook — both user-initiated paths; NULLed on re-mark. Non-NULL ⇒ record not active |
-| release_trigger | String 32, nullable | 098. `vendor_email`\|`offer_received` — renders the advisory hint copy |
-| requirement_id | FK -> requirements, SET NULL, indexed | 098. Provenance: the requirement the mark was made from (refreshed on re-mark). SET NULL, not CASCADE — knowledge outlives requirements. Widens `clear_unavailability`'s delete predicate so a record whose key no longer matches the requirement's current keys is still clearable (zombie-record fix) |
+| created_at | UTCDateTime, not null | dual default (Python + server); also the temporal-policy window anchor — re-mark refreshes it. NOT NULL so `is_active`'s None branch is provably pre-flush-only |
+| qty_at_mark | Integer, nullable | 103. Per-key qty snapshot at mark/re-mark: max non-NULL `qty_available` over the vendor's sightings whose `normalize_mpn_key(mpn_matched)` equals THIS record's key (empty-MPN rows count toward the primary-key record); never cross-key. Re-mark keeps the old value when the new computation is NULL. Powers the O2 restock override; NULL ⇒ O2 never fires (fail-closed for records created before 103) |
+| released_at | UTCDateTime, nullable | 103. Written ONLY by override O3 (buyer-routed vendor email) and the offer hook — both user-initiated paths, both via the model's `release()` transition; NULLed on re-mark (`re_arm()`). Non-NULL ⇒ record not active |
+| release_trigger | String 32, nullable | 103. `ReleaseTrigger` StrEnum (vendor_email\|offer_received), validated on write (None allowed); advisory hint copy via the enum's `.label`. CHECK `ck_vendor_part_unavail_release_pair` enforces (released_at IS NULL) = (release_trigger IS NULL) |
+| requirement_id | FK -> requirements, SET NULL, indexed | 103. Provenance: the requirement the mark was made from (refreshed on re-mark). SET NULL, not CASCADE — knowledge outlives requirements. Widens `clear_unavailability`'s delete predicate so a record whose key no longer matches the requirement's current keys is still clearable (zombie-record fix) |
 
 > UNIQUE `uq_vendor_part_unavail_vendor_mpn` (vendor_name_normalized, normalized_mpn) — marking again for an existing pair is an upsert (the re-arm path), never a duplicate. Written and read only via `app/services/vendor_unavailability.py` (record/clear/apply/release/exclude) and `app/services/sighting_status.py` (reader-authority status branch).
 
@@ -371,6 +371,31 @@
 > UNIQUE `uq_fru_links_edge` (fru_norm, related_norm, rel_kind, source_sheet). Populated by
 > `python -m app.management.ingest_fru_matrix <xlsx> [--apply]`; read by
 > `app/services/fru_matrix_service.py` for the materials detail "FRU matrix" / "Used in FRUs" panels.
+
+**`oem_crosswalk`** — permanent OEM spare→canonical-MPN web-resolution cache, incl. negative rows (migration 101)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| spare_raw / spare_norm | String 64, NOT NULL | Spare PN as displayed / `normalize_mpn_key` form (`ix_oem_crosswalk_spare_norm` — the Pass-B join key against cards' display_mpn norm) |
+| vendor | String 16, NOT NULL | `hpe` \| `lenovo` (`@validates` against the classifier vocabulary with a stable lookup surface — Phase A: hpe/PartSurfer; Phase B: lenovo/PSREF) |
+| status | String 16, NOT NULL | `OemCrosswalkStatus` (constants.py): `resolved` \| `no_match` — only two states; a resolver gate-fail IS no_match. Validated on write. (`ix_oem_crosswalk_status`) |
+| canonical_mpn_raw / canonical_mpn_norm | String 64, nullable | The commodity MPN the spare relabels; NULL iff no_match — `ck_oem_crosswalk_status_canonical` enforces the norm leg (`ix_oem_crosswalk_canonical_norm`) |
+| canonical_manufacturer | String 128, nullable | |
+| title | Text, nullable | OEM page part title/description verbatim (the Pass-B title channel's input — CPU titles parse to all six cpu facets) |
+| confidence | Float, nullable | Resolver confidence (>= 0.90 when resolved) |
+| source_url / source_domain | Text nullable / String 128 NOT NULL default `''` | The allowlisted page the verbatim quote was taken from; no_match rows store `source_domain=''` (sentinel, never NULL — NULLs are pairwise-distinct in a UNIQUE constraint), so `uq_oem_crosswalk_edge` enforces ONE negative row per (spare_norm, vendor) |
+| payload | JSON, nullable | Full raw extraction (forensics, kept for negative rows too) |
+| looked_up_at | UTCDateTime, NOT NULL | Drives the negative-cache window: `resolved` rows are PERMANENT (never re-fetched); `no_match` rows block re-resolution for 90 days and are updated in place on retry |
+| created_at / updated_at | UTCDateTime | |
+
+> UNIQUE `uq_oem_crosswalk_edge` (spare_norm, vendor, source_domain) + CHECK
+> `ck_oem_crosswalk_status_canonical` ((status='resolved') = (canonical_mpn_norm IS NOT NULL)).
+> Written by the enrichment worker's paced Pass-A resolution
+> (`enrichment_worker/oem_crosswalk_resolver.py` — Claude-grounded, NO direct HTTP to
+> PartSurfer/PSREF) and `python -m app.management.backfill_oem_crosswalk` — BOTH through the single
+> `oem_crosswalk_enrich.apply_resolution` row writer (the keeper of the nullability invariant and
+> the `''` sentinel; clamps LLM strings to column widths); read by
+> `app/services/oem_crosswalk_enrich.py` (the deterministic tier-80 partsurfer/psref writer pass).
 
 ---
 

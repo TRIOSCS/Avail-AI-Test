@@ -19,6 +19,12 @@ import re
 # not_found (22h retry) instead of being parked for a month.
 HIGH_PRECISION_VENDORS: frozenset[str] = frozenset({"lenovo", "ibm", "hpe", "acer", "asus"})
 
+# HP/HPE OPTION KIT shape (819203-B21) — named because oem_crosswalk_enrich gates the
+# oem_sourced status uplift on it: unlike service spares (\d{6}-\d{3}), option kits ARE
+# widely distributor-catalogued, so an unenriched -B21 card keeps its free tier-90
+# connector chance before taking the tier-80 crosswalk status.
+OPTION_KIT_RE: re.Pattern[str] = re.compile(r"^\d{6}-B\d{2}$")
+
 # Ordered (priority) (vendor, pattern). First match wins. Anchored, matched against the
 # UPPERCASED stripped display_mpn. Each pattern is justified by a real not_found sample
 # (see spec §1).
@@ -37,6 +43,10 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("asus", re.compile(r"^0[A-Z]\d{3}-\d{8}$")),
     # HP/HPE spare: 6 digits - 3 digits (918042-601, 619559-001)
     ("hpe", re.compile(r"^\d{6}-\d{3}$")),
+    # HP/HPE option kit: 6 digits - B + 2 digits (819203-B21, 875942-B21)
+    ("hpe", OPTION_KIT_RE),
+    # HP/HPE L-series spare: L + 5 digits - 3 digits (L15335-001)
+    ("hpe", re.compile(r"^L\d{5}-\d{3}$")),
     # Dell 5-char spare with >=1 letter (HV52W, 66YYK). Broad/low-priority; a false
     # positive costs only a wasted web call (genuine MPNs resolve at earlier tiers first).
     ("dell", re.compile(r"^(?=[A-Z0-9]{5}$)[A-Z0-9]*[A-Z][A-Z0-9]*$")),
