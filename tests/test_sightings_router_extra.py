@@ -284,10 +284,14 @@ class TestVendorModal:
 
 class TestMarkUnavailable:
     def test_mark_unavailable_no_vendor_name(self, client: TestClient, req_with_item: tuple):
+        """Htmx callers get the actionable message as an error toast (F5); API callers
+        keep the 400 JSON (pinned in test_sightings_router.py)."""
         _, item = req_with_item
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/mark-unavailable",
             data={"vendor_name": ""},
             headers={"HX-Request": "true"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "vendor_name required" in resp.text
+        assert "$store.toast.type='error'" in resp.text

@@ -13,6 +13,14 @@
     <span class="text-xs text-gray-400 ml-auto">{{ previews|length }} vendor{{ 's' if previews|length != 1 else '' }}</span>
   </div>
 
+  {# Vendors dropped by the active-only unavailability re-check — reported visibly,
+     never a silent drop (mirrors the send-time skipped-vendor reporting). #}
+  {% if unavailable_vendors %}
+  <div class="text-xs text-rose-700 bg-rose-50 border border-rose-100 rounded-lg px-3 py-2">
+    Skipped (marked unavailable): {{ unavailable_vendors|join(', ') }} — clear the mark on the vendor row to contact them again.
+  </div>
+  {% endif %}
+
   <div class="max-h-[26rem] overflow-y-auto space-y-3 pr-1">
     {% for p in previews %}
     <div class="border border-gray-200 rounded-lg overflow-hidden">

@@ -51,6 +51,7 @@ from ..schemas.responses import (
 )
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.credential_service import get_credential_cached
+from ..services.vendor_unavailability import apply_to_fresh_sightings
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter()
@@ -305,11 +306,12 @@ def _create_sightings_from_attachment(
 
     req_map: dict[str, Requirement] = {}
     for req in reqs:
-        norm = (req.mpn or "").upper().strip()
+        norm = (req.primary_mpn or "").upper().strip()
         if norm:
             req_map[norm] = req
 
     created = 0
+    created_by_req: dict[int, list[Sighting]] = {}
     for row in rows:
         mpn = (row.get("mpn") or "").upper().strip()
         if not mpn:
@@ -336,6 +338,17 @@ def _create_sightings_from_attachment(
             .first()
         )
         if existing:
+            # A RE-SENT vendor stock list is fresh HUMAN_DIRECT evidence: refresh
+            # the deduped row's qty/price from the new parse and include it in the
+            # apply batch so the override matrix evaluates it (O3 release). A bare
+            # `continue` here silently defeated the documented vendor-email release.
+            new_qty = normalize_quantity(row.get("qty"))
+            if new_qty is not None:
+                existing.qty_available = new_qty
+            new_price = normalize_price(row.get("unit_price"))
+            if new_price is not None:
+                existing.unit_price = new_price
+            created_by_req.setdefault(matched_req.id, []).append(existing)
             continue
 
         # Resolve material card
@@ -367,7 +380,16 @@ def _create_sightings_from_attachment(
             raw_data=row,
         )
         db.add(sighting)
+        created_by_req.setdefault(matched_req.id, []).append(sighting)
         created += 1
+
+    # Re-apply durable vendor+part unavailability knowledge per requirement
+    # (created rows AND dedup-refreshed re-sent rows). This is the HUMAN_DIRECT
+    # path: a buyer-routed attachment row with qty>0 triggers override O3
+    # (record release) instead of stamping.
+    req_by_id = {req.id: req for req in reqs}
+    for req_id, fresh_rows in created_by_req.items():
+        apply_to_fresh_sightings(db, req_by_id[req_id], fresh_rows)
 
     db.flush()
     return created

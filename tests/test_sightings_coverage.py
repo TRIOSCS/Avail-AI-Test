@@ -372,7 +372,7 @@ class TestMarkUnavailableEndpoint:
         db_session.commit()
         resp = client.post(
             f"/v2/partials/sightings/{r.id}/mark-unavailable",
-            data={"vendor_name": "Cover Vendor"},
+            data={"vendor_name": "Cover Vendor", "reason": "sold_elsewhere"},
         )
         assert resp.status_code == 200
         db_session.refresh(s)
@@ -383,7 +383,7 @@ class TestMarkUnavailableEndpoint:
         _, r, _ = _seed_active(db_session)
         resp = client.post(
             f"/v2/partials/sightings/{r.id}/mark-unavailable",
-            data={"vendor_name": "Nonexistent Vendor"},
+            data={"vendor_name": "Nonexistent Vendor", "reason": "other"},
         )
         assert resp.status_code == 200
 

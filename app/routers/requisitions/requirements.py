@@ -48,6 +48,7 @@ from ...services.sourcing_leads import (
     get_requisition_leads,
     update_lead_status,
 )
+from ...services.vendor_unavailability import apply_to_fresh_sightings
 from ...utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -1034,6 +1035,7 @@ async def import_stock_list(
 
     matched = 0
     imported = 0
+    created_by_req: dict[int, list[Sighting]] = {}
 
     try:
         for row in rows:
@@ -1072,7 +1074,17 @@ async def import_stock_list(
             )
             s.score = 50  # Neutral score for manual imports
             db.add(s)
+            created_by_req.setdefault(r.id, []).append(s)
             matched += 1
+
+        # Re-apply durable vendor+part unavailability knowledge per requirement
+        # before the commit (the inventory_jobs pattern) — imported stock-list
+        # rows must not resurrect a dead vendor (listing-class rows: O2 restock
+        # check, else stamp).
+        if created_by_req:
+            req_by_id = {r.id: r for r in req.requirements}
+            for req_id_key, fresh_rows in created_by_req.items():
+                apply_to_fresh_sightings(db, req_by_id[req_id_key], fresh_rows)
 
         db.commit()
     except Exception:

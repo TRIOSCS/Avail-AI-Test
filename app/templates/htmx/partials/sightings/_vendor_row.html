@@ -15,6 +15,16 @@
 {# Single source of truth for the 'unavailable' dim/tint invariant — every
    unavailable-specific conditional below uses this flag, never the raw string. #}
 {% set is_unavailable = vs == 'unavailable' %}
+{# Three-state unavailability UI keyed off the reader-authority rule via the
+   annotated unavailable_intel (spec 2026-06-10-vendor-part-unavailability-design.md):
+   state 1 suppressed = pill 'unavailable' (active record + no unstamped row, or true
+   legacy flags); state 2 advisory = record exists but is no longer active (expired /
+   released) — row fully normal + gray history hint + amber verify; state 3 restock =
+   active record + an override-surfaced (unstamped) row — emerald chip + verify.
+   RFQ stays gated server-side while a record is active (states 1 and 3). #}
+{% set unav = unavailable_intel.get(s.vendor_name) if unavailable_intel is defined else none %}
+{% set unav_advisory = unav is not none and not unav.is_active and not is_unavailable %}
+{% set unav_restock = unav is not none and unav.is_active and not is_unavailable and unav.has_unstamped_row %}
 
 <tr class="group border-b border-gray-50 last:border-0"
     x-data="{ expanded: false }">
@@ -39,6 +49,14 @@
           <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ vs_styles.get(vs, 'bg-gray-100 text-gray-600') }}">
             {{ vs|replace('-', ' ')|capitalize }}
           </span>
+          {% if unav_restock %}
+          {# Bordered emerald-50 chip — deliberately distinct from the solid
+             bg-emerald-100 offer-in pill (color-collision rule). #}
+          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+                title="qty {{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '?' }} since marked — possible restock">
+            Possible restock
+          </span>
+          {% endif %}
           {% if ooo %}
           <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
             OOO{% if ooo.ooo_return_date %} until {{ ooo.ooo_return_date.strftime('%m/%d') }}{% endif %}
@@ -68,6 +86,50 @@
             {% endif %}
           </span>
           {% endif %}
+          {# ── State 1 (suppressed): reason + note + age; Mark available is the only action ── #}
+          {% if is_unavailable and unav %}
+          <span class="text-rose-400">{{ unav.reason_label }}</span>
+          {% if unav.note %}
+          <span class="text-rose-300 italic truncate max-w-[28ch] min-w-0" title="{{ unav.note }}">{{ unav.note }}</span>
+          {% endif %}
+          <span class="text-rose-300">{{ unav.age_days }}d ago</span>
+          {% endif %}
+          {% if is_unavailable %}
+          <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"
+                  hx-vals='{{ {"vendor_name": s.vendor_name}|tojson }}'
+                  hx-target="#sightings-detail"
+                  hx-swap="innerHTML"
+                  hx-confirm="Mark {{ s.vendor_name }} available again for this part?"
+                  data-loading-disable
+                  @click.stop
+                  class="text-[10px] text-gray-400 hover:text-emerald-600 font-medium">
+            Mark available
+          </button>
+          {% endif %}
+          {# ── State 2 (expired/released advisory): gray italic hint + amber verify.
+                Within the unavailability treatment, amber appears ONLY on the verify
+                link (collision rule) — the OOO pill above is also amber but is a
+                separate, pre-existing treatment. The verify modal carries both
+                actions — re-arm and mark-available. ── #}
+          {% if unav_advisory %}
+          <span class="text-gray-400 italic truncate max-w-[36ch] min-w-0"
+                title="Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label }}{% if unav.note %} — {{ unav.note }}{% endif %}{% if unav.marked_by %} · {{ unav.marked_by }}{% endif %}{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}">
+            Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label|lower }}
+          </span>
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
+                  class="text-[10px] text-amber-600 hover:text-amber-800 font-medium">
+            Verify availability
+          </button>
+          {% endif %}
+          {# ── State 3 (possible restock): qty delta + compressed history + emerald verify ── #}
+          {% if unav_restock %}
+          <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
+          <span class="text-gray-400 italic truncate max-w-[24ch]">was: {{ unav.reason_label|lower }}, {{ unav.age_days }}d ago</span>
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
+                  class="text-[10px] text-emerald-700 hover:text-emerald-900 font-medium">
+            Verify restock
+          </button>
+          {% endif %}
           {# Actions — always visible on the collapsed row; @click.stop keeps a button press from toggling expand #}
           {% if vs != 'blacklisted' and not is_unavailable %}
           <span class="flex items-center gap-2">
@@ -75,13 +137,9 @@
                     class="text-[10px] text-brand-600 hover:text-brand-800 font-medium">
               Send RFQ
             </button>
-            <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
-                    hx-vals='{"vendor_name": "{{ s.vendor_name }}"}'
-                    hx-target="#sightings-detail"
-                    hx-swap="innerHTML"
-                    hx-confirm="Mark {{ s.vendor_name }} as unavailable for this part?"
-                    data-loading-disable
-                    @click.stop
+            {# Opens the reason modal; on an advisory/restock row this doubles as the
+               re-arm (the modal's upsert refreshes the suppression window). #}
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
                     class="text-[10px] text-gray-400 hover:text-rose-500">
               Mark Unavail
             </button>
@@ -107,6 +165,28 @@
     {# ── Expandable detail ──────────────────────────────── #}
     <div x-show="expanded" x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
       <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 py-2 text-xs">
+        {# ── Unavailability knowledge — first entry, full width ── #}
+        {% if unav and is_unavailable %}
+        <div class="col-span-2">
+          <span class="text-gray-400">What we learned:</span>
+          <span class="text-rose-600 font-medium">{{ unav.reason_label }}</span>
+          {% if unav.note %}<span class="italic text-gray-600">— {{ unav.note }}</span>{% endif %}
+          <span class="text-gray-400">· {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago</span>
+        </div>
+        {% elif unav_advisory or unav_restock %}
+        <div class="col-span-2">
+          <span class="text-gray-400">History:</span>
+          <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}</span>
+        </div>
+        {% if unav_restock %}
+        <div class="col-span-2">
+          <span class="text-gray-400">Changed:</span>
+          <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
+          {% if intel.get('age_days') is not none %}<span class="text-gray-400">· seen {{ intel.age_days }}d ago</span>{% endif %}
+        </div>
+        {% endif %}
+        {% endif %}
+
         {% if intel.get('listing_count') %}
         <div>
           <span class="text-gray-400">Sources:</span>

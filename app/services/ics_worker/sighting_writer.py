@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Sighting
+from app.services.vendor_unavailability import apply_to_fresh_sightings
 from app.vendor_utils import normalize_vendor_name
 
 from .mpn_normalizer import strip_packaging_suffixes
@@ -50,6 +51,7 @@ def save_ics_sightings(
     existing_keys = {((v or "").lower(), (m or "").lower(), q) for v, m, q in existing}
 
     created = 0
+    created_rows: list[Sighting] = []
     for ics in ics_sightings:
         if not ics.vendor_name:
             continue
@@ -88,9 +90,13 @@ def save_ics_sightings(
             created_at=now,
         )
         db.add(sighting)
+        created_rows.append(sighting)
         created += 1
 
     if created:
+        # Re-apply durable vendor+part unavailability knowledge before the
+        # commit — async ICS results must not resurrect a dead vendor.
+        apply_to_fresh_sightings(db, req, created_rows)
         db.commit()
         # Rebuild vendor-level summaries
         from app.services.sighting_aggregation import rebuild_vendor_summaries_from_sightings

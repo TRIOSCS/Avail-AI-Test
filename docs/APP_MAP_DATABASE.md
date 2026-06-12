@@ -88,6 +88,23 @@
 
 > **Router note:** `sightings_list()` and `sightings_detail()` in `app/routers/sightings.py` build a `link_map` dict (MPN string → MaterialCard.id) by querying `material_cards` with `normalize_mpn_key()`. The map is passed to the template context so the `mpn_chips` macro can link MPN chips to material card detail pages.
 
+**`vendor_part_unavailability`** — Durable vendor+part unavailability knowledge ("this vendor's stock of this part is gone"): one row per (normalized vendor, normalized MPN) pair recording why + note + provenance. Outlives scraped Sighting rows — every sighting-persistence path re-stamps fresh rows from these records, and RFQ suggestions exclude matching vendors while a record is active. `Sighting.is_unavailable` is **demoted to a render cache**: the `is_active` predicate in `app/services/vendor_unavailability.py` is the single authority on every read surface (see APP_MAP_INTERACTIONS § 2d). Migrations 102 (base table) + 103 (policy/provenance columns).
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| vendor_name_normalized | String 255, not null, indexed | via `normalize_vendor_name()` (app/vendor_utils.py); @validates re-normalizes on write (empty result raises) |
+| normalized_mpn | String 255, not null, indexed | via `normalize_mpn_key()` — same canonical dash-stripped key space offers use; @validates re-normalizes on write (empty result raises) |
+| reason | String 32, not null | `UnavailabilityReason` StrEnum (bought_by_us\|sold_elsewhere\|broken\|not_really_there\|different_part\|other), validated on write; display text via the enum's `.label` property (single source of truth) |
+| note | Text, nullable | free-text "what we learned" |
+| created_by_id | FK -> users, SET NULL | knowledge outlives accounts |
+| created_at | UTCDateTime, not null | dual default (Python + server); also the temporal-policy window anchor — re-mark refreshes it. NOT NULL so `is_active`'s None branch is provably pre-flush-only |
+| qty_at_mark | Integer, nullable | 103. Per-key qty snapshot at mark/re-mark: max non-NULL `qty_available` over the vendor's sightings whose `normalize_mpn_key(mpn_matched)` equals THIS record's key (empty-MPN rows count toward the primary-key record); never cross-key. Re-mark keeps the old value when the new computation is NULL. Powers the O2 restock override; NULL ⇒ O2 never fires (fail-closed for records created before 103) |
+| released_at | UTCDateTime, nullable | 103. Written ONLY by override O3 (buyer-routed vendor email) and the offer hook — both user-initiated paths, both via the model's `release()` transition; NULLed on re-mark (`re_arm()`). Non-NULL ⇒ record not active |
+| release_trigger | String 32, nullable | 103. `ReleaseTrigger` StrEnum (vendor_email\|offer_received), validated on write (None allowed); advisory hint copy via the enum's `.label`. CHECK `ck_vendor_part_unavail_release_pair` enforces (released_at IS NULL) = (release_trigger IS NULL) |
+| requirement_id | FK -> requirements, SET NULL, indexed | 103. Provenance: the requirement the mark was made from (refreshed on re-mark). SET NULL, not CASCADE — knowledge outlives requirements. Widens `clear_unavailability`'s delete predicate so a record whose key no longer matches the requirement's current keys is still clearable (zombie-record fix) |
+
+> UNIQUE `uq_vendor_part_unavail_vendor_mpn` (vendor_name_normalized, normalized_mpn) — marking again for an existing pair is an upsert (the re-arm path), never a duplicate. Written and read only via `app/services/vendor_unavailability.py` (record/clear/apply/release/exclude) and `app/services/sighting_status.py` (reader-authority status branch).
+
 **`contacts`** — RFQ emails sent to vendors
 | Column | Type | Notes |
 |--------|------|-------|

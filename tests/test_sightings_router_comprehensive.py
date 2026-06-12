@@ -637,7 +637,7 @@ class TestMarkUnavailable:
         db_session.commit()
         resp = client.post(
             f"/v2/partials/sightings/{r.id}/mark-unavailable",
-            data={"vendor_name": "Good Vendor"},
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere"},
         )
         assert resp.status_code == 200
         db_session.refresh(s)

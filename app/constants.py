@@ -388,6 +388,9 @@ class ActivityType(StrEnum):
     PART_STATUS_CHANGE = "part_status_change"
     TEAMS_MESSAGE = "teams_message"
     WECHAT_MESSAGE = "wechat_message"
+    # Vendor+part unavailability knowledge (vendor_unavailability service)
+    VENDOR_UNAVAILABLE = "vendor_unavailable"  # 18 chars — fits String(20)
+    VENDOR_AVAILABLE = "vendor_available"
 
 
 class Channel(StrEnum):
@@ -526,6 +529,63 @@ class FruLinkKind(StrEnum):
 # app-synthesized sentinel (CDC pending-qualification sheet); the FRU panels render
 # it as the amber "CDC pending" pill — keep ingest and display on this constant.
 CDC_PENDING = "cdc_pending"
+
+
+class UnavailabilityReason(StrEnum):
+    """Why a (vendor, part) pair is durably unavailable.
+
+    Single source of truth for VendorPartUnavailability.reason values AND their
+    display labels (``.label``) — templates and services render labels through
+    the property, never duplicate the strings.
+    """
+
+    BOUGHT_BY_US = "bought_by_us"
+    SOLD_ELSEWHERE = "sold_elsewhere"
+    BROKEN = "broken"
+    NOT_REALLY_THERE = "not_really_there"
+    DIFFERENT_PART = "different_part"
+    OTHER = "other"
+
+    @property
+    def label(self) -> str:
+        """Human display label for this reason."""
+        return _UNAVAILABILITY_REASON_LABELS[self]
+
+
+# Display labels for UnavailabilityReason, kept beside the enum. The .label property
+# is the only reader — templates/services go through it, never duplicate these strings.
+_UNAVAILABILITY_REASON_LABELS: dict[UnavailabilityReason, str] = {
+    UnavailabilityReason.BOUGHT_BY_US: "We bought them",
+    UnavailabilityReason.SOLD_ELSEWHERE: "Vendor sold them",
+    UnavailabilityReason.BROKEN: "Broken / bad condition",
+    UnavailabilityReason.NOT_REALLY_THERE: "Not really in stock",
+    UnavailabilityReason.DIFFERENT_PART: "Different part number",
+    UnavailabilityReason.OTHER: "Other",
+}
+
+
+class ReleaseTrigger(StrEnum):
+    """How a VendorPartUnavailability record was released — the closed vocabulary for
+    ``release_trigger``.
+
+    Written ONLY by override O3 (buyer-routed vendor email) and the offer hook;
+    enforced via @validates on the model. ``.label`` is the display fragment the
+    advisory row hint renders ("released by <label>").
+    """
+
+    VENDOR_EMAIL = "vendor_email"
+    OFFER_RECEIVED = "offer_received"
+
+    @property
+    def label(self) -> str:
+        """Human display fragment for this trigger."""
+        return _RELEASE_TRIGGER_LABELS[self]
+
+
+_RELEASE_TRIGGER_LABELS: dict[ReleaseTrigger, str] = {
+    ReleaseTrigger.VENDOR_EMAIL: "vendor email",
+    ReleaseTrigger.OFFER_RECEIVED: "offer",
+}
 
 
 class OemCrosswalkStatus(StrEnum):

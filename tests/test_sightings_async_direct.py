@@ -487,6 +487,7 @@ async def test_mark_unavailable_success(db_session: Session, test_user: User, te
     mock_req = _make_form_request(
         {
             "vendor_name": "Arrow Electronics",
+            "reason": "sold_elsewhere",
         }
     )
 

@@ -5,12 +5,13 @@ Depends on: conftest fixtures (client, db_session), Offer/Requirement/Requisitio
 models, app.services.part_offers, the sightings offer endpoints.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from app.constants import ActivityType, OfferStatus
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
+from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.services.part_offers import part_offers_for
 from app.utils.normalization import normalize_mpn_key
@@ -331,3 +332,62 @@ def test_mutation_response_is_panel_scoped(client, db_session):
     assert resp.status_code == 200
     assert "All offers for" in resp.text  # panel heading
     assert "activeTab: 'vendors'" not in resp.text  # not the full detail shell
+
+
+# ── Offer hook: the sightings offer-creation route releases via the canonical
+#    create_offer (maybe_release_on_offer) — no route-level call ──────────────
+
+
+def _unav(db, vendor_norm, key, reason="sold_elsewhere", age_days=0):
+    rec = VendorPartUnavailability(
+        vendor_name_normalized=vendor_norm,
+        normalized_mpn=key,
+        reason=reason,
+        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+    )
+    db.add(rec)
+    db.commit()
+    return rec
+
+
+def test_create_offer_releases_active_unavailability_record(client, db_session):
+    """An incoming offer is proof of availability: the sightings offer-creation route
+    releases the vendor's matching ACTIVE records ('offer_received')."""
+    rq, r = _req(db_session, mpn="LM317T")
+    rec = _unav(db_session, "arrow", "lm317t")
+    resp = client.post(
+        f"/v2/partials/sightings/{r.id}/offers",
+        data={
+            "vendor_name": "Arrow",
+            "mpn": "LM317T",
+            "qty_available": "5000",
+            "unit_price": "0.45",
+            "condition": "new",
+        },
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    rec = db_session.get(VendorPartUnavailability, rec.id)
+    assert rec.released_at is not None
+    assert rec.release_trigger == "offer_received"
+
+
+def test_create_offer_never_releases_different_part(client, db_session):
+    """Availability evidence never releases identity knowledge — different_part stays
+    active through the offer hook."""
+    rq, r = _req(db_session, mpn="LM317T")
+    rec = _unav(db_session, "arrow", "lm317t", reason="different_part")
+    resp = client.post(
+        f"/v2/partials/sightings/{r.id}/offers",
+        data={
+            "vendor_name": "Arrow",
+            "mpn": "LM317T",
+            "unit_price": "0.45",
+            "condition": "new",
+        },
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    rec = db_session.get(VendorPartUnavailability, rec.id)
+    assert rec.released_at is None
+    assert rec.release_trigger is None

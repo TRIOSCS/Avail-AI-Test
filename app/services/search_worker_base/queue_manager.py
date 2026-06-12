@@ -5,7 +5,8 @@ and an optional sighting linking callback. Handles enqueuing parts for
 search, deduplication, polling the next item, and updating queue status.
 
 Called by: requisition triggers, ai_gate, worker loop, admin endpoints
-Depends on: queue model, sightings model, mpn_normalizer
+Depends on: queue model, sightings model, mpn_normalizer,
+            vendor_unavailability (apply_to_fresh_sightings on dedup-cloned rows)
 """
 
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Requirement, Sighting
 from app.models.sourcing import Requisition
+from app.services.vendor_unavailability import apply_to_fresh_sightings
 
 from .mpn_normalizer import strip_packaging_suffixes
 
@@ -158,9 +160,17 @@ class QueueManager:
                     )
                     .all()
                 )
+                cloned_rows = []
                 for s in existing_sightings:
                     new_s = self._link_sighting(s, requirement_id, req.material_card_id, self.source_type)
                     db.add(new_s)
+                    cloned_rows.append(new_s)
+                # The cross-requirement dedup clones prior rows onto THIS
+                # requirement — re-apply durable vendor+part unavailability
+                # knowledge before the commit so the clones never resurrect a
+                # dead vendor (never-gated rows would render a false
+                # "Possible restock" chip).
+                apply_to_fresh_sightings(db, req, cloned_rows)
                 db.commit()
                 logger.info(
                     "{} dedup: requirement {} linked {} sightings from previous search (queue {})",

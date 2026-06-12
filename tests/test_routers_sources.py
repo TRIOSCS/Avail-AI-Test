@@ -96,6 +96,9 @@ def _mock_db_for_sightings(requirements: list, existing_sightings: list | None =
             mock_q.filter_by.return_value.all.return_value = requirements
         elif model_name == "Sighting":
             mock_q.filter_by.return_value.first.return_value = existing_sightings[0] if existing_sightings else None
+        elif model_name == "VendorPartUnavailability":
+            # apply_to_fresh_sightings' batched record fetch — no records.
+            mock_q.filter.return_value.all.return_value = []
         return mock_q
 
     db.query.side_effect = query_side_effect
@@ -106,7 +109,7 @@ def _mock_db_for_sightings(requirements: list, existing_sightings: list | None =
 
 def test_create_sightings_exact_mpn_match():
     """Rows with exact MPN match create sightings."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -130,7 +133,7 @@ def test_create_sightings_no_requirements():
 
 def test_create_sightings_skips_empty_mpn():
     """Rows with no MPN are skipped."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -141,9 +144,22 @@ def test_create_sightings_skips_empty_mpn():
 
 
 def test_create_sightings_skips_duplicates():
-    """Existing sighting prevents duplicate creation."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
-    existing = SimpleNamespace(id=99)  # Already exists
+    """Existing sighting prevents duplicate creation — but the dedup hit refreshes the
+    row's qty from the new parse and routes it through the unavailability apply batch
+    (so a re-sent stock list still fires the O3 release) instead of being silently
+    skipped."""
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
+    existing = SimpleNamespace(  # already exists — realistic sighting stub
+        id=99,
+        vendor_name="ACME",
+        vendor_name_normalized="acme",
+        mpn_matched="LM358N",
+        source_type="email_attachment",
+        qty_available=0,
+        unit_price=None,
+        is_unavailable=False,
+        is_authorized=None,
+    )
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req], existing_sightings=[existing])
 
@@ -151,11 +167,13 @@ def test_create_sightings_skips_duplicates():
     created = _create_sightings_from_attachment(db, vr, rows)
 
     assert created == 0
+    assert existing.qty_available == 100  # refreshed from the re-sent parse
+    assert existing.unit_price is None  # absent in the new parse → kept
 
 
 def test_create_sightings_case_insensitive_mpn():
     """MPN matching is case-insensitive (both uppercased)."""
-    req = SimpleNamespace(id=1, mpn="lm358n", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="lm358n", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -703,7 +721,7 @@ def test_parse_response_attachments_success(
 def test_create_sightings_fuzzy_mpn_match():
     """Rows with slightly different MPN still match requirements via fuzzy logic."""
     # "LM358N" vs "LM358-N" — fuzzy_mpn_match strips dashes
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -721,8 +739,8 @@ def test_create_sightings_fuzzy_mpn_match():
 
 def test_create_sightings_multiple_requirements():
     """Multiple matching requirements create sightings for each matched row."""
-    req1 = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
-    req2 = SimpleNamespace(id=2, mpn="LM317T", requisition_id=10)
+    req1 = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
+    req2 = SimpleNamespace(id=2, primary_mpn="LM317T", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req1, req2])
 
@@ -741,7 +759,7 @@ def test_create_sightings_multiple_requirements():
 
 def test_create_sightings_price_parsing():
     """Rows with string prices like '$1.50' are parsed correctly via normalize_price."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -2241,7 +2259,7 @@ def test_parse_response_attachments_multiple_file_types(
 
 def test_create_sightings_unmatched_mpn():
     """Rows with MPN that doesn't match any requirement (exact or fuzzy) are skipped."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 
@@ -2253,7 +2271,7 @@ def test_create_sightings_unmatched_mpn():
 
 def test_create_sightings_vendor_email_without_at():
     """Sightings created even when vendor_email has no '@'."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="no-at-sign")
     db = _mock_db_for_sightings([req])
 
@@ -2265,7 +2283,7 @@ def test_create_sightings_vendor_email_without_at():
 
 def test_create_sightings_with_all_optional_fields():
     """Sighting includes all optional fields from row data."""
-    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    req = SimpleNamespace(id=1, primary_mpn="LM358N", requisition_id=10)
     vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
     db = _mock_db_for_sightings([req])
 

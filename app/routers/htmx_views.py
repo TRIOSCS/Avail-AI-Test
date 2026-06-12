@@ -88,6 +88,7 @@ from ..services.part_history_service import (
     sightings_for_card,
 )
 from ..services.status_machine import require_valid_transition
+from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
 from ..template_env import template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
@@ -1553,6 +1554,9 @@ async def save_parsed_offers(
             status=OfferStatus.ACTIVE,
         )
         db.add(offer)
+        # Offer hook: the user reviewed and saved this parse ACTIVE — user-initiated
+        # proof of availability, release the vendor's matching active records.
+        maybe_release_on_offer(db, req_match_id, offer.vendor_name, user)
         saved_count += 1
 
     db.commit()
@@ -1977,6 +1981,9 @@ async def review_offer(
         offer.approved_by_id = user.id
 
         offer.approved_at = datetime.now(timezone.utc)
+        # Offer hook: user approval of a pending offer is user-initiated proof of
+        # availability — release the vendor's matching active unavailability records.
+        maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     else:
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
@@ -2073,6 +2080,9 @@ async def add_offer(
     )
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
+    # Offer hook: a manually entered offer is user-initiated proof of availability —
+    # release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
 
     _log_activity(
@@ -2334,6 +2344,10 @@ async def promote_offer_htmx(
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    # Offer hook: user approval of a pending offer is user-initiated proof of
+    # availability — release the vendor's matching active unavailability records.
+    maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
 
     _log_activity(
         db,
@@ -3434,6 +3448,7 @@ async def add_to_requisition(
         db.flush()
 
     # Create Sighting rows
+    created_rows: list[Sighting] = []
     for item in items:
         sighting = Sighting(
             requirement_id=requirement.id,
@@ -3463,6 +3478,12 @@ async def add_to_requisition(
             },
         )
         db.add(sighting)
+        created_rows.append(sighting)
+
+    # Re-apply durable vendor+part unavailability knowledge — a manually added
+    # sighting for a known-dead vendor+part renders flagged with its reason; the
+    # user can Mark available to override.
+    apply_to_fresh_sightings(db, requirement, created_rows)
 
     db.commit()
 

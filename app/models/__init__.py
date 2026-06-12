@@ -129,6 +129,9 @@ from .trouble_ticket import TroubleTicket  # noqa: F401
 # Unified Score (cross-role leaderboard)
 from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 
+# Vendor+Part Unavailability (durable "stock is gone" knowledge per vendor+MPN)
+from .vendor_part_unavailability import VendorPartUnavailability  # noqa: F401
+
 # Vendor Sighting Summary (materialized vendor-level sighting aggregation)
 from .vendor_sighting_summary import VendorSightingSummary  # noqa: F401
 

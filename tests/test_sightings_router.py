@@ -9,10 +9,11 @@ import re
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
-from app.constants import ActivityType
+from app.constants import ActivityType, UnavailabilityReason
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
+from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard, VendorContact
 
@@ -60,6 +61,32 @@ def _seed_data(db_session):
     db_session.add(s)
     db_session.commit()
     return req, r, s
+
+
+def _unav_record(
+    db_session,
+    vendor_norm="good vendor",
+    key="testmpn001",
+    reason="sold_elsewhere",
+    age_days=0,
+    qty_at_mark=None,
+    note=None,
+    requirement_id=None,
+):
+    """Durable VendorPartUnavailability record; age_days backdates created_at so the
+    temporal-policy window state (active vs expired) is controlled per test."""
+    rec = VendorPartUnavailability(
+        vendor_name_normalized=vendor_norm,
+        normalized_mpn=key,
+        reason=reason,
+        note=note,
+        created_at=datetime.now(timezone.utc) - timedelta(days=age_days),
+        qty_at_mark=qty_at_mark,
+        requirement_id=requirement_id,
+    )
+    db_session.add(rec)
+    db_session.commit()
+    return rec
 
 
 class TestSightingsListPartial:
@@ -250,7 +277,9 @@ class TestSightingsRefresh:
 
 
 class TestSightingsMarkUnavailable:
-    def test_marks_sightings_unavailable(self, client, db_session):
+    def test_marks_sightings_unavailable_with_reason_and_note(self, client, db_session):
+        """Mark with a validated reason + note writes the durable record, flags the
+        sighting, and the re-rendered detail shows the reason label on the row."""
         _, r, _ = _seed_data(db_session)
         s = Sighting(
             requirement_id=r.id,
@@ -261,9 +290,23 @@ class TestSightingsMarkUnavailable:
         db_session.commit()
         resp = client.post(
             f"/v2/partials/sightings/{r.id}/mark-unavailable",
-            data={"vendor_name": "Good Vendor"},
+            data={
+                "vendor_name": "Good Vendor",
+                "reason": "sold_elsewhere",
+                "note": "Sold the lot last week",
+            },
         )
         assert resp.status_code == 200
+        assert "Vendor sold them" in resp.text  # reason label renders on the row
+        db_session.expire_all()
+        assert db_session.get(Sighting, s.id).is_unavailable is True
+        rec = (
+            db_session.query(VendorPartUnavailability)
+            .filter_by(vendor_name_normalized="good vendor", normalized_mpn="testmpn001")
+            .one()
+        )
+        assert rec.reason == UnavailabilityReason.SOLD_ELSEWHERE
+        assert rec.note == "Sold the lot last week"
 
     def test_400_without_vendor_name(self, client, db_session):
         _, r, _ = _seed_data(db_session)
@@ -273,14 +316,561 @@ class TestSightingsMarkUnavailable:
         )
         assert resp.status_code == 400
 
-    def test_noop_when_no_matching_sightings(self, client, db_session):
-        """No matching sightings for vendor returns 200 (no-op)."""
+    def test_missing_reason_returns_400_json_error(self, client, db_session):
         _, r, _ = _seed_data(db_session)
         resp = client.post(
             f"/v2/partials/sightings/{r.id}/mark-unavailable",
-            data={"vendor_name": "Nonexistent Vendor"},
+            data={"vendor_name": "Good Vendor"},
+        )
+        assert resp.status_code == 400
+        assert "reason" in resp.json()["error"]
+
+    def test_invalid_reason_returns_400_json_error(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "gone_fishing"},
+        )
+        assert resp.status_code == 400
+        assert "reason" in resp.json()["error"]
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
+    def test_zero_key_mark_returns_400_json_error_without_activity(self, client, db_session):
+        """Service ValueError (no derivable MPN keys — CRITICAL-1) maps to a 400 JSON
+        error and writes nothing, including no ActivityLog."""
+        req = Requisition(name="Keyless RFQ", status="active", customer_name="NoKey Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=None, sourcing_status="open")
+        db_session.add(r)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "broken"},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]
+        assert db_session.query(VendorPartUnavailability).count() == 0
+        assert (
+            db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.VENDOR_UNAVAILABLE).count()
+            == 0
+        )
+
+    def test_records_via_primary_key_when_no_matching_sightings(self, client, db_session):
+        """No matching sightings still records durable knowledge keyed on the
+        requirement's primary MPN (200, record written)."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Nonexistent Vendor", "reason": "other"},
         )
         assert resp.status_code == 200
+        rec = (
+            db_session.query(VendorPartUnavailability)
+            .filter_by(vendor_name_normalized="nonexistent vendor", normalized_mpn="testmpn001")
+            .one()
+        )
+        assert rec.reason == UnavailabilityReason.OTHER
+
+    def test_success_response_contains_toast_fragment(self, client, db_session):
+        """F5: success appends the OOB toast fragment to the re-rendered detail —
+        'Marked <vendor> unavailable — <reason label>'."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "sold_elsewhere"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "Marked Good Vendor unavailable" in resp.text
+        assert "Vendor sold them" in resp.text
+        assert "$store.toast.type='success'" in resp.text
+
+    def test_invalid_reason_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: htmx callers see the actionable message as an error toast on the
+        re-rendered detail (the global htmx:responseError handler only shows a
+        generic line); nothing is written."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "gone_fishing"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "must be one of" in resp.text
+        assert "$store.toast.type='error'" in resp.text
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
+    def test_zero_key_mark_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: the service ValueError (no derivable MPN keys) surfaces its actionable
+        message to htmx callers; API callers keep the 400 JSON (pinned above)."""
+        req = Requisition(name="Keyless RFQ 2", status="active", customer_name="NoKey Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(requisition_id=req.id, primary_mpn=None, sourcing_status="open")
+        db_session.add(r)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor", "reason": "broken"},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "no MPN keys derivable" in resp.text
+        assert "$store.toast.type='error'" in resp.text
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
+    def test_suffixed_vendor_name_marks_end_to_end(self, client, db_session):
+        """'X, Inc.' marks work end-to-end — the route delegates to the service's
+        normalized matching (the old lower(trim()) strict-equality matcher is gone)."""
+        _, r, _ = _seed_data(db_session)
+        s = Sighting(
+            requirement_id=r.id,
+            vendor_name="Good Vendor, Inc.",
+            vendor_name_normalized=None,  # legacy NULL-norm row
+            mpn_matched="TEST-MPN-001",
+        )
+        db_session.add(s)
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-unavailable",
+            data={"vendor_name": "Good Vendor, Inc.", "reason": "broken"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Sighting, s.id).is_unavailable is True
+        rec = db_session.query(VendorPartUnavailability).one()
+        assert rec.vendor_name_normalized == "good vendor"
+
+
+class TestSightingsMarkAvailable:
+    def test_mark_available_restores_normal_row(self, client, db_session):
+        """Clear deletes the record, unflags the sighting, and the re-rendered detail
+        has no suppressed (rose) treatment."""
+        _, r, _ = _seed_data(db_session)
+        s = Sighting(
+            requirement_id=r.id,
+            vendor_name="Good Vendor",
+            mpn_matched="TEST-MPN-001",
+            is_unavailable=True,
+        )
+        db_session.add(s)
+        db_session.commit()
+        _unav_record(db_session, requirement_id=r.id)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Good Vendor"},
+        )
+        assert resp.status_code == 200
+        assert "bg-rose-50/60" not in resp.text
+        db_session.expire_all()
+        assert db_session.get(Sighting, s.id).is_unavailable is False
+        assert db_session.query(VendorPartUnavailability).count() == 0
+
+    def test_400_without_vendor_name(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(f"/v2/partials/sightings/{r.id}/mark-available", data={})
+        assert resp.status_code == 400
+
+    def test_400_when_vendor_normalizes_to_nothing(self, client, db_session):
+        """Service ValueError (empty vendor norm — IMPORTANT-4) maps to 400 JSON."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Inc."},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]
+
+    def test_success_response_contains_toast_fragment(self, client, db_session):
+        """F5: success appends the OOB toast — '<vendor> marked available again'."""
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, requirement_id=r.id)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Good Vendor"},
+        )
+        assert resp.status_code == 200
+        assert 'id="toast-trigger"' in resp.text
+        assert "Good Vendor marked available again" in resp.text
+        assert "$store.toast.type='success'" in resp.text
+
+    def test_empty_norm_htmx_surfaces_specific_message(self, client, db_session):
+        """F5: htmx callers get the actionable empty-norm message as an error toast
+        instead of the generic responseError line."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            f"/v2/partials/sightings/{r.id}/mark-available",
+            data={"vendor_name": "Inc."},
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert "normalizes to nothing" in resp.text
+        assert "$store.toast.type='error'" in resp.text
+
+
+class TestUnavailableFormModal:
+    def test_renders_all_six_reasons_and_caveat(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        for reason in UnavailabilityReason:
+            assert reason.label in resp.text
+            assert f'value="{reason.value}"' in resp.text
+        # Accepted-limitation caveat copy (condition/variant key collapse)
+        assert "all of this vendor's listings of this MPN" in resp.text
+        # Submits to the mark-unavailable route
+        assert f"/v2/partials/sightings/{r.id}/mark-unavailable" in resp.text
+
+    def test_404_for_missing_requirement(self, client, db_session):
+        resp = client.get("/v2/partials/sightings/99999/unavailable-form?vendor_name=X")
+        assert resp.status_code == 404
+
+    def test_existing_record_shows_mark_available_exit(self, client, db_session):
+        """When a record already exists, the modal is the verify/re-arm affordance and
+        carries BOTH actions: re-arm (submit) and 'It's back' (mark-available)."""
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, note="checked by phone", requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        assert "Currently marked" in resp.text
+        assert "checked by phone" in resp.text
+        assert f"/v2/partials/sightings/{r.id}/mark-available" in resp.text
+
+    def test_fresh_mark_has_no_mark_available_exit(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=Good%20Vendor")
+        assert resp.status_code == 200
+        assert "Currently marked" not in resp.text
+        assert f"/v2/partials/sightings/{r.id}/mark-available" not in resp.text
+
+
+class TestVendorRowThreeStates:
+    """The three-state row UI (spec 2026-06-10-vendor-part-unavailability-design.md 'UI'
+    section), keyed off the reader-authority rule via unavailable_intel."""
+
+    def test_state1_suppressed_reason_note_age_and_mark_available_only(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, note="Whole lot went to a competitor", age_days=3, requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        # Shipped PR #260 treatment intact
+        assert "bg-rose-50/60" in body
+        assert "bg-rose-100 text-rose-700" in body
+        # Reason label + truncated note + age (spec literals)
+        assert "Vendor sold them" in body
+        assert 'class="text-rose-400"' in body
+        assert 'class="text-rose-300 italic truncate max-w-[28ch] min-w-0"' in body
+        assert "Whole lot went to a competitor" in body
+        assert "3d ago" in body
+        # The only action is Mark available (gray → emerald hover)
+        assert "Mark available" in body
+        assert "text-gray-400 hover:text-emerald-600" in body
+        # Expanded detail carries the What we learned entry
+        assert "What we learned:" in body
+        assert 'class="text-rose-600 font-medium"' in body
+        # Action trio hidden
+        assert "Send RFQ" not in body
+        assert "Mark Unavail" not in body
+        assert "Convert to offer" not in body
+
+    def test_state1_renders_for_contacted_vendor(self, client, db_session):
+        """F4 precedence pin: a vendor that was CONTACTED and then marked renders the
+        full state-1 UI — rose tint, reason, Mark available. Contacted is a step;
+        unavailable is its answer — a mark made after contacting must be visible."""
+        from app.models.auth import User
+        from app.models.offers import Contact
+
+        req, r, _ = _seed_data(db_session)
+        user = User(email="rowpin@example.com", name="Row Pin", role="buyer")
+        db_session.add(user)
+        db_session.flush()
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name="Good Vendor",
+                parts_included=["TEST-MPN-001"],
+                status="sent",
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, reason="bought_by_us", age_days=2, requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "bg-rose-50/60" in body  # rose row tint
+        assert "bg-rose-100 text-rose-700" in body  # Unavailable pill, not Contacted
+        assert "We bought them" in body  # reason label renders
+        assert "Mark available" in body  # state-1 action present
+        assert "Send RFQ" not in body  # action trio hidden
+        assert "Mark Unavail" not in body
+
+    def test_state2_expired_record_renders_advisory_hint_and_verify(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=True,  # stale render cache — record expired
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, age_days=45, note="gone", requirement_id=r.id)  # LOT window is 30d
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        # Row fully normal — no tint, no rose pill
+        assert "bg-rose-50/60" not in body
+        assert "bg-rose-100 text-rose-700" not in body
+        # Gray italic history hint with lowercased reason label
+        assert "Marked unavailable 45d ago" in body
+        assert "vendor sold them" in body
+        assert "text-gray-400 italic truncate max-w-[36ch] min-w-0" in body
+        # Amber verify affordance (amber ONLY on the action link — collision rule)
+        assert "Verify availability" in body
+        assert "text-amber-600 hover:text-amber-800" in body
+        # Expanded grid History entry
+        assert "History:" in body
+        # Full action trio restored (Mark Unavail doubles as the re-arm)
+        assert "Send RFQ" in body
+        assert "Mark Unavail" in body
+        assert "Convert to offer" in body
+
+    def test_state3_restock_chip_when_surfaced_row_and_active_record(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="Good Vendor",
+                mpn_matched="TEST-MPN-001",
+                is_unavailable=False,  # override-surfaced (unstamped) row
+                qty_available=200,
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, age_days=5, qty_at_mark=100, requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        # Normal row, NO tint; bordered emerald-50 chip (distinct from offer-in solid 100)
+        assert "bg-rose-50/60" not in body
+        assert "Possible restock" in body
+        assert "bg-emerald-50 text-emerald-700 border border-emerald-200" in body
+        # qty delta old → new in emerald mono + compressed history echo
+        assert "100 → 200" in body
+        assert 'class="font-mono text-emerald-600"' in body
+        assert "text-gray-400 italic truncate max-w-[24ch]" in body
+        # Emerald verify link
+        assert "Verify restock" in body
+        assert "text-emerald-700 hover:text-emerald-900" in body
+        # Expanded grid: History + Changed entries
+        assert "History:" in body
+        assert "Changed:" in body
+        # Full action trio restored
+        assert "Send RFQ" in body
+        assert "Mark Unavail" in body
+        assert "Convert to offer" in body
+
+    def test_normal_row_mark_unavail_opens_reason_modal(self, client, db_session):
+        """The Mark Unavail button dispatches open-modal to the unavailable-form (no
+        more direct hx-confirm POST)."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert f"/v2/partials/sightings/{r.id}/unavailable-form?vendor_name=" in resp.text
+        assert "mark-unavailable" not in resp.text  # direct POST gone from the row
+
+
+class TestRfqModalUnavailableExclusion:
+    """RFQ vendor modal excludes vendors with an ACTIVE unavailability record on the
+    selected requirements' primary MPN keys (alongside the blacklist filter)."""
+
+    def _card(self, db_session, normalized="good vendor", display="Good Vendor"):
+        db_session.add(
+            VendorCard(
+                normalized_name=normalized,
+                display_name=display,
+                is_blacklisted=False,
+                engagement_score=50.0,
+            )
+        )
+        db_session.commit()
+
+    def test_excludes_marked_vendor_for_that_requirement(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        self._card(db_session)
+        _unav_record(db_session, requirement_id=r.id)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Good Vendor" not in resp.text
+
+    def test_still_suggested_for_unrelated_requirement(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        self._card(db_session)
+        _unav_record(db_session, requirement_id=r.id)  # key testmpn001 only
+        req2 = Requisition(name="Other RFQ", status="active", customer_name="Other Co")
+        db_session.add(req2)
+        db_session.flush()
+        r2 = Requirement(
+            requisition_id=req2.id,
+            primary_mpn="OTHER-MPN-9",
+            sourcing_status="open",
+        )
+        db_session.add(r2)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r2.id,
+                vendor_name="Good Vendor",
+                listing_count=1,
+                score=60.0,
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r2.id}")
+        assert resp.status_code == 200
+        assert "Good Vendor" in resp.text
+
+    def test_expired_record_returns_vendor_to_modal(self, client, db_session):
+        """Active-only exclusion: an expired record no longer suppresses suggestions."""
+        _, r, _ = _seed_data(db_session)
+        self._card(db_session)
+        _unav_record(db_session, age_days=45, requirement_id=r.id)  # LOT window is 30d
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Good Vendor" in resp.text
+
+    def test_legacy_suffixed_card_still_excluded(self, client, db_session):
+        """Pins the Python-side re-filter behind the SQL notin_ column filter: a legacy
+        VendorCard whose normalized_name predates normalize_vendor_name (suffix kept,
+        'good vendor inc') slips past the column filter — the canonical re-normalization
+        of display_name must still exclude it, or a durably-dead vendor gets
+        re-suggested to buyers."""
+        _, r, _ = _seed_data(db_session)
+        # Legacy card: normalized_name kept the suffix, so notin_({'good vendor'})
+        # does NOT filter it at the SQL layer.
+        self._card(db_session, normalized="good vendor inc", display="Good Vendor, Inc.")
+        # Summary whose lower(trim(vendor_name)) matches the legacy card's join key.
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Good Vendor Inc",
+                estimated_qty=150,
+                listing_count=1,
+                score=70.0,
+                tier="Good",
+            )
+        )
+        db_session.commit()
+        _unav_record(db_session, requirement_id=r.id)  # active, canonical norm 'good vendor'
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Good Vendor, Inc." not in resp.text
+
+
+class TestSendInquiryUnavailableExclusion:
+    """Send/preview re-validate submitted vendor_names against active-only
+    excluded_vendor_norms at request time — excluded vendors are dropped and the skip is
+    visibly reported (never silent)."""
+
+    def _post_send(self, client, r):
+        return client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme", "Globex"],
+                "email_body": "Please quote.",
+            },
+        )
+
+    def test_send_drops_excluded_vendor_and_reports(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, vendor_norm="globex", requirement_id=r.id)
+        captured = {}
+
+        async def fake_send(**kwargs):
+            captured["groups"] = kwargs["vendor_groups"]
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post_send(client, r)
+        assert resp.status_code == 200
+        assert [g["vendor_name"] for g in captured["groups"]] == ["Acme"]
+        assert "Globex" in resp.text  # the dropped vendor is named
+        assert "unavailable" in resp.text.lower()  # and the reason is stated
+        assert resp.headers["X-RFQ-Sent"] == "1"
+        assert resp.headers["X-RFQ-Total"] == "2"
+        assert resp.headers["X-RFQ-Unavailable"] == "1"
+
+    def test_send_all_excluded_sends_nothing(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, vendor_norm="acme", requirement_id=r.id)
+        _unav_record(db_session, vendor_norm="globex", requirement_id=r.id)
+        called = {}
+
+        async def fake_send(**kwargs):
+            called["yes"] = True
+            return []
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post_send(client, r)
+        assert resp.status_code == 200
+        assert "yes" not in called  # nothing was sent
+        assert "Acme" in resp.text and "Globex" in resp.text
+        assert "unavailable" in resp.text.lower()
+        assert resp.headers["X-RFQ-Sent"] == "0"
+        assert resp.headers["X-RFQ-Total"] == "2"
+        assert resp.headers["X-RFQ-Unavailable"] == "2"
+
+    def test_expired_record_does_not_block_send(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, vendor_norm="globex", age_days=45, requirement_id=r.id)
+
+        async def fake_send(**kwargs):
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post_send(client, r)
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "2"
+
+    def test_preview_drops_excluded_vendor_and_reports(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        _unav_record(db_session, vendor_norm="globex", requirement_id=r.id)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme", "Globex"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert "1 vendor" in resp.text  # only Acme is previewed
+        assert "Globex" in resp.text  # the skip is visibly reported
+        assert "unavailable" in resp.text.lower()
 
 
 class TestSightingsVendorRowStatusTreatment:

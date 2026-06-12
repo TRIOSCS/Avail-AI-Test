@@ -6,8 +6,9 @@ they do NOT commit.
 
 Called by: routers/ai.py
 Depends on: models (Offer, Requirement, Requisition, VendorCard, VendorContact,
-            SiteContact, ProspectContact, CustomerSite),
-            vendor_utils, search_service, utils/normalization
+            SiteContact, ProspectContact, CustomerSite, User),
+            vendor_utils, search_service, utils/normalization,
+            vendor_unavailability (offer-hook release on user-saved ACTIVE offers)
 """
 
 from loguru import logger
@@ -21,12 +22,14 @@ from ..models import (
     Requirement,
     Requisition,
     SiteContact,
+    User,
     VendorCard,
     VendorContact,
 )
 from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
 from .activity_service import log_activity
+from .vendor_unavailability import maybe_release_on_offer
 
 # -- Prospect Contact Promotion -----------------------------------------------
 
@@ -289,6 +292,7 @@ def save_freeform_offers(
     from ..search_service import resolve_material_card
 
     reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
+    user = db.get(User, user_id)
 
     created = []
     for o in offers:
@@ -332,6 +336,9 @@ def save_freeform_offers(
         )
         db.add(offer)
         db.flush()
+        # Offer hook: freeform offers are saved ACTIVE after user review — user-
+        # initiated proof of availability, release matching active records.
+        maybe_release_on_offer(db, req_id, offer.vendor_name, user)
         log_activity(
             db,
             activity_type=ActivityType.OFFER_CREATED,
