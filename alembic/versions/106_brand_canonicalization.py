@@ -40,7 +40,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "104_brand_canonicalization"
+revision = "106_brand_canonicalization"
 down_revision = "103_unavail_policy_columns"
 branch_labels = None
 depends_on = None
