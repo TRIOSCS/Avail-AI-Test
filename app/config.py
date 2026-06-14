@@ -141,6 +141,21 @@ class Settings(BaseSettings):
     # is ADDITIONALLY inert until the per-batch/daily caps allow — see EnrichmentWorkerConfig
     # oem_resolve_per_batch / oem_resolve_daily_cap). See app/services/oem_crosswalk_enrich.
     oem_crosswalk_enrich_enabled: bool = True
+    # Worker lane split (call routing only — never write pre-gating; the F1 ladder still
+    # arbitrates every write). Bulk-lane cards (enrich_requested_at IS NULL) run the FREE
+    # connectors + deterministic passes only: the web tier (extract_part_from_web), the
+    # OEM tiers (cross_reference_mpn / extract_oem_description) and the Opus infer_part
+    # fallback are skipped (measured ~$6-10/day for ~0 accepted writes). Priority-lane
+    # cards (user single-add stamps enrich_requested_at) keep the full pipeline.
+    # Env: ENRICHMENT_LANE_SPLIT_ENABLED.
+    enrichment_lane_split_enabled: bool = True
+    # Skip extract_part_from_web for OEM/FRU-shaped MPNs (any classify_oem_vendor hit:
+    # HP 6digit-3 / option-kit / L-series, Lenovo/IBM FRU shapes, EMC 303-x, Dell 5-char,
+    # Acer, ASUS) on EVERY lane — the measured ~95% no-trusted-source reject class
+    # (reseller-only pages). The OEM tiers + Opus fallback still run on the priority
+    # lane. Interim until the direct-HTTP OEM resolver lands.
+    # Env: ENRICHMENT_SKIP_WEB_FOR_OEM_MPNS.
+    enrichment_skip_web_for_oem_mpns: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90
