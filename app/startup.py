@@ -327,7 +327,7 @@ def _seed_manufacturers(conn) -> None:
     import json
 
     seeds = [
-        ("Texas Instruments", ["TI", "Texas Inst"]),
+        ("Texas Instruments", ["TI", "Texas Inst", "Texas Instruments (TI)"]),
         ("Analog Devices", ["ADI", "Analog"]),
         ("Microchip Technology", ["Microchip", "MCHP"]),
         ("STMicroelectronics", ["ST", "STMicro"]),
@@ -375,7 +375,11 @@ def _seed_manufacturers(conn) -> None:
         ("Seagate Technology", ["Seagate"]),
         ("Western Digital", ["WD"]),
         ("IBM", []),
-        ("Hewlett Packard Enterprise", ["HPE", "HP"]),
+        # Canonical "HPE" (brand canonicalization, migration 104 for existing DBs): the
+        # live catalog's HPE family was split four ways (Hewlett Packard Enterprise /
+        # HP / HPE / HEWLETT PACKARD) — the short canonical folds them into one facet
+        # slot; the long form is now an alias.
+        ("HPE", ["Hewlett Packard Enterprise", "HP", "Hewlett Packard", "Hewlett-Packard"]),
         ("Dell Technologies", ["Dell"]),
         # Dual-brand normalization seeds (SPEC_DUAL_BRAND_FILTERS §2): canonical homes
         # for the brand/maker names normalize_brand_name resolves. "Toshiba" the

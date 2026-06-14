@@ -387,6 +387,20 @@ def test_set_brand_rejects_none_empty_whitespace(db_session: Session):
     assert card.manufacturer_source is None
 
 
+def test_set_brand_and_manufacturer_reject_garbage_fragments(db_session: Session):
+    # The ladder is the single arbitration point — packing-suffix fragments ("F)",
+    # "LF(T") and single chars die here for EVERY writer, not just the ingest parser.
+    card = _card(db_session, normalized_mpn="brand-garbage")
+    from app.services.spec_tiers import set_brand, set_manufacturer
+
+    for junk in ("F)", "F", "LF(T", "TSOP)"):
+        assert set_brand(card, junk, "trio_source", 0.9) is False, junk
+        assert set_manufacturer(card, junk, "trio_source", 0.9) is False, junk
+    assert card.brand is None
+    assert card.manufacturer is None
+    assert card.manufacturer_source is None
+
+
 def test_set_brand_writes_on_empty_card_with_provenance(db_session: Session):
     from app.services.spec_tiers import set_brand
 
