@@ -117,6 +117,13 @@ def get_all_commodities() -> list[str]:
     return result
 
 
+# Frozen canonical vocabulary — the ONLY values material_cards.category may hold
+# (besides NULL). Consumed by category_normalizer.normalize_category and the
+# @validates("category") guard on MaterialCard (models/intelligence.py), so the
+# guard and the normalizer can never drift apart.
+CANONICAL_COMMODITY_KEYS: frozenset[str] = frozenset(get_all_commodities())
+
+
 def get_parent_group(commodity: str) -> str:
     """Return the parent group name for a commodity, or 'Misc' if unknown."""
     return _PARENT_LOOKUP.get(commodity.lower().strip(), "Misc")

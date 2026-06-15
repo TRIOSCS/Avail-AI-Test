@@ -1417,7 +1417,7 @@ class TestEnrichmentBar:
             normalized_mpn="test-mpn-001",
             display_mpn="TEST-MPN-001",
             lifecycle_status="active",
-            category="Microcontroller",
+            category="microcontrollers",  # canonical (the @validates guard rejects off-vocab)
             rohs_status="compliant",
         )
         db_session.add(mc)
@@ -1438,7 +1438,7 @@ class TestEnrichmentBar:
             normalized_mpn="test-mpn-001",
             display_mpn="TEST-MPN-001",
             lifecycle_status="eol",
-            category="Memory",
+            category="dram",  # canonical (the @validates guard rejects off-vocab)
         )
         db_session.add(mc)
         db_session.flush()

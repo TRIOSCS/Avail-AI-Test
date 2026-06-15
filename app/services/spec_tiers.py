@@ -515,7 +515,9 @@ def set_category(
             logger.warning("set_category: off-vocab value {!r} (source={}) — not writing", value, source)
         return False
 
-    # value is already canonical here; SP3's @validates("category") hardens other paths.
+    # value is already canonical here; MaterialCard's @validates("category") guard
+    # (models/intelligence.py) hardens every OTHER path — an off-vocab direct
+    # assignment raises instead of bypassing the ladder.
     return _set_provenanced_column(
         card,
         "category",

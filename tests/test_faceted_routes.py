@@ -84,7 +84,7 @@ def test_faceted_results_returns_materials(client, db_session: Session):
         normalized_mpn="test-001",
         display_mpn="TEST-001",
         manufacturer="TestCo",
-        category="DRAM",
+        category="dram",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card)
@@ -429,7 +429,7 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
         normalized_mpn="eur-test-001",
         display_mpn="EUR-TEST-001",
         manufacturer="EuroCo",
-        category="passive",
+        category="capacitors",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card_eur)
@@ -457,7 +457,7 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
         normalized_mpn="mixed-test-001",
         display_mpn="MIXED-TEST-001",
         manufacturer="MixedCo",
-        category="passive",
+        category="capacitors",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card_mixed)
@@ -826,10 +826,13 @@ def test_faceted_spec_chips_without_commodity_use_schema_primaries(client, db_se
 
 def test_faceted_spec_chips_without_commodity_fallback_first_scalars(client, db_session: Session):
     """Cards in a schema-less category fall back to the first 3 scalar spec entries."""
+    # "other" is a canonical commodity key (so it passes the @validates guard) that
+    # carries no CommoditySpecSchema rows — exactly the schema-less shape this fallback
+    # path serves.
     _op_card(
         db_session,
         "chip-fallback",
-        category="widgets",
+        category="other",
         specs_structured={
             "speed_mhz": {"value": 3200},
             "rank": "2R",

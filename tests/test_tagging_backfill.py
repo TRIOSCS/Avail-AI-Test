@@ -71,7 +71,9 @@ def test_seed_skips_empty_manufacturer(db_session):
 
 def test_seed_with_category(db_session):
     _seed_commodity_tags(db_session)
-    _make_card(db_session, "LM317T", manufacturer="TI", category="Voltage Regulator")
+    # Canonical category (the @validates guard rejects off-vocab); "microcontrollers"
+    # maps to the seeded "Microcontrollers (MCU)" commodity tag.
+    _make_card(db_session, "STM32F103", manufacturer="ST", category="microcontrollers")
 
     result = seed_from_existing_manufacturers(db_session)
     assert result["total_seeded"] == 1

@@ -3126,15 +3126,15 @@ class TestUpsertMaterialCardTagClassification:
         now = datetime.now(timezone.utc)
 
         # Commodity tags are pre-seeded (get_or_create_commodity_tag never
-        # creates them) — seed the one "Voltage Regulators" maps to.
-        db_session.add(Tag(name="Power Management ICs", tag_type="commodity", created_at=datetime.now(timezone.utc)))
-        # Pre-create the card with a manufacturer AND a category so the
-        # commodity branch (result["commodity"]) is exercised.
+        # creates them) — seed the one the canonical "dram" category maps to.
+        db_session.add(Tag(name="Memory ICs", tag_type="commodity", created_at=datetime.now(timezone.utc)))
+        # Pre-create the card with a manufacturer AND a canonical category (the @validates
+        # guard rejects off-vocab) so the commodity branch (result["commodity"]) is exercised.
         card = MaterialCard(
             normalized_mpn="lm317t",
             display_mpn="LM317T",
             manufacturer="Texas Instruments",
-            category="Voltage Regulators",
+            category="dram",
             search_count=0,
         )
         db_session.add(card)

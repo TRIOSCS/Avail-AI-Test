@@ -642,3 +642,41 @@ def test_set_category_non_manual_rejection_logs_at_info(db_session: Session):
         assert not card2.has_validation_conflict  # no conflict entry — INFO is the only trace
     finally:
         loguru_logger.remove(sink_id)
+
+
+# --- @validates("category") guard (SP3 ladder hardening) --------------------
+# The guard on MaterialCard.category (app/models/intelligence.py) rejects any off-vocab
+# direct assignment, so a future un-routed writer can no longer persist junk past the F1
+# ladder. set_category (the single routed writer) only ever assigns canonical keys, so it
+# passes the guard untouched; these pin the guard's contract directly.
+
+
+class TestCategoryValidatesGuard:
+    def test_canonical_key_assignment_passes(self, db_session: Session):
+        card = _card(db_session, normalized_mpn="guard-ok", category="dram")
+        assert card.category == "dram"
+
+    def test_none_assignment_passes(self, db_session: Session):
+        card = _card(db_session, normalized_mpn="guard-none", category=None)
+        card.category = None
+        assert card.category is None
+
+    def test_off_vocab_assignment_raises(self, db_session: Session):
+        import pytest
+
+        card = _card(db_session, normalized_mpn="guard-bad", category=None)
+        with pytest.raises(ValueError, match="canonical commodity key or None"):
+            card.category = "IGBT Modules"  # the pre-#267 bypass-writer junk class
+
+    def test_off_vocab_at_construction_raises(self, db_session: Session):
+        import pytest
+
+        with pytest.raises(ValueError, match="canonical commodity key or None"):
+            MaterialCard(normalized_mpn="guard-ctor", display_mpn="GUARD-CTOR", category="Voltage Regulator")
+
+    def test_set_category_canonical_value_passes_the_guard(self, db_session: Session):
+        # The routed writer normalizes "IC" → canonical "ics_other" before assigning, so it
+        # never trips the guard (the guard hardens OTHER paths, never the ladder).
+        card = _card(db_session, normalized_mpn="guard-routed", category=None)
+        assert set_category(card, "IC", "digikey_api", 0.9) is True
+        assert card.category == "ics_other"
