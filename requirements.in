@@ -13,7 +13,7 @@ jinja2==3.1.6
 filetype==1.2.0
 charset-normalizer==3.4.7
 # Credential encryption
-cryptography==48.0.0
+cryptography==49.0.0
 # Observability
 loguru==0.7.3
 # Pinned >=1.0.1 to fix PYSEC-2026-161 (Host header URL-reconstruction auth bypass).
