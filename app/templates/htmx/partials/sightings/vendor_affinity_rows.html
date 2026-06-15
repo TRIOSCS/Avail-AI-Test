@@ -1,0 +1,37 @@
+{# Affinity vendor suggestion rows for the RFQ vendor modal (on demand).
+   Called by: sightings.py sightings_vendor_affinity — swapped by the vendor_modal.html
+   "Suggest more vendors" button into #rfq-affinity-section (innerHTML, replacing the
+   button so a second request can never duplicate rows).
+   Depends on: the surrounding rfqVendorModal Alpine component (htmx_app.js) — the
+   checkboxes join the SAME isSelected/toggleVendor selection state as the suggested
+   rows, keyed by normalized vendor name, so checked rows flow into vendor_names.
+   Context: affinity_vendors (list of dicts: vendor_name, normalized_name, confidence,
+   reasoning), confidence-desc, capped at 10; affinity_partial (bool — at least one
+   selected MPN's affinity lookup failed, so the list may be missing vendors).
+#}
+{% if affinity_vendors %}
+<label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+  More Vendors ({{ affinity_vendors|length }} by affinity)
+</label>
+<div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+  {% for v in affinity_vendors %}
+  <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+    <input type="checkbox"
+           :checked='isSelected({{ v.normalized_name|tojson }})'
+           @change='toggleVendor({{ v.normalized_name|tojson }})'
+           class="rounded border-gray-300">
+    <div class="flex-1 min-w-0">
+      <span class="text-sm font-medium text-gray-700">{{ v.vendor_name }}</span>
+      <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700"
+            title="{{ v.reasoning }}">affinity</span>
+      <span class="ml-2 text-[10px] text-gray-400">{{ (v.confidence * 100)|round|int }}% match</span>
+    </div>
+  </label>
+  {% endfor %}
+</div>
+{% else %}
+<p class="text-xs text-gray-400 italic">No additional vendors found by affinity.</p>
+{% endif %}
+{% if affinity_partial %}
+<p class="mt-1 text-[10px] text-gray-400 italic">Suggestions incomplete — some parts could not be checked.</p>
+{% endif %}
