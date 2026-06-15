@@ -1061,6 +1061,8 @@ class TestScanSentFolder:
 
         # No existing log
         mock_db.query.return_value.filter.return_value.first.side_effect = [None, None]
+        # Requisition existence filter: token 42 is live
+        mock_db.query.return_value.filter.return_value.all.return_value = [(42,)]
 
         gc_mock = MagicMock()
         gc_mock.delta_query = AsyncMock(
@@ -1145,6 +1147,138 @@ class TestScanSentFolder:
         ):
             result = await scan_sent_folder(user, mock_db)
             assert len(result) >= 1
+
+    @pytest.mark.asyncio
+    async def test_scan_multi_token_subject_attributes_all_requisitions(self):
+        """A sent message tagged with TWO [ref:] tokens (cross-requisition RFQ) creates
+        one ActivityLog per token requisition."""
+        from app.jobs.email_jobs import scan_sent_folder
+
+        user = MagicMock()
+        user.id = 1
+        user.email = "buyer@trioscs.com"
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.first.return_value = None
+        # Requisition existence filter: both tokens are live
+        mock_db.query.return_value.filter.return_value.all.return_value = [(12,), (34,)]
+
+        gc_mock = MagicMock()
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "msg-multi-001",
+                        "subject": "RFQ — 2 parts [ref:12] [ref:34]",
+                        "sentDateTime": "2026-06-01T10:00:00Z",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+                        "hasAttachments": False,
+                    }
+                ],
+                None,
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            result = await scan_sent_folder(user, mock_db)
+
+        assert len(result) == 2
+        assert sorted(log.requisition_id for log in result) == [12, 34]
+        # Both rows are the SAME message — shared external_id, same recipient
+        assert {log.external_id for log in result} == {"msg-multi-001"}
+        assert {log.contact_email for log in result} == {"vendor@arrow.com"}
+
+    @pytest.mark.asyncio
+    async def test_scan_stale_token_not_attributed(self, db_session, test_user, test_requisition):
+        """F5: a [ref:] token pointing at a deleted requisition must not be written
+        to ActivityLog.requisition_id (FK violation on PG → whole batch + delta
+        token rolled back). The stale-token message is logged UNLINKED; the live
+        token still attributes."""
+        from app.jobs.email_jobs import scan_sent_folder
+        from app.models import ActivityLog
+
+        gc_mock = MagicMock()
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "msg-live-1",
+                        "subject": f"RFQ [ref:{test_requisition.id}]",
+                        "sentDateTime": "2026-06-01T10:00:00Z",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+                        "hasAttachments": False,
+                    },
+                    {
+                        "id": "msg-stale-1",
+                        "subject": "RFQ [ref:99999]",
+                        "sentDateTime": "2026-06-01T10:01:00Z",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@avnet.com"}}],
+                        "hasAttachments": False,
+                    },
+                ],
+                "delta-after-stale",
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            result = await scan_sent_folder(test_user, db_session)
+
+        assert len(result) == 2
+        by_msg = {log.external_id: log for log in result}
+        assert by_msg["msg-live-1"].requisition_id == test_requisition.id
+        assert by_msg["msg-stale-1"].requisition_id is None  # stale token dropped, row kept
+        # Everything committed — no FK crash rolled the batch back.
+        assert db_session.query(ActivityLog).filter(ActivityLog.external_id == "msg-stale-1").count() == 1
+
+    @pytest.mark.asyncio
+    async def test_scan_one_bad_message_does_not_poison_batch(self, db_session, test_user, test_requisition):
+        """F5: per-message savepoints — one malformed message is skipped (logged),
+        the rest of the batch and the delta token survive."""
+        from app.jobs.email_jobs import scan_sent_folder
+        from app.models import SyncState
+
+        gc_mock = MagicMock()
+        gc_mock.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "id": "msg-bad-1",
+                        "subject": "RFQ broken",
+                        "sentDateTime": "2026-06-01T10:00:00Z",
+                        "toRecipients": [None],  # malformed Graph payload → raises in-loop
+                        "hasAttachments": False,
+                    },
+                    {
+                        "id": "msg-good-1",
+                        "subject": f"RFQ [ref:{test_requisition.id}]",
+                        "sentDateTime": "2026-06-01T10:02:00Z",
+                        "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+                        "hasAttachments": False,
+                    },
+                ],
+                "delta-after-bad",
+            )
+        )
+
+        with (
+            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+        ):
+            result = await scan_sent_folder(test_user, db_session)
+
+        assert [log.external_id for log in result] == ["msg-good-1"]
+        assert result[0].requisition_id == test_requisition.id
+        sync = (
+            db_session.query(SyncState)
+            .filter(SyncState.user_id == test_user.id, SyncState.folder == "sent_items_scan")
+            .one()
+        )
+        assert sync.delta_token == "delta-after-bad"
 
 
 # ── detect_attachments ───────────────────────────────────────────────

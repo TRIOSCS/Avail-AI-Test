@@ -58,8 +58,14 @@ function makeModal(names: string[], ids: number[]) {
   return inst;
 }
 
-function fetchResponse(sent: string | null, total: string | null, ok = true, status = 200) {
-  const h: Record<string, string | null> = { 'X-RFQ-Sent': sent, 'X-RFQ-Total': total };
+function fetchResponse(
+  sent: string | null,
+  total: string | null,
+  ok = true,
+  status = 200,
+  extra: Record<string, string> = {},
+) {
+  const h: Record<string, string | null> = { 'X-RFQ-Sent': sent, 'X-RFQ-Total': total, ...extra };
   return { ok, status, headers: { get: (k: string) => h[k] ?? null } };
 }
 
@@ -130,6 +136,23 @@ describe('rfqVendorModal (real factory)', () => {
 
       expect(m.$store.toast.type).toBe('warning');
       expect(m.$store.toast.message).toBe('Sent to 1 of 2 vendors — 1 failed');
+      expect(m.$dispatch).toHaveBeenCalledWith('close-modal');
+    });
+
+    it('unavailable vendors are not counted as failed in the toast', async () => {
+      // F3: server drops 1 of 2 vendors at send time (X-RFQ-Unavailable=1). The blocked
+      // vendor was correctly handled, NOT a delivery failure — the toast must say
+      // "marked unavailable", never "1 failed".
+      const m = makeModal(['a', 'b'], [1]);
+      m.emailBody = 'q';
+      alpineMock.store.mockReturnValue({ selectedReqId: null });
+      (fetch as any).mockResolvedValue(fetchResponse('1', '2', true, 200, { 'X-RFQ-Unavailable': '1' }));
+
+      await m.confirmSend();
+
+      expect(m.$store.toast.type).toBe('warning');
+      expect(m.$store.toast.message).toBe('Sent to 1 of 2 vendors — 1 marked unavailable');
+      expect(m.$store.toast.message).not.toContain('failed');
       expect(m.$dispatch).toHaveBeenCalledWith('close-modal');
     });
 
@@ -243,6 +266,247 @@ describe('rfqVendorModal (real factory)', () => {
     });
   });
 
+  describe('_addComposerVendor / pickVendor (any-vendor picker)', () => {
+    function rowHtml(normalized: string) {
+      // Mirrors composer_vendor_row.html's selectable branch: x-init carries the
+      // server-normalized name as a tojson-quoted string in a single-quoted attr.
+      // Jinja's |tojson escapes ' < > & as \uXXXX so the attr can't break — mirror it.
+      const quoted = JSON.stringify(normalized)
+        .replace(/'/g, '\\u0027').replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e').replace(/&/g, '\\u0026');
+      return `<label x-init='selectVendor(${quoted})'><input type="checkbox"><span>row</span></label>`;
+    }
+    function htmlResponse(html: string, ok = true, status = 200) {
+      return { ok, status, text: () => Promise.resolve(html) };
+    }
+    function addContainer() {
+      const div = document.createElement('div');
+      div.id = 'rfq-added-vendors';
+      document.body.appendChild(div);
+      return div;
+    }
+
+    it('pickVendor posts to composer-vendor and appends the returned row', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [10, 11]);
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('new vendor co')));
+
+      await m.pickVendor('New Vendor Co');
+
+      const [url, opts] = (fetch as any).mock.calls[0];
+      expect(url).toBe('/v2/partials/sightings/composer-vendor');
+      expect(opts.method).toBe('POST');
+      expect(opts.headers['x-csrftoken']).toBe('testtoken');
+      expect(opts.body.get('vendor_name')).toBe('New Vendor Co');
+      expect(opts.body.getAll('requirement_ids')).toEqual(['10', '11']);
+      expect(container.children.length).toBe(1);
+      expect((htmx as any).process).toHaveBeenCalledWith(container);
+      expect(m.vendorQuery).toBe('');
+      expect(m.searchOpen).toBe(false);
+    });
+
+    it('skips the request entirely when the vendor is already selected (case-insensitive)', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+
+      await m.pickVendor('Mouser Electronics');
+
+      expect(fetch).not.toHaveBeenCalled();
+      expect(container.children.length).toBe(0);
+      expect(m.$store.toast.type).toBe('info');
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('skips the APPEND when the returned row resolves to an already-selected vendor', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+      // Display name differs from the normalized key, so the fast path misses and
+      // the request goes out — the server-normalized name in the row must dedupe.
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('mouser electronics')));
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Mouser Electronics, Inc.' });
+
+      expect(ok).toBe(true);
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(container.children.length).toBe(0); // no duplicate visual row
+      expect(m.$store.toast.type).toBe('info');
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('still appends excluded rows (no x-init selection key)', async () => {
+      const container = addContainer();
+      const m = makeModal(['mouser electronics'], [1]);
+      (fetch as any).mockResolvedValue(htmlResponse('<label><input type="checkbox" disabled><span>unavailable co</span></label>'));
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Unavailable Co' });
+
+      expect(ok).toBe(true);
+      expect(container.children.length).toBe(1);
+    });
+
+    it('a 4xx response keeps the inline create-form values and reports an error', async () => {
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      m.newVendorWebsite = 'acme.example';
+      m.newVendorEmail = 'not-an-email';
+      (fetch as any).mockResolvedValue(htmlResponse('', false, 400));
+
+      await m.createVendor();
+
+      expect(m.newVendorName).toBe('Acme Components'); // typed values preserved
+      expect(m.newVendorWebsite).toBe('acme.example');
+      expect(m.newVendorEmail).toBe('not-an-email');
+      expect(m.addingVendor).toBe(true); // form stays open
+      expect(m.addingVendorBusy).toBe(false);
+      expect(container.children.length).toBe(0);
+      expect(m.$store.toast.type).toBe('error');
+      expect(m.$store.toast.message).toBe('Could not add vendor — please try again');
+    });
+
+    it('a network failure also keeps the create-form values', async () => {
+      addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      (fetch as any).mockRejectedValue(new Error('offline'));
+
+      await m.createVendor();
+
+      expect(m.newVendorName).toBe('Acme Components');
+      expect(m.addingVendor).toBe(true);
+      expect(m.addingVendorBusy).toBe(false);
+      expect(m.$store.toast.type).toBe('error');
+    });
+
+    it('createVendor success appends the row, clears the form, and closes the panel', async () => {
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      m.addingVendor = true;
+      m.newVendorName = 'Acme Components';
+      m.newVendorWebsite = 'https://acme.example';
+      m.newVendorEmail = 'sales@acme.example';
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('acme components')));
+
+      await m.createVendor();
+
+      expect(container.children.length).toBe(1);
+      expect(m.newVendorName).toBe('');
+      expect(m.newVendorWebsite).toBe('');
+      expect(m.newVendorEmail).toBe('');
+      expect(m.addingVendor).toBe(false);
+      expect(m.addingVendorBusy).toBe(false);
+    });
+
+    it('_rowVendorName parses the tojson-quoted normalized name (and escapes)', () => {
+      const m = makeModal([], [1]);
+      expect(m._rowVendorName(rowHtml('digi-key'))).toBe('digi-key');
+      expect(m._rowVendorName(rowHtml("o'brien & co"))).toBe("o'brien & co");
+      expect(m._rowVendorName('<label><span>excluded</span></label>')).toBeNull();
+    });
+
+    it('_rowVendorName reads data-vendor-norm from excluded rows (no x-init)', () => {
+      // F11: composer_vendor_row.html emits the normalized name on excluded rows
+      // as a data attribute, since they render no x-init to parse it from.
+      const m = makeModal([], [1]);
+      const excluded = '<label data-vendor-norm="dead vendor"><input type="checkbox" disabled><span>Dead Vendor</span></label>';
+      expect(m._rowVendorName(excluded)).toBe('dead vendor');
+    });
+
+    it('dedupes a re-picked EXCLUDED vendor against rows already in the container', async () => {
+      // F11: excluded rows never join selectedVendors (disabled checkbox), so the
+      // selection-state dedupe can't see them — the container check must.
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      const excludedRow = '<label data-vendor-norm="dead vendor"><input type="checkbox" disabled><span>Dead Vendor</span></label>';
+      (fetch as any).mockResolvedValue(htmlResponse(excludedRow));
+
+      const first = await m._addComposerVendor({ vendor_name: 'Dead Vendor' });
+      const second = await m._addComposerVendor({ vendor_name: 'Dead Vendor' });
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(container.children.length).toBe(1); // no duplicate excluded row
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('createVendor payloads carrying email/website bypass the already-selected fast-path', async () => {
+      // F4: the server attaches a typed email to the matched existing card —
+      // skipping the request would silently discard it. Bare picks still skip.
+      addContainer();
+      const m = makeModal(['known vendor'], [1]);
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('known vendor')));
+
+      await m._addComposerVendor({ vendor_name: 'Known Vendor', email: 'x@known.com' });
+
+      expect(fetch).toHaveBeenCalledTimes(1); // request went out despite the name match
+      expect(m.$store.toast.type).toBe('info'); // row itself still deduped on return
+    });
+
+    it('a 4xx with a JSON error body surfaces the server reason in the toast', async () => {
+      // F8: the server emits {"error": ...} — show the actionable reason, not a
+      // generic try-again.
+      addContainer();
+      const m = makeModal([], [1]);
+      (fetch as any).mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ error: 'invalid website — could not extract a domain' }),
+        text: () => Promise.resolve(''),
+      });
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Bad Site Co', website: 'no-dot' });
+
+      expect(ok).toBe(false);
+      expect(m.$store.toast.type).toBe('error');
+      expect(m.$store.toast.message).toContain('invalid website — could not extract a domain');
+    });
+
+    it('a 5xx never surfaces body text — generic try-again toast', async () => {
+      addContainer();
+      const m = makeModal([], [1]);
+      (fetch as any).mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: 'Internal Server Error' }),
+        text: () => Promise.resolve(''),
+      });
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Acme' });
+
+      expect(ok).toBe(false);
+      expect(m.$store.toast.message).toBe('Could not add vendor — please try again');
+    });
+  });
+
+  describe('searchVendors failure visibility (F9)', () => {
+    it('toasts ONCE per failure streak, then again after a success resets the flag', async () => {
+      const m = makeModal([], [1]);
+      const toastSpy = vi.spyOn(m, '_toast');
+      m.vendorQuery = 'arr';
+      (fetch as any).mockRejectedValue(new Error('offline'));
+
+      await m.searchVendors();
+      await m.searchVendors(); // repeated debounce failure — no second toast
+
+      expect(toastSpy).toHaveBeenCalledTimes(1);
+      expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('search failed'), 'error');
+      expect(m.vendorResults).toEqual([]);
+      expect(m.searchOpen).toBe(false);
+
+      (fetch as any).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([{ name: 'Arrow', type: 'vendor' }]),
+      });
+      await m.searchVendors(); // success resets the flag
+      (fetch as any).mockRejectedValue(new Error('offline again'));
+      await m.searchVendors();
+
+      expect(toastSpy).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('_sendOutcome mapping', () => {
     it('maps full / partial / zero correctly', () => {
       const m = makeModal(['a'], [1]);
@@ -260,6 +524,16 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m._sendOutcome(1, 3, 1).message).toBe('Sent to 1 of 3 vendors — 1 failed, 1 had no email');
       // 1 sent of 3: 0 skipped, 2 failed (default skipped=0)
       expect(m._sendOutcome(1, 3).message).toBe('Sent to 1 of 3 vendors — 2 failed');
+    });
+
+    it('subtracts unavailable vendors from the failed bucket (F3)', () => {
+      const m = makeModal(['a'], [1]);
+      // 1 sent of 3: 2 marked unavailable, 0 failed — none are "failed"
+      expect(m._sendOutcome(1, 3, 0, 2).message).toBe('Sent to 1 of 3 vendors — 2 marked unavailable');
+      // 1 sent of 4: 1 skipped, 1 unavailable, 1 genuinely failed — all three reasons
+      expect(m._sendOutcome(1, 4, 1, 1).message).toBe(
+        'Sent to 1 of 4 vendors — 1 failed, 1 had no email, 1 marked unavailable',
+      );
     });
   });
 });
