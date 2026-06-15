@@ -318,7 +318,7 @@
 | manufacturer | String 255, indexed | Dual-brand semantics (migration 097): the ACTUAL MAKER (`Seagate Technology`, `Kingston Technology`, composite `Hitachi/IBM` verbatim). Written ONLY via `spec_tiers.set_manufacturer` (F1 ladder + `normalize_brand_name`); legacy direct writes rank at the `legacy_backfill` floor (50) on the next arbitration. |
 | brand | String 255, nullable, indexed (`ix_material_cards_brand`) | Migration 097. The OEM LABEL on the part (`IBM`, `Dell Technologies`, `Hewlett Packard Enterprise`, `Lenovo`) — most cards never get one. Written ONLY via `spec_tiers.set_brand`, gated to source-backed evidence (`OEM_TRAILING_RE` description token, explicit ingest column, B1 legacy reclassify) — never guessed. The materials "Brand" facet ORs across `brand` + `manufacturer` (one combined facet; wire param stays `manufacturers`). |
 | brand_source / brand_confidence / brand_tier / brand_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `brand`, same F1 contract as `category_*` (valued-but-NULL-provenance ranks at the legacy floor 50; `brand_updated_at` is the ladder tie-break stamp). |
-| manufacturer_source / manufacturer_confidence / manufacturer_tier / manufacturer_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `manufacturer` — required so trio_source (95) maker evidence (fru_links `mfg_model`) can displace an OEM name sitting in `manufacturer` from legacy data via the ladder. All pre-097 rows are NULL → legacy floor 50 at runtime (no in-migration backfill; the data backfill is `python -m app.management.backfill_dual_brand`, dry-run by default, run post-deploy). |
+| manufacturer_source / manufacturer_confidence / manufacturer_tier / manufacturer_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `manufacturer` — required so trio_source (95) maker evidence (fru_links `mfg_model`) can displace an OEM name sitting in `manufacturer` from legacy data via the ladder. Maker writers: `mpn_decode` (85, decoder's own vendor), `fru_matrix_decode` (84, §2.6(d) — the UNANIMOUS deterministic vendor across a FRU's decoded canonical models, conf 0.9), vendor APIs (90), trio_source (95), manual (100). All pre-097 rows are NULL → legacy floor 50 at runtime (no in-migration backfill; the data backfill is `python -m app.management.backfill_dual_brand`, dry-run by default, run post-deploy). |
 | description | Text | AI-enriched part description |
 | category | String 255 | AI-enriched commodity category |
 | lifecycle_status | String 50 | active\|nrfnd\|eol\|obsolete\|ltb |
@@ -382,6 +382,12 @@
 > UNIQUE `uq_fru_links_edge` (fru_norm, related_norm, rel_kind, source_sheet). Populated by
 > `python -m app.management.ingest_fru_matrix <xlsx> [--apply]`; read by
 > `app/services/fru_matrix_service.py` for the materials detail "FRU matrix" / "Used in FRUs" panels.
+> The `mfg_model` (always) and `drive_pn` (gated by `settings.fru_crosswalk_drive_pn_decode_enabled`)
+> edges feed the FRU crosswalk DECODE channel (`fru_crosswalk_enrich.py` → tier-84 category +
+> deterministic-maker + specs); `mfg_model`/`drive_pn` descriptions feed the DESC channel
+> (tier-82 specs). The targeted drain + dangling-card creation over these edges is
+> `python -m app.management.run_fru_crosswalk [drain|create|all] [--apply]` (dry-run default;
+> lenovo_ppn danglers are explicitly skipped). See APP_MAP_INTERACTIONS "FRU Crosswalk".
 
 **`oem_crosswalk`** — permanent OEM spare→canonical-MPN web-resolution cache, incl. negative rows (migration 101)
 | Column | Type | Notes |
