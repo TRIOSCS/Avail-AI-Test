@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<!--
+  Part Dossier mockup — single-scrolling one-PN sourcing dossier for /v2/search.
+  Static HTML + Tailwind (CDN) + Alpine (CDN), realistic dummy data.
+  Purpose: visual + interaction reference for the AVAIL Search→Dossier redesign.
+  Matches the codebase design language: brand-* slate palette, mono MPNs,
+  emerald/amber/rose semantics, paper(light)↔terminal(dark) dual-surface,
+  source-chip / source-badge systems, vendor-card slideUp stagger, lead drawer.
+  This is a MOCKUP — endpoints/SSE are simulated with Alpine + setTimeout.
+-->
+<html lang="en" class="h-full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Part Dossier — STM32F407VGT6 · AVAIL</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+tailwind.config = {
+  theme: { extend: {
+    fontFamily: {
+      sans: ['Aptos','Segoe UI','system-ui','-apple-system','sans-serif'],
+      mono: ['"JetBrains Mono"','ui-monospace','SFMono-Regular','Menlo','monospace'],
+    },
+    colors: { brand: {
+      50:'#F8F9FA',100:'#F0F1F4',200:'#D8DBE2',300:'#ADB3BF',400:'#838B9B',
+      500:'#5F6878',600:'#4B5463',700:'#3A4252',800:'#2A3040',900:'#1C2130' } },
+  }},
+};
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  [x-cloak]{display:none!important;}
+  body{font-family:'Aptos','Segoe UI',system-ui,sans-serif;}
+  /* ── Source progress chips (bright, terminal header) — mirrors styles.css ── */
+  .source-chip{padding:.2rem .55rem;font-size:.7rem;font-weight:500;border-radius:9999px;border:1px solid transparent;transition:all .3s;display:inline-flex;align-items:center;gap:.3rem;}
+  .source-chip--searching{background:#1f2530;color:#9aa3b2;border-color:#2b3340;}
+  .source-chip--searching .dot{animation:pulse 1.2s infinite;}
+  .source-chip--nexar{background:#7c3aed;color:#fff;}
+  .source-chip--brokerbin{background:#0284c7;color:#fff;}
+  .source-chip--digikey{background:#ea580c;color:#fff;}
+  .source-chip--mouser{background:#0d9488;color:#fff;}
+  .source-chip--oemsecrets{background:#c026d3;color:#fff;}
+  .source-chip--ebay{background:#ca8a04;color:#fff;}
+  .source-chip--empty{background:#252b38;color:#6b7280;border-color:#2b3340;}
+  .source-chip--error{background:#3a1d24;color:#fb7185;border-color:#5b2330;}
+  .dot{width:.4rem;height:.4rem;border-radius:9999px;background:currentColor;display:inline-block;}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+  /* ── Source badges (dark vendor rows) ── */
+  .source-badge{padding:.05rem .35rem;font-size:.62rem;font-weight:500;border-radius:.25rem;border:1px solid;letter-spacing:.01em;}
+  .source-badge--nexar{background:rgba(124,58,237,.18);color:#c4b5fd;border-color:#5b21b6;}
+  .source-badge--brokerbin{background:rgba(2,132,199,.18);color:#7dd3fc;border-color:#075985;}
+  .source-badge--digikey{background:rgba(234,88,12,.18);color:#fdba74;border-color:#9a3412;}
+  .source-badge--mouser{background:rgba(13,148,136,.18);color:#5eead4;border-color:#115e59;}
+  .source-badge--ebay{background:rgba(202,138,4,.18);color:#fde047;border-color:#854d0e;}
+  .source-badge--oemsecrets{background:rgba(192,38,211,.18);color:#f0abfc;border-color:#86198f;}
+  /* ── vendor-row slideUp stagger (mirrors .vendor-card) ── */
+  @keyframes slideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+  .mkt-row{animation:slideUp .35s ease-out both;animation-delay:calc(var(--i,0)*55ms);}
+  /* shimmer */
+  @keyframes shimmer{100%{transform:translateX(100%)}}
+  .shimmer{position:relative;overflow:hidden;}
+  .shimmer::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.06),transparent);animation:shimmer 1.4s infinite;}
+  /* sticky tier offsets */
+  .tier-search{top:3rem;}
+  .tier-rail{top:6.5rem;}
+  /* count tile */
+  .count-tile dt{font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;color:#838B9B;}
+  /* chevron rotate */
+  .chev{transition:transform .2s ease;}
+  .chev.open{transform:rotate(90deg);}
+</style>
+</head>
+<body class="h-full bg-brand-50 text-brand-900 antialiased"
+      x-data="dossier()" x-init="init()">
+
+<!-- ════════════════ TIER 0 — global topbar (existing) ════════════════ -->
+<header class="sticky top-0 z-30 flex h-12 items-center gap-4 bg-white px-3 sm:px-5 border-b border-brand-200">
+  <div class="flex-shrink-0 flex items-center gap-2 font-bold tracking-tight text-brand-800 text-lg">
+    <span class="inline-flex h-6 w-6 items-center justify-center rounded bg-brand-700 text-white text-xs font-mono">A</span>
+    AVAIL
+  </div>
+  <div class="relative mx-auto w-full max-w-lg hidden sm:block">
+    <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+    <input type="search" placeholder="Search reqs, customers, vendors…" class="w-full rounded-lg border border-brand-300 bg-white py-1.5 pl-9 pr-3 text-sm text-gray-800 placeholder-brand-300 outline-none focus:border-brand-500">
+  </div>
+  <div class="ml-auto h-7 w-7 rounded-full bg-brand-200 text-brand-700 grid place-items-center text-xs font-semibold">MK</div>
+</header>
+
+<!-- ════════════════ TIER 1 — persistent dossier search bar ════════════════ -->
+<div class="sticky tier-search z-20 bg-white/95 backdrop-blur border-b border-brand-200">
+  <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-2">
+    <svg class="h-4 w-4 text-brand-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+    <input type="text" :value="mpn" placeholder="Enter a part number…"
+           class="flex-1 bg-transparent px-1 py-1 text-sm font-mono tracking-tight text-brand-900 placeholder:text-gray-400 outline-none">
+    <button class="px-3 py-1.5 bg-brand-600 text-white text-xs font-semibold rounded-lg hover:bg-brand-700 transition-colors">Search</button>
+    <span class="hidden md:inline text-[11px] text-gray-400 ml-1">Nexar · BrokerBin · DigiKey · Mouser · eBay · OEMSecrets…</span>
+  </div>
+</div>
+
+<!-- ════════════════ TIER 2 — condensed sticky hero rail (appears on scroll) ════════════════ -->
+<div x-show="railShown" x-cloak
+     x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
+     class="sticky tier-rail z-10 bg-white border-b border-brand-200 shadow-sm">
+  <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-3">
+    <span class="font-mono text-sm font-bold text-brand-900 truncate" x-text="mpn"></span>
+    <span class="hidden sm:inline text-xs text-gray-400 truncate">STMicroelectronics · $0.84–$9.40</span>
+    <div class="ml-auto flex items-center gap-2">
+      <button class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 inline-flex items-center gap-1.5">
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg><span class="hidden sm:inline">Send RFQ</span>
+      </button>
+      <button class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add Offer</button>
+      <button class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add to Req</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════ DOSSIER BODY ════════════════════════════ -->
+<main class="max-w-5xl mx-auto px-4 pt-5 pb-32 space-y-5">
+
+  <!-- ───────────── IDENTITY HERO ───────────── -->
+  <section id="hero" class="rounded-xl bg-white border border-brand-200 shadow-sm p-5">
+    <div class="flex flex-col lg:flex-row gap-6">
+      <!-- Zone A : identity -->
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <h1 class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 break-all" x-text="mpn"></h1>
+          <button @click="copyMpn()" class="shrink-0 text-gray-300 hover:text-brand-500 transition-colors" title="Copy MPN">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </button>
+          <span x-show="copied" x-cloak class="text-[11px] text-emerald-600 font-medium">copied</span>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          <span class="text-sm font-medium text-gray-700">STMicroelectronics</span>
+          <span class="mx-0.5 text-gray-300">·</span>
+          <!-- OEM-brand crosswalk chip -->
+          <span class="inline-flex items-center gap-1 rounded-md bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Dell · FRU
+          </span>
+          <span class="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">Microcontroller</span>
+          <span class="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 border border-emerald-100">Active</span>
+          <span class="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">New</span>
+        </div>
+        <p class="mt-3 text-xs text-gray-500 max-w-xl leading-relaxed">
+          High-performance Arm® Cortex®-M4 32-bit MCU, 1 MB Flash, 168 MHz, LQFP-100.
+          <span class="text-gray-400">We've traded this part before — see what we know below.</span>
+        </p>
+      </div>
+
+      <!-- Zone B : market price strip -->
+      <div class="lg:w-[200px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+        <p class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Market price</p>
+        <div class="mt-1 flex items-baseline gap-1.5">
+          <span class="font-mono text-2xl font-bold text-brand-900">$0.84</span>
+          <span class="text-xs text-gray-400">median</span>
+        </div>
+        <p class="font-mono text-xs text-gray-500 mt-0.5">$0.79 – $9.40</p>
+        <!-- inline sparkline -->
+        <svg viewBox="0 0 120 32" class="mt-2 w-full h-8" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#838B9B" stroke-width="1.5" points="0,24 20,22 40,26 60,18 80,20 100,12 120,14"/>
+          <circle cx="120" cy="14" r="2" fill="#4B5463"/>
+        </svg>
+        <p class="text-[10px] text-gray-400 mt-1">across 14 snapshots · 90d</p>
+      </div>
+
+      <!-- Zone C : knowledge counts -->
+      <div class="lg:w-[150px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+        <p class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-2">What we know</p>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-2 count-tile">
+          <div><div class="font-mono text-lg font-bold text-brand-900 leading-none">23</div><dt>Offers</dt></div>
+          <div><div class="font-mono text-lg font-bold text-emerald-600 leading-none">6</div><dt>Won</dt></div>
+          <div><div class="font-mono text-lg font-bold text-brand-900 leading-none">41</div><dt>Sightings</dt></div>
+          <div><div class="font-mono text-lg font-bold text-brand-900 leading-none">5</div><dt>Reqs</dt></div>
+        </div>
+        <div class="mt-2 flex items-center -space-x-1.5">
+          <span class="h-5 w-5 rounded-full bg-blue-100 text-blue-700 grid place-items-center text-[9px] font-semibold ring-2 ring-white">MK</span>
+          <span class="h-5 w-5 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-[9px] font-semibold ring-2 ring-white">JR</span>
+          <span class="h-5 w-5 rounded-full bg-amber-100 text-amber-700 grid place-items-center text-[9px] font-semibold ring-2 ring-white">SP</span>
+          <span class="text-[10px] text-gray-400 pl-2.5">3 buyers</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── ACTION BAR ───────────── -->
+  <div class="flex flex-col sm:flex-row sm:items-center gap-3" x-data="{ overflow:false, reqPop:false }">
+    <p class="hidden sm:block text-[11px] text-gray-400 mr-auto">
+      <svg class="inline h-3.5 w-3.5 -mt-0.5 mr-0.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Actions create a quick-source requisition and capture the live results below.
+    </p>
+    <div class="flex items-center gap-2">
+      <button @click="toast('Quick-source req created · 9 sightings captured', 'success')"
+              class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors inline-flex items-center gap-2 shadow-sm">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
+      </button>
+      <button @click="toast('Offer form opened', 'info')"
+              class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors">Add Offer</button>
+      <!-- intentional path: typeahead popover -->
+      <div class="relative">
+        <button @click="reqPop=!reqPop"
+                class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors inline-flex items-center gap-1.5">
+          Add to Requisition
+          <svg class="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div x-show="reqPop" x-cloak @click.outside="reqPop=false"
+             x-transition class="absolute right-0 mt-1 w-72 rounded-lg bg-white border border-brand-200 shadow-lg z-20 overflow-hidden">
+          <div class="p-2 border-b border-brand-100">
+            <input type="text" placeholder="Find an open requisition…" class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded outline-none focus:border-brand-400">
+          </div>
+          <div class="max-h-56 overflow-y-auto">
+            <button class="w-full text-left px-3 py-2 hover:bg-brand-50">
+              <div class="text-sm font-medium text-gray-900">Acme Aerospace — Q3 MCU buy</div>
+              <div class="text-xs text-gray-400">Acme Corp · 12 parts · open</div></button>
+            <button class="w-full text-left px-3 py-2 hover:bg-brand-50">
+              <div class="text-sm font-medium text-gray-900">Spot buy — STM32 family</div>
+              <div class="text-xs text-gray-400">No customer · 4 parts · open</div></button>
+          </div>
+          <button class="w-full text-left px-3 py-2.5 border-t border-brand-100 text-sm font-medium text-brand-600 hover:bg-brand-50 inline-flex items-center gap-1.5">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg>New requisition…
+          </button>
+        </div>
+      </div>
+      <!-- overflow -->
+      <div class="relative">
+        <button @click="overflow=!overflow" class="px-2.5 py-2 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="More">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+        <div x-show="overflow" x-cloak @click.outside="overflow=false" x-transition
+             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-brand-200 shadow-lg z-20 py-1 text-sm">
+          <button @click="refreshMarket();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">↻ Refresh market</button>
+          <button @click="copyMpn();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">Copy MPN</button>
+          <a class="block px-3 py-2 hover:bg-brand-50 text-gray-700" href="#">Open full part page →</a>
+          <a class="block px-3 py-2 hover:bg-brand-50 text-gray-700" href="#">Add to shortlist view</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ───────────── LIVE MARKET — terminal ───────────── -->
+  <section class="rounded-xl bg-gray-900 border border-gray-800 shadow-sm overflow-hidden"
+           x-data="{ open:true }">
+    <!-- terminal header -->
+    <header class="px-4 py-3 border-b border-gray-800">
+      <div class="flex items-center gap-3">
+        <button @click="open=!open" class="flex items-center gap-2 text-gray-100">
+          <svg class="chev h-4 w-4 text-gray-500" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+          <span class="text-sm font-semibold">Live market</span>
+        </button>
+        <span class="inline-flex items-center gap-1.5 text-[11px]"
+              :class="phase==='live' ? 'text-emerald-400' : 'text-gray-500'">
+          <span class="h-1.5 w-1.5 rounded-full" :class="phase==='live' ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'"></span>
+          <span x-text="phase==='live' ? 'live' : (phase==='cached' ? 'cached 4m ago' : 'streaming…')"></span>
+        </span>
+        <button @click="refreshMarket()"
+                class="ml-auto px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 text-[11px] inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" :class="phase==='streaming' && 'animate-spin'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          Refresh market
+        </button>
+      </div>
+      <!-- source progress chips -->
+      <div class="mt-3 flex flex-wrap gap-1.5 items-center">
+        <span class="text-[11px] text-gray-500 mr-1">Sources:</span>
+        <template x-for="s in sources" :key="s.name">
+          <span class="source-chip" :class="'source-chip--'+s.state2" :title="s.error || ''">
+            <span class="dot" x-show="s.state2==='searching'"></span>
+            <span x-text="s.name"></span>
+            <span x-show="s.state2!=='searching' && s.n!==null" class="opacity-70" x-text="s.n"></span>
+          </span>
+        </template>
+      </div>
+    </header>
+
+    <div x-show="open" x-collapse>
+      <!-- refreshing dim overlay shimmer -->
+      <div class="relative" :class="phase==='streaming' && 'opacity-60'">
+        <!-- skeleton rows (initial) -->
+        <template x-if="rows.length===0 && phase==='streaming'">
+          <div class="divide-y divide-gray-800">
+            <template x-for="i in 3" :key="i">
+              <div class="px-4 py-3 flex items-center gap-4 shimmer">
+                <div class="h-8 w-1 rounded bg-gray-700"></div>
+                <div class="h-3 w-40 rounded bg-gray-800"></div>
+                <div class="ml-auto h-3 w-16 rounded bg-gray-800"></div>
+                <div class="h-3 w-20 rounded bg-gray-800"></div>
+              </div>
+            </template>
+          </div>
+        </template>
+
+        <!-- column header -->
+        <div x-show="rows.length>0" class="hidden lg:grid grid-cols-[10px_1fr_110px_150px_110px_120px] gap-3 px-4 py-2 border-b border-gray-800 text-[10px] uppercase tracking-wide text-gray-500 font-semibold">
+          <span></span><span>Vendor</span><span class="text-right">Price</span><span class="text-right">Qty / MOQ</span><span>Region · Lead</span><span class="text-right">Actions</span>
+        </div>
+
+        <!-- streamed rows -->
+        <div class="divide-y divide-gray-800">
+          <template x-for="(r,idx) in rows" :key="r.id">
+            <div class="mkt-row group lg:grid lg:grid-cols-[10px_1fr_110px_150px_110px_120px] gap-3 px-4 py-3 items-center border-l-2 border-l-transparent hover:bg-gray-800 hover:border-l-brand-400 transition-colors"
+                 :style="'--i:'+idx">
+              <!-- confidence bar -->
+              <div class="hidden lg:flex h-9 w-[3px] rounded-full self-center"
+                   :class="r.conf==='green'?'bg-emerald-500':(r.conf==='amber'?'bg-amber-500':'bg-rose-500')"></div>
+              <!-- vendor -->
+              <div class="min-w-0">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span class="flex items-center gap-1 lg:hidden">
+                    <span class="h-2.5 w-2.5 rounded-full" :class="r.conf==='green'?'bg-emerald-500':(r.conf==='amber'?'bg-amber-500':'bg-rose-500')"></span>
+                  </span>
+                  <span class="text-sm font-semibold text-white truncate" x-text="r.vendor"></span>
+                  <span x-show="r.auth" class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-900/50 text-emerald-400 border border-emerald-800">AUTH</span>
+                  <span class="px-1.5 py-0.5 text-[10px] font-medium rounded border"
+                        :class="r.conf==='green'?'bg-emerald-900/50 text-emerald-400 border-emerald-800':(r.conf==='amber'?'bg-amber-900/50 text-amber-400 border-amber-800':'bg-rose-900/50 text-rose-400 border-rose-800')"
+                        x-text="r.confPct+'%'"></span>
+                  <template x-for="src in r.sources" :key="src">
+                    <span class="source-badge" :class="'source-badge--'+src" x-text="src"></span>
+                  </template>
+                </div>
+                <div class="text-[11px] text-gray-500 mt-0.5 font-mono" x-text="r.mpn + ' · ' + r.mfr"></div>
+              </div>
+              <!-- price -->
+              <div class="lg:text-right mt-1 lg:mt-0">
+                <span class="font-mono text-base font-semibold text-white" x-show="r.price" x-text="'$'+r.price"></span>
+                <span class="text-xs text-gray-500" x-show="!r.price">RFQ</span>
+              </div>
+              <!-- qty/moq -->
+              <div class="lg:text-right font-mono text-xs text-gray-300 mt-0.5 lg:mt-0">
+                <span x-text="r.qty"></span><span class="text-gray-500"> avail</span>
+                <span class="text-gray-500" x-show="r.moq"> · MOQ <span x-text="r.moq"></span></span>
+              </div>
+              <!-- region/lead -->
+              <div class="text-[11px] text-gray-400 mt-0.5 lg:mt-0" x-text="r.region + ' · ' + r.lead"></div>
+              <!-- actions -->
+              <div class="flex lg:justify-end items-center gap-1 mt-2 lg:mt-0 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
+                <button @click="toast('RFQ queued to '+r.vendor,'success')" title="RFQ this vendor" class="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg></button>
+                <button @click="toast('Offer form · '+r.vendor,'info')" title="Add as offer" class="p-1.5 rounded text-gray-400 hover:text-white hover:bg-gray-700"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 4v16m8-8H4"/></svg></button>
+                <button @click="openDrawer(r)" title="Details" class="px-2 py-1 rounded text-[11px] text-gray-400 hover:text-white hover:bg-gray-700">Details →</button>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- partial footer -->
+        <div x-show="phase==='streaming' && rows.length>0" class="px-4 py-2.5 border-t border-gray-800 text-[11px] text-gray-500">
+          <span x-text="sourcesDone()+' of '+sources.length+' sources reporting…'"></span>
+        </div>
+
+        <!-- done stats + error rollup -->
+        <div x-show="phase!=='streaming' && rows.length>0" class="px-4 py-2.5 border-t border-gray-800 flex flex-wrap items-center gap-3 text-[11px]">
+          <span class="text-gray-400"><span class="font-mono text-gray-200" x-text="rows.length"></span> offers · <span class="font-mono text-gray-200">9</span> vendors · best <span class="font-mono text-emerald-400">$0.79</span> · 4m</span>
+          <button x-show="errorCount()>0" @click="errOpen=!errOpen"
+                  class="ml-auto inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-900/40 text-rose-300 border border-rose-800">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.5 0L3.18 16.25A2 2 0 005 19z"/></svg>
+            <span x-text="errorCount()+' sources errored'"></span>
+          </button>
+        </div>
+        <div x-show="errOpen" x-cloak x-collapse class="px-4 pb-3 space-y-1">
+          <template x-for="s in sources.filter(s=>s.state2==='error')" :key="s.name">
+            <div class="text-[11px] text-rose-300 flex items-center gap-2">
+              <span class="source-badge" :class="'source-badge--'+s.name" x-text="s.name"></span>
+              <span class="text-gray-400" x-text="s.error"></span>
+            </div>
+          </template>
+        </div>
+
+        <!-- EMPTY state (pivot to knowledge) -->
+        <div x-show="phase==='empty'" x-cloak class="px-6 py-12 text-center">
+          <svg class="mx-auto mb-3 h-10 w-10 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+          <p class="text-base font-semibold text-gray-200">No live stock right now.</p>
+          <p class="text-sm text-gray-500 mt-1">Here's what we already know about this part.</p>
+          <a href="#know" class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 text-sm hover:bg-gray-700">
+            Jump to What we know <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── WHAT WE KNOW ───────────── -->
+  <section id="know" class="rounded-xl bg-white border border-brand-200 shadow-sm"
+           x-data="{ open:true, acc:'offers' }">
+    <header @click="open=!open" class="flex items-center justify-between px-4 py-3 cursor-pointer select-none">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-brand-900">
+        <svg class="chev h-4 w-4 text-gray-400" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+        What we know
+        <span class="rounded-full bg-brand-100 text-brand-600 px-2 py-0.5 text-[11px] font-mono">23 offers</span>
+      </h2>
+      <a href="#" class="text-xs font-medium text-blue-600 hover:text-blue-700">Open full part page →</a>
+    </header>
+    <div x-show="open" x-collapse class="px-4 pb-4 space-y-4">
+      <!-- count strip -->
+      <div class="grid grid-cols-3 sm:grid-cols-5 gap-3 count-tile">
+        <div class="rounded-lg bg-brand-50 px-3 py-2"><div class="font-mono text-lg font-bold text-brand-900 leading-none">23</div><dt>Offers</dt></div>
+        <div class="rounded-lg bg-brand-50 px-3 py-2"><div class="font-mono text-lg font-bold text-emerald-600 leading-none">6</div><dt>Won</dt></div>
+        <div class="rounded-lg bg-brand-50 px-3 py-2"><div class="font-mono text-lg font-bold text-brand-900 leading-none">41</div><dt>Sightings</dt></div>
+        <div class="rounded-lg bg-brand-50 px-3 py-2"><div class="font-mono text-lg font-bold text-brand-900 leading-none">5</div><dt>Reqs</dt></div>
+        <div class="rounded-lg bg-brand-50 px-3 py-2"><div class="font-mono text-lg font-bold text-brand-900 leading-none">3</div><dt>Buyers</dt></div>
+      </div>
+
+      <!-- price trend band -->
+      <div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-3 flex items-center gap-4">
+        <div>
+          <p class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Price trend (USD)</p>
+          <p class="font-mono text-sm text-gray-700 mt-0.5"><span class="font-semibold text-brand-900">$0.79</span> – <span class="font-semibold text-brand-900">$9.40</span> · last <span class="font-semibold text-emerald-600">$0.84</span></p>
+        </div>
+        <svg viewBox="0 0 240 36" class="ml-auto w-40 h-9" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#838B9B" stroke-width="1.5" points="0,28 30,30 60,22 90,26 120,16 150,18 180,12 210,15 240,13"/>
+          <circle cx="240" cy="13" r="2.5" fill="#4B5463"/>
+        </svg>
+      </div>
+
+      <!-- buyer chips -->
+      <div class="flex flex-wrap gap-1.5">
+        <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">Marcus Khoury</span>
+        <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">J. Reyes</span>
+        <span class="rounded-full bg-blue-50 px-2 py-0.5 text-[11px] text-blue-700">S. Patel</span>
+      </div>
+
+      <!-- accordion -->
+      <div class="rounded-lg border border-brand-100 divide-y divide-brand-100 overflow-hidden">
+        <!-- Offers -->
+        <div>
+          <button @click="acc = acc==='offers'?'':'offers'" class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-brand-50">
+            <span>Offers <span class="text-gray-400">(23)</span></span>
+            <svg class="chev h-3.5 w-3.5 text-gray-400" :class="acc==='offers' && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div x-show="acc==='offers'" x-collapse class="px-4 pb-3 text-xs text-gray-600">
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Smith Micro Components</span><span class="text-gray-500 font-mono">2,500 · $0.81 · quoted</span></div>
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>NorthBridge Electronics</span><span class="text-gray-500 font-mono">5,000 · $0.86 · quoted</span></div>
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Apex Semiconductor</span><span class="text-gray-500 font-mono">1,000 · $0.92 · open</span></div>
+            <a href="#" class="mt-1 inline-block text-blue-600">View all 23 on part page →</a>
+          </div>
+        </div>
+        <!-- Confirmed/Won -->
+        <div>
+          <button @click="acc = acc==='won'?'':'won'" class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-brand-50">
+            <span>Confirmed / Won <span class="text-gray-400">(6)</span></span>
+            <svg class="chev h-3.5 w-3.5 text-gray-400" :class="acc==='won' && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div x-show="acc==='won'" x-collapse class="px-4 pb-3 text-xs text-gray-600">
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Smith Micro Components</span><span class="text-emerald-600 font-mono">won · $0.79</span></div>
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span class="truncate">Acme Aerospace (customer)</span><span class="text-gray-500 font-mono">×3 · $1.04</span></div>
+          </div>
+        </div>
+        <!-- Sightings -->
+        <div>
+          <button @click="acc = acc==='sight'?'':'sight'" class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-brand-50">
+            <span>Sightings <span class="text-gray-400">(41)</span></span>
+            <svg class="chev h-3.5 w-3.5 text-gray-400" :class="acc==='sight' && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div x-show="acc==='sight'" x-collapse class="px-4 pb-3 text-xs text-gray-600">
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Tferro Distribution</span><span class="text-gray-500 font-mono">8,000 · $0.84 · brokerbin</span></div>
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Eastlink Trading</span><span class="text-gray-500 font-mono">3,200 · $0.88 · nexar</span></div>
+          </div>
+        </div>
+        <!-- Requisitions -->
+        <div>
+          <button @click="acc = acc==='req'?'':'req'" class="flex w-full items-center justify-between px-4 py-2.5 text-left text-sm font-medium text-gray-700 hover:bg-brand-50">
+            <span>Requisitions <span class="text-gray-400">(5)</span></span>
+            <svg class="chev h-3.5 w-3.5 text-gray-400" :class="acc==='req' && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div x-show="acc==='req'" x-collapse class="px-4 pb-3 text-xs text-gray-600">
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Req #1042 — Acme Q3 buy</span><span class="text-emerald-600">sourced</span></div>
+            <div class="flex items-center justify-between py-1 border-b border-brand-50"><span>Req #0987 — Spot buy</span><span class="text-gray-500">open</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- FRU crosswalk card -->
+      <div class="rounded-lg bg-brand-50 border border-brand-100 p-4">
+        <div class="flex items-center justify-between">
+          <p class="text-sm font-semibold text-brand-900 flex items-center gap-1.5">
+            <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            FRU crosswalk
+          </p>
+          <a href="#" class="text-xs font-medium text-blue-600 hover:text-blue-700">View full FRU matrix →</a>
+        </div>
+        <p class="mt-2 text-xs text-gray-600">Used in <span class="font-semibold text-brand-900">4</span> FRUs · Dell PowerEdge controller assemblies</p>
+        <div class="mt-2 flex flex-wrap gap-1">
+          <span class="rounded-full bg-white border border-brand-200 px-2 py-0.5 text-[11px] font-mono text-gray-600">0HCJ4T</span>
+          <span class="rounded-full bg-white border border-brand-200 px-2 py-0.5 text-[11px] font-mono text-gray-600">0K3RND</span>
+          <span class="rounded-full bg-white border border-brand-200 px-2 py-0.5 text-[11px] font-mono text-gray-600">0WPRGM</span>
+          <span class="rounded-full bg-white border border-brand-200 px-2 py-0.5 text-[11px] font-mono text-gray-600">0F9YXV</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────── SPECS & ENRICHMENT ───────────── -->
+  <section class="rounded-xl bg-white border border-brand-200 shadow-sm"
+           x-data="{ open:false, enriching:false }">
+    <header @click="open=!open" class="flex items-center justify-between px-4 py-3 cursor-pointer select-none">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-brand-900">
+        <svg class="chev h-4 w-4 text-gray-400" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+        Specs &amp; enrichment
+        <span x-show="enriching" x-cloak class="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-2 py-0.5 text-[11px] animate-pulse">enriching…</span>
+      </h2>
+      <button @click.stop="enriching=!enriching" class="text-xs text-gray-400 hover:text-brand-600">toggle enriching state</button>
+    </header>
+    <div x-show="open" x-collapse class="px-4 pb-4">
+      <!-- enriching skeleton -->
+      <div x-show="enriching" x-cloak class="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3">
+        <template x-for="i in 6" :key="i"><div class="shimmer"><div class="h-2.5 w-16 rounded bg-brand-100 mb-1.5"></div><div class="h-3.5 w-24 rounded bg-brand-100"></div></div></template>
+      </div>
+      <!-- spec grid -->
+      <dl x-show="!enriching" class="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Core</dt><dd class="text-gray-900">Arm Cortex-M4 <span class="ml-1 align-middle rounded bg-brand-50 px-1 text-[9px] text-brand-600">T1 Direct</span></dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Flash</dt><dd class="font-mono text-gray-900">1 MB <span class="ml-1 align-middle rounded bg-brand-50 px-1 text-[9px] text-brand-600">T1</span></dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Speed</dt><dd class="font-mono text-gray-900">168 MHz</dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Package</dt><dd class="font-mono text-gray-900">LQFP-100</dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Temp range</dt><dd class="text-gray-900">-40 to 85°C <span class="ml-1 align-middle rounded bg-gray-50 px-1 text-[9px] text-gray-500">T4 Mktpl</span></dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">RoHS</dt><dd class="text-gray-900">Compliant</dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Lifecycle</dt><dd class="text-emerald-700">Active</dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">ECCN</dt><dd class="font-mono text-gray-900">EAR99</dd></div>
+        <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">HTS</dt><dd class="font-mono text-gray-900">8542.31.0000</dd></div>
+      </dl>
+      <div x-show="!enriching" class="mt-4 flex flex-wrap gap-2">
+        <a href="#" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Datasheet (PDF)
+        </a>
+        <a href="#" class="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">Manufacturer page →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- state toggles (mockup-only controls) -->
+  <div class="rounded-xl border border-dashed border-brand-300 bg-brand-50 p-3 text-xs text-gray-500">
+    <span class="font-semibold text-brand-600">Mockup state controls:</span>
+    <button @click="reset();stream()" class="ml-2 underline hover:text-brand-700">replay live stream</button> ·
+    <button @click="showEmpty()" class="underline hover:text-brand-700">empty market</button> ·
+    <button @click="reset();stream(true)" class="underline hover:text-brand-700">stream with source errors</button> ·
+    <button @click="showNewPart()" class="underline hover:text-brand-700">unknown / new part hero</button>
+  </div>
+</main>
+
+<!-- ════════════════ LEAD-DETAIL DRAWER (reused slide-in) ════════════════ -->
+<div x-show="drawer" x-cloak>
+  <div x-show="drawer" x-transition.opacity @click="drawer=false" class="fixed inset-0 bg-black/30 z-40"></div>
+  <div x-show="drawer"
+       x-transition:enter="transition ease-out duration-200 transform" x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+       x-transition:leave="transition ease-in duration-150 transform" x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-gray-200 z-50 flex flex-col">
+    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200 bg-brand-700">
+      <div class="min-w-0"><h2 class="text-lg font-bold text-white truncate" x-text="drawerRow.vendor"></h2><p class="text-xs text-brand-300 mt-0.5 font-mono" x-text="drawerRow.mpn"></p></div>
+      <button @click="drawer=false" class="text-brand-300 hover:text-white p-1"><svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M6 18L18 6M6 6l12 12"/></svg></button>
+    </div>
+    <div class="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="px-2.5 py-1 text-xs font-semibold rounded-full"
+              :class="drawerRow.conf==='green'?'bg-emerald-100 text-emerald-700':(drawerRow.conf==='amber'?'bg-amber-100 text-amber-700':'bg-rose-100 text-rose-700')"
+              x-text="(drawerRow.conf==='green'?'High':(drawerRow.conf==='amber'?'Medium':'Low'))+' Confidence · '+drawerRow.confPct+'%'"></span>
+        <span x-show="drawerRow.auth" class="px-2.5 py-1 text-xs font-semibold rounded-full bg-brand-100 text-brand-700">Authorized</span>
+      </div>
+      <div class="bg-brand-50 rounded-lg p-4 border border-brand-100">
+        <h3 class="text-xs font-semibold text-brand-700 uppercase tracking-wider mb-1.5">Why this lead</h3>
+        <p class="text-sm text-gray-700">Exact MPN match from <span x-text="drawerRow.sources && drawerRow.sources[0]"></span> with in-stock quantity and a sub-$1 unit price; vendor has a 71% historical response rate on this commodity.</p>
+      </div>
+      <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Part details</h3>
+        <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+          <div><dt class="text-gray-500 text-xs">MPN</dt><dd class="font-mono font-medium text-gray-900" x-text="drawerRow.mpn"></dd></div>
+          <div><dt class="text-gray-500 text-xs">Manufacturer</dt><dd class="text-gray-900" x-text="drawerRow.mfr"></dd></div>
+          <div><dt class="text-gray-500 text-xs">Unit price</dt><dd class="font-medium text-emerald-700 font-mono" x-text="drawerRow.price?'$'+drawerRow.price:'RFQ'"></dd></div>
+          <div><dt class="text-gray-500 text-xs">Qty available</dt><dd class="text-gray-900 font-mono" x-text="drawerRow.qty"></dd></div>
+          <div><dt class="text-gray-500 text-xs">MOQ</dt><dd class="text-gray-900 font-mono" x-text="drawerRow.moq||'—'"></dd></div>
+          <div><dt class="text-gray-500 text-xs">Region · Lead</dt><dd class="text-gray-900" x-text="drawerRow.region+' · '+drawerRow.lead"></dd></div>
+        </dl>
+      </div>
+      <button @click="toast('Added to shortlist','success')" class="w-full px-4 py-2 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700">Add to shortlist</button>
+      <div class="bg-white rounded-lg border border-gray-200 p-4">
+        <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Contact</h3>
+        <div class="space-y-2 text-sm">
+          <a href="#" class="flex items-center gap-2 text-brand-600 underline"><svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>sales@smithmicro.example</a>
+          <a href="#" class="flex items-center gap-2 text-brand-600 underline"><svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>+1 408 555 0142</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════ MOBILE bottom action sheet ════════════════ -->
+<div class="sm:hidden fixed left-0 right-0 bottom-[52px] z-30 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-2"
+     x-data="{ sheet:false }">
+  <button @click="toast('Quick-source req created','success')" class="flex-1 px-3 py-2.5 rounded-lg bg-brand-600 text-white text-sm font-semibold inline-flex items-center justify-center gap-2">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
+  </button>
+  <button @click="sheet=true" class="px-4 py-2.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium">Actions</button>
+  <div x-show="sheet" x-cloak @click="sheet=false" class="fixed inset-0 bg-black/40 z-40"></div>
+  <div x-show="sheet" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
+       class="fixed left-0 right-0 bottom-0 z-50 bg-white rounded-t-2xl border-t border-brand-200 p-4 space-y-1">
+    <div class="mx-auto mb-2 h-1 w-10 rounded-full bg-brand-200"></div>
+    <button @click="sheet=false;toast('Offer form opened','info')" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">Add Offer</button>
+    <button @click="sheet=false" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">Add to Requisition</button>
+    <button @click="sheet=false;refreshMarket()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">↻ Refresh market</button>
+    <button @click="sheet=false;copyMpn()" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">Copy MPN</button>
+  </div>
+</div>
+
+<!-- ════════════════ Bottom nav (existing, simplified) ════════════════ -->
+<nav class="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-brand-200">
+  <div class="flex items-stretch justify-center mx-auto max-w-[720px]">
+    <template x-for="it in ['Reqs','Sightings','Materials','Search','Buy Plans','CRM']" :key="it">
+      <a href="#" class="relative flex flex-col items-center justify-center py-1.5 w-[62px]"
+         :class="it==='Search' ? 'text-brand-700' : 'text-gray-400'">
+        <span x-show="it==='Search'" class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
+        <svg class="h-[19px] w-[19px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" :stroke-width="it==='Search'?'2.25':'1.75'"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <span class="mt-0.5 text-[10px] font-medium leading-none" x-text="it"></span>
+      </a>
+    </template>
+  </div>
+</nav>
+
+<!-- ════════════════ Toast ════════════════ -->
+<div x-show="t.show" x-cloak x-transition @click="t.show=false"
+     class="fixed top-16 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-sm border"
+     :class="{
+       'bg-emerald-50 text-emerald-700 border-emerald-200': t.type==='success',
+       'bg-rose-50 text-rose-700 border-rose-200': t.type==='error',
+       'bg-brand-100 text-brand-600 border-brand-200': t.type==='info'
+     }"><span x-text="t.msg"></span></div>
+
+<script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/intersect@3.x.x/dist/cdn.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+function dossier(){
+  const SAMPLE = [
+    {id:1,vendor:'Smith Micro Components',mfr:'STMicroelectronics',price:'0.7900',qty:'12,500',moq:'100',region:'US',lead:'stock',conf:'green',confPct:96,auth:true,sources:['nexar','brokerbin'],src0:'Nexar'},
+    {id:2,vendor:'NorthBridge Electronics',mfr:'STMicroelectronics',price:'0.8400',qty:'8,000',moq:'250',region:'US',lead:'2wks',conf:'green',confPct:91,auth:false,sources:['digikey']},
+    {id:3,vendor:'Tferro Distribution',mfr:'STMicroelectronics',price:'0.8800',qty:'3,200',moq:'1',region:'DE',lead:'stock',conf:'amber',confPct:74,auth:false,sources:['brokerbin','ebay']},
+    {id:4,vendor:'Mouser Electronics',mfr:'STMicroelectronics',price:'1.0420',qty:'45,000',moq:'1',region:'US',lead:'stock',conf:'green',confPct:99,auth:true,sources:['mouser']},
+    {id:5,vendor:'Eastlink Trading',mfr:'STMicroelectronics',price:'',qty:'2,000',moq:'',region:'HK',lead:'4wks',conf:'rose',confPct:48,auth:false,sources:['oemsecrets']},
+    {id:6,vendor:'Apex Semiconductor',mfr:'STMicroelectronics',price:'0.9200',qty:'1,000',moq:'100',region:'US',lead:'6wks',conf:'amber',confPct:68,auth:false,sources:['nexar']},
+    {id:7,vendor:'Crestwood Components',mfr:'STMicroelectronics',price:'0.8650',qty:'6,400',moq:'50',region:'UK',lead:'3wks',conf:'green',confPct:88,auth:false,sources:['brokerbin','digikey']},
+    {id:8,vendor:'Pacific Rim Distribution',mfr:'STMicroelectronics',price:'1.1500',qty:'900',moq:'1',region:'SG',lead:'stock',conf:'amber',confPct:72,auth:false,sources:['ebay']},
+    {id:9,vendor:'Veritas Electronics',mfr:'STMicroelectronics',price:'0.8100',qty:'15,000',moq:'500',region:'US',lead:'stock',conf:'green',confPct:94,auth:true,sources:['nexar','mouser']},
+  ];
+  return {
+    mpn:'STM32F407VGT6',
+    sources:[
+      {name:'nexar',state2:'searching',n:null,error:null},
+      {name:'brokerbin',state2:'searching',n:null,error:null},
+      {name:'digikey',state2:'searching',n:null,error:null},
+      {name:'mouser',state2:'searching',n:null,error:null},
+      {name:'oemsecrets',state2:'searching',n:null,error:null},
+      {name:'ebay',state2:'searching',n:null,error:null},
+    ],
+    rows:[], phase:'streaming', railShown:false, copied:false,
+    drawer:false, drawerRow:{}, errOpen:false,
+    t:{show:false,msg:'',type:'info'},
+    _timers:[],
+    init(){ this.observeHero(); this.stream(); },
+    observeHero(){
+      const hero=document.getElementById('hero');
+      const io=new IntersectionObserver(([e])=>{ this.railShown=!e.isIntersecting; },{rootMargin:'-120px 0px 0px 0px'});
+      io.observe(hero);
+    },
+    reset(){ this._timers.forEach(clearTimeout); this._timers=[]; this.rows=[]; this.errOpen=false;
+      this.sources.forEach(s=>{s.state2='searching';s.n=null;s.error=null;}); },
+    stream(withErrors=false){
+      this.phase='streaming';
+      // stagger sources resolving
+      const order=['mouser','digikey','nexar','brokerbin','ebay','oemsecrets'];
+      const counts={mouser:1,digikey:1,nexar:3,brokerbin:3,ebay:2,oemsecrets:1};
+      order.forEach((nm,i)=>{
+        this._timers.push(setTimeout(()=>{
+          const s=this.sources.find(x=>x.name===nm);
+          if(withErrors && (nm==='oemsecrets'||nm==='ebay')){ s.state2='error'; s.n=null;
+            s.error = nm==='oemsecrets'?'429 rate-limited — retry in 60s':'auth token expired'; }
+          else { s.state2 = counts[nm]>0 ? nm : 'empty'; s.n=counts[nm]; }
+        }, 500+i*420));
+      });
+      // stream rows in
+      const pool = withErrors ? SAMPLE.filter(r=>!r.sources.includes('oemsecrets')&&!r.sources.includes('ebay')) : SAMPLE;
+      pool.forEach((r,i)=>{
+        this._timers.push(setTimeout(()=>{ this.rows.push(r); }, 700+i*280));
+      });
+      this._timers.push(setTimeout(()=>{ this.phase='cached'; }, 700+pool.length*280+400));
+    },
+    refreshMarket(){ this.reset(); this.phase='streaming'; this.toast('Re-running connector sweep…','info'); this.stream(); },
+    showEmpty(){ this.reset(); this.sources.forEach(s=>{s.state2='empty';s.n=0;}); this.phase='empty'; },
+    showNewPart(){
+      this.mpn='RX-9920-QF';
+      const hero=document.getElementById('hero');
+      hero.querySelector('h1').textContent=this.mpn;
+      hero.querySelector('p.mt-3').innerHTML='<span class="text-gray-400">We don\'t have history on this part — the live market below will tell us who has it.</span>';
+      const chips=hero.querySelectorAll('.mt-2 span'); chips.forEach(c=>c.remove());
+      const chipRow=hero.querySelector('.mt-2');
+      chipRow.innerHTML='<span class="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 border border-amber-100">New to us</span>';
+      this.toast('Hero degraded to unknown-part state','info');
+      window.scrollTo({top:0,behavior:'smooth'});
+    },
+    openDrawer(r){ this.drawerRow=r; this.drawer=true; },
+    sourcesDone(){ return this.sources.filter(s=>s.state2!=='searching').length; },
+    errorCount(){ return this.sources.filter(s=>s.state2==='error').length; },
+    copyMpn(){ navigator.clipboard&&navigator.clipboard.writeText(this.mpn); this.copied=true; setTimeout(()=>this.copied=false,1200); },
+    toast(msg,type){ this.t={show:true,msg,type:type||'info'}; setTimeout(()=>this.t.show=false,3200); },
+  };
+}
+</script>
+</body>
+</html>
