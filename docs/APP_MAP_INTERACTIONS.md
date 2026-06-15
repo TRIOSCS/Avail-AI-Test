@@ -2052,7 +2052,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
-    |       value no longer collapses its siblings to 0). With NO commodity selected the
+    |       value no longer collapses its siblings to 0) AND receives the FULL card-level
+    |       filter set (card_filters=: q / brand / confidence / global / sourcing) so a
+    |       facet count never overstates versus the visible results — the count-honesty
+    |       invariant (see "Count-consistency" note below). With NO commodity selected the
     |       route renders the server-side placeholder "Select a category to unlock spec
     |       filters" (subfilters.html commodity_selected=False branch; no service calls)
     |       instead of an empty response.
@@ -2100,11 +2103,38 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     Static section (no per-value counts → no HTMX reload).
     +---> "More attributes" (LAST fold, collapsed, $persist moreAttrsOpen; active-count
     |     badge): Manufacturer (search + top-N) + Global facets (lifecycle / rohs /
-    |     condition / has_datasheet) via get_global_facet_counts(). Containers load
-    |     while hidden.
+    |     condition / has_datasheet / needs_review) via get_global_facet_counts(filters=)
+    |     — also fed the FULL active filter set and self-excluding each facet's OWN key, so
+    |     these counts match the visible results too (count-honesty invariant). Both count
+    |     containers now reload on `filters-changed from:body` (not just commodity-changed),
+    |     carrying the same wire params (hx-vals object literal) as #materials-results.
+    |     Containers load while hidden.
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
+
+Count-consistency invariant (count-honesty, OPTIMIZATION_PLAN §3.3 backend):
+    The faceted sidebar counts MUST equal what the user sees after applying a filter.
+    Enforced structurally by a single source of predicate + parse truth:
+    +---> _apply_card_filters(query, db, **card_kwargs) in faceted_search_service.py is
+    |     the ONE card-level predicate builder (incl. the universal deleted_at IS NULL
+    |     guard + has_crosses_predicate()). The results list (search_materials_faceted),
+    |     get_facet_counts and get_global_facet_counts ALL run through it, so a count can
+    |     never apply a different predicate than the list. It returns (query, ts_query):
+    |     a non-None ts_query is the PG multi-word FTS branch — the list orders by ts_rank
+    |     with it; counts ignore it (ORDER BY in a grouped count is meaningless / PG rejects).
+    +---> _parse_card_filter_params() + _pop_manufacturers() in htmx_views.py are the ONE
+    |     wire-param parser, shared by the results route AND both count routes, so the
+    |     list and the counts can never read the same query string differently.
+    +---> Self-exclusion: each facet drops its OWN selection before counting (spec facets
+    |     in get_facet_counts pass 2; card columns via the own_key drop in
+    |     get_global_facet_counts) so checking one value never zeroes its siblings.
+    Vocabulary honesty: panel facet enums are real, curated values — displays.resolution
+    holds monitor/laptop panel resolutions (the unreachable character-LCD formats like
+    16x2/128x64 were dropped from commodity_seeds.json; _RES_SEEDED in
+    desc_extractor/display.py mirrors the seed list exactly). A changed seed enum is
+    reconciled into commodity_spec_schemas by reseed_changed_schemas() (run at startup;
+    covered by tests/test_count_consistency.py::test_reseed_reconciles_displays_resolution_row).
 
 Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
 SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):

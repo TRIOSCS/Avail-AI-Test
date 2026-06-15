@@ -93,14 +93,30 @@
         </div>
       </div>
 
-      {# Dynamic sub-filters — reloads on commodity change AND filter change #}
+      {# Dynamic sub-filters — reloads on commodity change AND filter change.
+         Carries the FULL active filter set (same params as #materials-results) so
+         facet counts reflect active q/brand/confidence/global/sourcing filters
+         instead of overstating. hx-vals js: MUST stay a pure object literal. #}
       <div id="subfilters-container"
            hx-target="this"
            hx-get="/v2/partials/materials/filters/sub"
            hx-trigger="commodity-changed from:body, filters-changed from:body"
            hx-vals='js:{
              "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
-             "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {})
+             "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
+             "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
+             "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
+             "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
+             "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
+             "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
+             "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
+             "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
+             "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
+             "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
+             "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
+             "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
+             "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
+             "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0
            }'
            hx-swap="innerHTML"
            hx-sync="this:replace">
@@ -209,13 +225,34 @@
                hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
                hx-swap="innerHTML">
           </div>
-          {# Global facets — lifecycle / RoHS / condition / has-datasheet #}
+          {# Global facets — lifecycle / RoHS / condition / has-datasheet.
+             Reloads on filters-changed too, carrying the FULL active filter set
+             (same params as #materials-results) so counts match visible results;
+             each facet's own selection is excluded server-side (self-exclusion).
+             hx-vals js: MUST stay a pure object literal. #}
           <div id="global-filter-container"
                hx-get="/v2/partials/materials/filters/global"
                hx-target="this"
-               hx-trigger="load, commodity-changed from:body"
-               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
-               hx-swap="innerHTML">
+               hx-trigger="load, commodity-changed from:body, filters-changed from:body"
+               hx-vals='js:{
+                 "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
+                 "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
+                 "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
+                 "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
+                 "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
+                 "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
+                 "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
+                 "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
+                 "has_validation_conflict": Alpine.evaluate(document.querySelector("#materials-workspace"), "needsReview") || false,
+                 "has_stock": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasStock") || false,
+                 "has_price": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasPrice") || false,
+                 "has_crosses": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasCrosses") || false,
+                 "internal": Alpine.evaluate(document.querySelector("#materials-workspace"), "internal") || "all",
+                 "searched_within": Alpine.evaluate(document.querySelector("#materials-workspace"), "searchedWithin") || "any",
+                 "min_searches": Alpine.evaluate(document.querySelector("#materials-workspace"), "minSearches") || 0
+               }'
+               hx-swap="innerHTML"
+               hx-sync="this:replace">
           </div>
         </div>
       </div>

@@ -49,20 +49,16 @@ _RES_BY_NAME = {
     "FHD": "1920x1080",
     "HD": "1366x768",
 }
-# Seeded displays.resolution pixel members an explicit WxH token may emit
-# (3-4 digit pairs only — the 16x2/20x4 character formats are unreachable).
+# Seeded displays.resolution members an explicit WxH token may emit — the full
+# panel-resolution vocabulary (the character-LCD formats like 16x2/128x64 were
+# dropped from the seeds; TRIO's displays catalog is laptop/monitor panels).
 _RES_SEEDED = {
-    "240x320",
-    "320x240",
-    "480x272",
-    "800x480",
-    "1024x600",
-    "1280x800",
     "1920x1080",
     "1366x768",
+    "3840x2160",
     "1920x1200",
     "2560x1440",
-    "3840x2160",
+    "1280x1024",
 }
 
 # A named class that immediately precedes a camera word modifies the integrated
