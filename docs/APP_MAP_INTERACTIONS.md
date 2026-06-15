@@ -183,6 +183,22 @@ Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     v
 sightings.py (router) → search_requirement(req, db)
     |
+    +---> _expand_fru_aliases(db, req) → fru_matrix_service.get_search_aliases
+    |     FRU-crosswalk alias injection (item 2.7). The primary MPN is looked
+    |     up in fru_links BOTH directions; its mfg_model/drive_pn/option/ibm_11s
+    |     equivalents (the canonical numbers brokers actually list) are deduped
+    |     against the primary + existing substitutes, capped at 8 in that kind
+    |     priority order, and appended to the search MPN set so they fan out to
+    |     every connector. Each alias is durably persisted as a system-derived
+    |     substitute {"mpn", "manufacturer", "source": "fru_crosswalk"} via a
+    |     dedicated write session (_persist_fru_aliases) — so it survives through
+    |     the existing primary+substitutes contract and future searches, AND on
+    |     the all-cached short-circuit path that never opens the main write
+    |     session. Best-effort: a lookup/persist failure logs and the search
+    |     proceeds with the explicit MPNs. Display flags crosswalk-derived subs
+    |     with a "via FRU crosswalk" tooltip via the |fru_alias_mpns filter in
+    |     _mpn_chips.html (no new UI elements).
+    |
     +---> _mpn_cooldown_partition(pns) → (to_search, cached_card_ids)
     |     Per-MPN 48h cooldown. Cards inside the window are partitioned
     |     out; their material_card_id is returned for the detail-panel
