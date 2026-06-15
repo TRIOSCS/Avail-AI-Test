@@ -176,7 +176,7 @@ pexpect==4.9.0
     # via ipython
 pip-api==0.0.34
     # via pip-audit
-pip-audit==2.10.0
+pip-audit==2.10.1
     # via -r requirements-dev.in
 pip-requirements-parser==32.0.1
     # via pip-audit
@@ -231,7 +231,7 @@ pyproject-hooks==1.2.0
     #   pip-tools
 pyrate-limiter==4.2.0
     # via schemathesis
-pytest==9.0.3
+pytest==9.1.0
     # via
     #   -r requirements-dev.in
     #   pytest-asyncio
@@ -290,9 +290,9 @@ rpds-py==2026.5.1
     # via
     #   jsonschema
     #   referencing
-ruff==0.15.16
+ruff==0.15.17
     # via -r requirements-dev.in
-schemathesis==4.21.1
+schemathesis==4.21.6
     # via -r requirements-dev.in
 six==1.17.0
     # via
