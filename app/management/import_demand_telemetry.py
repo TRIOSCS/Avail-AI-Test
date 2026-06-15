@@ -58,7 +58,8 @@ _TS_FORMATS = ("%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y")
 
 
 def _parse_qty(raw: str | None) -> int | None:
-    """Parse the sourced-qty cell ("14", "14.0", "") to an int, None when absent/junk."""
+    """Parse the sourced-qty cell ("14", "14.0", "") to an int, None when
+    absent/junk."""
     if raw is None or not raw.strip():
         return None
     try:
@@ -171,7 +172,10 @@ def apply_telemetry(
 
 
 def run_import(db: Session, *, csv_path: str | Path, apply: bool, chunk_size: int = 5000) -> dict:
-    """Stream + aggregate + (dry-run|apply). Returns the combined stats dict."""
+    """Stream + aggregate + (dry-run|apply).
+
+    Returns the combined stats dict.
+    """
     mode = "APPLY" if apply else "DRY-RUN (no writes — pass --apply to write)"
     logger.info("import_demand_telemetry: starting in {} mode over {}", mode, csv_path)
     telemetry, read_stats = read_telemetry(csv_path)

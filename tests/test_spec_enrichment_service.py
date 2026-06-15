@@ -27,6 +27,8 @@ def _mc(
     # SP1 (2026-06-09): only trustworthy/source-attributed cards seed specs. Default the
     # helper to 'verified' so existing happy-path tests still exercise the spec reader.
     enrichment_status=MaterialEnrichmentStatus.VERIFIED,
+    sourced_qty_90d=None,
+    last_sourced_at=None,
 ) -> MaterialCard:
     card = MaterialCard(
         normalized_mpn=mpn.lower().replace("-", ""),
@@ -37,6 +39,8 @@ def _mc(
         search_count=5,
         specs_enriched_at=specs_enriched_at,
         enrichment_status=enrichment_status,
+        sourced_qty_90d=sourced_qty_90d,
+        last_sourced_at=last_sourced_at,
     )
     db.add(card)
     db.commit()
@@ -216,6 +220,33 @@ async def test_pending_selects_unmarked_cards(db: Session, _schemas):
     with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("PENDING1")):
         stats = await enrich_pending_specs(db, limit=10)
     assert stats["cards_processed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_orders_by_demand_telemetry(db: Session, _schemas):
+    """The scheduled spec-pass selection orders by demand telemetry (sourced_qty_90d
+    DESC NULLS LAST, last_sourced_at DESC NULLS LAST, id) — same as the worker's
+    select_batch, so every spec-pass dollar lands on parts TRIO trades (migration 105,
+    plan 1.4).
+
+    With limit=1 the highest-demand card is the only one selected.
+    """
+    from app.services.spec_enrichment_service import enrich_pending_specs
+
+    _mc(db, "DEMAND-LOW", sourced_qty_90d=1)
+    _mc(db, "DEMAND-NONE", sourced_qty_90d=None)
+    _mc(db, "DEMAND-HIGH", sourced_qty_90d=900)
+    with patch(
+        "app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("DEMAND-HIGH")
+    ) as m:
+        stats = await enrich_pending_specs(db, limit=1)
+
+    assert stats["cards_processed"] == 1
+    # build_spec_prompt receives only the highest-demand card's MPN.
+    prompt_arg = m.await_args.args[0] if m.await_args.args else m.await_args.kwargs.get("prompt", "")
+    assert "DEMAND-HIGH" in prompt_arg
+    assert "DEMAND-LOW" not in prompt_arg
+    assert "DEMAND-NONE" not in prompt_arg
 
 
 @pytest.mark.asyncio

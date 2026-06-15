@@ -630,6 +630,10 @@ async def test_crossref_double_verify_to_verified(db_session):
 
     meter = WebMeter()
     with (
+        # Force the distributor web tier to run for this OEM MPN so both web-search
+        # tiers (web + cross-ref) bill — the §1.3 OEM-web-skip is exercised on its own
+        # in test_worker_lane_split.py; here we pin the cross-ref double-verify contract.
+        patch("app.config.settings.enrichment_skip_web_for_oem_mpns", False),
         patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
         patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
         patch.object(aes, "cross_reference_mpn", new=AsyncMock(return_value=xr)),
@@ -824,6 +828,10 @@ async def test_oem_tiers_skipped_when_web_disabled(db_session):
 
 
 @pytest.mark.asyncio
+# Pin the per-tier web-call billing contract with the §1.3 OEM-web-skip OFF so the
+# distributor web tier runs for these OEM MPNs (the skip itself is covered by
+# test_worker_lane_split.py). `new=False` means no mock is injected as an argument.
+@patch("app.config.settings.enrichment_skip_web_for_oem_mpns", False)
 async def test_web_meter_exact_counts_per_tier(db_session):
     """Reserve-before-dispatch billing: each web-search tier attempt is counted exactly once."""
 
@@ -911,6 +919,9 @@ async def test_web_meter_counts_billed_call_on_claude_error(db_session):
     billed calls."""
     card = _oem_card()
     with (
+        # OEM-web-skip OFF so the distributor web tier runs and bills alongside the
+        # cross-ref reserve (the skip is covered by test_worker_lane_split.py).
+        patch("app.config.settings.enrichment_skip_web_for_oem_mpns", False),
         patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
         patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
         patch.object(aes, "cross_reference_mpn", new=AsyncMock(side_effect=ClaudeError("backend down"))),
