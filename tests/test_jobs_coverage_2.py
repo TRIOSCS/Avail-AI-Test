@@ -1915,15 +1915,19 @@ class TestApplyEnrichmentToCard:
         assert card.category == "ics_other"
         mock_tag.assert_called_once()
 
-    def test_does_not_overwrite_existing_manufacturer(self):
+    def test_does_not_overwrite_higher_tier_manufacturer_and_category(self):
         from app.services.enrichment import _apply_enrichment_to_card
 
         card = MagicMock()
         card.manufacturer = "Existing MFR"
-        card.category = "Existing Cat"
-        # Real provenance values: the category now routes through spec_tiers.set_category,
-        # whose ladder math needs concrete tier/confidence (a manual=100 prior outranks
-        # the incoming digikey_api=90, so the category is kept).
+        card.category = "ics_other"  # canonical — both maker and category now route
+        # Real provenance values: manufacturer and category both route through the F1
+        # ladder (set_manufacturer / set_category). A manual=100 prior outranks the
+        # incoming digikey_api=90, so both are kept.
+        card.manufacturer_source = "manual"
+        card.manufacturer_confidence = 1.0
+        card.manufacturer_tier = 100
+        card.manufacturer_updated_at = None
         card.category_source = "manual"
         card.category_confidence = 1.0
         card.category_tier = 100
@@ -1938,9 +1942,9 @@ class TestApplyEnrichmentToCard:
         ):
             _apply_enrichment_to_card(card, enrichment, db)
 
-        # Should NOT overwrite
+        # Should NOT overwrite — manual (100) outranks digikey_api (90)
         assert card.manufacturer == "Existing MFR"
-        assert card.category == "Existing Cat"
+        assert card.category == "ics_other"
 
     def test_no_commodity_tag(self):
         from app.services.enrichment import _apply_enrichment_to_card

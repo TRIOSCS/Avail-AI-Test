@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.management.reconcile_decoded_facets import _classify, _facet_matches, reconcile
 from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
+from app.services.spec_tiers import tier_for
 from app.services.spec_write_service import record_spec
 
 _OLD_TS = "2026-01-01T00:00:00+00:00"
@@ -39,6 +40,41 @@ def _seed_wrong(db: Session, card: MaterialCard, spec_key: str, value, source: s
     specs = dict(card.specs_structured)
     specs[spec_key] = {**specs[spec_key], "updated_at": _OLD_TS}
     card.specs_structured = specs
+    db.flush()
+
+
+def _seed_legacy_offenum_text(db: Session, card: MaterialCard, spec_key: str, value: str, source: str) -> None:
+    """Seed a text facet whose value is no longer a valid enum member, bypassing
+    record_spec.
+
+    record_spec now rejects off-enum values (e.g. ``gpu_family='RTX'`` after "RTX" left the
+    seeded enum in the trust hotfix), so a legacy bad row can no longer be written through it
+    — yet such rows DO exist in the live DB from before the fix, and correcting them is exactly
+    what the reconcile command is for. This mirrors what a pre-fix record_spec produced (JSONB
+    source-of-truth entry + facet projection), backdated like _seed_wrong, with NO enum gate.
+    """
+    confidence = 0.95 if source == "mpn_decode" else 0.90
+    tier = tier_for(source)
+    specs = dict(card.specs_structured or {})
+    specs[spec_key] = {
+        "value": value,
+        "source": source,
+        "confidence": confidence,
+        "tier": tier,
+        "updated_at": _OLD_TS,
+    }
+    card.specs_structured = specs
+    db.add(
+        MaterialSpecFacet(
+            material_card_id=card.id,
+            category=card.category,
+            spec_key=spec_key,
+            value_text=value,
+            source=source,
+            confidence=confidence,
+            tier=tier,
+        )
+    )
     db.flush()
 
 
@@ -71,7 +107,9 @@ def _seed_audit_cards(db: Session) -> dict[str, MaterialCard]:
     _seed_wrong(db, cards["stmicro"], "capacity_gb", 232, "mpn_decode")
     _seed_wrong(db, cards["seagate"], "capacity_gb", 373207, "mpn_decode")
     _seed_wrong(db, cards["dram"], "capacity_gb", 2, "desc_parse")
-    _seed_wrong(db, cards["gpu"], "gpu_family", "RTX", "desc_parse")
+    # "RTX" left the seeded gpu_family enum (trust hotfix) so record_spec now rejects it;
+    # seed the legacy bad row directly — correcting it is what reconcile is FOR.
+    _seed_legacy_offenum_text(db, cards["gpu"], "gpu_family", "RTX", "desc_parse")
     _seed_wrong(db, cards["modern"], "capacity_gb", 4000, "mpn_decode")
     _seed_wrong(db, cards["wd_rev"], "capacity_gb", 10100, "mpn_decode")
     _seed_wrong(db, cards["seagate_trunc"], "capacity_gb", 120, "mpn_decode")
@@ -315,7 +353,7 @@ def test_facet_matches_no_schema_uses_text_fallback():
 
 
 def test_reconcile_limit_restricts_cards_processed(db_session: Session):
-    """limit=1 causes only the first card to be processed."""
+    """Limit=1 causes only the first card to be processed."""
     seed_commodity_schemas(db_session)
     c1 = _card(db_session, "WD800BB", "hdd")
     c2 = _card(db_session, "WD1200BB", "hdd")
@@ -335,7 +373,8 @@ def test_reconcile_limit_restricts_cards_processed(db_session: Session):
 
 
 def test_reconcile_two_cards_different_categories_loads_schema_cache(db_session: Session):
-    """Each new category triggers a schema_cache load — exercises the cache-miss branch."""
+    """Each new category triggers a schema_cache load — exercises the cache-miss
+    branch."""
     seed_commodity_schemas(db_session)
     hdd_card = _card(db_session, "WD800BB", "hdd")
     dram_card = _card(db_session, "K4B2G1646F", "dram", "Mem, DDR3, 2Gb, 128*16, Samsung")
@@ -353,8 +392,8 @@ def test_reconcile_two_cards_different_categories_loads_schema_cache(db_session:
 
 
 def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Session, monkeypatch):
-    """When record_spec raises inside apply mode the savepoint is rolled back and
-    the card is counted as failed (lines 231-234, 240-242)."""
+    """When record_spec raises inside apply mode the savepoint is rolled back and the
+    card is counted as failed (lines 231-234, 240-242)."""
     seed_commodity_schemas(db_session)
     card = _card(db_session, "WD800BB", "hdd")
     _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
@@ -378,7 +417,8 @@ def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Sessi
 
 
 def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkeypatch):
-    """When db.get raises for a card_id the outer handler increments totals['failed']."""
+    """When db.get raises for a card_id the outer handler increments
+    totals['failed']."""
     seed_commodity_schemas(db_session)
     card = _card(db_session, "WD800BB", "hdd")
     _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
@@ -401,7 +441,7 @@ def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkey
 
 
 def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
-    """main() with no --apply calls reconcile(apply=False) and then rollback."""
+    """Main() with no --apply calls reconcile(apply=False) and then rollback."""
 
     from app.management import reconcile_decoded_facets as mod
 
@@ -452,7 +492,7 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
 
 
 def test_reconcile_main_apply(db_session: Session, monkeypatch):
-    """main() with --apply calls reconcile(apply=True) and skips rollback."""
+    """Main() with --apply calls reconcile(apply=True) and skips rollback."""
     from app.management import reconcile_decoded_facets as mod
 
     reconcile_calls: list[dict] = []

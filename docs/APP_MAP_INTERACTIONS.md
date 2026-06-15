@@ -1324,8 +1324,11 @@ owns arbitration in one place:
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
        "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
        (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
-       to GeForce and reserves the seeded "RTX" member for the professional
-       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       to GeForce and emits NO family for the professional Quadro-successor line
+       (RTX A2000, RTX 4000 Ada) or bare context-less RTX — "RTX" was REMOVED
+       from the seeded gpu_family enum (trust hotfix 2026-06-12: it re-fragmented
+       one physical family across two facet values, audit cards 583761 vs 560385),
+       and a wrong family is worse than a missing one, bit-unit tokens
        ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
        neutralized BEFORE the upper-casing so bits are never recorded as GB
        capacity (skipped, never ÷8-converted), NAND-die context (_common.
@@ -1551,10 +1554,14 @@ web_search:70 — for BOTH category and manufacturer, with ladder-rejected write
 from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
 ladder monopoly is complete: every category/manufacturer writer routes through
 `set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
-`card.manufacturer` remains** (the only direct maker assignments left are
-fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
-at the legacy floor until a routed writer stamps real provenance; SP3 adds the
-`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+`card.manufacturer` remains** (the last fill-when-NULL maker write — `_apply_enrichment_to_card`
+in `enrichment.py` — now routes through `set_manufacturer` too, so a connector maker
+displaces a legacy NULL-provenance value (50 < 90) instead of only filling an empty one).
+SP3 hardening is LIVE: `MaterialCard` carries an `@validates("category")` guard
+(`app/models/intelligence.py`) that REJECTS any off-vocab direct assignment (raises
+`ValueError`) — a future un-routed writer can no longer persist junk past the ladder; the
+guard's canonical vocabulary is the single frozen `commodity_registry.CANONICAL_COMMODITY_KEYS`,
+shared with `category_normalizer` so the two can never drift. Visibility: a NON-manual rejection logs at INFO for EVERY
 provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
 systematically losing writer must be visible at production log levels; the W8
 enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
@@ -1798,6 +1805,22 @@ wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
 fallback buckets); SAVEPOINT per card.
+
+Stop-the-bleed trust hotfix (one-shot, post-deploy): `python -m
+app.management.cleanup_known_bad [--apply]` — dry-run by default. Three idempotent
+passes that remediate documented-bad catalog data the new guards now block at the
+source: (1) DELETE the two documented-wrong facet rows (fru_matrix_decode
+capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT not
+row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
+normalize-or-null every non-canonical `material_cards.category` (the pre-#267
+bypass-writer residue) — resolvable values route through `set_category` at
+legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
+stale facets purged) when provenanced, unresolvable values are nulled with provenance
+cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
+card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
+`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
+One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
+dry-run rolls back, never commits.
 
 ## Cross-Reference Caching
 
