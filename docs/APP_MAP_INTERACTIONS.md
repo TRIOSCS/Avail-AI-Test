@@ -624,23 +624,129 @@ exits are window expiry, offer/email release, or manual clear.
 Browser POST (send RFQ)
     |
     v
-requirements.py (router)
+Two callers, ONE canonical send path:
+  - htmx_views.rfq_send            (requisition page; legacy scalar requisition_id)
+  - sightings.sightings_send_inquiry (bulk composer; requisition_parts_map)
     |
     v
-email_service.py
+email_service.send_batch_rfq
     |
     +---> graph_client.py --> Microsoft Graph API
-    |       +---> POST /me/sendMail (subject tagged [AVAIL-{req_id}])
-    |       +---> Returns graph_message_id
+    |       +---> POST /me/sendMail — ONE email per vendor; subject carries one
+    |       |     [ref:{req_id}] token per involved requisition, ascending id
+    |       |     ([AVAIL-{id}] is the legacy spelling, still matched on replies)
+    |       +---> Sent-folder lookup -> graph_message_id + graph_conversation_id
     |
-    +---> DB: INSERT contacts (type=rfq, status=sent, graph_message_id)
+    +---> DB: INSERT contacts (type=email, status=sent|failed) — ONE row per
+    |     (requisition, vendor) pair; each parts_included scoped to its OWN
+    |     requisition; all of a vendor's rows share that one email's
+    |     graph_message_id / graph_conversation_id
     |
-    +---> activity_service.py --> DB: INSERT activity_log (outbound email)
+    +---> tag propagation: material_card ids collected from ALL involved
+    |     requisitions' requirements (one pass per unique vendor)
     |
-    +---> vendor_card update: total_outreach++, last_contact_at
-    |
-    +---> teams_notifications.py --> Microsoft Teams webhook
+    v
+back in the sightings router:
+    +---> activity_service.log_rfq_activity per requirement (rfq_sent),
+    |     only for vendors actually sent
+    +---> status auto-progress OPEN -> SOURCING per involved requisition
+    +---> X-RFQ-Sent / X-RFQ-Total / X-RFQ-Skipped / X-RFQ-Unavailable headers
 ```
+
+**Per-requisition Contact fan-out (cross-requisition bulk composer).** The
+sightings vendor modal's selection can span requisitions. There is no collapse
+to one arbitrary requisition anywhere in the path (the old
+`next(iter(requisition_ids))` collapse in both preview and send is gone): the
+router builds a `requisition_parts_map` ({requisition_id: parts}) and
+`send_batch_rfq` takes it as an **additive** parameter. One email per vendor
+still covers ALL selected parts (the point of a bulk composer); the
+multiplicity moves to `Contact` rows — one per (requisition, vendor) pair, each
+`parts_included` holding only that requisition's parts, all sharing the email's
+graph ids. No schema change (Contact keeps its singular `requisition_id`).
+A **legacy shim** keeps the scalar-`requisition_id` call shape byte-identical
+(one Contact per vendor, parts from the vendor group) — `htmx_views.rfq_send`
+was not touched.
+
+**Preview/send lockstep.** `sightings_preview_inquiry` renders the exact
+multi-token subject the send will produce — one `[ref:{id}]` per involved
+requisition, ascending requisition id — so preview and send can never diverge.
+
+**Subject-token single source of truth.** `shared_constants.RFQ_SUBJECT_TAG_RE`
+(`[ref:{id}]` current, `[AVAIL-{id}]` legacy) is the ONE pattern; the duplicate
+`AVAIL_TOKEN_RE` in `email_mining.py` was removed (the miner's sent-scan check
+is presence-only and points at the shared pattern). Extractors use
+`re.findall`, never `.search().group(1)`, so a multi-requisition subject
+attributes to ALL token requisitions: the sent-folder scan
+(`email_jobs.scan_sent_folder`) writes one `email_sent` ActivityLog per token
+requisition (rows share the message's `external_id`, so the dedup check still
+skips re-scans), and inbox Tier-2 matching resolves every token (next section).
+Reply attribution to Contacts is Tier-1 fan-out — see section 4.
+
+**Vendor panel — four selection sources.** The modal's vendor checklist
+(`vendor_modal.html`, all rows joining the same Alpine selection state — see
+the `rfqVendorModal` section below) is fed from four sources:
+
+1. **Coverage-ranked suggestions (default).** `sightings_vendor_modal` runs the
+   shared `_coverage_ranked_vendor_rows` query: a grouped query over
+   `VendorSightingSummary` filtered to the selected requirements, joined to
+   `VendorCard` via `_vss_vendor_card_join()` — an `or_()` coalesce whose PRIMARY
+   branch is the `vendor_card_id` FK (indexed `ix_vss_vendor_card`), with a
+   `lower(trim(vendor_name)) == normalized_name` FALLBACK for NULL-FK rows (so a
+   known vendor's coverage never silently disappears when a post-rebuild summary
+   hasn't been FK-backfilled yet; the NULL-FK guard on the fallback prevents
+   double-matching FK rows by name). Only VSS summaries matching no card at all —
+   neither by FK nor by name — are excluded.
+   Order: covered-part count desc, then engagement desc; cap 20. Each row shows
+   an `N/M parts` chip with the covered MPNs in `title` (computed server-side,
+   plain-column aggregates — SQLite+PG safe). `excluded_vendor_norms`
+   filtering is unchanged.
+2. **Affinity on demand.** A "Suggest more vendors" button hx-gets
+   `GET /v2/partials/sightings/vendor-affinity?requirement_ids=…`, which runs
+   `find_vendor_affinity` once per UNIQUE primary MPN. The service is SYNC with
+   a blocking Anthropic L3 call inside, so each call runs via
+   `asyncio.to_thread` (with its own short-lived `SessionLocal` — sessions
+   never cross the thread boundary) gathered under an `asyncio.Semaphore(3)`;
+   it is never called bare from the async route. Results are merged/deduped by
+   vendor keeping the highest confidence, dropping already-suggested (same
+   coverage query) and unavailability-excluded vendors, capped at 10; rows
+   render a bordered indigo "affinity" chip + confidence % + reasoning in
+   `title`. The button lives INSIDE its own swap target
+   (`#rfq-affinity-section`), so the response replaces it — a second click
+   cannot duplicate rows.
+3. **Any-vendor autocomplete.** A debounced input against the existing
+   `GET /api/autocomplete/names` (vendors filtered client-side from the mixed
+   response; the endpoint is not forked). Picking a result POSTs
+   `composer-vendor` (below) and appends the returned checked row.
+4. **Inline vendor creation.** An "Add new vendor" mini-form (name required;
+   website + email optional) POSTs `POST /v2/partials/sightings/composer-vendor`,
+   which calls `check_vendor_duplicate` from `app/services/vendor_duplicates.py`
+   (direct service call — never loopback HTTP; the same function backs
+   `GET /api/vendors/check-duplicate`). Duplicate semantics are
+   **exact-match-only**: an exact normalized-name match (score 100) is the one
+   confident duplicate → the EXISTING vendor row is returned with a "matched
+   existing vendor" notice and no new DB row; fuzzy hits (pg_trgm with a
+   rapidfuzz fallback, score >= 80) are suggestions, never auto-dedup.
+   Otherwise it creates a minimal `VendorCard` (+ `VendorContact` when an email
+   was given) and fires `_background_enrich_vendor` post-commit (same pattern
+   as materials/vendor_contacts). Empty name → 400 JSON error. If the resolved
+   vendor is unavailability-excluded for the selected parts, the row renders
+   the rose "marked unavailable" chip with a DISABLED checkbox (send-time
+   re-validation stays the backstop).
+
+Every HTMX swap for these sections targets a stable-id sub-container INSIDE the
+`x-data='rfqVendorModal(...)'` wrapper (`#rfq-affinity-section`,
+`#rfq-added-vendors`) — never the wrapper itself, which would re-init the
+Alpine component and wipe runtime selection state.
+
+The affinity and composer rows carry Alpine directives (`:checked='isSelected(...)'`,
+`@change='toggleVendor(...)'`, `x-init='selectVendor(...)'`) that bind to the
+surrounding `rfqVendorModal` scope, and **htmx innerHTML swaps do not reliably
+auto-run Alpine on new nodes**. So both swap targets are explicitly
+`Alpine.initTree`-d: `#rfq-affinity-section` is in the `htmx:afterSwap` allowlist
+(`htmx_app.js`, alongside `lead-drawer-content` / `rq2-table`), and the composer row
+is `initTree`-d by `_addComposerVendor` after its `insertAdjacentHTML`. Without this
+the checkboxes are inert and ticked vendors never enter `selectedVendors` / never get
+sent.
 
 ## 4. Inbox Monitoring & Response Parsing (Background Job)
 
@@ -651,14 +757,31 @@ APScheduler (every 30 min)
 email_jobs.py -> inbox_monitor()
     |
     v
-email_service.py
+email_service.poll_inbox()
     |
     +---> graph_client.py --> Graph API: GET inbox messages
-    |       Filter: subject contains [AVAIL-*]
+    |       (delta query incremental sync when available; top-50 fallback —
+    |        ALL messages fetched, matching happens locally below)
     |
-    +---> Match reply to original contact via graph_conversation_id
+    +---> 4-tier reply matching (first tier that hits wins):
+    |       Tier 1: graph_conversation_id (global, exact) — matches ALL
+    |               Contacts sharing the thread: a cross-requisition RFQ
+    |               writes one Contact per (requisition, vendor) on ONE
+    |               conversation, so conv_id_map is dict[str, list[Contact]]
+    |               and the reply is attributed to every one of them
+    |       Tier 2: subject [ref:{id}]/[AVAIL-{id}] tokens — re.findall over
+    |               RFQ_SUBJECT_TAG_RE; every token's (req_id, sender email)
+    |               pair is resolved via req_email_map (unique keys under the
+    |               per-requisition fan-out); tokens with no email match still
+    |               assign the first token's requisition
+    |       Tier 3: sender email -> most-recent contact (USER-SCOPED,
+    |               single-contact fallback BY DESIGN — untokenized replies)
+    |       Tier 4: sender domain (USER-SCOPED, same single-contact design)
     |
-    +---> DB: INSERT vendor_responses (raw email)
+    +---> DB: INSERT vendor_responses (raw email) — exactly ONE per message
+    |     (it is per-message, not per-requisition); contact_id anchors to the
+    |     first matched contact; _progress_contact_status then advances EVERY
+    |     matched contact, so all involved requisitions' rows progress
     |       +---> activity_service.py: log_email_activity() --> DB: INSERT activity_log
     |             (event_type='email', direction='inbound', activity_type='email_received';
     |              dedups on external_id=message_id) so inbound vendor replies
@@ -1217,8 +1340,11 @@ owns arbitration in one place:
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
        "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
        (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
-       to GeForce and reserves the seeded "RTX" member for the professional
-       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       to GeForce and emits NO family for the professional Quadro-successor line
+       (RTX A2000, RTX 4000 Ada) or bare context-less RTX — "RTX" was REMOVED
+       from the seeded gpu_family enum (trust hotfix 2026-06-12: it re-fragmented
+       one physical family across two facet values, audit cards 583761 vs 560385),
+       and a wrong family is worse than a missing one, bit-unit tokens
        ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
        neutralized BEFORE the upper-casing so bits are never recorded as GB
        capacity (skipped, never ÷8-converted), NAND-die context (_common.
@@ -1444,10 +1570,14 @@ web_search:70 — for BOTH category and manufacturer, with ladder-rejected write
 from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
 ladder monopoly is complete: every category/manufacturer writer routes through
 `set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
-`card.manufacturer` remains** (the only direct maker assignments left are
-fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
-at the legacy floor until a routed writer stamps real provenance; SP3 adds the
-`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+`card.manufacturer` remains** (the last fill-when-NULL maker write — `_apply_enrichment_to_card`
+in `enrichment.py` — now routes through `set_manufacturer` too, so a connector maker
+displaces a legacy NULL-provenance value (50 < 90) instead of only filling an empty one).
+SP3 hardening is LIVE: `MaterialCard` carries an `@validates("category")` guard
+(`app/models/intelligence.py`) that REJECTS any off-vocab direct assignment (raises
+`ValueError`) — a future un-routed writer can no longer persist junk past the ladder; the
+guard's canonical vocabulary is the single frozen `commodity_registry.CANONICAL_COMMODITY_KEYS`,
+shared with `category_normalizer` so the two can never drift. Visibility: a NON-manual rejection logs at INFO for EVERY
 provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
 systematically losing writer must be visible at production log levels; the W8
 enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
@@ -1691,6 +1821,22 @@ wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
 fallback buckets); SAVEPOINT per card.
+
+Stop-the-bleed trust hotfix (one-shot, post-deploy): `python -m
+app.management.cleanup_known_bad [--apply]` — dry-run by default. Three idempotent
+passes that remediate documented-bad catalog data the new guards now block at the
+source: (1) DELETE the two documented-wrong facet rows (fru_matrix_decode
+capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT not
+row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
+normalize-or-null every non-canonical `material_cards.category` (the pre-#267
+bypass-writer residue) — resolvable values route through `set_category` at
+legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
+stale facets purged) when provenanced, unresolvable values are nulled with provenance
+cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
+card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
+`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
+One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
+dry-run rolls back, never commits.
 
 ## Cross-Reference Caching
 
@@ -2325,7 +2471,7 @@ the current implementation.
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
 | Buy Plans | 6 | CRUD, external approval via token |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
-| Sightings | 25 | CRUD, RFQ send, batch RFQ, inquiry, vendor+part unavailability (mark/clear/reason modal) |
+| Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
@@ -2343,7 +2489,7 @@ the current implementation.
 
 ---
 
-## Service Modules (118 total)
+## Service Modules (123 top-level)
 
 | Category | Count | Key Modules |
 |----------|-------|-------------|
@@ -2352,7 +2498,7 @@ the current implementation.
 | Email & Communication | 10 | email_threads, contact_intelligence, signature_parser |
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
-| Vendor Mgmt | 8 | vendor_analysis, vendor_affinity, vendor_scorecard |
+| Vendor Mgmt | 9 | vendor_analysis, vendor_affinity, vendor_scorecard, vendor_duplicates |
 | Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
 | Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
@@ -2437,14 +2583,30 @@ would close a double-quoted `x-data` attribute and break Alpine init; the data i
 carried through a **single-quoted** attribute (tojson escapes `'`). State:
 `step` (compose|preview), `selectedVendors` (a plain reactive object keyed by vendor
 name — matches the `sightingSelection` store, not a Set; `selectedCount` getter +
-`isSelected(name)` back the bindings), `emailBody`. Methods: `toggleVendor`;
+`isSelected(name)` back the bindings), `emailBody`, plus the any-vendor picker /
+inline-create state (`vendorQuery`, `vendorResults`, `searchOpen`, `addingVendor`,
+`addingVendorBusy`, `newVendorName/Website/Email`). Methods: `toggleVendor`;
+`selectVendor(name)` (server-returned composer rows `x-init` through it so they
+arrive CHECKED); `searchVendors()` → `GET /api/autocomplete/names` filtered to
+`type === "vendor"` client-side; `pickVendor`/`createVendor` → `_addComposerVendor()`,
+a **raw `fetch` POST** to `/v2/partials/sightings/composer-vendor` (raw fetch, not
+`htmx.ajax`, so a server 4xx is detected and the inline create form keeps its typed
+values) that appends the returned row into the stable-id `#rfq-added-vendors`
+sub-container via `insertAdjacentHTML('beforeend')` + `htmx.process` +
+`Alpine.initTree` on the new node (so the row's `x-init='selectVendor(...)'` /
+`:checked` / `@change` directives bind to this `x-data` scope and the row arrives
+CHECKED — never the `x-data` wrapper, whose re-init would wipe selection state);
 `loadPreview()` → `POST /v2/partials/sightings/preview-inquiry` (htmx.ajax swap into
 `x-ref="previewContent"`); `confirmSend()` → `fetch POST
 /v2/partials/sightings/send-inquiry` with the `x-csrftoken` header, then on success
 `_refreshSightings()` re-GETs the open `#sightings-detail` (status auto-advances
 OPEN→SOURCING + new activity rows) and the `#sightings-table` list, and dispatches
 `close-modal`. `_form()` builds a `FormData` with **repeated** `requirement_ids`/
-`vendor_names` keys (not `Object.fromEntries`, which collapses duplicates).
+`vendor_names` keys (not `Object.fromEntries`, which collapses duplicates) from
+`Object.keys(selectedVendors)` — so rows added at runtime (affinity rows,
+autocomplete picks, inline creates) flow into `vendor_names` with no extra wiring.
+The vendor panel's four selection sources (coverage-ranked, affinity on demand,
+autocomplete, inline create) are documented flow-level in section 3.
 
 The route returns **HTTP 200 even on partial/total send failure** (failures are
 captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total` /

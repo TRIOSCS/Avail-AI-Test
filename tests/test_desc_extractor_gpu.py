@@ -31,10 +31,12 @@ CASES = [
     # as the catalog's "GeForce RTX 3080" rows (card 560385) — GeForce, never "RTX".
     ("NVIDIA, RTX, 3070", "gpu", {"gpu_family": "GeForce"}),  # audit card 583761
     ("NVIDIA, RTX, 3080", "gpu", {"gpu_family": "GeForce"}),  # audit card 560385's family
-    # The professional Quadro-successor line keeps the seeded "RTX" member: A-prefixed
-    # and x000-shaped models never match the consumer x050–x090 shape.
-    ("NVIDIA RTX A2000 6GB", "gpu", {"gpu_family": "RTX", "memory_gb": 6}),
-    ("SPS-PCA NVIDIA RTX 4000 ADA 20GB", "gpu", {"gpu_family": "RTX", "memory_gb": 20}),
+    # The professional Quadro-successor line emits NO family since "RTX" left the
+    # seeded enum (trust hotfix 2026-06-12): A-prefixed and x000-shaped models never
+    # match the consumer x050–x090 shape, and a wrong family is worse than a missing
+    # one. The NVIDIA context token still unlocks memory_gb.
+    ("NVIDIA RTX A2000 6GB", "gpu", {"memory_gb": 6}),
+    ("SPS-PCA NVIDIA RTX 4000 ADA 20GB", "gpu", {"memory_gb": 20}),
     (
         "GTX1660Super@6G/D6/DP/H/DVI",  # GTX is definitionally GeForce
         "gpu",

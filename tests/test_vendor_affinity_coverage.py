@@ -28,7 +28,7 @@ def material_card(db_session: Session) -> MaterialCard:
         normalized_mpn="lm317t",
         display_mpn="LM317T",
         manufacturer="Texas Instruments",
-        category="Voltage Regulator",
+        category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(card)

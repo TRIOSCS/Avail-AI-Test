@@ -8,7 +8,6 @@ Depends on: models, dependencies, vendor_utils, vendor_helpers, cache
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import text as sqltext
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -22,62 +21,16 @@ from ..models.strategic import StrategicVendor
 from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
 from ..schemas.vendors import VendorBlacklistToggle, VendorCardUpdate, VendorReviewCreate
+
+# The duplicate-check logic lives in the service (shared with the sightings RFQ
+# composer's POST composer-vendor endpoint). _fuzzy_match_python is re-exported
+# for back-compat — existing callers/tests import it from this module.
+from ..services.vendor_duplicates import _fuzzy_match_python  # noqa: F401
+from ..services.vendor_duplicates import check_vendor_duplicate as _check_vendor_duplicate
 from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import card_to_dict
-from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
-
-FUZZY_MATCH_POOL_SIZE = 500  # Max vendors loaded for fuzzy duplicate check
-TRIGRAM_SIMILARITY_THRESHOLD = 0.3  # pg_trgm similarity threshold (0.3 ≈ 80+ rapidfuzz score)
-
-
-def _fuzzy_match_pg_trgm(db: Session, norm: str) -> list[dict]:
-    """Use PostgreSQL pg_trgm similarity() for index-backed fuzzy matching."""
-    sim = sqlfunc.similarity(VendorCard.normalized_name, norm).label("score")
-    rows = (
-        db.query(VendorCard.id, VendorCard.display_name, sim)
-        .filter(sim >= TRIGRAM_SIMILARITY_THRESHOLD)
-        .order_by(sim.desc())
-        .limit(5)
-        .all()
-    )
-    return [
-        {
-            "id": row.id,
-            "name": row.display_name,
-            "match": "fuzzy",
-            "score": round(row.score * 100),
-        }
-        for row in rows
-    ]
-
-
-def _fuzzy_match_python(db: Session, norm: str) -> list[dict]:
-    """Fallback O(n) fuzzy match using rapidfuzz (for SQLite / environments without
-    pg_trgm)."""
-    try:
-        from rapidfuzz import fuzz
-    except ImportError:  # pragma: no cover
-        return []
-
-    existing = (
-        db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(FUZZY_MATCH_POOL_SIZE).all()
-    )
-    matches = []
-    for row in existing:
-        score = fuzz.token_sort_ratio(norm, row.normalized_name)
-        if score >= 80:
-            matches.append(
-                {
-                    "id": row.id,
-                    "name": row.display_name,
-                    "match": "fuzzy",
-                    "score": round(score),
-                }
-            )
-    matches.sort(key=lambda m: m["score"], reverse=True)
-    return matches[:5]
 
 
 @router.get("/api/vendors/check-duplicate")
@@ -90,37 +43,10 @@ async def check_vendor_duplicate(
 
     Returns exact and fuzzy matches (threshold 80 for suggestions). Used by frontend
     before vendor creation to warn about duplicates. Uses PostgreSQL pg_trgm trigram
-    index when available, falls back to Python-side rapidfuzz matching on SQLite.
+    index when available, falls back to Python-side rapidfuzz matching on SQLite. Thin
+    wrapper over services.vendor_duplicates.check_vendor_duplicate.
     """
-    norm = normalize_vendor_name(name)
-    matches = []
-
-    # Exact match
-    exact = db.query(VendorCard).filter_by(normalized_name=norm).first()
-    if exact:
-        matches.append(
-            {
-                "id": exact.id,
-                "name": exact.display_name,
-                "match": "exact",
-                "score": 100,
-            }
-        )
-        return {"matches": matches}
-
-    # Fuzzy matches — use pg_trgm on PostgreSQL, rapidfuzz fallback on SQLite
-    dialect = db.bind.dialect.name if db.bind else ""
-    if dialect == "postgresql":
-        try:
-            matches = _fuzzy_match_pg_trgm(db, norm)
-        except (OperationalError, ProgrammingError):
-            db.rollback()
-            logger.warning("pg_trgm not available, falling back to Python fuzzy match")
-            matches = _fuzzy_match_python(db, norm)
-    else:
-        matches = _fuzzy_match_python(db, norm)
-
-    return {"matches": matches[:5]}
+    return {"matches": _check_vendor_duplicate(name, db)}
 
 
 @router.get("/api/vendors", response_model=VendorListResponse, response_model_exclude_none=True)

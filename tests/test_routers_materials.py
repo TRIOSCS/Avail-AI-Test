@@ -227,7 +227,7 @@ def test_material_card_to_dict_enrichment_fields(db_session):
         manufacturer="TI",
         lifecycle_status="active",
         package_type="QFP-64",
-        category="Microcontroller",
+        category="microcontrollers",  # canonical (the @validates guard rejects off-vocab)
         rohs_status="compliant",
         pin_count=64,
         datasheet_url="https://ti.com/ds.pdf",
