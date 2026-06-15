@@ -183,6 +183,22 @@ Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     v
 sightings.py (router) → search_requirement(req, db)
     |
+    +---> _expand_fru_aliases(db, req) → fru_matrix_service.get_search_aliases
+    |     FRU-crosswalk alias injection (item 2.7). The primary MPN is looked
+    |     up in fru_links BOTH directions; its mfg_model/drive_pn/option/ibm_11s
+    |     equivalents (the canonical numbers brokers actually list) are deduped
+    |     against the primary + existing substitutes, capped at 8 in that kind
+    |     priority order, and appended to the search MPN set so they fan out to
+    |     every connector. Each alias is durably persisted as a system-derived
+    |     substitute {"mpn", "manufacturer", "source": "fru_crosswalk"} via a
+    |     dedicated write session (_persist_fru_aliases) — so it survives through
+    |     the existing primary+substitutes contract and future searches, AND on
+    |     the all-cached short-circuit path that never opens the main write
+    |     session. Best-effort: a lookup/persist failure logs and the search
+    |     proceeds with the explicit MPNs. Display flags crosswalk-derived subs
+    |     with a "via FRU crosswalk" tooltip via the |fru_alias_mpns filter in
+    |     _mpn_chips.html (no new UI elements).
+    |
     +---> _mpn_cooldown_partition(pns) → (to_search, cached_card_ids)
     |     Per-MPN 48h cooldown. Cards inside the window are partitioned
     |     out; their material_card_id is returned for the detail-panel
@@ -1333,8 +1349,11 @@ owns arbitration in one place:
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
        "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
        (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
-       to GeForce and reserves the seeded "RTX" member for the professional
-       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       to GeForce and emits NO family for the professional Quadro-successor line
+       (RTX A2000, RTX 4000 Ada) or bare context-less RTX — "RTX" was REMOVED
+       from the seeded gpu_family enum (trust hotfix 2026-06-12: it re-fragmented
+       one physical family across two facet values, audit cards 583761 vs 560385),
+       and a wrong family is worse than a missing one, bit-unit tokens
        ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
        neutralized BEFORE the upper-casing so bits are never recorded as GB
        capacity (skipped, never ÷8-converted), NAND-die context (_common.
@@ -1357,13 +1376,28 @@ owns arbitration in one place:
        and a curated model→spec table (app/data/cpu_model_specs.json) merged
        UNDER desc tokens (skipped when the desc names two models, incl. dangling
        slash-alternates like "GOLD 6230R/6240R").
-       Only cards already categorized to one of the nine commodities are written
-       (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The F1 ladder (fru_desc_parse 82 < desc_parse 83 < fru_matrix_decode 84 <
-       mpn_decode 85 < vendor 90) keeps decode/vendor values authoritative and the
-       card's OWN description above its FRU-linked prose — no per-writer
-       pre-gate. The phase-2/3 commodities have no MPN decoders, so
-       desc_parse is their top non-vendor deterministic source.
+       In the worker SPEC stage only cards ALREADY categorized to one of the nine
+       commodities are written (this stage NEVER categorizes). A separate,
+       opt-in CATEGORIZE stage (writer.categorize_and_record, NOT run by the
+       worker — only the one-shot CLI + ingest call it) closes that gap for
+       UNCATEGORIZED cards: a strict lead/body grammar
+       (desc_extractor/categorizer.py — the nine SPEC commodities via the reused
+       extract_desc router with a stricter CPU-identity gate, plus anchored
+       cables/batteries/fans_cooling leads with pollution suppression) infers the
+       commodity KEY and, ONLY when card.category IS NULL, writes it via
+       set_category at desc_parse/83 (own description) or fru_desc_parse/82
+       (a linked fru_links description), then runs the SAME spec extraction for the
+       fresh category in the same SAVEPOINT. Reuses the desc_parse identity — no new
+       tier-83 source. Driven by app/management/categorize_from_desc.py (one-shot,
+       dry-run default, --apply; own-desc + FRU-desc channels, real-desc gate
+       alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15,
+       MaterialCardAudit action="categorized" per card) and at ingest time by
+       source_ingest/clean.py (same grammar, fallback when the source carries no
+       mappable Commodity_Code__c). The F1 ladder (fru_desc_parse 82 < desc_parse
+       83 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90) keeps decode/vendor
+       values authoritative and the card's OWN description above its FRU-linked
+       prose — no per-writer pre-gate. The phase-2/3 commodities have no MPN
+       decoders, so desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -1560,10 +1594,14 @@ web_search:70 — for BOTH category and manufacturer, with ladder-rejected write
 from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
 ladder monopoly is complete: every category/manufacturer writer routes through
 `set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
-`card.manufacturer` remains** (the only direct maker assignments left are
-fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
-at the legacy floor until a routed writer stamps real provenance; SP3 adds the
-`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+`card.manufacturer` remains** (the last fill-when-NULL maker write — `_apply_enrichment_to_card`
+in `enrichment.py` — now routes through `set_manufacturer` too, so a connector maker
+displaces a legacy NULL-provenance value (50 < 90) instead of only filling an empty one).
+SP3 hardening is LIVE: `MaterialCard` carries an `@validates("category")` guard
+(`app/models/intelligence.py`) that REJECTS any off-vocab direct assignment (raises
+`ValueError`) — a future un-routed writer can no longer persist junk past the ladder; the
+guard's canonical vocabulary is the single frozen `commodity_registry.CANONICAL_COMMODITY_KEYS`,
+shared with `category_normalizer` so the two can never drift. Visibility: a NON-manual rejection logs at INFO for EVERY
 provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
 systematically losing writer must be visible at production log levels; the W8
 enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
@@ -1827,6 +1865,40 @@ decoding drive_pn related parts (a decode whose commodity/specs contradict the l
 qual-sheet description) — drive_pn decode widening defaults ON iff that rate ≤2%
 (measured 0/3328 decode → 0%). All writes go through the F1 ladder (set_category /
 set_manufacturer / record_spec); the orchestrator runs `--apply` post-deploy.
+
+Categorize-from-description backfill (OPTIMIZATION_PLAN §2.4): `python -m
+app.management.categorize_from_desc [--apply] [--limit N]` categorizes UNCATEGORIZED
+cards from their descriptions via the shared lead-token grammar
+(`desc_extractor/categorizer.py::categorize_from_desc`), then fills each freshly
+categorized card's desc_parse facets in the same SAVEPOINT (the new category is
+immediately food for the existing extractor). Two channels: OWN-DESC (a REAL
+description — alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15
+— at `desc_parse`/83) and FRU-DESC (the card has no usable own description but a linked
+`fru_links` row carries one — at `fru_desc_parse`/82). Category writes go through
+`set_category` and ONLY when `card.category IS NULL` (fill-only — never reclassifies);
+the grammar is conservative (foreign/ambiguous/conflicting/pollution → no write).
+Dry-run by default (prints a yield report broken down by resulting category + channel,
+writes nothing); `--apply` commits and logs a `MaterialCardAudit` (action
+`categorized`, `created_by="categorize_from_desc"`) per card. The SAME grammar runs at
+ingest time in `source_ingest/clean.py` (fallback when the source carries no mappable
+`Commodity_Code__c`) so future imports categorize real-desc rows — single source of
+truth, no duplicated grammar.
+
+Stop-the-bleed trust hotfix (one-shot, post-deploy): `python -m
+app.management.cleanup_known_bad [--apply]` — dry-run by default. Three idempotent
+passes that remediate documented-bad catalog data the new guards now block at the
+source: (1) DELETE the two documented-wrong facet rows (fru_matrix_decode
+capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT not
+row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
+normalize-or-null every non-canonical `material_cards.category` (the pre-#267
+bypass-writer residue) — resolvable values route through `set_category` at
+legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
+stale facets purged) when provenanced, unresolvable values are nulled with provenance
+cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
+card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
+`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
+One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
+dry-run rolls back, never commits.
 
 ## Cross-Reference Caching
 

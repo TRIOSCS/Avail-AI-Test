@@ -530,6 +530,13 @@ class FruLinkKind(StrEnum):
 # it as the amber "CDC pending" pill — keep ingest and display on this constant.
 CDC_PENDING = "cdc_pending"
 
+# Provenance value in a Requirement.substitutes entry's optional "source" key:
+# the substitute was system-derived from the FRU crosswalk by search_service's
+# alias expansion (vs entered by a user). Written by
+# search_service._persist_fru_aliases, preserved by parse_substitute_mpns, read
+# by template_env's |fru_alias_mpns filter for the "via FRU crosswalk" tooltip.
+FRU_ALIAS_SOURCE = "fru_crosswalk"
+
 
 class UnavailabilityReason(StrEnum):
     """Why a (vendor, part) pair is durably unavailable.

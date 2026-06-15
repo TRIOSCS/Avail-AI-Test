@@ -6,17 +6,27 @@ F1 tier ladder (app/services/spec_tiers.py) arbitrates every write — desc_pars
 tier 83, so it can never overwrite an mpn_decode (85) / vendor-API (90) / trio_source
 (95) value and always beats AI spec_extraction (60), regardless of which pass ran
 first. (The old per-writer confidence pre-gate is gone — the ladder owns arbitration.)
-Unlike mpn_decoder/writer.py this NEVER writes a category: descriptions are not a
-regex-gated commodity proof, so only cards already categorized to a handled
-commodity (SPEC_COMMODITIES: hdd/ssd/dram/power_supplies/displays/tape_drives/gpu/
-motherboards/cpu — the spec'd _HANDLED set) are processed (record_spec requires a
-category anyway). The phase-2/3 commodities have no MPN decoders, so desc_parse
-is their top non-vendor source by confidence. Does not commit — the caller manages
-the txn.
 
-Called by: app/services/enrichment_worker/worker.py (run_one_batch, second pass,
-           gated by settings.desc_parse_enabled).
-Depends on: desc_extractor.extract_desc (pure), spec_write_service.record_spec.
+The SPEC stage (``extract_and_record`` / ``extract_and_record_specs``) only fills facets
+for cards ALREADY categorized to a handled commodity (SPEC_COMMODITIES: hdd/ssd/dram/
+power_supplies/displays/tape_drives/gpu/motherboards/cpu — record_spec requires a
+category). The phase-2/3 commodities have no MPN decoders, so desc_parse is their top
+non-vendor source by confidence.
+
+The CATEGORIZE stage (``categorize_and_record`` — opt-in; only the one-shot CLI / ingest
+call it, the worker still runs spec-only) closes the gap for UNCATEGORIZED cards: a strict
+lead/body grammar (desc_extractor/categorizer.py) infers the commodity KEY from the
+description and, ONLY when ``card.category IS NULL``, fills it via ``set_category`` at
+``desc_parse``/tier 83 (no new source name — reuse the desc_parse identity) before the same
+spec extraction runs for the freshly-set category. Grammar discipline is "a wrong category
+is worse than a missing one": ambiguous / foreign / conflicting descriptions return None
+and the card stays uncategorized. Does not commit — the caller manages the txn.
+
+Called by: app/services/enrichment_worker/worker.py (run_one_batch, second pass, SPEC
+           stage only, gated by settings.desc_parse_enabled);
+           app/management/categorize_from_desc.py (the one-shot CATEGORIZE run).
+Depends on: desc_extractor.extract_desc + categorizer.categorize_from_desc (pure),
+           spec_tiers.set_category, spec_write_service.record_spec.
 """
 
 from loguru import logger
@@ -24,7 +34,9 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
 from app.services.desc_extractor import extract_desc
-from app.services.desc_extractor._common import DESC_SOURCE, SPEC_COMMODITIES
+from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES
+from app.services.desc_extractor.categorizer import categorize_from_desc
+from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
 
 
@@ -61,6 +73,74 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
             ):
                 written += 1
     return written
+
+
+def categorize_and_record(
+    db: Session,
+    card: MaterialCard,
+    *,
+    description: str | None = None,
+    source: str = DESC_SOURCE,
+    confidence: float = DESC_CONFIDENCE,
+    schema_cache: dict | None = None,
+) -> tuple[bool, int]:
+    """CATEGORIZE an UNCATEGORIZED card from a description, then fill its facets.
+
+    Returns ``(categorized, specs_written)``. No-op (``(False, 0)``) when the card already
+    has a category (categorization is fill-only — never reclassifies), when *description*
+    is empty, or when the grammar declines to name a commodity.
+
+    *description* defaults to ``card.description``; the FRU-desc channel passes a linked
+    ``fru_links.description`` with ``source="fru_desc_parse"`` (tier 82) so a card with no
+    own description still categorizes from its FRU's prose. ``set_category`` writes the
+    canonical commodity at *source*/*confidence* via the F1 ladder (existing=None always
+    loses, so the fill wins; we gate on NULL first regardless). After a successful set, the
+    SAME spec extraction runs for the new category.
+
+    All writes are wrapped in a per-card ``begin_nested()`` SAVEPOINT: a DB-level failure
+    rolls back ONLY this card (category + facets together — a facet failure must not strand
+    a category with no facets, and vice versa) and re-raises, keeping the caller's shared
+    transaction usable for the rest of the batch.
+    """
+    if (card.category or "").strip():
+        return (False, 0)  # already categorized — fill-only, never reclassify
+    text = (description if description is not None else card.description or "").strip()
+    if not text:
+        return (False, 0)
+    commodity = categorize_from_desc(text)
+    if commodity is None:
+        return (False, 0)
+
+    with db.begin_nested():
+        if not set_category(card, commodity, source=source, confidence=confidence):
+            # The canonical commodity lost the ladder or normalized to None. Off-vocab is
+            # impossible (categorize_from_desc only returns canonical keys), so this is a
+            # category that appeared concurrently — nothing else to do (no facets without
+            # a category). Roll back the empty savepoint.
+            return (False, 0)
+        # record_spec needs the now-set category. category + facets are one atomic unit
+        # under this savepoint; the freshly-categorized commodity gets desc_parse facets
+        # immediately, in the SAME transaction.
+        if schema_cache is None:
+            schema_cache = load_schema_cache(db, commodity)
+        written = 0
+        result = extract_desc(text, commodity_hint=commodity)
+        if result is not None and result.specs:
+            for spec_key, value in result.specs.items():
+                # Facets carry the SAME provenance as the category they were unlocked by
+                # (desc_parse/83 for the own description, fru_desc_parse/82 for a linked
+                # FRU description). The ladder arbitrates — a higher prior is never clobbered.
+                if record_spec(
+                    db,
+                    int(card.id),
+                    spec_key,
+                    value,
+                    source=source,
+                    confidence=confidence,
+                    schema_cache=schema_cache,
+                ):
+                    written += 1
+    return (True, written)
 
 
 def extract_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
