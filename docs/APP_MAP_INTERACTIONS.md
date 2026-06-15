@@ -1279,9 +1279,17 @@ owns arbitration in one place:
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
        settings.fru_crosswalk_enrich_enabled. (a) DECODE channel: IBM/Lenovo FRU
        spare PNs inherit the STRICT-INTERSECTED decode of their rel_kind='mfg_model'
-       models — only spec keys present in every decode with equal values write; a
-       commodity disagreement skips the card (BOTH channels) — source=
-       "fru_matrix_decode" (tier 84), confidence 0.93. (b) LINKED-DESCRIPTION channel
+       models (PLUS rel_kind='drive_pn' when settings.fru_crosswalk_drive_pn_decode_enabled
+       — the §2.6(c) GATED widening; measured 0% OEM-firmware-suffix misread so default ON,
+       since drive_pn related parts are IBM/Lenovo FRU numbers the regex gates reject, but
+       the desc channel reads drive_pn descriptions regardless of the flag) — only spec keys
+       present in every decode with equal values write; a commodity disagreement skips the
+       card (BOTH channels) — source="fru_matrix_decode" (tier 84), confidence 0.93. The
+       card's MANUFACTURER is filled via spec_tiers.set_manufacturer (tier 84, conf 0.9)
+       ONLY when EVERY decoded substitute identifies the SAME maker (DecodeResult.vendor;
+       the decoder's regex gate is manufacturer-scheme-specific, so a unanimous vendor is a
+       DETERMINISTIC maker — §2.6(d)/D4: never a prose inference) and the decode commodity
+       agrees with the card's category — counted in manufacturers_set. (b) LINKED-DESCRIPTION channel
        (wave 3A): the qual-sheet prose stored on the FRU's mfg_model + drive_pn rows
        (e.g. drive_pn `18TB 3.5 HDD 7.2K 12 Gb/s SAS`, mfg_model `SSD; 2.5; 1.92 TB
        Samsung PM1733`) runs through desc_extractor.extract_desc(description,
@@ -1308,7 +1316,8 @@ owns arbitration in one place:
        NOT enriched_ids — FRU spares finish not_found, and the pass never touches
        enrichment_status. Fills a NULL category from the agreed DECODE commodity via
        spec_tiers.set_category (an existing DIFFERENT category skips the card before
-       any write); never writes manufacturer; never writes the reverse direction (a
+       any write); writes manufacturer ONLY via the deterministic-maker propagation
+       above (the desc channel never writes a maker); never writes the reverse direction (a
        card that IS a mfg_model already decodes first-party at tier 85 and
        desc-parses its own description at tier 83). The ladder (82 < 83 desc_parse <
        84 < 85, < vendor 90) guarantees neither channel overwrites
@@ -1836,6 +1845,26 @@ wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
 fallback buckets); SAVEPOINT per card.
+
+Targeted FRU-graph drain (§2.6): `python -m app.management.run_fru_crosswalk
+[drain|create|all] [--apply] [--limit N] [--measure-drive-pn]` — dry-run by
+default, two phases. PHASE A (`drain`) runs `crosswalk_and_record_specs` over the
+EXISTING cards that have a mfg_model/drive_pn FRU link but are still UNFACETED (no
+material_spec_facets row) or UNCATEGORIZED (category NULL/blank) — the worker only
+crosswalks whatever lands in its current batch, so this is the targeted runner;
+dry-run wraps the writer in a SAVEPOINT and rolls it back, so the returned stats are
+a REAL yield report with nothing persisted. PHASE B (`create`) creates MaterialCards
+(category=None, unenriched) for two dangling populations so the worker's tier-84
+crosswalk / tier-85 mpn_decode passes fire on the next loop: (b1) dangling enrichable
+FRUs — a fru_norm with NO card whose linked models decode or whose link descriptions
+extract; (b2) dangling canonical models — a related_norm (mfg_model/drive_pn, NEVER
+lenovo_ppn) with NO card whose related_raw decodes to a recognized vendor. The ~31k
+lenovo_ppn danglers are EXPLICITLY out of scope (display-only; §5 kill-list).
+`--measure-drive-pn` reports the §2.6(c) gate: the OEM-firmware-suffix MISREAD rate of
+decoding drive_pn related parts (a decode whose commodity/specs contradict the linked
+qual-sheet description) — drive_pn decode widening defaults ON iff that rate ≤2%
+(measured 0/3328 decode → 0%). All writes go through the F1 ladder (set_category /
+set_manufacturer / record_spec); the orchestrator runs `--apply` post-deploy.
 
 Categorize-from-description backfill (OPTIMIZATION_PLAN §2.4): `python -m
 app.management.categorize_from_desc [--apply] [--limit N]` categorizes UNCATEGORIZED
