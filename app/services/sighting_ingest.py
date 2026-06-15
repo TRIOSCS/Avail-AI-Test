@@ -22,7 +22,8 @@ def sighting_from_row(requirement_id: int, item: dict) -> Sighting:
     return Sighting(
         requirement_id=requirement_id,
         vendor_name=item.get("vendor_name", "Unknown"),
-        mpn_matched=item.get("mpn_matched"),
+        # Shortlist rows post the MPN under "mpn"; fall back so the sighting carries it.
+        mpn_matched=item.get("mpn_matched") or item.get("mpn"),
         manufacturer=item.get("manufacturer"),
         qty_available=item.get("qty_available"),
         unit_price=item.get("unit_price"),

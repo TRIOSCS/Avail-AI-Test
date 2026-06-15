@@ -21,9 +21,10 @@ Depends on: services.part_history_service.get_part_history, services.fru_matrix_
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -32,6 +33,8 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
 from ..models.intelligence import MaterialCard
+from ..models.sourcing import Requisition
+from ..services.quick_source_service import get_or_create_scratch_req, persist_rows_as_sightings
 from ..template_env import template_response
 from ..utils.normalization import normalize_mpn_key
 
@@ -193,3 +196,79 @@ async def search_recent(
     ctx = _ctx(request, user)
     ctx.update({"recent": recent})
     return template_response("htmx/partials/search/dossier_recent.html", ctx)
+
+
+# ── Quick-source actions — Send RFQ / Add Offer from the dossier ──────────────
+#
+# These give a one-off Search action a home: get_or_create_scratch_req (idempotent per
+# user+mpn) + persist the posted market rows as Sightings, then HX-Redirect to the scratch
+# req's full workspace page where the existing rfq-compose / add-offer UI completes the
+# action. Payload shapes: page-level posts {mpn, items=<JSON array>}; a per-row button
+# posts {mpn, vendor_name} (single vendor). The scratch req is created ONLY here (an
+# action), never on a bare search (design decision #4).
+
+
+def _parse_rows(items: str, vendor_name: str, mpn: str) -> list[dict]:
+    """Build the market-row list from either the JSON ``items`` payload (page-level) or
+    a single ``vendor_name`` (per-row button)."""
+    rows: list[dict] = []
+    if items:
+        try:
+            parsed = json.loads(items)
+            if isinstance(parsed, list):
+                rows = [r for r in parsed if isinstance(r, dict)]
+        except (ValueError, TypeError):
+            logger.warning("quick-source: ignoring malformed items payload")
+    if not rows and vendor_name.strip():
+        rows = [{"vendor_name": vendor_name.strip(), "mpn_matched": mpn.strip().upper()}]
+    return rows
+
+
+def _start_quick_source(db: Session, user: User, mpn: str, items: str, vendor_name: str) -> Requisition | None:
+    """Create-or-reuse the scratch req, persist the posted rows, commit.
+
+    None if no mpn.
+    """
+    if not mpn.strip():
+        return None
+    req, requirement = get_or_create_scratch_req(db, user, mpn)
+    rows = _parse_rows(items, vendor_name, mpn)
+    if rows:
+        persist_rows_as_sightings(db, requirement, rows)
+    db.commit()
+    return req
+
+
+def _redirect_to_req(req: Requisition | None) -> HTMLResponse:
+    """HX-Redirect to the scratch req's full workspace page (partials break on reload,
+    so we send the canonical full-page route)."""
+    if req is None:
+        return HTMLResponse(
+            '<div class="text-rose-600 text-sm p-2">Enter a part number first.</div>',
+            status_code=400,
+        )
+    return HTMLResponse("", status_code=200, headers={"HX-Redirect": f"/v2/requisitions/{req.id}"})
+
+
+@router.post("/v2/partials/search/quick-source/rfq", response_class=HTMLResponse)
+async def quick_source_rfq(
+    mpn: str = Form(""),
+    items: str = Form(""),
+    vendor_name: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send RFQ from the dossier → scratch req + captured sightings → its workspace."""
+    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+
+
+@router.post("/v2/partials/search/quick-source/offer", response_class=HTMLResponse)
+async def quick_source_offer(
+    mpn: str = Form(""),
+    items: str = Form(""),
+    vendor_name: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add Offer from the dossier → scratch req + captured sightings → its workspace."""
+    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
