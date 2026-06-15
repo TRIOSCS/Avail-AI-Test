@@ -36,6 +36,7 @@ from app.email_service import (
     _is_noise_email,
     _parse_sequential_fallback,
     _progress_contact_status,
+    _scope_thread_contacts_to_sender,
     _submit_parse_batch,
     log_phone_contact,
     parse_response_ai,
@@ -929,6 +930,70 @@ class TestSendBatchRfq:
         contact_id = results[0]["id"]
         contact = db_session.get(Contact, contact_id)
         assert contact.graph_message_id is None
+
+    @pytest.mark.asyncio
+    async def test_lookup_no_match_logs_and_leaves_graph_ids_null(self, db_session, test_user, test_requisition):
+        """F5: when the sent message is not found in the $top Sent window (e.g. pushed
+        below it by a large batch), the Contact keeps NULL graph ids AND the dropped
+        association is OBSERVABLE (a warning at the call site naming the vendor email),
+        not silent."""
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        # Sent folder returns messages, but none match the recipient → no-match (not an error)
+        mock_gc.get_json.return_value = {
+            "value": [_sent_item("other-msg", "other-conv", "RFQ [ref:999]", recipient="someone-else@x.com")]
+        }
+
+        vendor_groups = [
+            {
+                "vendor_name": "Vendor A",
+                "vendor_email": "sales@vendora.com",
+                "parts": ["LM317T"],
+                "subject": "RFQ",
+                "body": "Quote please",
+            }
+        ]
+
+        # Loguru bypasses stdlib logging propagation, so spy on the module logger directly.
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("app.email_service.logger.warning") as mock_warn,
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                requisition_id=test_requisition.id,
+                vendor_groups=vendor_groups,
+            )
+
+        assert results[0]["status"] == "sent"
+        contact = db_session.get(Contact, results[0]["id"])
+        assert contact.graph_message_id is None
+        assert contact.graph_conversation_id is None
+        # The dropped graph-id association is logged with the vendor email — observable.
+        # logger.warning(template, *args) → flatten the call args and look for the email.
+        logged = " ".join(
+            str(a) for call in mock_warn.call_args_list for a in (call.args + tuple(call.kwargs.values()))
+        )
+        assert "sales@vendora.com" in logged
+
+    @pytest.mark.asyncio
+    async def test_both_requisition_inputs_raise(self, db_session, test_user, test_requisition):
+        """F11: requisition_id and requisition_parts_map are mutually exclusive modes —
+        passing both must fail loudly instead of silently ignoring the scalar."""
+        with patch("app.utils.graph_client.GraphClient", return_value=AsyncMock()):
+            with pytest.raises(ValueError, match="mutually exclusive"):
+                await send_batch_rfq(
+                    token="fake-token",
+                    db=db_session,
+                    user_id=test_user.id,
+                    requisition_id=test_requisition.id,
+                    requisition_parts_map={test_requisition.id: [{"mpn": "X", "qty": 1}]},
+                    vendor_groups=[],
+                )
 
     @pytest.mark.asyncio
     async def test_group_without_body_still_sends(self, db_session, test_user, test_requisition):
@@ -2681,6 +2746,65 @@ class TestPollInbox:
 # ── poll_inbox: cross-requisition reply fan-out ──────────────────────
 
 
+class TestScopeThreadContactsToSender:
+    """F7/F8: direct unit tests of _scope_thread_contacts_to_sender — the vendor-scoping
+    guard that stops a Tier-1 conversation-id match from progressing the WRONG vendor's
+    contacts on a legacy collided thread.
+
+    Its four paths: (1) exact email, (2) same-domain
+    fallback, (3) full-thread when single-vendor, (4) [] for a multi-vendor thread with an
+    unrecognized sender (the security backstop). The poll_inbox pre-filter drops
+    noise-domain SENDERS before they reach here, so the noise-domain guard on path 2 is
+    only reachable via this direct test.
+    """
+
+    def _contact(self, email, vendor="V"):
+        return Contact(
+            contact_type="email",
+            vendor_name=vendor,
+            vendor_contact=email,
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+
+    def test_path1_exact_email_match(self):
+        a1 = self._contact("a@vendora.com", "A")
+        a2 = self._contact("a@vendora.com", "A")
+        b1 = self._contact("b@vendorb.com", "B")
+        out = _scope_thread_contacts_to_sender([a1, a2, b1], "a@vendora.com")
+        assert out == [a1, a2]
+
+    def test_path2_same_domain_fallback_scopes_to_one_vendor(self):
+        a1 = self._contact("a@vendora.com", "A")
+        b1 = self._contact("b@vendorb.com", "B")
+        # sales@ is a different mailbox at Vendor A — domain fallback, never path 3.
+        out = _scope_thread_contacts_to_sender([a1, b1], "sales@vendora.com")
+        assert out == [a1]
+
+    def test_path3_single_vendor_thread_full_fanout(self):
+        a1 = self._contact("a@vendora.com", "A")
+        a2 = self._contact("a@vendora.com", "A")
+        # Colleague from a different mailbox, single-vendor thread → full fan-out.
+        out = _scope_thread_contacts_to_sender([a1, a2], "colleague@vendora.com")
+        assert out == [a1, a2]
+
+    def test_path4_multi_vendor_unrecognized_sender_returns_empty(self):
+        a1 = self._contact("a@vendora.com", "A")
+        b1 = self._contact("b@vendorb.com", "B")
+        # Stranger on a non-noise domain matching neither vendor → no fan-out (backstop).
+        out = _scope_thread_contacts_to_sender([a1, b1], "stranger@unknownco.com")
+        assert out == []
+
+    def test_path2_noise_domain_guard_blocks_domain_fanout(self):
+        noise_domain = next(iter(NOISE_DOMAINS))
+        a1 = self._contact(f"alice@{noise_domain}", "A")
+        b1 = self._contact(f"bob@{noise_domain}", "B")
+        # An unrecognized sender on a generic shared domain must NOT match everyone on
+        # that domain (path 2 is skipped for noise domains); two vendors block path 3 → [].
+        out = _scope_thread_contacts_to_sender([a1, b1], f"carol@{noise_domain}")
+        assert out == []
+
+
 class TestPollInboxCrossRequisitionFanout:
     """Reply matching against per-(requisition, vendor) Contact rows.
 
@@ -2959,6 +3083,133 @@ class TestPollInboxCrossRequisitionFanout:
         db_session.refresh(c2)
         assert c1.status == "responded"
         assert c2.status == "responded"
+
+    @pytest.mark.asyncio
+    async def test_tier1_collided_thread_unrecognized_sender_no_cross_vendor_fanout(self, db_session, test_user):
+        """F7: path-4 backstop — a multi-vendor collided conversation with a reply from an
+        UNRECOGNIZED, non-noise sender matching neither vendor must progress NO contact.
+
+        This pins the no-cross-vendor-fan-out invariant: if _scope_thread_contacts_to_sender
+        ever fell through to returning the full thread instead of [], a reply from a stranger
+        would silently progress BOTH vendors' contacts — the exact mis-attribution the
+        function exists to prevent. Tier-1 returns [], so the reply falls through to Tier 2+
+        (no token, no email/domain match here) and is saved unmatched.
+        """
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        contacts = []
+        for req, vendor, email in [
+            (req_a, "Vendor A", "a@vendora.com"),
+            (req_b, "Vendor A", "a@vendora.com"),
+            (req_a, "Vendor B", "b@vendorb.com"),
+        ]:
+            c = Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="email",
+                vendor_name=vendor,
+                vendor_contact=email,
+                graph_conversation_id="conv-collided",
+                status="sent",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(c)
+            contacts.append(c)
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    # Third party, NON-noise domain, matches neither vendora.com nor vendorb.com
+                    sender_email="stranger@unknownco.com",
+                    conv_id="conv-collided",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        for c in contacts:
+            db_session.refresh(c)
+        # NO contact progressed — the stranger matched nobody on the collided thread.
+        assert all(c.status == "sent" for c in contacts)
+        # The response falls through Tiers 2-4 (no token, no email/domain match) → unmatched.
+        vr = db_session.query(VendorResponse).one()
+        assert vr.contact_id is None
+        assert vr.status == "new"
+
+    @pytest.mark.asyncio
+    async def test_tier1_collided_thread_domain_fallback_scopes_to_one_vendor(self, db_session, test_user):
+        """F8: path-2 (same-domain fallback) on a MULTI-vendor thread — a reply from a
+        DIFFERENT mailbox at Vendor A (sales@vendora.com) must progress only Vendor A's
+        contacts and never leak to Vendor B, even though both share one conversation id.
+
+        The exact-email match (path 1) misses (sales@ != a@), so resolution must come from
+        the domain branch, NOT the single-vendor full-thread branch (path 3 can't fire — the
+        thread holds two distinct vendor emails).
+        """
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        a1 = Contact(
+            requisition_id=req_a.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Vendor A",
+            vendor_contact="a@vendora.com",
+            graph_conversation_id="conv-collided",
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        a2 = Contact(
+            requisition_id=req_b.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Vendor A",
+            vendor_contact="a@vendora.com",
+            graph_conversation_id="conv-collided",
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        b1 = Contact(
+            requisition_id=req_a.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Vendor B",
+            vendor_contact="b@vendorb.com",
+            graph_conversation_id="conv-collided",
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([a1, a2, b1])
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="sales@vendora.com",  # different mailbox, same domain as Vendor A
+                    conv_id="conv-collided",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        for c in (a1, a2, b1):
+            db_session.refresh(c)
+        # Only Vendor A's contacts progressed via the domain fallback; Vendor B untouched.
+        assert a1.status == "responded"
+        assert a2.status == "responded"
+        assert b1.status == "sent"
+        vr = db_session.query(VendorResponse).one()
+        assert vr.contact_id in (a1.id, a2.id)
 
     @pytest.mark.asyncio
     async def test_tier2_stale_token_filtered_against_live_requisitions(self, db_session, test_user):

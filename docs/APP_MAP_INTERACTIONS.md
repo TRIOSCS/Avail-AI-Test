@@ -673,9 +673,13 @@ the `rfqVendorModal` section below) is fed from four sources:
 1. **Coverage-ranked suggestions (default).** `sightings_vendor_modal` runs the
    shared `_coverage_ranked_vendor_rows` query: a grouped query over
    `VendorSightingSummary` filtered to the selected requirements, joined to
-   `VendorCard` via the `vendor_card_id` FK (indexed `ix_vss_vendor_card`) —
-   NOT the legacy `lower(trim(vendor_name))` name join; VSS rows with NULL
-   `vendor_card_id` are excluded by design (the modal suggests known vendors).
+   `VendorCard` via `_vss_vendor_card_join()` — an `or_()` coalesce whose PRIMARY
+   branch is the `vendor_card_id` FK (indexed `ix_vss_vendor_card`), with a
+   `lower(trim(vendor_name)) == normalized_name` FALLBACK for NULL-FK rows (so a
+   known vendor's coverage never silently disappears when a post-rebuild summary
+   hasn't been FK-backfilled yet; the NULL-FK guard on the fallback prevents
+   double-matching FK rows by name). Only VSS summaries matching no card at all —
+   neither by FK nor by name — are excluded.
    Order: covered-part count desc, then engagement desc; cap 20. Each row shows
    an `N/M parts` chip with the covered MPNs in `title` (computed server-side,
    plain-column aggregates — SQLite+PG safe). `excluded_vendor_norms`
@@ -717,6 +721,16 @@ Every HTMX swap for these sections targets a stable-id sub-container INSIDE the
 `x-data='rfqVendorModal(...)'` wrapper (`#rfq-affinity-section`,
 `#rfq-added-vendors`) — never the wrapper itself, which would re-init the
 Alpine component and wipe runtime selection state.
+
+The affinity and composer rows carry Alpine directives (`:checked='isSelected(...)'`,
+`@change='toggleVendor(...)'`, `x-init='selectVendor(...)'`) that bind to the
+surrounding `rfqVendorModal` scope, and **htmx innerHTML swaps do not reliably
+auto-run Alpine on new nodes**. So both swap targets are explicitly
+`Alpine.initTree`-d: `#rfq-affinity-section` is in the `htmx:afterSwap` allowlist
+(`htmx_app.js`, alongside `lead-drawer-content` / `rq2-table`), and the composer row
+is `initTree`-d by `_addComposerVendor` after its `insertAdjacentHTML`. Without this
+the checkboxes are inert and ticked vendors never enter `selectedVendors` / never get
+sent.
 
 ## 4. Inbox Monitoring & Response Parsing (Background Job)
 
@@ -2536,10 +2550,13 @@ inline-create state (`vendorQuery`, `vendorResults`, `searchOpen`, `addingVendor
 `selectVendor(name)` (server-returned composer rows `x-init` through it so they
 arrive CHECKED); `searchVendors()` → `GET /api/autocomplete/names` filtered to
 `type === "vendor"` client-side; `pickVendor`/`createVendor` → `_addComposerVendor()`,
-an `htmx.ajax` POST to `/v2/partials/sightings/composer-vendor` that appends the
-returned row into the stable-id `#rfq-added-vendors` sub-container (swap
-`beforeend`, explicit target + indicator — never the `x-data` wrapper, whose
-re-init would wipe selection state);
+a **raw `fetch` POST** to `/v2/partials/sightings/composer-vendor` (raw fetch, not
+`htmx.ajax`, so a server 4xx is detected and the inline create form keeps its typed
+values) that appends the returned row into the stable-id `#rfq-added-vendors`
+sub-container via `insertAdjacentHTML('beforeend')` + `htmx.process` +
+`Alpine.initTree` on the new node (so the row's `x-init='selectVendor(...)'` /
+`:checked` / `@change` directives bind to this `x-data` scope and the row arrives
+CHECKED — never the `x-data` wrapper, whose re-init would wipe selection state);
 `loadPreview()` → `POST /v2/partials/sightings/preview-inquiry` (htmx.ajax swap into
 `x-ref="previewContent"`); `confirmSend()` → `fetch POST
 /v2/partials/sightings/send-inquiry` with the `x-csrftoken` header, then on success

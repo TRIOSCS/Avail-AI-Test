@@ -75,8 +75,10 @@
       {% endif %}
 
       {# Added vendors (autocomplete picks + inline creates): stable-id append target
-         for composer_vendor_row.html — htmx.ajax POSTs to composer-vendor target THIS
-         div with swap beforeend (explicit target + indicator; see _addComposerVendor). #}
+         for composer_vendor_row.html — _addComposerVendor does a raw fetch POST to
+         composer-vendor, then insertAdjacentHTML('beforeend') + htmx.process +
+         Alpine.initTree on THIS div (raw fetch chosen over htmx.ajax to detect 4xx;
+         see _addComposerVendor). #}
       <div id="rfq-added-vendors"></div>
       <span id="rfq-added-vendors-spinner" class="htmx-indicator mt-1 inline-flex items-center text-gray-400">
         <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">

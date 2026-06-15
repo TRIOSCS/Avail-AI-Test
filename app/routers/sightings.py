@@ -16,7 +16,7 @@ import json
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, NamedTuple, TypedDict
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -1324,9 +1324,31 @@ def _vss_vendor_card_join():
     )
 
 
-def _coverage_ranked_vendor_rows(
-    db: Session, req_id_list: list[int], excluded: set[str]
-) -> list[tuple[VendorCard, int, float | None]]:
+class RankedVendor(NamedTuple):
+    """One coverage-ranked vendor row (see _coverage_ranked_vendor_rows).
+
+    Named fields pin the SELECT-column order: a future swap of covered_count and
+    avg_score in the query would otherwise mis-bind silently (both are numeric).
+    """
+
+    card: VendorCard
+    covered_count: int
+    avg_score: float | None
+
+
+class CoverageEntry(TypedDict):
+    """Per-card coverage shape rendered in the vendor modal row.
+
+    ``mpns`` is populated lazily by a second query and stays ``""`` for cards with no
+    MPN rows — ``""`` is a valid terminal value, NOT "not yet computed".
+    """
+
+    count: int
+    avg_score: float | None
+    mpns: str
+
+
+def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
     """Coverage-ranked suggested vendors — the single source shared by the vendor modal
     and the affinity endpoint (which must drop already-suggested vendors computed the
     SAME way, so it stays self-contained).
@@ -1336,8 +1358,8 @@ def _coverage_ranked_vendor_rows(
     lower(trim(vendor_name)) fallback for NULL-FK rows (post-rebuild summaries are now
     INCLUDED via that fallback — only summaries matching no card at all stay out, since
     the modal suggests known vendors). Plain-column aggregates only (SQLite+PG safe).
-    Returns (card, covered_count, avg_score) rows, coverage desc then engagement desc,
-    capped at 20.
+    Returns RankedVendor(card, covered_count, avg_score) rows, coverage desc then
+    engagement desc, capped at 20.
     """
     covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
     vendor_query = (
@@ -1354,7 +1376,7 @@ def _coverage_ranked_vendor_rows(
     )
     if excluded:
         vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
-    rows = (
+    raw_rows = (
         vendor_query.group_by(VendorCard.id)
         .order_by(
             covered_count.desc(),
@@ -1364,14 +1386,15 @@ def _coverage_ranked_vendor_rows(
         .limit(20)
         .all()
     )
+    rows = [RankedVendor(card, int(n_covered), avg_score) for card, n_covered, avg_score in raw_rows]
     if excluded:
         # Belt and braces: some legacy cards carry a normalized_name that predates
         # normalize_vendor_name (suffix kept) — re-check through the canonical
         # normalizer so "X, Inc." cards can't slip past the column filter.
         rows = [
-            (card, n_covered, avg_score)
-            for card, n_covered, avg_score in rows
-            if normalize_vendor_name(card.display_name or card.normalized_name or "") not in excluded
+            r
+            for r in rows
+            if normalize_vendor_name(r.card.display_name or r.card.normalized_name or "") not in excluded
         ]
     return rows
 
@@ -1423,17 +1446,17 @@ async def sightings_vendor_modal(
     excluded = excluded_vendor_norms(db, requirements) if requirements else set()
 
     suggested_vendors: list[VendorCard] = []
-    coverage: dict[int, dict[str, Any]] = {}
+    coverage: dict[int, CoverageEntry] = {}
     if req_id_list:
         rows = _coverage_ranked_vendor_rows(db, req_id_list, excluded)
-        suggested_vendors = [card for card, _, _ in rows]
+        suggested_vendors = [r.card for r in rows]
         coverage = {
-            card.id: {
-                "count": int(n_covered),
-                "avg_score": float(avg_score) if avg_score is not None else None,
-                "mpns": "",
-            }
-            for card, n_covered, avg_score in rows
+            r.card.id: CoverageEntry(
+                count=r.covered_count,
+                avg_score=float(r.avg_score) if r.avg_score is not None else None,
+                mpns="",
+            )
+            for r in rows
         }
         if coverage:
             # Covered-MPN list per vendor (rendered in the row's `title`) — a second
@@ -1498,11 +1521,11 @@ async def sightings_vendor_affinity(
     if requirements:
         excluded = excluded_vendor_norms(db, requirements)
         suggested_norms: set[str] = set()
-        for card, _, _ in _coverage_ranked_vendor_rows(db, req_id_list, excluded):
+        for r in _coverage_ranked_vendor_rows(db, req_id_list, excluded):
             # Both spellings: the stored normalized_name (may be legacy-suffixed) and
             # the canonical re-normalization — affinity matches are compared canonically.
-            suggested_norms.add(card.normalized_name or "")
-            suggested_norms.add(normalize_vendor_name(card.display_name or card.normalized_name or ""))
+            suggested_norms.add(r.card.normalized_name or "")
+            suggested_norms.add(normalize_vendor_name(r.card.display_name or r.card.normalized_name or ""))
 
         # One affinity call per UNIQUE primary MPN (order-preserving dedupe — no
         # double L3 spend when requirements share an MPN).
@@ -1610,13 +1633,22 @@ async def sightings_composer_vendor(
     matched_existing = bool(matches) and matches[0]["match"] == "exact"
     contact_added = False
 
+    # TOCTOU: check_vendor_duplicate ran an earlier, separate query, so the matched
+    # card can be deleted between that check and this fetch. A None card here would
+    # AttributeError → generic 500; instead treat it as "no confident duplicate" and
+    # fall through to the create branch (re-resolving the name the user typed).
+    matched_card = db.get(VendorCard, matches[0]["id"]) if matched_existing else None
+    if matched_existing and matched_card is None:
+        matched_existing = False
+
     if matched_existing:
         # Confident duplicate: hand back the existing card — but a typed email /
         # website must NOT be silently discarded (F4): attach the email as a
         # VendorContact (deduped case-insensitively against the card's existing
         # contacts) and backfill a missing domain. The row's notice reports the
         # email attach explicitly.
-        card = db.get(VendorCard, matches[0]["id"])
+        assert matched_card is not None  # narrowed by the TOCTOU guard above
+        card = matched_card
         updated = False
         if email:
             existing_emails = {
@@ -1714,6 +1746,33 @@ async def sightings_composer_vendor(
     return template_response("htmx/partials/sightings/composer_vendor_row.html", ctx)
 
 
+def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorContact]:
+    """Vendor contacts ordered worst-first so a last-wins ``{card_id: c}`` dict keeps
+    the BEST contact per vendor.
+
+    VendorContact has no is_primary flag, and a vendor can hold several contacts (an
+    rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
+    unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
+    NULL-email) row win, which would silently skip the vendor as "had no email". Ordering
+    non-NULL email LAST (then verified, then higher confidence) makes the real email win.
+
+    Called by: sightings_preview_inquiry, sightings_send_inquiry.
+    """
+    if not card_ids:
+        return []
+    return (
+        db.query(VendorContact)
+        .filter(VendorContact.vendor_card_id.in_(card_ids))
+        .order_by(
+            VendorContact.email.is_(None).desc(),  # NULL-email rows first (lose last-wins)
+            VendorContact.is_verified.asc().nullsfirst(),  # verified rows last
+            VendorContact.confidence.asc().nullsfirst(),  # higher confidence last
+            VendorContact.id.asc(),  # deterministic tiebreak (newest row wins ties)
+        )
+        .all()
+    )
+
+
 @router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)
 async def sightings_preview_inquiry(
     request: Request,
@@ -1751,7 +1810,11 @@ async def sightings_preview_inquiry(
     card_map = {c.normalized_name: c for c in cards}
 
     card_ids = [c.id for c in cards]
-    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    # Order worst-first so the dict's last-wins keeps the BEST contact per vendor: a
+    # vendor with multiple contacts (e.g. an rfq_manual row added via the composer plus
+    # an Apollo-enriched row) must not pick a NULL-email contact over one that has the
+    # real email — that would silently skip the vendor as "had no email".
+    contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
 
     from ..email_service import _build_html_body
@@ -1842,7 +1905,9 @@ async def sightings_send_inquiry(
     card_map = {c.normalized_name: c for c in cards}
 
     card_ids = [c.id for c in cards]
-    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    # Best-contact-per-vendor (see _best_contacts_by_card): last-wins dict over a
+    # worst-first ordering so a non-NULL email always beats a NULL-email row.
+    contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
 
     vendor_groups = []

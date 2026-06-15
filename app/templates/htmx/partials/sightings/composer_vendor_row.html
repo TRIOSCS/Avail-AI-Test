@@ -1,6 +1,7 @@
 {# composer_vendor_row.html — single vendor row returned by the RFQ composer's
    any-vendor picker / inline "Add new vendor" form (POST composer-vendor).
-   Called by: sightings.py sightings_composer_vendor — appended (hx swap beforeend)
+   Called by: sightings.py sightings_composer_vendor — appended via _addComposerVendor's
+   raw fetch POST + insertAdjacentHTML('beforeend') + htmx.process + Alpine.initTree
    into the stable-id #rfq-added-vendors sub-container in vendor_modal.html, INSIDE
    the rfqVendorModal x-data wrapper (never the wrapper — re-init wipes selection).
    Depends on: the surrounding rfqVendorModal Alpine component (htmx_app.js) — a

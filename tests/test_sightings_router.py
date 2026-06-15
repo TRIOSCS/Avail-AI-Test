@@ -1443,6 +1443,26 @@ class TestComposerVendor:
         # dedupe can see them (no x-init to read it from).
         assert 'data-vendor-norm="dead vendor"' in resp.text
 
+    def test_exact_duplicate_whose_card_vanished_falls_through_to_create(self, client, db_session):
+        """F6 (TOCTOU): check_vendor_duplicate runs a SEPARATE earlier query, so the
+        matched card can be deleted before the endpoint's db.get.
+
+        A None card must NOT AttributeError into a generic 500 — it falls through to the
+        create branch (using the name the user typed) instead.
+        """
+        from unittest.mock import patch
+
+        # The duplicate service reports an EXACT match on an id that no longer exists.
+        stale = {"id": 999999, "match": "exact", "score": 100}
+        with patch("app.routers.sightings.check_vendor_duplicate", return_value=[stale]):
+            resp = client.post(self.URL, data={"vendor_name": "Vanished Vendor"})
+
+        assert resp.status_code == 200
+        # Created fresh (no "matched existing" notice), selectable row
+        assert "matched existing vendor" not in resp.text
+        assert 'selectVendor("vanished vendor")' in resp.text
+        assert db_session.query(VendorCard).filter_by(normalized_name="vanished vendor").count() == 1
+
     def test_modal_renders_picker_added_container_and_inline_form(self, client, db_session):
         """vendor_modal.html: the vendor panel carries a stable id; the any-vendor
         autocomplete, the #rfq-added-vendors append target, and the 'Add new vendor'
@@ -1591,6 +1611,64 @@ class TestSendInquiryUnavailableExclusion:
         assert "1 vendor" in resp.text  # only Acme is previewed
         assert "Globex" in resp.text  # the skip is visibly reported
         assert "unavailable" in resp.text.lower()
+
+
+class TestSendInquiryContactSelection:
+    """F4: a vendor with multiple VendorContact rows (no is_primary flag) must resolve
+    the one carrying a real email — an unordered last-wins map could pick a NULL-email
+    row and silently skip the vendor as 'had no email'."""
+
+    def _post(self, client, r, url="/v2/partials/sightings/send-inquiry"):
+        return client.post(
+            url,
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+
+    def test_send_prefers_contact_with_email_over_null_email_row(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+        vc = VendorCard(normalized_name="acme", display_name="Acme")
+        db_session.add(vc)
+        db_session.flush()
+        # A higher-confidence NULL-email contact (would win a naive last-wins map) plus a
+        # lower-confidence row that actually has the email.
+        db_session.add(VendorContact(vendor_card_id=vc.id, email=None, source="apollo", confidence=95))
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="real@acme.com", source="rfq_manual", confidence=80))
+        db_session.commit()
+
+        captured = {}
+
+        async def fake_send(**kwargs):
+            captured["groups"] = kwargs["vendor_groups"]
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert captured["groups"][0]["vendor_email"] == "real@acme.com"
+
+    def test_preview_prefers_contact_with_email_over_null_email_row(self, client, db_session):
+        _, r, _ = _seed_data(db_session)
+        vc = VendorCard(normalized_name="acme", display_name="Acme")
+        db_session.add(vc)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=vc.id, email=None, source="apollo", confidence=95))
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="real@acme.com", source="rfq_manual", confidence=80))
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert "real@acme.com" in resp.text
 
 
 def _seed_two_requisitions(db_session):

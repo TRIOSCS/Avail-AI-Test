@@ -644,9 +644,12 @@ htmx.on('htmx:afterSwap', function(evt) {
     // HTMX innerHTML swaps do not always auto-run Alpine on new nodes.
     // Explicit initTree for targets known to contain Alpine components/directives
     // (lead drawer close button; rq2-table rows with rowActionRail, x-truncate-tip,
-    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps).
+    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps;
+    // rfq-affinity-section — affinity rows whose :checked/@change checkboxes bind to
+    // the surrounding rfqVendorModal x-data scope, otherwise the checkboxes are inert
+    // and ticked affinity vendors never enter selectedVendors / never get sent).
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
-        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table') {
+        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table' || t.id === 'rfq-affinity-section') {
             Alpine.initTree(t);
         }
     }
@@ -1931,6 +1934,16 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // Server HTML is trusted (same-origin, auth-protected endpoint).
       container.insertAdjacentHTML('beforeend', html);
       htmx.process(container);
+      // The appended row carries Alpine directives (x-init='selectVendor(...)',
+      // :checked, @change) that bind to THIS rfqVendorModal x-data scope. htmx.process
+      // only wires htmx attributes, not Alpine's, and relying on Alpine 3's
+      // MutationObserver is exactly the unreliable path the afterSwap handler warns
+      // about — explicitly initTree the new node so the row arrives CHECKED and its
+      // checkbox is live (matches the lead-drawer / rq2-table workaround).
+      const addedRow = container.lastElementChild;
+      if (addedRow && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(addedRow);
+      }
       return true;
     } catch (err) {
       console.error('[rfqVendorModal] add vendor failed', err);
@@ -1998,7 +2011,11 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       const sent = parseInt(resp.headers.get('X-RFQ-Sent') || '0', 10);
       const total = parseInt(resp.headers.get('X-RFQ-Total') || String(count), 10);
       const skipped = parseInt(resp.headers.get('X-RFQ-Skipped') || '0', 10);
-      const outcome = this._sendOutcome(sent, total, skipped);
+      // X-RFQ-Unavailable = vendors dropped by the send-time unavailability re-check.
+      // They are NOT delivery failures — without subtracting them they'd be
+      // misattributed to the 'failed' bucket (total - sent - skipped).
+      const unavailable = parseInt(resp.headers.get('X-RFQ-Unavailable') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped, unavailable);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -2011,18 +2028,21 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total/skipped counts to a toast. `delivered` is false only when
-  // nothing went out, so the caller can keep the modal open for a retry. `skipped` =
-  // vendors with no contact email — reported distinctly from send failures.
-  _sendOutcome(sent, total, skipped = 0) {
+  // Map the server's sent/total/skipped/unavailable counts to a toast. `delivered` is
+  // false only when nothing went out, so the caller can keep the modal open for a retry.
+  // `skipped` = vendors with no contact email; `unavailable` = vendors dropped by the
+  // send-time unavailability re-check — both reported distinctly from send failures so a
+  // correctly-blocked vendor is never miscounted as 'failed'.
+  _sendOutcome(sent, total, skipped = 0, unavailable = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
     if (sent < total) {
-      const failed = total - sent - skipped;
+      const failed = total - sent - skipped - unavailable;
       const reasons = [];
       if (failed > 0) reasons.push(failed + ' failed');
       if (skipped > 0) reasons.push(skipped + ' had no email');
+      if (unavailable > 0) reasons.push(unavailable + ' marked unavailable');
       return {
         type: 'warning',
         delivered: true,

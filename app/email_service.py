@@ -101,8 +101,23 @@ async def send_batch_rfq(
     Legacy shim: without the map, the scalar ``requisition_id`` behaves exactly
     as before (one Contact per vendor, parts taken from each vendor group) —
     callers like htmx_views.rfq_send need no change.
+
+    ``requisition_id`` and ``requisition_parts_map`` are MUTUALLY EXCLUSIVE modes
+    (single- vs cross-requisition). Passing both raises ``ValueError`` — the scalar
+    would otherwise be silently ignored.
     """
     from app.utils.graph_client import GraphClient
+
+    # The two requisition inputs are a sum type, not independent kwargs: EITHER
+    # single-requisition mode (scalar requisition_id, parts from each vendor group) OR
+    # cross-requisition mode (requisition_parts_map, parts from the map). Passing both is
+    # meaningless — the scalar would be silently ignored (req_ids = sorted(parts_map)).
+    # Fail loudly on the illegal combination instead of silently picking a winner.
+    if requisition_parts_map is not None and requisition_id is not None:
+        raise ValueError(
+            "send_batch_rfq: pass requisition_id (single-req) OR requisition_parts_map "
+            "(cross-req), never both — they are mutually exclusive modes"
+        )
 
     vendor_groups = vendor_groups or []
     # Legacy scalar shim: a missing/empty map means single-requisition mode where
@@ -293,11 +308,30 @@ async def send_batch_rfq(
             *[_find_sent_message(gc, subj, vendor_email) for _, subj, vendor_email in contacts_to_lookup],
             return_exceptions=True,
         )
-        for (contacts, _, _), sent_msg in zip(contacts_to_lookup, lookup_results):
+        for (contacts, subj, vendor_email), sent_msg in zip(contacts_to_lookup, lookup_results):
             if isinstance(sent_msg, dict) and sent_msg:
                 for contact in contacts:
                     contact.graph_message_id = sent_msg.get("id")
                     contact.graph_conversation_id = sent_msg.get("conversationId")
+            else:
+                # The sent message could not be located (None after retries, or the
+                # lookup task raised and was captured by return_exceptions). These
+                # Contacts keep NULL graph ids, which silently downgrades all future
+                # reply matching for this vendor from Tier-1 conversationId (exact
+                # thread) to the weaker Tier-2/3/4 heuristics — make the dropped
+                # association OBSERVABLE rather than silent. Common on large batches:
+                # the vendor's own message can sit below the $top window in Sent Items.
+                detail = f": {sent_msg}" if isinstance(sent_msg, Exception) else ""
+                logger.warning(
+                    "Sent-message lookup found no match for vendor '{}' <{}> "
+                    "(subject '{}', requisitions {}) — Contact graph ids left NULL; "
+                    "reply matching degrades to subject/email heuristics{}",
+                    contacts[0].vendor_name,
+                    vendor_email,
+                    subj,
+                    [c.requisition_id for c in contacts],
+                    detail,
+                )
 
     db.commit()
 
@@ -344,6 +378,8 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
     """
     wanted = (vendor_email or "").strip().lower()
     delays = [1, 2, 4]
+    api_error = False
+    scanned = 0
     for delay in delays:
         try:
             await asyncio.sleep(delay)
@@ -356,6 +392,7 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
                 },
             )
             msgs = data.get("value", []) if data else []
+            scanned = len(msgs)
             for m in msgs:
                 if m.get("subject", "").strip() != subject.strip():
                     continue
@@ -365,7 +402,25 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
                 if wanted in recipients:
                     return m
         except Exception as e:
+            api_error = True
             logger.warning(f"Sent message lookup attempt failed: {e}")
+    # Distinguish a transient API failure from a genuine no-match: the latter means the
+    # recipient never appeared in the $top window (likely pushed below it by a large
+    # batch fan-out), and the caller leaves the Contact's graph ids NULL.
+    if api_error:
+        logger.warning(
+            "Sent-message lookup gave up for <{}> (subject '{}') after API errors on all retries",
+            wanted,
+            subject,
+        )
+    else:
+        logger.warning(
+            "Sent-message lookup found no match for <{}> (subject '{}') within the top {} Sent items "
+            "— recipient may have been pushed below the window by a large batch",
+            wanted,
+            subject,
+            scanned,
+        )
     return None
 
 

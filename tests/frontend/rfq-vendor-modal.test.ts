@@ -58,8 +58,14 @@ function makeModal(names: string[], ids: number[]) {
   return inst;
 }
 
-function fetchResponse(sent: string | null, total: string | null, ok = true, status = 200) {
-  const h: Record<string, string | null> = { 'X-RFQ-Sent': sent, 'X-RFQ-Total': total };
+function fetchResponse(
+  sent: string | null,
+  total: string | null,
+  ok = true,
+  status = 200,
+  extra: Record<string, string> = {},
+) {
+  const h: Record<string, string | null> = { 'X-RFQ-Sent': sent, 'X-RFQ-Total': total, ...extra };
   return { ok, status, headers: { get: (k: string) => h[k] ?? null } };
 }
 
@@ -130,6 +136,23 @@ describe('rfqVendorModal (real factory)', () => {
 
       expect(m.$store.toast.type).toBe('warning');
       expect(m.$store.toast.message).toBe('Sent to 1 of 2 vendors — 1 failed');
+      expect(m.$dispatch).toHaveBeenCalledWith('close-modal');
+    });
+
+    it('unavailable vendors are not counted as failed in the toast', async () => {
+      // F3: server drops 1 of 2 vendors at send time (X-RFQ-Unavailable=1). The blocked
+      // vendor was correctly handled, NOT a delivery failure — the toast must say
+      // "marked unavailable", never "1 failed".
+      const m = makeModal(['a', 'b'], [1]);
+      m.emailBody = 'q';
+      alpineMock.store.mockReturnValue({ selectedReqId: null });
+      (fetch as any).mockResolvedValue(fetchResponse('1', '2', true, 200, { 'X-RFQ-Unavailable': '1' }));
+
+      await m.confirmSend();
+
+      expect(m.$store.toast.type).toBe('warning');
+      expect(m.$store.toast.message).toBe('Sent to 1 of 2 vendors — 1 marked unavailable');
+      expect(m.$store.toast.message).not.toContain('failed');
       expect(m.$dispatch).toHaveBeenCalledWith('close-modal');
     });
 
@@ -501,6 +524,16 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m._sendOutcome(1, 3, 1).message).toBe('Sent to 1 of 3 vendors — 1 failed, 1 had no email');
       // 1 sent of 3: 0 skipped, 2 failed (default skipped=0)
       expect(m._sendOutcome(1, 3).message).toBe('Sent to 1 of 3 vendors — 2 failed');
+    });
+
+    it('subtracts unavailable vendors from the failed bucket (F3)', () => {
+      const m = makeModal(['a'], [1]);
+      // 1 sent of 3: 2 marked unavailable, 0 failed — none are "failed"
+      expect(m._sendOutcome(1, 3, 0, 2).message).toBe('Sent to 1 of 3 vendors — 2 marked unavailable');
+      // 1 sent of 4: 1 skipped, 1 unavailable, 1 genuinely failed — all three reasons
+      expect(m._sendOutcome(1, 4, 1, 1).message).toBe(
+        'Sent to 1 of 4 vendors — 1 failed, 1 had no email, 1 marked unavailable',
+      );
     });
   });
 });
