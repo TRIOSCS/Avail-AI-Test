@@ -44,9 +44,10 @@ import argparse
 from dataclasses import dataclass, field
 
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
+from app.models.intelligence import MaterialCard
 from app.services.manufacturer_normalizer import is_garbage_brand_value, normalize_brand_name
 
 _COLUMNS = ("manufacturer", "brand")
@@ -78,9 +79,8 @@ def _classify(db: Session, column: str) -> ColumnPlan:
     prints them — so the dry-run tallies cannot drift from --apply.
     """
     plan = ColumnPlan(column=column)
-    rows = db.execute(
-        text(f"SELECT {column} AS val, COUNT(*) AS n FROM material_cards WHERE {column} IS NOT NULL GROUP BY {column}")
-    ).all()
+    col = getattr(MaterialCard, column)  # column is from the fixed _COLUMNS allowlist
+    rows = db.execute(select(col.label("val"), func.count().label("n")).where(col.is_not(None)).group_by(col)).all()
     for raw, count in rows:
         if is_garbage_brand_value(raw):
             plan.garbage[raw] = count
@@ -97,19 +97,16 @@ def _classify(db: Session, column: str) -> ColumnPlan:
 def _apply(db: Session, plan: ColumnPlan) -> None:
     """Execute the per-value UPDATEs for one column (value-keyed, exact string
     match)."""
-    col = plan.column
+    col = getattr(MaterialCard, plan.column)  # plan.column is from the fixed _COLUMNS allowlist
+    provenance_cleared = {
+        getattr(MaterialCard, f"{plan.column}_{suffix}"): None
+        for suffix in ("source", "confidence", "tier", "updated_at")
+    }
     for value in plan.garbage:
-        db.execute(
-            text(
-                f"UPDATE material_cards SET {col} = NULL, {col}_source = NULL, "
-                f"{col}_confidence = NULL, {col}_tier = NULL, {col}_updated_at = NULL "
-                f"WHERE {col} = :val"
-            ),
-            {"val": value},
-        )
+        db.execute(update(MaterialCard).where(col == value).values({col: None, **provenance_cleared}))
     for old, new in plan.renames:
         # Value cell ONLY — provenance columns stay byte-identical (see module header).
-        db.execute(text(f"UPDATE material_cards SET {col} = :new WHERE {col} = :old"), {"new": new, "old": old})
+        db.execute(update(MaterialCard).where(col == old).values({col: new}))
 
 
 def _report(plan: ColumnPlan) -> None:
