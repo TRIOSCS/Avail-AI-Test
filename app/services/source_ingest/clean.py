@@ -12,7 +12,9 @@ What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and nor
       description; and DROPS the record when the MPN is too short / falsy or the description
       says "DO NOT USE".
       ``extract_trailing_oem`` pulls the embedded ", IBM"/", EMC"/", HP" trailing token out
-      of a sheet description. Dual-brand routing (SPEC_DUAL_BRAND_FILTERS §2 W6): a trailing
+      of a sheet description — splitting commas at paren depth 0 only and rejecting
+      packing-suffix fragments, so Toshiba ordering codes ("TLP781(D4-GR-TP6,F)") never
+      mint "F)"/"F" manufacturers. Dual-brand routing (SPEC_DUAL_BRAND_FILTERS §2 W6): a trailing
       token matching OEM_TRAILING_RE (IBM/Dell/HP/HPE/Lenovo — an OEM LABEL, not a maker)
       fills ``record.brand``; any other plausible trailing token keeps the legacy behavior
       and fills ``manufacturer`` when absent. Brand is NEVER inferred beyond that regex.
@@ -31,7 +33,7 @@ import re
 from app.constants import MaterialCondition
 from app.services.category_normalizer import normalize_trio_category
 from app.services.desc_extractor.categorizer import categorize_from_desc
-from app.services.manufacturer_normalizer import OEM_TRAILING_RE
+from app.services.manufacturer_normalizer import OEM_TRAILING_RE, is_garbage_brand_value
 from app.services.source_ingest.models import SourceRecord
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
 
@@ -115,16 +117,52 @@ def strip_mpn_suffix(raw_mpn: str) -> str:
     return _MPN_SUFFIX_RE.sub("", str(raw_mpn)).strip()
 
 
+def _split_commas_outside_parens(text: str) -> list[str]:
+    """Split *text* on commas at parenthesis depth 0 only.
+
+    A comma INSIDE a parenthesized group is part of that group, never a field
+    delimiter — Toshiba ordering codes carry comma-bearing packing suffixes
+    ("TLP781(D4-GR-TP6,F)") and sheet descriptions carry parenthesized spec lists
+    ("... (SED, FIPS)"). An unclosed "(" keeps the rest of the string at depth>0
+    (a truncated suffix like "TA78L18F(TE12L,F" must not split either); a stray ")"
+    at depth 0 is treated as plain text.
+    """
+    parts: list[str] = []
+    depth = 0
+    start = 0
+    for i, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth = max(0, depth - 1)
+        elif ch == "," and depth == 0:
+            parts.append(text[start:i])
+            start = i + 1
+    parts.append(text[start:])
+    return parts
+
+
+# A balanced parenthetical CONTAINING a comma is a packing/spec list ("(TP,F)",
+# "(5P/3P/2P,3.3V,1A)", "(00LF232, SL10A28870)") — never part of a maker name.
+_PAREN_LIST_RE = re.compile(r"\([^)]*,[^)]*\)")
+
+
 def extract_trailing_oem(description: str | None) -> str | None:
     """Pull the trailing manufacturer token from a sheet description.
 
     The operational sheets embed the OEM as the last comma-token, e.g. "HDD, 6Gbps 1.2TB
     10K 2.5 Inch HDD, IBM" → "IBM". Returns None when the last token is not a plausible
     manufacturer (too long / sentence-like) so we never mistake spec text for an OEM.
+
+    Commas are split at parenthesis depth 0 only, and a candidate is rejected when it is
+    a garbage fragment (is_garbage_brand_value: unbalanced parens / <2 chars) or carries
+    a comma-bearing parenthetical — the root-cause fix for the "(TP,F)" leak: Toshiba
+    ordering codes used as descriptions ("TLP781(D4-GR-TP6,F)") were split on the comma
+    INSIDE the packing suffix, minting "F)" / "F" / "LF(T" manufacturers.
     """
     if not description:
         return None
-    parts = [p.strip() for p in str(description).split(",")]
+    parts = [p.strip() for p in _split_commas_outside_parens(str(description))]
     if len(parts) < 2:
         return None
     candidate = parts[-1]
@@ -136,6 +174,10 @@ def extract_trailing_oem(description: str | None) -> str | None:
         return None
     # Reject obvious non-OEM trailers (pure measurements/connectors left after a comma).
     if re.fullmatch(r"[\d.\s\"'/-]+", candidate):
+        return None
+    # Packing-suffix fragments ("F)", "LF(T") and comma-bearing parentheticals
+    # ("LED(5P/3P/2P,3.3V,1A)") are MPN/spec residue, never a maker.
+    if is_garbage_brand_value(candidate) or _PAREN_LIST_RE.search(candidate):
         return None
     return candidate
 

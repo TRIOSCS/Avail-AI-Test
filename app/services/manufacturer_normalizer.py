@@ -2,21 +2,27 @@
 
 What: ``normalize_brand_name(db, value)`` canonicalizes a brand/maker name through the
       ``manufacturers`` lookup table (``canonical_name`` + ``aliases`` JSON), e.g.
-      ``HP`` → ``Hewlett Packard Enterprise``, ``SEAGATE`` → ``Seagate Technology``.
+      ``HP`` → ``HPE``, ``SEAGATE`` → ``Seagate Technology``.
       Case-insensitive; a miss returns the input verbatim with ``.strip()`` only —
       a source-backed verbatim value is truthful, inventing a canonicalization would be
       a guess (composite makers like ``Hitachi/IBM`` stay verbatim, their own facet
       value). The table map is cached per-process (loaded lazily; a NON-EMPTY load is
       never invalidated — the table is seed-only, a restart refreshes — but an EMPTY
       load is never memoized, so a worker/CLI that races the app's seeding self-heals;
-      under TESTING=1 it reloads per call so each test's isolated DB is honored). Also
+      under TESTING=1 it reloads per call so each test's isolated DB is honored).
+      ``is_garbage_brand_value(value)`` classifies strings that can never be a real
+      brand/maker name (len<2 after strip, or unbalanced parentheses — the comma-split
+      fragments of parenthesized MPN packing suffixes, e.g. the ``F)``/``LF(T`` residue
+      of Toshiba ordering codes like ``TLP781(D4-GR-TP6,F)``). Also
       home of the dual-brand gating
       constants: ``OEM_BRANDS`` (the only values ever routed to ``brand`` by
       regex/reclassification), ``OEM_TRAILING_RE`` (trailing description token → brand)
       and ``MAKER_TRAILING_RE`` (trailing description token → manufacturer).
 Called by: app/services/spec_tiers.py (set_brand / set_manufacturer — writers never
-      normalize themselves), app/services/source_ingest/clean.py (trailing-token
-      routing), app/management/backfill_dual_brand.py (B1/B3 gating).
+      normalize themselves; the garbage gate rejects fragment values at the ladder),
+      app/services/source_ingest/clean.py (trailing-token routing + candidate
+      plausibility), app/management/backfill_dual_brand.py (B1/B3 gating),
+      app/management/normalize_manufacturers.py (one-shot canonicalization backfill).
 Depends on: app.models.Manufacturer (lazy import — avoids a model↔service import
       cycle); the seeds in app/startup.py:_seed_manufacturers.
 """
@@ -88,6 +94,26 @@ def _load_map(db: Session) -> dict[str, str]:
     _canonical_by_lower = mapping
     logger.info("manufacturer_normalizer: loaded {} alias mapping(s) from manufacturers table", len(mapping))
     return mapping
+
+
+def is_garbage_brand_value(value: str | None) -> bool:
+    """True when *value* can never be a real brand/maker name.
+
+    Two empirically-validated shapes (live audit 2026-06-12, 2,340 cards — every one a
+    parser fragment or empty residue, zero legitimate names lost):
+
+    - shorter than 2 characters once stripped (includes the empty-string residue;
+      no 0/1-char manufacturer exists — 2-char names like ``TI``/``WD`` stay valid);
+    - unbalanced parentheses — the comma-split fragments of parenthesized MPN packing
+      suffixes (``F)``, ``LF(T``, ``TSOP)``, ``Ind.)`` …) that the pre-fix
+      ``extract_trailing_oem`` carved out of Toshiba-style ordering codes like
+      ``TLP781(D4-GR-TP6,F)``. Balanced parentheticals (``Texas Instruments (TI)``)
+      are NOT garbage — they normalize via the alias table instead.
+    """
+    s = str(value or "").strip()
+    if len(s) < 2:
+        return True
+    return s.count("(") != s.count(")")
 
 
 def normalize_brand_name(db: Session | None, value: str) -> str:

@@ -1506,9 +1506,19 @@ set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-bra
     +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
     |     manufacturer = the ACTUAL MAKER (Seagate Technology, Hitachi/IBM verbatim)
     +---> None/empty/whitespace → no-op False (a write can never blank a value)
+    +---> is_garbage_brand_value(value) → no-op False + WARNING (brand canon, mig 106):
+    |     fragment shapes that can never be a maker name (len<2 after strip, or unbalanced
+    |     parens — the comma-split residue of parenthesized MPN packing suffixes like the
+    |     "F)"/"LF(T" carved out of Toshiba ordering codes "TLP781(D4-GR-TP6,F)"). The
+    |     ingest parser (clean.extract_trailing_oem) rejects these at extraction, but the
+    |     ladder is the SINGLE arbitration point for ALL writers, so junk dies here too
+    |     (mirrors set_category's off-vocab WARNING).
     +---> normalize_brand_name(db, value) (manufacturer_normalizer.py — manufacturers-
     |     table canonical_name+aliases, per-process cache, miss → verbatim strip;
-    |     writers NEVER normalize themselves)
+    |     writers NEVER normalize themselves). The manufacturers seed (startup.
+    |     _seed_manufacturers) + migration 106 fold the HPE family 4 ways
+    |     (Hewlett Packard Enterprise / HP / Hewlett Packard / Hewlett-Packard → HPE),
+    |     case-fold Dell (DELL/Dell → Dell Technologies), and alias Texas Instruments (TI)
     +---> identical F1 ladder via the shared _set_provenanced_column (generic over the
           column prefix — set_category delegates to it too, behavior unchanged incl.
           the stale-commodity purge); valued-but-NULL-provenance existing ranks at the
@@ -1987,6 +1997,23 @@ card with a maker but NULL provenance (attribution of existing data, NOT a ladde
 `manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
 One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
 dry-run rolls back, never commits.
+
+Brand/manufacturer canonicalization backfill (OPTIMIZATION_PLAN §1.5B, one-shot
+post-deploy of migration 106): `python -m app.management.normalize_manufacturers
+[--apply]` — dry-run by default. Scans EVERY non-null `manufacturer` and `brand` value
+on material_cards (soft-deleted INCLUDED — restoring a card must surface a canonical
+value, same contract as migration 100). Two classes, both classified from the same
+distinct-value scan so the dry-run report cannot drift from `--apply`: (1) GARBAGE
+(`is_garbage_brand_value` — the "(TP,F)" ingest-leak fragments "F)"/"F"/"LF(T" plus
+empty residue) → value NULLed AND its four provenance columns (`<attr>_source/
+_confidence/_tier/_updated_at`) cleared, so a later real write starts clean; (2) ALIAS
+→ canonical via `normalize_brand_name` (HP → HPE, DELL → Dell Technologies), value cell
+ONLY — provenance left byte-identical. This deliberately BYPASSES set_brand/
+set_manufacturer (the documented exception, same as migrations 093/100): it corrects the
+SPELLING of evidence that already won the ladder, not new evidence — re-stamping through
+the ladder would forge a fresh source/confidence/timestamp for an observation that never
+re-occurred. Any writer introducing NEW brand/maker evidence MUST still route through
+the ladder. The orchestrator runs `--apply` post-deploy of migration 106.
 
 ## Cross-Reference Caching
 

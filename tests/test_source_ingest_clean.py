@@ -70,6 +70,36 @@ def test_extract_trailing_oem():
     assert extract_trailing_oem('Cable, 3.5"') is None
 
 
+def test_extract_trailing_oem_toshiba_packing_suffix_never_leaks():
+    # ROOT CAUSE of the live "F)" (360 cards) / "F" (111) manufacturer garbage: Toshiba
+    # ordering codes used verbatim as descriptions carry a comma INSIDE the parenthesized
+    # packing suffix — "TLP781(D4-GR-TP6,F)" must never mint manufacturer "F)".
+    assert extract_trailing_oem("TLP781(D4-GR-TP6,F)") is None  # balanced suffix
+    assert extract_trailing_oem("2SC4116-Y(T5LND,F)") is None
+    assert extract_trailing_oem("TA78L18F(TE12L,F") is None  # truncated suffix (no close)
+    assert extract_trailing_oem("TLP183(GB-TPL,E(T") is None  # the live "E(T" shape
+    assert extract_trailing_oem("RN1302 T5RCANO,F") is None  # bare 1-char fragment
+    # A comma-bearing parenthetical inside the trailing token is a spec list, not a maker.
+    assert extract_trailing_oem("Lenovo - CBL-ASSY, 003.00 IN, LED (5P/3P/2P,3.3V,1A)") is None
+    assert extract_trailing_oem("SSD, 480GB 6Gb SATA 2.5, No Tray (00LF232, SL10A28870)") is None
+
+
+def test_extract_trailing_oem_splits_at_paren_depth_zero_only():
+    # A parenthesized spec list mid-description must not hide the real trailing maker.
+    assert extract_trailing_oem("HDD, 300GB (SED, FIPS), Seagate") == "Seagate"
+    # Balanced parenthetical WITHOUT a comma is still a plausible maker form.
+    assert extract_trailing_oem("Resistor 10K, Texas Instruments (TI)") == "Texas Instruments (TI)"
+
+
+def test_clean_record_toshiba_ordering_code_leaves_manufacturer_empty():
+    # End-to-end: the Firesale/Foxconn rows whose "description" is the bare Toshiba
+    # ordering code must yield NO manufacturer (the pre-fix parser wrote "F").
+    c = clean_record(_rec(raw_mpn="TLP781(D4-GR-TP6,F)", description="TLP781(D4-GR-TP6,F"))
+    assert c is not None
+    assert c.manufacturer is None
+    assert c.brand is None
+
+
 def test_clean_routes_trailing_oem_label_to_brand():
     # Dual-brand: a trailing token in the literal OEM-label list (OEM_TRAILING_RE) is
     # BRAND evidence, never a maker — manufacturer stays empty for B2/W4 to fill.
