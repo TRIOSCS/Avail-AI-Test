@@ -286,6 +286,40 @@ search_service.py (orchestrator)
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
 
+### 2a-bis. Part Dossier ("The Bench") — `/v2/search?mpn=<PN>`
+
+The Search tab is a single one-PN **Part Dossier**: a scrolling document that paints
+identity/specs/history instantly from the DB, with the live market streaming in below.
+
+```
+GET /v2/search?mpn=<PN>  (v2_page → base_page.html fires hx-get partial_url)
+    |  v2_page search branch: partial_url = /v2/partials/search?mpn=<quote(PN)>
+    v
+htmx_views.py: search_form_partial(mpn)
+    |  mpn present  → dossier_shell.html      (the Bench)
+    |  no mpn       → form.html landing + lazy /v2/partials/search/recent
+    v
+dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
+    +-- GET /v2/partials/search/dossier/hero?mpn=    part_dossier.dossier_hero
+    |     instant DB read (MaterialCard + PartHistory). Light-footprint write:
+    |     bumps search_count/last_searched_at on an EXISTING card only (never
+    |     creates one — unknown PN stays "New to us" / "Known via FRU crosswalk").
+    +-- GET /v2/partials/search/dossier/market?mpn=  part_dossier.dossier_market
+    |     cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
+    |     vendor rows in the dark terminal frame + "↻ Refresh market"; cache MISS
+    |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
+    |     search/run SSE flow (results_shell.html) inside the terminal frame.
+    +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
+    +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
+```
+
+New router `app/routers/part_dossier.py` (GET-only; reuses data/services, no route
+moves). `stream_search_mpn` now also writes the pointer key `search:{normalize_mpn_key
+(mpn)}:latest = search_id` (TTL 900s) so the dossier market cache-hit path can find the
+freshest run. The search-flow `vendor_card.html` + `results_shell.html` are re-skinned in
+place to the dark terminal row/frame (their ONLY consumer is now the dossier market).
+Page-level + per-row RFQ/offer actions (the quick-source endpoints) are a follow-up task.
+
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
 
 ```

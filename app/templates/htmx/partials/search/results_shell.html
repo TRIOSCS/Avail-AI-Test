@@ -1,65 +1,67 @@
-{# Results shell — returned by search_run POST, contains SSE connection for streaming.
-   Called by: htmx_views.search_run
-   Depends on: SSE stream at /v2/partials/search/stream
-#}
-<div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start">
-<div id="search-results-wrapper" class="space-y-4">
-  <div id="source-progress" class="flex flex-wrap gap-2 items-center">
-    <span class="text-xs font-medium text-gray-500 mr-1">Sources:</span>
+{# Live-market terminal body — returned by search_run POST, contains the SSE connection.
+   Re-skinned to the dark "terminal" look for the Part Dossier: it renders INSIDE the
+   #dossier-market frame (the dossier already owns the bg-gray-900 section, collapsible
+   header, and the lead-detail drawer). The history "What we know" column is NOT here —
+   it is its own dossier section. SSE wiring, source-progress chips, $store.shortlist, and
+   the lead-detail Details trigger are all kept intact.
+   Called by: htmx_views.search_run.
+   Depends on: SSE stream at /v2/partials/search/stream, vendor_card.html (terminal rows). #}
+
+<div id="search-results-wrapper" data-search-id="{{ search_id }}">
+  {# terminal header: freshness + refresh #}
+  <div class="px-4 py-2.5 border-b border-gray-800 flex items-center gap-3 text-[11px]">
+    <span class="inline-flex items-center gap-1.5 text-emerald-400">
+      <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>live
+    </span>
+    <button type="button"
+            hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}&amp;refresh=1"
+            hx-target="#dossier-market" hx-swap="innerHTML"
+            class="ml-auto px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 inline-flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      Refresh market
+    </button>
+  </div>
+
+  {# source progress chips #}
+  <div id="source-progress" class="px-4 py-3 border-b border-gray-800 flex flex-wrap gap-1.5 items-center">
+    <span class="text-[11px] text-gray-500 mr-1">Sources:</span>
     {% for source in enabled_sources %}
-    <span id="source-chip-{{ source.name }}"
-          class="source-chip source-chip--searching">
-      <span class="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1"></span>
-      {{ source.name }}
+    <span id="source-chip-{{ source.name }}" class="source-chip source-chip--searching">
+      <span class="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1"></span>{{ source.name }}
     </span>
     {% endfor %}
   </div>
 
+  {# SSE stream → rows cascade in (beforeend) #}
   <div hx-ext="sse"
        sse-connect="/v2/partials/search/stream?search_id={{ search_id }}"
        sse-close="done">
     <div id="search-results-cards"
          sse-swap="results"
          hx-swap="beforeend settle:100ms"
-         class="space-y-3">
+         class="divide-y divide-gray-800">
     </div>
     <div sse-swap="source-status" hx-swap="none"></div>
     <div sse-swap="card-update" hx-swap="none"></div>
     <div sse-swap="done" hx-swap="none"></div>
   </div>
 
-  <div id="search-stats" class="hidden text-xs text-gray-500 pt-2"></div>
+  <div id="search-stats" class="hidden px-4 py-2.5 border-t border-gray-800 text-[11px] text-gray-500"></div>
 
-  {# Empty state — shown after SSE stream completes with no results #}
-  <div id="search-empty-state" class="hidden">
-    <div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
-      <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-      </svg>
-      <p class="text-base font-medium text-gray-500">No results found.</p>
-      <p class="text-sm text-gray-400 mt-1">Try a different part number or broaden your search.</p>
-    </div>
+  {# Empty state — re-skinned dark, reframed as a pivot to knowledge. #}
+  <div id="search-empty-state" class="hidden px-6 py-12 text-center">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+    </svg>
+    <p class="text-base font-semibold text-gray-200">No live stock right now.</p>
+    <p class="text-sm text-gray-500 mt-1">Here's what we already know about this part.</p>
+    <a href="#know" class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 text-sm hover:bg-gray-700">
+      Jump to What we know
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
+    </a>
   </div>
 
   {% include "htmx/partials/search/shortlist_bar.html" %}
-</div>
-
-  {# Right column — "What we know" history panel, loaded in parallel with the SSE stream #}
-  <aside id="part-history-col"
-         hx-get="/v2/partials/search/history?mpn={{ mpn | urlencode }}"
-         hx-trigger="load"
-         hx-swap="innerHTML"
-         class="lg:sticky lg:top-4">
-    <div class="rounded-xl bg-white p-6 border border-gray-100 shadow-sm animate-pulse">
-      <div class="h-4 w-2/3 bg-gray-100 rounded"></div>
-      <div class="mt-3 h-3 w-1/2 bg-gray-100 rounded"></div>
-      <div class="mt-4 space-y-2">
-        <div class="h-3 w-full bg-gray-100 rounded"></div>
-        <div class="h-3 w-5/6 bg-gray-100 rounded"></div>
-      </div>
-    </div>
-  </aside>
 </div>
 <script>
   (function() {

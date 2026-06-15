@@ -382,7 +382,8 @@ def test_vendor_card_template_renders_no_price():
         search_id="test-456",
     )
     assert "Unknown Vendor" in html
-    assert "No price" in html
+    # Re-skinned terminal row shows "RFQ" (not "No price") when unit_price is None.
+    assert "RFQ" in html
     assert "AUTH" not in html
 
 

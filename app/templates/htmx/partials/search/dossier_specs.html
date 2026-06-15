@@ -1,0 +1,104 @@
+{# Part Dossier specs & enrichment grid — from MaterialCard enrichment fields.
+   Renders specs_structured (per-field value + evidence-tier tag from its provenance),
+   then package/RoHS/lifecycle/pin-count, the datasheet + manufacturer pills, and any
+   cross_references. Graceful "Unenriched / New to us" state when the card is missing or
+   has not been enriched.
+
+   Called by: part_dossier.dossier_specs (GET /v2/partials/search/dossier/specs).
+   Depends on: card (MaterialCard | None). #}
+
+{% set unenriched = (card is none) or (card.enrichment_status in (none, 'unenriched')) %}
+
+{% if card is none %}
+<div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
+  <p class="text-sm font-medium text-gray-500">New to us — no enrichment yet</p>
+  <p class="text-xs text-gray-400 mt-1">The first sourcing action queues this part for enrichment.</p>
+</div>
+{% else %}
+
+{# Structured specs (each value carries {value, source, confidence}). #}
+{% set structured = card.specs_structured or {} %}
+{% if structured or card.package_type or card.rohs_status or card.lifecycle_status or card.pin_count or card.specs_summary %}
+<dl class="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3 text-sm">
+  {% for key, field in structured.items() %}
+  {% set val = field.value if field is mapping else field %}
+  {% if val is not none and val != '' %}
+  <div>
+    <dt class="text-[10px] uppercase tracking-wide text-gray-400">{{ key|replace('_', ' ') }}</dt>
+    <dd class="text-gray-900">
+      <span class="font-mono">{{ val }}</span>
+      {% if field is mapping and field.source %}
+      {% set conf = field.confidence|default(0)|float %}
+      <span class="ml-1 align-middle rounded px-1 text-[9px] {{ 'bg-brand-50 text-brand-600' if conf >= 0.9 else 'bg-gray-50 text-gray-500' }}"
+            title="source: {{ field.source }}{% if field.confidence is not none %} · conf {{ field.confidence }}{% endif %}">
+        {{ 'Direct' if conf >= 0.9 else 'Sourced' }}
+      </span>
+      {% endif %}
+    </dd>
+  </div>
+  {% endif %}
+  {% endfor %}
+
+  {% if card.package_type %}
+  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Package</dt><dd class="font-mono text-gray-900">{{ card.package_type }}</dd></div>
+  {% endif %}
+  {% if card.pin_count %}
+  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Pins</dt><dd class="font-mono text-gray-900">{{ card.pin_count }}</dd></div>
+  {% endif %}
+  {% if card.rohs_status %}
+  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">RoHS</dt><dd class="text-gray-900">{{ card.rohs_status|title }}</dd></div>
+  {% endif %}
+  {% if card.lifecycle_status %}
+  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Lifecycle</dt><dd class="text-gray-900">{{ card.lifecycle_status|title }}</dd></div>
+  {% endif %}
+  {% if card.condition %}
+  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Condition</dt><dd class="text-gray-900">{{ card.condition }}</dd></div>
+  {% endif %}
+</dl>
+
+{% if card.specs_summary %}
+<p class="mt-3 text-xs text-gray-500 leading-relaxed">{{ card.specs_summary }}</p>
+{% endif %}
+
+{# Datasheet + manufacturer pills. #}
+{% if card.datasheet_url or card.manufacturer %}
+<div class="mt-4 flex flex-wrap gap-2">
+  {% if card.datasheet_url %}
+  <a href="{{ card.datasheet_url }}" target="_blank" rel="noopener noreferrer"
+     class="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+    Datasheet (PDF)
+  </a>
+  {% endif %}
+  {% if card.manufacturer %}
+  <span class="inline-flex items-center rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-gray-600">{{ card.manufacturer }}</span>
+  {% endif %}
+</div>
+{% endif %}
+
+{# Cross references. #}
+{% if card.cross_references %}
+<div class="mt-4">
+  <p class="text-[10px] uppercase tracking-wide text-gray-400 mb-1.5">Cross references</p>
+  <div class="flex flex-wrap gap-1.5">
+    {% for x in card.cross_references %}
+    <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-mono text-gray-600">
+      {{ x.mpn if x is mapping else x }}{% if x is mapping and x.manufacturer %} · {{ x.manufacturer }}{% endif %}
+    </span>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{% else %}
+<div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
+  {% if unenriched %}
+  <p class="text-sm font-medium text-gray-500">Unenriched — enriching…</p>
+  <p class="text-xs text-gray-400 mt-1">We know this part, but its specs haven't been filled in yet.</p>
+  {% else %}
+  <p class="text-sm font-medium text-gray-500">No specs on record.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% endif %}

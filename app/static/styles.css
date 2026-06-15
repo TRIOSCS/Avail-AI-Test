@@ -488,6 +488,26 @@ table {
     animation-delay: calc(var(--i, 0) * 50ms);
 }
 
+/* ── Part Dossier ("The Bench") ───────────────────────────────────── */
+/* Market-terminal row — same slideUp stagger as .vendor-card, denser cadence. */
+.mkt-row {
+    animation: slideUp 0.35s ease-out both;
+    animation-delay: calc(var(--i, 0) * 55ms);
+}
+/* Count-tile label (uppercase micro caption under each mono numeral). */
+.count-tile dt {
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #838B9B;
+}
+/* Rotating section chevron. */
+.chev { transition: transform 0.2s ease; }
+.chev.open { transform: rotate(90deg); }
+/* Two-tier sticky offsets (topbar h-12 = 3rem). */
+.tier-search { top: 3rem; }
+.tier-rail { top: 6.5rem; }
+
 /* Search scope & match badge animations */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(-4px); }

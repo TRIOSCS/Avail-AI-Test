@@ -16,6 +16,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
@@ -329,6 +330,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
         partial_url = "/v2/partials/sightings/workspace"
+    elif current_view == "search":
+        # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
+        # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
+        mpn_qs = request.query_params.get("mpn", "").strip()
+        partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Pass path params for detail views
@@ -3100,11 +3106,21 @@ async def update_requirement(
 @router.get("/v2/partials/search", response_class=HTMLResponse)
 async def search_form_partial(
     request: Request,
+    mpn: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the search form partial."""
+    """Search surface entry point.
+
+    With ``mpn`` → render the Part Dossier shell ("The Bench") whose sections lazy-load
+    from part_dossier.py. Without ``mpn`` → the recent-searches landing (search box that
+    deep-links the dossier + a lazy-loaded recent list). The new routes live in
+    routers/part_dossier.py; this stays the single /v2/partials/search entry point.
+    """
     ctx = _base_ctx(request, user, "search")
+    if mpn.strip():
+        ctx["mpn"] = mpn.strip().upper()
+        return template_response("htmx/partials/search/dossier_shell.html", ctx)
     return template_response("htmx/partials/search/form.html", ctx)
 
 
