@@ -28,8 +28,8 @@ Downgrade: restores the previous canonical name + alias lists exactly.
 Called by: alembic (upgrade/downgrade).
 Depends on: manufacturers table (canonical_name unique, aliases JSON).
 
-Revision ID: 104_brand_canonicalization
-Revises: 103_unavail_policy_columns
+Revision ID: 106_brand_canonicalization
+Revises: 105_demand_telemetry
 Create Date: 2026-06-12
 """
 
@@ -41,7 +41,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "106_brand_canonicalization"
-down_revision = "103_unavail_policy_columns"
+down_revision = "105_demand_telemetry"
 branch_labels = None
 depends_on = None
 
@@ -70,19 +70,19 @@ def upgrade() -> None:
             text("UPDATE manufacturers SET aliases = :aliases WHERE canonical_name = :new"),
             {"aliases": json.dumps(_NEW_HPE_ALIASES), "new": _NEW_HPE_CANONICAL},
         )
-        logger.info("104: 'HPE' row already present — removed legacy '{}' row, reasserted aliases", _OLD_HPE_CANONICAL)
+        logger.info("106: 'HPE' row already present — removed legacy '{}' row, reasserted aliases", _OLD_HPE_CANONICAL)
     else:
         result = conn.execute(
             text("UPDATE manufacturers SET canonical_name = :new, aliases = :aliases WHERE canonical_name = :old"),
             {"new": _NEW_HPE_CANONICAL, "aliases": json.dumps(_NEW_HPE_ALIASES), "old": _OLD_HPE_CANONICAL},
         )
-        logger.info("104: renamed '{}' -> 'HPE' ({} row)", _OLD_HPE_CANONICAL, result.rowcount or 0)
+        logger.info("106: renamed '{}' -> 'HPE' ({} row)", _OLD_HPE_CANONICAL, result.rowcount or 0)
 
     conn.execute(
         text("UPDATE manufacturers SET aliases = :aliases WHERE canonical_name = :c"),
         {"aliases": json.dumps(_NEW_TI_ALIASES), "c": _TI_CANONICAL},
     )
-    logger.info("104: 'Texas Instruments' aliases now include 'Texas Instruments (TI)'")
+    logger.info("106: 'Texas Instruments' aliases now include 'Texas Instruments (TI)'")
 
 
 def downgrade() -> None:
@@ -95,4 +95,4 @@ def downgrade() -> None:
         text("UPDATE manufacturers SET aliases = :aliases WHERE canonical_name = :c"),
         {"aliases": json.dumps(_OLD_TI_ALIASES), "c": _TI_CANONICAL},
     )
-    logger.info("104: restored '{}' canonical + previous alias lists", _OLD_HPE_CANONICAL)
+    logger.info("106: restored '{}' canonical + previous alias lists", _OLD_HPE_CANONICAL)

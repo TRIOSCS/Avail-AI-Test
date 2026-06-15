@@ -183,6 +183,22 @@ Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     v
 sightings.py (router) → search_requirement(req, db)
     |
+    +---> _expand_fru_aliases(db, req) → fru_matrix_service.get_search_aliases
+    |     FRU-crosswalk alias injection (item 2.7). The primary MPN is looked
+    |     up in fru_links BOTH directions; its mfg_model/drive_pn/option/ibm_11s
+    |     equivalents (the canonical numbers brokers actually list) are deduped
+    |     against the primary + existing substitutes, capped at 8 in that kind
+    |     priority order, and appended to the search MPN set so they fan out to
+    |     every connector. Each alias is durably persisted as a system-derived
+    |     substitute {"mpn", "manufacturer", "source": "fru_crosswalk"} via a
+    |     dedicated write session (_persist_fru_aliases) — so it survives through
+    |     the existing primary+substitutes contract and future searches, AND on
+    |     the all-cached short-circuit path that never opens the main write
+    |     session. Best-effort: a lookup/persist failure logs and the search
+    |     proceeds with the explicit MPNs. Display flags crosswalk-derived subs
+    |     with a "via FRU crosswalk" tooltip via the |fru_alias_mpns filter in
+    |     _mpn_chips.html (no new UI elements).
+    |
     +---> _mpn_cooldown_partition(pns) → (to_search, cached_card_ids)
     |     Per-MPN 48h cooldown. Cards inside the window are partitioned
     |     out; their material_card_id is returned for the detail-panel
@@ -608,23 +624,129 @@ exits are window expiry, offer/email release, or manual clear.
 Browser POST (send RFQ)
     |
     v
-requirements.py (router)
+Two callers, ONE canonical send path:
+  - htmx_views.rfq_send            (requisition page; legacy scalar requisition_id)
+  - sightings.sightings_send_inquiry (bulk composer; requisition_parts_map)
     |
     v
-email_service.py
+email_service.send_batch_rfq
     |
     +---> graph_client.py --> Microsoft Graph API
-    |       +---> POST /me/sendMail (subject tagged [AVAIL-{req_id}])
-    |       +---> Returns graph_message_id
+    |       +---> POST /me/sendMail — ONE email per vendor; subject carries one
+    |       |     [ref:{req_id}] token per involved requisition, ascending id
+    |       |     ([AVAIL-{id}] is the legacy spelling, still matched on replies)
+    |       +---> Sent-folder lookup -> graph_message_id + graph_conversation_id
     |
-    +---> DB: INSERT contacts (type=rfq, status=sent, graph_message_id)
+    +---> DB: INSERT contacts (type=email, status=sent|failed) — ONE row per
+    |     (requisition, vendor) pair; each parts_included scoped to its OWN
+    |     requisition; all of a vendor's rows share that one email's
+    |     graph_message_id / graph_conversation_id
     |
-    +---> activity_service.py --> DB: INSERT activity_log (outbound email)
+    +---> tag propagation: material_card ids collected from ALL involved
+    |     requisitions' requirements (one pass per unique vendor)
     |
-    +---> vendor_card update: total_outreach++, last_contact_at
-    |
-    +---> teams_notifications.py --> Microsoft Teams webhook
+    v
+back in the sightings router:
+    +---> activity_service.log_rfq_activity per requirement (rfq_sent),
+    |     only for vendors actually sent
+    +---> status auto-progress OPEN -> SOURCING per involved requisition
+    +---> X-RFQ-Sent / X-RFQ-Total / X-RFQ-Skipped / X-RFQ-Unavailable headers
 ```
+
+**Per-requisition Contact fan-out (cross-requisition bulk composer).** The
+sightings vendor modal's selection can span requisitions. There is no collapse
+to one arbitrary requisition anywhere in the path (the old
+`next(iter(requisition_ids))` collapse in both preview and send is gone): the
+router builds a `requisition_parts_map` ({requisition_id: parts}) and
+`send_batch_rfq` takes it as an **additive** parameter. One email per vendor
+still covers ALL selected parts (the point of a bulk composer); the
+multiplicity moves to `Contact` rows — one per (requisition, vendor) pair, each
+`parts_included` holding only that requisition's parts, all sharing the email's
+graph ids. No schema change (Contact keeps its singular `requisition_id`).
+A **legacy shim** keeps the scalar-`requisition_id` call shape byte-identical
+(one Contact per vendor, parts from the vendor group) — `htmx_views.rfq_send`
+was not touched.
+
+**Preview/send lockstep.** `sightings_preview_inquiry` renders the exact
+multi-token subject the send will produce — one `[ref:{id}]` per involved
+requisition, ascending requisition id — so preview and send can never diverge.
+
+**Subject-token single source of truth.** `shared_constants.RFQ_SUBJECT_TAG_RE`
+(`[ref:{id}]` current, `[AVAIL-{id}]` legacy) is the ONE pattern; the duplicate
+`AVAIL_TOKEN_RE` in `email_mining.py` was removed (the miner's sent-scan check
+is presence-only and points at the shared pattern). Extractors use
+`re.findall`, never `.search().group(1)`, so a multi-requisition subject
+attributes to ALL token requisitions: the sent-folder scan
+(`email_jobs.scan_sent_folder`) writes one `email_sent` ActivityLog per token
+requisition (rows share the message's `external_id`, so the dedup check still
+skips re-scans), and inbox Tier-2 matching resolves every token (next section).
+Reply attribution to Contacts is Tier-1 fan-out — see section 4.
+
+**Vendor panel — four selection sources.** The modal's vendor checklist
+(`vendor_modal.html`, all rows joining the same Alpine selection state — see
+the `rfqVendorModal` section below) is fed from four sources:
+
+1. **Coverage-ranked suggestions (default).** `sightings_vendor_modal` runs the
+   shared `_coverage_ranked_vendor_rows` query: a grouped query over
+   `VendorSightingSummary` filtered to the selected requirements, joined to
+   `VendorCard` via `_vss_vendor_card_join()` — an `or_()` coalesce whose PRIMARY
+   branch is the `vendor_card_id` FK (indexed `ix_vss_vendor_card`), with a
+   `lower(trim(vendor_name)) == normalized_name` FALLBACK for NULL-FK rows (so a
+   known vendor's coverage never silently disappears when a post-rebuild summary
+   hasn't been FK-backfilled yet; the NULL-FK guard on the fallback prevents
+   double-matching FK rows by name). Only VSS summaries matching no card at all —
+   neither by FK nor by name — are excluded.
+   Order: covered-part count desc, then engagement desc; cap 20. Each row shows
+   an `N/M parts` chip with the covered MPNs in `title` (computed server-side,
+   plain-column aggregates — SQLite+PG safe). `excluded_vendor_norms`
+   filtering is unchanged.
+2. **Affinity on demand.** A "Suggest more vendors" button hx-gets
+   `GET /v2/partials/sightings/vendor-affinity?requirement_ids=…`, which runs
+   `find_vendor_affinity` once per UNIQUE primary MPN. The service is SYNC with
+   a blocking Anthropic L3 call inside, so each call runs via
+   `asyncio.to_thread` (with its own short-lived `SessionLocal` — sessions
+   never cross the thread boundary) gathered under an `asyncio.Semaphore(3)`;
+   it is never called bare from the async route. Results are merged/deduped by
+   vendor keeping the highest confidence, dropping already-suggested (same
+   coverage query) and unavailability-excluded vendors, capped at 10; rows
+   render a bordered indigo "affinity" chip + confidence % + reasoning in
+   `title`. The button lives INSIDE its own swap target
+   (`#rfq-affinity-section`), so the response replaces it — a second click
+   cannot duplicate rows.
+3. **Any-vendor autocomplete.** A debounced input against the existing
+   `GET /api/autocomplete/names` (vendors filtered client-side from the mixed
+   response; the endpoint is not forked). Picking a result POSTs
+   `composer-vendor` (below) and appends the returned checked row.
+4. **Inline vendor creation.** An "Add new vendor" mini-form (name required;
+   website + email optional) POSTs `POST /v2/partials/sightings/composer-vendor`,
+   which calls `check_vendor_duplicate` from `app/services/vendor_duplicates.py`
+   (direct service call — never loopback HTTP; the same function backs
+   `GET /api/vendors/check-duplicate`). Duplicate semantics are
+   **exact-match-only**: an exact normalized-name match (score 100) is the one
+   confident duplicate → the EXISTING vendor row is returned with a "matched
+   existing vendor" notice and no new DB row; fuzzy hits (pg_trgm with a
+   rapidfuzz fallback, score >= 80) are suggestions, never auto-dedup.
+   Otherwise it creates a minimal `VendorCard` (+ `VendorContact` when an email
+   was given) and fires `_background_enrich_vendor` post-commit (same pattern
+   as materials/vendor_contacts). Empty name → 400 JSON error. If the resolved
+   vendor is unavailability-excluded for the selected parts, the row renders
+   the rose "marked unavailable" chip with a DISABLED checkbox (send-time
+   re-validation stays the backstop).
+
+Every HTMX swap for these sections targets a stable-id sub-container INSIDE the
+`x-data='rfqVendorModal(...)'` wrapper (`#rfq-affinity-section`,
+`#rfq-added-vendors`) — never the wrapper itself, which would re-init the
+Alpine component and wipe runtime selection state.
+
+The affinity and composer rows carry Alpine directives (`:checked='isSelected(...)'`,
+`@change='toggleVendor(...)'`, `x-init='selectVendor(...)'`) that bind to the
+surrounding `rfqVendorModal` scope, and **htmx innerHTML swaps do not reliably
+auto-run Alpine on new nodes**. So both swap targets are explicitly
+`Alpine.initTree`-d: `#rfq-affinity-section` is in the `htmx:afterSwap` allowlist
+(`htmx_app.js`, alongside `lead-drawer-content` / `rq2-table`), and the composer row
+is `initTree`-d by `_addComposerVendor` after its `insertAdjacentHTML`. Without this
+the checkboxes are inert and ticked vendors never enter `selectedVendors` / never get
+sent.
 
 ## 4. Inbox Monitoring & Response Parsing (Background Job)
 
@@ -635,14 +757,31 @@ APScheduler (every 30 min)
 email_jobs.py -> inbox_monitor()
     |
     v
-email_service.py
+email_service.poll_inbox()
     |
     +---> graph_client.py --> Graph API: GET inbox messages
-    |       Filter: subject contains [AVAIL-*]
+    |       (delta query incremental sync when available; top-50 fallback —
+    |        ALL messages fetched, matching happens locally below)
     |
-    +---> Match reply to original contact via graph_conversation_id
+    +---> 4-tier reply matching (first tier that hits wins):
+    |       Tier 1: graph_conversation_id (global, exact) — matches ALL
+    |               Contacts sharing the thread: a cross-requisition RFQ
+    |               writes one Contact per (requisition, vendor) on ONE
+    |               conversation, so conv_id_map is dict[str, list[Contact]]
+    |               and the reply is attributed to every one of them
+    |       Tier 2: subject [ref:{id}]/[AVAIL-{id}] tokens — re.findall over
+    |               RFQ_SUBJECT_TAG_RE; every token's (req_id, sender email)
+    |               pair is resolved via req_email_map (unique keys under the
+    |               per-requisition fan-out); tokens with no email match still
+    |               assign the first token's requisition
+    |       Tier 3: sender email -> most-recent contact (USER-SCOPED,
+    |               single-contact fallback BY DESIGN — untokenized replies)
+    |       Tier 4: sender domain (USER-SCOPED, same single-contact design)
     |
-    +---> DB: INSERT vendor_responses (raw email)
+    +---> DB: INSERT vendor_responses (raw email) — exactly ONE per message
+    |     (it is per-message, not per-requisition); contact_id anchors to the
+    |     first matched contact; _progress_contact_status then advances EVERY
+    |     matched contact, so all involved requisitions' rows progress
     |       +---> activity_service.py: log_email_activity() --> DB: INSERT activity_log
     |             (event_type='email', direction='inbound', activity_type='email_received';
     |              dedups on external_id=message_id) so inbound vendor replies
@@ -966,21 +1105,38 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
     v
 authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |
+    LANE SPLIT (full_pipeline arg; settings.enrichment_lane_split_enabled, default on —
+    CALL ROUTING ONLY, every write still arbitrates through the F1 ladder, no write
+    pre-gate is ever added):
+      • PRIORITY lane (full_pipeline=True): cards a user single-added (worker passes
+        full_pipeline=True for every card whose enrich_requested_at was stamped) run the
+        full sequence below.
+      • BULK lane (full_pipeline=False): cards with enrich_requested_at IS NULL run only
+        Tier 1 (the FREE connectors); Tiers 2-5 (web / OEM cross-ref / OEM description /
+        Opus infer) are ALL skipped and a Tier-1 miss goes straight to terminal not_found
+        (the OEM tiers never ran, so not_catalogued can't be concluded). Measured
+        ~$6-10/day of paid calls for ~0 ladder-accepted bulk-lane writes.
+    |
     +---> Tier 1: distributor connector fanout (fetch_authoritative → merge_authoritative)
     |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle;
     |              category + manufacturer route through the F1 ladder at {connector}_api/90
     |              (ladder-rejected writes are dropped from enrichment_provenance).
-    |       MISS → fall through.
+    |       MISS → fall through (BULK lane stops here → not_found).
     |
-    +---> Tier 2: distributor/manufacturer web search (extract_part_from_web, web_meter +1)
+    +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call. Computed
+    |       BEFORE Tier 2 now: an OEM/FRU vendor hit + settings.enrichment_skip_web_for_oem_mpns
+    |       (default on) skips Tier 2 (web) on EVERY lane — OEM/FRU PNs surface only on
+    |       reseller pages (the measured ~95% no-trusted-source reject class). The OEM
+    |       tiers (3-4) + Opus (5) still run on the priority lane. Non-OEM parts skip
+    |       Tiers 3-4 entirely.
+    |
+    +---> Tier 2 (priority lane; skipped for OEM-shaped MPNs per the gate above):
+    |       distributor/manufacturer web search (extract_part_from_web, web_meter +1)
     |       HIT (web_sourced)  → apply_web_sourced(); category + manufacturer through the
     |              F1 ladder at web_search/70; done.
     |       MISS → fall through.
     |
-    +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call.
-    |       Non-OEM parts skip Tiers 3-4 entirely.
-    |
-    +---> Tier 3 (OEM only): cross-reference MPN (cross_reference_mpn, web_meter +1)
+    +---> Tier 3 (OEM only, priority lane only): cross-reference MPN (cross_reference_mpn, web_meter +1)
     |       Grounded Claude web search; four Python gates:
     |         (1) ≥1 source URL on is_crossref_domain allowlist
     |         (2) both OEM code and resolved MPN appear verbatim in the sourced linkage_quote
@@ -995,7 +1151,7 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         UNCONFIRMED → discard candidate, fall through.
     |       FAILED → fall through.
     |
-    +---> Tier 4 (OEM only): OEM-official description (extract_oem_description, web_meter +1)
+    +---> Tier 4 (OEM only, priority lane only): OEM-official description (extract_oem_description, web_meter +1)
     |       Grounded Claude web search on OEM's own page; four Python gates:
     |         (1) ≥1 source URL on is_oem_domain allowlist (stricter than cross-ref)
     |         (2) exact_mpn_found matches normalized_mpn verbatim
@@ -1006,7 +1162,7 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |             oem_official/80); status=oem_sourced.
     |       MISS → fall through.
     |
-    +---> Tier 5: AI inference fallback (infer_part via ai_inference_fallback,
+    +---> Tier 5 (priority lane only): AI inference fallback (infer_part via ai_inference_fallback,
     |       web_meter: claude_ok=True)
     |       ai_inferred → writes description/category with reconfirm_needed flag.
     |       not_found → terminal.
@@ -1140,9 +1296,17 @@ owns arbitration in one place:
        fru_links query (rel_kind IN mfg_model + drive_pn), both gated by
        settings.fru_crosswalk_enrich_enabled. (a) DECODE channel: IBM/Lenovo FRU
        spare PNs inherit the STRICT-INTERSECTED decode of their rel_kind='mfg_model'
-       models — only spec keys present in every decode with equal values write; a
-       commodity disagreement skips the card (BOTH channels) — source=
-       "fru_matrix_decode" (tier 84), confidence 0.93. (b) LINKED-DESCRIPTION channel
+       models (PLUS rel_kind='drive_pn' when settings.fru_crosswalk_drive_pn_decode_enabled
+       — the §2.6(c) GATED widening; measured 0% OEM-firmware-suffix misread so default ON,
+       since drive_pn related parts are IBM/Lenovo FRU numbers the regex gates reject, but
+       the desc channel reads drive_pn descriptions regardless of the flag) — only spec keys
+       present in every decode with equal values write; a commodity disagreement skips the
+       card (BOTH channels) — source="fru_matrix_decode" (tier 84), confidence 0.93. The
+       card's MANUFACTURER is filled via spec_tiers.set_manufacturer (tier 84, conf 0.9)
+       ONLY when EVERY decoded substitute identifies the SAME maker (DecodeResult.vendor;
+       the decoder's regex gate is manufacturer-scheme-specific, so a unanimous vendor is a
+       DETERMINISTIC maker — §2.6(d)/D4: never a prose inference) and the decode commodity
+       agrees with the card's category — counted in manufacturers_set. (b) LINKED-DESCRIPTION channel
        (wave 3A): the qual-sheet prose stored on the FRU's mfg_model + drive_pn rows
        (e.g. drive_pn `18TB 3.5 HDD 7.2K 12 Gb/s SAS`, mfg_model `SSD; 2.5; 1.92 TB
        Samsung PM1733`) runs through desc_extractor.extract_desc(description,
@@ -1169,7 +1333,8 @@ owns arbitration in one place:
        NOT enriched_ids — FRU spares finish not_found, and the pass never touches
        enrichment_status. Fills a NULL category from the agreed DECODE commodity via
        spec_tiers.set_category (an existing DIFFERENT category skips the card before
-       any write); never writes manufacturer; never writes the reverse direction (a
+       any write); writes manufacturer ONLY via the deterministic-maker propagation
+       above (the desc channel never writes a maker); never writes the reverse direction (a
        card that IS a mfg_model already decodes first-party at tier 85 and
        desc-parses its own description at tier 83). The ladder (82 < 83 desc_parse <
        84 < 85, < vendor 90) guarantees neither channel overwrites
@@ -1201,8 +1366,11 @@ owns arbitration in one place:
        memory_gb requires a GPU-context token (NVIDIA/GDDR/HBM/family hit) so NIC
        "10GB"/"100GbE" rows emit nothing, gpu_family maps consumer RTX models
        (x050–x090 adjacent to the RTX token, incl. comma-tokenized "RTX, 3070")
-       to GeForce and reserves the seeded "RTX" member for the professional
-       Quadro-successor line (RTX A2000, RTX 4000 Ada), bit-unit tokens
+       to GeForce and emits NO family for the professional Quadro-successor line
+       (RTX A2000, RTX 4000 Ada) or bare context-less RTX — "RTX" was REMOVED
+       from the seeded gpu_family enum (trust hotfix 2026-06-12: it re-fragmented
+       one physical family across two facet values, audit cards 583761 vs 560385),
+       and a wrong family is worse than a missing one, bit-unit tokens
        ("2Gb, 128*16" component densities — uppercase letter + lowercase b) are
        neutralized BEFORE the upper-casing so bits are never recorded as GB
        capacity (skipped, never ÷8-converted), NAND-die context (_common.
@@ -1225,13 +1393,28 @@ owns arbitration in one place:
        and a curated model→spec table (app/data/cpu_model_specs.json) merged
        UNDER desc tokens (skipped when the desc names two models, incl. dangling
        slash-alternates like "GOLD 6230R/6240R").
-       Only cards already categorized to one of the nine commodities are written
-       (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The F1 ladder (fru_desc_parse 82 < desc_parse 83 < fru_matrix_decode 84 <
-       mpn_decode 85 < vendor 90) keeps decode/vendor values authoritative and the
-       card's OWN description above its FRU-linked prose — no per-writer
-       pre-gate. The phase-2/3 commodities have no MPN decoders, so
-       desc_parse is their top non-vendor deterministic source.
+       In the worker SPEC stage only cards ALREADY categorized to one of the nine
+       commodities are written (this stage NEVER categorizes). A separate,
+       opt-in CATEGORIZE stage (writer.categorize_and_record, NOT run by the
+       worker — only the one-shot CLI + ingest call it) closes that gap for
+       UNCATEGORIZED cards: a strict lead/body grammar
+       (desc_extractor/categorizer.py — the nine SPEC commodities via the reused
+       extract_desc router with a stricter CPU-identity gate, plus anchored
+       cables/batteries/fans_cooling leads with pollution suppression) infers the
+       commodity KEY and, ONLY when card.category IS NULL, writes it via
+       set_category at desc_parse/83 (own description) or fru_desc_parse/82
+       (a linked fru_links description), then runs the SAME spec extraction for the
+       fresh category in the same SAVEPOINT. Reuses the desc_parse identity — no new
+       tier-83 source. Driven by app/management/categorize_from_desc.py (one-shot,
+       dry-run default, --apply; own-desc + FRU-desc channels, real-desc gate
+       alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15,
+       MaterialCardAudit action="categorized" per card) and at ingest time by
+       source_ingest/clean.py (same grammar, fallback when the source carries no
+       mappable Commodity_Code__c). The F1 ladder (fru_desc_parse 82 < desc_parse
+       83 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90) keeps decode/vendor
+       values authoritative and the card's OWN description above its FRU-linked
+       prose — no per-writer pre-gate. The phase-2/3 commodities have no MPN
+       decoders, so desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -1323,9 +1506,19 @@ set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-bra
     +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
     |     manufacturer = the ACTUAL MAKER (Seagate Technology, Hitachi/IBM verbatim)
     +---> None/empty/whitespace → no-op False (a write can never blank a value)
+    +---> is_garbage_brand_value(value) → no-op False + WARNING (brand canon, mig 106):
+    |     fragment shapes that can never be a maker name (len<2 after strip, or unbalanced
+    |     parens — the comma-split residue of parenthesized MPN packing suffixes like the
+    |     "F)"/"LF(T" carved out of Toshiba ordering codes "TLP781(D4-GR-TP6,F)"). The
+    |     ingest parser (clean.extract_trailing_oem) rejects these at extraction, but the
+    |     ladder is the SINGLE arbitration point for ALL writers, so junk dies here too
+    |     (mirrors set_category's off-vocab WARNING).
     +---> normalize_brand_name(db, value) (manufacturer_normalizer.py — manufacturers-
     |     table canonical_name+aliases, per-process cache, miss → verbatim strip;
-    |     writers NEVER normalize themselves)
+    |     writers NEVER normalize themselves). The manufacturers seed (startup.
+    |     _seed_manufacturers) + migration 106 fold the HPE family 4 ways
+    |     (Hewlett Packard Enterprise / HP / Hewlett Packard / Hewlett-Packard → HPE),
+    |     case-fold Dell (DELL/Dell → Dell Technologies), and alias Texas Instruments (TI)
     +---> identical F1 ladder via the shared _set_provenanced_column (generic over the
           column prefix — set_category delegates to it too, behavior unchanged incl.
           the stale-commodity purge); valued-but-NULL-provenance existing ranks at the
@@ -1349,6 +1542,36 @@ record_validation_conflict(card, key, existing_prov, incoming_prov, incoming_val
     # card.validation_conflicts (de-dupe per (key, evidence.source), newest replaces) +
     # sets has_validation_conflict. Arbitration is UNCHANGED — the manual value always
     # survives; this only persists the contradiction.
+
+record_evidence_dissent(card, key, kept_prov, incoming_prov, incoming_value) -> bool
+    # Trust architecture §1.2b: the companion of record_validation_conflict for the case
+    # it structurally NEVER covers — the kept value is NOT manual. Before this, an
+    # authoritative-vs-authoritative contradiction (trio_source category vs mpn_decode, a
+    # FRU 373TB capacity vs the description's 36.4 GB) was resolved silently by tier with
+    # no review artifact. Called from the SAME LOSE branches (record_spec's _incoming_loses
+    # path and _set_provenanced_column write=True). Gates (all here): kept source != manual
+    # (the manual case stays with record_validation_conflict); LOSING source tier >= 80
+    # (CONFLICT_EVIDENCE_MIN_TIER); values differ under values_contradict (the SINGLE
+    # comparison both recorders + the counter share, so corroboration/contradiction can
+    # never be classified differently — and a same-source observation that now AGREES drops
+    # its own stale dissent, like record_validation_conflict). Exactly ONE of the two
+    # recorders fires per loss (manual-or-not is mutually exclusive). Persists into the
+    # SAME validation_conflicts JSONB + has_validation_conflict flag (de-dupe per
+    # (key, evidence.source)), tagged kind:"dissent" — the kept side is stored under the
+    # "manual" sub-key (for the existing rendered conflict rows + accept endpoint) but
+    # carries honest source/tier. Zero UI work: dissents surface in the already-wired
+    # needs-review filter. Arbitration is UNCHANGED.
+
+count_ladder_rejection(winner_source, loser_source, *, contradiction) -> None
+    # Trust architecture §1.2c: persistent per-day ladder-rejection telemetry. NEVER raises
+    # (telemetry must not break the write path — every failure is swallowed, logged DEBUG).
+    # Called once per real (write-mode) rejection from both LOSE branches. Bumps Redis hash
+    # intel:ladder:rejections:{date} (via app.cache.intel_cache.incr_hash_count, 35-day TTL)
+    # field "{winner}|{loser}|{corroboration|contradiction}" — kind via values_contradict
+    # so corroborations and contradictions are now distinguishable (before, rejections were
+    # log-only and died with container rotation, and the two were indistinguishable). The
+    # set_* + record_spec rejection log lines now name BOTH sides (winner source+tier AND
+    # loser) so a rejection is diagnosable from the log alone.
 
 clear_validation_conflicts(card, key) -> bool
     # Drops every entry for *key* and recomputes has_validation_conflict. Called by the
@@ -1428,10 +1651,14 @@ web_search:70 — for BOTH category and manufacturer, with ladder-rejected write
 from `enrichment_provenance` — plus the claude_opus_inferred:40 AI fallback). **The
 ladder monopoly is complete: every category/manufacturer writer routes through
 `set_category` / `set_manufacturer` — no direct overwrite of `card.category` or
-`card.manufacturer` remains** (the only direct maker assignments left are
-fill-when-NULL guards (`if not card.manufacturer`), which can never overwrite and rank
-at the legacy floor until a routed writer stamps real provenance; SP3 adds the
-`@validates` hardening). Visibility: a NON-manual rejection logs at INFO for EVERY
+`card.manufacturer` remains** (the last fill-when-NULL maker write — `_apply_enrichment_to_card`
+in `enrichment.py` — now routes through `set_manufacturer` too, so a connector maker
+displaces a legacy NULL-provenance value (50 < 90) instead of only filling an empty one).
+SP3 hardening is LIVE: `MaterialCard` carries an `@validates("category")` guard
+(`app/models/intelligence.py`) that REJECTS any off-vocab direct assignment (raises
+`ValueError`) — a future un-routed writer can no longer persist junk past the ladder; the
+guard's canonical vocabulary is the single frozen `commodity_registry.CANONICAL_COMMODITY_KEYS`,
+shared with `category_normalizer` so the two can never drift. Visibility: a NON-manual rejection logs at INFO for EVERY
 provenanced column — category, brand AND manufacturer (mirrors `record_spec` — a
 systematically losing writer must be visible at production log levels; the W8
 enrichment writers carry no aggregate maker-conflict counter, so DEBUG-only maker
@@ -1478,7 +1705,8 @@ POST /api/materials/add  (routers/materials.py — exactly 5 fields: mpn require
     |     this — verify against live PG).
     +---> stamps card.enrich_requested_at (PRIORITY LANE — single-add ONLY; bulk import,
     |     stock import, email auto-import, source ingest and the search flow never stamp:
-    |     they ride the created_at fast lane + search_count demand ordering). Stamped
+    |     they ride the bulk lane, ordered by demand telemetry — sourced_qty_90d /
+    |     last_sourced_at, migration 105). Stamped
     |     ONLY when enrichment_status is selectable by the worker (unenriched/not_found/
     |     not_catalogued) — an already-enriched re-add must not hold a stamp nothing
     |     clears (run_one_batch is the sole clearing mechanism).
@@ -1494,15 +1722,37 @@ Bulk surfaces gain the same server-side pipeline (no UI changes):
   deliberate deviation from the original spec ("newly created ids only"): the passes are
   idempotent through the ladder and re-searching an old card backfills its decode.
 
-Worker priority lane (enrichment_worker/worker.py):
-  select_batch ORDER BY gains a leading pair — `enrich_requested_at IS NOT NULL DESC,
-  enrich_requested_at ASC NULLS LAST` — ahead of the existing (status=unenriched DESC,
-  search_count DESC, created_at DESC): FIFO among user-requested cards, then current
-  behavior. run_one_batch sets enrich_requested_at = None on EVERY batch card immediately
-  after select_batch returns (attribute writes pre-await — the worker's
-  no-query-after-await discipline; persisted by the batch-final commit), so a terminal
-  not_found card cannot pin the lane. SLA (worker healthy, caps not exhausted):
-  deterministic facets immediate; connector/web/AI tiers P50 <= 90s, P95 <= 5min.
+Worker priority lane + demand ordering (enrichment_worker/worker.py, migration 105):
+  select_batch ORDER BY is `enrich_requested_at ASC NULLS LAST, (status=unenriched) DESC,
+  sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS LAST, id`. ASC NULLS LAST
+  alone gives stamped-first FIFO (the old redundant leading `IS NOT NULL DESC` term is
+  dropped so the ORDER BY matches the PG index ix_mc_demand_queue). After the priority
+  lane and the unenriched-before-recheck term, the demand tiebreak is TRIO's OWN SFDC
+  sourcing telemetry — sourced_qty_90d (90-day volume) then last_sourced_at recency,
+  NULLS LAST so every demanded card drains before unmatched ones; id makes the order
+  total. This REPLACED the old search_count/created_at demand keys. run_one_batch sets
+  enrich_requested_at = None on EVERY batch card immediately after select_batch returns
+  (attribute writes pre-await — the worker's no-query-after-await discipline; persisted by
+  the batch-final commit), so a terminal not_found card cannot pin the lane. The same
+  ORDER BY is mirrored in spec_enrichment_service.enrich_pending_specs (the scheduled
+  spec pass) so every spec-pass dollar lands on the parts TRIO actually trades. SLA
+  (worker healthy, caps not exhausted): deterministic facets immediate; connector/web/AI
+  tiers P50 <= 90s, P95 <= 5min.
+
+  Lane split (run_one_batch, settings.enrichment_lane_split_enabled default on): lane
+  membership is captured (priority_ids = cards with a stamp) BEFORE the stamps are
+  cleared; priority-lane cards call enrich_card(full_pipeline=True), bulk-lane cards
+  call enrich_card(full_pipeline=False) — see the enrich_card tier sequence above for
+  what each lane runs. Call routing only; the F1 ladder still arbitrates every write.
+
+  Demand-telemetry backfill (app/management/import_demand_telemetry.py): ONE-SHOT
+  operator command (dry-run by default; --apply to write) that streams TRIO's SFDC
+  Weekly Export (LSC1__Material__c), aggregates Sourced_Qty_Last_90_Days__c +
+  Most_Recent_Source_TS__c per normalize_mpn_key (column-wise MAX on dup keys), and
+  bulk-updates sourced_qty_90d / last_sourced_at on matched, non-soft-deleted cards.
+  Run at deploy AFTER migration 105. No recurring refresh — re-run only when a NEW
+  export lands. These columns are a prioritization signal ONLY, never a displayed fact,
+  so they bypass the F1 ladder (not provenanced category/spec columns).
 
 Status badge (card detail header): htmx/partials/materials/enrich_status.html — while
   enrichment_status == unenriched it polls GET /v2/partials/materials/{id}/enrich-status
@@ -1513,13 +1763,21 @@ Status badge (card detail header): htmx/partials/materials/enrich_status.html �
   forever).
 
 Validation conflicts (storage: material_cards.validation_conflicts JSONB +
-  has_validation_conflict + partial index, migration 099; write hook:
-  spec_tiers.record_validation_conflict — see the spec_tiers contract above):
+  has_validation_conflict + partial index, migration 099; write hooks:
+  spec_tiers.record_validation_conflict + record_evidence_dissent — see the spec_tiers
+  contract above):
   V1 decode-vs-manual spec keys (the decoder writes, the ladder rejects, the hook
   records); V2 manual category/brand/manufacturer vs an authoritative writer
   (_set_provenanced_column hook — covers every provenanced column, so manual maker
   edits carry the same contract; the decoder's cross-commodity guard is unchanged);
-  V3 = the intake rejections above.
+  V3 = the intake rejections above;
+  V4 authoritative-vs-authoritative dissent (trust architecture §1.2b,
+  record_evidence_dissent) — a kept NON-manual value contradicted by a losing tier>=80
+  source, tagged kind:"dissent", stored in the SAME JSONB/flag (so it surfaces in the
+  same needs-review queue and renders through the same conflict rows / accept route with
+  zero new UI). Exactly one of V1/V2 (manual-kept) or V4 (non-manual-kept) fires per loss.
+  Every real rejection also bumps the persistent Redis ladder-rejection counter
+  (spec_tiers.count_ladder_rejection, §1.2c) classified corroboration vs contradiction.
   Surfacing: amber "Needs review — N conflict(s)" hero badge + per-key warning rows in
   the detail Specifications panel with tooltip ("Manual value kept. <source> reported
   <value> (conf <c>) on <date>") and an "Use this value" button →
@@ -1662,19 +1920,100 @@ their existing category conflicts with the decoded commodity are counted too
 category-alias map needs another entry).
 
 Reconciliation after a decoder/extractor fix: `python -m app.management.
-reconcile_decoded_facets [--apply] [--limit N]` re-runs the fixed decode + desc
-extraction over every card owning a facet row with source IN (mpn_decode,
-desc_parse) for the audit-affected spec_keys (capacity_gb/gpu_family/memory_gb).
-A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
-source (the F1 newest-timestamp tie-break lets the re-run win its own stale
-entry); a key the fixed extractor no longer yields is DELETED from both
-material_spec_facets and specs_structured (wrong is worse than missing —
-provenance stays honest). Dry-run by default with per-failure-class tallies
-(round 1: legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
+reconcile_decoded_facets [--apply] [--limit N] [--sources csv] [--keys csv]`.
+**Trust architecture §1.2a generalized the scope:** `--sources` defaults to ALL four
+deterministic facet sources (mpn_decode, desc_parse, fru_matrix_decode, fru_desc_parse)
+and `--keys` defaults to EVERY spec_key in commodity_spec_schemas (was 2 sources × 3
+audit-affected keys). mpn_decode/desc_parse rows are RECOMPUTED against the fixed
+extractors; the fru sources have NO card-local recompute channel (the crosswalk depends
+on fru_links workbook state) so they ride a capacity PLAUSIBILITY-GRID gate instead — an
+hdd capacity_gb off `HDD_SHIPPED_CAPACITY_GB` is a misread → DELETE; on-grid → unchanged;
+every other key/category is tally-only (`fru_ungated`/`skipped_ungated`, so coverage gaps
+stay visible). A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
+source (the F1 newest-timestamp tie-break lets the re-run win its own stale entry); a key
+the fixed extractor no longer yields is DELETED from both material_spec_facets and
+specs_structured (wrong is worse than missing — provenance stays honest). Dry-run by
+default with per-failure-class tallies (round 1:
+legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
 wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
-fallback buckets); SAVEPOINT per card.
+fallback buckets; fru: fru_capacity_grid/fru_ungated); SAVEPOINT per card with BUFFERED
+tallies merged only after a clean release. **Every run (dry-run AND apply) persists its
+summary to the `reconcile_runs` table** via `record_reconcile_run` (both prior rounds'
+apply tallies were log-only and are unrecoverable) — a dry-run commits the report row
+AFTER its facet-write rollback, so the row is the only write a dry-run leaves.
+
+Targeted FRU-graph drain (§2.6): `python -m app.management.run_fru_crosswalk
+[drain|create|all] [--apply] [--limit N] [--measure-drive-pn]` — dry-run by
+default, two phases. PHASE A (`drain`) runs `crosswalk_and_record_specs` over the
+EXISTING cards that have a mfg_model/drive_pn FRU link but are still UNFACETED (no
+material_spec_facets row) or UNCATEGORIZED (category NULL/blank) — the worker only
+crosswalks whatever lands in its current batch, so this is the targeted runner;
+dry-run wraps the writer in a SAVEPOINT and rolls it back, so the returned stats are
+a REAL yield report with nothing persisted. PHASE B (`create`) creates MaterialCards
+(category=None, unenriched) for two dangling populations so the worker's tier-84
+crosswalk / tier-85 mpn_decode passes fire on the next loop: (b1) dangling enrichable
+FRUs — a fru_norm with NO card whose linked models decode or whose link descriptions
+extract; (b2) dangling canonical models — a related_norm (mfg_model/drive_pn, NEVER
+lenovo_ppn) with NO card whose related_raw decodes to a recognized vendor. The ~31k
+lenovo_ppn danglers are EXPLICITLY out of scope (display-only; §5 kill-list).
+`--measure-drive-pn` reports the §2.6(c) gate: the OEM-firmware-suffix MISREAD rate of
+decoding drive_pn related parts (a decode whose commodity/specs contradict the linked
+qual-sheet description) — drive_pn decode widening defaults ON iff that rate ≤2%
+(measured 0/3328 decode → 0%). All writes go through the F1 ladder (set_category /
+set_manufacturer / record_spec); the orchestrator runs `--apply` post-deploy.
+
+Categorize-from-description backfill (OPTIMIZATION_PLAN §2.4): `python -m
+app.management.categorize_from_desc [--apply] [--limit N]` categorizes UNCATEGORIZED
+cards from their descriptions via the shared lead-token grammar
+(`desc_extractor/categorizer.py::categorize_from_desc`), then fills each freshly
+categorized card's desc_parse facets in the same SAVEPOINT (the new category is
+immediately food for the existing extractor). Two channels: OWN-DESC (a REAL
+description — alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15
+— at `desc_parse`/83) and FRU-DESC (the card has no usable own description but a linked
+`fru_links` row carries one — at `fru_desc_parse`/82). Category writes go through
+`set_category` and ONLY when `card.category IS NULL` (fill-only — never reclassifies);
+the grammar is conservative (foreign/ambiguous/conflicting/pollution → no write).
+Dry-run by default (prints a yield report broken down by resulting category + channel,
+writes nothing); `--apply` commits and logs a `MaterialCardAudit` (action
+`categorized`, `created_by="categorize_from_desc"`) per card. The SAME grammar runs at
+ingest time in `source_ingest/clean.py` (fallback when the source carries no mappable
+`Commodity_Code__c`) so future imports categorize real-desc rows — single source of
+truth, no duplicated grammar.
+
+Stop-the-bleed trust hotfix (one-shot, post-deploy): `python -m
+app.management.cleanup_known_bad [--apply]` — dry-run by default. Three idempotent
+passes that remediate documented-bad catalog data the new guards now block at the
+source: (1) DELETE the two documented-wrong facet rows (fru_matrix_decode
+capacity_gb=373,455 and the hdd capacity_gb=973,452 outlier), matched by CONTENT not
+row id, dropping the specs_structured JSONB mirror only when its source agrees; (2)
+normalize-or-null every non-canonical `material_cards.category` (the pre-#267
+bypass-writer residue) — resolvable values route through `set_category` at
+legacy_backfill when unprovenanced or are canonicalized in place (source preserved,
+stale facets purged) when provenanced, unresolvable values are nulled with provenance
+cleared; (3) stamp `manufacturer_source='legacy_backfill'` (conf 0.5, tier 50) on every
+card with a maker but NULL provenance (attribution of existing data, NOT a ladder write;
+`manufacturer_updated_at` stays NULL so it ranks at the runtime NULL-provenance floor).
+One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
+dry-run rolls back, never commits.
+
+Brand/manufacturer canonicalization backfill (OPTIMIZATION_PLAN §1.5B, one-shot
+post-deploy of migration 106): `python -m app.management.normalize_manufacturers
+[--apply]` — dry-run by default. Scans EVERY non-null `manufacturer` and `brand` value
+on material_cards (soft-deleted INCLUDED — restoring a card must surface a canonical
+value, same contract as migration 100). Two classes, both classified from the same
+distinct-value scan so the dry-run report cannot drift from `--apply`: (1) GARBAGE
+(`is_garbage_brand_value` — the "(TP,F)" ingest-leak fragments "F)"/"F"/"LF(T" plus
+empty residue) → value NULLed AND its four provenance columns (`<attr>_source/
+_confidence/_tier/_updated_at`) cleared, so a later real write starts clean; (2) ALIAS
+→ canonical via `normalize_brand_name` (HP → HPE, DELL → Dell Technologies), value cell
+ONLY — provenance left byte-identical. This deliberately BYPASSES set_brand/
+set_manufacturer (the documented exception, same as migrations 093/100): it corrects the
+SPELLING of evidence that already won the ladder, not new evidence — re-stamping through
+the ladder would forge a fresh source/confidence/timestamp for an observation that never
+re-occurred. Any writer introducing NEW brand/maker evidence MUST still route through
+the ladder. The orchestrator runs `--apply` post-deploy of migration 106.
 
 ## Cross-Reference Caching
 
@@ -1857,7 +2196,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
-    |       value no longer collapses its siblings to 0). With NO commodity selected the
+    |       value no longer collapses its siblings to 0) AND receives the FULL card-level
+    |       filter set (card_filters=: q / brand / confidence / global / sourcing) so a
+    |       facet count never overstates versus the visible results — the count-honesty
+    |       invariant (see "Count-consistency" note below). With NO commodity selected the
     |       route renders the server-side placeholder "Select a category to unlock spec
     |       filters" (subfilters.html commodity_selected=False branch; no service calls)
     |       instead of an empty response.
@@ -1905,11 +2247,38 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     Static section (no per-value counts → no HTMX reload).
     +---> "More attributes" (LAST fold, collapsed, $persist moreAttrsOpen; active-count
     |     badge): Manufacturer (search + top-N) + Global facets (lifecycle / rohs /
-    |     condition / has_datasheet) via get_global_facet_counts(). Containers load
-    |     while hidden.
+    |     condition / has_datasheet / needs_review) via get_global_facet_counts(filters=)
+    |     — also fed the FULL active filter set and self-excluding each facet's OWN key, so
+    |     these counts match the visible results too (count-honesty invariant). Both count
+    |     containers now reload on `filters-changed from:body` (not just commodity-changed),
+    |     carrying the same wire params (hx-vals object literal) as #materials-results.
+    |     Containers load while hidden.
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
+
+Count-consistency invariant (count-honesty, OPTIMIZATION_PLAN §3.3 backend):
+    The faceted sidebar counts MUST equal what the user sees after applying a filter.
+    Enforced structurally by a single source of predicate + parse truth:
+    +---> _apply_card_filters(query, db, **card_kwargs) in faceted_search_service.py is
+    |     the ONE card-level predicate builder (incl. the universal deleted_at IS NULL
+    |     guard + has_crosses_predicate()). The results list (search_materials_faceted),
+    |     get_facet_counts and get_global_facet_counts ALL run through it, so a count can
+    |     never apply a different predicate than the list. It returns (query, ts_query):
+    |     a non-None ts_query is the PG multi-word FTS branch — the list orders by ts_rank
+    |     with it; counts ignore it (ORDER BY in a grouped count is meaningless / PG rejects).
+    +---> _parse_card_filter_params() + _pop_manufacturers() in htmx_views.py are the ONE
+    |     wire-param parser, shared by the results route AND both count routes, so the
+    |     list and the counts can never read the same query string differently.
+    +---> Self-exclusion: each facet drops its OWN selection before counting (spec facets
+    |     in get_facet_counts pass 2; card columns via the own_key drop in
+    |     get_global_facet_counts) so checking one value never zeroes its siblings.
+    Vocabulary honesty: panel facet enums are real, curated values — displays.resolution
+    holds monitor/laptop panel resolutions (the unreachable character-LCD formats like
+    16x2/128x64 were dropped from commodity_seeds.json; _RES_SEEDED in
+    desc_extractor/display.py mirrors the seed list exactly). A changed seed enum is
+    reconciled into commodity_spec_schemas by reseed_changed_schemas() (run at startup;
+    covered by tests/test_count_consistency.py::test_reseed_reconciles_displays_resolution_row).
 
 Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
 SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
@@ -2309,7 +2678,7 @@ the current implementation.
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
 | Buy Plans | 6 | CRUD, external approval via token |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
-| Sightings | 25 | CRUD, RFQ send, batch RFQ, inquiry, vendor+part unavailability (mark/clear/reason modal) |
+| Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
@@ -2327,7 +2696,7 @@ the current implementation.
 
 ---
 
-## Service Modules (118 total)
+## Service Modules (123 top-level)
 
 | Category | Count | Key Modules |
 |----------|-------|-------------|
@@ -2336,7 +2705,7 @@ the current implementation.
 | Email & Communication | 10 | email_threads, contact_intelligence, signature_parser |
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
-| Vendor Mgmt | 8 | vendor_analysis, vendor_affinity, vendor_scorecard |
+| Vendor Mgmt | 9 | vendor_analysis, vendor_affinity, vendor_scorecard, vendor_duplicates |
 | Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
 | Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
@@ -2421,14 +2790,30 @@ would close a double-quoted `x-data` attribute and break Alpine init; the data i
 carried through a **single-quoted** attribute (tojson escapes `'`). State:
 `step` (compose|preview), `selectedVendors` (a plain reactive object keyed by vendor
 name — matches the `sightingSelection` store, not a Set; `selectedCount` getter +
-`isSelected(name)` back the bindings), `emailBody`. Methods: `toggleVendor`;
+`isSelected(name)` back the bindings), `emailBody`, plus the any-vendor picker /
+inline-create state (`vendorQuery`, `vendorResults`, `searchOpen`, `addingVendor`,
+`addingVendorBusy`, `newVendorName/Website/Email`). Methods: `toggleVendor`;
+`selectVendor(name)` (server-returned composer rows `x-init` through it so they
+arrive CHECKED); `searchVendors()` → `GET /api/autocomplete/names` filtered to
+`type === "vendor"` client-side; `pickVendor`/`createVendor` → `_addComposerVendor()`,
+a **raw `fetch` POST** to `/v2/partials/sightings/composer-vendor` (raw fetch, not
+`htmx.ajax`, so a server 4xx is detected and the inline create form keeps its typed
+values) that appends the returned row into the stable-id `#rfq-added-vendors`
+sub-container via `insertAdjacentHTML('beforeend')` + `htmx.process` +
+`Alpine.initTree` on the new node (so the row's `x-init='selectVendor(...)'` /
+`:checked` / `@change` directives bind to this `x-data` scope and the row arrives
+CHECKED — never the `x-data` wrapper, whose re-init would wipe selection state);
 `loadPreview()` → `POST /v2/partials/sightings/preview-inquiry` (htmx.ajax swap into
 `x-ref="previewContent"`); `confirmSend()` → `fetch POST
 /v2/partials/sightings/send-inquiry` with the `x-csrftoken` header, then on success
 `_refreshSightings()` re-GETs the open `#sightings-detail` (status auto-advances
 OPEN→SOURCING + new activity rows) and the `#sightings-table` list, and dispatches
 `close-modal`. `_form()` builds a `FormData` with **repeated** `requirement_ids`/
-`vendor_names` keys (not `Object.fromEntries`, which collapses duplicates).
+`vendor_names` keys (not `Object.fromEntries`, which collapses duplicates) from
+`Object.keys(selectedVendors)` — so rows added at runtime (affinity rows,
+autocomplete picks, inline creates) flow into `vendor_names` with no extra wiring.
+The vendor panel's four selection sources (coverage-ranked, affinity on demand,
+autocomplete, inline create) are documented flow-level in section 3.
 
 The route returns **HTTP 200 even on partial/total send failure** (failures are
 captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total` /

@@ -33,7 +33,7 @@ same contract as migrations 093/100 ("the value's SOURCE did not change, only it
 spelling was canonicalized"). Any writer introducing NEW brand/maker evidence MUST
 still go through set_brand/set_manufacturer — never copy this pattern for that.
 
-Called by: an operator (manually, post-deploy of migration 104 — NOT at startup).
+Called by: an operator (manually, post-deploy of migration 106 — NOT at startup).
 Depends on: app.database.SessionLocal; app.services.manufacturer_normalizer
       (normalize_brand_name + is_garbage_brand_value); the material_cards table.
 """
@@ -95,7 +95,8 @@ def _classify(db: Session, column: str) -> ColumnPlan:
 
 
 def _apply(db: Session, plan: ColumnPlan) -> None:
-    """Execute the per-value UPDATEs for one column (value-keyed, exact string match)."""
+    """Execute the per-value UPDATEs for one column (value-keyed, exact string
+    match)."""
     col = plan.column
     for value in plan.garbage:
         db.execute(

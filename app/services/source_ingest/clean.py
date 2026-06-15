@@ -6,8 +6,11 @@ What: ``clean_record`` strips MPN suffixes (` - Pull` / ` - New` / `-x`) and nor
       free-text fields; canonicalizes ``condition`` to the MaterialCondition vocabulary
       (constants.py — None when the source carries none); maps the source commodity
       to an app-canonical category (None if unmappable) with a CPU-bucket pollution deny-list
-      (the SFDC master's 'CPU' code is ~14% non-CPU parts — see _CPU_POLLUTION_RE); and DROPS
-      the record when the MPN is too short / falsy or the description says "DO NOT USE".
+      (the SFDC master's 'CPU' code is ~14% non-CPU parts — see _CPU_POLLUTION_RE), and when
+      the source carries no mappable category falls back to the SHARED lead-token grammar
+      (categorize_from_desc — the same grammar the categorize CLI/worker use) over the
+      description; and DROPS the record when the MPN is too short / falsy or the description
+      says "DO NOT USE".
       ``extract_trailing_oem`` pulls the embedded ", IBM"/", EMC"/", HP" trailing token out
       of a sheet description — splitting commas at paren depth 0 only and rejecting
       packing-suffix fragments, so Toshiba ordering codes ("TLP781(D4-GR-TP6,F)") never
@@ -29,6 +32,7 @@ import re
 
 from app.constants import MaterialCondition
 from app.services.category_normalizer import normalize_trio_category
+from app.services.desc_extractor.categorizer import categorize_from_desc
 from app.services.manufacturer_normalizer import OEM_TRAILING_RE, is_garbage_brand_value
 from app.services.source_ingest.models import SourceRecord
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
@@ -150,11 +154,11 @@ def extract_trailing_oem(description: str | None) -> str | None:
     10K 2.5 Inch HDD, IBM" → "IBM". Returns None when the last token is not a plausible
     manufacturer (too long / sentence-like) so we never mistake spec text for an OEM.
 
-    Commas are split at parenthesis depth 0 only, and a candidate is rejected when it
-    is a garbage fragment (is_garbage_brand_value: unbalanced parens / <2 chars) or
-    carries a comma-bearing parenthetical — the root-cause fix for the "(TP,F)" leak:
-    Toshiba ordering codes used as descriptions ("TLP781(D4-GR-TP6,F)") were split on
-    the comma INSIDE the packing suffix, minting "F)" / "F" / "LF(T" manufacturers.
+    Commas are split at parenthesis depth 0 only, and a candidate is rejected when it is
+    a garbage fragment (is_garbage_brand_value: unbalanced parens / <2 chars) or carries
+    a comma-bearing parenthetical — the root-cause fix for the "(TP,F)" leak: Toshiba
+    ordering codes used as descriptions ("TLP781(D4-GR-TP6,F)") were split on the comma
+    INSIDE the packing suffix, minting "F)" / "F" / "LF(T" manufacturers.
     """
     if not description:
         return None
@@ -225,6 +229,14 @@ def clean_record(rec: SourceRecord) -> SourceRecord | None:
         # facet-curation analysis identified (HDD trays, CPUs, SSDs, …). Blank it: the card
         # stays in the no-commodity bucket, open to real categorization.
         category = None
+    if category is None and description:
+        # The source carried no mappable Commodity_Code__c (blank / 'Other' / polluted-CPU
+        # blanked above) but the description may unambiguously name a commodity. Fall back
+        # to the SHARED lead-token grammar (categorize_from_desc — the same one the one-shot
+        # categorize CLI and the worker's categorize stage use) so future imports categorize
+        # real-desc rows at ingest. Conservative by construction (ambiguous → None), and the
+        # returned key is canonical so it survives the consolidate ladder downstream.
+        category = categorize_from_desc(description)
 
     return SourceRecord(
         raw_mpn=normalize_mpn(display_mpn) or display_mpn,

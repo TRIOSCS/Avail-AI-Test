@@ -13,13 +13,17 @@ Depends on: _common (SpecDict alias + unique_or_none helper) — pure functions.
 
 CONSERVATIVE by design (a wrong facet value is worse than a missing one):
 - gpu_family collects all marketing/chip tokens (Quadro, GeForce, GTX⇒GeForce,
-  RTX, Tesla + datacenter chip list incl. T4, Radeon (Pro), A-/H-series) and
+  RTX⇒GeForce-or-omit, Tesla + datacenter chip list incl. T4, Radeon (Pro),
+  A-/H-series) and
   emits a unique member or omits. Subsumption: an explicit GEFORCE token absorbs
   its own GTX/RTX sub-brand tokens ("GeForce RTX/GTX …" is one family, not a
   conflict). An RTX token adjacent to a consumer x050–x090 model ("RTX 3070",
   "RTX3080", comma-tokenized "RTX, 3070") maps to GeForce — RTX is a tier, not
-  the family — while "RTX" itself is reserved for the professional
-  Quadro-successor line (RTX A2000 etc.) and bare context-less RTX tokens. A-/H-series chip tokens reject hyphen-glued silicon steppings
+  the family — while professional Quadro-successor models (RTX A2000, RTX 4000
+  Ada) and bare context-less RTX tokens emit NO family: "RTX" was removed from
+  the seeded gpu_family enum (trust hotfix 2026-06-12 — it re-fragmented one
+  physical family across two facet values), and these shapes have no honest
+  member in the remaining vocabulary. A-/H-series chip tokens reject hyphen-glued silicon steppings
   ("N17M-Q3-A2", "GK104-400-A2") via a lookbehind — those mark a chip revision,
   never an Ampere/Hopper card. Architecture names (PASCAL spans Tesla AND
   Quadro) and bare models ("2080TI") are deliberately unmapped.
@@ -47,8 +51,9 @@ import re
 from app.services.desc_extractor._common import SpecDict, unique_or_none
 
 # Canonical gpu_family enum strings — MUST match the gpu entry in
-# app/data/commodity_seeds.json (drift-guarded).
-GEFORCE, QUADRO, RTX = "GeForce", "Quadro", "RTX"
+# app/data/commodity_seeds.json (drift-guarded). "RTX" is NOT a member: removed
+# from the seeds (trust hotfix 2026-06-12), so the extractor must never emit it.
+GEFORCE, QUADRO = "GeForce", "Quadro"
 RADEON, RADEON_PRO, TESLA = "Radeon", "Radeon Pro", "Tesla"
 A_SERIES, H_SERIES = "A-series", "H-series"
 
@@ -105,14 +110,15 @@ def _family_members(text: str) -> set[str]:
     else:
         if _GTX.search(text):
             members.add(GEFORCE)  # GTX is definitionally GeForce
-        if _RTX.search(text):
-            # The seeded enum carries BOTH "GeForce" and "RTX". Consumer RTX models
-            # (GeForce RTX 2060…5090) ARE the GeForce family — storing them under
-            # "RTX" fragments one physical family across two facet values (audit
-            # cards 583761 vs 560385). "RTX" is reserved for the professional
-            # Quadro-successor line (RTX A2000/A4000, RTX 4000 Ada, Quadro RTX
-            # 8000) and bare context-less RTX tokens.
-            members.add(GEFORCE if _RTX_CONSUMER.search(text) else RTX)
+        if _RTX.search(text) and _RTX_CONSUMER.search(text):
+            # Consumer RTX models (GeForce RTX 2060…5090) ARE the GeForce family —
+            # storing them under "RTX" fragments one physical family across two facet
+            # values (audit cards 583761 vs 560385). Professional Quadro-successor
+            # models (RTX A2000/A4000, RTX 4000 Ada) and bare context-less RTX tokens
+            # add NOTHING: "RTX" left the seeded enum (trust hotfix 2026-06-12) and a
+            # wrong family is worse than a missing one. A co-occurring branded token
+            # (e.g. "QUADRO RTX 8000") still resolves via its own pattern above.
+            members.add(GEFORCE)
     return members
 
 

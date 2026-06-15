@@ -175,6 +175,35 @@ def test_clean_blanks_other_commodity_code():
     assert clean_record(_rec(raw_mpn="REAL123", category="OEM ASSY")).category == "oem_assemblies"
 
 
+def test_clean_categorizes_from_description_when_code_unmappable():
+    # Ingest-time categorize fallback (OPTIMIZATION_PLAN §2.4): when the source carries no
+    # mappable Commodity_Code__c but the description unambiguously names a commodity, the
+    # SHARED lead-token grammar (categorize_from_desc) fills it — same grammar the CLI uses.
+    assert (
+        clean_record(_rec(raw_mpn="00AR327", category=None, description='HD, 450GB, 15KRPM, 3.5", FC')).category
+        == "hdd"
+    )
+    # 'Other' code blanked above, THEN the description fallback recovers it.
+    assert (
+        clean_record(_rec(raw_mpn="01KL563", category="Other", description="PSU, 1460W AC Hot Swap")).category
+        == "power_supplies"
+    )
+    # A new-category lead (cables) that has no Commodity_Code__c equivalent.
+    assert (
+        clean_record(_rec(raw_mpn="CBL55", category=None, description="CABLE, LVDS 40-pin harness")).category
+        == "cables"
+    )
+
+
+def test_clean_description_fallback_is_conservative():
+    # Ambiguous / MPN-as-desc / no-signal descriptions do NOT categorize (a wrong category
+    # is worse than a missing one); a mappable source code is never overridden by the desc.
+    assert clean_record(_rec(raw_mpn="00AR327", category=None, description="00AR327")).category is None
+    assert clean_record(_rec(raw_mpn="REAL123", category=None, description="VPD Card spare")).category is None
+    # A real source code wins; the desc fallback only runs when the code is unmappable.
+    assert clean_record(_rec(raw_mpn="REAL123", category="HDD", description="PSU, 1460W AC Hot Swap")).category == "hdd"
+
+
 def test_clean_blanks_cpu_category_for_polluted_mpn_shapes():
     # CATALOG.md ingest warning: ~14% of the SFDC 'CPU' bucket is passives/connectors/logic.
     # Known non-CPU MPN shapes must get their category BLANKED (None — never a tier-95 'cpu'),

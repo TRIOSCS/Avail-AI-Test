@@ -639,9 +639,11 @@ def test_set_category_non_manual_rejection_logs_at_info(db_session: Session):
 
         assert set_manufacturer(card, "Samsung", "mpn_decode", 0.9) is False
         assert any("set_manufacturer" in m and "kept existing" in m for m in infos), infos
-        # A non-manual maker loss against a NON-manual prior fires NO validation
-        # conflict (existing isn't manual) — this INFO line is its only production
-        # trace, the exact gap the rule closes (tier-90 connector maker vs trio/95).
+        # A non-manual maker loss against a NON-manual prior (tier-90 connector maker vs
+        # trio/95) logs the INFO line AND — since the trust-architecture dissent channel
+        # — records an evidence-dissent artifact (kept!=manual, loser tier>=80, values
+        # differ), so the contradiction surfaces in the needs-review filter instead of
+        # being resolved silently by the ladder. The INFO line names BOTH sides.
         card2 = _card(
             db_session,
             normalized_mpn="info-loss-2",
@@ -653,6 +655,185 @@ def test_set_category_non_manual_rejection_logs_at_info(db_session: Session):
         infos.clear()
         assert set_manufacturer(card2, "Seagate Technology", "digikey_api", 1.0) is False
         assert any("set_manufacturer" in m and "kept existing" in m for m in infos), infos
-        assert not card2.has_validation_conflict  # no conflict entry — INFO is the only trace
+        assert card2.has_validation_conflict  # dissent recorded (authoritative-vs-authoritative)
+        (dissent,) = card2.validation_conflicts
+        assert dissent["kind"] == "dissent"
+        assert dissent["key"] == "manufacturer"
+        assert dissent["manual"]["value"] == "Samsung"
+        assert dissent["manual"]["source"] == "trio_source"
+        assert dissent["evidence"]["source"] == "digikey_api"
+        assert dissent["evidence"]["value"] == "Seagate Technology"
     finally:
         loguru_logger.remove(sink_id)
+
+
+# --- @validates("category") guard (SP3 ladder hardening) --------------------
+# The guard on MaterialCard.category (app/models/intelligence.py) rejects any off-vocab
+# direct assignment, so a future un-routed writer can no longer persist junk past the F1
+# ladder. set_category (the single routed writer) only ever assigns canonical keys, so it
+# passes the guard untouched; these pin the guard's contract directly.
+
+
+class TestCategoryValidatesGuard:
+    def test_canonical_key_assignment_passes(self, db_session: Session):
+        card = _card(db_session, normalized_mpn="guard-ok", category="dram")
+        assert card.category == "dram"
+
+    def test_none_assignment_passes(self, db_session: Session):
+        card = _card(db_session, normalized_mpn="guard-none", category=None)
+        card.category = None
+        assert card.category is None
+
+    def test_off_vocab_assignment_raises(self, db_session: Session):
+        import pytest
+
+        card = _card(db_session, normalized_mpn="guard-bad", category=None)
+        with pytest.raises(ValueError, match="canonical commodity key or None"):
+            card.category = "IGBT Modules"  # the pre-#267 bypass-writer junk class
+
+    def test_off_vocab_at_construction_raises(self, db_session: Session):
+        import pytest
+
+        with pytest.raises(ValueError, match="canonical commodity key or None"):
+            MaterialCard(normalized_mpn="guard-ctor", display_mpn="GUARD-CTOR", category="Voltage Regulator")
+
+    def test_set_category_canonical_value_passes_the_guard(self, db_session: Session):
+        # The routed writer normalizes "IC" → canonical "ics_other" before assigning, so it
+        # never trips the guard (the guard hardens OTHER paths, never the ladder).
+        card = _card(db_session, normalized_mpn="guard-routed", category=None)
+        assert set_category(card, "IC", "digikey_api", 0.9) is True
+        assert card.category == "ics_other"
+
+
+# --- record_evidence_dissent (trust architecture §1.2b) ----------------------
+# The companion of record_validation_conflict for the case it never covers: an
+# authoritative-vs-authoritative contradiction (kept value is NOT manual). Fires when a
+# LOSING write has tier >= 80 AND a value DIFFERENT from the kept value; writes into the
+# same validation_conflicts JSONB + has_validation_conflict flag, tagged kind='dissent'.
+
+
+class TestRecordEvidenceDissent:
+    def test_tier84_contradiction_records_dissent(self, db_session: Session):
+        """The spec's canonical case: a tier-84 (fru_matrix_decode) contradiction of a
+        kept trio_source (95) value records a dissent row and raises the flag."""
+        from app.services.spec_tiers import record_evidence_dissent
+
+        card = _card(db_session, normalized_mpn="dissent-84", category="hdd")
+        wrote = record_evidence_dissent(
+            card,
+            "capacity_gb",
+            {"source": "trio_source", "value": 1000, "tier": 95},
+            {"source": "fru_matrix_decode", "tier": 84, "confidence": 0.9},
+            373455,
+        )
+        assert wrote is True
+        assert card.has_validation_conflict
+        (entry,) = card.validation_conflicts
+        assert entry["kind"] == "dissent"
+        assert entry["key"] == "capacity_gb"
+        assert entry["manual"]["value"] == 1000
+        assert entry["manual"]["source"] == "trio_source"
+        assert entry["manual"]["tier"] == 95
+        assert entry["evidence"]["source"] == "fru_matrix_decode"
+        assert entry["evidence"]["tier"] == 84
+        assert entry["evidence"]["value"] == 373455
+
+    def test_manual_kept_value_is_left_to_validation_conflict(self, db_session: Session):
+        """A manual kept value is record_validation_conflict's job — dissent no-ops so
+        exactly one recorder fires per loss."""
+        from app.services.spec_tiers import record_evidence_dissent
+
+        card = _card(db_session, normalized_mpn="dissent-manual", category="hdd")
+        wrote = record_evidence_dissent(
+            card,
+            "capacity_gb",
+            {"source": "manual", "value": 1000, "tier": 100},
+            {"source": "mpn_decode", "tier": 85},
+            500,
+        )
+        assert wrote is False
+        assert not card.has_validation_conflict
+
+    def test_below_band_loser_no_dissent(self, db_session: Session):
+        """A loser below the authoritative band (tier < 80) never dissents."""
+        from app.services.spec_tiers import record_evidence_dissent
+
+        card = _card(db_session, normalized_mpn="dissent-lowtier", category="hdd")
+        wrote = record_evidence_dissent(
+            card,
+            "capacity_gb",
+            {"source": "mpn_decode", "value": 1000, "tier": 85},
+            {"source": "web_search", "tier": 70},
+            500,
+        )
+        assert wrote is False
+        assert not card.has_validation_conflict
+
+    def test_corroboration_clears_a_same_source_stale_dissent(self, db_session: Session):
+        """A deterministic source that re-fires and now AGREES drops its own stale
+        dissent and recomputes the flag (a fixed decoder must not flag forever)."""
+        from app.services.spec_tiers import record_evidence_dissent
+
+        card = _card(db_session, normalized_mpn="dissent-heal", category="hdd")
+        assert record_evidence_dissent(
+            card,
+            "capacity_gb",
+            {"source": "trio_source", "value": 1000, "tier": 95},
+            {"source": "mpn_decode", "tier": 85},
+            500,
+        )
+        assert card.has_validation_conflict
+        # mpn_decode is fixed and now reports the kept value — its stale dissent clears.
+        assert (
+            record_evidence_dissent(
+                card,
+                "capacity_gb",
+                {"source": "trio_source", "value": 1000, "tier": 95},
+                {"source": "mpn_decode", "tier": 85},
+                1000,
+            )
+            is False
+        )
+        assert not card.has_validation_conflict
+        assert not (card.validation_conflicts or [])
+
+
+# --- count_ladder_rejection (trust architecture §1.2c) -----------------------
+
+
+class TestCountLadderRejection:
+    def test_contradiction_bumps_the_contradiction_field(self, monkeypatch):
+        import app.cache.intel_cache as intel_cache
+        from app.services import spec_tiers
+
+        calls: list[tuple] = []
+        monkeypatch.setattr(intel_cache, "incr_hash_count", lambda key, field, **kw: calls.append((key, field, kw)))
+
+        spec_tiers.count_ladder_rejection("trio_source", "mpn_decode", contradiction=True)
+        assert len(calls) == 1
+        key, field, kw = calls[0]
+        assert key.startswith("ladder:rejections:")
+        assert field == "trio_source|mpn_decode|contradiction"
+        assert kw.get("ttl_days") == spec_tiers.REJECTION_COUNTER_TTL_DAYS
+
+    def test_corroboration_classifies_distinctly(self, monkeypatch):
+        from app.services import spec_tiers
+
+        calls: list[tuple] = []
+        import app.cache.intel_cache as intel_cache
+
+        monkeypatch.setattr(intel_cache, "incr_hash_count", lambda key, field, **kw: calls.append((key, field)))
+
+        spec_tiers.count_ladder_rejection("digikey_api", "web_search", contradiction=False)
+        assert calls[0][1] == "digikey_api|web_search|corroboration"
+
+    def test_unknown_sides_default_and_never_raises(self, monkeypatch):
+        import app.cache.intel_cache as intel_cache
+        from app.services import spec_tiers
+
+        def _boom(*a, **k):
+            raise RuntimeError("redis down")
+
+        monkeypatch.setattr(intel_cache, "incr_hash_count", _boom)
+        # Telemetry must never break the write path — the failure is swallowed.
+        spec_tiers.count_ladder_rejection("", "", contradiction=True)

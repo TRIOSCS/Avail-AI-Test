@@ -40,7 +40,7 @@ def test_alias_hit_returns_canonical(db_session: Session):
 
 
 def test_hpe_family_folds_to_hpe(db_session: Session):
-    # The production seed shape (startup._seed_manufacturers + migration 104): every
+    # The production seed shape (startup._seed_manufacturers + migration 106): every
     # live HPE variant — split 4 ways in the 2026-06-12 brand facet — folds to the one
     # canonical, so selecting "HPE" no longer silently misses 4,400 HP-labeled cards.
     _seed(db_session, ("HPE", ["Hewlett Packard Enterprise", "HP", "Hewlett Packard", "Hewlett-Packard"]))

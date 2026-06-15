@@ -72,8 +72,9 @@ class MaterialCard(Base):
     # ladder). Through set_category, a lower-tier source can never overwrite a category
     # written by a higher-tier source; a category carrying a value but NULL provenance
     # (legacy data) ranks at the legacy_backfill mid-tier (50). All in-tree category
-    # writers route through set_category; SP3 adds an @validates("category") guard so a
-    # future direct assignment cannot bypass the ladder and leave these columns stale.
+    # writers route through set_category; the @validates("category") guard below (SP3)
+    # rejects any off-vocab direct assignment, so a future un-routed writer can no
+    # longer persist junk past the ladder.
     category_source = Column(String(50))  # "mpn_decode", "digikey_api", "claude_opus_inferred", ...
     category_confidence = Column(Float)
     category_tier = Column(Integer)
@@ -114,6 +115,18 @@ class MaterialCard(Base):
     # the partial index ix_material_cards_needs_review (WHERE has_validation_conflict).
     has_validation_conflict = Column(Boolean, nullable=False, default=False, server_default="false")
 
+    # Demand telemetry (migration 105 — TRIO's SFDC Weekly Export, one-shot backfill
+    # via app/management/import_demand_telemetry.py; NO recurring refresh — the export
+    # is a static snapshot, re-import is an explicit operator step). Prioritization
+    # signal ONLY, never a displayed fact: worker select_batch and the spec-pass
+    # selection order by (sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS
+    # LAST, id) so enrichment slots land on parts TRIO actually trades. NULL = no
+    # telemetry row matched this card's normalized_mpn. Served on PG by the partial
+    # index ix_mc_demand_queue (migration-only — its DESC NULLS LAST keys are not
+    # valid SQLite index DDL, so it is deliberately NOT declared on the model).
+    sourced_qty_90d = Column(Integer)
+    last_sourced_at = Column(UTCDateTime)
+
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
@@ -149,6 +162,28 @@ class MaterialCard(Base):
         if value is None:
             return MaterialEnrichmentStatus.UNENRICHED.value
         return MaterialEnrichmentStatus(value).value  # raises ValueError on unknown
+
+    @validates("category")
+    def _validate_category(self, _key, value):
+        """SP3 ladder hardening: only NULL or a canonical commodity key may be assigned.
+
+        set_category (spec_tiers) is the single routed writer and only ever assigns
+        canonical keys, so it passes untouched; an off-vocab direct assignment (the
+        pre-#267 bypass-writer class that minted 61 junk categories) raises instead of
+        silently persisting junk with stale provenance columns. Lazy import — the
+        registry imports app.models at module level.
+        """
+        if value is None:
+            return None
+        from app.services.commodity_registry import CANONICAL_COMMODITY_KEYS
+
+        if value not in CANONICAL_COMMODITY_KEYS:
+            raise ValueError(
+                f"material_cards.category must be a canonical commodity key or None, got {value!r} — "
+                "route the write through spec_tiers.set_category (which normalizes via "
+                "category_normalizer and arbitrates via the F1 ladder)"
+            )
+        return value
 
 
 class MaterialVendorHistory(Base):
@@ -187,7 +222,9 @@ class MaterialCardAudit(Base):
     __tablename__ = "material_card_audit"
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
-    action = Column(String(50), nullable=False)  # created, linked, unlinked, deleted, merged, healed, restored
+    # created, linked, unlinked, deleted, merged, healed, restored,
+    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py)
+    action = Column(String(50), nullable=False)
     entity_type = Column(String(50))  # requirement, sighting, offer
     entity_id = Column(Integer)
     old_card_id = Column(Integer)

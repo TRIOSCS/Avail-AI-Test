@@ -16,7 +16,7 @@ class TestFacetedSearchFTS:
             display_mpn="STM32F407VGT6",
             manufacturer="STMicroelectronics",
             description="32-bit ARM Cortex-M4 microcontroller with FPU",
-            category="microcontroller",
+            category="microcontrollers",
         )
         db_session.add(card)
         db_session.commit()
@@ -32,7 +32,7 @@ class TestFacetedSearchFTS:
             normalized_mpn="lm7805ct",
             display_mpn="LM7805CT",
             manufacturer="Texas Instruments",
-            category="voltage_regulator",
+            category="voltage_regulators",
         )
         db_session.add(card)
         db_session.commit()
@@ -51,16 +51,16 @@ class TestFacetedSearchFTS:
         card1 = MaterialCard(
             normalized_mpn="stm32f4",
             display_mpn="STM32F4",
-            category="microcontroller",
+            category="microcontrollers",
         )
         card2 = MaterialCard(
             normalized_mpn="lm7805",
             display_mpn="LM7805",
-            category="voltage_regulator",
+            category="voltage_regulators",
         )
         db_session.add_all([card1, card2])
         db_session.commit()
 
-        results, total = search_materials_faceted(db_session, commodity="microcontroller")
+        results, total = search_materials_faceted(db_session, commodity="microcontrollers")
         assert total == 1
         assert results[0].normalized_mpn == "stm32f4"

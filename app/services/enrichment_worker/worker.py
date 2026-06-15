@@ -97,16 +97,22 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
       ``not_catalogued_retry_days`` (long backoff — uncatalogued OEM service parts
       rarely become catalogued, so re-check infrequently).
     - ``is_internal_part``, ``deleted_at`` are excluded.
-    - Ordered by ``enrich_requested_at IS NOT NULL DESC, enrich_requested_at ASC NULLS
-      LAST, status=unenriched DESC, search_count DESC, created_at DESC``: the priority
-      lane first — cards a user explicitly added (single-add stamps
+    - Ordered by ``enrich_requested_at ASC NULLS LAST, status=unenriched DESC,
+      sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS LAST, id``: the
+      priority lane first — cards a user explicitly added (single-add stamps
       ``enrich_requested_at``; bulk/stock/email/search creation never does), FIFO among
-      themselves so no stamped card starves another; ``run_one_batch`` clears the stamp
-      on every batch card so a terminal ``not_found`` card cannot pin the lane. Then
-      never-resolved parts drain before re-checks of already-terminal cards (so old,
-      low-demand ``unenriched`` parts aren't starved by the daily ``not_found``
-      re-check churn); then demand wins (high-demand first); then, among equal
-      demand, the most-recently-added part heads the next batch (fast lane).
+      themselves so no stamped card starves another (ASC NULLS LAST alone yields
+      stamped-first FIFO — the old leading ``IS NOT NULL DESC`` term was redundant and
+      is dropped so the ordering matches ``ix_mc_demand_queue``, migration 105);
+      ``run_one_batch`` clears the stamp on every batch card so a terminal
+      ``not_found`` card cannot pin the lane. Then never-resolved parts drain before
+      re-checks of already-terminal cards (so old ``unenriched`` parts aren't starved
+      by the daily ``not_found`` re-check churn — at a raised daily cap the 22h
+      re-check pool alone could otherwise consume most of a day's slots). Then TRIO's
+      own demand telemetry wins: ``sourced_qty_90d`` (real 90-day sourcing volume from
+      the SFDC export, one-shot import via app/management/import_demand_telemetry.py)
+      then ``last_sourced_at`` recency, NULLS LAST so unmatched cards drain after
+      every demanded card; ``id`` makes the order total/deterministic.
     """
     from app.models import MaterialCard
 
@@ -145,17 +151,23 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
         )
         .order_by(
             # Priority lane: user-requested cards (single-add stamps enrich_requested_at)
-            # jump the whole queue, FIFO among themselves. run_one_batch clears the stamp
-            # on every batch card, so a terminal not_found card cannot pin the lane.
-            MaterialCard.enrich_requested_at.isnot(None).desc(),
+            # jump the whole queue, FIFO among themselves — ASC NULLS LAST alone gives
+            # stamped-first FIFO (the old redundant `IS NOT NULL DESC` leading term is
+            # gone so this ORDER BY matches ix_mc_demand_queue, migration 105).
+            # run_one_batch clears the stamp on every batch card, so a terminal
+            # not_found card cannot pin the lane.
             MaterialCard.enrich_requested_at.asc().nullslast(),
-            # Never-resolved parts drain before re-checks of already-terminal ones.
-            # Without this, old low-demand `unenriched` cards are starved: they share
-            # search_count=0 with the daily `not_found` re-check churn, and created_at
-            # DESC then favours the newer not_found cards until the daily cap is spent.
+            # Never-resolved parts drain before re-checks of already-terminal ones —
+            # without this, the daily not_found re-check pool (22h backoff) would
+            # compete demand-for-demand with the unenriched backlog and could consume
+            # most of a day's cap on dead-enders.
             (MaterialCard.enrichment_status == MaterialEnrichmentStatus.UNENRICHED).desc(),
-            MaterialCard.search_count.desc(),
-            MaterialCard.created_at.desc(),
+            # Demand telemetry (TRIO's SFDC export — migration 105, one-shot import):
+            # real 90-day sourcing volume, then sourcing recency; NULLS LAST so every
+            # demanded card drains before unmatched ones; id keeps the order total.
+            MaterialCard.sourced_qty_90d.desc().nullslast(),
+            MaterialCard.last_sourced_at.desc().nullslast(),
+            MaterialCard.id,
         )
         .limit(config.batch_size)
         .all()
@@ -298,6 +310,14 @@ async def run_one_batch(
 ) -> dict[str, int]:
     """Enrich one batch of cards and return per-tier counts.
 
+    LANE SPLIT (settings.enrichment_lane_split_enabled, default on): priority-lane
+    cards (enrich_requested_at stamped by single-add — membership captured before the
+    stamps are cleared) run the full enrich_card pipeline; bulk-lane cards run the
+    FREE connectors only inside enrich_card (web/OEM/Opus tiers skipped) and still get
+    every deterministic pass below (mpn-decode / fru-crosswalk / desc-parse / oem
+    crosswalk Pass B) plus the in-batch spec pass when they land a real category.
+    Call routing only — all writes still arbitrate through the F1 ladder.
+
     After the per-card core-enrichment loop completes, this also triggers a paced,
     second-pass PARAMETRIC SPEC extraction (``enrich_card_specs``) for the cards that
     landed a real category this batch (verified / web_sourced / ai_inferred) — so the
@@ -342,6 +362,12 @@ async def run_one_batch(
     # batch (not enriched_ids) — FRU spare PNs are precisely the population connectors
     # miss, so they finish not_found and never reach enriched_ids.
     batch_ids = [int(c.id) for c in batch]
+    # Lane membership, captured BEFORE the stamps are cleared below: priority-lane
+    # cards (user single-add stamped enrich_requested_at) keep the full enrich_card
+    # pipeline; bulk-lane cards run connectors + deterministic passes only when
+    # settings.enrichment_lane_split_enabled (call routing only — the F1 ladder still
+    # arbitrates every write).
+    priority_ids = {int(c.id) for c in batch if c.enrich_requested_at is not None}
 
     # Clear the priority-lane stamp on EVERY batch card immediately — attribute writes
     # on already-loaded ORM objects, BEFORE the first await (the worker's
@@ -411,6 +437,9 @@ async def run_one_batch(
             except Exception:
                 logger.exception("ENRICH_WORKER: oem-crosswalk failed over {} cards", len(batch_ids))
 
+    from app.config import settings as _settings
+
+    lane_split = _settings.enrichment_lane_split_enabled
     conns = _connectors_in_order(db)
     counts: dict[str, int] = {}
     # Cards that landed a real category this batch (verified / web_sourced / ai_inferred) —
@@ -438,6 +467,10 @@ async def run_one_batch(
                 disabled=disabled,
                 cooldown=cooldown,
                 web_meter=card_meter,
+                # Bulk lane (no enrich_requested_at stamp): connectors + deterministic
+                # passes only — web/OEM/Opus tiers are skipped inside enrich_card.
+                # Priority lane keeps the full pipeline. Flag off = full pipeline for all.
+                full_pipeline=(not lane_split) or int(card.id) in priority_ids,
             )
             card.enriched_at = now
             counts[status] = counts.get(status, 0) + 1

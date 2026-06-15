@@ -375,7 +375,7 @@ def _seed_manufacturers(conn) -> None:
         ("Seagate Technology", ["Seagate"]),
         ("Western Digital", ["WD"]),
         ("IBM", []),
-        # Canonical "HPE" (brand canonicalization, migration 104 for existing DBs): the
+        # Canonical "HPE" (brand canonicalization, migration 106 for existing DBs): the
         # live catalog's HPE family was split four ways (Hewlett Packard Enterprise /
         # HP / HPE / HEWLETT PACKARD) — the short canonical folds them into one facet
         # slot; the long form is now an alias.

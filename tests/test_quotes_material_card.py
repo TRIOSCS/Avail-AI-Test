@@ -34,7 +34,7 @@ def material_card(db_session: Session) -> MaterialCard:
         display_mpn="LM317T",
         manufacturer="Texas Instruments",
         description="Adjustable Voltage Regulator, 1.5A",
-        category="Semiconductors",
+        category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
     )
     db_session.add(mc)
     db_session.commit()
@@ -48,7 +48,7 @@ def material_card_2(db_session: Session) -> MaterialCard:
         display_mpn="NE555P",
         manufacturer="Texas Instruments",
         description="Precision Timer IC",
-        category="Semiconductors",
+        category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
     )
     db_session.add(mc)
     db_session.commit()
@@ -117,7 +117,7 @@ def test_quote_to_dict_with_db_enriches_items(db_session, material_card):
     d = quote_to_dict(q, db=db_session)
     assert len(d["line_items"]) == 1
     assert d["line_items"][0]["description"] == "Adjustable Voltage Regulator, 1.5A"
-    assert d["line_items"][0]["category"] == "Semiconductors"
+    assert d["line_items"][0]["category"] == "voltage_regulators"
     assert d["line_items"][0]["mpn"] == "LM317T"
     assert d["line_items"][0]["qty"] == 100
 
