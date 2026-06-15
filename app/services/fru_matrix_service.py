@@ -8,11 +8,14 @@ capped at REVERSE_VIEW_LIMIT usages (shared hardware PNs like screws can sit und
 thousands of FRUs); ReverseView.total carries the uncapped count for display.
 get_reverse_context is the lightweight companion for the search page's compact
 card: a COUNT(DISTINCT fru_norm) aggregate + column-tuple fetch, no FruLink
-entity hydration.
+entity hydration. get_search_aliases is the supplier-search expansion hook:
+both-direction crosswalk equivalents of one MPN as a flat candidate list
+(no entity hydration — it runs on every requirement search).
 
 Called by: app/routers/htmx_views.py (material detail + fru-lookup + faceted-list
            partials, and the search-page "What we know" panel's compact
-           FRU-crosswalk context)
+           FRU-crosswalk context), app/search_service.py (get_search_aliases —
+           FRU alias expansion into supplier queries)
 Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
             app/utils/normalization.normalize_mpn_key
 """
@@ -20,7 +23,7 @@ Depends on: app/models/fru_link.FruLink, app/constants.FruLinkKind/CDC_PENDING,
 from dataclasses import dataclass
 from datetime import date
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from ..constants import CDC_PENDING, FruLinkKind
@@ -403,3 +406,90 @@ def get_reverse_context(db: Session, mpn: str) -> ReverseContext:
         if current is None or (len(fru_raw), fru_raw) < (len(current), current):
             best_raw[fru_norm] = fru_raw
     return ReverseContext(distinct_frus=distinct, top_frus=tuple(sorted(best_raw.values())[:3]))
+
+
+# Crosswalk kinds eligible for supplier-search expansion, in priority order —
+# search_service caps the injected alias count, so higher-sourcing-value kinds
+# (canonical broker-listed models first) must come before weaker identifiers.
+SEARCH_ALIAS_KINDS: tuple[FruLinkKind, ...] = (
+    FruLinkKind.MFG_MODEL,
+    FruLinkKind.DRIVE_PN,
+    FruLinkKind.OPTION,
+    FruLinkKind.IBM_11S,
+)
+
+
+@dataclass(frozen=True)
+class SearchAlias:
+    """One crosswalk-derived MPN candidate for supplier-search expansion."""
+
+    mpn: str  # display spelling (shortest raw form across sheets — canonical de-padded)
+    norm: str  # normalize_mpn_key dedup key
+    rel_kind: str  # FruLinkKind value of the strongest (highest-priority) edge
+    manufacturer: str  # maker of the alias part when known ("" on reverse hits)
+
+
+def get_search_aliases(db: Session, mpn: str) -> list[SearchAlias]:
+    """Both-direction crosswalk equivalents of ``mpn`` for supplier-search expansion.
+
+    Forward hit (``mpn`` is the FRU side): aliases are its linked
+    mfg_model/drive_pn/option/ibm_11s parts — the canonical numbers brokers
+    actually list. Reverse hit (``mpn`` is the related side): the alias is the
+    FRU itself, so canonical-model searches also reach OEM spare listings.
+
+    One indexed query (ix_fru_links_fru_norm / ix_fru_links_related_norm OR'd,
+    column tuples only — no entity hydration) because this runs on every
+    requirement search. Deduped per alias norm: strongest SEARCH_ALIAS_KINDS
+    kind wins, display spelling is the shortest raw form (sheets disagree on
+    SAP zero-padding), manufacturer is the first non-empty forward value.
+    Ordered by kind priority then display string for deterministic capping.
+    """
+    norm = normalize_mpn_key(mpn)
+    if not norm:
+        return []
+    kind_values = [k.value for k in SEARCH_ALIAS_KINDS]
+    # Defensive fetch cap: real FRUs carry well under 100 alias-kind edges; the
+    # cap bounds the Python dedup work if a pathological key accumulates more.
+    rows = db.execute(
+        select(
+            FruLink.fru_norm,
+            FruLink.fru_raw,
+            FruLink.related_norm,
+            FruLink.related_raw,
+            FruLink.rel_kind,
+            FruLink.manufacturer,
+        )
+        .where(
+            FruLink.rel_kind.in_(kind_values),
+            or_(FruLink.fru_norm == norm, FruLink.related_norm == norm),
+        )
+        .order_by(FruLink.id)
+        .limit(2000)
+    ).all()
+    priority = {value: rank for rank, value in enumerate(kind_values)}
+    best: dict[str, dict] = {}
+    for fru_norm, fru_raw, related_norm, related_raw, rel_kind, manufacturer in rows:
+        if fru_norm == norm:
+            alias_norm, alias_raw, alias_mfr = related_norm, related_raw, (manufacturer or "").strip()
+        else:
+            # Reverse hit: the alias is the FRU. FruLink.manufacturer describes
+            # the related (searched) part, not the FRU — leave it blank.
+            alias_norm, alias_raw, alias_mfr = fru_norm, fru_raw, ""
+        if alias_norm == norm:  # self-edge — nothing new to search
+            continue
+        entry = best.get(alias_norm)
+        if entry is None:
+            best[alias_norm] = {"raw": alias_raw, "kind": rel_kind, "mfr": alias_mfr}
+            continue
+        if priority[rel_kind] < priority[entry["kind"]]:
+            entry["kind"] = rel_kind
+        if (len(alias_raw), alias_raw) < (len(entry["raw"]), entry["raw"]):
+            entry["raw"] = alias_raw
+        if not entry["mfr"] and alias_mfr:
+            entry["mfr"] = alias_mfr
+    aliases = [
+        SearchAlias(mpn=entry["raw"], norm=alias_norm, rel_kind=entry["kind"], manufacturer=entry["mfr"])
+        for alias_norm, entry in best.items()
+    ]
+    aliases.sort(key=lambda a: (priority[a.rel_kind], a.mpn))
+    return aliases
