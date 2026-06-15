@@ -30,6 +30,7 @@ export default [
         CustomEvent: 'readonly',
         Event: 'readonly',
         FormData: 'readonly',
+        DOMParser: 'readonly',
         AbortController: 'readonly',
         EventSource: 'readonly',
         localStorage: 'readonly',

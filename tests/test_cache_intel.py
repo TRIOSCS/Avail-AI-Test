@@ -344,3 +344,45 @@ class TestIncrCount:
 
         assert cache_mod.incr_count("k") == 10
         mock_set_cached.assert_called_once_with("k", {"count": 10}, ttl_days=1.0)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  incr_hash_count — atomic multi-dimensional day-counters (F1 ladder
+#  rejection telemetry: one key per day, one field per winner|loser|kind)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestIncrHashCount:
+    @patch("app.cache.intel_cache._get_redis")
+    def test_redis_hincrby_is_used_atomically(self, mock_get_redis):
+        mock_redis = MagicMock()
+        mock_redis.hincrby.return_value = 3
+        mock_get_redis.return_value = mock_redis
+
+        new = cache_mod.incr_hash_count(
+            "ladder:rejections:2026-06-15", "trio_source|mpn_decode|contradiction", ttl_days=35.0
+        )
+        assert new == 3
+        mock_redis.hincrby.assert_called_once_with(
+            "intel:ladder:rejections:2026-06-15", "trio_source|mpn_decode|contradiction", 1
+        )
+        mock_redis.expire.assert_called_once_with("intel:ladder:rejections:2026-06-15", int(35.0 * 86400))
+
+    @patch("app.cache.intel_cache.set_cached")
+    @patch("app.cache.intel_cache.get_cached")
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_redis_down_falls_back_to_read_modify_write(self, _mock_redis, mock_get_cached, mock_set_cached):
+        mock_get_cached.return_value = {"a|b|contradiction": 2}
+
+        new = cache_mod.incr_hash_count("ladder:rejections:2026-06-15", "a|b|contradiction", ttl_days=35.0)
+        assert new == 3
+        mock_set_cached.assert_called_once_with("ladder:rejections:2026-06-15", {"a|b|contradiction": 3}, ttl_days=35.0)
+
+    @patch("app.cache.intel_cache.set_cached")
+    @patch("app.cache.intel_cache.get_cached")
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_fallback_seeds_a_new_field(self, _mock_redis, mock_get_cached, mock_set_cached):
+        # A field that doesn't exist yet (or a garbage value) starts at the amount.
+        mock_get_cached.return_value = None
+        assert cache_mod.incr_hash_count("k", "x|y|corroboration", ttl_days=35.0) == 1
+        mock_set_cached.assert_called_once_with("k", {"x|y|corroboration": 1}, ttl_days=35.0)

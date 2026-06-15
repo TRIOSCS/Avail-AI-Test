@@ -183,6 +183,38 @@ def incr_count(cache_key: str, amount: int = 1, ttl_days: float = 1.0) -> int:
     return new
 
 
+def incr_hash_count(cache_key: str, field: str, amount: int = 1, ttl_days: float = 35.0) -> int:
+    """Atomically add *amount* to *field* of the hash at *cache_key*; returns the new
+    value.
+
+    The hash shape keeps one Redis key per day for multi-dimensional counters (e.g.
+    the F1 ladder-rejection telemetry: key ``ladder:rejections:{date}``, fields
+    ``{winner}|{loser}|{corroboration|contradiction}``) instead of a key explosion.
+    Redis path: HINCRBY + EXPIRE — atomic across processes, same contract as
+    ``incr_count``. Fallback (Redis down): non-atomic read-modify-write of the whole
+    hash as a ``get_cached``/``set_cached`` dict — single-writer-safe only, and
+    best-effort when BOTH backends are down (set_cached swallows failures). Callers
+    that must never break on telemetry (the spec-write path) wrap this call anyway.
+    """
+    r = _get_redis()
+    if r:
+        try:
+            new = int(r.hincrby(f"{_REDIS_PREFIX}{cache_key}", field, amount))
+            r.expire(f"{_REDIS_PREFIX}{cache_key}", int(ttl_days * 86400))
+            return new
+        except Exception as e:
+            logger.warning("Redis hash-incr error for {}: {} — falling back to read-modify-write", cache_key, e)
+    data = get_cached(cache_key)
+    counts: dict = dict(data) if isinstance(data, dict) else {}
+    try:
+        new = int(counts.get(field, 0) or 0) + amount
+    except (TypeError, ValueError):
+        new = amount
+    counts[field] = new
+    set_cached(cache_key, counts, ttl_days=ttl_days)
+    return new
+
+
 def cleanup_expired() -> int:
     """Remove expired cache entries in batches. Returns count deleted.
 

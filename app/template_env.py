@@ -197,6 +197,29 @@ def _sub_mpns_filter(subs: list | None) -> list[str]:
 templates.env.filters["sub_mpns"] = _sub_mpns_filter
 
 
+def _fru_alias_mpns_filter(subs: list | None) -> set[str]:
+    """Normalized MPNs of substitutes that were system-derived from the FRU crosswalk.
+
+    Companion to |sub_mpns (same normalize_mpn display form, so membership tests against
+    its output match) letting templates flag crosswalk-derived substitutes with a "via
+    FRU crosswalk" tooltip — no new UI elements. Provenance is the optional "source" key
+    written by search_service's alias expansion.
+    """
+    from .constants import FRU_ALIAS_SOURCE
+    from .utils.normalization import normalize_mpn
+
+    result: set[str] = set()
+    for s in subs or []:
+        if isinstance(s, dict) and s.get("source") == FRU_ALIAS_SOURCE:
+            mpn = normalize_mpn(s.get("mpn") or "")
+            if mpn:
+                result.add(mpn)
+    return result
+
+
+templates.env.filters["fru_alias_mpns"] = _fru_alias_mpns_filter
+
+
 def _part_description(obj) -> str:
     """Return part description from MaterialCard (source of truth) with fallback.
 

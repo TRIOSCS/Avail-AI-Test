@@ -401,7 +401,11 @@ def test_select_batch_prioritizes_unenriched_over_not_found_recheck(db_session):
 
 
 def test_select_batch_ordering(db_session):
-    """Cards with higher search_count should appear first."""
+    """Cards with higher demand telemetry (sourced_qty_90d) should appear first.
+
+    Migration 105 replaced the old search_count demand key with TRIO's own SFDC sourcing
+    volume (sourced_qty_90d DESC NULLS LAST) — see select_batch ORDER BY.
+    """
     from datetime import datetime, timezone
 
     from app.models import MaterialCard
@@ -409,13 +413,13 @@ def test_select_batch_ordering(db_session):
     from app.services.enrichment_worker.worker import select_batch
 
     now = datetime.now(timezone.utc)
-    for mpn, sc in [("low_sc", 1), ("high_sc", 99), ("mid_sc", 10)]:
+    for mpn, qty in [("low_q", 1), ("high_q", 99), ("mid_q", 10)]:
         db_session.add(
             MaterialCard(
                 normalized_mpn=mpn,
                 display_mpn=mpn.upper(),
                 enrichment_status="unenriched",
-                search_count=sc,
+                sourced_qty_90d=qty,
                 created_at=now,
             )
         )
@@ -423,14 +427,16 @@ def test_select_batch_ordering(db_session):
 
     cfg = EnrichmentWorkerConfig(batch_size=5)
     results = select_batch(db_session, cfg)
-    search_counts = [c.search_count for c in results]
-    assert search_counts == sorted(search_counts, reverse=True)
+    qtys = [c.sourced_qty_90d for c in results]
+    assert qtys == sorted(qtys, reverse=True)
 
 
-def test_select_batch_freshness_tiebreaker(db_session):
-    """Among equal demand (search_count=0), the most-recently-created card wins.
+def test_select_batch_recency_tiebreaker(db_session):
+    """Among equal demand (sourced_qty_90d), the most-recently-sourced card wins.
 
-    This is the fast-lane guarantee: a just-added part heads the next batch.
+    last_sourced_at DESC NULLS LAST is the secondary demand-telemetry key (migration
+    105) — a card TRIO sourced more recently heads the next batch over an equally-
+    demanded staler one; the id tiebreak keeps the order deterministic.
     """
     from datetime import datetime, timedelta, timezone
 
@@ -439,18 +445,19 @@ def test_select_batch_freshness_tiebreaker(db_session):
     from app.services.enrichment_worker.worker import select_batch
 
     now = datetime.now(timezone.utc)
-    for mpn, created in [
-        ("oldest", now - timedelta(hours=2)),
-        ("middle", now - timedelta(hours=1)),
-        ("newest", now),
+    for mpn, sourced in [
+        ("oldest", now - timedelta(days=30)),
+        ("middle", now - timedelta(days=15)),
+        ("newest", now - timedelta(days=1)),
     ]:
         db_session.add(
             MaterialCard(
                 normalized_mpn=mpn,
                 display_mpn=mpn.upper(),
                 enrichment_status="unenriched",
-                search_count=0,
-                created_at=created,
+                sourced_qty_90d=10,
+                last_sourced_at=sourced,
+                created_at=now,
             )
         )
     db_session.flush()
@@ -460,10 +467,12 @@ def test_select_batch_freshness_tiebreaker(db_session):
     assert order == ["newest", "middle", "oldest"]
 
 
-def test_select_batch_demand_beats_freshness(db_session):
-    """Demand is primary: a high-search_count old card outranks a brand-new card.
+def test_select_batch_demand_beats_recency(db_session):
+    """Demand is primary: a high-sourced_qty_90d card with no recency outranks a low-
+    demand card sourced just yesterday.
 
-    Freshness only breaks ties; it never overrides demand.
+    last_sourced_at only breaks ties within equal sourced_qty_90d; it never overrides
+    the demand-volume key (migration 105).
     """
     from datetime import datetime, timedelta, timezone
 
@@ -474,19 +483,21 @@ def test_select_batch_demand_beats_freshness(db_session):
     now = datetime.now(timezone.utc)
     db_session.add(
         MaterialCard(
-            normalized_mpn="old_hot",
-            display_mpn="OLD_HOT",
+            normalized_mpn="hot_stale",
+            display_mpn="HOT_STALE",
             enrichment_status="unenriched",
-            search_count=50,
+            sourced_qty_90d=50,
+            last_sourced_at=None,
             created_at=now - timedelta(days=7),
         )
     )
     db_session.add(
         MaterialCard(
-            normalized_mpn="new_cold",
-            display_mpn="NEW_COLD",
+            normalized_mpn="cold_fresh",
+            display_mpn="COLD_FRESH",
             enrichment_status="unenriched",
-            search_count=0,
+            sourced_qty_90d=1,
+            last_sourced_at=now,
             created_at=now,
         )
     )
@@ -494,7 +505,7 @@ def test_select_batch_demand_beats_freshness(db_session):
 
     cfg = EnrichmentWorkerConfig(batch_size=5)
     order = [c.normalized_mpn for c in select_batch(db_session, cfg)]
-    assert order[0] == "old_hot"
+    assert order[0] == "hot_stale"
 
 
 def test_new_cards_are_enrichable_by_worker(db_session):

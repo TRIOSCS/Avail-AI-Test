@@ -1,0 +1,44 @@
+{# composer_vendor_row.html — single vendor row returned by the RFQ composer's
+   any-vendor picker / inline "Add new vendor" form (POST composer-vendor).
+   Called by: sightings.py sightings_composer_vendor — appended via _addComposerVendor's
+   raw fetch POST + insertAdjacentHTML('beforeend') + htmx.process + Alpine.initTree
+   into the stable-id #rfq-added-vendors sub-container in vendor_modal.html, INSIDE
+   the rfqVendorModal x-data wrapper (never the wrapper — re-init wipes selection).
+   Depends on: the surrounding rfqVendorModal Alpine component (htmx_app.js) — a
+   selectable row x-inits through selectVendor() so it arrives CHECKED and joins the
+   SAME isSelected/toggleVendor selection state as the suggested/affinity rows; an
+   unavailability-excluded row renders the rose chip with a DISABLED checkbox and
+   never touches the selection (send-time re-validation stays the backstop). BOTH
+   branches emit data-vendor-norm so _rowVendorName/_containerHasVendor can dedupe
+   excluded rows too (they have no x-init to read the name from).
+   Context: vendor (VendorCard), matched_existing (bool), contact_added (bool —
+   typed email attached to the matched existing card), is_excluded (bool).
+#}
+{% if is_excluded %}
+<label class="flex items-center gap-3 px-3 py-2 mt-1 border border-rose-100 rounded-lg bg-rose-50/60"
+       data-vendor-norm="{{ vendor.normalized_name }}">
+  <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+  <div class="flex-1 min-w-0">
+    <span class="text-sm font-medium text-gray-500">{{ vendor.display_name }}</span>
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-rose-100 text-rose-700">marked unavailable</span>
+    {% if matched_existing %}
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
+    {% endif %}
+  </div>
+</label>
+{% else %}
+<label class="flex items-center gap-3 px-3 py-2 mt-1 border border-gray-200 rounded-lg hover:bg-gray-50 cursor-pointer"
+       data-vendor-norm="{{ vendor.normalized_name }}"
+       x-init='selectVendor({{ vendor.normalized_name|tojson }})'>
+  <input type="checkbox"
+         :checked='isSelected({{ vendor.normalized_name|tojson }})'
+         @change='toggleVendor({{ vendor.normalized_name|tojson }})'
+         class="rounded border-gray-300">
+  <div class="flex-1 min-w-0">
+    <span class="text-sm font-medium text-gray-700">{{ vendor.display_name }}</span>
+    {% if matched_existing %}
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
+    {% endif %}
+  </div>
+</label>
+{% endif %}
