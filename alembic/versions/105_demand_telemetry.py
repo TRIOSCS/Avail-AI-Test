@@ -35,7 +35,7 @@ verifies). For the same reason the index is deliberately NOT declared on the mod
 Downgrade drops the index (PG) and both columns (both engines).
 
 Revision ID: 105_demand_telemetry
-Revises: 103_unavail_policy_columns
+Revises: 104_trust_telemetry
 Create Date: 2026-06-12
 """
 
@@ -44,7 +44,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "105_demand_telemetry"
-down_revision = "103_unavail_policy_columns"
+down_revision = "104_trust_telemetry"
 branch_labels = None
 depends_on = None
 

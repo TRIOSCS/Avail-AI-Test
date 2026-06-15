@@ -167,21 +167,26 @@ async def enrich_batch(mpns: list[str], db: Session, concurrency: int = 5) -> di
 
 def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session) -> None:
     """Apply enrichment result to a material card and tag it."""
+    from app.services.spec_tiers import set_category, set_manufacturer
+
     manufacturer = enrichment["manufacturer"]
     confidence = enrichment["confidence"]
     source_name = enrichment["source"]
 
-    # Update card fields
-    if not card.manufacturer:
-        card.manufacturer = manufacturer
-    if enrichment.get("category"):
-        from app.services.spec_tiers import set_category
+    # Connector name → its registered *_api ladder source (tier 90; brokerbin is
+    # registered as-is at 65). The evidence here is a distributor-API part match, so
+    # both writes below carry the connector's own SOURCE_TIER name.
+    ladder_source = source_name if source_name == "brokerbin" else f"{source_name}_api"
 
-        # Through the F1 ladder (connector name → its registered *_api ladder source,
-        # tier 90; brokerbin is registered as-is at 65): fills an empty category and may
-        # correct a lower-tier one (decode 85, AI guess 40), but never overwrites a
-        # higher-tier value and never persists off-vocab junk.
-        ladder_source = source_name if source_name == "brokerbin" else f"{source_name}_api"
+    # Manufacturer through the F1 ladder (was a direct fill-when-NULL `card.manufacturer
+    # = ...` — the last un-routed maker writer, which left NULL provenance ranking at
+    # the legacy floor). The ladder fills an empty maker, displaces legacy/lower-tier
+    # values (50 < 90), and never overwrites manual (100) or trio_source (95).
+    set_manufacturer(card, manufacturer, ladder_source, confidence)
+    if enrichment.get("category"):
+        # Same ladder: fills an empty category and may correct a lower-tier one (decode
+        # 85, AI guess 40), but never overwrites a higher-tier value and never persists
+        # off-vocab junk.
         set_category(card, enrichment["category"], ladder_source, confidence)
 
     # Classify and tag

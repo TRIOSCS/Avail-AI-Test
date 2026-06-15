@@ -1204,9 +1204,10 @@ class TestReenrich:
 
         mock_enrich.return_value = {"enriched": 1}
 
-        # Set specs_structured and category on the card
+        # Set specs_structured and a canonical category (the @validates guard rejects
+        # off-vocab) on the card.
         test_material_card.specs_structured = {"voltage": {"value": "3.3V"}}
-        test_material_card.category = "semiconductor"
+        test_material_card.category = "ics_other"
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
@@ -1243,7 +1244,7 @@ class TestReenrich:
         mock_enrich.return_value = {"enriched": 1}
 
         test_material_card.specs_structured = {"voltage": "3.3V"}
-        test_material_card.category = "ic"
+        test_material_card.category = "ics_other"  # canonical (off-vocab is rejected by @validates)
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):

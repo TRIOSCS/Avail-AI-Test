@@ -105,17 +105,28 @@
 
 > UNIQUE `uq_vendor_part_unavail_vendor_mpn` (vendor_name_normalized, normalized_mpn) — marking again for an existing pair is an upsert (the re-arm path), never a duplicate. Written and read only via `app/services/vendor_unavailability.py` (record/clear/apply/release/exclude) and `app/services/sighting_status.py` (reader-authority status branch).
 
-**`contacts`** — RFQ emails sent to vendors
+**`contacts`** — outreach to vendors (RFQ emails, logged calls)
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
 | requisition_id | FK -> requisitions (CASCADE) | |
 | user_id | FK -> users (CASCADE) | |
-| contact_type | String 20 | rfq\|follow_up\|etc |
+| contact_type | String 20 | email (RFQ sends)\|phone (logged calls) |
 | vendor_name | String 255 | |
 | vendor_contact | String 255 | Email address |
+| parts_included | JSON | Parts asked of the vendor — scoped to THIS row's requisition |
 | graph_message_id | String 500 | Microsoft Graph tracking |
+| graph_conversation_id | String 500 | Graph thread id — inbox-monitor Tier-1 reply matching |
 | status | String 50 | sent\|replied\|etc |
+
+> **Row semantics: one row per (requisition, vendor) pair.** A cross-requisition
+> bulk RFQ (sightings composer) still sends ONE email per vendor, but
+> `send_batch_rfq` writes one Contact per involved requisition — each
+> `parts_included` holding only its own requisition's parts, all of a vendor's
+> rows sharing that one email's `graph_message_id` / `graph_conversation_id`.
+> The inbox monitor therefore treats `graph_conversation_id` as one-to-many
+> (a reply on the thread progresses EVERY contact sharing it). No schema change
+> was needed — multiplicity lives in rows, `requisition_id` stays singular.
 
 **`vendor_responses`** — Replies from vendors to RFQs
 | Column | Type | Notes |
@@ -307,7 +318,7 @@
 | manufacturer | String 255, indexed | Dual-brand semantics (migration 097): the ACTUAL MAKER (`Seagate Technology`, `Kingston Technology`, composite `Hitachi/IBM` verbatim). Written ONLY via `spec_tiers.set_manufacturer` (F1 ladder + `normalize_brand_name`); legacy direct writes rank at the `legacy_backfill` floor (50) on the next arbitration. |
 | brand | String 255, nullable, indexed (`ix_material_cards_brand`) | Migration 097. The OEM LABEL on the part (`IBM`, `Dell Technologies`, `Hewlett Packard Enterprise`, `Lenovo`) — most cards never get one. Written ONLY via `spec_tiers.set_brand`, gated to source-backed evidence (`OEM_TRAILING_RE` description token, explicit ingest column, B1 legacy reclassify) — never guessed. The materials "Brand" facet ORs across `brand` + `manufacturer` (one combined facet; wire param stays `manufacturers`). |
 | brand_source / brand_confidence / brand_tier / brand_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `brand`, same F1 contract as `category_*` (valued-but-NULL-provenance ranks at the legacy floor 50; `brand_updated_at` is the ladder tie-break stamp). |
-| manufacturer_source / manufacturer_confidence / manufacturer_tier / manufacturer_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `manufacturer` — required so trio_source (95) maker evidence (fru_links `mfg_model`) can displace an OEM name sitting in `manufacturer` from legacy data via the ladder. All pre-097 rows are NULL → legacy floor 50 at runtime (no in-migration backfill; the data backfill is `python -m app.management.backfill_dual_brand`, dry-run by default, run post-deploy). |
+| manufacturer_source / manufacturer_confidence / manufacturer_tier / manufacturer_updated_at | String 50 / Float / Integer / UTCDateTime — all nullable | Migration 097. Provenance for `manufacturer` — required so trio_source (95) maker evidence (fru_links `mfg_model`) can displace an OEM name sitting in `manufacturer` from legacy data via the ladder. Maker writers: `mpn_decode` (85, decoder's own vendor), `fru_matrix_decode` (84, §2.6(d) — the UNANIMOUS deterministic vendor across a FRU's decoded canonical models, conf 0.9), vendor APIs (90), trio_source (95), manual (100). All pre-097 rows are NULL → legacy floor 50 at runtime (no in-migration backfill; the data backfill is `python -m app.management.backfill_dual_brand`, dry-run by default, run post-deploy). |
 | description | Text | AI-enriched part description |
 | category | String 255 | AI-enriched commodity category |
 | lifecycle_status | String 50 | active\|nrfnd\|eol\|obsolete\|ltb |
@@ -317,7 +328,7 @@
 | enrichment_status | String 20 | `unenriched` \| `verified` \| `web_sourced` \| `oem_sourced` \| `ai_inferred` \| `not_found` \| `not_catalogued`. Validated on write against `MaterialEnrichmentStatus` (constants.py). `oem_sourced` = single official OEM page; `not_catalogued` = recognised OEM/FRU part with no public specs (retries on 30-day backoff). No migration — varchar column. |
 | cross_references | JSONB | Alternative MPNs; also records OEM FRU→commodity-MPN linkages written by the cross-ref enrichment tier (`[{"mpn": <resolved>, "manufacturer": <mfr>}]`). |
 | specs_structured | JSONB | Parametric data — `{spec_key: {value, source, confidence, tier, updated_at}}`. `tier` (SP2/F2, migration 096) is the F1 ladder rank of the writing source so `record_spec` can rank conflicting writes without re-deriving; legacy entries lacking `tier` are backfilled in-memory from `source` before comparison. Source vocabulary (ladder tier): `manual` (100) · `trio_source` (95) · vendor APIs `digikey_api`\|`nexar_api`\|`mouser_api`\|… (90) · `trio_source_ai` (88) · `mpn_decode` (85) · `fru_matrix_decode` (84, FRU crosswalk intersection) · `desc_parse` (83) · `fru_desc_parse` (82, FRU-linked qual-sheet description intersection — below the card's OWN description, above the OEM scrapers) · `spec_extraction` (60, AI quality-floored at ≥ 0.85) · `legacy_backfill` (50) · `{ai_guess,claude_opus_inferred,claude_haiku}` (40); unknown sources rank 0 (once-per-source WARNING). |
-| category_source | String 50, nullable | SP2/F2 (migration 096). Which source set `category` (e.g. `mpn_decode`, `digikey_api`, `claude_opus_inferred`, `legacy_backfill`). Written only via `spec_tiers.set_category`. |
+| category_source | String 50, nullable | SP2/F2 (migration 096). Which source set `category` (e.g. `mpn_decode`, `digikey_api`, `claude_opus_inferred`, `legacy_backfill`; `desc_parse`/83 + `fru_desc_parse`/82 when set by the categorize-from-description channel — see APP_MAP_INTERACTIONS §desc-parse). Written only via `spec_tiers.set_category`. |
 | category_confidence | Float, nullable | SP2/F2. Confidence of the source that set `category`. |
 | category_tier | Integer, nullable | SP2/F2. F1 ladder rank of `category_source`. A lower-tier source can never overwrite a higher-tier category (the ladder, not write order, decides). Legacy valued-but-unprovenanced rows are backfilled to mid-tier 50 (`legacy_backfill`/0.5); `set_category` applies the SAME floor at runtime to a valued category with NULL provenance, so pre- and post-migration data rank identically. |
 | category_updated_at | UTCDateTime, nullable | SP2/F2 (migration 096). When the category was last (re)written through the ladder — the tie-break timestamp for `set_category` (never borrowed from the card-wide `updated_at`). NULL for legacy rows (ranks as ""). |
@@ -348,7 +359,7 @@
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 
-**`material_card_audit`** — Audit trail for card lifecycle events
+**`material_card_audit`** — Audit trail for card lifecycle events (actions: created, linked, unlinked, deleted, merged, healed, restored, soft_deleted, plus `categorized` — written by `app/management/categorize_from_desc.py` when the categorize-from-description channel sets a previously-NULL category, `details` carrying the resulting category/source/tier/channel)
 
 **`material_price_snapshots`** — Historical pricing data points
 
@@ -371,6 +382,12 @@
 > UNIQUE `uq_fru_links_edge` (fru_norm, related_norm, rel_kind, source_sheet). Populated by
 > `python -m app.management.ingest_fru_matrix <xlsx> [--apply]`; read by
 > `app/services/fru_matrix_service.py` for the materials detail "FRU matrix" / "Used in FRUs" panels.
+> The `mfg_model` (always) and `drive_pn` (gated by `settings.fru_crosswalk_drive_pn_decode_enabled`)
+> edges feed the FRU crosswalk DECODE channel (`fru_crosswalk_enrich.py` → tier-84 category +
+> deterministic-maker + specs); `mfg_model`/`drive_pn` descriptions feed the DESC channel
+> (tier-82 specs). The targeted drain + dangling-card creation over these edges is
+> `python -m app.management.run_fru_crosswalk [drain|create|all] [--apply]` (dry-run default;
+> lenovo_ppn danglers are explicitly skipped). See APP_MAP_INTERACTIONS "FRU Crosswalk".
 
 **`oem_crosswalk`** — permanent OEM spare→canonical-MPN web-resolution cache, incl. negative rows (migration 101)
 | Column | Type | Notes |
@@ -552,6 +569,10 @@ Lineage columns added to existing tables: `requirements.oem_hint`; `sightings.re
 
 **`commodity_spec_schemas`** — Parametric filter definitions per commodity
 **`material_spec_facets`** — Parametric values per material card
+**`reconcile_runs`** — Durable per-run tallies for `reconcile_decoded_facets` (migration 104)
+**`facet_audits`** — Per-row facet-accuracy verdicts (migration 104)
+
+> **Trust telemetry tables (trust architecture §1.2, migration 104):** `reconcile_runs` persists one row per `app/management/reconcile_decoded_facets.py` execution — `mode` ('dry-run'|'apply'), `sources`/`keys` (JSONB lists — the run scope), `by_class` (JSONB `{failure_class: {action: count}}`) and `totals` (JSONB `{cards, facets, corrected, deleted, unchanged, skipped, failed}`), indexed on `ran_at`. Both prior reconcile rounds' apply tallies were runtime-log-only and are unrecoverable; every run (dry-run AND apply) now leaves a queryable row, written via `record_reconcile_run` (flush-only; the CLI owns the commit — a dry-run commits the report row AFTER its facet-write rollback). `facet_audits` stores one verdict per audited facet row for the volume-weighted accuracy audits — `card_id` (no FK, survives card deletion), `category`/`spec_key`/`value`/`source`, and `verdict` (`correct`|`wrong`|`unverifiable`), indexed on `audited_at`, `card_id`, and `(category, spec_key)`. The closed verdict vocabulary is pinned at the DB level by `CHECK ck_facet_audits_verdict` AND the model's `@validates("verdict")` (the model guard only catches ORM writers; the CHECK catches everything). `facet_audits` lands in this migration so the Phase-2.2 audit harness needs no second one. Models: `app/models/telemetry.py` (`ReconcileRun`, `FacetAudit`). Downgrade drops both tables (telemetry, not source data — acceptable loss on rollback).
 
 > **Facet provenance (SP2/F2, migration 096):** each facet row carries `source` (String 50, nullable), `confidence` (Float, nullable), and `tier` (Integer, nullable), set by `record_spec` to mirror the winning `specs_structured` entry on every write that wins the F1 ladder (a losing write never mutates the facet). Legacy rows are backfilled from the matching `material_cards.specs_structured -> spec_key` JSONB entry (PG-only backfill in migration 096; tier computed via a `CASE` snapshot of the `SOURCE_TIER` map — a sync test pins the snapshot against the live ladder).
 

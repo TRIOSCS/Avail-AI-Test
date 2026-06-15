@@ -453,14 +453,24 @@ class TestApplyEnrichmentToCard:
 
         assert card.category is None  # junk rejected, column left NULL
 
-    def test_does_not_overwrite_existing_manufacturer(self, db_session):
-        """Does not overwrite existing manufacturer."""
+    def test_does_not_overwrite_higher_tier_manufacturer(self, db_session):
+        """A higher-tier maker (manual=100) survives an incoming connector write
+        (mouser_api=90).
+
+        Manufacturer now routes through spec_tiers.set_manufacturer, so "don't
+        overwrite" is the ladder's tier arbitration — a manual prior outranks the
+        connector tier and is kept (the legacy fill-when-NULL guard is gone).
+        """
         from app.services.enrichment import _apply_enrichment_to_card
 
         card = _make_card(db_session, manufacturer="Existing Mfr")
+        card.manufacturer_source = "manual"
+        card.manufacturer_confidence = 1.0
+        card.manufacturer_tier = 100
+        db_session.flush()
         enrichment = {
             "manufacturer": "New Mfr",
-            "category": "New Cat",
+            "category": "voltage_regulators",
             "source": "mouser",
             "confidence": 0.95,
         }
@@ -473,14 +483,25 @@ class TestApplyEnrichmentToCard:
 
         assert card.manufacturer == "Existing Mfr"
 
-    def test_does_not_overwrite_existing_category(self, db_session):
-        """Does not overwrite existing category."""
+    def test_does_not_overwrite_higher_tier_category(self, db_session):
+        """A higher-tier category (manual=100) survives an incoming connector write
+        (mouser_api=90).
+
+        Category routes through spec_tiers.set_category; the manual prior outranks the
+        connector tier and is kept. The seeded value must be canonical (the @validates
+        guard rejects off-vocab assignment), so this also exercises the ladder, not the
+        guard.
+        """
         from app.services.enrichment import _apply_enrichment_to_card
 
-        card = _make_card(db_session, category="Existing Cat")
+        card = _make_card(db_session, category="capacitors")
+        card.category_source = "manual"
+        card.category_confidence = 1.0
+        card.category_tier = 100
+        db_session.flush()
         enrichment = {
             "manufacturer": "TI",
-            "category": "New Cat",
+            "category": "voltage_regulators",  # canonical, but lower tier (mouser_api=90)
             "source": "mouser",
             "confidence": 0.95,
         }
@@ -491,7 +512,7 @@ class TestApplyEnrichmentToCard:
         ):
             _apply_enrichment_to_card(card, enrichment, db_session)
 
-        assert card.category == "Existing Cat"
+        assert card.category == "capacitors"
 
     def test_creates_brand_and_commodity_tags(self, db_session):
         """Creates brand and commodity tags from classification."""

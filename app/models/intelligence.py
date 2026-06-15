@@ -72,8 +72,9 @@ class MaterialCard(Base):
     # ladder). Through set_category, a lower-tier source can never overwrite a category
     # written by a higher-tier source; a category carrying a value but NULL provenance
     # (legacy data) ranks at the legacy_backfill mid-tier (50). All in-tree category
-    # writers route through set_category; SP3 adds an @validates("category") guard so a
-    # future direct assignment cannot bypass the ladder and leave these columns stale.
+    # writers route through set_category; the @validates("category") guard below (SP3)
+    # rejects any off-vocab direct assignment, so a future un-routed writer can no
+    # longer persist junk past the ladder.
     category_source = Column(String(50))  # "mpn_decode", "digikey_api", "claude_opus_inferred", ...
     category_confidence = Column(Float)
     category_tier = Column(Integer)
@@ -162,6 +163,28 @@ class MaterialCard(Base):
             return MaterialEnrichmentStatus.UNENRICHED.value
         return MaterialEnrichmentStatus(value).value  # raises ValueError on unknown
 
+    @validates("category")
+    def _validate_category(self, _key, value):
+        """SP3 ladder hardening: only NULL or a canonical commodity key may be assigned.
+
+        set_category (spec_tiers) is the single routed writer and only ever assigns
+        canonical keys, so it passes untouched; an off-vocab direct assignment (the
+        pre-#267 bypass-writer class that minted 61 junk categories) raises instead of
+        silently persisting junk with stale provenance columns. Lazy import — the
+        registry imports app.models at module level.
+        """
+        if value is None:
+            return None
+        from app.services.commodity_registry import CANONICAL_COMMODITY_KEYS
+
+        if value not in CANONICAL_COMMODITY_KEYS:
+            raise ValueError(
+                f"material_cards.category must be a canonical commodity key or None, got {value!r} — "
+                "route the write through spec_tiers.set_category (which normalizes via "
+                "category_normalizer and arbitrates via the F1 ladder)"
+            )
+        return value
+
 
 class MaterialVendorHistory(Base):
     __tablename__ = "material_vendor_history"
@@ -199,7 +222,9 @@ class MaterialCardAudit(Base):
     __tablename__ = "material_card_audit"
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
-    action = Column(String(50), nullable=False)  # created, linked, unlinked, deleted, merged, healed, restored
+    # created, linked, unlinked, deleted, merged, healed, restored,
+    # category_cleanup / facet_cleanup (app/management/cleanup_known_bad.py)
+    action = Column(String(50), nullable=False)
     entity_type = Column(String(50))  # requirement, sighting, offer
     entity_id = Column(Integer)
     old_card_id = Column(Integer)

@@ -13,15 +13,18 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 
 import asyncio
 import json
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, NamedTuple, TypedDict
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, Response
 from loguru import logger
 from pydantic import ValidationError
+from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -48,6 +51,7 @@ from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
+from ..services.vendor_duplicates import check_vendor_duplicate
 from ..services.vendor_unavailability import (
     clear_unavailability,
     excluded_vendor_norms,
@@ -1299,6 +1303,121 @@ async def sightings_log_activity(
     return resp
 
 
+def _vss_vendor_card_join():
+    """Coalesce join VendorSightingSummary → VendorCard (F10).
+
+    The vendor_card_id FK (indexed ix_vss_vendor_card) is the PRIMARY branch; VSS
+    rows with a NULL FK (e.g. summaries rebuilt before the FK backfill ran) fall
+    back to the legacy lower(trim(vendor_name)) == normalized_name match so a
+    known vendor's coverage never silently disappears. The NULL-FK guard on the
+    fallback prevents double-matching FK rows by name. Plain functions only —
+    SQLite + PG safe.
+
+    Called by: _coverage_ranked_vendor_rows, sightings_vendor_modal (MPN titles).
+    """
+    return or_(
+        VendorSightingSummary.vendor_card_id == VendorCard.id,
+        and_(
+            VendorSightingSummary.vendor_card_id.is_(None),
+            sqlfunc.lower(sqlfunc.trim(VendorSightingSummary.vendor_name)) == VendorCard.normalized_name,
+        ),
+    )
+
+
+class RankedVendor(NamedTuple):
+    """One coverage-ranked vendor row (see _coverage_ranked_vendor_rows).
+
+    Named fields pin the SELECT-column order: a future swap of covered_count and
+    avg_score in the query would otherwise mis-bind silently (both are numeric).
+    """
+
+    card: VendorCard
+    covered_count: int
+    avg_score: float | None
+
+
+class CoverageEntry(TypedDict):
+    """Per-card coverage shape rendered in the vendor modal row.
+
+    ``mpns`` is populated lazily by a second query and stays ``""`` for cards with no
+    MPN rows — ``""`` is a valid terminal value, NOT "not yet computed".
+    """
+
+    count: int
+    avg_score: float | None
+    mpns: str
+
+
+def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
+    """Coverage-ranked suggested vendors — the single source shared by the vendor modal
+    and the affinity endpoint (which must drop already-suggested vendors computed the
+    SAME way, so it stays self-contained).
+
+    One grouped query over VendorSightingSummary filtered to the selected requirements,
+    joined to VendorCard via _vss_vendor_card_join: the vendor_card_id FK first, with a
+    lower(trim(vendor_name)) fallback for NULL-FK rows (post-rebuild summaries are now
+    INCLUDED via that fallback — only summaries matching no card at all stay out, since
+    the modal suggests known vendors). Plain-column aggregates only (SQLite+PG safe).
+    Returns RankedVendor(card, covered_count, avg_score) rows, coverage desc then
+    engagement desc, capped at 20.
+    """
+    covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
+    vendor_query = (
+        db.query(
+            VendorCard,
+            covered_count.label("covered_count"),
+            sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
+        )
+        .join(VendorSightingSummary, _vss_vendor_card_join())
+        .filter(
+            VendorSightingSummary.requirement_id.in_(req_id_list),
+            VendorCard.is_blacklisted.is_(False),
+        )
+    )
+    if excluded:
+        vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
+    raw_rows = (
+        vendor_query.group_by(VendorCard.id)
+        .order_by(
+            covered_count.desc(),
+            VendorCard.engagement_score.desc().nullslast(),
+            VendorCard.id,
+        )
+        .limit(20)
+        .all()
+    )
+    rows = [RankedVendor(card, int(n_covered), avg_score) for card, n_covered, avg_score in raw_rows]
+    if excluded:
+        # Belt and braces: some legacy cards carry a normalized_name that predates
+        # normalize_vendor_name (suffix kept) — re-check through the canonical
+        # normalizer so "X, Inc." cards can't slip past the column filter.
+        rows = [
+            r
+            for r in rows
+            if normalize_vendor_name(r.card.display_name or r.card.normalized_name or "") not in excluded
+        ]
+    return rows
+
+
+def _find_affinity_in_thread(mpn: str) -> list[dict]:
+    """Run the SYNC find_vendor_affinity on a worker thread with its OWN session.
+
+    SQLAlchemy sessions are not thread-safe, so the request session never crosses the
+    to_thread boundary — each call opens and closes a fresh SessionLocal (the
+    established thread-work pattern: description_service._collect_db_descriptions,
+    jobs/tagging_jobs). find_vendor_affinity is imported lazily so tests mock it at
+    the source module (app.services.vendor_affinity_service), never the import site.
+    """
+    from ..database import SessionLocal
+    from ..services.vendor_affinity_service import find_vendor_affinity
+
+    thread_db = SessionLocal()
+    try:
+        return find_vendor_affinity(mpn, thread_db)
+    finally:
+        thread_db.close()
+
+
 @router.get("/v2/partials/sightings/vendor-modal", response_class=HTMLResponse)
 async def sightings_vendor_modal(
     request: Request,
@@ -1327,40 +1446,331 @@ async def sightings_vendor_modal(
     excluded = excluded_vendor_norms(db, requirements) if requirements else set()
 
     suggested_vendors: list[VendorCard] = []
+    coverage: dict[int, CoverageEntry] = {}
     if req_id_list:
-        vendor_query = (
-            db.query(VendorCard)
-            .join(
-                VendorSightingSummary,
-                sqlfunc.lower(sqlfunc.trim(VendorSightingSummary.vendor_name)) == VendorCard.normalized_name,
+        rows = _coverage_ranked_vendor_rows(db, req_id_list, excluded)
+        suggested_vendors = [r.card for r in rows]
+        coverage = {
+            r.card.id: CoverageEntry(
+                count=r.covered_count,
+                avg_score=float(r.avg_score) if r.avg_score is not None else None,
+                mpns="",
             )
-            .filter(
-                VendorSightingSummary.requirement_id.in_(req_id_list),
-                VendorCard.is_blacklisted.is_(False),
+            for r in rows
+        }
+        if coverage:
+            # Covered-MPN list per vendor (rendered in the row's `title`) — a second
+            # plain query; no string_agg/group_concat (SQLite vs PG divergence).
+            # Same coalesce join as the ranking query, so fallback-joined (NULL-FK)
+            # rows contribute their MPNs too.
+            mpn_rows = (
+                db.query(VendorCard.id, Requirement.primary_mpn)
+                .select_from(VendorSightingSummary)
+                .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
+                .join(VendorCard, _vss_vendor_card_join())
+                .filter(
+                    VendorSightingSummary.requirement_id.in_(req_id_list),
+                    VendorCard.id.in_(list(coverage)),
+                )
+                .distinct()
+                .all()
             )
-        )
-        if excluded:
-            vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
-        suggested_vendors = (
-            vendor_query.order_by(VendorCard.engagement_score.desc().nullslast()).distinct().limit(20).all()
-        )
-        if excluded:
-            # Belt and braces: some legacy cards carry a normalized_name that predates
-            # normalize_vendor_name (suffix kept) — re-check through the canonical
-            # normalizer so "X, Inc." cards can't slip past the column filter.
-            suggested_vendors = [
-                v
-                for v in suggested_vendors
-                if normalize_vendor_name(v.display_name or v.normalized_name or "") not in excluded
-            ]
+            mpns_by_card: dict[int, set[str]] = {}
+            for card_id, mpn in mpn_rows:
+                if mpn:
+                    mpns_by_card.setdefault(card_id, set()).add(mpn)
+            for card_id, mpns in mpns_by_card.items():
+                coverage[card_id]["mpns"] = ", ".join(sorted(mpns))
 
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
+        "coverage": coverage,
         "requirement_ids": req_id_list,
         "parts": parts,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
+
+
+@router.get("/v2/partials/sightings/vendor-affinity", response_class=HTMLResponse)
+async def sightings_vendor_affinity(
+    request: Request,
+    requirement_ids: str = "",
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """On-demand affinity vendor suggestions for the RFQ vendor modal.
+
+    Called by: vendor_modal.html "Suggest more vendors" button (hx-get swaps the
+    rows into #rfq-affinity-section, replacing the button — second click impossible).
+    Runs find_vendor_affinity per selected primary MPN, merges/dedupes by vendor
+    keeping the highest confidence, drops vendors already coverage-suggested (same
+    query as the modal — self-contained) or unavailability-excluded, caps at 10.
+
+    THREADING: find_vendor_affinity is SYNC with a blocking Anthropic L3 call inside
+    (3-12s for 6 parts) — each per-MPN call runs via asyncio.to_thread with its own
+    short-lived session (_find_affinity_in_thread), gathered under a Semaphore(3) so
+    a wide selection can't exhaust the thread pool. Never call it bare from this
+    async route: it would block the uvicorn worker.
+    """
+    req_id_list = [int(x) for x in requirement_ids.split(",") if x.strip().isdigit()]
+    requirements = (db.query(Requirement).filter(Requirement.id.in_(req_id_list)).all()) if req_id_list else []
+
+    affinity_vendors: list[dict] = []
+    affinity_partial = False
+    if requirements:
+        excluded = excluded_vendor_norms(db, requirements)
+        suggested_norms: set[str] = set()
+        for r in _coverage_ranked_vendor_rows(db, req_id_list, excluded):
+            # Both spellings: the stored normalized_name (may be legacy-suffixed) and
+            # the canonical re-normalization — affinity matches are compared canonically.
+            suggested_norms.add(r.card.normalized_name or "")
+            suggested_norms.add(normalize_vendor_name(r.card.display_name or r.card.normalized_name or ""))
+
+        # One affinity call per UNIQUE primary MPN (order-preserving dedupe — no
+        # double L3 spend when requirements share an MPN).
+        mpns = list(dict.fromkeys(r.primary_mpn for r in requirements if r.primary_mpn))
+        sem = asyncio.Semaphore(3)
+
+        async def _bounded(mpn: str) -> list[dict]:
+            async with sem:
+                return await asyncio.to_thread(_find_affinity_in_thread, mpn)
+
+        # F6: one MPN's failure must not blank the whole panel (or 500 the swap).
+        # Failed MPNs are logged with the MPN in context; survivors render, and
+        # the template shows a quiet "suggestions incomplete" notice.
+        per_mpn_results = await asyncio.gather(*(_bounded(m) for m in mpns), return_exceptions=True)
+        per_mpn_matches: list[list[dict]] = []
+        for mpn, matches in zip(mpns, per_mpn_results):
+            if isinstance(matches, BaseException):
+                affinity_partial = True
+                logger.error("Vendor affinity lookup failed for MPN {}: {}", mpn, matches)
+                continue
+            per_mpn_matches.append(matches)
+
+        best: dict[str, dict] = {}
+        for matches in per_mpn_matches:
+            for match in matches:
+                norm = normalize_vendor_name(match.get("vendor_name") or "")
+                if not norm or norm in suggested_norms or norm in excluded:
+                    continue
+                if norm not in best or match["confidence"] > best[norm]["confidence"]:
+                    best[norm] = {**match, "normalized_name": norm}
+        affinity_vendors = sorted(best.values(), key=lambda m: m["confidence"], reverse=True)[:10]
+
+    ctx = {"request": request, "affinity_vendors": affinity_vendors, "affinity_partial": affinity_partial}
+    return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
+
+
+def _parse_website_domain(website: str) -> str:
+    """Extract a usable domain from user-typed website input (F12).
+
+    urlsplit-based (scheme optional), lowercased host, strips ONE leading
+    "www." — never a blanket str.replace that mangles hosts containing the
+    substring. Returns "" when no plausible domain can be extracted; the caller
+    turns that into a visible 400 instead of silently saving a junk domain.
+
+    Called by: sightings_composer_vendor.
+    """
+    raw = website.strip()
+    try:
+        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+        host = (parsed.hostname or "").strip().lower()
+    except ValueError:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        return ""
+    return host
+
+
+@router.post("/v2/partials/sightings/composer-vendor", response_class=HTMLResponse)
+async def sightings_composer_vendor(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Resolve-or-create a vendor for the RFQ composer's any-vendor picker.
+
+    Called by: vendor_modal.html — both the "Find any vendor" autocomplete pick and
+    the "Add new vendor" inline mini-form POST here (form fields: vendor_name
+    required; website, email, requirement_ids optional); the returned row is
+    appended into the stable-id #rfq-added-vendors sub-container.
+
+    Flow: check_vendor_duplicate (the extracted service — direct call, never
+    loopback HTTP). A confident duplicate is an EXACT normalized-name match (the
+    service's own classification: exact short-circuits at score 100; fuzzy >= 80
+    are suggestions, not dupes) → return the EXISTING vendor as a selected row with
+    a "matched existing vendor" notice, no new DB row. Otherwise create the minimal
+    VendorCard (normalized_name, display_name, optional domain parsed from the
+    website — the crm/offers manual-entry pattern) plus a VendorContact when an
+    email was given, commit, then fire _background_enrich_vendor post-commit
+    (identical to the materials.py / vendor_contacts.py patterns; imports are lazy
+    so tests mock both gates at their source modules).
+
+    If the resolved vendor is unavailability-excluded for the selected
+    requirement_ids, the row renders the rose "marked unavailable" chip with a
+    DISABLED checkbox — send-time re-validation stays the backstop.
+    """
+    form = await request.form()
+    vendor_name = str(form.get("vendor_name") or "").strip()
+    norm = normalize_vendor_name(vendor_name)
+    if not vendor_name or not norm:
+        raise HTTPException(status_code=400, detail="vendor_name required")
+    website = str(form.get("website") or "").strip()
+    email = str(form.get("email") or "").strip()
+    if email and "@" not in email:
+        raise HTTPException(status_code=400, detail="invalid contact email")
+    domain = ""
+    if website:
+        domain = _parse_website_domain(website)
+        if not domain:
+            raise HTTPException(status_code=400, detail="invalid website — could not extract a domain")
+    req_id_list = [int(x) for x in form.getlist("requirement_ids") if str(x).strip().isdigit()]
+
+    matches = check_vendor_duplicate(vendor_name, db)
+    matched_existing = bool(matches) and matches[0]["match"] == "exact"
+    contact_added = False
+
+    # TOCTOU: check_vendor_duplicate ran an earlier, separate query, so the matched
+    # card can be deleted between that check and this fetch. A None card here would
+    # AttributeError → generic 500; instead treat it as "no confident duplicate" and
+    # fall through to the create branch (re-resolving the name the user typed).
+    matched_card = db.get(VendorCard, matches[0]["id"]) if matched_existing else None
+    if matched_existing and matched_card is None:
+        matched_existing = False
+
+    if matched_existing:
+        # Confident duplicate: hand back the existing card — but a typed email /
+        # website must NOT be silently discarded (F4): attach the email as a
+        # VendorContact (deduped case-insensitively against the card's existing
+        # contacts) and backfill a missing domain. The row's notice reports the
+        # email attach explicitly.
+        assert matched_card is not None  # narrowed by the TOCTOU guard above
+        card = matched_card
+        updated = False
+        if email:
+            existing_emails = {
+                (vc.email or "").lower()
+                for vc in db.query(VendorContact).filter(VendorContact.vendor_card_id == card.id).all()
+            }
+            if email.lower() not in existing_emails:
+                db.add(
+                    VendorContact(
+                        vendor_card_id=card.id,
+                        email=email,
+                        contact_type="company",
+                        source="rfq_manual",
+                        confidence=80,
+                        is_verified=False,
+                    )
+                )
+                contact_added = True
+                updated = True
+        if domain and not card.domain:
+            card.domain = domain
+            updated = True
+        if updated:
+            db.commit()
+    else:
+        card = VendorCard(
+            normalized_name=norm,
+            display_name=vendor_name,
+            domain=domain or None,
+            emails=[],
+            phones=[],
+        )
+        db.add(card)
+        db.flush()
+        if email:
+            db.add(
+                VendorContact(
+                    vendor_card_id=card.id,
+                    email=email,
+                    contact_type="company",
+                    source="rfq_manual",
+                    confidence=80,
+                    is_verified=False,
+                )
+            )
+        db.commit()
+
+        # Post-commit background enrichment when a usable domain came with the
+        # website. Lazy imports: tests mock _background_enrich_vendor and
+        # get_credential_cached at their SOURCE modules (CLAUDE.md), and the
+        # coroutine opens its own session (never the request session). F7: the
+        # card is already committed — a failure ANYWHERE in this block is logged
+        # and the created row is still returned (enrichment is best-effort;
+        # turning it into a 500 would misreport a successful create).
+        try:
+            if card.domain and not card.last_enriched_at:
+                from ..services.credential_service import get_credential_cached
+
+                if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
+                    "anthropic_ai", "ANTHROPIC_API_KEY"
+                ):
+                    from ..utils.async_helpers import safe_background_task
+                    from ..utils.vendor_helpers import _background_enrich_vendor
+
+                    await safe_background_task(
+                        _background_enrich_vendor(card.id, card.domain, card.display_name),
+                        task_name="enrich_vendor_from_composer",
+                    )
+        except Exception:
+            logger.error(
+                "Post-create enrichment kickoff failed for vendor card {} — card committed and returned",
+                card.id,
+                exc_info=True,
+            )
+
+    # Active-only unavailability re-check for the selected parts: an excluded
+    # vendor renders the rose chip with a DISABLED checkbox and never joins the
+    # selection. Both norm spellings are checked (stored normalized_name may be
+    # legacy-suffixed), same belt-and-braces as _coverage_ranked_vendor_rows.
+    is_excluded = False
+    if req_id_list:
+        requirements = db.query(Requirement).filter(Requirement.id.in_(req_id_list)).all()
+        if requirements:
+            excluded = excluded_vendor_norms(db, requirements)
+            canonical = normalize_vendor_name(card.display_name or card.normalized_name or "")
+            is_excluded = canonical in excluded or (card.normalized_name or "") in excluded
+
+    ctx = {
+        "request": request,
+        "vendor": card,
+        "matched_existing": matched_existing,
+        "contact_added": contact_added,
+        "is_excluded": is_excluded,
+    }
+    return template_response("htmx/partials/sightings/composer_vendor_row.html", ctx)
+
+
+def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorContact]:
+    """Vendor contacts ordered worst-first so a last-wins ``{card_id: c}`` dict keeps
+    the BEST contact per vendor.
+
+    VendorContact has no is_primary flag, and a vendor can hold several contacts (an
+    rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
+    unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
+    NULL-email) row win, which would silently skip the vendor as "had no email". Ordering
+    non-NULL email LAST (then verified, then higher confidence) makes the real email win.
+
+    Called by: sightings_preview_inquiry, sightings_send_inquiry.
+    """
+    if not card_ids:
+        return []
+    return (
+        db.query(VendorContact)
+        .filter(VendorContact.vendor_card_id.in_(card_ids))
+        .order_by(
+            VendorContact.email.is_(None).desc(),  # NULL-email rows first (lose last-wins)
+            VendorContact.is_verified.asc().nullsfirst(),  # verified rows last
+            VendorContact.confidence.asc().nullsfirst(),  # higher confidence last
+            VendorContact.id.asc(),  # deterministic tiebreak (newest row wins ties)
+        )
+        .all()
+    )
 
 
 @router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)
@@ -1390,8 +1800,9 @@ async def sightings_preview_inquiry(
     excluded = excluded_vendor_norms(db, requirements)
     unavailable_vendors, vendor_names = _partition_by_unavailability(vendor_names, excluded)
 
-    requisition_ids = {r.requisition_id for r in requirements}
-    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
+    # LOCKSTEP with send-inquiry: one [ref:{id}] token per involved requisition,
+    # ascending requisition id — exactly what send_batch_rfq will append.
+    requisition_ids = sorted({r.requisition_id for r in requirements})
 
     # Batch-fetch vendor cards + contacts (same logic as send-inquiry)
     normalized_names = [normalize_vendor_name(vn) for vn in vendor_names]
@@ -1399,12 +1810,16 @@ async def sightings_preview_inquiry(
     card_map = {c.normalized_name: c for c in cards}
 
     card_ids = [c.id for c in cards]
-    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    # Order worst-first so the dict's last-wins keeps the BEST contact per vendor: a
+    # vendor with multiple contacts (e.g. an rfq_manual row added via the composer plus
+    # an Apollo-enriched row) must not pick a NULL-email contact over one that has the
+    # real email — that would silently skip the vendor as "had no email".
+    contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
 
     from ..email_service import _build_html_body
 
-    avail_token = f"[ref:{requisition_id}]" if requisition_id else ""
+    avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
     previews = []
@@ -1465,6 +1880,11 @@ async def sightings_send_inquiry(
         )
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+    if not requirements:
+        # Every posted requirement id is stale (rows deleted under an open modal).
+        # Without this guard the send would proceed with NO requisition at all —
+        # emails out, zero Contact tracking — instead of telling the user.
+        raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -1472,8 +1892,12 @@ async def sightings_send_inquiry(
     excluded = excluded_vendor_norms(db, requirements)
     unavailable_vendors, sendable_vendors = _partition_by_unavailability(vendor_names, excluded)
 
-    requisition_ids = {r.requisition_id for r in requirements}
-    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
+    # Per-requisition parts map: NO collapse to one arbitrary requisition. Each
+    # involved requisition gets its own Contact rows (scoped to its parts) and
+    # its own [ref:{id}] subject token inside send_batch_rfq.
+    requisition_parts_map: dict[int, list] = {}
+    for r in requirements:
+        requisition_parts_map.setdefault(r.requisition_id, []).append({"mpn": r.primary_mpn, "qty": r.target_qty})
 
     # Batch-fetch vendor cards + contacts in two queries instead of N+1
     normalized_names = [normalize_vendor_name(vn) for vn in sendable_vendors]
@@ -1481,7 +1905,9 @@ async def sightings_send_inquiry(
     card_map = {c.normalized_name: c for c in cards}
 
     card_ids = [c.id for c in cards]
-    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    # Best-contact-per-vendor (see _best_contacts_by_card): last-wins dict over a
+    # worst-first ordering so a non-NULL email always beats a NULL-email row.
+    contacts = _best_contacts_by_card(db, card_ids)
     contact_map = {c.vendor_card_id: c for c in contacts}
 
     vendor_groups = []
@@ -1515,8 +1941,8 @@ async def sightings_send_inquiry(
                 token=token,
                 db=db,
                 user_id=user.id,
-                requisition_id=requisition_id,
                 vendor_groups=vendor_groups,
+                requisition_parts_map=requisition_parts_map,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check
@@ -1551,6 +1977,10 @@ async def sightings_send_inquiry(
                     progressed_count += 1
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
+        # A mid-batch crash can leave partial Contact/ActivityLog rows pending on
+        # the session — roll them back BEFORE the commit below, or the commit
+        # would persist tracking for sends in an unknown state.
+        db.rollback()
         failed_vendors = list(sendable_vendors)
         sent_count = 0
 

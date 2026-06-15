@@ -135,6 +135,16 @@ class Settings(BaseSettings):
     # between mpn-decode (0.95) and desc-parse (0.90) at 0.93. Safe to leave on — values are
     # enum-validated by record_spec. See app/services/fru_crosswalk_enrich.
     fru_crosswalk_enrich_enabled: bool = True
+    # Widen the FRU crosswalk DECODE channel to also decode the drive_pn rel_kind's related
+    # parts (today the decode channel reads mfg_model links only; drive_pn rows still feed the
+    # DESC channel regardless of this flag). GATED on a measured misread rate: a 100-row dry-run
+    # (app.management.run_fru_crosswalk --measure-drive-pn) found 0/3328 drive_pn related parts
+    # decode at all (they are IBM/Lenovo FRU numbers, not canonical manufacturer MPNs), so the
+    # OEM-firmware-suffix misread rate is 0% (≤2% gate) — safe to default ON. The regex gate in
+    # decode_mpn is the source of truth, so a non-canonical drive_pn never misdecodes; record_spec
+    # re-validates every value. Flip OFF only if a future drive_pn ingest carries canonical models
+    # whose firmware suffixes are re-measured above the 2% gate. See app/services/fru_crosswalk_enrich.
+    fru_crosswalk_drive_pn_decode_enabled: bool = True
     # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache): gates BOTH
     # worker passes — Pass B (the deterministic tier-80 writer over cached oem_crosswalk rows:
     # zero-network, zero-LLM, safe-on) and Pass A (the paced Claude-grounded resolution, which

@@ -644,9 +644,12 @@ htmx.on('htmx:afterSwap', function(evt) {
     // HTMX innerHTML swaps do not always auto-run Alpine on new nodes.
     // Explicit initTree for targets known to contain Alpine components/directives
     // (lead drawer close button; rq2-table rows with rowActionRail, x-truncate-tip,
-    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps).
+    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps;
+    // rfq-affinity-section — affinity rows whose :checked/@change checkboxes bind to
+    // the surrounding rfqVendorModal x-data scope, otherwise the checkboxes are inert
+    // and ticked affinity vendors never enter selectedVendors / never get sent).
     if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
-        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table') {
+        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table' || t.id === 'rfq-affinity-section') {
             Alpine.initTree(t);
         }
     }
@@ -1742,6 +1745,16 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   previewing: false,
   sending: false,
 
+  // ── Any-vendor picker + inline create (bulk composer spec Part 2 §3/§4) ──
+  vendorQuery: '',
+  vendorResults: [],
+  searchOpen: false,
+  addingVendor: false,
+  addingVendorBusy: false,
+  newVendorName: '',
+  newVendorWebsite: '',
+  newVendorEmail: '',
+
   get selectedCount() {
     return Object.keys(this.selectedVendors).length;
   },
@@ -1751,6 +1764,194 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   toggleVendor(name) {
     if (this.selectedVendors[name]) delete this.selectedVendors[name];
     else this.selectedVendors[name] = true;
+  },
+  // Server-returned composer rows (composer_vendor_row.html) x-init through here so
+  // they arrive CHECKED — runtime-added keys flow into vendor_names via _form().
+  selectVendor(name) {
+    this.selectedVendors[name] = true;
+  },
+
+  // Debounced (template-side @input.debounce.300ms) lookup against the existing
+  // /api/autocomplete/names endpoint. It mixes vendors + customers — filter to
+  // vendors client-side; never fork the endpoint. A failure is VISIBLE (toast),
+  // but only once per failure streak — debounced keystrokes would otherwise
+  // stack identical toasts; a success resets the flag.
+  _searchErrorToasted: false,
+  async searchVendors() {
+    const q = this.vendorQuery.trim();
+    if (q.length < 2) {
+      this.vendorResults = [];
+      this.searchOpen = false;
+      return;
+    }
+    try {
+      const resp = await fetch('/api/autocomplete/names?q=' + encodeURIComponent(q));
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      const items = await resp.json();
+      this.vendorResults = (items || []).filter((it) => it.type === 'vendor');
+      this.searchOpen = true;
+      this._searchErrorToasted = false;
+    } catch (err) {
+      console.error('[rfqVendorModal] vendor search failed', err);
+      this.vendorResults = [];
+      this.searchOpen = false;
+      if (!this._searchErrorToasted) {
+        this._searchErrorToasted = true;
+        this._toast('Vendor search failed — please try again', 'error');
+      }
+    }
+  },
+
+  async pickVendor(name) {
+    this.searchOpen = false;
+    this.vendorQuery = '';
+    this.vendorResults = [];
+    await this._addComposerVendor({ vendor_name: name });
+  },
+
+  async createVendor() {
+    if (!this.newVendorName.trim() || this.addingVendorBusy) return;
+    this.addingVendorBusy = true;
+    try {
+      const ok = await this._addComposerVendor({
+        vendor_name: this.newVendorName.trim(),
+        website: this.newVendorWebsite.trim(),
+        email: this.newVendorEmail.trim(),
+      });
+      if (ok) {
+        this.newVendorName = '';
+        this.newVendorWebsite = '';
+        this.newVendorEmail = '';
+        this.addingVendor = false;
+      }
+    } finally {
+      this.addingVendorBusy = false;
+    }
+  },
+
+  // Fast-path dedup: true when `name` matches a selection key case-insensitively.
+  // Keys are server-NORMALIZED names (suffixes stripped) while picker/typed names
+  // are display names, so this only catches exact/case matches — the authoritative
+  // check in _addComposerVendor re-tests the server's normalized name from the row.
+  _isVendorSelected(name) {
+    const q = (name || '').trim().toLowerCase();
+    return Object.keys(this.selectedVendors).some((k) => k.toLowerCase() === q);
+  },
+
+  // Extract the server-normalized vendor name from a composer_vendor_row.html
+  // payload. Both row branches carry a data-vendor-norm attribute (excluded rows
+  // have no x-init, so the attribute is their ONLY carrier); the x-init
+  // selectVendor("<normalized>") parse stays as a fallback for selectable rows.
+  // Parsed detached via DOMParser (no script execution, no insert).
+  _rowVendorName(html) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const norm = doc.querySelector('[data-vendor-norm]')?.getAttribute('data-vendor-norm');
+    if (norm) return norm;
+    const xInit = doc.querySelector('[x-init]')?.getAttribute('x-init') || '';
+    const m = xInit.match(/selectVendor\(("(?:[^"\\]|\\.)*")\)/);
+    if (!m) return null;
+    try {
+      return JSON.parse(m[1]);
+    } catch {
+      return null;
+    }
+  },
+
+  // True when #rfq-added-vendors already holds a row for this normalized name —
+  // the dedupe for EXCLUDED rows, which never join selectedVendors (disabled
+  // checkbox) and would otherwise stack duplicates on repeated picks.
+  _containerHasVendor(norm) {
+    const container = document.querySelector('#rfq-added-vendors');
+    if (!container) return false;
+    return Array.from(container.querySelectorAll('[data-vendor-norm]')).some(
+      (el) => el.getAttribute('data-vendor-norm') === norm,
+    );
+  },
+
+  // POST to composer-vendor and append the returned row into the stable-id
+  // #rfq-added-vendors sub-container INSIDE this x-data wrapper (explicit container —
+  // swapping the wrapper would re-init rfqVendorModal and wipe selection state).
+  // Raw fetch + manual insert (mirrors confirmSend / customerPicker.lookupCompany)
+  // so a server 4xx is DETECTED: htmx.ajax resolves on HTTP errors, which used to
+  // clear the inline create form on a 400. Returns true only when the vendor ended
+  // up selected (row appended, or already present — duplicate picks skip the
+  // append, INCLUDING excluded rows via the container check, so #rfq-added-vendors
+  // never shows the same vendor twice); false on any error so createVendor keeps
+  // the typed values.
+  async _addComposerVendor(fields) {
+    // Bare picks only: a createVendor submission carrying an email/website must
+    // reach the server even when the name matches a selection — the server
+    // attaches the typed email/domain to the existing card; skipping here would
+    // silently discard the input.
+    if (!fields.email && !fields.website && this._isVendorSelected(fields.vendor_name)) {
+      this._toast('Vendor already added', 'info');
+      return true;
+    }
+    const form = new FormData();
+    form.append('vendor_name', fields.vendor_name);
+    if (fields.website) form.append('website', fields.website);
+    if (fields.email) form.append('email', fields.email);
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    const spinner = document.querySelector('#rfq-added-vendors-spinner');
+    spinner?.classList.add('htmx-request');
+    try {
+      // starlette_csrf requires the x-csrftoken header on POST (mirrors confirmSend).
+      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+      const resp = await fetch('/v2/partials/sightings/composer-vendor', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrf },
+        body: form,
+      });
+      if (!resp.ok) {
+        // The server emits the repo JSON error format ({"error": ...}). A 4xx
+        // reason is actionable user input ("invalid website — ...") — surface it
+        // verbatim; 5xx bodies are internals, keep the generic try-again.
+        let reason = '';
+        try {
+          reason = (await resp.json()).error || '';
+        } catch {
+          /* non-JSON / empty body — fall through to the generic message */
+        }
+        console.error('[rfqVendorModal] add vendor failed: HTTP ' + resp.status, reason);
+        const msg = resp.status < 500 && reason
+          ? 'Could not add vendor: ' + reason
+          : 'Could not add vendor — please try again';
+        this._toast(msg, 'error');
+        return false;
+      }
+      const html = await resp.text();
+      // Authoritative dedup on the server-normalized name: picking
+      // "Mouser Electronics, Inc." when "mouser electronics" is already selected
+      // would append a duplicate row while selection state stays unchanged.
+      // Excluded rows never enter selectedVendors, so they dedupe against the
+      // rows already in the container instead.
+      const normalized = this._rowVendorName(html);
+      if (normalized && (this.selectedVendors[normalized] || this._containerHasVendor(normalized))) {
+        this._toast('Vendor already added', 'info');
+        return true;
+      }
+      const container = document.querySelector('#rfq-added-vendors');
+      // Server HTML is trusted (same-origin, auth-protected endpoint).
+      container.insertAdjacentHTML('beforeend', html);
+      htmx.process(container);
+      // The appended row carries Alpine directives (x-init='selectVendor(...)',
+      // :checked, @change) that bind to THIS rfqVendorModal x-data scope. htmx.process
+      // only wires htmx attributes, not Alpine's, and relying on Alpine 3's
+      // MutationObserver is exactly the unreliable path the afterSwap handler warns
+      // about — explicitly initTree the new node so the row arrives CHECKED and its
+      // checkbox is live (matches the lead-drawer / rq2-table workaround).
+      const addedRow = container.lastElementChild;
+      if (addedRow && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(addedRow);
+      }
+      return true;
+    } catch (err) {
+      console.error('[rfqVendorModal] add vendor failed', err);
+      this._toast('Could not add vendor — please try again', 'error');
+      return false;
+    } finally {
+      spinner?.classList.remove('htmx-request');
+    }
   },
 
   // Build a FormData with REPEATED keys for the multi-valued fields. (Object.fromEntries
@@ -1810,7 +2011,11 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       const sent = parseInt(resp.headers.get('X-RFQ-Sent') || '0', 10);
       const total = parseInt(resp.headers.get('X-RFQ-Total') || String(count), 10);
       const skipped = parseInt(resp.headers.get('X-RFQ-Skipped') || '0', 10);
-      const outcome = this._sendOutcome(sent, total, skipped);
+      // X-RFQ-Unavailable = vendors dropped by the send-time unavailability re-check.
+      // They are NOT delivery failures — without subtracting them they'd be
+      // misattributed to the 'failed' bucket (total - sent - skipped).
+      const unavailable = parseInt(resp.headers.get('X-RFQ-Unavailable') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped, unavailable);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -1823,18 +2028,21 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total/skipped counts to a toast. `delivered` is false only when
-  // nothing went out, so the caller can keep the modal open for a retry. `skipped` =
-  // vendors with no contact email — reported distinctly from send failures.
-  _sendOutcome(sent, total, skipped = 0) {
+  // Map the server's sent/total/skipped/unavailable counts to a toast. `delivered` is
+  // false only when nothing went out, so the caller can keep the modal open for a retry.
+  // `skipped` = vendors with no contact email; `unavailable` = vendors dropped by the
+  // send-time unavailability re-check — both reported distinctly from send failures so a
+  // correctly-blocked vendor is never miscounted as 'failed'.
+  _sendOutcome(sent, total, skipped = 0, unavailable = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
     if (sent < total) {
-      const failed = total - sent - skipped;
+      const failed = total - sent - skipped - unavailable;
       const reasons = [];
       if (failed > 0) reasons.push(failed + ' failed');
       if (skipped > 0) reasons.push(skipped + ' had no email');
+      if (unavailable > 0) reasons.push(unavailable + ' marked unavailable');
       return {
         type: 'warning',
         delivered: true,
