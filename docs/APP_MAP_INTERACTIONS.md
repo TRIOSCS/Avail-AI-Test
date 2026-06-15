@@ -1153,21 +1153,38 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
     v
 authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |
+    LANE SPLIT (full_pipeline arg; settings.enrichment_lane_split_enabled, default on —
+    CALL ROUTING ONLY, every write still arbitrates through the F1 ladder, no write
+    pre-gate is ever added):
+      • PRIORITY lane (full_pipeline=True): cards a user single-added (worker passes
+        full_pipeline=True for every card whose enrich_requested_at was stamped) run the
+        full sequence below.
+      • BULK lane (full_pipeline=False): cards with enrich_requested_at IS NULL run only
+        Tier 1 (the FREE connectors); Tiers 2-5 (web / OEM cross-ref / OEM description /
+        Opus infer) are ALL skipped and a Tier-1 miss goes straight to terminal not_found
+        (the OEM tiers never ran, so not_catalogued can't be concluded). Measured
+        ~$6-10/day of paid calls for ~0 ladder-accepted bulk-lane writes.
+    |
     +---> Tier 1: distributor connector fanout (fetch_authoritative → merge_authoritative)
     |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle;
     |              category + manufacturer route through the F1 ladder at {connector}_api/90
     |              (ladder-rejected writes are dropped from enrichment_provenance).
-    |       MISS → fall through.
+    |       MISS → fall through (BULK lane stops here → not_found).
     |
-    +---> Tier 2: distributor/manufacturer web search (extract_part_from_web, web_meter +1)
+    +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call. Computed
+    |       BEFORE Tier 2 now: an OEM/FRU vendor hit + settings.enrichment_skip_web_for_oem_mpns
+    |       (default on) skips Tier 2 (web) on EVERY lane — OEM/FRU PNs surface only on
+    |       reseller pages (the measured ~95% no-trusted-source reject class). The OEM
+    |       tiers (3-4) + Opus (5) still run on the priority lane. Non-OEM parts skip
+    |       Tiers 3-4 entirely.
+    |
+    +---> Tier 2 (priority lane; skipped for OEM-shaped MPNs per the gate above):
+    |       distributor/manufacturer web search (extract_part_from_web, web_meter +1)
     |       HIT (web_sourced)  → apply_web_sourced(); category + manufacturer through the
     |              F1 ladder at web_search/70; done.
     |       MISS → fall through.
     |
-    +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call.
-    |       Non-OEM parts skip Tiers 3-4 entirely.
-    |
-    +---> Tier 3 (OEM only): cross-reference MPN (cross_reference_mpn, web_meter +1)
+    +---> Tier 3 (OEM only, priority lane only): cross-reference MPN (cross_reference_mpn, web_meter +1)
     |       Grounded Claude web search; four Python gates:
     |         (1) ≥1 source URL on is_crossref_domain allowlist
     |         (2) both OEM code and resolved MPN appear verbatim in the sourced linkage_quote
@@ -1182,7 +1199,7 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |         UNCONFIRMED → discard candidate, fall through.
     |       FAILED → fall through.
     |
-    +---> Tier 4 (OEM only): OEM-official description (extract_oem_description, web_meter +1)
+    +---> Tier 4 (OEM only, priority lane only): OEM-official description (extract_oem_description, web_meter +1)
     |       Grounded Claude web search on OEM's own page; four Python gates:
     |         (1) ≥1 source URL on is_oem_domain allowlist (stricter than cross-ref)
     |         (2) exact_mpn_found matches normalized_mpn verbatim
@@ -1193,7 +1210,7 @@ authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
     |             oem_official/80); status=oem_sourced.
     |       MISS → fall through.
     |
-    +---> Tier 5: AI inference fallback (infer_part via ai_inference_fallback,
+    +---> Tier 5 (priority lane only): AI inference fallback (infer_part via ai_inference_fallback,
     |       web_meter: claude_ok=True)
     |       ai_inferred → writes description/category with reconfirm_needed flag.
     |       not_found → terminal.
@@ -1726,7 +1743,8 @@ POST /api/materials/add  (routers/materials.py — exactly 5 fields: mpn require
     |     this — verify against live PG).
     +---> stamps card.enrich_requested_at (PRIORITY LANE — single-add ONLY; bulk import,
     |     stock import, email auto-import, source ingest and the search flow never stamp:
-    |     they ride the created_at fast lane + search_count demand ordering). Stamped
+    |     they ride the bulk lane, ordered by demand telemetry — sourced_qty_90d /
+    |     last_sourced_at, migration 105). Stamped
     |     ONLY when enrichment_status is selectable by the worker (unenriched/not_found/
     |     not_catalogued) — an already-enriched re-add must not hold a stamp nothing
     |     clears (run_one_batch is the sole clearing mechanism).
@@ -1742,15 +1760,37 @@ Bulk surfaces gain the same server-side pipeline (no UI changes):
   deliberate deviation from the original spec ("newly created ids only"): the passes are
   idempotent through the ladder and re-searching an old card backfills its decode.
 
-Worker priority lane (enrichment_worker/worker.py):
-  select_batch ORDER BY gains a leading pair — `enrich_requested_at IS NOT NULL DESC,
-  enrich_requested_at ASC NULLS LAST` — ahead of the existing (status=unenriched DESC,
-  search_count DESC, created_at DESC): FIFO among user-requested cards, then current
-  behavior. run_one_batch sets enrich_requested_at = None on EVERY batch card immediately
-  after select_batch returns (attribute writes pre-await — the worker's
-  no-query-after-await discipline; persisted by the batch-final commit), so a terminal
-  not_found card cannot pin the lane. SLA (worker healthy, caps not exhausted):
-  deterministic facets immediate; connector/web/AI tiers P50 <= 90s, P95 <= 5min.
+Worker priority lane + demand ordering (enrichment_worker/worker.py, migration 105):
+  select_batch ORDER BY is `enrich_requested_at ASC NULLS LAST, (status=unenriched) DESC,
+  sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS LAST, id`. ASC NULLS LAST
+  alone gives stamped-first FIFO (the old redundant leading `IS NOT NULL DESC` term is
+  dropped so the ORDER BY matches the PG index ix_mc_demand_queue). After the priority
+  lane and the unenriched-before-recheck term, the demand tiebreak is TRIO's OWN SFDC
+  sourcing telemetry — sourced_qty_90d (90-day volume) then last_sourced_at recency,
+  NULLS LAST so every demanded card drains before unmatched ones; id makes the order
+  total. This REPLACED the old search_count/created_at demand keys. run_one_batch sets
+  enrich_requested_at = None on EVERY batch card immediately after select_batch returns
+  (attribute writes pre-await — the worker's no-query-after-await discipline; persisted by
+  the batch-final commit), so a terminal not_found card cannot pin the lane. The same
+  ORDER BY is mirrored in spec_enrichment_service.enrich_pending_specs (the scheduled
+  spec pass) so every spec-pass dollar lands on the parts TRIO actually trades. SLA
+  (worker healthy, caps not exhausted): deterministic facets immediate; connector/web/AI
+  tiers P50 <= 90s, P95 <= 5min.
+
+  Lane split (run_one_batch, settings.enrichment_lane_split_enabled default on): lane
+  membership is captured (priority_ids = cards with a stamp) BEFORE the stamps are
+  cleared; priority-lane cards call enrich_card(full_pipeline=True), bulk-lane cards
+  call enrich_card(full_pipeline=False) — see the enrich_card tier sequence above for
+  what each lane runs. Call routing only; the F1 ladder still arbitrates every write.
+
+  Demand-telemetry backfill (app/management/import_demand_telemetry.py): ONE-SHOT
+  operator command (dry-run by default; --apply to write) that streams TRIO's SFDC
+  Weekly Export (LSC1__Material__c), aggregates Sourced_Qty_Last_90_Days__c +
+  Most_Recent_Source_TS__c per normalize_mpn_key (column-wise MAX on dup keys), and
+  bulk-updates sourced_qty_90d / last_sourced_at on matched, non-soft-deleted cards.
+  Run at deploy AFTER migration 105. No recurring refresh — re-run only when a NEW
+  export lands. These columns are a prioritization signal ONLY, never a displayed fact,
+  so they bypass the F1 ladder (not provenanced category/spec columns).
 
 Status badge (card detail header): htmx/partials/materials/enrich_status.html — while
   enrichment_status == unenriched it polls GET /v2/partials/materials/{id}/enrich-status

@@ -34,6 +34,10 @@ from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
         ("0B200-00930000", "asus"),
         ("HV52W", "dell"),
         ("66YYK", "dell"),
+        # EMC 303-x assembly/spare (plan 1.3 — gates the OEM-FRU web-extract skip).
+        ("303-104-000D", "emc"),
+        ("303-081-103B", "emc"),
+        ("303-127-000", "emc"),  # optional rev letter absent
     ],
 )
 def test_classifies_known_oem_codes(mpn, vendor):
