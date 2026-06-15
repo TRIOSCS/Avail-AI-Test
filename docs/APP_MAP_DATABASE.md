@@ -317,7 +317,7 @@
 | enrichment_status | String 20 | `unenriched` \| `verified` \| `web_sourced` \| `oem_sourced` \| `ai_inferred` \| `not_found` \| `not_catalogued`. Validated on write against `MaterialEnrichmentStatus` (constants.py). `oem_sourced` = single official OEM page; `not_catalogued` = recognised OEM/FRU part with no public specs (retries on 30-day backoff). No migration — varchar column. |
 | cross_references | JSONB | Alternative MPNs; also records OEM FRU→commodity-MPN linkages written by the cross-ref enrichment tier (`[{"mpn": <resolved>, "manufacturer": <mfr>}]`). |
 | specs_structured | JSONB | Parametric data — `{spec_key: {value, source, confidence, tier, updated_at}}`. `tier` (SP2/F2, migration 096) is the F1 ladder rank of the writing source so `record_spec` can rank conflicting writes without re-deriving; legacy entries lacking `tier` are backfilled in-memory from `source` before comparison. Source vocabulary (ladder tier): `manual` (100) · `trio_source` (95) · vendor APIs `digikey_api`\|`nexar_api`\|`mouser_api`\|… (90) · `trio_source_ai` (88) · `mpn_decode` (85) · `fru_matrix_decode` (84, FRU crosswalk intersection) · `desc_parse` (83) · `fru_desc_parse` (82, FRU-linked qual-sheet description intersection — below the card's OWN description, above the OEM scrapers) · `spec_extraction` (60, AI quality-floored at ≥ 0.85) · `legacy_backfill` (50) · `{ai_guess,claude_opus_inferred,claude_haiku}` (40); unknown sources rank 0 (once-per-source WARNING). |
-| category_source | String 50, nullable | SP2/F2 (migration 096). Which source set `category` (e.g. `mpn_decode`, `digikey_api`, `claude_opus_inferred`, `legacy_backfill`). Written only via `spec_tiers.set_category`. |
+| category_source | String 50, nullable | SP2/F2 (migration 096). Which source set `category` (e.g. `mpn_decode`, `digikey_api`, `claude_opus_inferred`, `legacy_backfill`; `desc_parse`/83 + `fru_desc_parse`/82 when set by the categorize-from-description channel — see APP_MAP_INTERACTIONS §desc-parse). Written only via `spec_tiers.set_category`. |
 | category_confidence | Float, nullable | SP2/F2. Confidence of the source that set `category`. |
 | category_tier | Integer, nullable | SP2/F2. F1 ladder rank of `category_source`. A lower-tier source can never overwrite a higher-tier category (the ladder, not write order, decides). Legacy valued-but-unprovenanced rows are backfilled to mid-tier 50 (`legacy_backfill`/0.5); `set_category` applies the SAME floor at runtime to a valued category with NULL provenance, so pre- and post-migration data rank identically. |
 | category_updated_at | UTCDateTime, nullable | SP2/F2 (migration 096). When the category was last (re)written through the ladder — the tie-break timestamp for `set_category` (never borrowed from the card-wide `updated_at`). NULL for legacy rows (ranks as ""). |
@@ -348,7 +348,7 @@
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 
-**`material_card_audit`** — Audit trail for card lifecycle events
+**`material_card_audit`** — Audit trail for card lifecycle events (actions: created, linked, unlinked, deleted, merged, healed, restored, soft_deleted, plus `categorized` — written by `app/management/categorize_from_desc.py` when the categorize-from-description channel sets a previously-NULL category, `details` carrying the resulting category/source/tier/channel)
 
 **`material_price_snapshots`** — Historical pricing data points
 

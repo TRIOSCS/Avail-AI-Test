@@ -1225,13 +1225,28 @@ owns arbitration in one place:
        and a curated model→spec table (app/data/cpu_model_specs.json) merged
        UNDER desc tokens (skipped when the desc names two models, incl. dangling
        slash-alternates like "GOLD 6230R/6240R").
-       Only cards already categorized to one of the nine commodities are written
-       (NEVER categorizes — a description is not a regex-gated commodity proof).
-       The F1 ladder (fru_desc_parse 82 < desc_parse 83 < fru_matrix_decode 84 <
-       mpn_decode 85 < vendor 90) keeps decode/vendor values authoritative and the
-       card's OWN description above its FRU-linked prose — no per-writer
-       pre-gate. The phase-2/3 commodities have no MPN decoders, so
-       desc_parse is their top non-vendor deterministic source.
+       In the worker SPEC stage only cards ALREADY categorized to one of the nine
+       commodities are written (this stage NEVER categorizes). A separate,
+       opt-in CATEGORIZE stage (writer.categorize_and_record, NOT run by the
+       worker — only the one-shot CLI + ingest call it) closes that gap for
+       UNCATEGORIZED cards: a strict lead/body grammar
+       (desc_extractor/categorizer.py — the nine SPEC commodities via the reused
+       extract_desc router with a stricter CPU-identity gate, plus anchored
+       cables/batteries/fans_cooling leads with pollution suppression) infers the
+       commodity KEY and, ONLY when card.category IS NULL, writes it via
+       set_category at desc_parse/83 (own description) or fru_desc_parse/82
+       (a linked fru_links description), then runs the SAME spec extraction for the
+       fresh category in the same SAVEPOINT. Reuses the desc_parse identity — no new
+       tier-83 source. Driven by app/management/categorize_from_desc.py (one-shot,
+       dry-run default, --apply; own-desc + FRU-desc channels, real-desc gate
+       alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15,
+       MaterialCardAudit action="categorized" per card) and at ingest time by
+       source_ingest/clean.py (same grammar, fallback when the source carries no
+       mappable Commodity_Code__c). The F1 ladder (fru_desc_parse 82 < desc_parse
+       83 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90) keeps decode/vendor
+       values authoritative and the card's OWN description above its FRU-linked
+       prose — no per-writer pre-gate. The phase-2/3 commodities have no MPN
+       decoders, so desc_parse is their top non-vendor deterministic source.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -1675,6 +1690,24 @@ wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
 fallback buckets); SAVEPOINT per card.
+
+Categorize-from-description backfill (OPTIMIZATION_PLAN §2.4): `python -m
+app.management.categorize_from_desc [--apply] [--limit N]` categorizes UNCATEGORIZED
+cards from their descriptions via the shared lead-token grammar
+(`desc_extractor/categorizer.py::categorize_from_desc`), then fills each freshly
+categorized card's desc_parse facets in the same SAVEPOINT (the new category is
+immediately food for the existing extractor). Two channels: OWN-DESC (a REAL
+description — alphanumeric-norm(desc) != alphanumeric-norm(display_mpn) and len >= 15
+— at `desc_parse`/83) and FRU-DESC (the card has no usable own description but a linked
+`fru_links` row carries one — at `fru_desc_parse`/82). Category writes go through
+`set_category` and ONLY when `card.category IS NULL` (fill-only — never reclassifies);
+the grammar is conservative (foreign/ambiguous/conflicting/pollution → no write).
+Dry-run by default (prints a yield report broken down by resulting category + channel,
+writes nothing); `--apply` commits and logs a `MaterialCardAudit` (action
+`categorized`, `created_by="categorize_from_desc"`) per card. The SAME grammar runs at
+ingest time in `source_ingest/clean.py` (fallback when the source carries no mappable
+`Commodity_Code__c`) so future imports categorize real-desc rows — single source of
+truth, no duplicated grammar.
 
 ## Cross-Reference Caching
 
