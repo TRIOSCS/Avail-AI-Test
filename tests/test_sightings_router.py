@@ -128,6 +128,32 @@ class TestSightingsDetailPartial:
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert "Good Vendor" in resp.text
 
+    def test_renders_vendor_with_null_score(self, client, db_session):
+        """A VendorSightingSummary with score=None must not 500 the detail panel.
+
+        score is nullable; the row template's score-color/display compared None to an
+        int (TypeError) — caught only against live Postgres, since seeds set a numeric
+        score. Reproduces the live 500 and pins the None-guard.
+        """
+        _, r, _ = _seed_data(db_session)
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="NullScore Vendor",
+                estimated_qty=50,
+                listing_count=1,
+                score=None,
+                tier="Unknown",
+            )
+        )
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "NullScore Vendor" in resp.text  # null-score vendor rendered, no crash
+        assert "75%" in resp.text  # the non-null sibling still renders its numeric score
+        assert "None%" not in resp.text  # null score never reaches the |round|int path
+        assert "—" in resp.text  # score renders as em-dash, not a crash
+
     def test_404_for_missing(self, client, db_session):
         resp = client.get("/v2/partials/sightings/99999/detail")
         assert resp.status_code == 404
