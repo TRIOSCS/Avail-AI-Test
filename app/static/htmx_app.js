@@ -1829,6 +1829,17 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
+  // "Add contact" on a non-contactable (cardless / emailless) suggested row: reveal the
+  // existing inline "Add new vendor" form pre-filled with this vendor's display name and
+  // focus the email input — the buyer types the known email and the existing
+  // composer-vendor POST (createVendor) creates the card + VendorContact. No new endpoint.
+  // $nextTick waits for x-show to mount the form before focusing the (now-visible) input.
+  addContactFor(name) {
+    this.newVendorName = name || '';
+    this.addingVendor = true;
+    this.$nextTick(() => this.$refs.newVendorEmail?.focus());
+  },
+
   // Fast-path dedup: true when `name` matches a selection key case-insensitively.
   // Keys are server-NORMALIZED names (suffixes stripped) while picker/typed names
   // are display names, so this only catches exact/case matches — the authoritative

@@ -25,6 +25,8 @@
       </label>
       <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
         {% for v in suggested_vendors %}
+        {% if v.has_contact %}
+        {# Contactable row — enabled checkbox + engagement/response badges (unchanged). #}
         <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
           <input type="checkbox"
                  :checked='isSelected({{ v.normalized_name|tojson }})'
@@ -45,6 +47,29 @@
           <span class="text-[10px] text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
           {% endif %}
         </label>
+        {% else %}
+        {# Non-contactable row (cardless OR carded-but-no-resolvable-email): coverage chip
+           unchanged, but a DISABLED checkbox (you can't select what the send path skips),
+           a neutral "no contact on file" badge, and an "Add contact" action that reveals
+           the inline create-form pre-filled with this vendor's name. No engagement badges
+           (no card / no data). The @click is single-quoted (CLAUDE.md Alpine landmine). #}
+        <label class="flex items-center gap-3 px-3 py-2">
+          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <div class="flex-1 min-w-0">
+            <span class="text-sm font-medium text-gray-500">{{ v.display_name }}</span>
+            {% set cov = coverage.get(v.id) %}
+            {% if cov %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
+                  title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
+            {% endif %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
+          </div>
+          <button type="button" @click='addContactFor({{ v.display_name|tojson }})'
+                  class="text-xs font-semibold text-brand-600 hover:text-brand-700">
+            Add contact
+          </button>
+        </label>
+        {% endif %}
         {% else %}
         <p class="px-3 py-2 text-xs text-gray-400">No vendors with sightings for these parts — search or add one below.</p>
         {% endfor %}
@@ -129,7 +154,7 @@
                class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
         <input aria-label="Website" type="url" x-model="newVendorWebsite" placeholder="Website (optional)"
                class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
-        <input aria-label="Contact email" type="email" x-model="newVendorEmail" placeholder="Contact email (optional)"
+        <input aria-label="Contact email" type="email" x-ref="newVendorEmail" x-model="newVendorEmail" placeholder="Contact email (optional)"
                class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
         <button type="button" :disabled="!newVendorName.trim() || addingVendorBusy"
                 @click="createVendor()"

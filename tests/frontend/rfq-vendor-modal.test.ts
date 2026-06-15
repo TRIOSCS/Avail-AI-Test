@@ -399,6 +399,20 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m.addingVendorBusy).toBe(false);
     });
 
+    it('addContactFor pre-fills the inline-form name, reveals the form, and focuses the email input', () => {
+      const m = makeModal([], [1]);
+      const emailInput = document.createElement('input');
+      m.$refs = { ...m.$refs, newVendorEmail: emailInput };
+      m.$nextTick = (cb: () => void) => cb();
+      const focusSpy = vi.spyOn(emailInput, 'focus');
+
+      m.addContactFor('Cyclops Cardless');
+
+      expect(m.newVendorName).toBe('Cyclops Cardless');
+      expect(m.addingVendor).toBe(true);
+      expect(focusSpy).toHaveBeenCalled();
+    });
+
     it('_rowVendorName parses the tojson-quoted normalized name (and escapes)', () => {
       const m = makeModal([], [1]);
       expect(m._rowVendorName(rowHtml('digi-key'))).toBe('digi-key');

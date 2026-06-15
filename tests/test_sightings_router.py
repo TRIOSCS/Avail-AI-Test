@@ -1219,6 +1219,65 @@ class TestVendorModalCardlessCoverage:
         assert resp.status_code == 200
         assert "Silent Vendor" in resp.text
 
+    def test_non_contactable_row_renders_badge_disabled_checkbox_and_add_contact(self, client, db_session):
+        """Task 2 chrome: a cardless (non-contactable) suggested row renders the neutral
+        'no contact on file' badge, a DISABLED checkbox (you can't select what the send
+        path would skip), and an 'Add contact' action — while keeping its coverage chip
+        and covered-MPN title."""
+        items = self._reqs(db_session, ["CL-MPN-3"])
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id, vendor_name="Cyclops Cardless", listing_count=1, score=50.0
+            )
+        )
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Cyclops Cardless" in resp.text
+        assert "no contact on file" in resp.text
+        assert "bg-gray-100 text-gray-500" in resp.text
+        assert "cursor-not-allowed" in resp.text
+        assert "Add contact" in resp.text
+        # The "Add contact" action carries this vendor's display name into the inline form.
+        assert "addContactFor" in resp.text
+        # Coverage chip + covered-MPN title still rendered for the cardless row.
+        assert "1/1 parts" in resp.text
+        assert 'title="Covers: CL-MPN-3"' in resp.text
+
+    def test_contactable_row_keeps_enabled_checkbox_and_engagement_badge(self, client, db_session):
+        """Task 2 regression: a contactable carded vendor (resolvable email) keeps the
+        ENABLED checkbox (no `disabled`/`cursor-not-allowed`) and its engagement badge,
+        and renders NO 'no contact on file' badge / 'Add contact' action."""
+        items = self._reqs(db_session, ["CL-MPN-4"])
+        card = VendorCard(
+            normalized_name="reachable distributor",
+            display_name="Reachable Distributor",
+            is_blacklisted=False,
+            engagement_score=72.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@reachable.com", source="email"))
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id,
+                vendor_name="Reachable Distributor",
+                listing_count=1,
+                score=50.0,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Reachable Distributor" in resp.text
+        assert "Score: 72" in resp.text  # engagement badge present
+        assert "no contact on file" not in resp.text
+        assert "Add contact" not in resp.text
+        assert "cursor-not-allowed" not in resp.text
+        # Enabled checkbox wired to the selection state.
+        assert "toggleVendor" in resp.text
+
 
 class TestVendorAffinityOnDemand:
     """Spec Part 2 §2 (bulk RFQ composer): `GET /v2/partials/sightings/vendor-affinity`
