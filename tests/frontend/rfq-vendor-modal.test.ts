@@ -98,6 +98,19 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m.selectedCount).toBe(1);
       expect(m.isSelected('digikey')).toBe(true);
     });
+
+    it('selectedCount counts only the seeded (contactable) names — C1', () => {
+      // C1: the template now passes ONLY contactable normalized names into the factory.
+      // The seed is the source of truth for selectedCount / the Send/Preview buttons, so
+      // a non-contactable vendor (never seeded) is never counted or posted.
+      const m = makeModal(['arrow electronics', 'mouser'], [1]);
+      expect(m.selectedCount).toBe(2);
+      expect(m.isSelected('arrow electronics')).toBe(true);
+      expect(m.isSelected('cardless distributor')).toBe(false);
+      // The non-contactable name is absent from _form's vendor_names payload entirely.
+      m.emailBody = 'hi';
+      expect(m._form().getAll('vendor_names').sort()).toEqual(['arrow electronics', 'mouser']);
+    });
   });
 
   describe('_form serialisation (repeated keys, no Object.fromEntries collapse)', () => {
@@ -397,6 +410,50 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m.newVendorEmail).toBe('');
       expect(m.addingVendor).toBe(false);
       expect(m.addingVendorBusy).toBe(false);
+    });
+
+    it('addContactFor pre-fills the inline-form name, reveals the form, and focuses the email input', () => {
+      const m = makeModal([], [1]);
+      const emailInput = document.createElement('input');
+      m.$refs = { ...m.$refs, newVendorEmail: emailInput };
+      m.$nextTick = (cb: () => void) => cb();
+      const focusSpy = vi.spyOn(emailInput, 'focus');
+
+      m.addContactFor('Cyclops Cardless');
+
+      expect(m.newVendorName).toBe('Cyclops Cardless');
+      expect(m.addingVendor).toBe(true);
+      expect(focusSpy).toHaveBeenCalled();
+    });
+
+    it('addContactFor does NOT overwrite a non-empty newVendorName — L2', () => {
+      // L2: a buyer half-typing a manual entry, then clicking "Add contact" on a
+      // suggested row, must keep their in-progress name — only reveal + focus the form.
+      const m = makeModal([], [1]);
+      const emailInput = document.createElement('input');
+      m.$refs = { ...m.$refs, newVendorEmail: emailInput };
+      m.$nextTick = (cb: () => void) => cb();
+      const focusSpy = vi.spyOn(emailInput, 'focus');
+      m.newVendorName = 'Half Typed Co';
+
+      m.addContactFor('Cyclops Cardless');
+
+      expect(m.newVendorName).toBe('Half Typed Co'); // preserved, not clobbered
+      expect(m.addingVendor).toBe(true); // form still revealed
+      expect(focusSpy).toHaveBeenCalled(); // email still focused
+    });
+
+    it('addContactFor fills the name when the form is whitespace-only — L2', () => {
+      // A whitespace-only field counts as empty, so the suggested name fills it.
+      const m = makeModal([], [1]);
+      const emailInput = document.createElement('input');
+      m.$refs = { ...m.$refs, newVendorEmail: emailInput };
+      m.$nextTick = (cb: () => void) => cb();
+      m.newVendorName = '   ';
+
+      m.addContactFor('Cyclops Cardless');
+
+      expect(m.newVendorName).toBe('Cyclops Cardless');
     });
 
     it('_rowVendorName parses the tojson-quoted normalized name (and escapes)', () => {
