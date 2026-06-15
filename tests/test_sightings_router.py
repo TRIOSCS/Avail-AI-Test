@@ -16,6 +16,7 @@ from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard, VendorContact
+from app.vendor_utils import normalize_vendor_name
 
 
 class _XDataExtractor(HTMLParser):
@@ -826,11 +827,12 @@ class TestRfqModalUnavailableExclusion:
 
 class TestVendorModalCoverageRanking:
     """Spec Part 2 §1 (bulk RFQ composer): suggested vendors are coverage-ranked over
-    VendorSightingSummary joined via the vendor_card_id FK — covered-part count desc,
-    then engagement desc.
+    VendorSightingSummary OUTER-joined to VendorCard — covered-part count desc, then
+    has_contact desc, then engagement desc.
 
-    Each row renders `N/M parts` with the covered MPNs in title; VSS rows with NULL
-    vendor_card_id are excluded by design (known vendors only).
+    Each row renders `N/M parts` with the covered MPNs in title. Coverage-discovery
+    (2026-06-15): cardless VSS rows (no matching VendorCard) ARE surfaced now — see
+    TestVendorModalCardlessCoverage for the cardless / has_contact behaviour.
     """
 
     def _requirements(self, db_session, mpns):
@@ -935,15 +937,16 @@ class TestVendorModalCoverageRanking:
         assert "1/1 parts" in resp.text
         assert 'title="Covers: CV-MPN-7"' in resp.text
 
-    def test_null_fk_summary_without_matching_card_still_absent(self, client, db_session):
-        """The fallback is card-gated: a NULL-FK summary whose name matches no
-        VendorCard suggests nothing (the modal suggests known vendors only)."""
+    def test_cardless_summary_now_surfaced_as_discovery(self, client, db_session):
+        """Coverage-discovery: a NULL-FK summary whose name matches NO VendorCard is now
+        SURFACED (the composer is a discovery surface — "who has my parts?"), where it
+        previously stayed absent. It carries coverage but no contact (cardless)."""
         items = self._requirements(db_session, ["CV-MPN-8"])
         self._summary(db_session, items[0], card=None, vendor_name="Unknown Rawname")
         db_session.commit()
         resp = self._modal(client, items)
         assert resp.status_code == 200
-        assert "Unknown Rawname" not in resp.text
+        assert "Unknown Rawname" in resp.text
 
     def test_fk_and_null_fk_rows_do_not_double_count(self, client, db_session):
         """One FK row + one NULL-FK name-matching row on the SAME requirement still
@@ -981,6 +984,240 @@ class TestVendorModalCoverageRanking:
         assert resp.status_code == 200
         assert "1/1 parts" in resp.text
         assert "2/1 parts" not in resp.text
+
+
+class TestCoverageRankedVendorRows:
+    """Unit-level coverage of `_coverage_ranked_vendor_rows` — the cardless /
+    has_contact coverage-discovery contract (spec Part 1).
+
+    Exercises the function directly so the RankedVendor shape (card|None, vendor_name,
+    covered_count, avg_score, has_contact), Python grouping, ranking, and the send-path-
+    mirroring has_contact resolver are pinned independent of template rendering.
+    """
+
+    def _reqs(self, db_session, mpns):
+        req = Requisition(name="Cov Unit RFQ", status="active", customer_name="CovU Co")
+        db_session.add(req)
+        db_session.flush()
+        items = []
+        for mpn in mpns:
+            r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
+            db_session.add(r)
+            items.append(r)
+        db_session.flush()
+        return items
+
+    def _card(self, db_session, display, engagement=0.0, blacklisted=False):
+        card = VendorCard(
+            normalized_name=display.lower(),
+            display_name=display,
+            is_blacklisted=blacklisted,
+            engagement_score=engagement,
+        )
+        db_session.add(card)
+        db_session.flush()
+        return card
+
+    def _vss(self, db_session, requirement, card=None, vendor_name=None, score=50.0):
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=requirement.id,
+                vendor_name=vendor_name or (card.display_name if card else "Mystery"),
+                listing_count=1,
+                score=score,
+                vendor_card_id=card.id if card else None,
+            )
+        )
+
+    def _rows(self, db_session, items, excluded=None):
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        db_session.commit()
+        return _coverage_ranked_vendor_rows(db_session, [r.id for r in items], excluded or set())
+
+    def test_cardless_vendor_appears_has_contact_false(self, db_session):
+        """A VSS row with no matching card → one cardless RankedVendor (card=None),
+        has_contact=False (no card means the send path skips it)."""
+        items = self._reqs(db_session, ["U-MPN-1"])
+        self._vss(db_session, items[0], card=None, vendor_name="Cardless Distributor")
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.card is None
+        assert r.vendor_name == "Cardless Distributor"
+        assert r.covered_count == 1
+        assert r.has_contact is False
+
+    def test_carded_with_contact_email_has_contact_true(self, db_session):
+        """Carded vendor with a VendorContact that has an email → has_contact=True (the
+        send path would resolve that email and NOT skip)."""
+        items = self._reqs(db_session, ["U-MPN-2"])
+        card = self._card(db_session, "Emailed Vendor")
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@emailed.com", source="rfq_manual"))
+        self._vss(db_session, items[0], card=card)
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].card is not None
+        assert rows[0].has_contact is True
+
+    def test_carded_without_email_has_contact_false(self, db_session):
+        """CRITICAL coupling: carded vendor whose ONLY contact has a NULL email →
+        has_contact=False. The send path resolves '' for this vendor and skips it, so the
+        badge must say 'no contact'. Pins the has_contact↔send-skip mirror."""
+        items = self._reqs(db_session, ["U-MPN-3"])
+        card = self._card(db_session, "Emailless Vendor")
+        db_session.add(VendorContact(vendor_card_id=card.id, email=None, source="apollo", confidence=95))
+        self._vss(db_session, items[0], card=card)
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].card is not None
+        assert rows[0].has_contact is False
+
+    def test_carded_no_contact_row_has_contact_false(self, db_session):
+        """Carded vendor with NO VendorContact rows at all → has_contact=False
+        (card.emails is NOT used by the send path; only VendorContact.email is)."""
+        items = self._reqs(db_session, ["U-MPN-3B"])
+        card = self._card(db_session, "Contactless Vendor")
+        card.emails = ["card-level@contactless.com"]  # send path ignores card.emails
+        db_session.add(card)
+        self._vss(db_session, items[0], card=card)
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].has_contact is False
+
+    def test_cardless_2of2_outranks_carded_1of2(self, db_session):
+        """Coverage is the primary key: a cardless vendor covering 2/2 parts ranks above a
+        carded (contactable) vendor covering 1/2."""
+        items = self._reqs(db_session, ["U-MPN-4", "U-MPN-5"])
+        carded = self._card(db_session, "Narrow Carded", engagement=99.0)
+        db_session.add(VendorContact(vendor_card_id=carded.id, email="x@narrow.com", source="email"))
+        self._vss(db_session, items[0], card=carded)  # covers 1/2
+        for r in items:  # cardless covers 2/2
+            self._vss(db_session, r, card=None, vendor_name="Wide Cardless")
+        rows = self._rows(db_session, items)
+        names = [r.vendor_name for r in rows]
+        assert names.index("Wide Cardless") < names.index("Narrow Carded")
+        assert rows[0].covered_count == 2
+
+    def test_contactable_outranks_noncontactable_at_equal_coverage(self, db_session):
+        """has_contact desc is the second sort key: at equal coverage, a contactable
+        carded vendor ranks above a cardless (non-contactable) one."""
+        items = self._reqs(db_session, ["U-MPN-6"])
+        carded = self._card(db_session, "Reachable Vendor", engagement=1.0)
+        db_session.add(VendorContact(vendor_card_id=carded.id, email="r@reach.com", source="email"))
+        self._vss(db_session, items[0], card=carded)
+        self._vss(db_session, items[0], card=None, vendor_name="Unreachable Vendor")
+        rows = self._rows(db_session, items)
+        names = [r.vendor_name for r in rows]
+        assert names.index("Reachable Vendor") < names.index("Unreachable Vendor")
+
+    def test_cardless_name_variants_merge(self, db_session):
+        """Two raw spellings of one cardless vendor (different requirements) merge into
+        a single group keyed by normalize_vendor_name — one RankedVendor covering
+        2/2."""
+        items = self._reqs(db_session, ["U-MPN-7", "U-MPN-8"])
+        self._vss(db_session, items[0], card=None, vendor_name="Acme Components, Inc.")
+        self._vss(db_session, items[1], card=None, vendor_name="ACME COMPONENTS")
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].card is None
+        assert rows[0].covered_count == 2
+        # Deterministic display name = lexicographically-min raw vendor_name in the group.
+        assert rows[0].vendor_name == "ACME COMPONENTS"
+
+    def test_excluded_cardless_absent(self, db_session):
+        """A cardless vendor whose normalized name is in `excluded` is dropped (its
+        group key IS its normalized name, so the exclusion set matches directly)."""
+        items = self._reqs(db_session, ["U-MPN-9"])
+        self._vss(db_session, items[0], card=None, vendor_name="Dodgy Cardless")
+        rows = self._rows(db_session, items, excluded={normalize_vendor_name("Dodgy Cardless")})
+        assert rows == []
+
+    def test_blacklisted_carded_absent(self, db_session):
+        """A blacklisted carded vendor is dropped (blacklist applies only to carded
+        vendors; cardless rows have no blacklist flag)."""
+        items = self._reqs(db_session, ["U-MPN-10"])
+        bad = self._card(db_session, "Blacklisted Vendor", blacklisted=True)
+        self._vss(db_session, items[0], card=bad)
+        rows = self._rows(db_session, items)
+        assert rows == []
+
+    def test_cap_20(self, db_session):
+        """At most 20 groups are returned even when more vendors have coverage."""
+        items = self._reqs(db_session, ["U-MPN-CAP"])
+        for i in range(25):
+            self._vss(db_session, items[0], card=None, vendor_name=f"Cardless {i:02d}")
+        rows = self._rows(db_session, items)
+        assert len(rows) == 20
+
+    def test_avg_score_ignores_nulls(self, db_session):
+        """avg_score averages only non-null scores within a group; an all-null group
+        yields avg_score=None without crashing."""
+        items = self._reqs(db_session, ["U-MPN-11", "U-MPN-12"])
+        self._vss(db_session, items[0], card=None, vendor_name="Scored Cardless", score=40.0)
+        self._vss(db_session, items[1], card=None, vendor_name="Scored Cardless", score=None)
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].avg_score == 40.0
+
+
+class TestVendorModalCardlessCoverage:
+    """Coverage-discovery rendering (spec Part 1 → context): the vendor modal now
+    surfaces cardless vendors and the has_contact flag reaches the template context.
+
+    Template chrome (badge / disabled checkbox) is Task 2; here we pin that the data is
+    surfaced.
+    """
+
+    def _reqs(self, db_session, mpns):
+        req = Requisition(name="Cardless RFQ", status="active", customer_name="CL Co")
+        db_session.add(req)
+        db_session.flush()
+        items = []
+        for mpn in mpns:
+            r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
+            db_session.add(r)
+            items.append(r)
+        db_session.flush()
+        return items
+
+    def _modal(self, client, items):
+        ids = ",".join(str(r.id) for r in items)
+        return client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={ids}")
+
+    def test_cardless_vendor_rendered_in_modal(self, client, db_session):
+        items = self._reqs(db_session, ["CL-MPN-1"])
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id, vendor_name="Avnet Discovery", listing_count=1, score=50.0
+            )
+        )
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Avnet Discovery" in resp.text
+
+    def test_carded_no_email_still_rendered(self, client, db_session):
+        """A carded-but-uncontactable vendor still appears (discovery), even though the
+        send path would skip it."""
+        items = self._reqs(db_session, ["CL-MPN-2"])
+        card = VendorCard(normalized_name="silent vendor", display_name="Silent Vendor", is_blacklisted=False)
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email=None, source="apollo"))
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id,
+                vendor_name="Silent Vendor",
+                listing_count=1,
+                score=50.0,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Silent Vendor" in resp.text
 
 
 class TestVendorAffinityOnDemand:
@@ -1081,6 +1318,32 @@ class TestVendorAffinityOnDemand:
         assert resp.status_code == 200
         assert "Fresh Vendor" in resp.text
         assert "Covered Vendor" not in resp.text
+
+    def test_drops_already_suggested_cardless_vendor(self, client, db_session):
+        """Coverage-discovery dedup: a now-suggested CARDLESS vendor (no VendorCard,
+        surfaced only via the outer join) is dropped from affinity results too — the
+        affinity 'already-suggested' set keys on normalize_vendor_name(r.vendor_name),
+        which now covers cardless RankedVendor rows."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-3C"])
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id,
+                vendor_name="Cardless Covered, Inc.",
+                listing_count=1,
+                score=60.0,
+                vendor_card_id=None,
+            )
+        )
+        db_session.commit()
+        # Affinity returns a name variant of the same cardless vendor; normalization merges.
+        matches = [self._match("CARDLESS COVERED", 0.70), self._match("Fresh Vendor", 0.45)]
+        with patch(self.PATCH_TARGET, return_value=matches):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Fresh Vendor" in resp.text
+        assert "CARDLESS COVERED" not in resp.text
 
     def test_drops_excluded_vendors(self, client, db_session):
         """Vendors with an ACTIVE unavailability record on a selected MPN key are
