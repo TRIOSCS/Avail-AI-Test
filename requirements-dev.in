@@ -29,7 +29,7 @@ ruff>=0.15.15
 
 # Type checking
 mypy>=2.1.0
-sqlalchemy[mypy]>=2.0.50
+sqlalchemy[mypy]>=2.0.51
 types-redis>=4.6.0.20241004
 
 # Pre-commit
