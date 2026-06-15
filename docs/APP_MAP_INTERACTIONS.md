@@ -686,20 +686,68 @@ Reply attribution to Contacts is Tier-1 fan-out — see section 4.
 (`vendor_modal.html`, all rows joining the same Alpine selection state — see
 the `rfqVendorModal` section below) is fed from four sources:
 
-1. **Coverage-ranked suggestions (default).** `sightings_vendor_modal` runs the
-   shared `_coverage_ranked_vendor_rows` query: a grouped query over
-   `VendorSightingSummary` filtered to the selected requirements, joined to
-   `VendorCard` via `_vss_vendor_card_join()` — an `or_()` coalesce whose PRIMARY
-   branch is the `vendor_card_id` FK (indexed `ix_vss_vendor_card`), with a
-   `lower(trim(vendor_name)) == normalized_name` FALLBACK for NULL-FK rows (so a
-   known vendor's coverage never silently disappears when a post-rebuild summary
-   hasn't been FK-backfilled yet; the NULL-FK guard on the fallback prevents
-   double-matching FK rows by name). Only VSS summaries matching no card at all —
-   neither by FK nor by name — are excluded.
-   Order: covered-part count desc, then engagement desc; cap 20. Each row shows
-   an `N/M parts` chip with the covered MPNs in `title` (computed server-side,
-   plain-column aggregates — SQLite+PG safe). `excluded_vendor_norms`
-   filtering is unchanged.
+1. **Coverage-ranked suggestions (default) — coverage-DISCOVERY, includes cardless
+   vendors.** `sightings_vendor_modal` runs the shared
+   `_coverage_ranked_vendor_rows` query over `VendorSightingSummary` (VSS) filtered
+   to the selected requirements, **OUTER-joined** to `VendorCard` via
+   `_vss_vendor_card_join()` — an `or_()` coalesce whose PRIMARY branch is the
+   `vendor_card_id` FK (indexed `ix_vss_vendor_card`), with a
+   `lower(trim(vendor_name)) == normalized_name` FALLBACK for NULL-FK rows (the
+   NULL-FK guard on the fallback prevents double-matching FK rows by name). The
+   outer join means a VSS row that matches **no card at all** yields `card=None`
+   and is **surfaced as a CARDLESS vendor**, not dropped — the composer is a
+   coverage-discovery surface ("who has my parts?"), so every vendor with sightings
+   on the selected parts appears (on live data ~112 of 120 distributors were
+   previously invisible behind the old inner join). The result is **grouped in
+   Python** (not SQL `GROUP BY` — sidesteps the GROUP-BY-entity SQLite/PG
+   portability seam; VSS is a few hundred rows) by **`card.id` when carded, else
+   `normalize_vendor_name(vendor_name)` when cardless** (the canonical normalizer,
+   so two name variants of one cardless vendor merge into one group and the key
+   matches the exclusion set). Per group it accumulates distinct-requirement
+   `covered_count`, the mean of non-null scores (`avg_score`), a representative
+   card (None if all cardless), and a deterministic display name
+   (`card.display_name` if carded, else the lexicographically-min raw
+   `vendor_name`). **Suffix-mismatch de-dup:** after grouping, any cardless group whose
+   key equals a CARDED group's `normalize_vendor_name(display_name)` is folded into that
+   carded group (covered requirements union, scores merged, carded card/`has_contact`
+   kept) — the fallback SQL join matches NULL-FK rows by raw `lower(trim(vendor_name))`
+   while grouping keys on `normalize_vendor_name`, so a NULL-FK `"Acme Inc"` would
+   otherwise split off a duplicate cardless `"acme"` row beside card `"acme"`. Blacklist
+   drops apply **only when carded**; `excluded_vendor_norms`
+   unavailability filtering is by normalized name (cardless group key; carded
+   belt-and-braces re-check). Each row exposes **`has_contact`**, which **mirrors
+   the send-path skip EXACTLY**: True iff `card is not None` AND some `VendorContact`
+   for that card has a non-empty `email` (resolved in ONE batched query via
+   `_cards_with_resolvable_email`, no N+1; filters `email != ''`) — i.e. `has_contact`
+   true ⇔ `sightings_send_inquiry` / `sightings_preview_inquiry` would NOT skip the
+   vendor. The send path's `_best_contacts_by_card` orders empty-OR-NULL-email rows FIRST
+   (lose last-wins) via `or_(email.is_(None), email == "").desc()`, so a high-confidence
+   `''`-email contact can't win and resolve `vendor_email=''` → skip while the badge said
+   contactable (the empty-email asymmetry). `card.emails` is deliberately NOT consulted
+   (the send path resolves the address only from `VendorContact` rows), so the "no contact
+   on file" badge never lies.
+   Order: `covered_count` desc, then `has_contact` desc (contactable above
+   equal-coverage non-contactable), then engagement desc nullslast, then a stable,
+   deterministic tiebreak — `(0, card.id)` for carded (numeric id order, matching main;
+   NOT lexicographic `str(key)`, which put "10" before "2"), `(1, group_key_str)` for
+   cardless (carded ties first, cardless after); cap 20. Each row shows an `N/M parts` chip with the covered
+   MPNs in `title` (computed server-side, plain-column aggregates — SQLite+PG safe),
+   keyed by the group key (card id carded, normalized name cardless).
+   - **Non-contactable rows** (cardless OR carded-but-no-resolvable-email) render a
+     neutral `bg-gray-100 text-gray-500` **"no contact on file"** badge, a **disabled
+     checkbox** (reusing the excluded-vendor disabled pattern — you can't select what
+     the send path would skip), and an **"Add contact"** link. "Add contact"
+     (`addContactFor` in `rfqVendorModal`) pre-fills + reveals the existing inline
+     "Add new vendor" form (source 4 below) with the vendor's display name and focuses
+     the email input — the buyer types the known email and the existing `composer-vendor`
+     POST creates the card + `VendorContact`. **No new endpoint, no schema change, no
+     bulk CRM writes.** Contactable rows are unchanged (enabled checkbox + engagement/
+     response badges).
+   - **Deferred follow-up (tracked, not built):** `vendor_email` is 100% NULL on
+     sightings — contact emails live only on cards. Capturing vendor contact emails at
+     **scrape/enrich time** is the real long-tail lever that would make most cardless
+     vendors instantly RFQ-able; it is the flagged pre-rollout follow-up, deliberately
+     out of scope here.
 2. **Affinity on demand.** A "Suggest more vendors" button hx-gets
    `GET /v2/partials/sightings/vendor-affinity?requirement_ids=…`, which runs
    `find_vendor_affinity` once per UNIQUE primary MPN. The service is SYNC with
@@ -1506,9 +1554,19 @@ set_manufacturer(card, value, source, confidence, write=True) -> bool # dual-bra
     +---> brand = the OEM LABEL (IBM, Dell Technologies, Lenovo);
     |     manufacturer = the ACTUAL MAKER (Seagate Technology, Hitachi/IBM verbatim)
     +---> None/empty/whitespace → no-op False (a write can never blank a value)
+    +---> is_garbage_brand_value(value) → no-op False + WARNING (brand canon, mig 106):
+    |     fragment shapes that can never be a maker name (len<2 after strip, or unbalanced
+    |     parens — the comma-split residue of parenthesized MPN packing suffixes like the
+    |     "F)"/"LF(T" carved out of Toshiba ordering codes "TLP781(D4-GR-TP6,F)"). The
+    |     ingest parser (clean.extract_trailing_oem) rejects these at extraction, but the
+    |     ladder is the SINGLE arbitration point for ALL writers, so junk dies here too
+    |     (mirrors set_category's off-vocab WARNING).
     +---> normalize_brand_name(db, value) (manufacturer_normalizer.py — manufacturers-
     |     table canonical_name+aliases, per-process cache, miss → verbatim strip;
-    |     writers NEVER normalize themselves)
+    |     writers NEVER normalize themselves). The manufacturers seed (startup.
+    |     _seed_manufacturers) + migration 106 fold the HPE family 4 ways
+    |     (Hewlett Packard Enterprise / HP / Hewlett Packard / Hewlett-Packard → HPE),
+    |     case-fold Dell (DELL/Dell → Dell Technologies), and alias Texas Instruments (TI)
     +---> identical F1 ladder via the shared _set_provenanced_column (generic over the
           column prefix — set_category delegates to it too, behavior unchanged incl.
           the stale-commodity purge); valued-but-NULL-provenance existing ranks at the
@@ -1988,6 +2046,23 @@ card with a maker but NULL provenance (attribution of existing data, NOT a ladde
 One `MaterialCardAudit` row per changed card (action `facet_cleanup` / `category_cleanup`);
 dry-run rolls back, never commits.
 
+Brand/manufacturer canonicalization backfill (OPTIMIZATION_PLAN §1.5B, one-shot
+post-deploy of migration 106): `python -m app.management.normalize_manufacturers
+[--apply]` — dry-run by default. Scans EVERY non-null `manufacturer` and `brand` value
+on material_cards (soft-deleted INCLUDED — restoring a card must surface a canonical
+value, same contract as migration 100). Two classes, both classified from the same
+distinct-value scan so the dry-run report cannot drift from `--apply`: (1) GARBAGE
+(`is_garbage_brand_value` — the "(TP,F)" ingest-leak fragments "F)"/"F"/"LF(T" plus
+empty residue) → value NULLed AND its four provenance columns (`<attr>_source/
+_confidence/_tier/_updated_at`) cleared, so a later real write starts clean; (2) ALIAS
+→ canonical via `normalize_brand_name` (HP → HPE, DELL → Dell Technologies), value cell
+ONLY — provenance left byte-identical. This deliberately BYPASSES set_brand/
+set_manufacturer (the documented exception, same as migrations 093/100): it corrects the
+SPELLING of evidence that already won the ladder, not new evidence — re-stamping through
+the ladder would forge a fresh source/confidence/timestamp for an observation that never
+re-occurred. Any writer introducing NEW brand/maker evidence MUST still route through
+the ladder. The orchestrator runs `--apply` post-deploy of migration 106.
+
 ## Cross-Reference Caching
 
 ```
@@ -2226,8 +2301,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     containers now reload on `filters-changed from:body` (not just commodity-changed),
     |     carrying the same wire params (hx-vals object literal) as #materials-results.
     |     Containers load while hidden.
-    Live result count "<N> <Commodity> parts" renders at the top of the results pane
-    (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
+    Live result count "<N> results [in <Commodity>] [· matching "<q>"]" renders at the top
+    of the results pane (list.html) every filters-changed cycle (match-framed so the number
+    reads as "how many matched", not a bare part count; singular "result" when N==1), with a
+    parallel sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
 
 Count-consistency invariant (count-honesty, OPTIMIZATION_PLAN §3.3 backend):
@@ -2260,6 +2337,13 @@ SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
     +---> Zero results + active parametric sub_filters + N < M → list.html renders the
     |     "not yet spec-enriched" nudge instead of the generic empty state.
 Result-row upgrades (list.html, server-side in materials_faceted_partial):
+    +---> Condensed 7-column layout (was 9): MPN · Description · Manufacturer · Status ·
+    |     Vendors · Best Price · Last Seen. Category is folded as a muted sub-line under the
+    |     manufacturer (no standalone column); Lifecycle + Condition are merged into the
+    |     Status cell alongside the enrichment-trust badge (one wrapping badge group). Best
+    |     Price renders 2 decimals at/above $1, 4 below (passive precision). Table carries
+    |     the scoped .compact-table--dense modifier (4px row padding; shared .compact-table
+    |     untouched). No data dropped — only regrouped.
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
     |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
@@ -2757,10 +2841,14 @@ users. `Escape` dismisses.
 Backs `sightings/vendor_modal.html` — the "Send RFQ" batch-inquiry modal opened
 from a sighting's vendor row (`requirement_ids=<id>`) or the table action bar
 (comma-joined ids). Invoked as
-`x-data='rfqVendorModal({{ suggested_vendors|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'`.
-The factory lives in JS (not inline) because `|tojson` emits double quotes that
-would close a double-quoted `x-data` attribute and break Alpine init; the data is
-carried through a **single-quoted** attribute (tojson escapes `'`). State:
+`x-data='rfqVendorModal({{ suggested_vendors|selectattr("has_contact")|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'`.
+The seed list is filtered to **`has_contact` rows ONLY** — non-contactable rows render a
+DISABLED checkbox with no `@change`, so seeding their names would force-count and
+force-post a vendor the send path then silently skips (they enter the selection only via
+the explicit Add-contact → `createVendor` path). The factory lives in JS (not inline)
+because `|tojson` emits double quotes that would close a double-quoted `x-data` attribute
+and break Alpine init; the data is carried through a **single-quoted** attribute (tojson
+escapes `'`). State:
 `step` (compose|preview), `selectedVendors` (a plain reactive object keyed by vendor
 name — matches the `sightingSelection` store, not a Set; `selectedCount` getter +
 `isSelected(name)` back the bindings), `emailBody`, plus the any-vendor picker /
@@ -2785,8 +2873,15 @@ OPEN→SOURCING + new activity rows) and the `#sightings-table` list, and dispat
 `vendor_names` keys (not `Object.fromEntries`, which collapses duplicates) from
 `Object.keys(selectedVendors)` — so rows added at runtime (affinity rows,
 autocomplete picks, inline creates) flow into `vendor_names` with no extra wiring.
-The vendor panel's four selection sources (coverage-ranked, affinity on demand,
-autocomplete, inline create) are documented flow-level in section 3.
+`addContactFor(name)` backs the **"Add contact"** link on a non-contactable
+(cardless / emailless) coverage-suggested row: it sets `newVendorName = name` **only when
+the field is empty** (a half-typed manual entry survives the click), `addingVendor =
+true`, then `$nextTick`-focuses the email input — reusing the inline-create form (source
+4) so the buyer's typed email flows through the existing `composer-vendor` POST; no new
+endpoint or invented state.
+The vendor panel's four selection sources (coverage-ranked — now including cardless
+discovery rows, affinity on demand, autocomplete, inline create) are documented
+flow-level in section 3.
 
 The route returns **HTTP 200 even on partial/total send failure** (failures are
 captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total` /

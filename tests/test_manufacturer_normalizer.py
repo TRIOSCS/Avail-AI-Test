@@ -19,6 +19,7 @@ from app.services.manufacturer_normalizer import (
     MAKER_TRAILING_RE,
     OEM_BRANDS,
     OEM_TRAILING_RE,
+    is_garbage_brand_value,
     normalize_brand_name,
 )
 
@@ -33,9 +34,31 @@ def _seed(db: Session, *rows: tuple[str, list[str]]) -> None:
 
 
 def test_alias_hit_returns_canonical(db_session: Session):
-    _seed(db_session, ("Hewlett Packard Enterprise", ["HPE", "HP"]))
-    assert normalize_brand_name(db_session, "HP") == "Hewlett Packard Enterprise"
-    assert normalize_brand_name(db_session, "hpe") == "Hewlett Packard Enterprise"
+    _seed(db_session, ("HPE", ["Hewlett Packard Enterprise", "HP", "Hewlett Packard", "Hewlett-Packard"]))
+    assert normalize_brand_name(db_session, "HP") == "HPE"
+    assert normalize_brand_name(db_session, "hewlett packard enterprise") == "HPE"
+
+
+def test_hpe_family_folds_to_hpe(db_session: Session):
+    # The production seed shape (startup._seed_manufacturers + migration 106): every
+    # live HPE variant — split 4 ways in the 2026-06-12 brand facet — folds to the one
+    # canonical, so selecting "HPE" no longer silently misses 4,400 HP-labeled cards.
+    _seed(db_session, ("HPE", ["Hewlett Packard Enterprise", "HP", "Hewlett Packard", "Hewlett-Packard"]))
+    for variant in ("Hewlett Packard Enterprise", "HP", "HPE", "HEWLETT PACKARD", "Hewlett Packard", "Hewlett-Packard"):
+        assert normalize_brand_name(db_session, variant) == "HPE", variant
+
+
+def test_dell_family_folds_to_dell_technologies(db_session: Session):
+    # Existing production seed row; the case-insensitive lookup merges DELL/Dell.
+    _seed(db_session, ("Dell Technologies", ["Dell"]))
+    for variant in ("Dell Technologies", "DELL", "Dell", "dell technologies"):
+        assert normalize_brand_name(db_session, variant) == "Dell Technologies", variant
+
+
+def test_ti_paren_alias_folds(db_session: Session):
+    _seed(db_session, ("Texas Instruments", ["TI", "Texas Inst", "Texas Instruments (TI)"]))
+    assert normalize_brand_name(db_session, "Texas Instruments (TI)") == "Texas Instruments"
+    assert normalize_brand_name(db_session, "TI") == "Texas Instruments"
 
 
 def test_alias_hit_is_case_insensitive(db_session: Session):
@@ -79,6 +102,26 @@ def test_aliases_stored_as_json_text_still_resolve(db_session: Session):
     db_session.add(Manufacturer(canonical_name="Western Digital", aliases=json.loads('["WD"]')))
     db_session.flush()
     assert normalize_brand_name(db_session, "wd") == "Western Digital"
+
+
+# --- is_garbage_brand_value ------------------------------------------------------
+
+
+def test_garbage_rejects_packing_suffix_fragments():
+    # The "(TP,F)" ingest-leak class (live audit 2026-06-12): comma-split fragments of
+    # parenthesized MPN packing suffixes carry unbalanced parens.
+    for fragment in ("F)", "LF(T", "E(T", "TSOP)", "Ind.)", "128M)", "L1Q(M", "("):
+        assert is_garbage_brand_value(fragment) is True, fragment
+
+
+def test_garbage_rejects_too_short_and_empty():
+    for value in ("", " ", "F", "T", None):
+        assert is_garbage_brand_value(value) is True, repr(value)
+
+
+def test_garbage_keeps_real_names():
+    for name in ("TI", "WD", "IBM", "Texas Instruments (TI)", "Hitachi/IBM", "HPE", "MEAN WELL"):
+        assert is_garbage_brand_value(name) is False, name
 
 
 # --- gating constants ----------------------------------------------------------

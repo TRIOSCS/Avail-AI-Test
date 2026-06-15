@@ -708,7 +708,9 @@ def _set_brand_or_maker(
     *,
     write: bool,
 ) -> bool:
-    """Shared body of set_brand/set_manufacturer: reject empties, normalize, ladder.
+    """Shared body of set_brand/set_manufacturer: reject empties + garbage fragments
+    (is_garbage_brand_value — unbalanced-paren / single-char shapes, logged at WARNING),
+    normalize, ladder.
 
     PRECONDITION: *card* should be session-attached — the alias lookup derives its DB
     session via ``Session.object_session(card)``. A detached/transient card cannot be
@@ -722,7 +724,21 @@ def _set_brand_or_maker(
 
     from sqlalchemy.orm import Session
 
-    from app.services.manufacturer_normalizer import normalize_brand_name
+    from app.services.manufacturer_normalizer import is_garbage_brand_value, normalize_brand_name
+
+    if is_garbage_brand_value(str(value)):
+        # Fragment shapes (unbalanced parens / single char) can never be a maker name —
+        # the source_ingest parser rejects them at extraction, but the ladder is the
+        # single arbitration point for ALL writers, so junk dies here too (mirrors
+        # set_category's off-vocab WARNING).
+        logger.warning(
+            "set_{}: card={} rejecting garbage value {!r} (source={}) — fragment/too-short, not a maker name",
+            attr,
+            getattr(card, "id", None),
+            value,
+            source,
+        )
+        return False
 
     db = Session.object_session(card)
     if db is None:

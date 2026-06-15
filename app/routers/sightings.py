@@ -1327,19 +1327,38 @@ def _vss_vendor_card_join():
 class RankedVendor(NamedTuple):
     """One coverage-ranked vendor row (see _coverage_ranked_vendor_rows).
 
-    Named fields pin the SELECT-column order: a future swap of covered_count and
-    avg_score in the query would otherwise mis-bind silently (both are numeric).
+    Coverage-discovery (2026-06-15): a row may be CARDLESS — ``card is None`` for a
+    vendor that has sightings on the selected parts but no matching VendorCard. Such a
+    vendor is surfaced for discovery ("who has my parts?") but is NOT RFQ-able, so
+    ``has_contact`` is False and the send path would skip it.
+
+    Fields:
+    - ``card``: the representative VendorCard for the group, or None when cardless.
+    - ``vendor_name``: the deterministic display name — ``card.display_name`` when
+      carded, else the lexicographically-min raw VSS ``vendor_name`` in the group.
+    - ``covered_count``: distinct selected requirements this vendor has sightings on.
+    - ``avg_score``: mean of the non-null VSS scores in the group (None if all null).
+    - ``has_contact``: True iff the send path (``sightings_send_inquiry`` /
+      ``sightings_preview_inquiry``) would resolve a non-empty email for this vendor —
+      i.e. ``card is not None`` AND some VendorContact for that card has a non-empty
+      ``email``. Mirrors the send-skip logic EXACTLY so the "no contact" badge never
+      lies. (``card.emails`` is deliberately NOT consulted: the send path resolves the
+      address only from VendorContact rows.)
     """
 
-    card: VendorCard
+    card: VendorCard | None
+    vendor_name: str
     covered_count: int
     avg_score: float | None
+    has_contact: bool
 
 
 class CoverageEntry(TypedDict):
-    """Per-card coverage shape rendered in the vendor modal row.
+    """Per-vendor coverage shape rendered in the vendor modal row, keyed by the
+    suggested vendor's ``key`` (card id for carded, normalized vendor_name for
+    cardless).
 
-    ``mpns`` is populated lazily by a second query and stays ``""`` for cards with no
+    ``mpns`` is populated lazily by a second query and stays ``""`` for vendors with no
     MPN rows — ``""`` is a valid terminal value, NOT "not yet computed".
     """
 
@@ -1348,55 +1367,179 @@ class CoverageEntry(TypedDict):
     mpns: str
 
 
+class SuggestedVendor(NamedTuple):
+    """Template-facing view of one coverage-ranked suggested vendor (carded OR
+    cardless).
+
+    Built from a RankedVendor in sightings_vendor_modal. Field names mirror the
+    VendorCard attributes the modal template already renders (``id``, ``normalized_name``,
+    ``display_name``, ``response_rate``, ``engagement_score``) so the carded path renders
+    byte-equivalent to before; cardless rows synthesize those (id = normalized name as the
+    coverage key + Alpine selection key, no card-derived badge fields). New fields
+    (``vendor_name``, ``has_contact``, ``card``) drive the Task-2 cardless chrome.
+
+    ``id`` is the grouping/coverage key (card id for carded, normalized vendor_name for
+    cardless); ``coverage`` in the modal context is keyed by this same value.
+    """
+
+    id: object
+    card: VendorCard | None
+    normalized_name: str
+    display_name: str
+    vendor_name: str
+    has_contact: bool
+    response_rate: float | None
+    engagement_score: float | None
+
+
+def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
+    """Card ids for which the send path would resolve a non-empty contact email.
+
+    MIRRORS the send-path contact resolution in sightings_send_inquiry /
+    sightings_preview_inquiry EXACTLY: a vendor is reachable iff a VendorContact for its
+    card has a non-empty ``email`` (the send path reads ``contact.email`` from
+    _best_contacts_by_card; it never consults ``card.emails``). One batched query over
+    all representative card ids — no N+1 over groups. Empty input → empty set.
+    """
+    if not card_ids:
+        return set()
+    rows = (
+        db.query(VendorContact.vendor_card_id)
+        .filter(
+            VendorContact.vendor_card_id.in_(card_ids),
+            VendorContact.email.isnot(None),
+            VendorContact.email != "",
+        )
+        .distinct()
+        .all()
+    )
+    return {cid for (cid,) in rows}
+
+
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
     """Coverage-ranked suggested vendors — the single source shared by the vendor modal
     and the affinity endpoint (which must drop already-suggested vendors computed the
     SAME way, so it stays self-contained).
 
-    One grouped query over VendorSightingSummary filtered to the selected requirements,
-    joined to VendorCard via _vss_vendor_card_join: the vendor_card_id FK first, with a
-    lower(trim(vendor_name)) fallback for NULL-FK rows (post-rebuild summaries are now
-    INCLUDED via that fallback — only summaries matching no card at all stay out, since
-    the modal suggests known vendors). Plain-column aggregates only (SQLite+PG safe).
-    Returns RankedVendor(card, covered_count, avg_score) rows, coverage desc then
-    engagement desc, capped at 20.
+    Coverage-discovery (2026-06-15): an OUTER join over VendorSightingSummary →
+    VendorCard (via _vss_vendor_card_join) plus Python grouping, so a vendor with
+    sightings but NO matching card (card=None, "cardless") is surfaced for discovery
+    instead of silently dropped. Python grouping sidesteps the GROUP-BY-entity
+    SQLite/PG portability seam; VSS is a few hundred rows — trivial.
+
+    Grouping key: ``card.id`` when carded, else ``normalize_vendor_name(vendor_name)``
+    (the canonical normalizer — two name variants of one cardless vendor merge, and the
+    key matches the exclusion set). Per group: distinct requirement count
+    (covered_count), mean of non-null scores (avg_score), a representative card (None if
+    all cardless), and a deterministic display name (card.display_name if carded, else
+    the lexicographically-min raw vendor_name).
+
+    Drops: blacklisted only when carded; excluded (unavailability) by normalized name
+    (cardless = its group key; carded = normalize_vendor_name(display/normalized_name) —
+    belt-and-braces re-check kept for legacy suffixed cards). has_contact mirrors the
+    send-skip logic (see _cards_with_resolvable_email).
+
+    Rank: covered_count desc, has_contact desc, engagement_score desc nullslast, then a
+    stable group-key tiebreak. Capped at 20.
     """
-    covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
-    vendor_query = (
-        db.query(
-            VendorCard,
-            covered_count.label("covered_count"),
-            sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
-        )
-        .join(VendorSightingSummary, _vss_vendor_card_join())
-        .filter(
-            VendorSightingSummary.requirement_id.in_(req_id_list),
-            VendorCard.is_blacklisted.is_(False),
-        )
-    )
-    if excluded:
-        vendor_query = vendor_query.filter(VendorCard.normalized_name.notin_(sorted(excluded)))
     raw_rows = (
-        vendor_query.group_by(VendorCard.id)
-        .order_by(
-            covered_count.desc(),
-            VendorCard.engagement_score.desc().nullslast(),
-            VendorCard.id,
-        )
-        .limit(20)
+        db.query(VendorSightingSummary, VendorCard)
+        .outerjoin(VendorCard, _vss_vendor_card_join())
+        .filter(VendorSightingSummary.requirement_id.in_(req_id_list))
         .all()
     )
-    rows = [RankedVendor(card, int(n_covered), avg_score) for card, n_covered, avg_score in raw_rows]
-    if excluded:
-        # Belt and braces: some legacy cards carry a normalized_name that predates
-        # normalize_vendor_name (suffix kept) — re-check through the canonical
-        # normalizer so "X, Inc." cards can't slip past the column filter.
-        rows = [
-            r
-            for r in rows
-            if normalize_vendor_name(r.card.display_name or r.card.normalized_name or "") not in excluded
-        ]
-    return rows
+
+    # Group in Python by card.id (carded) or normalize_vendor_name(vendor_name) (cardless).
+    groups: dict[object, dict] = {}
+    for vss, card in raw_rows:
+        # Blacklist applies only to carded vendors (cardless rows have no flag).
+        if card is not None and card.is_blacklisted:
+            continue
+        if card is not None:
+            key: object = card.id
+        else:
+            key = normalize_vendor_name(vss.vendor_name or "")
+            if not key:
+                continue  # un-normalizable cardless name — nothing to suggest
+        g = groups.get(key)
+        if g is None:
+            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": []}
+            groups[key] = g
+        g["req_ids"].add(vss.requirement_id)
+        if vss.score is not None:
+            g["scores"].append(vss.score)
+        if vss.vendor_name:
+            g["raw_names"].append(vss.vendor_name)
+        if g["card"] is None and card is not None:
+            g["card"] = card
+
+    # Fold suffix-mismatch duplicates (F-H1): the SQL fallback join matches NULL-FK rows by
+    # raw lower(trim(vendor_name)) == normalized_name, but cardless grouping keys on
+    # normalize_vendor_name(vendor_name). A NULL-FK row "Acme Inc" thus does NOT join to
+    # card "acme" (the ' inc' suffix survives raw lower(trim)) yet normalizes to "acme" — it
+    # would emit a SECOND, cardless "acme" row with split coverage. Merge any cardless group
+    # whose key equals a CARDED group's normalize_vendor_name(display) into that carded
+    # group BEFORE ranking, so coverage counts union and no duplicate row is emitted; the
+    # carded card / has_contact / display win. Two carded groups never collide on this key
+    # (each carded group keys on a distinct card.id).
+    carded_by_norm: dict[str, object] = {}
+    for ck, cg in groups.items():
+        c = cg["card"]
+        if c is not None:
+            carded_by_norm[normalize_vendor_name(c.display_name or c.normalized_name or "")] = ck
+    for cardless_key in [k for k, g in groups.items() if g["card"] is None and k in carded_by_norm]:
+        src = groups.pop(cardless_key)
+        dst = groups[carded_by_norm[cardless_key]]
+        dst["req_ids"].update(src["req_ids"])
+        dst["scores"].extend(src["scores"])
+        dst["raw_names"].extend(src["raw_names"])
+
+    # has_contact: one batched VendorContact lookup over all representative card ids.
+    contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
+
+    ranked: list[tuple[int, bool, float, tuple[int, object], RankedVendor]] = []
+    for key, g in groups.items():
+        card = g["card"]
+        excl_key: object
+        if card is not None:
+            display = card.display_name or card.normalized_name or ""
+            excl_key = normalize_vendor_name(display)
+        else:
+            display = min(g["raw_names"]) if g["raw_names"] else str(key)
+            excl_key = key  # cardless group key IS its normalized name
+        # Exclusion (unavailability) drop — cardless by group key, carded belt-and-braces.
+        if excluded and excl_key in excluded:
+            continue
+        covered = len(g["req_ids"])
+        scores = g["scores"]
+        avg_score = (sum(scores) / len(scores)) if scores else None
+        has_contact = card is not None and card.id in contactable_card_ids
+        rv = RankedVendor(
+            card=card,
+            vendor_name=display,
+            covered_count=covered,
+            avg_score=avg_score,
+            has_contact=has_contact,
+        )
+        engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
+        # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
+        # (bucket 0), cardless after (bucket 1, keyed by group-key string). str(key) alone
+        # was lexicographic ("10" < "2"), drifting which equally-ranked vendor fell off the
+        # cap-20 vs main's numeric id order.
+        tiebreak: tuple[int, object] = (0, card.id) if card is not None else (1, str(key))
+        # Sort tuple: covered desc, has_contact desc, engagement desc nullslast, then tiebreak.
+        ranked.append(
+            (
+                -covered,
+                not has_contact,  # False(0) sorts before True(1) → contactable first
+                -(engagement if engagement is not None else float("-inf")),
+                tiebreak,
+                rv,
+            )
+        )
+
+    ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
+    return [t[4] for t in ranked[:20]]
 
 
 def _find_affinity_in_thread(mpn: str) -> list[dict]:
@@ -1445,42 +1588,62 @@ async def sightings_vendor_modal(
     # not exclude (active-only is enforced inside the service).
     excluded = excluded_vendor_norms(db, requirements) if requirements else set()
 
-    suggested_vendors: list[VendorCard] = []
-    coverage: dict[int, CoverageEntry] = {}
+    suggested_vendors: list[SuggestedVendor] = []
+    coverage: dict[object, CoverageEntry] = {}
     if req_id_list:
         rows = _coverage_ranked_vendor_rows(db, req_id_list, excluded)
-        suggested_vendors = [r.card for r in rows]
-        coverage = {
-            r.card.id: CoverageEntry(
+        # Group key: card id for carded, normalized vendor_name for cardless. coverage is
+        # keyed by this same key so both carded and cardless rows resolve their chip. The
+        # Alpine selection / send-path key (normalized_name) is the card's stored
+        # normalized_name for carded rows (unchanged) and the normalized vendor_name for
+        # cardless rows.
+        for r in rows:
+            norm = normalize_vendor_name(r.vendor_name)
+            key = r.card.id if r.card is not None else norm
+            suggested_vendors.append(
+                SuggestedVendor(
+                    id=key,
+                    card=r.card,
+                    normalized_name=(r.card.normalized_name if r.card is not None else norm),
+                    display_name=r.vendor_name,
+                    vendor_name=r.vendor_name,
+                    has_contact=r.has_contact,
+                    response_rate=(r.card.response_rate if r.card is not None else None),
+                    engagement_score=(r.card.engagement_score if r.card is not None else None),
+                )
+            )
+            coverage[key] = CoverageEntry(
                 count=r.covered_count,
                 avg_score=float(r.avg_score) if r.avg_score is not None else None,
                 mpns="",
             )
-            for r in rows
-        }
         if coverage:
             # Covered-MPN list per vendor (rendered in the row's `title`) — a second
-            # plain query; no string_agg/group_concat (SQLite vs PG divergence).
-            # Same coalesce join as the ranking query, so fallback-joined (NULL-FK)
-            # rows contribute their MPNs too.
+            # plain query; no string_agg/group_concat (SQLite vs PG divergence). LEFT
+            # join so cardless rows (no card) contribute their MPNs too; the per-row key
+            # mirrors the ranking grouping (card id when joined, else normalized name).
             mpn_rows = (
-                db.query(VendorCard.id, Requirement.primary_mpn)
+                db.query(
+                    VendorCard.id,
+                    VendorSightingSummary.vendor_name,
+                    Requirement.primary_mpn,
+                )
                 .select_from(VendorSightingSummary)
                 .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
-                .join(VendorCard, _vss_vendor_card_join())
-                .filter(
-                    VendorSightingSummary.requirement_id.in_(req_id_list),
-                    VendorCard.id.in_(list(coverage)),
-                )
+                .outerjoin(VendorCard, _vss_vendor_card_join())
+                .filter(VendorSightingSummary.requirement_id.in_(req_id_list))
                 .distinct()
                 .all()
             )
-            mpns_by_card: dict[int, set[str]] = {}
-            for card_id, mpn in mpn_rows:
-                if mpn:
-                    mpns_by_card.setdefault(card_id, set()).add(mpn)
-            for card_id, mpns in mpns_by_card.items():
-                coverage[card_id]["mpns"] = ", ".join(sorted(mpns))
+            mpns_by_key: dict[object, set[str]] = {}
+            for card_id, vendor_name, mpn in mpn_rows:
+                if not mpn:
+                    continue
+                row_key: object = card_id if card_id is not None else normalize_vendor_name(vendor_name or "")
+                if row_key in coverage:
+                    mpns_by_key.setdefault(row_key, set()).add(mpn)
+            for cov_key, mpns in mpns_by_key.items():
+                coverage[cov_key]["mpns"] = ", ".join(sorted(mpns))
 
     ctx = {
         "request": request,
@@ -1522,10 +1685,13 @@ async def sightings_vendor_affinity(
         excluded = excluded_vendor_norms(db, requirements)
         suggested_norms: set[str] = set()
         for r in _coverage_ranked_vendor_rows(db, req_id_list, excluded):
-            # Both spellings: the stored normalized_name (may be legacy-suffixed) and
-            # the canonical re-normalization — affinity matches are compared canonically.
-            suggested_norms.add(r.card.normalized_name or "")
-            suggested_norms.add(normalize_vendor_name(r.card.display_name or r.card.normalized_name or ""))
+            # Canonical normalization of the row's display name — covers carded AND
+            # cardless rows uniformly (affinity matches are compared canonically). For
+            # carded rows also add the stored normalized_name, which may be legacy-
+            # suffixed and so differ from the canonical re-normalization.
+            suggested_norms.add(normalize_vendor_name(r.vendor_name))
+            if r.card is not None:
+                suggested_norms.add(r.card.normalized_name or "")
 
         # One affinity call per UNIQUE primary MPN (order-preserving dedupe — no
         # double L3 spend when requirements share an MPN).
@@ -1753,8 +1919,15 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
     VendorContact has no is_primary flag, and a vendor can hold several contacts (an
     rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
     unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
-    NULL-email) row win, which would silently skip the vendor as "had no email". Ordering
-    non-NULL email LAST (then verified, then higher confidence) makes the real email win.
+    EMPTY-email) row win, which would silently skip the vendor as "had no email". Ordering
+    a usable email LAST (then verified, then higher confidence) makes the real email win.
+
+    An EMPTY-OR-NULL email row sorts FIRST (loses last-wins) — both ``NULL`` and ``''`` are
+    unusable (the send path only resolves a non-empty ``contact.email``), and
+    ``_cards_with_resolvable_email`` (the has_contact badge) filters ``email != ''`` too. If
+    only ``is_(None)`` were checked, a higher-confidence ``''``-email row would win last-wins
+    and resolve ``vendor_email=''`` → skip, while the badge promised contactable. Treating
+    ``''`` like NULL here keeps the send path consistent with the badge.
 
     Called by: sightings_preview_inquiry, sightings_send_inquiry.
     """
@@ -1764,7 +1937,8 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
         db.query(VendorContact)
         .filter(VendorContact.vendor_card_id.in_(card_ids))
         .order_by(
-            VendorContact.email.is_(None).desc(),  # NULL-email rows first (lose last-wins)
+            # Empty-or-NULL email rows first (lose last-wins) — '' is as unusable as NULL.
+            or_(VendorContact.email.is_(None), VendorContact.email == "").desc(),
             VendorContact.is_verified.asc().nullsfirst(),  # verified rows last
             VendorContact.confidence.asc().nullsfirst(),  # higher confidence last
             VendorContact.id.asc(),  # deterministic tiebreak (newest row wins ties)
