@@ -985,6 +985,36 @@ class TestVendorModalCoverageRanking:
         assert "1/1 parts" in resp.text
         assert "2/1 parts" not in resp.text
 
+    def test_excluded_vendor_mpn_does_not_leak_into_displayed_chip(self, client, db_session):
+        """The covered-MPN query is unfiltered at the SQL level (it scans every VSS row
+        for the selected requirements); the `if row_key in coverage` Python guard is the
+        scoping mechanism.
+
+        Pin that an EXCLUDED vendor — sharing a requirement with a displayed vendor —
+        never leaks its distinct MPN into the displayed vendor's chip title. A
+        regression here would over-disclose chips for vendors that aren't even rendered.
+        """
+        items = self._requirements(db_session, ["CV-MPN-SHOWN", "CV-MPN-HIDDEN"])
+        shown = self._vendor(db_session, "Shown Vendor")
+        hidden = self._vendor(db_session, "Hidden Vendor")
+        # Shown vendor covers part 0; Hidden vendor covers BOTH parts (so it shares
+        # requirement[0] with Shown). Hidden is excluded via unavailability.
+        self._summary(db_session, items[0], shown)
+        self._summary(db_session, items[0], hidden)
+        self._summary(db_session, items[1], hidden)
+        db_session.commit()
+        _unav_record(db_session, vendor_norm="hidden vendor", key="cvmpnhidden", requirement_id=items[1].id)
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        # Hidden vendor is dropped entirely…
+        assert "Hidden Vendor" not in resp.text
+        # …and its parts never appear in ANY rendered coverage chip (Shown covers only
+        # part 0). CV-MPN-HIDDEN still appears in the read-only Parts reference list, so
+        # scope the assertion to the chip `title="Covers: …"` attributes specifically.
+        chip_titles = re.findall(r'title="Covers: ([^"]*)"', resp.text)
+        assert "CV-MPN-SHOWN" in chip_titles
+        assert all("CV-MPN-HIDDEN" not in t for t in chip_titles)
+
 
 class TestCoverageRankedVendorRows:
     """Unit-level coverage of `_coverage_ranked_vendor_rows` — the cardless /
