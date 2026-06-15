@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
@@ -38,6 +39,7 @@ class Requisition(Base):
         Index("ix_requisitions_claimed_by", "claimed_by_id"),
         Index("ix_requisitions_urgency", "urgency"),
         Index("ix_requisitions_company", "company_id"),
+        Index("ix_requisitions_scratch_user", "created_by", postgresql_where=text("is_scratch")),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -45,6 +47,11 @@ class Requisition(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
+    # Provenance flag: scratch / quick-source reqs are created by a one-off Search action
+    # (Send RFQ / Add Offer) so those flows have a home. Orthogonal to the `status`
+    # lifecycle; hidden from the normal requisitions list + picker; flipped to False when
+    # promoted (customer/name set). See services/quick_source_service.py.
+    is_scratch = Column(Boolean, nullable=False, default=False, server_default="false")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))

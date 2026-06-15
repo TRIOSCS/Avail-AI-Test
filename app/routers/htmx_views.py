@@ -87,6 +87,7 @@ from ..services.part_history_service import (
     requirements_for_card,
     sightings_for_card,
 )
+from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
 from ..template_env import template_response, templates
@@ -457,10 +458,14 @@ async def requisitions_list_partial(
     db: Session = Depends(get_db),
 ):
     """Return requisitions list as HTML partial with filters and sorting."""
-    query = db.query(Requisition).options(
-        joinedload(Requisition.creator),
-        joinedload(Requisition.requirements),
-        joinedload(Requisition.offers),
+    query = (
+        db.query(Requisition)
+        .filter(Requisition.is_scratch.is_(False))
+        .options(
+            joinedload(Requisition.creator),
+            joinedload(Requisition.requirements),
+            joinedload(Requisition.offers),
+        )
     )
 
     search_term = q.strip()
@@ -3466,7 +3471,13 @@ async def requisition_picker(
     Called by: shortlist_bar.html "Add to Requisition" button
     Depends on: models.sourcing (Requisition)
     """
-    recent_reqs = db.query(Requisition).order_by(Requisition.created_at.desc()).limit(20).all()
+    recent_reqs = (
+        db.query(Requisition)
+        .filter(Requisition.is_scratch.is_(False))
+        .order_by(Requisition.created_at.desc())
+        .limit(20)
+        .all()
+    )
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
@@ -3533,36 +3544,10 @@ async def add_to_requisition(
         db.add(requirement)
         db.flush()
 
-    # Create Sighting rows
+    # Create Sighting rows (shared mapping — see services.sighting_ingest)
     created_rows: list[Sighting] = []
     for item in items:
-        sighting = Sighting(
-            requirement_id=requirement.id,
-            vendor_name=item.get("vendor_name", "Unknown"),
-            mpn_matched=item.get("mpn_matched"),
-            manufacturer=item.get("manufacturer"),
-            qty_available=item.get("qty_available"),
-            unit_price=item.get("unit_price"),
-            currency=item.get("currency", "USD"),
-            source_type=item.get("source_type"),
-            is_authorized=item.get("is_authorized", False),
-            confidence=item.get("confidence", 0),
-            score=item.get("score", 0),
-            evidence_tier=item.get("evidence_tier"),
-            moq=item.get("moq"),
-            lead_time=item.get("lead_time"),
-            condition=item.get("condition"),
-            date_code=item.get("date_code"),
-            packaging=item.get("packaging"),
-            vendor_email=item.get("vendor_email"),
-            vendor_phone=item.get("vendor_phone"),
-            raw_data={
-                "vendor_url": item.get("vendor_url"),
-                "click_url": item.get("click_url"),
-                "octopart_url": item.get("octopart_url"),
-                "vendor_sku": item.get("vendor_sku"),
-            },
-        )
+        sighting = sighting_from_row(requirement.id, item)
         db.add(sighting)
         created_rows.append(sighting)
 
