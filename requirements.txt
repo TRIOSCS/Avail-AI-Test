@@ -45,7 +45,7 @@ charset-normalizer==3.4.7
     #   requests
 click==8.4.1
     # via uvicorn
-cryptography==48.0.0
+cryptography==49.0.0
     # via -r requirements.in
 cssselect2==0.9.0
     # via weasyprint
@@ -180,7 +180,7 @@ sqlalchemy==2.0.50
     #   alembic
 sse-starlette==3.4.4
     # via -r requirements.in
-starlette==1.2.1
+starlette==1.3.1
     # via
     #   -r requirements.in
     #   fastapi
