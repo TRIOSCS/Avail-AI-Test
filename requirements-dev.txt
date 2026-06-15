@@ -339,15 +339,10 @@ types-setuptools==82.0.0.20260518
 typing-extensions==4.15.0
     # via
     #   -c requirements.txt
-    #   anyio
-    #   cyclonedx-python-lib
     #   mypy
     #   pyee
-    #   pytest-asyncio
-    #   referencing
     #   schemathesis
     #   sqlalchemy
-    #   starlette
 urllib3==2.7.0
     # via
     #   -c requirements.txt
