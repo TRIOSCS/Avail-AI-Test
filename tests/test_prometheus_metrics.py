@@ -18,12 +18,17 @@ values, so they remain stable when run in parallel with xdist.
 
 from unittest.mock import patch
 
-from fastapi import FastAPI
+from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
 
 from app.main import app
 from app.prometheus_metrics import PrometheusMiddleware
+
+# Sub-router mounted on the real app via include_router() below, to exercise the
+# fastapi 0.137 _IncludedRouter route-tree path in _handler_for(). Prefixed under
+# /__prom_inc/ to keep collisions impossible with real + other test routes.
+router_inc = APIRouter(prefix="/__prom_inc")
 
 # ── Test-only routes registered once on the real app ─────────────────────────
 # Prefixed under /__prom_test/ to make collisions impossible with real routes.
@@ -248,17 +253,56 @@ def test_metrics_rejects_empty_server_token() -> None:
             assert resp.status_code == 403
 
 
+# ── Included-router regression: handler label survives the 0.137 route tree ──
+
+
+@router_inc.get("/items/{item_id}", include_in_schema=False)
+async def _prom_test_included_get_item(item_id: int) -> dict[str, int]:
+    return {"id": item_id}
+
+
+app.include_router(router_inc)
+
+
+def test_included_router_endpoint_labelled_by_template() -> None:
+    """An app.include_router()'d, parameterized route labels by its full template.
+
+    Regression for fastapi 0.137 (PR #15745): include_router'd routes now sit behind an
+    opaque _IncludedRouter wrapper in app.routes, so the old endpoint-identity table
+    walk in _handler_for() collapsed EVERY router-mounted route to <unmatched>. Reading
+    scope["route"].path instead is nesting-agnostic. The original @app.get test routes
+    don't exercise this (they're flat top-level routes), so this drives a request
+    through PrometheusMiddleware to an included route and asserts the templated label
+    appears — and the <unmatched> sentinel does not leak in for it.
+    """
+    with patch("app.main.settings.metrics_token", "test-token"):
+        with _client() as client:
+            client.get("/__prom_inc/items/7")
+            client.get("/__prom_inc/items/9")
+            body = _get_metrics_text(client)
+    assert 'handler="/__prom_inc/items/{item_id}"' in body
+    assert 'handler="/__prom_inc/items/7"' not in body
+    assert 'handler="/__prom_inc/items/9"' not in body
+
+
 # ── Unit-level handler_for behavior (no HTTP roundtrip) ──────────────────────
 
 
-def test_handler_for_returns_template_for_known_endpoint() -> None:
-    """_handler_for walks app.routes to find the template for a known endpoint."""
+def test_handler_for_returns_template_from_scope_route() -> None:
+    """_handler_for reads the matched route's template off scope["route"].
+
+    fastapi 0.137 makes app.routes a tree, so _handler_for no longer walks it — it reads
+    the flat APIRoute that starlette puts on the scope at match time.
+    """
+    from starlette.routing import Route
+
     from app.prometheus_metrics import _UNMATCHED_HANDLER, _handler_for
 
-    scope = {"endpoint": _prom_test_get_item, "app": app}
-    assert _handler_for(scope) == "/__prom_test/items/{item_id}"
-    # Sanity: missing endpoint hits the sentinel.
-    assert _handler_for({"endpoint": None, "app": app}) == _UNMATCHED_HANDLER
+    route = Route("/__prom_test/items/{item_id}", endpoint=_prom_test_get_item)
+    assert _handler_for({"type": "http", "route": route}) == "/__prom_test/items/{item_id}"
+    # Sanity: no matched route on the scope hits the sentinel.
+    assert _handler_for({"type": "http"}) == _UNMATCHED_HANDLER
+    assert _handler_for({"type": "http", "route": None}) == _UNMATCHED_HANDLER
 
 
 def test_middleware_passes_through_non_http_scopes() -> None:

@@ -48,6 +48,10 @@ FastAPI Middleware Stack (in order):
     ├── 2. SessionMiddleware (HTTP-only cookie, 15-min expiry)
     ├── 3. CSRFMiddleware (double-submit cookie on mutations)
     ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
+    │       Note: fastapi 0.137 (PR #15745) made `app.routes` a tree — `include_router`'d
+    │       routes hide behind opaque `_IncludedRouter` wrappers — so `_handler_for` reads
+    │       the templated label straight off `scope["route"].path` instead of walking the
+    │       route table (nesting-agnostic, correct on 0.136.x and 0.137.x).
     ├── 5. CSP Middleware (Content-Security-Policy header)
     ├── 6. Request ID Middleware (UUID tracking, timing, logging)
     └── 7. API Version Middleware (/api/v1/* -> /api/*)

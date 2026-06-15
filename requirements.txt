@@ -4,7 +4,7 @@ annotated-doc==0.0.4
     # via fastapi
 annotated-types==0.7.0
     # via pydantic
-anthropic==0.107.1
+anthropic==0.109.2
     # via -r requirements.in
 anyio==4.13.0
     # via
@@ -59,7 +59,7 @@ docstring-parser==0.18.0
     # via anthropic
 et-xmlfile==2.0.0
     # via openpyxl
-fastapi==0.136.3
+fastapi==0.137.1
     # via
     #   -r requirements.in
     #   sentry-sdk
@@ -168,13 +168,13 @@ requests-oauthlib==2.0.0
     # via msrest
 sentry-sdk[fastapi]==2.62.0
     # via -r requirements.in
-slowapi==0.1.9
+slowapi==0.1.10
     # via -r requirements.in
 sniffio==1.3.1
     # via anthropic
 soupsieve==2.8.4
     # via beautifulsoup4
-sqlalchemy==2.0.50
+sqlalchemy==2.0.51
     # via
     #   -r requirements.in
     #   alembic

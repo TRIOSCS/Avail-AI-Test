@@ -302,7 +302,7 @@ sortedcontainers==2.4.0
     # via
     #   cyclonedx-python-lib
     #   hypothesis
-sqlalchemy[mypy]==2.0.50
+sqlalchemy[mypy]==2.0.51
     # via
     #   -c requirements.txt
     #   -r requirements-dev.in
