@@ -1,53 +1,71 @@
-"""Reconcile mpn_decode / desc_parse facet rows against the FIXED deterministic
-extractors.
+"""Reconcile deterministic facet rows against the FIXED extractors + plausibility gates.
 
-What: facet-accuracy hotfix companion (audit 2026-06-10). Re-runs the corrected MPN
-      decoder and description extractor over every card owning a facet row with
-      source IN (mpn_decode, desc_parse) for the audit-affected spec_keys
-      (capacity_gb / gpu_family / memory_gb) and reconciles the stored value:
-        * fixed extractor yields a DIFFERENT value  -> record_spec the corrected
-          value (same source — the F1 ladder's newest-timestamp tie-break lets the
-          re-run win over the stale same-tier entry);
-        * fixed extractor yields NOTHING for a previously-recorded key -> DELETE the
-          facet row and its specs_structured entry (the old value was a misdecode —
-          wrong is worse than missing, provenance stays honest).
+What: generalized facet-accuracy reconciler (trust architecture, 2026-06-12;
+      originally the 2026-06-10 audit hotfix companion). Scope is selectable:
+      ``--sources`` (default: ALL deterministic facet sources — mpn_decode,
+      desc_parse, fru_matrix_decode, fru_desc_parse) × ``--keys`` (default: every
+      spec_key present in commodity_spec_schemas). Per row:
+        * mpn_decode / desc_parse — re-runs the corrected MPN decoder / description
+          extractor and reconciles the stored value: a DIFFERENT value ->
+          record_spec the correction (same source — the F1 ladder's
+          newest-timestamp tie-break lets the re-run win over the stale same-tier
+          entry); NOTHING for a previously-recorded key -> DELETE the facet row and
+          its specs_structured entry (the old value was a misdecode — wrong is
+          worse than missing, provenance stays honest).
+        * fru_matrix_decode / fru_desc_parse — no deterministic recompute channel
+          exists (the crosswalk depends on fru_links workbook state, not the card
+          alone), so these rows ride a capacity PLAUSIBILITY-GRID gate instead: an
+          hdd capacity_gb off the shipped-capacity grid
+          (mpn_decoder.storage.HDD_SHIPPED_CAPACITY_GB — HDD capacities are a
+          discrete vendor vocabulary, see that module) is a misread -> DELETE;
+          on-grid -> unchanged; everything else is tally-only (skipped_ungated —
+          the grid is deliberately HDD-only, SSD/DRAM capacities are
+          near-continuous).
       Dry-run by default with per-failure-class tallies — round 1: legacy_wd /
       legacy_seagate / stmicro_gate / gb_bit / rtx_family; round 2 (re-audit
       2026-06-10): wd_revision_digit (modern WD final-digit revision markers read as
       tenths-of-TB), capacity_grid (hdd capacity the decoder now drops as off the
       shipped-capacity grid), seagate_envelope (modern structured-tail Seagate shapes,
       now per-family-envelope gated), nand_density (bare-"G" gigaBIT die densities
-      recorded as GB). --apply writes. SAVEPOINT per card so one bad card never
-      poisons the batch.
+      recorded as GB); fru gate: fru_capacity_grid / fru_ungated. --apply writes.
+      SAVEPOINT per card so one bad card never poisons the batch. Every run's tallies
+      (dry-run AND apply) persist to the reconcile_runs table via
+      ``record_reconcile_run`` — the first two rounds' tallies were log-only and are
+      unrecoverable.
 Usage: python -m app.management.reconcile_decoded_facets [--apply] [--limit N]
-Called by: admin manually after deploying the facet-accuracy hotfix.
-Depends on: mpn_decoder.decode_mpn, desc_extractor.extract_desc,
+      [--sources csv] [--keys csv]
+Called by: admin manually after extractor fixes / on the trust-review cadence.
+Depends on: mpn_decoder.decode_mpn (+ storage.HDD_SHIPPED_CAPACITY_GB),
+      desc_extractor.extract_desc, fru_crosswalk_enrich source tags,
       spec_write_service.record_spec/spec_would_write/load_schema_cache,
-      MaterialCard + MaterialSpecFacet, normalize_mpn.
+      MaterialCard + MaterialSpecFacet + ReconcileRun (+ CommoditySpecSchema for the
+      default key set), normalize_mpn.
 """
 
 import argparse
 import re
 from collections import Counter, defaultdict
+from collections.abc import Sequence
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard, MaterialSpecFacet
+from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet, ReconcileRun
 from app.services.desc_extractor import extract_desc
 from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES, nand_die_context
+from app.services.fru_crosswalk_enrich import FRU_DECODE_SOURCE, FRU_DESC_SOURCE
 from app.services.mpn_decoder import decode_mpn
 from app.services.mpn_decoder._common import DECODE_CONFIDENCE, DECODE_SOURCE, DROP_OUT_OF_ENVELOPE
-from app.services.mpn_decoder.storage import _SEAGATE, _STMICRO_DENY, _WD_MODERN
+from app.services.mpn_decoder.storage import _SEAGATE, _STMICRO_DENY, _WD_MODERN, HDD_SHIPPED_CAPACITY_GB
 from app.services.spec_write_service import load_schema_cache, record_spec, spec_would_write
 from app.utils.normalization import normalize_mpn
 
-# The audit's wrong rows live in these (source, spec_key) cells: legacy WD/Seagate +
-# STMicro misdecodes (mpn_decode × capacity_gb), Gb-vs-GB bit coercion (desc_parse ×
-# capacity_gb, and the same reader fix touches gpu memory_gb), and RTX family
-# fragmentation (desc_parse × gpu_family).
-TARGET_SOURCES = (DECODE_SOURCE, DESC_SOURCE)
-TARGET_SPEC_KEYS = ("capacity_gb", "gpu_family", "memory_gb")
+# Every deterministic facet source the reconciler knows how to handle. mpn_decode /
+# desc_parse rows are RECOMPUTED against the fixed extractors; the fru sources have no
+# card-local recompute channel and ride the capacity plausibility-grid gate instead.
+DEFAULT_SOURCES = (DECODE_SOURCE, DESC_SOURCE, FRU_DECODE_SOURCE, FRU_DESC_SOURCE)
+_RECOMPUTE_SOURCES = frozenset({DECODE_SOURCE, DESC_SOURCE})
+_FRU_SOURCES = frozenset({FRU_DECODE_SOURCE, FRU_DESC_SOURCE})
 
 _CONFIDENCE = {DECODE_SOURCE: DECODE_CONFIDENCE, DESC_SOURCE: DESC_CONFIDENCE}
 
@@ -117,6 +135,58 @@ def _recompute(card: MaterialCard, sources: set[str]) -> dict[str, dict]:
     return out
 
 
+def _all_schema_keys(db: Session) -> tuple[str, ...]:
+    """Every spec_key present in commodity_spec_schemas — the ``--keys`` default."""
+    rows = db.query(CommoditySpecSchema.spec_key).distinct().order_by(CommoditySpecSchema.spec_key).all()
+    return tuple(key for (key,) in rows)
+
+
+def _delete_facet_row(db: Session, card: MaterialCard, facet: MaterialSpecFacet, *, apply: bool) -> str:
+    """Delete *facet* + its specs_structured mirror (apply mode); returns the action.
+
+    Guard shared by every delete branch: the JSONB entry and the facet row mirror by
+    construction, so a provenance mismatch between them means drift — skip rather
+    than delete data some other source now owns.
+    """
+    specs = dict(card.specs_structured or {})
+    entry = specs.get(facet.spec_key)
+    if entry is not None and entry.get("source") != facet.source:
+        return "skipped_provenance_mismatch"
+    if apply:
+        specs.pop(facet.spec_key, None)
+        card.specs_structured = specs
+        db.delete(facet)
+    return "deleted"
+
+
+def _gate_fru_facet(
+    db: Session, card: MaterialCard, facet: MaterialSpecFacet, category: str, *, apply: bool
+) -> tuple[str, str]:
+    """Plausibility gate for a fru_matrix_decode / fru_desc_parse row → (class, action).
+
+    No recompute channel exists for the fru sources (the crosswalk depends on
+    fru_links workbook state, not the card alone), so the only deterministic check is
+    the shipped-capacity grid: an hdd capacity_gb off HDD_SHIPPED_CAPACITY_GB is a
+    misread (the documented 373,455 GB class) — wrong is worse than missing → delete.
+    The grid is deliberately HDD-only (SSD/DRAM capacities are near-continuous, see
+    mpn_decoder/storage.py), and non-capacity keys have no plausibility vocabulary —
+    those rows are tally-only (``fru_ungated`` / ``skipped_ungated``) so coverage
+    gaps stay visible in the persisted run report instead of silently passing.
+    """
+    if facet.spec_key == "capacity_gb" and category == "hdd":
+        value = facet.value_numeric
+        on_grid = False
+        if value is not None:
+            try:
+                on_grid = float(value) in HDD_SHIPPED_CAPACITY_GB
+            except (TypeError, ValueError):
+                on_grid = False
+        if on_grid:
+            return "fru_capacity_grid", "unchanged"
+        return "fru_capacity_grid", _delete_facet_row(db, card, facet, apply=apply)
+    return "fru_ungated", "skipped_ungated"
+
+
 def _facet_matches(facet: MaterialSpecFacet, schema, new_value) -> bool:
     """Does the stored facet projection already equal the fixed extractor's value?"""
     if schema is not None and schema.data_type == "numeric":
@@ -131,18 +201,34 @@ def _facet_matches(facet: MaterialSpecFacet, schema, new_value) -> bool:
     return facet.value_text == str(new_value)
 
 
-def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
+def reconcile(
+    db: Session,
+    *,
+    apply: bool = False,
+    limit: int = 0,
+    sources: Sequence[str] | None = None,
+    keys: Sequence[str] | None = None,
+) -> dict:
     """Reconcile the targeted facet rows; returns the tally dict (see module docstring).
 
-    Dry-run (default) classifies every row through the exact gates apply-mode uses
-    (spec_would_write is record_spec's read-only twin) and writes NOTHING; --apply
-    mutates inside a per-card SAVEPOINT and commits at the end.
+    *sources* / *keys* default to ALL deterministic sources / every schema'd spec_key
+    (an unknown source raises — the reconciler only knows the four deterministic
+    channels). Dry-run (default) classifies every row through the exact gates
+    apply-mode uses (spec_would_write is record_spec's read-only twin) and writes
+    NOTHING; --apply mutates inside a per-card SAVEPOINT and commits at the end. The
+    caller persists the returned summary via ``record_reconcile_run`` (main() does).
     """
+    sources = tuple(sources) if sources else DEFAULT_SOURCES
+    unknown = sorted(set(sources) - set(DEFAULT_SOURCES))
+    if unknown:
+        raise ValueError(f"reconcile: unsupported source(s) {unknown} — supported: {list(DEFAULT_SOURCES)}")
+    keys = tuple(keys) if keys else _all_schema_keys(db)
+
     rows = (
         db.query(MaterialSpecFacet)
         .filter(
-            MaterialSpecFacet.source.in_(TARGET_SOURCES),
-            MaterialSpecFacet.spec_key.in_(TARGET_SPEC_KEYS),
+            MaterialSpecFacet.source.in_(sources),
+            MaterialSpecFacet.spec_key.in_(keys),
         )
         .order_by(MaterialSpecFacet.material_card_id, MaterialSpecFacet.spec_key)
         .all()
@@ -170,7 +256,7 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
             cache = schema_caches.get(category)
             if cache is None and category:
                 cache = schema_caches[category] = load_schema_cache(db, category)
-            recomputed = _recompute(card, {f.source for f in facets})
+            recomputed = _recompute(card, {f.source for f in facets} & _RECOMPUTE_SOURCES)
 
             # Per-card SAVEPOINT (apply mode): record_spec flushes, so a DB-level
             # failure would otherwise poison the shared transaction for every later
@@ -182,6 +268,10 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
             ctx = db.begin_nested() if apply else None
             try:
                 for facet in facets:
+                    if facet.source in _FRU_SOURCES:
+                        # No recompute channel — plausibility-grid gate only.
+                        pending.append(_gate_fru_facet(db, card, facet, category, apply=apply))
+                        continue
                     klass = _classify(facet, card)
                     new_value = recomputed.get(facet.source, {}).get(facet.spec_key)
                     schema = (cache or {}).get((category, facet.spec_key))
@@ -190,16 +280,7 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
                         # value is a stale misdecode. Delete facet + JSONB entry, but
                         # only when the JSONB provenance still agrees with the facet's
                         # (they mirror by construction; a mismatch means drift — skip).
-                        specs = dict(card.specs_structured or {})
-                        entry = specs.get(facet.spec_key)
-                        if entry is not None and entry.get("source") != facet.source:
-                            pending.append((klass, "skipped_provenance_mismatch"))
-                            continue
-                        if apply:
-                            specs.pop(facet.spec_key, None)
-                            card.specs_structured = specs
-                            db.delete(facet)
-                        pending.append((klass, "deleted"))
+                        pending.append((klass, _delete_facet_row(db, card, facet, apply=apply)))
                     elif _facet_matches(facet, schema, new_value):
                         pending.append((klass, "unchanged"))
                     else:
@@ -246,6 +327,8 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
 
     summary = {
         "mode": "apply" if apply else "dry-run",
+        "sources": list(sources),
+        "keys": list(keys),
         "cards": totals["cards"],
         "facets": sum(len(by_card[c]) for c in card_ids),
         "corrected": totals["corrected"],
@@ -259,11 +342,43 @@ def reconcile(db: Session, *, apply: bool = False, limit: int = 0) -> dict:
     return summary
 
 
+def record_reconcile_run(db: Session, summary: dict) -> ReconcileRun:
+    """Persist a reconcile *summary* to the reconcile_runs table (durable telemetry).
+
+    Both prior reconcile rounds' per-class apply tallies were runtime-log-only and died
+    with container rotation — every run (dry-run AND apply) now leaves a queryable row.
+    Flushes but does not commit; the caller owns the transaction (main() commits AFTER
+    the dry-run rollback so the report row is the only thing a dry-run persists).
+    """
+    run = ReconcileRun(
+        mode=summary["mode"],
+        sources=summary["sources"],
+        keys=summary["keys"],
+        by_class=summary["by_class"],
+        totals={k: summary[k] for k in ("cards", "facets", "corrected", "deleted", "unchanged", "skipped", "failed")},
+    )
+    db.add(run)
+    db.flush()
+    return run
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reconcile mpn_decode/desc_parse facets against the fixed extractors")
+    parser = argparse.ArgumentParser(description="Reconcile deterministic facet rows against the fixed extractors")
     parser.add_argument("--apply", action="store_true", help="Write the corrections/deletes (default: dry-run)")
     parser.add_argument("--limit", type=int, default=0, help="Max cards to process (0 = all)")
+    parser.add_argument(
+        "--sources",
+        default=",".join(DEFAULT_SOURCES),
+        help=f"Comma-separated facet sources to reconcile (default: {','.join(DEFAULT_SOURCES)})",
+    )
+    parser.add_argument(
+        "--keys",
+        default="",
+        help="Comma-separated spec_keys to reconcile (default: every spec_key in commodity_spec_schemas)",
+    )
     args = parser.parse_args()
+    sources = tuple(s.strip() for s in args.sources.split(",") if s.strip())
+    keys = tuple(k.strip() for k in args.keys.split(",") if k.strip()) or None
 
     from app.database import SessionLocal
 
@@ -271,14 +386,19 @@ def main() -> None:
     try:
         if args.apply:
             logger.warning(
-                "reconcile-decoded-facets: --apply will rewrite/DELETE mpn_decode/desc_parse facet rows "
-                "for spec_keys {} — ensure a recent db-backup exists (pg_dump runs every 6h; "
+                "reconcile-decoded-facets: --apply will rewrite/DELETE facet rows for sources {} / "
+                "spec_keys {} — ensure a recent db-backup exists (pg_dump runs every 6h; "
                 "scripts/restore.sh to roll back)",
-                TARGET_SPEC_KEYS,
+                sources,
+                args.keys or "ALL schema'd",
             )
-        reconcile(db, apply=args.apply, limit=args.limit)
+        summary = reconcile(db, apply=args.apply, limit=args.limit, sources=sources, keys=keys)
         if not args.apply:
-            db.rollback()  # belt-and-braces: dry-run leaves no writes behind
+            db.rollback()  # belt-and-braces: dry-run leaves no facet writes behind
+        # The durable run report is persisted for BOTH modes — after the dry-run
+        # rollback, the ReconcileRun row is the only write this commit contains.
+        record_reconcile_run(db, summary)
+        db.commit()
     finally:
         db.close()
 

@@ -167,6 +167,46 @@ def _conflict_value_key(value) -> str:
         return text.casefold()
 
 
+def values_contradict(kept_value, incoming_value) -> bool:
+    """True iff the two values DIFFER under the ladder's conflict normalization.
+
+    The single comparison both contradiction detectors (``record_validation_conflict``,
+    ``record_evidence_dissent``) and the rejection counters use, so "corroboration vs
+    contradiction" can never be classified differently across them.
+    """
+    return _conflict_value_key(kept_value) != _conflict_value_key(incoming_value)
+
+
+# Daily ladder-rejection counters survive ~a month so weekly trust reviews can read
+# them back; the date-keyed hash self-partitions, so a longer TTL only costs bytes.
+REJECTION_COUNTER_TTL_DAYS = 35.0
+
+
+def count_ladder_rejection(winner_source: str, loser_source: str, *, contradiction: bool) -> None:
+    """Bump the persistent per-day ladder-rejection counter. NEVER raises.
+
+    Redis hash ``intel:ladder:rejections:{date}`` (via app.cache.intel_cache, the same
+    backend the enrichment-worker daily counters use), field
+    ``{winner_source}|{loser_source}|{corroboration|contradiction}``. Before this
+    counter, rejections were log-only and died with container rotation — and
+    corroborations vs contradictions were indistinguishable without re-parsing logs.
+    Telemetry must never break the write path: every failure is swallowed and logged
+    at DEBUG.
+    """
+    try:
+        from app.cache import intel_cache
+
+        kind = "contradiction" if contradiction else "corroboration"
+        date = datetime.now(timezone.utc).date().isoformat()
+        intel_cache.incr_hash_count(
+            f"ladder:rejections:{date}",
+            f"{winner_source or 'unknown'}|{loser_source or 'unknown'}|{kind}",
+            ttl_days=REJECTION_COUNTER_TTL_DAYS,
+        )
+    except Exception as exc:
+        logger.debug("count_ladder_rejection: counter write failed (non-fatal): {}", exc)
+
+
 def record_validation_conflict(
     card: "MaterialCard",
     key: str,
@@ -245,6 +285,109 @@ def record_validation_conflict(
         getattr(card, "id", None),
         key,
         manual_value,
+        incoming_source,
+        incoming_tier,
+        incoming_value,
+    )
+    return True
+
+
+def record_evidence_dissent(
+    card: "MaterialCard",
+    key: str,
+    kept_prov: dict | None,
+    incoming_prov: dict,
+    incoming_value,
+) -> bool:
+    """Record that authoritative evidence dissents from a kept NON-manual value.
+
+    The companion of ``record_validation_conflict`` for the case it structurally never
+    covers: that helper fires only when the KEPT value is ``manual`` (tier 100), so an
+    authoritative-vs-authoritative contradiction (trio_source category vs mpn_decode,
+    a FRU 373TB capacity vs the description's 36.4 GB) resolved silently by tier with
+    no review artifact — "wrong facet worse than missing" had no detector above the
+    ladder itself. Called from the same LOSE branches (``record_spec``'s
+    ``_incoming_loses`` path and ``_set_provenanced_column``); gates (all here, call
+    sites stay dumb):
+      - the kept value is NOT ``manual`` (the manual-winner case stays with
+        ``record_validation_conflict``, unchanged);
+      - the LOSING source ranks in the authoritative band (tier >=
+        ``CONFLICT_EVIDENCE_MIN_TIER`` = 80);
+      - the two values actually differ under ``values_contradict`` (corroboration is
+        not stored — and, mirroring record_validation_conflict, a same-source
+        observation that now AGREES removes that source's stale entry).
+
+    Persists into the SAME ``card.validation_conflicts`` JSONB +
+    ``has_validation_conflict`` flag (de-duped per ``(key, evidence.source)``, newest
+    replaces) so dissents surface in the already-wired needs-review filter and detail
+    rendering with zero UI work. Shape note: the kept side is stored under the
+    ``manual`` sub-dict key for compatibility with the rendered conflict rows and the
+    accept endpoint, but carries honest ``source``/``tier`` fields and the entry is
+    tagged ``kind: "dissent"``. Returns True iff an entry was written.
+    """
+    kept_prov = kept_prov or {}
+    incoming_prov = incoming_prov or {}
+    kept_source = kept_prov.get("source") or ""
+    if kept_source == "manual":
+        return False
+    incoming_source = incoming_prov.get("source", "")
+    incoming_tier = incoming_prov.get("tier")
+    if incoming_tier is None:
+        incoming_tier = tier_for(incoming_source)
+    if int(incoming_tier) < CONFLICT_EVIDENCE_MIN_TIER:
+        return False
+    kept_value = kept_prov.get("value")
+    if not values_contradict(kept_value, incoming_value):
+        # Corroboration: this source's NEWEST observation agrees with the kept value —
+        # drop any stale dissent it recorded earlier and recompute the flag
+        # (deterministic sources re-fire every pass; a fixed decoder must not leave
+        # the card flagged forever).
+        stale = [
+            c
+            for c in (card.validation_conflicts or [])
+            if c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source
+        ]
+        if stale:
+            kept_entries = [c for c in (card.validation_conflicts or []) if c not in stale]
+            card.validation_conflicts = kept_entries
+            card.has_validation_conflict = bool(kept_entries)
+        return False
+
+    kept_tier = kept_prov.get("tier")
+    if kept_tier is None and kept_source:
+        kept_tier = tier_for(kept_source)
+    entry = {
+        "key": key,
+        "kind": "dissent",
+        "manual": {
+            "value": kept_value,
+            "updated_at": kept_prov.get("updated_at") or "",
+            "source": kept_source,
+            "tier": int(kept_tier) if kept_tier is not None else None,
+        },
+        "evidence": {
+            "source": incoming_source,
+            "tier": int(incoming_tier),
+            "confidence": incoming_prov.get("confidence"),
+            "value": incoming_value,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+        },
+    }
+    conflicts = [
+        c
+        for c in (card.validation_conflicts or [])
+        if not (c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source)
+    ]
+    conflicts.append(entry)
+    card.validation_conflicts = conflicts
+    card.has_validation_conflict = True
+    logger.info(
+        "evidence dissent: card={} key={} kept {!r} ({}, tier {}); {} (tier {}) reported {!r}",
+        getattr(card, "id", None),
+        key,
+        kept_value,
+        kept_source,
+        kept_tier,
         incoming_source,
         incoming_tier,
         incoming_value,
@@ -422,6 +565,11 @@ def _set_provenanced_column(
         }
 
     if not resolve(existing, incoming):
+        # The KEPT side's effective provenance: a valued-but-unprovenanced existing
+        # ranked as legacy_backfill above, so it must be NAMED that here too (the
+        # dissent record, the rejection counter, and the log line all describe the
+        # same decision the ladder just made).
+        kept_source = existing_source if existing_source else (LEGACY_BACKFILL_SOURCE if existing else "")
         if write:
             # The ladder kept the existing value. If that value is a manual edit and
             # the loser is an authoritative source reporting something ELSE, persist
@@ -442,6 +590,24 @@ def _set_provenanced_column(
                 {"source": source, **incoming},
                 value,
             )
+            # Non-manual kept values get the same contradiction artifact via the
+            # dissent channel (the helper gates kept!=manual / loser tier>=80 /
+            # value-differs — exactly one of the two recorders can fire per loss).
+            record_evidence_dissent(
+                card,
+                attr,
+                {
+                    "source": kept_source,
+                    "value": current,
+                    "updated_at": existing["updated_at"] if existing else "",
+                    "tier": existing["tier"] if existing else None,
+                },
+                {"source": source, **incoming},
+                value,
+            )
+            # Persistent telemetry: every real (write-mode) rejection counts once,
+            # classified corroboration vs contradiction. Never raises (wrapped inside).
+            count_ladder_rejection(kept_source, source, contradiction=values_contradict(current, value))
         # Visibility rule (mirrors record_spec._incoming_loses): a writer that
         # systematically loses arbitration must be visible at production log levels,
         # so NON-manual rejections log at INFO for EVERY provenanced column
@@ -453,16 +619,20 @@ def _set_provenanced_column(
         # (no validation conflict either unless the kept value is manual and the
         # loser is tier >= 80). Only manual submissions stay at DEBUG: the human
         # gets endpoint feedback (toast/422) and the no-op re-assert paths are
-        # deliberate.
+        # deliberate. The line names BOTH sides — winner source+tier AND loser —
+        # so a rejection is diagnosable from the log alone.
         log = logger.info if source != "manual" else logger.debug
         log(
-            "set_{}: card={} kept existing {}={!r} (incoming {!r}@{} lost)",
+            "set_{}: card={} kept existing {}={!r} ({}, tier {}) — incoming {!r}@{} (tier {}) lost",
             attr,
             getattr(card, "id", None),
             attr,
             current,
+            kept_source,
+            existing["tier"] if existing else None,
             value,
             source,
+            incoming["tier"],
         )
         return False
 

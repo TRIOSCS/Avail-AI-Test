@@ -1516,6 +1516,36 @@ record_validation_conflict(card, key, existing_prov, incoming_prov, incoming_val
     # sets has_validation_conflict. Arbitration is UNCHANGED — the manual value always
     # survives; this only persists the contradiction.
 
+record_evidence_dissent(card, key, kept_prov, incoming_prov, incoming_value) -> bool
+    # Trust architecture §1.2b: the companion of record_validation_conflict for the case
+    # it structurally NEVER covers — the kept value is NOT manual. Before this, an
+    # authoritative-vs-authoritative contradiction (trio_source category vs mpn_decode, a
+    # FRU 373TB capacity vs the description's 36.4 GB) was resolved silently by tier with
+    # no review artifact. Called from the SAME LOSE branches (record_spec's _incoming_loses
+    # path and _set_provenanced_column write=True). Gates (all here): kept source != manual
+    # (the manual case stays with record_validation_conflict); LOSING source tier >= 80
+    # (CONFLICT_EVIDENCE_MIN_TIER); values differ under values_contradict (the SINGLE
+    # comparison both recorders + the counter share, so corroboration/contradiction can
+    # never be classified differently — and a same-source observation that now AGREES drops
+    # its own stale dissent, like record_validation_conflict). Exactly ONE of the two
+    # recorders fires per loss (manual-or-not is mutually exclusive). Persists into the
+    # SAME validation_conflicts JSONB + has_validation_conflict flag (de-dupe per
+    # (key, evidence.source)), tagged kind:"dissent" — the kept side is stored under the
+    # "manual" sub-key (for the existing rendered conflict rows + accept endpoint) but
+    # carries honest source/tier. Zero UI work: dissents surface in the already-wired
+    # needs-review filter. Arbitration is UNCHANGED.
+
+count_ladder_rejection(winner_source, loser_source, *, contradiction) -> None
+    # Trust architecture §1.2c: persistent per-day ladder-rejection telemetry. NEVER raises
+    # (telemetry must not break the write path — every failure is swallowed, logged DEBUG).
+    # Called once per real (write-mode) rejection from both LOSE branches. Bumps Redis hash
+    # intel:ladder:rejections:{date} (via app.cache.intel_cache.incr_hash_count, 35-day TTL)
+    # field "{winner}|{loser}|{corroboration|contradiction}" — kind via values_contradict
+    # so corroborations and contradictions are now distinguishable (before, rejections were
+    # log-only and died with container rotation, and the two were indistinguishable). The
+    # set_* + record_spec rejection log lines now name BOTH sides (winner source+tier AND
+    # loser) so a rejection is diagnosable from the log alone.
+
 clear_validation_conflicts(card, key) -> bool
     # Drops every entry for *key* and recomputes has_validation_conflict. Called by the
     # PUT updates when the field is re-asserted (routers/materials.py::update_material —
@@ -1683,13 +1713,21 @@ Status badge (card detail header): htmx/partials/materials/enrich_status.html �
   forever).
 
 Validation conflicts (storage: material_cards.validation_conflicts JSONB +
-  has_validation_conflict + partial index, migration 099; write hook:
-  spec_tiers.record_validation_conflict — see the spec_tiers contract above):
+  has_validation_conflict + partial index, migration 099; write hooks:
+  spec_tiers.record_validation_conflict + record_evidence_dissent — see the spec_tiers
+  contract above):
   V1 decode-vs-manual spec keys (the decoder writes, the ladder rejects, the hook
   records); V2 manual category/brand/manufacturer vs an authoritative writer
   (_set_provenanced_column hook — covers every provenanced column, so manual maker
   edits carry the same contract; the decoder's cross-commodity guard is unchanged);
-  V3 = the intake rejections above.
+  V3 = the intake rejections above;
+  V4 authoritative-vs-authoritative dissent (trust architecture §1.2b,
+  record_evidence_dissent) — a kept NON-manual value contradicted by a losing tier>=80
+  source, tagged kind:"dissent", stored in the SAME JSONB/flag (so it surfaces in the
+  same needs-review queue and renders through the same conflict rows / accept route with
+  zero new UI). Exactly one of V1/V2 (manual-kept) or V4 (non-manual-kept) fires per loss.
+  Every real rejection also bumps the persistent Redis ladder-rejection counter
+  (spec_tiers.count_ladder_rejection, §1.2c) classified corroboration vs contradiction.
   Surfacing: amber "Needs review — N conflict(s)" hero badge + per-key warning rows in
   the detail Specifications panel with tooltip ("Manual value kept. <source> reported
   <value> (conf <c>) on <date>") and an "Use this value" button →
@@ -1832,19 +1870,29 @@ their existing category conflicts with the decoded commodity are counted too
 category-alias map needs another entry).
 
 Reconciliation after a decoder/extractor fix: `python -m app.management.
-reconcile_decoded_facets [--apply] [--limit N]` re-runs the fixed decode + desc
-extraction over every card owning a facet row with source IN (mpn_decode,
-desc_parse) for the audit-affected spec_keys (capacity_gb/gpu_family/memory_gb).
-A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
-source (the F1 newest-timestamp tie-break lets the re-run win its own stale
-entry); a key the fixed extractor no longer yields is DELETED from both
-material_spec_facets and specs_structured (wrong is worse than missing —
-provenance stays honest). Dry-run by default with per-failure-class tallies
-(round 1: legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
+reconcile_decoded_facets [--apply] [--limit N] [--sources csv] [--keys csv]`.
+**Trust architecture §1.2a generalized the scope:** `--sources` defaults to ALL four
+deterministic facet sources (mpn_decode, desc_parse, fru_matrix_decode, fru_desc_parse)
+and `--keys` defaults to EVERY spec_key in commodity_spec_schemas (was 2 sources × 3
+audit-affected keys). mpn_decode/desc_parse rows are RECOMPUTED against the fixed
+extractors; the fru sources have NO card-local recompute channel (the crosswalk depends
+on fru_links workbook state) so they ride a capacity PLAUSIBILITY-GRID gate instead — an
+hdd capacity_gb off `HDD_SHIPPED_CAPACITY_GB` is a misread → DELETE; on-grid → unchanged;
+every other key/category is tally-only (`fru_ungated`/`skipped_ungated`, so coverage gaps
+stay visible). A DIFFERENT re-run value is re-recorded through `record_spec` under the SAME
+source (the F1 newest-timestamp tie-break lets the re-run win its own stale entry); a key
+the fixed extractor no longer yields is DELETED from both material_spec_facets and
+specs_structured (wrong is worse than missing — provenance stays honest). Dry-run by
+default with per-failure-class tallies (round 1:
+legacy_wd/legacy_seagate/stmicro_gate/gb_bit/rtx_family; round 2:
 wd_revision_digit/capacity_grid/seagate_envelope/nand_density — the decoder's
 `dropped`/`drop_reasons` channel attributes grid-emptied capacity-only decodes to
 capacity_grid and envelope refusals to seagate_envelope, never to the shape-regex
-fallback buckets); SAVEPOINT per card.
+fallback buckets; fru: fru_capacity_grid/fru_ungated); SAVEPOINT per card with BUFFERED
+tallies merged only after a clean release. **Every run (dry-run AND apply) persists its
+summary to the `reconcile_runs` table** via `record_reconcile_run` (both prior rounds'
+apply tallies were log-only and are unrecoverable) — a dry-run commits the report row
+AFTER its facet-write rollback, so the row is the only write a dry-run leaves.
 
 Targeted FRU-graph drain (§2.6): `python -m app.management.run_fru_crosswalk
 [drain|create|all] [--apply] [--limit N] [--measure-drive-pn]` — dry-run by
