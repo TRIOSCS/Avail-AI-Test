@@ -114,7 +114,7 @@ If you can't do this drill end-to-end, the backup strategy is theoretical and yo
 
 ## Gate 3 — TLS cert & DNS
 
-`app.availai.net` has public DNS pointing to `127.0.0.1` (intentional — `/etc/hosts` on team laptops routes the real traffic). That means **Let's Encrypt HTTP-01 and TLS-ALPN-01 challenges cannot reach the droplet by hostname**, so cert renewal will fail when Caddy tries it.
+**RESOLVED 2026-06-12:** public DNS for `app.availai.net` now returns the droplet IP (`104.248.191.152` via 8.8.8.8), so HTTP-01 renewal works — verified by a successful auto-renewal (cert expires 2026-08-17, Let's Encrypt E8). The local `dig` showing `127.0.0.1` is this host's `/etc/hosts`, not public DNS. The checks below remain as the recurring verification procedure.
 
 ### Gate 3a — Current cert has > 30 days remaining
 
