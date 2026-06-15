@@ -115,7 +115,8 @@ def _seed_audit_cards(db: Session) -> dict[str, MaterialCard]:
     _seed_wrong(db, cards["seagate_trunc"], "capacity_gb", 120, "mpn_decode")
     _seed_wrong(db, cards["off_grid"], "capacity_gb", 17000, "mpn_decode")
     _seed_wrong(db, cards["nand"], "capacity_gb", 512, "desc_parse")
-    # The dram card's CORRECT desc-parsed key — outside TARGET_SPEC_KEYS, must survive.
+    # The dram card's CORRECT desc-parsed key — in scope under the generalized default
+    # keys (every schema'd spec_key), but the re-run corroborates it: must survive.
     assert record_spec(db, cards["dram"].id, "ddr_type", "DDR3", source="desc_parse", confidence=0.90)
     db.commit()
     return cards
@@ -129,12 +130,16 @@ def test_dry_run_tallies_without_writing(db_session: Session):
     assert summary["mode"] == "dry-run"
     assert summary["corrected"] == 3  # WD legacy capacity + RTX family + WD revision digit
     assert summary["deleted"] == 6  # STMicro + legacy Seagate + Gb-bit dram + trunc + grid + NAND
-    assert summary["unchanged"] == 1  # modern Seagate control
+    assert summary["unchanged"] == 2  # modern Seagate control + corroborated ddr_type
     assert summary["failed"] == 0
+    assert summary["sources"] == ["mpn_decode", "desc_parse", "fru_matrix_decode", "fru_desc_parse"]
+    assert "ddr_type" in summary["keys"]  # default keys = every schema'd spec_key
     assert summary["by_class"]["legacy_wd"] == {"corrected": 1}
     assert summary["by_class"]["stmicro_gate"] == {"deleted": 1}
     assert summary["by_class"]["legacy_seagate"] == {"deleted": 1}
-    assert summary["by_class"]["gb_bit"] == {"deleted": 1}
+    # The dram card's wrong capacity deletes; its corroborated ddr_type row (same
+    # bit-token description) tallies unchanged in the same class.
+    assert summary["by_class"]["gb_bit"] == {"deleted": 1, "unchanged": 1}
     assert summary["by_class"]["rtx_family"] == {"corrected": 1}
     # Round-2 classes: the modern-shape control row moved from the round-1 legacy_seagate
     # bucket into the (more precise) envelope-gated branch bucket.
@@ -181,7 +186,7 @@ def test_apply_corrects_deletes_and_matches_dry_run(db_session: Session):
     for name in ("stmicro", "seagate", "dram", "seagate_trunc", "off_grid", "nand"):
         assert "capacity_gb" not in _facets(db_session, cards[name].id), name
         assert "capacity_gb" not in (cards[name].specs_structured or {}), name
-    # the dram card's non-targeted desc_parse key survives (only capacity was wrong).
+    # the dram card's corroborated desc_parse key survives (only capacity was wrong).
     assert _facets(db_session, cards["dram"].id)["ddr_type"] == "DDR3"
     # class 5 corrected: one family, the catalog-canonical one.
     assert _facets(db_session, cards["gpu"].id)["gpu_family"] == "GeForce"
@@ -200,7 +205,7 @@ def test_apply_is_idempotent(db_session: Session):
     # Second pass finds the corrected rows already right and the deleted rows gone.
     assert second["corrected"] == 0
     assert second["deleted"] == 0
-    assert second["unchanged"] == 4  # wd + gpu + wd_rev (now right) + modern control
+    assert second["unchanged"] == 5  # wd + gpu + wd_rev (now right) + modern control + ddr_type
 
 
 def test_delete_skipped_when_jsonb_provenance_drifted(db_session: Session):
@@ -447,10 +452,12 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
-        reconcile_calls.append({"apply": apply, "limit": limit})
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "dry-run",
+            "sources": list(sources or []),
+            "keys": [],
             "corrected": 0,
             "deleted": 0,
             "unchanged": 0,
@@ -462,15 +469,21 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
         }
 
     rollback_called: list[bool] = []
+    commit_called: list[bool] = []
+    recorded: list[dict] = []
 
     class _FakeSession:
         def rollback(self):
             rollback_called.append(True)
 
+        def commit(self):
+            commit_called.append(True)
+
         def close(self):
             pass
 
     monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    monkeypatch.setattr(mod, "record_reconcile_run", lambda db, summary: recorded.append(summary))
     import app.database as db_mod
 
     monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
@@ -488,7 +501,12 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
 
     assert len(reconcile_calls) == 1
     assert reconcile_calls[0]["apply"] is False
+    assert reconcile_calls[0]["sources"] == tuple(mod.DEFAULT_SOURCES)
+    assert reconcile_calls[0]["keys"] is None  # default: every schema'd spec_key
     assert rollback_called  # dry-run always calls rollback
+    # The durable run report persists AFTER the rollback (the row is the only write).
+    assert len(recorded) == 1 and recorded[0]["mode"] == "dry-run"
+    assert commit_called
 
 
 def test_reconcile_main_apply(db_session: Session, monkeypatch):
@@ -497,10 +515,12 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
-        reconcile_calls.append({"apply": apply, "limit": limit})
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "apply",
+            "sources": list(sources or []),
+            "keys": list(keys or []),
             "corrected": 0,
             "deleted": 0,
             "unchanged": 0,
@@ -512,15 +532,20 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
         }
 
     rollback_called: list[bool] = []
+    recorded: list[dict] = []
 
     class _FakeSession:
         def rollback(self):
             rollback_called.append(True)
 
+        def commit(self):
+            pass
+
         def close(self):
             pass
 
     monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    monkeypatch.setattr(mod, "record_reconcile_run", lambda db, summary: recorded.append(summary))
     import app.database as db_mod
 
     monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
@@ -529,14 +554,17 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
 
     old_argv = sys.argv
     try:
-        sys.argv = ["reconcile_decoded_facets", "--apply"]
+        sys.argv = ["reconcile_decoded_facets", "--apply", "--sources", "fru_matrix_decode", "--keys", "capacity_gb"]
         mod.main()
     finally:
         sys.argv = old_argv
 
     assert len(reconcile_calls) == 1
     assert reconcile_calls[0]["apply"] is True
+    assert reconcile_calls[0]["sources"] == ("fru_matrix_decode",)
+    assert reconcile_calls[0]["keys"] == ("capacity_gb",)
     assert not rollback_called  # apply mode skips rollback
+    assert len(recorded) == 1 and recorded[0]["mode"] == "apply"
 
 
 # ── _facet_matches: numeric schema sub-branches (lines 124, 127-128) ─────────
