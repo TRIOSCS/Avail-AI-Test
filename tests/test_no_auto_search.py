@@ -10,11 +10,17 @@ import pytest
 
 
 def _route_paths():
-    """Return the set of registered route paths on the FastAPI app."""
+    """Return the set of registered route paths on the FastAPI app.
+
+    Uses iter_routes so included-router routes (hidden behind fastapi 0.137's
+    _IncludedRouter tree wrappers) are flattened in — otherwise the absence assertions
+    below would pass vacuously for any router-mounted route.
+    """
     from app.main import app
+    from tests._route_helpers import iter_routes
 
     paths = set()
-    for route in app.routes:
+    for route in iter_routes(app.routes):
         path = getattr(route, "path", None)
         if path:
             paths.add(path)

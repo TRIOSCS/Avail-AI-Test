@@ -126,18 +126,18 @@ class TestPasswordLoginRateLimit:
         from app.routers.auth import password_login
 
         source = inspect.getsource(password_login)
-        # The function should exist and the rate limit is applied via decorator
-        # We verify by checking the route registration
+        # The function should exist and the rate limit is applied via decorator.
+        # We verify by checking the route registration. fastapi 0.137 nests
+        # include_router'd routes behind _IncludedRouter wrappers, so walk the
+        # tree via iter_routes (flat-walk-safe on 0.136.x too).
         from app.main import app
+        from tests._route_helpers import iter_routes
 
-        for route in app.routes:
-            if hasattr(route, "path") and route.path == "/auth/login" and hasattr(route, "methods"):
-                if "POST" in route.methods:
-                    # Route exists — rate limit is applied via decorator in the source
-                    assert True
-                    return
-        # If we get here, route wasn't found
-        pytest.fail("POST /auth/login route not found")
+        assert source  # the endpoint source is loadable (decorator lives here)
+        assert any(
+            getattr(r, "path", None) == "/auth/login" and "POST" in (getattr(r, "methods", None) or set())
+            for r in iter_routes(app.routes)
+        ), "POST /auth/login route not found"
 
 
 # ── Fix 1: Fernet Decryption Fail-Open ─────────────────────────────

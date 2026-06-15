@@ -89,24 +89,19 @@ def _excluded(path: str) -> bool:
 def _handler_for(scope: Scope) -> str:
     """Return the matched route's templated path (e.g. ``/users/{id}``).
 
-    Starlette's router populates ``scope["endpoint"]`` and ``scope["path_params"]``
-    on match — but NOT ``scope["route"]`` (verified against starlette 1.x's
-    ``Route.matches``). To recover the templated path we walk the app's route
-    table and find the one whose endpoint is identical to the scope's endpoint.
+    Starlette's router populates ``scope["route"]`` with the matched ``APIRoute``
+    on a successful match (verified against starlette 1.2.1 and 1.3.1), so we read
+    the templated path straight off it. This is also fastapi-0.137-safe: 0.137 turned
+    ``app.routes`` into a tree (``include_router``'d routes hide behind an opaque
+    ``_IncludedRouter`` wrapper), which would break any route-table walk — but the
+    matched route on the scope is always the flat ``APIRoute`` regardless of nesting.
 
     Returns ``_UNMATCHED_HANDLER`` for requests that didn't match any route so
     that bot/scanner traffic can't blow up label cardinality.
     """
-    endpoint = scope.get("endpoint")
-    app = scope.get("app")
-    if endpoint is None or app is None:
-        return _UNMATCHED_HANDLER
-    for route in getattr(app, "routes", ()):
-        if getattr(route, "endpoint", None) is endpoint:
-            path = getattr(route, "path", None)
-            if path:
-                return path
-    return _UNMATCHED_HANDLER
+    route = scope.get("route")
+    path = getattr(route, "path", None)
+    return path or _UNMATCHED_HANDLER
 
 
 class PrometheusMiddleware:
