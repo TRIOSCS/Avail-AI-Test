@@ -6,7 +6,8 @@
    checkboxes join the SAME isSelected/toggleVendor selection state as the suggested
    rows, keyed by normalized vendor name, so checked rows flow into vendor_names.
    Context: affinity_vendors (list of dicts: vendor_name, normalized_name, confidence,
-   reasoning), confidence-desc, capped at 10.
+   reasoning), confidence-desc, capped at 10; affinity_partial (bool — at least one
+   selected MPN's affinity lookup failed, so the list may be missing vendors).
 #}
 {% if affinity_vendors %}
 <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
@@ -30,4 +31,7 @@
 </div>
 {% else %}
 <p class="text-xs text-gray-400 italic">No additional vendors found by affinity.</p>
+{% endif %}
+{% if affinity_partial %}
+<p class="mt-1 text-[10px] text-gray-400 italic">Suggestions incomplete — some parts could not be checked.</p>
 {% endif %}

@@ -337,31 +337,66 @@ class TestLogPhoneContact:
 # ── _find_sent_message ───────────────────────────────────────────────
 
 
+def _sent_item(msg_id, conv_id, subject, recipient="sales@vendora.com"):
+    """A Graph sentItems message shaped like the real API response (toRecipients always
+    present under the $select the service requests)."""
+    return {
+        "id": msg_id,
+        "conversationId": conv_id,
+        "subject": subject,
+        "toRecipients": [{"emailAddress": {"address": recipient}}],
+    }
+
+
 class TestFindSentMessage:
     @pytest.mark.asyncio
     async def test_found_matching_subject(self):
         gc = AsyncMock()
         gc.get_json.return_value = {
             "value": [
-                {"id": "msg-1", "conversationId": "conv-1", "subject": "RFQ Parts [ref:10]"},
-                {"id": "msg-2", "conversationId": "conv-2", "subject": "Something Else"},
+                _sent_item("msg-1", "conv-1", "RFQ Parts [ref:10]"),
+                _sent_item("msg-2", "conv-2", "Something Else"),
             ]
         }
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "RFQ Parts [ref:10]")
+            result = await _find_sent_message(gc, "RFQ Parts [ref:10]", "sales@vendora.com")
         assert result["id"] == "msg-1"
         assert result["conversationId"] == "conv-1"
 
     @pytest.mark.asyncio
-    async def test_no_matching_subject(self):
+    async def test_same_subject_discriminated_by_recipient(self):
+        """The batch-collision case (F1): every vendor in a batch shares ONE tagged
+        subject, so the lookup MUST discriminate on toRecipients — each vendor's lookup
+        returns the message addressed to THAT vendor, never the newest."""
         gc = AsyncMock()
+        shared = "RFQ — 2 parts [ref:1] [ref:2]"
         gc.get_json.return_value = {
             "value": [
-                {"id": "msg-1", "subject": "Not a match"},
+                _sent_item("sent-b", "conv-b", shared, recipient="b@vendorb.com"),
+                _sent_item("sent-a", "conv-a", shared, recipient="a@vendora.com"),
             ]
         }
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "RFQ Parts [ref:10]")
+            result_a = await _find_sent_message(gc, shared, "a@vendora.com")
+            result_b = await _find_sent_message(gc, shared, "B@VendorB.com")  # case-insensitive
+        assert result_a["id"] == "sent-a"
+        assert result_b["id"] == "sent-b"
+
+    @pytest.mark.asyncio
+    async def test_subject_match_wrong_recipient_returns_none(self):
+        """A same-subject message addressed to a DIFFERENT vendor must not match."""
+        gc = AsyncMock()
+        gc.get_json.return_value = {"value": [_sent_item("sent-b", "conv-b", "RFQ [ref:1]", recipient="b@vendorb.com")]}
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _find_sent_message(gc, "RFQ [ref:1]", "a@vendora.com")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_no_matching_subject(self):
+        gc = AsyncMock()
+        gc.get_json.return_value = {"value": [_sent_item("msg-1", "conv-1", "Not a match")]}
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _find_sent_message(gc, "RFQ Parts [ref:10]", "sales@vendora.com")
         assert result is None
 
     @pytest.mark.asyncio
@@ -369,7 +404,7 @@ class TestFindSentMessage:
         gc = AsyncMock()
         gc.get_json.return_value = None
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "Subject")
+            result = await _find_sent_message(gc, "Subject", "sales@vendora.com")
         assert result is None
 
     @pytest.mark.asyncio
@@ -377,7 +412,7 @@ class TestFindSentMessage:
         gc = AsyncMock()
         gc.get_json.return_value = {"value": []}
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "Subject")
+            result = await _find_sent_message(gc, "Subject", "sales@vendora.com")
         assert result is None
 
     @pytest.mark.asyncio
@@ -385,19 +420,15 @@ class TestFindSentMessage:
         gc = AsyncMock()
         gc.get_json.side_effect = Exception("Network error")
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "Subject")
+            result = await _find_sent_message(gc, "Subject", "sales@vendora.com")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_subject_whitespace_matching(self):
         gc = AsyncMock()
-        gc.get_json.return_value = {
-            "value": [
-                {"id": "msg-1", "conversationId": "conv-1", "subject": " RFQ [ref:10] "},
-            ]
-        }
+        gc.get_json.return_value = {"value": [_sent_item("msg-1", "conv-1", " RFQ [ref:10] ")]}
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, " RFQ [ref:10] ")
+            result = await _find_sent_message(gc, " RFQ [ref:10] ", "sales@vendora.com")
         assert result["id"] == "msg-1"
 
     @pytest.mark.asyncio
@@ -407,10 +438,10 @@ class TestFindSentMessage:
         gc.get_json.side_effect = [
             {"value": []},
             {"value": []},
-            {"value": [{"id": "msg-1", "conversationId": "conv-1", "subject": "Test Subject"}]},
+            {"value": [_sent_item("msg-1", "conv-1", "Test Subject")]},
         ]
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "Test Subject")
+            result = await _find_sent_message(gc, "Test Subject", "sales@vendora.com")
         assert result["id"] == "msg-1"
         assert gc.get_json.call_count == 3
 
@@ -419,11 +450,9 @@ class TestFindSentMessage:
         """Verify function returns on first successful match without exhausting
         retries."""
         gc = AsyncMock()
-        gc.get_json.return_value = {
-            "value": [{"id": "msg-1", "conversationId": "conv-1", "subject": "Quick Find"}],
-        }
+        gc.get_json.return_value = {"value": [_sent_item("msg-1", "conv-1", "Quick Find")]}
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "Quick Find")
+            result = await _find_sent_message(gc, "Quick Find", "sales@vendora.com")
         assert result["id"] == "msg-1"
         assert gc.get_json.call_count == 1
 
@@ -834,13 +863,7 @@ class TestSendBatchRfq:
         mock_gc.post_json.return_value = {}
         tagged_subject = f"RFQ [ref:{test_requisition.id}]"
         mock_gc.get_json.return_value = {
-            "value": [
-                {
-                    "id": "sent-msg-100",
-                    "conversationId": "conv-100",
-                    "subject": tagged_subject,
-                }
-            ]
+            "value": [_sent_item("sent-msg-100", "conv-100", tagged_subject, recipient="sales@vendora.com")]
         }
 
         vendor_groups = [
@@ -989,6 +1012,11 @@ class TestSendBatchRfqCrossRequisition:
 
     @pytest.mark.asyncio
     async def test_multi_requisition_contact_fanout(self, db_session, test_user):
+        """The REAL Graph collision scenario: every vendor in the batch shares one
+        identical tagged subject, and EVERY sent-items lookup sees the SAME list
+        (both messages). Only the toRecipients discrimination can hand each
+        vendor its own graph ids — a subject-only match would give every contact
+        the newest message's conversation id (the F1 misattribution bug)."""
         req_a, req_b = _two_requisitions(db_session, test_user)
         parts_map = {
             req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
@@ -999,11 +1027,14 @@ class TestSendBatchRfqCrossRequisition:
 
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
-        # One sent-message lookup per vendor — distinct graph ids per vendor.
-        mock_gc.get_json.side_effect = [
-            {"value": [{"id": "sent-a", "conversationId": "conv-vendor-a", "subject": tagged}]},
-            {"value": [{"id": "sent-b", "conversationId": "conv-vendor-b", "subject": tagged}]},
-        ]
+        # ONE shared sent-items list for every lookup — identical subjects, newest
+        # (Vendor B's) first, exactly as Graph returns after a batch send.
+        mock_gc.get_json.return_value = {
+            "value": [
+                _sent_item("sent-b", "conv-vendor-b", tagged, recipient="b@vendorb.com"),
+                _sent_item("sent-a", "conv-vendor-a", tagged, recipient="a@vendora.com"),
+            ]
+        }
 
         vendor_groups = [
             {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote please"},
@@ -1039,12 +1070,87 @@ class TestSendBatchRfqCrossRequisition:
             assert c.parts_included == parts_map[c.requisition_id]
             # every row carries the full multi-token subject
             assert expected_tokens in c.subject
-        # Graph ids shared per vendor (same email), distinct across vendors.
+        # Graph ids shared per vendor (same email), distinct across vendors —
+        # despite every lookup seeing the same same-subject list.
         by_vendor: dict = {}
         for c in contacts:
             by_vendor.setdefault(c.vendor_name, set()).add((c.graph_message_id, c.graph_conversation_id))
         assert by_vendor["Vendor A"] == {("sent-a", "conv-vendor-a")}
         assert by_vendor["Vendor B"] == {("sent-b", "conv-vendor-b")}
+
+    @pytest.mark.asyncio
+    async def test_same_subject_batch_reply_progresses_only_replying_vendor(self, db_session, test_user):
+        """End-to-end F1 pin: two vendors, same subject, shared sent-lookup → a reply
+        from one vendor progresses ONLY that vendor's contacts (on both
+        requisitions), never the other's. The replier is Vendor B — the NEWEST
+        sent item — whose conversation id the old subject-only lookup stamped on
+        EVERY vendor's contacts (so pre-fix, B's reply progressed A too). The
+        reply subject carries no tokens (vendors often trim them), isolating
+        Tier-1."""
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+        tagged = f"RFQ [ref:{req_a.id}] [ref:{req_b.id}]"
+
+        send_gc = AsyncMock()
+        send_gc.post_json.return_value = {}
+        send_gc.get_json.return_value = {
+            "value": [
+                _sent_item("sent-b", "conv-vendor-b", tagged, recipient="b@vendorb.com"),
+                _sent_item("sent-a", "conv-vendor-a", tagged, recipient="a@vendora.com"),
+            ]
+        }
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote"},
+            {"vendor_name": "Vendor B", "vendor_email": "b@vendorb.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=send_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        poll_gc = AsyncMock()
+        poll_gc.get_json.return_value = {
+            "value": [
+                {
+                    "id": "reply-b",
+                    "subject": "RE: RFQ",  # token-stripped reply: Tier-1 only
+                    "from": {"emailAddress": {"address": "b@vendorb.com", "name": "Vendor B"}},
+                    "bodyPreview": "Quote attached",
+                    "body": {"content": "<p>Quote attached</p>"},
+                    "conversationId": "conv-vendor-b",
+                    "receivedDateTime": None,
+                }
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=poll_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        a_contacts = [c for c in contacts if c.vendor_name == "Vendor A"]
+        b_contacts = [c for c in contacts if c.vendor_name == "Vendor B"]
+        # Vendor B progressed on BOTH requisitions; Vendor A untouched on both.
+        assert {c.requisition_id for c in b_contacts} == {req_a.id, req_b.id}
+        assert all(c.status == "responded" for c in b_contacts)
+        assert all(c.status == "sent" for c in a_contacts)
+        # The VendorResponse anchors to one of B's contacts, never A's.
+        vr = db_session.query(VendorResponse).one()
+        assert vr.contact_id in {c.id for c in b_contacts}
 
     @pytest.mark.asyncio
     async def test_subject_tokens_sorted_by_requisition_id(self, db_session, test_user):
@@ -1215,6 +1321,95 @@ class TestSendBatchRfqCrossRequisition:
 
         propagated_card_ids = {call.args[2] for call in mock_propagate.call_args_list}
         assert propagated_card_ids == {cards[0].id, cards[1].id}
+
+    @pytest.mark.asyncio
+    async def test_contact_tracking_failure_isolated_per_vendor(self, db_session, test_user):
+        """F3: a Contact-creation failure for one vendor must not poison the batch —
+        the other vendor's rows persist, and the broken vendor is reported as a
+        visible tracking error (its email DID go out), never an exception."""
+        import app.email_service as es
+
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        parts_map = {
+            req_a.id: [{"mpn": "CROSS-MPN-A", "qty": 100}],
+            req_b.id: [{"mpn": "CROSS-MPN-B", "qty": 200}],
+        }
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.return_value = {"value": []}
+
+        vendor_groups = [
+            {"vendor_name": "Vendor A", "vendor_email": "a@vendora.com", "subject": "RFQ", "body": "Quote"},
+            {"vendor_name": "Vendor B", "vendor_email": "b@vendorb.com", "subject": "RFQ", "body": "Quote"},
+        ]
+
+        real_create = es._create_contact
+
+        def exploding_create(db, rid, user_id, vendor_name, *args, **kwargs):
+            if vendor_name == "Vendor B":
+                raise RuntimeError("simulated flush failure")
+            return real_create(db, rid, user_id, vendor_name, *args, **kwargs)
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("app.email_service._create_contact", side_effect=exploding_create),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+                requisition_parts_map=parts_map,
+            )
+
+        by_vendor = {r["vendor_name"]: r for r in results}
+        assert by_vendor["Vendor A"]["status"] == "sent"
+        assert by_vendor["Vendor B"]["status"] == "failed"
+        assert "tracking_error" in by_vendor["Vendor B"]["error"]
+        # Vendor A's per-requisition rows persisted despite Vendor B's failure.
+        contacts = db_session.query(Contact).order_by(Contact.id).all()
+        assert {(c.requisition_id, c.vendor_name) for c in contacts} == {
+            (req_a.id, "Vendor A"),
+            (req_b.id, "Vendor A"),
+        }
+
+    @pytest.mark.asyncio
+    async def test_legacy_none_requisition_creates_no_contacts(self, db_session, test_user):
+        """F12: Contact.requisition_id is NOT NULL — a degenerate legacy call with
+        neither a scalar requisition_id nor a parts map sends the email but writes
+        no Contact rows (instead of crashing on the NULL flush)."""
+        mock_gc = AsyncMock()
+        mock_gc.post_json.return_value = {}
+        mock_gc.get_json.return_value = {"value": []}
+
+        vendor_groups = [
+            {
+                "vendor_name": "Vendor A",
+                "vendor_email": "a@vendora.com",
+                "parts": ["LM317T"],
+                "subject": "RFQ",
+                "body": "Quote",
+            },
+        ]
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+            patch("asyncio.sleep", new_callable=AsyncMock),
+        ):
+            results = await send_batch_rfq(
+                token="fake-token",
+                db=db_session,
+                user_id=test_user.id,
+                vendor_groups=vendor_groups,
+            )
+
+        assert results[0]["status"] == "sent"
+        assert results[0]["id"] is None
+        assert db_session.query(Contact).count() == 0
 
 
 # ── parse_response_ai ────────────────────────────────────────────────
@@ -2636,7 +2831,9 @@ class TestPollInboxCrossRequisitionFanout:
 
         send_gc = AsyncMock()
         send_gc.post_json.return_value = {}
-        send_gc.get_json.return_value = {"value": [{"id": "sent-e2e", "conversationId": "conv-e2e", "subject": tagged}]}
+        send_gc.get_json.return_value = {
+            "value": [_sent_item("sent-e2e", "conv-e2e", tagged, recipient="vendor@parts.com")]
+        }
         vendor_groups = [
             {"vendor_name": "Vendor A", "vendor_email": "vendor@parts.com", "subject": "RFQ", "body": "Quote"},
         ]
@@ -2680,6 +2877,287 @@ class TestPollInboxCrossRequisitionFanout:
             db_session.refresh(c)
             assert c.status == "responded"
         assert {c.requisition_id for c in contacts} == {req_a.id, req_b.id}
+
+    @pytest.mark.asyncio
+    async def test_tier1_collided_conversation_scoped_to_sender_vendor(self, db_session, test_user):
+        """F1(b): legacy data can hold contacts of DIFFERENT vendors under one
+        conversation id (the old subject-only sent-lookup).
+
+        Tier-1 fan-out must scope to the replying vendor's email — fan out across
+        requisitions for the SAME vendor, never across vendors.
+        """
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        contacts = []
+        for req, vendor, email in [
+            (req_a, "Vendor A", "a@vendora.com"),
+            (req_b, "Vendor A", "a@vendora.com"),
+            (req_a, "Vendor B", "b@vendorb.com"),
+        ]:
+            c = Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="email",
+                vendor_name=vendor,
+                vendor_contact=email,
+                graph_conversation_id="conv-collided",
+                status="sent",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(c)
+            contacts.append(c)
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="a@vendora.com",
+                    conv_id="conv-collided",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        a1, a2, b1 = contacts
+        for c in contacts:
+            db_session.refresh(c)
+        # Vendor A's contacts progressed on BOTH requisitions; Vendor B's untouched.
+        assert a1.status == "responded"
+        assert a2.status == "responded"
+        assert b1.status == "sent"
+        vr = db_session.query(VendorResponse).one()
+        assert vr.contact_id in (a1.id, a2.id)
+
+    @pytest.mark.asyncio
+    async def test_tier1_thread_reply_from_colleague_at_same_vendor_still_matches(self, db_session, test_user):
+        """A reply from a different mailbox at the SAME vendor (single-vendor thread,
+        e.g. a colleague answering) still fans out to the thread's contacts."""
+        req_a, req_b, (c1, c2) = self._fanout_contacts(db_session, test_user, conv_id="conv-shared")
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="colleague@parts.com",
+                    conv_id="conv-shared",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "responded"
+        assert c2.status == "responded"
+
+    @pytest.mark.asyncio
+    async def test_tier2_stale_token_filtered_against_live_requisitions(self, db_session, test_user):
+        """F5: a [ref:] token pointing at a deleted requisition is dropped before
+        use — the live token still matches its contact, and nothing crashes."""
+        req_a, req_b, (c1, c2) = self._fanout_contacts(db_session, test_user, conv_id=None)
+        stale_id = req_a.id + req_b.id + 1000  # guaranteed nonexistent
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="vendor@parts.com",
+                    subject=f"RE: RFQ [ref:{stale_id}] [ref:{req_a.id}]",
+                    conv_id="unrelated-conv",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        assert results[0]["matched_requisition_id"] == req_a.id
+        db_session.refresh(c1)
+        assert c1.status == "responded"
+
+    @pytest.mark.asyncio
+    async def test_tier2_stale_token_only_saves_unlinked_response(self, db_session, test_user):
+        """F5: a subject whose ONLY token is stale must not be attributed to the
+        dead requisition (FK crash on PG) — the reply is saved unmatched."""
+        _two_requisitions(db_session, test_user)
+
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {
+            "value": [
+                self._make_inbox_message(
+                    sender_email="unknown@vendor.com",
+                    subject="RE: RFQ [ref:99999]",
+                    conv_id="no-match-conv",
+                ),
+            ]
+        }
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(token="fake-token", db=db_session)
+
+        assert len(results) == 1
+        assert results[0]["matched_requisition_id"] is None
+        vr = db_session.query(VendorResponse).one()
+        assert vr.requisition_id is None
+        assert vr.status == "new"
+
+
+# ── OOO / bounce contact-status repair (F2) ──────────────────────────
+
+
+class TestOooBounceContactRepair:
+    """The post-parse OOO/bounce correction must (a) trigger on the vocabulary the
+    classifiers actually emit — exactly "ooo_bounce" (_classify_response,
+    RESPONSE_PARSE_SCHEMA, ai.py reparse) — and (b) apply to ALL contacts matched for
+    the message (conversation-id siblings, vendor-email scoped), on BOTH the sequential-
+    fallback path and the batch path."""
+
+    def _seed(self, db_session, test_user, conv_id="conv-ooo"):
+        req_a, req_b = _two_requisitions(db_session, test_user)
+        contacts = []
+        for req in (req_a, req_b):
+            c = Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="email",
+                vendor_name="Vendor A",
+                vendor_contact="vendor@parts.com",
+                graph_conversation_id=conv_id,
+                status="sent",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(c)
+            contacts.append(c)
+        db_session.commit()
+        return contacts
+
+    def _message(self, body, subject="Automatic reply: RFQ", conv_id="conv-ooo"):
+        return {
+            "id": "msg-ooo-1",
+            "subject": subject,
+            "from": {"emailAddress": {"address": "vendor@parts.com", "name": "Vendor"}},
+            "bodyPreview": body,
+            "body": {"content": body},
+            "conversationId": conv_id,
+            "receivedDateTime": None,
+        }
+
+    async def _poll(self, db_session, message):
+        mock_gc = AsyncMock()
+        mock_gc.get_json.return_value = {"value": [message]}
+        parsed = {"sentiment": "neutral", "parts": [], "confidence": 0.9}
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value="fake-key"),
+            patch("app.email_service._submit_parse_batch", side_effect=RuntimeError("batch down")),
+            patch("app.email_service.parse_response_ai", new_callable=AsyncMock, return_value=parsed),
+        ):
+            return await poll_inbox(token="fake-token", db=db_session)
+
+    @pytest.mark.asyncio
+    async def test_ooo_classification_repairs_all_sibling_contacts(self, db_session, test_user):
+        """Sequential-fallback path: an out-of-office reply sets status='ooo' on
+        EVERY contact matched for the message, not just vr.contact_id's."""
+        c1, c2 = self._seed(db_session, test_user)
+        body = "I am currently out of office and will return Monday."
+        results = await self._poll(db_session, self._message(body))
+
+        assert len(results) == 1
+        vr = db_session.query(VendorResponse).one()
+        assert vr.classification == "ooo_bounce"  # the REAL vocabulary
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "ooo"
+        assert c2.status == "ooo"
+
+    @pytest.mark.asyncio
+    async def test_bounce_signals_set_bounced(self, db_session, test_user):
+        c1, c2 = self._seed(db_session, test_user)
+        body = "Undeliverable: delivery failure — recipient address rejected."
+        await self._poll(db_session, self._message(body, subject="Undeliverable: RFQ"))
+
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "bounced"
+        assert c2.status == "bounced"
+
+    @pytest.mark.asyncio
+    async def test_terminal_contact_status_not_regressed(self, db_session, test_user):
+        """A contact already quoted must not be downgraded by a late auto-reply."""
+        c1, c2 = self._seed(db_session, test_user)
+        c1.status = "quoted"
+        db_session.commit()
+        body = "Automatic reply: out of office."
+        await self._poll(db_session, self._message(body))
+
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "quoted"
+        assert c2.status == "ooo"
+
+    @pytest.mark.asyncio
+    async def test_batch_path_repairs_contacts_when_results_arrive(self, db_session, test_user):
+        """Batch path: classification arrives LATER via process_batch_results —
+        the repair must run there too (it was structurally dead before)."""
+        c1, c2 = self._seed(db_session, test_user, conv_id="conv-batch-ooo")
+        vr = VendorResponse(
+            requisition_id=c1.requisition_id,
+            contact_id=c1.id,
+            vendor_name="Vendor A",
+            vendor_email="vendor@parts.com",
+            subject="Automatic reply: RFQ",
+            body="I am out of the office until next week.",
+            message_id="msg-batch-ooo",
+            graph_conversation_id="conv-batch-ooo",
+            status="new",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vr)
+        db_session.flush()
+        pb = PendingBatch(
+            batch_id="batch-ooo-1",
+            batch_type="inbox_parse",
+            request_map={f"vr-{vr.id}": vr.id},
+            status="processing",
+            submitted_at=datetime.now(timezone.utc),
+        )
+        db_session.add(pb)
+        db_session.commit()
+
+        batch_results = {
+            f"vr-{vr.id}": {
+                "overall_sentiment": "neutral",
+                "overall_classification": "ooo_bounce",
+                "confidence": 0.9,
+                "parts": [],
+            }
+        }
+        with (
+            patch("app.utils.claude_client.claude_batch_results", new_callable=AsyncMock, return_value=batch_results),
+            patch("app.services.response_parser._normalize_parsed_parts"),
+        ):
+            applied = await process_batch_results(db_session)
+
+        assert applied == 1
+        db_session.refresh(c1)
+        db_session.refresh(c2)
+        assert c1.status == "ooo"
+        assert c2.status == "ooo"
 
 
 # ── process_batch_results ────────────────────────────────────────────

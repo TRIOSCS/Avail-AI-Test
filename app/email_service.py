@@ -40,7 +40,7 @@ def _build_html_body(plain_text: str) -> str:
 
 def _create_contact(
     db: Session,
-    requisition_id: int | None,
+    requisition_id: int,
     user_id: int,
     vendor_name: str,
     vendor_email: str,
@@ -111,10 +111,15 @@ async def send_batch_rfq(
     legacy_mode = not parts_map
     req_ids: list[int | None] = [requisition_id] if legacy_mode else sorted(parts_map)
 
-    def _per_req_parts(group: dict) -> list[tuple[int | None, list]]:
-        """(requisition_id, parts) pairs to write Contacts for, per vendor."""
+    def _per_req_parts(group: dict) -> list[tuple[int, list]]:
+        """(requisition_id, parts) pairs to write Contacts for, per vendor.
+
+        Contact.requisition_id is NOT NULL, so a degenerate legacy call with no
+        requisition at all yields no pairs (email sent, nothing tracked) instead of a
+        guaranteed flush crash.
+        """
         if legacy_mode:
-            return [(requisition_id, group.get("parts", []))]
+            return [] if requisition_id is None else [(requisition_id, group.get("parts", []))]
         return [(rid, parts_map[rid]) for rid in req_ids if rid is not None]
 
     gc = GraphClient(token)
@@ -176,86 +181,97 @@ async def send_batch_rfq(
     send_results = await asyncio.gather(*[_throttled_send(task) for task in send_tasks], return_exceptions=True)
 
     # Process results: create Contact records (one per involved requisition per
-    # vendor), then batch-lookup sent message IDs
-    contacts_to_lookup = []  # (contacts_for_one_vendor, tagged_subject) pairs
+    # vendor), then batch-lookup sent message IDs. Each vendor's contact block
+    # runs inside its own SAVEPOINT so one flush failure can't poison the other
+    # vendors' rows or leave the session unusable for the route's commit (the
+    # emails are already out at this point — tracking must be best-effort
+    # per-vendor, and a tracking failure must be VISIBLE in the results).
+    contacts_to_lookup = []  # (contacts_for_one_vendor, tagged_subject, vendor_email)
     for group, send_result in zip(send_groups, send_results):
         email = group["vendor_email"]
         tagged_subject = group.pop("_tagged_subject")
 
-        if isinstance(send_result, Exception):
-            logger.error(f"Send error to {email}: {send_result}")
-            err_msg = str(send_result)[:500]
-            failed_contacts = [
-                _create_contact(
-                    db,
-                    rid,
-                    user_id,
+        if isinstance(send_result, Exception) or (isinstance(send_result, dict) and "error" in send_result):
+            if isinstance(send_result, Exception):
+                err_detail = str(send_result)
+                logger.error(f"Send error to {email}: {send_result}")
+            else:
+                err_detail = str(send_result.get("detail", ""))
+                logger.error(f"Send failed to {email}: {send_result}")
+            failed_contacts: list[Contact] = []
+            try:
+                with db.begin_nested():
+                    failed_contacts = [
+                        _create_contact(
+                            db,
+                            rid,
+                            user_id,
+                            group["vendor_name"],
+                            email,
+                            parts,
+                            tagged_subject,
+                            group["body"],
+                            "failed",
+                            err_detail[:500],
+                        )
+                        for rid, parts in _per_req_parts(group)
+                    ]
+            except Exception:
+                logger.error(
+                    "Contact tracking failed for vendor '{}' (requisitions {}) on the failed-send path",
                     group["vendor_name"],
-                    email,
-                    parts,
-                    tagged_subject,
-                    group["body"],
-                    "failed",
-                    err_msg,
+                    [rid for rid, _ in _per_req_parts(group)],
+                    exc_info=True,
                 )
-                for rid, parts in _per_req_parts(group)
-            ]
             results.append(
                 {
                     "id": failed_contacts[0].id if failed_contacts else None,
                     "vendor_name": group["vendor_name"],
                     "vendor_email": email,
                     "status": "failed",
-                    "error": str(send_result)[:200],
+                    "error": err_detail[:200],
                 }
             )
             continue
 
-        if "error" in send_result:
-            logger.error(f"Send failed to {email}: {send_result}")
-            err_msg = str(send_result.get("detail", ""))[:500]
-            failed_contacts = [
-                _create_contact(
-                    db,
-                    rid,
-                    user_id,
-                    group["vendor_name"],
-                    email,
-                    parts,
-                    tagged_subject,
-                    group["body"],
-                    "failed",
-                    err_msg,
-                )
-                for rid, parts in _per_req_parts(group)
-            ]
-            results.append(
-                {
-                    "id": failed_contacts[0].id if failed_contacts else None,
-                    "vendor_name": group["vendor_name"],
-                    "vendor_email": email,
-                    "status": "failed",
-                    "error": str(send_result.get("detail", ""))[:200],
-                }
-            )
-            continue
-
-        contacts = [
-            _create_contact(
-                db,
-                rid,
-                user_id,
+        try:
+            with db.begin_nested():
+                contacts = [
+                    _create_contact(
+                        db,
+                        rid,
+                        user_id,
+                        group["vendor_name"],
+                        email,
+                        parts,
+                        tagged_subject,
+                        group["body"],
+                        "sent",
+                    )
+                    for rid, parts in _per_req_parts(group)
+                ]
+        except Exception:
+            # The email WAS delivered — report a tracking error for this vendor
+            # only; the rest of the batch keeps its rows.
+            logger.error(
+                "Contact tracking failed for vendor '{}' (requisitions {}) — RFQ email was already sent",
                 group["vendor_name"],
-                email,
-                parts,
-                tagged_subject,
-                group["body"],
-                "sent",
+                [rid for rid, _ in _per_req_parts(group)],
+                exc_info=True,
             )
-            for rid, parts in _per_req_parts(group)
-        ]
+            results.append(
+                {
+                    "id": None,
+                    "vendor_name": group["vendor_name"],
+                    "vendor_email": email,
+                    "status": "failed",
+                    "error": "tracking_error: email sent but Contact rows could not be recorded",
+                }
+            )
+            continue
+
         if contacts:
-            contacts_to_lookup.append((contacts, tagged_subject))
+            contacts_to_lookup.append((contacts, tagged_subject, email))
         results.append(
             {
                 "id": contacts[0].id if contacts else None,
@@ -270,12 +286,14 @@ async def send_batch_rfq(
 
     # Batch-lookup sent message IDs in parallel for reply matching. One email per
     # vendor → all of that vendor's per-requisition Contacts share its graph ids.
+    # Every vendor in a batch shares the SAME tagged subject, so the lookup is
+    # vendor-discriminating (recipient email), never subject-only.
     if contacts_to_lookup:
         lookup_results = await asyncio.gather(
-            *[_find_sent_message(gc, subj) for _, subj in contacts_to_lookup],
+            *[_find_sent_message(gc, subj, vendor_email) for _, subj, vendor_email in contacts_to_lookup],
             return_exceptions=True,
         )
-        for (contacts, _), sent_msg in zip(contacts_to_lookup, lookup_results):
+        for (contacts, _, _), sent_msg in zip(contacts_to_lookup, lookup_results):
             if isinstance(sent_msg, dict) and sent_msg:
                 for contact in contacts:
                     contact.graph_message_id = sent_msg.get("id")
@@ -294,7 +312,7 @@ async def send_batch_rfq(
             card_ids = [r.material_card_id for r in reqs if r.material_card_id]
             if card_ids:  # pragma: no cover
                 seen_vendor_norms = set()
-                for contacts, _ in contacts_to_lookup:
+                for contacts, _, _ in contacts_to_lookup:
                     for contact_obj in contacts:
                         norm = contact_obj.vendor_name_normalized
                         if not norm or norm in seen_vendor_norms:
@@ -311,12 +329,20 @@ async def send_batch_rfq(
     return results
 
 
-async def _find_sent_message(gc, subject: str) -> dict | None:
+async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None:
     """Find the just-sent message in Sent Items to get its ID and conversationId.
+
+    Vendor-discriminating (F1): every vendor group in a batch shares an IDENTICAL tagged
+    subject, so a subject-only match would return the newest vendor's message for every
+    vendor — giving all batch Contacts one shared (wrong) conversation id and
+    misattributing replies. The match therefore requires the vendor's email among
+    toRecipients, and $top covers the whole batch fan-out (the vendor's own message can
+    sit well below the top 5 right after a batch).
 
     Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation
     delays.
     """
+    wanted = (vendor_email or "").strip().lower()
     delays = [1, 2, 4]
     for delay in delays:
         try:
@@ -324,18 +350,63 @@ async def _find_sent_message(gc, subject: str) -> dict | None:
             data = await gc.get_json(
                 "/me/mailFolders/sentItems/messages",
                 params={
-                    "$top": "5",
+                    "$top": "25",
                     "$orderby": "sentDateTime desc",
-                    "$select": "id,conversationId,subject",
+                    "$select": "id,conversationId,subject,toRecipients",
                 },
             )
             msgs = data.get("value", []) if data else []
             for m in msgs:
-                if m.get("subject", "").strip() == subject.strip():
+                if m.get("subject", "").strip() != subject.strip():
+                    continue
+                recipients = {
+                    (r.get("emailAddress", {}).get("address") or "").lower() for r in m.get("toRecipients", [])
+                }
+                if wanted in recipients:
                     return m
         except Exception as e:
             logger.warning(f"Sent message lookup attempt failed: {e}")
     return None
+
+
+def _scope_thread_contacts_to_sender(thread_contacts: list[Contact], sender_email: str) -> list[Contact]:
+    """Vendor-scope a conversation-id (Tier-1) match to the replying vendor.
+
+    A conversation id can map to contacts of DIFFERENT vendors (legacy rows
+    written by the old subject-only sent-lookup), so a blind fan-out would
+    progress every batch vendor when ONE replies. Scope: contacts whose vendor
+    email equals the sender, falling back to same-domain contacts (a colleague
+    replying from another mailbox), then to the full thread ONLY when it is
+    single-vendor (every contact shares one vendor email). A multi-vendor thread
+    with an unrecognized sender matches nothing — Tiers 2-4 take over.
+
+    Fan out across requisitions for the SAME vendor, never across vendors.
+
+    Called by: poll_inbox (Tier 1), _repair_contact_status_for_ooo_bounce.
+    """
+    sender = (sender_email or "").lower()
+    exact = [c for c in thread_contacts if (c.vendor_contact or "").lower() == sender]
+    if exact:
+        return exact
+    sender_domain = sender.split("@", 1)[1] if "@" in sender else ""
+    if sender_domain and sender_domain not in NOISE_DOMAINS:
+        domain_matches = [
+            c
+            for c in thread_contacts
+            if c.vendor_contact
+            and "@" in c.vendor_contact
+            and c.vendor_contact.lower().split("@", 1)[1] == sender_domain
+        ]
+        if domain_matches:
+            return domain_matches
+    if len({(c.vendor_contact or "").lower() for c in thread_contacts}) == 1:
+        return list(thread_contacts)
+    logger.warning(
+        "Tier-1 thread match dropped: sender {} matches none of the {} vendors on the conversation",
+        sender,
+        len({(c.vendor_contact or "").lower() for c in thread_contacts}),
+    )
+    return []
 
 
 def log_phone_contact(
@@ -558,15 +629,26 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         matched_contacts: list[Contact] = []
         matched_req_id = requisition_id
 
-        # Tier 1: ConversationId (exact thread, global) — all contacts on the thread
+        # Tier 1: ConversationId (exact thread, global) — all of the REPLYING
+        # vendor's contacts on the thread (vendor-scoped: a reply from vendor A
+        # must never progress vendor B's contacts on a collided conversation).
         if conv_id and conv_id in conv_id_map:
-            matched_contacts = conv_id_map[conv_id]
-            matched_req_id = matched_contacts[0].requisition_id
+            matched_contacts = _scope_thread_contacts_to_sender(conv_id_map[conv_id], email_addr)
+            if matched_contacts:
+                matched_req_id = matched_contacts[0].requisition_id
 
         # Tier 2: Subject [ref:]/[AVAIL-] tokens — iterate ALL tokens (cross-
-        # requisition subjects carry one token per involved requisition)
+        # requisition subjects carry one token per involved requisition). Tokens
+        # can outlive their requisition (deleted reqs, forwarded subjects), so
+        # they are existence-filtered in ONE query before any use — a stale id
+        # must never reach VendorResponse.requisition_id (FK violation on PG).
         if not matched_contacts:
             token_req_ids = list(dict.fromkeys(int(t) for t in RFQ_SUBJECT_TAG_RE.findall(subj)))
+            if token_req_ids:
+                live_ids = {row[0] for row in db.query(Requisition.id).filter(Requisition.id.in_(token_req_ids)).all()}
+                if dropped := [t for t in token_req_ids if t not in live_ids]:
+                    logger.warning("Dropping stale [ref:] token(s) {} from '{}'", dropped, subj[:120])
+                token_req_ids = [t for t in token_req_ids if t in live_ids]
             if token_req_ids:
                 # O(1) dict lookups instead of O(n) list comprehensions
                 matched_contacts = [
@@ -681,19 +763,10 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             await _parse_sequential_fallback(pending_parse, db)
 
     # ── Post-parse: update contact status for OOO/bounce classifications ──
-    OOO_CLASSIFICATIONS = {"ooo", "out_of_office", "auto_reply"}
-    BOUNCE_CLASSIFICATIONS = {"bounce", "bounced", "delivery_failure"}
+    # Only the sequential fallback sets vr.classification synchronously; batch
+    # results arrive later and are repaired in process_batch_results.
     for vr in pending_parse:
-        if vr.contact_id and vr.classification:
-            cls = vr.classification.lower()
-            parent_contact = db.get(Contact, vr.contact_id)
-            if parent_contact:
-                if cls in OOO_CLASSIFICATIONS:
-                    parent_contact.status = "ooo"
-                    parent_contact.status_updated_at = datetime.now(timezone.utc)
-                elif cls in BOUNCE_CLASSIFICATIONS:
-                    parent_contact.status = "bounced"
-                    parent_contact.status_updated_at = datetime.now(timezone.utc)
+        _repair_contact_status_for_ooo_bounce(vr, db)
 
     # Single commit for all new responses
     try:
@@ -812,6 +885,66 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
         "needs_action": True,
         "action_hint": "Response received \u2014 review and determine next steps",
     }
+
+
+# Bounce sub-signals within the merged "ooo_bounce" classification (the
+# classifiers deliberately fold OOO and bounces into one bucket — see
+# _classify_response's ooo_signals and RESPONSE_PARSE_SCHEMA).
+_BOUNCE_SIGNALS = (
+    "undeliverable",
+    "delivery failure",
+    "delivery has failed",
+    "mailer-daemon",
+    "address not found",
+    "recipient not found",
+)
+
+
+def _repair_contact_status_for_ooo_bounce(vr: VendorResponse, db: Session) -> None:
+    """Correct outbound Contact status when a reply classifies as OOO/bounce.
+
+    The classification vocabulary is exactly ONE value for this family:
+    "ooo_bounce" — emitted by _classify_response (sequential fallback path),
+    RESPONSE_PARSE_SCHEMA's enum (batch path via _apply_parsed_result), and the
+    ai.py reparse endpoint. Anything else here would be dead code (the old
+    {"ooo","out_of_office","auto_reply"} / {"bounce",...} sets never fired).
+
+    Applies to ALL contacts matched for the message — re-derived from the
+    reply's graph_conversation_id with the same vendor-email scoping as Tier-1
+    matching (never across vendors), falling back to the anchored vr.contact_id.
+    Bounce-vs-OOO is sub-classified from the message text; terminal statuses
+    (quoted/declined) are never regressed.
+
+    Called by: poll_inbox (post-parse, sequential fallback), process_batch_results.
+    """
+    if (vr.classification or "").lower() != "ooo_bounce":
+        return
+
+    contacts: list[Contact] = []
+    if vr.graph_conversation_id:
+        thread = (
+            db.query(Contact)
+            .filter(
+                Contact.graph_conversation_id == vr.graph_conversation_id,
+                Contact.contact_type == "email",
+            )
+            .order_by(Contact.id)
+            .all()
+        )
+        contacts = _scope_thread_contacts_to_sender(thread, (vr.vendor_email or "").lower())
+    if not contacts and vr.contact_id:
+        anchored = db.get(Contact, vr.contact_id)
+        if anchored:
+            contacts = [anchored]
+
+    text = f"{vr.subject or ''} {vr.body or ''}".lower()
+    new_status = "bounced" if any(s in text for s in _BOUNCE_SIGNALS) else "ooo"
+    now = datetime.now(timezone.utc)
+    for contact in contacts:
+        if contact.status in ("quoted", "declined"):
+            continue  # never regress a terminal state on a late auto-reply
+        contact.status = new_status
+        contact.status_updated_at = now
 
 
 def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
@@ -1374,6 +1507,10 @@ async def process_batch_results(db: Session) -> int:
                     "confidence": parsed_data.get("confidence", 0),
                 }
                 _apply_parsed_result(vr, legacy_parsed, db)
+                # Batch path of the OOO/bounce contact-status repair: the
+                # classification only exists NOW, so the poll-time block never
+                # sees it — repair here or it never happens.
+                _repair_contact_status_for_ooo_bounce(vr, db)
                 applied += 1
 
         pb.status = PendingBatchStatus.COMPLETED

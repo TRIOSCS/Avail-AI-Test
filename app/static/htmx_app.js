@@ -1770,7 +1770,10 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
 
   // Debounced (template-side @input.debounce.300ms) lookup against the existing
   // /api/autocomplete/names endpoint. It mixes vendors + customers — filter to
-  // vendors client-side; never fork the endpoint.
+  // vendors client-side; never fork the endpoint. A failure is VISIBLE (toast),
+  // but only once per failure streak — debounced keystrokes would otherwise
+  // stack identical toasts; a success resets the flag.
+  _searchErrorToasted: false,
   async searchVendors() {
     const q = this.vendorQuery.trim();
     if (q.length < 2) {
@@ -1784,10 +1787,15 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       const items = await resp.json();
       this.vendorResults = (items || []).filter((it) => it.type === 'vendor');
       this.searchOpen = true;
+      this._searchErrorToasted = false;
     } catch (err) {
       console.error('[rfqVendorModal] vendor search failed', err);
       this.vendorResults = [];
       this.searchOpen = false;
+      if (!this._searchErrorToasted) {
+        this._searchErrorToasted = true;
+        this._toast('Vendor search failed — please try again', 'error');
+      }
     }
   },
 
@@ -1828,11 +1836,14 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   },
 
   // Extract the server-normalized vendor name from a composer_vendor_row.html
-  // payload: the selectable row x-inits selectVendor("<normalized>") with a
-  // |tojson-quoted string (json escapes embedded `"`). Excluded rows render no
-  // x-init → null. Parsed detached via DOMParser (no script execution, no insert).
+  // payload. Both row branches carry a data-vendor-norm attribute (excluded rows
+  // have no x-init, so the attribute is their ONLY carrier); the x-init
+  // selectVendor("<normalized>") parse stays as a fallback for selectable rows.
+  // Parsed detached via DOMParser (no script execution, no insert).
   _rowVendorName(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
+    const norm = doc.querySelector('[data-vendor-norm]')?.getAttribute('data-vendor-norm');
+    if (norm) return norm;
     const xInit = doc.querySelector('[x-init]')?.getAttribute('x-init') || '';
     const m = xInit.match(/selectVendor\(("(?:[^"\\]|\\.)*")\)/);
     if (!m) return null;
@@ -1843,17 +1854,33 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
+  // True when #rfq-added-vendors already holds a row for this normalized name —
+  // the dedupe for EXCLUDED rows, which never join selectedVendors (disabled
+  // checkbox) and would otherwise stack duplicates on repeated picks.
+  _containerHasVendor(norm) {
+    const container = document.querySelector('#rfq-added-vendors');
+    if (!container) return false;
+    return Array.from(container.querySelectorAll('[data-vendor-norm]')).some(
+      (el) => el.getAttribute('data-vendor-norm') === norm,
+    );
+  },
+
   // POST to composer-vendor and append the returned row into the stable-id
   // #rfq-added-vendors sub-container INSIDE this x-data wrapper (explicit container —
   // swapping the wrapper would re-init rfqVendorModal and wipe selection state).
   // Raw fetch + manual insert (mirrors confirmSend / customerPicker.lookupCompany)
   // so a server 4xx is DETECTED: htmx.ajax resolves on HTTP errors, which used to
   // clear the inline create form on a 400. Returns true only when the vendor ended
-  // up selected (row appended, or already present — duplicate picks skip the append
-  // so #rfq-added-vendors never shows the same vendor twice); false on any error so
-  // createVendor keeps the typed values.
+  // up selected (row appended, or already present — duplicate picks skip the
+  // append, INCLUDING excluded rows via the container check, so #rfq-added-vendors
+  // never shows the same vendor twice); false on any error so createVendor keeps
+  // the typed values.
   async _addComposerVendor(fields) {
-    if (this._isVendorSelected(fields.vendor_name)) {
+    // Bare picks only: a createVendor submission carrying an email/website must
+    // reach the server even when the name matches a selection — the server
+    // attaches the typed email/domain to the existing card; skipping here would
+    // silently discard the input.
+    if (!fields.email && !fields.website && this._isVendorSelected(fields.vendor_name)) {
       this._toast('Vendor already added', 'info');
       return true;
     }
@@ -1873,16 +1900,30 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         body: form,
       });
       if (!resp.ok) {
-        console.error('[rfqVendorModal] add vendor failed: HTTP ' + resp.status);
-        this._toast('Could not add vendor — please try again', 'error');
+        // The server emits the repo JSON error format ({"error": ...}). A 4xx
+        // reason is actionable user input ("invalid website — ...") — surface it
+        // verbatim; 5xx bodies are internals, keep the generic try-again.
+        let reason = '';
+        try {
+          reason = (await resp.json()).error || '';
+        } catch {
+          /* non-JSON / empty body — fall through to the generic message */
+        }
+        console.error('[rfqVendorModal] add vendor failed: HTTP ' + resp.status, reason);
+        const msg = resp.status < 500 && reason
+          ? 'Could not add vendor: ' + reason
+          : 'Could not add vendor — please try again';
+        this._toast(msg, 'error');
         return false;
       }
       const html = await resp.text();
       // Authoritative dedup on the server-normalized name: picking
       // "Mouser Electronics, Inc." when "mouser electronics" is already selected
       // would append a duplicate row while selection state stays unchanged.
+      // Excluded rows never enter selectedVendors, so they dedupe against the
+      // rows already in the container instead.
       const normalized = this._rowVendorName(html);
-      if (normalized && this.selectedVendors[normalized]) {
+      if (normalized && (this.selectedVendors[normalized] || this._containerHasVendor(normalized))) {
         this._toast('Vendor already added', 'info');
         return true;
       }

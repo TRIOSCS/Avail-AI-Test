@@ -382,6 +382,106 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m._rowVendorName(rowHtml("o'brien & co"))).toBe("o'brien & co");
       expect(m._rowVendorName('<label><span>excluded</span></label>')).toBeNull();
     });
+
+    it('_rowVendorName reads data-vendor-norm from excluded rows (no x-init)', () => {
+      // F11: composer_vendor_row.html emits the normalized name on excluded rows
+      // as a data attribute, since they render no x-init to parse it from.
+      const m = makeModal([], [1]);
+      const excluded = '<label data-vendor-norm="dead vendor"><input type="checkbox" disabled><span>Dead Vendor</span></label>';
+      expect(m._rowVendorName(excluded)).toBe('dead vendor');
+    });
+
+    it('dedupes a re-picked EXCLUDED vendor against rows already in the container', async () => {
+      // F11: excluded rows never join selectedVendors (disabled checkbox), so the
+      // selection-state dedupe can't see them — the container check must.
+      const container = addContainer();
+      const m = makeModal([], [1]);
+      const excludedRow = '<label data-vendor-norm="dead vendor"><input type="checkbox" disabled><span>Dead Vendor</span></label>';
+      (fetch as any).mockResolvedValue(htmlResponse(excludedRow));
+
+      const first = await m._addComposerVendor({ vendor_name: 'Dead Vendor' });
+      const second = await m._addComposerVendor({ vendor_name: 'Dead Vendor' });
+
+      expect(first).toBe(true);
+      expect(second).toBe(true);
+      expect(container.children.length).toBe(1); // no duplicate excluded row
+      expect(m.$store.toast.message).toBe('Vendor already added');
+    });
+
+    it('createVendor payloads carrying email/website bypass the already-selected fast-path', async () => {
+      // F4: the server attaches a typed email to the matched existing card —
+      // skipping the request would silently discard it. Bare picks still skip.
+      addContainer();
+      const m = makeModal(['known vendor'], [1]);
+      (fetch as any).mockResolvedValue(htmlResponse(rowHtml('known vendor')));
+
+      await m._addComposerVendor({ vendor_name: 'Known Vendor', email: 'x@known.com' });
+
+      expect(fetch).toHaveBeenCalledTimes(1); // request went out despite the name match
+      expect(m.$store.toast.type).toBe('info'); // row itself still deduped on return
+    });
+
+    it('a 4xx with a JSON error body surfaces the server reason in the toast', async () => {
+      // F8: the server emits {"error": ...} — show the actionable reason, not a
+      // generic try-again.
+      addContainer();
+      const m = makeModal([], [1]);
+      (fetch as any).mockResolvedValue({
+        ok: false,
+        status: 400,
+        json: () => Promise.resolve({ error: 'invalid website — could not extract a domain' }),
+        text: () => Promise.resolve(''),
+      });
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Bad Site Co', website: 'no-dot' });
+
+      expect(ok).toBe(false);
+      expect(m.$store.toast.type).toBe('error');
+      expect(m.$store.toast.message).toContain('invalid website — could not extract a domain');
+    });
+
+    it('a 5xx never surfaces body text — generic try-again toast', async () => {
+      addContainer();
+      const m = makeModal([], [1]);
+      (fetch as any).mockResolvedValue({
+        ok: false,
+        status: 500,
+        json: () => Promise.resolve({ error: 'Internal Server Error' }),
+        text: () => Promise.resolve(''),
+      });
+
+      const ok = await m._addComposerVendor({ vendor_name: 'Acme' });
+
+      expect(ok).toBe(false);
+      expect(m.$store.toast.message).toBe('Could not add vendor — please try again');
+    });
+  });
+
+  describe('searchVendors failure visibility (F9)', () => {
+    it('toasts ONCE per failure streak, then again after a success resets the flag', async () => {
+      const m = makeModal([], [1]);
+      const toastSpy = vi.spyOn(m, '_toast');
+      m.vendorQuery = 'arr';
+      (fetch as any).mockRejectedValue(new Error('offline'));
+
+      await m.searchVendors();
+      await m.searchVendors(); // repeated debounce failure — no second toast
+
+      expect(toastSpy).toHaveBeenCalledTimes(1);
+      expect(toastSpy).toHaveBeenCalledWith(expect.stringContaining('search failed'), 'error');
+      expect(m.vendorResults).toEqual([]);
+      expect(m.searchOpen).toBe(false);
+
+      (fetch as any).mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve([{ name: 'Arrow', type: 'vendor' }]),
+      });
+      await m.searchVendors(); // success resets the flag
+      (fetch as any).mockRejectedValue(new Error('offline again'));
+      await m.searchVendors();
+
+      expect(toastSpy).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe('_sendOutcome mapping', () => {

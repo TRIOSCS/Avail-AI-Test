@@ -45,6 +45,8 @@
           <span class="text-[10px] text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
           {% endif %}
         </label>
+        {% else %}
+        <p class="px-3 py-2 text-xs text-gray-400">No vendors with sightings for these parts — search or add one below.</p>
         {% endfor %}
       </div>
 

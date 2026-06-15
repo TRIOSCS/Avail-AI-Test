@@ -884,66 +884,94 @@ async def scan_sent_folder(user, db):
             )
         db.flush()
 
-    # Process each sent message
+    # [ref:]/[AVAIL-] tokens can outlive their requisition (deleted reqs, stale
+    # forwarded subjects). Filter every message's tokens through ONE existence
+    # query up front — a stale id written to ActivityLog.requisition_id is an FK
+    # violation on PG that would roll back the WHOLE batch plus the delta token.
+    from ..models import Requisition
+
+    all_tokens = sorted({int(t) for m in messages for t in RFQ_SUBJECT_TAG_RE.findall(m.get("subject") or "")})
+    live_req_ids: set[int] = set()
+    if all_tokens:
+        live_req_ids = {row[0] for row in db.query(Requisition.id).filter(Requisition.id.in_(all_tokens)).all()}
+        if stale := sorted(set(all_tokens) - live_req_ids):
+            logger.warning(f"Sent folder scan [{user.email}]: dropping stale [ref:] token(s) {stale}")
+
+    # Process each sent message. Per-message SAVEPOINT: one malformed message
+    # must not roll back the batch (and with it the already-flushed delta token).
     created_logs = []
     attachment_queue = []
     for msg in messages:
         msg_id = msg.get("id", "")
-        subject = msg.get("subject", "")
-        sent_dt = msg.get("sentDateTime")
+        msg_logs: list[ActivityLog] = []
+        try:
+            with db.begin_nested():
+                subject = msg.get("subject", "")
+                sent_dt = msg.get("sentDateTime")
 
-        # Skip if we already logged this message (dedup by external_id)
-        existing = (
-            db.query(ActivityLog)
-            .filter(
-                ActivityLog.external_id == msg_id,
-                ActivityLog.user_id == user.id,
+                # Skip if we already logged this message (dedup by external_id)
+                existing = (
+                    db.query(ActivityLog)
+                    .filter(
+                        ActivityLog.external_id == msg_id,
+                        ActivityLog.user_id == user.id,
+                    )
+                    .first()
+                )
+                if existing:
+                    continue
+
+                # Extract first recipient email
+                recipients = msg.get("toRecipients", [])
+                first_recipient = ""
+                if recipients:
+                    first_recipient = recipients[0].get("emailAddress", {}).get("address", "")
+
+                # Check for [ref:{id}]/[AVAIL-{id}] tags to link to requisitions. A
+                # cross-requisition RFQ carries one token per involved requisition —
+                # attribute the sent email to ALL of them (untagged, or every token
+                # stale → one unlinked row).
+                token_req_ids: list[int | None] = list(
+                    dict.fromkeys(int(t) for t in RFQ_SUBJECT_TAG_RE.findall(subject) if int(t) in live_req_ids)
+                )
+
+                # Parse sentDateTime
+                occurred_at = None
+                if sent_dt:
+                    try:
+                        occurred_at = datetime.fromisoformat(sent_dt.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        occurred_at = datetime.now(timezone.utc)
+
+                # Create one ActivityLog entry per token requisition (they share the
+                # message's external_id, so the dedup check above still skips re-scans)
+                for requisition_id in token_req_ids or [None]:
+                    log_entry = ActivityLog(
+                        user_id=user.id,
+                        activity_type="email_sent",
+                        channel="email",
+                        direction="outbound",
+                        event_type="email",
+                        subject=subject[:500] if subject else None,
+                        contact_email=first_recipient or None,
+                        external_id=msg_id,
+                        requisition_id=requisition_id,
+                        auto_logged=True,
+                        occurred_at=occurred_at,
+                    )
+                    db.add(log_entry)
+                    msg_logs.append(log_entry)
+        except Exception:
+            logger.error(
+                f"Sent folder scan [{user.email}]: skipping message {msg_id[:20]} after per-message failure",
+                exc_info=True,
             )
-            .first()
-        )
-        if existing:
             continue
+        created_logs.extend(msg_logs)
 
-        # Extract first recipient email
-        recipients = msg.get("toRecipients", [])
-        first_recipient = ""
-        if recipients:
-            first_recipient = recipients[0].get("emailAddress", {}).get("address", "")
-
-        # Check for [ref:{id}]/[AVAIL-{id}] tags to link to requisitions. A
-        # cross-requisition RFQ carries one token per involved requisition —
-        # attribute the sent email to ALL of them (untagged → one unlinked row).
-        token_req_ids: list[int | None] = list(dict.fromkeys(int(t) for t in RFQ_SUBJECT_TAG_RE.findall(subject)))
-
-        # Parse sentDateTime
-        occurred_at = None
-        if sent_dt:
-            try:
-                occurred_at = datetime.fromisoformat(sent_dt.replace("Z", "+00:00"))
-            except (ValueError, TypeError):
-                occurred_at = datetime.now(timezone.utc)
-
-        # Create one ActivityLog entry per token requisition (they share the
-        # message's external_id, so the dedup check above still skips re-scans)
-        for requisition_id in token_req_ids or [None]:
-            log_entry = ActivityLog(
-                user_id=user.id,
-                activity_type="email_sent",
-                channel="email",
-                direction="outbound",
-                event_type="email",
-                subject=subject[:500] if subject else None,
-                contact_email=first_recipient or None,
-                external_id=msg_id,
-                requisition_id=requisition_id,
-                auto_logged=True,
-                occurred_at=occurred_at,
-            )
-            db.add(log_entry)
-            created_logs.append(log_entry)
-
-        # Check for file attachments (exclude inline images)
-        if msg.get("hasAttachments"):
+        # Check for file attachments (exclude inline images) — outside the
+        # savepoint (network I/O only; detect_attachments swallows its own errors)
+        if msg_logs and msg.get("hasAttachments"):
             attachment_info = await detect_attachments(gc, msg_id)
             if attachment_info:
                 attachment_queue.append({"message_id": msg_id, "attachments": attachment_info})

@@ -13,15 +13,18 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 
 import asyncio
 import json
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Final, Literal
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse, Response
 from loguru import logger
 from pydantic import ValidationError
+from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -1300,6 +1303,27 @@ async def sightings_log_activity(
     return resp
 
 
+def _vss_vendor_card_join():
+    """Coalesce join VendorSightingSummary → VendorCard (F10).
+
+    The vendor_card_id FK (indexed ix_vss_vendor_card) is the PRIMARY branch; VSS
+    rows with a NULL FK (e.g. summaries rebuilt before the FK backfill ran) fall
+    back to the legacy lower(trim(vendor_name)) == normalized_name match so a
+    known vendor's coverage never silently disappears. The NULL-FK guard on the
+    fallback prevents double-matching FK rows by name. Plain functions only —
+    SQLite + PG safe.
+
+    Called by: _coverage_ranked_vendor_rows, sightings_vendor_modal (MPN titles).
+    """
+    return or_(
+        VendorSightingSummary.vendor_card_id == VendorCard.id,
+        and_(
+            VendorSightingSummary.vendor_card_id.is_(None),
+            sqlfunc.lower(sqlfunc.trim(VendorSightingSummary.vendor_name)) == VendorCard.normalized_name,
+        ),
+    )
+
+
 def _coverage_ranked_vendor_rows(
     db: Session, req_id_list: list[int], excluded: set[str]
 ) -> list[tuple[VendorCard, int, float | None]]:
@@ -1307,13 +1331,13 @@ def _coverage_ranked_vendor_rows(
     and the affinity endpoint (which must drop already-suggested vendors computed the
     SAME way, so it stays self-contained).
 
-    One grouped query over VendorSightingSummary filtered to the selected
-    requirements, joined to VendorCard via the vendor_card_id FK (indexed
-    ix_vss_vendor_card) — NOT the legacy lower(trim(vendor_name)) name join. VSS rows
-    with NULL vendor_card_id are excluded by design: the modal suggests known vendors
-    (cards), never raw sighting names. Plain-column aggregates only (SQLite+PG safe).
-    Returns (card, covered_count, avg_score) rows, coverage desc then engagement
-    desc, capped at 20.
+    One grouped query over VendorSightingSummary filtered to the selected requirements,
+    joined to VendorCard via _vss_vendor_card_join: the vendor_card_id FK first, with a
+    lower(trim(vendor_name)) fallback for NULL-FK rows (post-rebuild summaries are now
+    INCLUDED via that fallback — only summaries matching no card at all stay out, since
+    the modal suggests known vendors). Plain-column aggregates only (SQLite+PG safe).
+    Returns (card, covered_count, avg_score) rows, coverage desc then engagement desc,
+    capped at 20.
     """
     covered_count = sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id))
     vendor_query = (
@@ -1322,10 +1346,7 @@ def _coverage_ranked_vendor_rows(
             covered_count.label("covered_count"),
             sqlfunc.avg(VendorSightingSummary.score).label("avg_score"),
         )
-        .join(
-            VendorSightingSummary,
-            VendorSightingSummary.vendor_card_id == VendorCard.id,
-        )
+        .join(VendorSightingSummary, _vss_vendor_card_join())
         .filter(
             VendorSightingSummary.requirement_id.in_(req_id_list),
             VendorCard.is_blacklisted.is_(False),
@@ -1417,12 +1438,16 @@ async def sightings_vendor_modal(
         if coverage:
             # Covered-MPN list per vendor (rendered in the row's `title`) — a second
             # plain query; no string_agg/group_concat (SQLite vs PG divergence).
+            # Same coalesce join as the ranking query, so fallback-joined (NULL-FK)
+            # rows contribute their MPNs too.
             mpn_rows = (
-                db.query(VendorSightingSummary.vendor_card_id, Requirement.primary_mpn)
+                db.query(VendorCard.id, Requirement.primary_mpn)
+                .select_from(VendorSightingSummary)
                 .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
+                .join(VendorCard, _vss_vendor_card_join())
                 .filter(
                     VendorSightingSummary.requirement_id.in_(req_id_list),
-                    VendorSightingSummary.vendor_card_id.in_(list(coverage)),
+                    VendorCard.id.in_(list(coverage)),
                 )
                 .distinct()
                 .all()
@@ -1469,6 +1494,7 @@ async def sightings_vendor_affinity(
     requirements = (db.query(Requirement).filter(Requirement.id.in_(req_id_list)).all()) if req_id_list else []
 
     affinity_vendors: list[dict] = []
+    affinity_partial = False
     if requirements:
         excluded = excluded_vendor_norms(db, requirements)
         suggested_norms: set[str] = set()
@@ -1487,7 +1513,17 @@ async def sightings_vendor_affinity(
             async with sem:
                 return await asyncio.to_thread(_find_affinity_in_thread, mpn)
 
-        per_mpn_matches = await asyncio.gather(*(_bounded(m) for m in mpns))
+        # F6: one MPN's failure must not blank the whole panel (or 500 the swap).
+        # Failed MPNs are logged with the MPN in context; survivors render, and
+        # the template shows a quiet "suggestions incomplete" notice.
+        per_mpn_results = await asyncio.gather(*(_bounded(m) for m in mpns), return_exceptions=True)
+        per_mpn_matches: list[list[dict]] = []
+        for mpn, matches in zip(mpns, per_mpn_results):
+            if isinstance(matches, BaseException):
+                affinity_partial = True
+                logger.error("Vendor affinity lookup failed for MPN {}: {}", mpn, matches)
+                continue
+            per_mpn_matches.append(matches)
 
         best: dict[str, dict] = {}
         for matches in per_mpn_matches:
@@ -1499,8 +1535,31 @@ async def sightings_vendor_affinity(
                     best[norm] = {**match, "normalized_name": norm}
         affinity_vendors = sorted(best.values(), key=lambda m: m["confidence"], reverse=True)[:10]
 
-    ctx = {"request": request, "affinity_vendors": affinity_vendors}
+    ctx = {"request": request, "affinity_vendors": affinity_vendors, "affinity_partial": affinity_partial}
     return template_response("htmx/partials/sightings/vendor_affinity_rows.html", ctx)
+
+
+def _parse_website_domain(website: str) -> str:
+    """Extract a usable domain from user-typed website input (F12).
+
+    urlsplit-based (scheme optional), lowercased host, strips ONE leading
+    "www." — never a blanket str.replace that mangles hosts containing the
+    substring. Returns "" when no plausible domain can be extracted; the caller
+    turns that into a visible 400 instead of silently saving a junk domain.
+
+    Called by: sightings_composer_vendor.
+    """
+    raw = website.strip()
+    try:
+        parsed = urlsplit(raw if "://" in raw else f"//{raw}")
+        host = (parsed.hostname or "").strip().lower()
+    except ValueError:
+        return ""
+    if host.startswith("www."):
+        host = host[4:]
+    if "." not in host or not re.fullmatch(r"[a-z0-9.-]+", host):
+        return ""
+    return host
 
 
 @router.post("/v2/partials/sightings/composer-vendor", response_class=HTMLResponse)
@@ -1540,18 +1599,49 @@ async def sightings_composer_vendor(
     email = str(form.get("email") or "").strip()
     if email and "@" not in email:
         raise HTTPException(status_code=400, detail="invalid contact email")
+    domain = ""
+    if website:
+        domain = _parse_website_domain(website)
+        if not domain:
+            raise HTTPException(status_code=400, detail="invalid website — could not extract a domain")
     req_id_list = [int(x) for x in form.getlist("requirement_ids") if str(x).strip().isdigit()]
 
     matches = check_vendor_duplicate(vendor_name, db)
     matched_existing = bool(matches) and matches[0]["match"] == "exact"
+    contact_added = False
 
     if matched_existing:
-        # Confident duplicate: hand back the existing card — no new DB row at all.
+        # Confident duplicate: hand back the existing card — but a typed email /
+        # website must NOT be silently discarded (F4): attach the email as a
+        # VendorContact (deduped case-insensitively against the card's existing
+        # contacts) and backfill a missing domain. The row's notice reports the
+        # email attach explicitly.
         card = db.get(VendorCard, matches[0]["id"])
+        updated = False
+        if email:
+            existing_emails = {
+                (vc.email or "").lower()
+                for vc in db.query(VendorContact).filter(VendorContact.vendor_card_id == card.id).all()
+            }
+            if email.lower() not in existing_emails:
+                db.add(
+                    VendorContact(
+                        vendor_card_id=card.id,
+                        email=email,
+                        contact_type="company",
+                        source="rfq_manual",
+                        confidence=80,
+                        is_verified=False,
+                    )
+                )
+                contact_added = True
+                updated = True
+        if domain and not card.domain:
+            card.domain = domain
+            updated = True
+        if updated:
+            db.commit()
     else:
-        domain = ""
-        if website:
-            domain = website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
         card = VendorCard(
             normalized_name=norm,
             display_name=vendor_name,
@@ -1577,20 +1667,30 @@ async def sightings_composer_vendor(
         # Post-commit background enrichment when a usable domain came with the
         # website. Lazy imports: tests mock _background_enrich_vendor and
         # get_credential_cached at their SOURCE modules (CLAUDE.md), and the
-        # coroutine opens its own session (never the request session).
-        if card.domain and not card.last_enriched_at:
-            from ..services.credential_service import get_credential_cached
+        # coroutine opens its own session (never the request session). F7: the
+        # card is already committed — a failure ANYWHERE in this block is logged
+        # and the created row is still returned (enrichment is best-effort;
+        # turning it into a 500 would misreport a successful create).
+        try:
+            if card.domain and not card.last_enriched_at:
+                from ..services.credential_service import get_credential_cached
 
-            if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
-                "anthropic_ai", "ANTHROPIC_API_KEY"
-            ):
-                from ..utils.async_helpers import safe_background_task
-                from ..utils.vendor_helpers import _background_enrich_vendor
+                if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
+                    "anthropic_ai", "ANTHROPIC_API_KEY"
+                ):
+                    from ..utils.async_helpers import safe_background_task
+                    from ..utils.vendor_helpers import _background_enrich_vendor
 
-                await safe_background_task(
-                    _background_enrich_vendor(card.id, card.domain, card.display_name),
-                    task_name="enrich_vendor_from_composer",
-                )
+                    await safe_background_task(
+                        _background_enrich_vendor(card.id, card.domain, card.display_name),
+                        task_name="enrich_vendor_from_composer",
+                    )
+        except Exception:
+            logger.error(
+                "Post-create enrichment kickoff failed for vendor card {} — card committed and returned",
+                card.id,
+                exc_info=True,
+            )
 
     # Active-only unavailability re-check for the selected parts: an excluded
     # vendor renders the rose chip with a DISABLED checkbox and never joins the
@@ -1608,6 +1708,7 @@ async def sightings_composer_vendor(
         "request": request,
         "vendor": card,
         "matched_existing": matched_existing,
+        "contact_added": contact_added,
         "is_excluded": is_excluded,
     }
     return template_response("htmx/partials/sightings/composer_vendor_row.html", ctx)
@@ -1716,6 +1817,11 @@ async def sightings_send_inquiry(
         )
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+    if not requirements:
+        # Every posted requirement id is stale (rows deleted under an open modal).
+        # Without this guard the send would proceed with NO requisition at all —
+        # emails out, zero Contact tracking — instead of telling the user.
+        raise HTTPException(status_code=400, detail="selected requirements no longer exist — refresh and retry")
 
     # Send-time re-validation (closes the TOCTOU the modal filter alone leaves open):
     # vendors with an ACTIVE unavailability record on the selected parts are dropped
@@ -1806,6 +1912,10 @@ async def sightings_send_inquiry(
                     progressed_count += 1
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
+        # A mid-batch crash can leave partial Contact/ActivityLog rows pending on
+        # the session — roll them back BEFORE the commit below, or the commit
+        # would persist tracking for sends in an unknown state.
+        db.rollback()
         failed_vendors = list(sendable_vendors)
         sent_count = 0
 

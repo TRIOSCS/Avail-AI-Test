@@ -894,16 +894,54 @@ class TestVendorModalCoverageRanking:
         assert resp.status_code == 200
         assert "Dodgy Vendor" not in resp.text
 
-    def test_null_vendor_card_id_summary_excluded(self, client, db_session):
-        """A VSS row with NULL vendor_card_id never suggests a vendor — even when a card
-        matches by name (the legacy lower(trim) join is gone by design)."""
+    def test_null_vendor_card_id_falls_back_to_name_join(self, client, db_session):
+        """F10: a VSS row with NULL vendor_card_id (e.g. a summary rebuilt before
+        the FK backfill ran) still suggests its vendor via the
+        lower(trim(vendor_name)) == normalized_name fallback branch — the FK
+        join stays primary, the name join only catches NULL-FK rows."""
         items = self._requirements(db_session, ["CV-MPN-7"])
         self._vendor(db_session, "Phantom Vendor")  # card exists, name matches
         self._summary(db_session, items[0], card=None, vendor_name="Phantom Vendor")
         db_session.commit()
         resp = self._modal(client, items)
         assert resp.status_code == 200
-        assert "Phantom Vendor" not in resp.text
+        assert "Phantom Vendor" in resp.text
+        assert "1/1 parts" in resp.text
+        assert 'title="Covers: CV-MPN-7"' in resp.text
+
+    def test_null_fk_summary_without_matching_card_still_absent(self, client, db_session):
+        """The fallback is card-gated: a NULL-FK summary whose name matches no
+        VendorCard suggests nothing (the modal suggests known vendors only)."""
+        items = self._requirements(db_session, ["CV-MPN-8"])
+        self._summary(db_session, items[0], card=None, vendor_name="Unknown Rawname")
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "Unknown Rawname" not in resp.text
+
+    def test_fk_and_null_fk_rows_do_not_double_count(self, client, db_session):
+        """One FK row + one NULL-FK name-matching row on the SAME requirement still
+        count 1 covered part (distinct requirement_id; the OR-join's NULL-FK guard
+        prevents cross-matching FK rows by name)."""
+        items = self._requirements(db_session, ["CV-MPN-9X"])
+        card = self._vendor(db_session, "Split Vendor")
+        self._summary(db_session, items[0], card)
+        # Different raw spelling (VSS has a UNIQUE on requirement_id+vendor_name)
+        # that still hits the lower(trim) fallback branch.
+        self._summary(db_session, items[0], card=None, vendor_name="SPLIT VENDOR ")
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "1/1 parts" in resp.text
+        assert "2/1 parts" not in resp.text
+
+    def test_no_suggested_vendors_shows_empty_state_line(self, client, db_session):
+        """F10: an empty suggested list explains itself instead of rendering a
+        bare empty box."""
+        items = self._requirements(db_session, ["CV-MPN-EMPTY"])
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        assert "No vendors with sightings for these parts" in resp.text
 
     def test_coverage_counts_distinct_requirements(self, client, db_session):
         """Two VSS spellings of one vendor on the same requirement count as 1 covered
@@ -1116,6 +1154,34 @@ class TestVendorAffinityOnDemand:
             assert isinstance(sess, SASession)
             assert sess is not db_session
 
+    def test_partial_affinity_failure_renders_results_with_notice(self, client, db_session):
+        """F6: one MPN's affinity lookup failing must neither 500 the endpoint nor
+        silently hide the surviving results — partial rows render, the failed MPN
+        is logged, and a quiet 'suggestions incomplete' notice row appears."""
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-20", "AF-MPN-21"])
+
+        def _maybe_fail(mpn, db):
+            if mpn == "AF-MPN-20":
+                raise RuntimeError("affinity backend down")
+            return [self._match("Solo Vendor", 0.50)]
+
+        with patch(self.PATCH_TARGET, side_effect=_maybe_fail):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Solo Vendor" in resp.text
+        assert "Suggestions incomplete" in resp.text
+
+    def test_full_affinity_success_has_no_incomplete_notice(self, client, db_session):
+        from unittest.mock import patch
+
+        items = self._requirements(db_session, ["AF-MPN-22"])
+        with patch(self.PATCH_TARGET, return_value=[self._match("Ok Vendor", 0.50)]):
+            resp = self._get(client, items)
+        assert resp.status_code == 200
+        assert "Suggestions incomplete" not in resp.text
+
     def test_modal_renders_affinity_section_with_button(self, client, db_session):
         """vendor_modal.html: 'Suggest more vendors' button lives inside the stable-id
         #rfq-affinity-section sub-container and targets IT (never the x-data wrapper —
@@ -1173,22 +1239,64 @@ class TestComposerVendor:
         db_session.commit()
         return card
 
-    def test_exact_duplicate_returns_existing_selected_row_no_new_db_row(self, client, db_session):
-        """A name that normalizes to an existing card is a confident duplicate: the
-        EXISTING vendor comes back as a selected row with the 'matched existing
-        vendor' notice — no new VendorCard, no VendorContact."""
+    def test_exact_duplicate_returns_existing_row_and_attaches_typed_email(self, client, db_session):
+        """F4: a name that normalizes to an existing card is a confident duplicate —
+        the EXISTING vendor comes back as a selected row (no new VendorCard), but
+        a typed email must NOT be silently discarded: it is attached to the
+        existing card as a VendorContact and the notice says so."""
         card = self._card(db_session, "Known Vendor")
         resp = client.post(self.URL, data={"vendor_name": "Known Vendor, Inc.", "email": "x@known.com"})
         assert resp.status_code == 200
         assert "Known Vendor" in resp.text
-        assert "matched existing vendor" in resp.text
+        assert "matched existing vendor — contact email added" in resp.text
         # Selected row: joins the modal's Alpine selection state checked
         assert 'selectVendor("known vendor")' in resp.text
         assert 'isSelected("known vendor")' in resp.text
         assert 'toggleVendor("known vendor")' in resp.text
-        # No new DB rows — the duplicate path never writes
+        # No new CARD — but the typed email survives as a contact
         assert db_session.query(VendorCard).filter_by(normalized_name="known vendor").count() == 1
+        contact = db_session.query(VendorContact).filter_by(vendor_card_id=card.id).one()
+        assert contact.email == "x@known.com"
+        assert contact.source == "rfq_manual"
+
+    def test_exact_duplicate_without_email_writes_nothing(self, client, db_session):
+        """A bare duplicate pick stays read-only: plain notice, no contact rows."""
+        card = self._card(db_session, "Known Vendor")
+        resp = client.post(self.URL, data={"vendor_name": "Known Vendor"})
+        assert resp.status_code == 200
+        assert "matched existing vendor" in resp.text
+        assert "contact email added" not in resp.text
         assert db_session.query(VendorContact).filter_by(vendor_card_id=card.id).count() == 0
+
+    def test_exact_duplicate_existing_email_not_duplicated(self, client, db_session):
+        """The attach dedupes case-insensitively against the card's existing contacts —
+        and the notice stays plain (nothing was added)."""
+        card = self._card(db_session, "Known Vendor")
+        db_session.add(VendorContact(vendor_card_id=card.id, email="X@Known.com", source="email"))
+        db_session.commit()
+        resp = client.post(self.URL, data={"vendor_name": "Known Vendor", "email": "x@known.com"})
+        assert resp.status_code == 200
+        assert "matched existing vendor" in resp.text
+        assert "contact email added" not in resp.text
+        assert db_session.query(VendorContact).filter_by(vendor_card_id=card.id).count() == 1
+
+    def test_exact_duplicate_backfills_missing_domain_from_website(self, client, db_session):
+        """F4: a typed website fills the existing card's missing domain."""
+        card = self._card(db_session, "Known Vendor")
+        assert card.domain is None
+        resp = client.post(self.URL, data={"vendor_name": "Known Vendor", "website": "https://www.known.com/contact"})
+        assert resp.status_code == 200
+        db_session.refresh(card)
+        assert card.domain == "known.com"
+
+    def test_exact_duplicate_never_overwrites_existing_domain(self, client, db_session):
+        card = self._card(db_session, "Known Vendor")
+        card.domain = "known.com"
+        db_session.commit()
+        resp = client.post(self.URL, data={"vendor_name": "Known Vendor", "website": "https://other.example.org"})
+        assert resp.status_code == 200
+        db_session.refresh(card)
+        assert card.domain == "known.com"
 
     def test_new_vendor_creates_card_contact_and_fires_enrichment(self, client, db_session):
         """No duplicate → minimal VendorCard (normalized_name, display_name, domain
@@ -1269,6 +1377,50 @@ class TestComposerVendor:
         assert resp.json()["error"]
         assert db_session.query(VendorCard).filter_by(normalized_name="").count() == 0
 
+    def test_website_without_scheme_parses_domain(self, client, db_session):
+        """F12: urlsplit-based parsing handles scheme-less input."""
+        resp = client.post(self.URL, data={"vendor_name": "Scheme Less", "website": "www.schemeless.io/shop"})
+        assert resp.status_code == 200
+        card = db_session.query(VendorCard).filter_by(normalized_name="scheme less").one()
+        assert card.domain == "schemeless.io"
+
+    def test_website_strips_only_leading_www(self, client, db_session):
+        """F12: only a LEADING 'www.' is stripped — the old blanket
+        str.replace("www.", "") mangled hosts containing the substring."""
+        resp = client.post(self.URL, data={"vendor_name": "Www Embedded", "website": "https://shop.mywww.example.com"})
+        assert resp.status_code == 200
+        card = db_session.query(VendorCard).filter_by(normalized_name="www embedded").one()
+        assert card.domain == "shop.mywww.example.com"
+
+    def test_unusable_website_returns_400_json_error(self, client, db_session):
+        """F12: unparseable / domain-less websites are rejected with the visible
+        400 JSON error (surfaced by the modal via F8), never silently saved as a
+        junk domain. Nothing is written."""
+        before = db_session.query(VendorCard).count()
+        for i, bad in enumerate(("https://", "no-dot", "ht!tp://%%%")):
+            resp = client.post(self.URL, data={"vendor_name": f"Bad Site {i}", "website": bad})
+            assert resp.status_code == 400, f"website {bad!r} should be rejected"
+            assert "website" in resp.json()["error"].lower()
+        assert db_session.query(VendorCard).count() == before
+
+    def test_post_commit_enrichment_failure_still_returns_row(self, client, db_session):
+        """F7: the card is committed before enrichment fires — a post-commit
+        failure must be logged, not turned into a 500 (the modal would report a
+        bogus failure for a vendor that EXISTS, and a retry would dupe-check)."""
+        from unittest.mock import AsyncMock, patch
+
+        with (
+            patch("app.services.credential_service.get_credential_cached", return_value="key"),
+            patch("app.utils.vendor_helpers._background_enrich_vendor", new_callable=AsyncMock),
+            patch("app.utils.async_helpers.safe_background_task", side_effect=RuntimeError("event loop down")),
+        ):
+            resp = client.post(
+                self.URL, data={"vendor_name": "Enrich Fail Co", "website": "https://enrichfail.example"}
+            )
+        assert resp.status_code == 200
+        assert 'selectVendor("enrich fail co")' in resp.text
+        assert db_session.query(VendorCard).filter_by(normalized_name="enrich fail co").count() == 1
+
     def test_excluded_vendor_renders_rose_chip_and_disabled_checkbox(self, client, db_session):
         """An existing vendor with an ACTIVE unavailability record on the selected parts
         renders the rose 'marked unavailable' chip and a DISABLED, unchecked checkbox —
@@ -1287,6 +1439,9 @@ class TestComposerVendor:
         # Never selected, never toggleable
         assert "selectVendor(" not in resp.text
         assert "toggleVendor(" not in resp.text
+        # F11: excluded rows still carry the normalized name so the client-side
+        # dedupe can see them (no x-init to read it from).
+        assert 'data-vendor-norm="dead vendor"' in resp.text
 
     def test_modal_renders_picker_added_container_and_inline_form(self, client, db_session):
         """vendor_modal.html: the vendor panel carries a stable id; the any-vendor
@@ -1307,6 +1462,52 @@ class TestComposerVendor:
         assert wrapper_at < resp.text.index("Find any vendor")
         # Debounced autocomplete input per the established Alpine pattern
         assert "@input.debounce.300ms" in resp.text
+
+
+class TestSendInquiryFailureContainment:
+    """F3/F12: a mid-send crash must not commit partial tracking rows, and a selection
+    whose every requirement id is stale 400s up front instead of reaching
+    send_batch_rfq's NOT-NULL crash path with no requisition at all."""
+
+    def test_send_failure_rolls_back_partial_state(self, client, db_session, monkeypatch):
+        from app.models.offers import Contact
+
+        _, r, _ = _seed_data(db_session)
+        req_id = r.requisition_id
+
+        async def fake_send(**kwargs):
+            # Simulate send_batch_rfq dying MID-batch: one Contact row already
+            # flushed on the shared session when the exception escapes.
+            inner_db = kwargs["db"]
+            inner_db.add(
+                Contact(
+                    requisition_id=req_id,
+                    user_id=kwargs["user_id"],
+                    contact_type="email",
+                    vendor_name="Half Written",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+            inner_db.flush()
+            raise RuntimeError("Graph died mid-batch")
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={"requirement_ids": str(r.id), "vendor_names": ["Acme"], "email_body": "Quote."},
+        )
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "0"
+        # The partial row was rolled back, not committed by the route's commit.
+        assert db_session.query(Contact).count() == 0
+
+    def test_all_stale_requirement_ids_return_400(self, client, db_session):
+        resp = client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={"requirement_ids": "99999", "vendor_names": ["Acme"], "email_body": "Quote."},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"]
 
 
 class TestSendInquiryUnavailableExclusion:
@@ -1509,10 +1710,25 @@ class TestCrossRequisitionTracking:
 
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
-        mock_gc.get_json.side_effect = [
-            {"value": [{"id": "sent-acme", "conversationId": "conv-acme", "subject": tagged}]},
-            {"value": [{"id": "sent-globex", "conversationId": "conv-globex", "subject": tagged}]},
-        ]
+        # ONE shared sent-items list per lookup (identical subjects, both vendors'
+        # messages present) — the realistic Graph shape; toRecipients is what
+        # discriminates each vendor's own message (F1).
+        mock_gc.get_json.return_value = {
+            "value": [
+                {
+                    "id": "sent-globex",
+                    "conversationId": "conv-globex",
+                    "subject": tagged,
+                    "toRecipients": [{"emailAddress": {"address": "sales@globex.com"}}],
+                },
+                {
+                    "id": "sent-acme",
+                    "conversationId": "conv-acme",
+                    "subject": tagged,
+                    "toRecipients": [{"emailAddress": {"address": "sales@acme.com"}}],
+                },
+            ]
+        }
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
