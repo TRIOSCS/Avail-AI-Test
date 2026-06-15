@@ -1,74 +1,46 @@
-{# Part Search form — large input with search button, spinner, and empty state.
-   Loaded via HTMX GET /v2/partials/search into #main-content.
-   Called by: htmx_views.search_form_partial
-   Depends on: partials/search/results.html (loaded into #search-results by form post) #}
+{# Part Search landing — deep-links the Part Dossier ("The Bench") + recent searches.
+   The search box navigates to /v2/search?mpn=<PN> (the dossier), NOT the old inline
+   results flow. Recent searches lazy-load from /v2/partials/search/recent.
+   Loaded via HTMX GET /v2/partials/search (no mpn) into #main-content.
+   Called by: htmx_views.search_form_partial (no mpn).
+   Depends on: part_dossier.py (dossier shell + recent endpoint). #}
 
-<div class="max-w-7xl mx-auto space-y-3">
-  {# Search form card #}
+<div class="max-w-2xl mx-auto space-y-3">
+  {# Search form card — deep-links to the dossier. #}
   <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-3">
-    <form hx-post="/v2/partials/search/run"
-          hx-target="#search-results"
-          hx-indicator="#search-spinner"
-          x-data="{ mpn: '' }">
+    <form x-data="{ q: '' }"
+          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-landing-spin'}); history.pushState({},'','/v2/search?mpn='+encodeURIComponent(v)); }">
       <div class="flex gap-2">
-        <input aria-label="Part number search" type="text" name="mpn" x-model="mpn"
+        <input aria-label="Part number search" type="text" name="mpn" x-model="q"
                placeholder="Enter part number (e.g. LM317T, STM32F407VG)"
                class="flex-1 px-3 py-2 text-sm font-mono border border-brand-200 rounded-lg
                       focus:ring-2 focus:ring-brand-500 focus:border-brand-500
                       placeholder:text-gray-400 tracking-tight"
                required>
-        <button type="submit" :disabled="!mpn.trim()"
+        <button type="submit" :disabled="!q.trim()"
                 class="px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg
                        hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed
                        transition-colors flex items-center gap-2 whitespace-nowrap text-sm">
-          <span id="search-spinner" class="htmx-indicator">
-            <svg class="inline h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
+          <span id="ds-landing-spin" class="htmx-indicator">
+            <svg class="inline h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
           </span>
-          Search All Sources
+          Search
         </button>
       </div>
-      <p class="mt-1 text-xs text-gray-400">Searches Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, and more in parallel.</p>
+      <p class="mt-1 text-xs text-gray-400">Pulls everything we know about the part + the live market across Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, and more.</p>
     </form>
   </div>
 
-  {# Results container #}
-  <div id="search-results">
-    {# Empty state (shown initially) #}
-    <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-12 text-center">
-      <svg class="mx-auto w-12 h-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-      </svg>
-      <p class="mt-4 text-lg text-gray-500">Enter a part number to search all sources</p>
-      <p class="text-sm text-gray-400 mt-1">Results will appear here with vendor, pricing, and availability data.</p>
-    </div>
-  </div>
-</div>
-
-{# Lead detail drawer — opens when HTMX loads lead detail into #lead-drawer-content (see @htmx:after-swap). #}
-<div id="lead-drawer"
-     x-data="{ drawerOpen: false }"
-     x-effect="document.body.style.overflow = drawerOpen ? 'hidden' : ''">
-  {# Backdrop #}
-  <div x-show="drawerOpen" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0"
-       x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150"
-       x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
-       @click="drawerOpen = false"
-       class="fixed inset-0 bg-black/30 z-40" x-cloak></div>
-  {# Drawer panel #}
-  <div x-show="drawerOpen" x-cloak x-transition:enter="transition ease-out duration-200 transform"
-       x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
-       x-transition:leave="transition ease-in duration-150 transform"
-       x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
-       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-gray-200 z-50"
-       x-cloak>
-    {# HTMX swaps lead detail HTML here; after-swap opens the drawer (Details button only loads content). #}
-    <div id="lead-drawer-content"
-         class="h-full"
-         @htmx:after-swap="drawerOpen = true">
+  {# Recent searches — lazy-loaded. Explicit hx-target="this" (anti-pattern guard). #}
+  <div id="recent-searches"
+       hx-get="/v2/partials/search/recent"
+       hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+    <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-6 animate-pulse">
+      <div class="h-3 w-1/3 bg-gray-100 rounded"></div>
+      <div class="mt-3 space-y-2">
+        <div class="h-3 w-full bg-gray-100 rounded"></div>
+        <div class="h-3 w-5/6 bg-gray-100 rounded"></div>
+      </div>
     </div>
   </div>
 </div>

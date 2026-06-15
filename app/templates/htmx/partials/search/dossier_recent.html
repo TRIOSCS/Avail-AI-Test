@@ -1,0 +1,32 @@
+{# Recent-searches list for the search landing — each card deep-links a PN's dossier.
+   Reuses existing columns only (search_count, last_searched_at).
+
+   Called by: part_dossier.search_recent (GET /v2/partials/search/recent).
+   Depends on: recent (list[MaterialCard]). #}
+
+{% if recent %}
+<div class="bg-white border border-brand-200 rounded-lg shadow-sm p-3">
+  <p class="text-xs font-semibold uppercase tracking-wide text-gray-400 mb-2">Recent searches</p>
+  <div class="divide-y divide-brand-100">
+    {% for c in recent %}
+    <a href="/v2/search?mpn={{ c.display_mpn|urlencode }}"
+       hx-get="/v2/partials/search?mpn={{ c.display_mpn|urlencode }}"
+       hx-target="#main-content" hx-push-url="/v2/search?mpn={{ c.display_mpn|urlencode }}"
+       class="flex items-center justify-between gap-3 py-2.5 px-1 hover:bg-brand-50 rounded-md transition-colors">
+      <div class="min-w-0">
+        <p class="font-mono text-sm font-semibold text-brand-900 truncate">{{ c.display_mpn }}</p>
+        <p class="text-xs text-gray-400 truncate">{{ c.manufacturer or '—' }}{% if c.category %} · {{ c.category }}{% endif %}</p>
+      </div>
+      <div class="shrink-0 text-right">
+        <p class="text-[11px] text-gray-400">{{ c.last_searched_at|timeago }}</p>
+        {% if c.search_count %}<p class="text-[10px] text-gray-300 font-mono">{{ c.search_count }}×</p>{% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+{% else %}
+<div class="bg-white border border-brand-200 rounded-lg shadow-sm p-8 text-center">
+  <p class="text-sm text-gray-400">No recent searches yet — enter a part number above to begin.</p>
+</div>
+{% endif %}

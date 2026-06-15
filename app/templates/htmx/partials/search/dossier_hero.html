@@ -1,0 +1,193 @@
+{# Part Dossier identity hero + action bar — instant DB read (MaterialCard + PartHistory).
+   3 zones: identity / market-price strip + sparkline / knowledge count tiles, then the
+   action bar (Send RFQ · Add Offer · Add to Requisition · overflow).
+
+   Called by: part_dossier.dossier_hero (GET /v2/partials/search/dossier/hero).
+   Depends on: card (MaterialCard | None), history (PartHistory), fru_view (FruView | None),
+               mpn (display). $store.shortlist for the action payload; the quick-source
+               endpoints land in the NEXT task (404 for now is fine).
+   Replaces #dossier-hero (outerHTML swap) — keeps the id so the rail observer still tracks it. #}
+
+{% set pt = history.price_trend %}
+{% set known = card is not none %}
+
+<section id="dossier-hero"
+         x-data="dossierHero('{{ mpn|e }}')"
+         @dossier-send-rfq.window="sendRfq()"
+         @dossier-add-offer.window="addOffer()"
+         @dossier-add-to-req.window="addToReq()">
+
+  {# ── Identity hero card ── #}
+  <div class="rounded-xl bg-white border border-brand-200 shadow-sm p-5">
+    <div class="flex flex-col lg:flex-row gap-6">
+
+      {# Zone A — identity #}
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <h1 class="font-mono text-2xl sm:text-3xl font-bold tracking-tight text-brand-900 break-all">{{ mpn }}</h1>
+          <button @click="copyMpn()" class="shrink-0 text-gray-300 hover:text-brand-500 transition-colors" title="Copy MPN" type="button">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+          </button>
+          <span x-show="copied" x-cloak class="text-[11px] text-emerald-600 font-medium">copied</span>
+        </div>
+
+        <div class="mt-2 flex flex-wrap items-center gap-1.5">
+          {% if known %}
+          {% if card.manufacturer %}<span class="text-sm font-medium text-gray-700">{{ card.manufacturer }}</span>{% endif %}
+          {% if card.brand %}
+            <span class="mx-0.5 text-gray-300">·</span>
+            <span class="inline-flex items-center gap-1 rounded-md bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>{{ card.brand }}
+            </span>
+          {% elif fru_view %}
+            <span class="mx-0.5 text-gray-300">·</span>
+            <span class="inline-flex items-center gap-1 rounded-md bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>FRU crosswalk
+            </span>
+          {% endif %}
+          {% if card.category %}<span class="rounded-md bg-blue-50 px-2 py-0.5 text-[11px] font-medium text-blue-700">{{ card.category }}</span>{% endif %}
+          {% set lc = (card.lifecycle_status or '')|lower %}
+          {% if card.lifecycle_status %}
+          <span class="rounded-md px-2 py-0.5 text-[11px] font-medium border
+            {% if lc == 'active' %}bg-emerald-50 text-emerald-700 border-emerald-100
+            {% elif lc in ('nrnd','nrfnd','ltb') %}bg-amber-50 text-amber-700 border-amber-100
+            {% elif lc in ('eol','obsolete') %}bg-rose-50 text-rose-700 border-rose-100
+            {% else %}bg-gray-100 text-gray-600 border-gray-200{% endif %}">{{ card.lifecycle_status|title }}</span>
+          {% endif %}
+          {% if card.condition %}<span class="rounded-md bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">{{ card.condition }}</span>{% endif %}
+          {% elif fru_view %}
+          <span class="inline-flex items-center gap-1 rounded-md bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700">
+            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>Known via FRU crosswalk
+          </span>
+          {% else %}
+          <span class="rounded-md bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 border border-amber-100">New to us</span>
+          {% endif %}
+        </div>
+
+        {% if known and card.description %}
+        <p class="mt-3 text-xs text-gray-500 max-w-xl leading-relaxed">{{ card.description }}</p>
+        {% elif not known %}
+        <p class="mt-3 text-xs text-gray-400 max-w-xl leading-relaxed">We don't have history on this part — the live market below will tell us who has it.</p>
+        {% endif %}
+      </div>
+
+      {# Zone B — market price strip + sparkline #}
+      <div class="lg:w-[200px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+        <p class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold">Market price</p>
+        {% if pt %}
+        <div class="mt-1 flex items-baseline gap-1.5">
+          <span class="font-mono text-2xl font-bold text-brand-900">${{ (pt.last_price if pt.last_price is not none else pt.min_price)|pricefmt }}</span>
+          <span class="text-xs text-gray-400">last</span>
+        </div>
+        <p class="font-mono text-xs text-gray-500 mt-0.5">${{ pt.min_price|pricefmt }} – ${{ pt.max_price|pricefmt }}</p>
+        {# Sparkline from min/last/max — a 3-point glanceable trend (no axes). #}
+        {% set lo = pt.min_price|float %}
+        {% set hi = pt.max_price|float %}
+        {% set last = (pt.last_price if pt.last_price is not none else pt.max_price)|float %}
+        {% set span = (hi - lo) if (hi - lo) > 0 else 1.0 %}
+        {% set y_lo = 30 - ((lo - lo) / span) * 28 %}
+        {% set y_hi = 30 - ((hi - lo) / span) * 28 %}
+        {% set y_last = 30 - ((last - lo) / span) * 28 %}
+        <svg viewBox="0 0 120 32" class="mt-2 w-full h-8" preserveAspectRatio="none">
+          <polyline fill="none" stroke="#838B9B" stroke-width="1.5" points="0,{{ '%.1f'|format(y_lo) }} 60,{{ '%.1f'|format(y_hi) }} 120,{{ '%.1f'|format(y_last) }}"/>
+          <circle cx="120" cy="{{ '%.1f'|format(y_last) }}" r="2" fill="#4B5463"/>
+        </svg>
+        <p class="text-[10px] text-gray-400 mt-1">{{ pt.currency }} · min–max–last</p>
+        {% else %}
+        <div class="mt-1 rounded-lg border border-dashed border-brand-200 px-3 py-4 text-center">
+          <p class="font-mono text-sm text-gray-300">$ — — —</p>
+          <p class="text-[10px] text-gray-400 mt-1">No price history yet — run the market</p>
+        </div>
+        {% endif %}
+      </div>
+
+      {# Zone C — knowledge counts #}
+      <div class="lg:w-[150px] lg:border-l lg:border-brand-100 lg:pl-5 shrink-0">
+        <p class="text-[10px] uppercase tracking-wide text-gray-400 font-semibold mb-2">What we know</p>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-2 count-tile">
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.offers_count else 'text-gray-300' }}">{{ history.offers_count }}</div><dt>Offers</dt></div>
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-emerald-600' if history.confirmed_count else 'text-gray-300' }}">{{ history.confirmed_count }}</div><dt>Won</dt></div>
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.sightings_count else 'text-gray-300' }}">{{ history.sightings_count }}</div><dt>Sightings</dt></div>
+          <div><div class="font-mono text-lg font-bold leading-none {{ 'text-brand-900' if history.requirements_count else 'text-gray-300' }}">{{ history.requirements_count }}</div><dt>Reqs</dt></div>
+        </div>
+        {% if history.buyers %}
+        <div class="mt-2 flex items-center -space-x-1.5">
+          {% for b in history.buyers[:3] %}
+          <span class="h-5 w-5 rounded-full bg-blue-100 text-blue-700 grid place-items-center text-[9px] font-semibold ring-2 ring-white" title="{{ b.name or b.email }}">{{ (b.name or b.email)[:2]|upper }}</span>
+          {% endfor %}
+          <span class="text-[10px] text-gray-400 pl-2.5">{{ history.buyers|length }} buyer{{ '' if history.buyers|length == 1 else 's' }}</span>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ── ACTION BAR ── #}
+  <div class="mt-3 flex flex-col sm:flex-row sm:items-center gap-3" x-data="{ overflow: false }">
+    <p class="hidden sm:block text-[11px] text-gray-400 mr-auto">
+      <svg class="inline h-3.5 w-3.5 -mt-0.5 mr-0.5 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      Actions create a quick-source requisition and capture the live results below.
+    </p>
+    <div class="flex items-center gap-2">
+      {# Send RFQ — primary. POSTs the shortlisted rows (endpoint lands in the next task). #}
+      <button type="button" @click="sendRfq()"
+              class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm font-semibold hover:bg-brand-700 transition-colors inline-flex items-center gap-2 shadow-sm">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
+      </button>
+      <button type="button" @click="addOffer()"
+              class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors">Add Offer</button>
+      {# Add to Requisition — intentional (non-scratch) path: existing requisition picker in the global modal. #}
+      <button type="button" @click="addToReq()"
+              class="px-4 py-2 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium hover:bg-brand-50 transition-colors inline-flex items-center gap-1.5">
+        Add to Requisition
+      </button>
+      {# overflow #}
+      <div class="relative">
+        <button type="button" @click="overflow=!overflow" class="px-2.5 py-2 rounded-lg text-gray-400 hover:text-brand-600 hover:bg-brand-50 transition-colors" title="More">
+          <svg class="h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/></svg>
+        </button>
+        <div x-show="overflow" x-cloak @click.outside="overflow=false" x-transition
+             class="absolute right-0 mt-1 w-52 rounded-lg bg-white border border-brand-200 shadow-lg z-20 py-1 text-sm">
+          <button type="button" @click="refreshMarket();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">↻ Refresh market</button>
+          <button type="button" @click="copyMpn();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">Copy MPN</button>
+          {% if known %}
+          <a class="block px-3 py-2 hover:bg-brand-50 text-gray-700" href="/v2/materials/{{ card.id }}"
+             hx-get="/v2/partials/materials/{{ card.id }}" hx-target="#main-content" hx-push-url="/v2/materials/{{ card.id }}">Open full part page →</a>
+          {% endif %}
+          <button type="button" @click="$store.shortlist.clear();overflow=false" class="w-full text-left px-3 py-2 hover:bg-brand-50 text-gray-700">Clear shortlist</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Alpine.data factory (single-quoted-attr safe). Posts the shortlisted market rows to
+  // the quick-source endpoints (which land in the NEXT task). $store.shortlist.items
+  // mirrors what add_to_requisition posts; an empty shortlist posts an empty payload —
+  // the next task's endpoint handles that gracefully.
+  window.dossierHero = window.dossierHero || function (mpn) {
+    return {
+      copied: false,
+      copyMpn() {
+        if (navigator.clipboard) navigator.clipboard.writeText(mpn);
+        this.copied = true; setTimeout(() => this.copied = false, 1200);
+      },
+      refreshMarket() {
+        const u = '/v2/partials/search/dossier/market?mpn=' + encodeURIComponent(mpn) + '&refresh=1';
+        htmx.ajax('GET', u, { target: '#dossier-market', swap: 'innerHTML', indicator: '#dossier-market' });
+      },
+      _rows() { return (Alpine.store('shortlist') && Alpine.store('shortlist').items) || []; },
+      _post(url) {
+        const vals = { mpn: mpn, items: JSON.stringify(this._rows()) };
+        htmx.ajax('POST', url, { values: vals, indicator: '#dossier-hero' });
+      },
+      sendRfq() { this._post('/v2/partials/search/quick-source/rfq'); },
+      addOffer() { this._post('/v2/partials/search/quick-source/offer'); },
+      addToReq() {
+        const items = encodeURIComponent(JSON.stringify(this._rows()));
+        this.$dispatch('open-modal', { url: '/v2/partials/search/requisition-picker?action=add&mpn=' + encodeURIComponent(mpn) + '&items=' + items });
+      },
+    };
+  };
+</script>

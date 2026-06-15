@@ -2656,12 +2656,18 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             ),
                         )
 
-            # Cache results for filter endpoint (15-min TTL)
+            # Cache results for filter endpoint (15-min TTL). Also write a per-MPN
+            # pointer key (search:{key}:latest → this search_id, same TTL) so the Part
+            # Dossier market section can find the freshest run for an MPN without knowing
+            # the search_id (cache-hit path in routers/part_dossier.dossier_market).
             try:
                 rc = _get_search_redis()
                 if rc:
                     cache_key = f"search:{search_id}:results"
                     rc.setex(cache_key, 900, json.dumps(accumulated, default=str))
+                    latest_key = normalize_mpn_key(mpn)
+                    if latest_key:
+                        rc.setex(f"search:{latest_key}:latest", 900, search_id)
             except Exception:
                 logger.exception(
                     "Failed to cache search results: search_id={} accumulated={}",

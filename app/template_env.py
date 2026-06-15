@@ -116,6 +116,24 @@ def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "\u2014") -
 templates.env.filters["fmtdate"] = _fmtdate_filter
 
 
+def _pricefmt_filter(value, default: str = "—") -> str:
+    """Format a price: up to 4 decimals with trailing zeros stripped.
+
+    0.7900 -> 0.79, 12.3400 -> 12.34, 5.0000 -> 5, sub-cent 0.0084 kept. Tames the
+    Numeric(12,4) trailing-zero noise while preserving the precision component pricing needs.
+    """
+    if value is None or value == "":
+        return default
+    try:
+        s = f"{float(value):.4f}".rstrip("0").rstrip(".")
+        return s or "0"
+    except (ValueError, TypeError):
+        return default
+
+
+templates.env.filters["pricefmt"] = _pricefmt_filter
+
+
 def _sanitize_html_filter(value: str) -> str:
     """Sanitize HTML to prevent XSS — allows safe formatting tags only."""
     if not value:

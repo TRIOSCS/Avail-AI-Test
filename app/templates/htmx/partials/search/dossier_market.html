@@ -1,0 +1,56 @@
+{# Part Dossier live-market terminal body — swapped into #dossier-market.
+   Two branches:
+     • CACHE HIT  — cached_rows present → render the cached vendor rows directly
+                    (vendor_card.html, in_dossier terminal rows) + a freshness stamp +
+                    "↻ Refresh market" (force re-run via the SSE flow).
+     • CACHE MISS — an inner element auto-fires the EXISTING /v2/partials/search/run flow
+                    (hx-post, hx-trigger="load"), returning results_shell.html's SSE
+                    experience embedded in the dark terminal frame. The SSE engine is
+                    UNCHANGED — we just embed it here.
+
+   Called by: part_dossier.dossier_market (GET /v2/partials/search/dossier/market).
+   Depends on: mpn (display), cached_search_id (str | None), cached_rows (list[dict] | None),
+               results_shell.html / vendor_card.html (in_dossier terminal skin),
+               $store.shortlist + lead-detail drawer (reused). #}
+
+{% if cached_rows %}
+{# ── CACHE HIT — static cached rows in the terminal frame ── #}
+<div class="px-4 py-2.5 border-b border-gray-800 flex items-center gap-3 text-[11px]">
+  <span class="inline-flex items-center gap-1.5 text-gray-400">
+    <span class="h-1.5 w-1.5 rounded-full bg-gray-500"></span>cached
+  </span>
+  <span class="text-gray-500">{{ cached_rows|length }} offer{{ '' if cached_rows|length == 1 else 's' }}</span>
+  <button type="button"
+          hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}&amp;refresh=1"
+          hx-target="#dossier-market" hx-swap="innerHTML"
+          class="ml-auto px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 inline-flex items-center gap-1.5">
+    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+    Refresh market
+  </button>
+</div>
+<div id="search-results-cards" class="divide-y divide-gray-800" data-search-id="{{ cached_search_id }}">
+  {% for card in cached_rows %}
+  {% with card_index=loop.index0, search_id=cached_search_id, swap_oob=False %}
+  {% include "htmx/partials/search/vendor_card.html" %}
+  {% endwith %}
+  {% endfor %}
+</div>
+
+{% else %}
+{# ── CACHE MISS — auto-fire the existing SSE search flow into this terminal frame. ── #}
+<div hx-post="/v2/partials/search/run"
+     hx-vals='{"mpn": "{{ mpn|e }}"}'
+     hx-trigger="load"
+     hx-target="this" hx-swap="innerHTML">
+  <div class="divide-y divide-gray-800">
+    {% for _ in range(3) %}
+    <div class="px-4 py-3 flex items-center gap-4 animate-pulse">
+      <div class="h-8 w-1 rounded bg-gray-700"></div>
+      <div class="h-3 w-40 rounded bg-gray-800"></div>
+      <div class="ml-auto h-3 w-16 rounded bg-gray-800"></div>
+      <div class="h-3 w-20 rounded bg-gray-800"></div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}

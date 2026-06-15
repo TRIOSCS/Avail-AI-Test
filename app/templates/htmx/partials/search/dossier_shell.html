@@ -1,0 +1,188 @@
+{# Part Dossier shell ("The Bench") — single scrolling one-PN sourcing dossier.
+   Tier-1 sticky search bar (deep-links a new PN) + tier-2 condensed hero rail
+   (x-intersect on the hero) + four lazy-load sections (hero / market / what-we-know /
+   specs) + the reused lead-detail drawer + the mobile bottom action sheet.
+
+   Loaded via HTMX GET /v2/partials/search?mpn=<PN> into #main-content.
+   Called by: htmx_views.search_form_partial (with mpn).
+   Depends on: part_dossier.py section endpoints (hero/market/specs/recent),
+               htmx_views.search_history_panel (existing /history endpoint),
+               Alpine $persist / x-intersect / x-collapse, $store.shortlist.
+   Context: mpn (display, uppercased). EVERY lazy-load div carries an explicit
+   hx-target="this" — under #main-content's hx-target="this", omitting it would
+   replace the whole page (CLAUDE.md anti-pattern). #}
+
+{# ── TIER 1 — persistent dossier search bar (deep-links a new PN) ── #}
+<div class="sticky tier-search z-20 -mx-4 bg-white/95 backdrop-blur border-b border-brand-200">
+  <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-2">
+    <svg class="h-4 w-4 text-brand-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+    <form class="flex flex-1 items-center gap-2"
+          x-data="{ q: '{{ mpn|default('') }}' }"
+          @submit.prevent="const v=q.trim(); if(v){ const u='/v2/partials/search?mpn='+encodeURIComponent(v); htmx.ajax('GET', u, {target:'#main-content', indicator:'#ds-bar-spin'}); history.pushState({},'','/v2/search?mpn='+encodeURIComponent(v)); }">
+      <input x-model="q" name="mpn" type="text" aria-label="Part number"
+             placeholder="Enter a part number…"
+             class="flex-1 bg-transparent px-1 py-1 text-sm font-mono tracking-tight text-brand-900 placeholder:text-gray-400 outline-none">
+      <span id="ds-bar-spin" class="htmx-indicator"><svg class="inline h-4 w-4 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg></span>
+      <button type="submit" class="px-3 py-1.5 bg-brand-600 text-white text-xs font-semibold rounded-lg hover:bg-brand-700 transition-colors">Search</button>
+    </form>
+    <span class="hidden md:inline text-[11px] text-gray-400 ml-1">Nexar · BrokerBin · DigiKey · Mouser · eBay · OEMSecrets…</span>
+  </div>
+</div>
+
+{# ── TIER 2 — condensed sticky hero rail (appears after hero scrolls off) ── #}
+<div x-data="{ railShown: false }"
+     @dossier-rail.window="railShown = $event.detail">
+  <div x-show="railShown" x-cloak
+       x-transition:enter="transition ease-out duration-150" x-transition:enter-start="opacity-0 -translate-y-1" x-transition:enter-end="opacity-100 translate-y-0"
+       class="sticky tier-rail z-10 -mx-4 bg-white border-b border-brand-200 shadow-sm">
+    <div class="max-w-5xl mx-auto px-4 py-2 flex items-center gap-3">
+      <span class="font-mono text-sm font-bold text-brand-900 truncate">{{ mpn }}</span>
+      <div class="ml-auto flex items-center gap-2">
+        <button @click="$dispatch('dossier-send-rfq')"
+                class="px-3 py-1.5 rounded-lg bg-brand-600 text-white text-xs font-semibold hover:bg-brand-700 inline-flex items-center gap-1.5">
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg><span class="hidden sm:inline">Send RFQ</span>
+        </button>
+        <button @click="$dispatch('dossier-add-offer')" class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add Offer</button>
+        <button @click="$dispatch('dossier-add-to-req')" class="hidden sm:inline-flex px-3 py-1.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-xs font-medium hover:bg-brand-50">Add to Req</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── DOSSIER BODY ── #}
+<div class="max-w-5xl mx-auto pt-5 pb-32 space-y-5">
+
+  {# IDENTITY HERO + ACTION BAR — instant DB read, no skeleton flash. #}
+  <div id="dossier-hero"
+       hx-get="/v2/partials/search/dossier/hero?mpn={{ mpn|urlencode }}"
+       hx-trigger="load" hx-target="this" hx-swap="outerHTML">
+    <section class="rounded-xl bg-white border border-brand-200 shadow-sm p-5 animate-pulse">
+      <div class="h-7 w-56 bg-brand-100 rounded"></div>
+      <div class="mt-3 h-3 w-72 bg-brand-100 rounded"></div>
+      <div class="mt-4 flex gap-3">
+        <div class="h-9 w-24 bg-brand-100 rounded"></div>
+        <div class="h-9 w-24 bg-brand-100 rounded"></div>
+      </div>
+    </section>
+  </div>
+
+  {# LIVE MARKET — dark terminal, open by default. #}
+  <section class="rounded-xl bg-gray-900 border border-gray-800 shadow-sm overflow-hidden"
+           x-data="{ open: persistOr(true, 'dossier_market_open') }">
+    <header @click="open=!open" class="px-4 py-3 border-b border-gray-800 cursor-pointer select-none flex items-center gap-2">
+      <svg class="chev h-4 w-4 text-gray-500" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+      <span class="text-sm font-semibold text-gray-100">Live market</span>
+    </header>
+    <div x-show="open" x-collapse>
+      <div id="dossier-market"
+           hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}"
+           hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="divide-y divide-gray-800">
+          {% for _ in range(3) %}
+          <div class="px-4 py-3 flex items-center gap-4 animate-pulse">
+            <div class="h-8 w-1 rounded bg-gray-700"></div>
+            <div class="h-3 w-40 rounded bg-gray-800"></div>
+            <div class="ml-auto h-3 w-16 rounded bg-gray-800"></div>
+            <div class="h-3 w-20 rounded bg-gray-800"></div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# WHAT WE KNOW — reuses the existing /history endpoint + history_panel.html, open by default. #}
+  <section id="know" class="rounded-xl bg-white border border-brand-200 shadow-sm"
+           x-data="{ open: persistOr(true, 'dossier_know_open') }">
+    <header @click="open=!open" class="flex items-center justify-between px-4 py-3 cursor-pointer select-none">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-brand-900">
+        <svg class="chev h-4 w-4 text-gray-400" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+        What we know
+      </h2>
+    </header>
+    <div x-show="open" x-collapse>
+      <div id="dossier-history" class="px-4 pb-4"
+           hx-get="/v2/partials/search/history?mpn={{ mpn|urlencode }}"
+           hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="rounded-xl bg-white p-6 border border-gray-100 shadow-sm animate-pulse">
+          <div class="h-4 w-2/3 bg-gray-100 rounded"></div>
+          <div class="mt-3 h-3 w-1/2 bg-gray-100 rounded"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  {# SPECS & ENRICHMENT — closed by default (reference, not decision-driving). #}
+  <section class="rounded-xl bg-white border border-brand-200 shadow-sm"
+           x-data="{ open: persistOr(false, 'dossier_specs_open') }">
+    <header @click="open=!open" class="flex items-center justify-between px-4 py-3 cursor-pointer select-none">
+      <h2 class="flex items-center gap-2 text-sm font-semibold text-brand-900">
+        <svg class="chev h-4 w-4 text-gray-400" :class="open && 'open'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+        Specs &amp; enrichment
+      </h2>
+    </header>
+    <div x-show="open" x-collapse>
+      <div id="dossier-specs" class="px-4 pb-4"
+           hx-get="/v2/partials/search/dossier/specs?mpn={{ mpn|urlencode }}"
+           hx-trigger="load" hx-target="this" hx-swap="innerHTML">
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-3 animate-pulse">
+          {% for _ in range(6) %}
+          <div><div class="h-2.5 w-16 rounded bg-brand-100 mb-1.5"></div><div class="h-3.5 w-24 rounded bg-brand-100"></div></div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+{# ── Hero-intersection observer → drives the tier-2 rail (dispatches dossier-rail). ── #}
+<div x-data x-init="
+  const hero = document.getElementById('dossier-hero');
+  if (hero) {
+    const io = new IntersectionObserver(([e]) => window.dispatchEvent(new CustomEvent('dossier-rail', { detail: !e.isIntersecting })), { rootMargin: '-120px 0px 0px 0px' });
+    io.observe(hero);
+  }
+"></div>
+
+{# ── LEAD-DETAIL DRAWER — reused verbatim from form.html (per-row Details → feeds it). ── #}
+<div id="lead-drawer"
+     x-data="{ drawerOpen: false }"
+     x-effect="document.body.style.overflow = drawerOpen ? 'hidden' : ''">
+  <div x-show="drawerOpen" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="opacity-0"
+       x-transition:enter-end="opacity-100" x-transition:leave="transition ease-in duration-150"
+       x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+       @click="drawerOpen = false"
+       class="fixed inset-0 bg-black/30 z-40" x-cloak></div>
+  <div x-show="drawerOpen" x-cloak x-transition:enter="transition ease-out duration-200 transform"
+       x-transition:enter-start="translate-x-full" x-transition:enter-end="translate-x-0"
+       x-transition:leave="transition ease-in duration-150 transform"
+       x-transition:leave-start="translate-x-0" x-transition:leave-end="translate-x-full"
+       class="fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl border-l border-gray-200 z-50"
+       x-cloak>
+    <div id="lead-drawer-content" class="h-full" @htmx:after-swap="drawerOpen = true"></div>
+  </div>
+</div>
+
+{# ── MOBILE bottom action sheet (above the fixed bottom nav). ── #}
+<div class="sm:hidden fixed left-0 right-0 bottom-[52px] z-30 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-2"
+     x-data="{ sheet: false }">
+  <button @click="$dispatch('dossier-send-rfq')" class="flex-1 px-3 py-2.5 rounded-lg bg-brand-600 text-white text-sm font-semibold inline-flex items-center justify-center gap-2">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M3 11l18-8-8 18-2-7-8-3z"/></svg>Send RFQ
+  </button>
+  <button @click="sheet=true" class="px-4 py-2.5 rounded-lg bg-white border border-brand-300 text-brand-700 text-sm font-medium">Actions</button>
+  <div x-show="sheet" x-cloak @click="sheet=false" class="fixed inset-0 bg-black/40 z-40"></div>
+  <div x-show="sheet" x-cloak x-transition:enter="transition ease-out duration-200" x-transition:enter-start="translate-y-full" x-transition:enter-end="translate-y-0"
+       class="fixed left-0 right-0 bottom-0 z-50 bg-white rounded-t-2xl border-t border-brand-200 p-4 space-y-1">
+    <div class="mx-auto mb-2 h-1 w-10 rounded-full bg-brand-200"></div>
+    <button @click="sheet=false;$dispatch('dossier-add-offer')" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">Add Offer</button>
+    <button @click="sheet=false;$dispatch('dossier-add-to-req')" class="w-full text-left px-3 py-3 rounded-lg hover:bg-brand-50 text-sm">Add to Requisition</button>
+  </div>
+</div>
+
+<script>
+  // $persist when the plugin is registered (browser), plain default otherwise (mirrors
+  // htmx_app.js's persistOr — local copy so the dossier shell is self-contained).
+  window.persistOr = window.persistOr || function (def, key) {
+    return (typeof Alpine !== 'undefined' && Alpine.$persist) ? Alpine.$persist(def).as(key) : def;
+  };
+</script>
