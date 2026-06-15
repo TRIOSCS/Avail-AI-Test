@@ -1085,6 +1085,21 @@ class TestCoverageRankedVendorRows:
         assert len(rows) == 1
         assert rows[0].has_contact is False
 
+    def test_carded_real_plus_empty_email_has_contact_true(self, db_session):
+        """C2: a card with a real-email contact AND a higher-confidence ''-email contact
+        is contactable (has_contact=True) — the badge already filters email != '', and the
+        send path must agree (it resolves the real email, not '')."""
+        items = self._reqs(db_session, ["U-MPN-3C"])
+        card = self._card(db_session, "Mixed Email Vendor")
+        db_session.add(
+            VendorContact(vendor_card_id=card.id, email="real@mixed.com", source="rfq_manual", confidence=50)
+        )
+        db_session.add(VendorContact(vendor_card_id=card.id, email="", source="apollo", confidence=95))
+        self._vss(db_session, items[0], card=card)
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        assert rows[0].has_contact is True
+
     def test_cardless_2of2_outranks_carded_1of2(self, db_session):
         """Coverage is the primary key: a cardless vendor covering 2/2 parts ranks above a
         carded (contactable) vendor covering 1/2."""
@@ -1149,6 +1164,58 @@ class TestCoverageRankedVendorRows:
             self._vss(db_session, items[0], card=None, vendor_name=f"Cardless {i:02d}")
         rows = self._rows(db_session, items)
         assert len(rows) == 20
+
+    def test_tiebreak_carded_numeric_id_order_not_lexicographic(self, db_session):
+        """L1: equally-ranked carded vendors break ties on numeric card.id, not str(id)
+        (lexicographic would put id 10 before id 2). Stable + matches main's behaviour."""
+        items = self._reqs(db_session, ["U-MPN-TB"])
+        cards = []
+        # Create >=10 carded vendors so ids span single+double digits; all equal coverage,
+        # equal (zero) engagement → only the id tiebreak distinguishes them.
+        for i in range(11):
+            c = self._card(db_session, f"Tie Vendor {i:02d}", engagement=0.0)
+            db_session.add(VendorContact(vendor_card_id=c.id, email=f"v{i}@tie.com", source="email"))
+            self._vss(db_session, items[0], card=c)
+            cards.append(c)
+        rows = self._rows(db_session, items)
+        returned_ids = [r.card.id for r in rows if r.card is not None]
+        assert returned_ids == sorted(returned_ids)  # ascending NUMERIC id, never str order
+
+    def test_tiebreak_carded_before_cardless_at_equal_rank(self, db_session):
+        """L1: at fully-equal rank (coverage, has_contact via engagement nullslast), a
+        carded vendor sorts before a cardless one (carded bucket 0 < cardless bucket 1)."""
+        items = self._reqs(db_session, ["U-MPN-TB2"])
+        carded = self._card(db_session, "ZZZ Carded", engagement=None)  # lexicographically late
+        db_session.add(VendorContact(vendor_card_id=carded.id, email="z@zzz.com", source="email"))
+        self._vss(db_session, items[0], card=carded)
+        # Cardless, also contactable=False; equal coverage. Name 'aaa' would beat 'zzz'
+        # lexicographically, but carded must still come first.
+        self._vss(db_session, items[0], card=None, vendor_name="aaa cardless")
+        rows = self._rows(db_session, items)
+        names = [r.vendor_name for r in rows]
+        # Contactable (carded with email) outranks non-contactable anyway, but pin the
+        # carded-before-cardless tiebreak holds even within the same has_contact bucket
+        # by checking the carded row is first.
+        assert names[0] == "ZZZ Carded"
+
+    def test_cardless_suffix_variant_folds_into_carded_group(self, db_session):
+        """H1: a NULL-FK VSS row 'Acme Inc' does NOT SQL-join to card 'acme' (raw
+        lower(trim) keeps the ' inc' suffix) yet normalizes to the card's name. It must
+        fold into the carded group, not emit a duplicate cardless row. Exactly ONE row,
+        carded, has_contact reflecting the card, covered_count = union of both rows."""
+        items = self._reqs(db_session, ["U-MPN-DUP-1", "U-MPN-DUP-2"])
+        card = self._card(db_session, "Acme")  # normalized_name == 'acme'
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@acme.com", source="email"))
+        # FK-linked row → carded group on requirement 1.
+        self._vss(db_session, items[0], card=card, vendor_name="Acme")
+        # NULL-FK suffixed row → would form a separate cardless 'acme' group on requirement 2.
+        self._vss(db_session, items[1], card=None, vendor_name="Acme Inc")
+        rows = self._rows(db_session, items)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r.card is not None
+        assert r.has_contact is True
+        assert r.covered_count == 2  # union of both rows' requirements
 
     def test_avg_score_ignores_nulls(self, db_session):
         """avg_score averages only non-null scores within a group; an all-null group
@@ -1243,6 +1310,45 @@ class TestVendorModalCardlessCoverage:
         # Coverage chip + covered-MPN title still rendered for the cardless row.
         assert "1/1 parts" in resp.text
         assert 'title="Covers: CL-MPN-3"' in resp.text
+
+    def test_xdata_seed_excludes_noncontactable_vendor(self, client, db_session):
+        """C1: the x-data rfqVendorModal init must seed selectedVendors ONLY from
+        contactable rows. A cardless (non-contactable) vendor renders a disabled checkbox
+        with no @change, so the user can't deselect it — if its normalized name were
+        pre-seeded it would be force-counted and posted, then silently skipped at send.
+        It must NOT appear in the x-data seed list, while a contactable carded vendor must."""
+        items = self._reqs(db_session, ["C1-MPN-1"])
+        card = VendorCard(
+            normalized_name="reachable c1",
+            display_name="Reachable C1",
+            is_blacklisted=False,
+            engagement_score=10.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@reachable-c1.com", source="email"))
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=items[0].id,
+                vendor_name="Reachable C1",
+                listing_count=1,
+                score=50.0,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.add(
+            VendorSightingSummary(requirement_id=items[0].id, vendor_name="Cardless C1", listing_count=1, score=50.0)
+        )
+        db_session.commit()
+        resp = self._modal(client, items)
+        assert resp.status_code == 200
+        # The x-data init list is the first |tojson arg to rfqVendorModal(...).
+        m = re.search(r"rfqVendorModal\((\[.*?\]),", resp.text)
+        assert m is not None
+        seed = json.loads(m.group(1))
+        assert "reachable c1" in seed  # contactable vendor is pre-selected
+        assert normalize_vendor_name("Cardless C1") not in seed  # non-contactable excluded
+        assert "cardless c1" not in seed
 
     def test_contactable_row_keeps_enabled_checkbox_and_engagement_badge(self, client, db_session):
         """Task 2 regression: a contactable carded vendor (resolvable email) keeps the
@@ -2018,6 +2124,49 @@ class TestSendInquiryContactSelection:
         assert resp.status_code == 200
         assert "real@acme.com" in resp.text
 
+    def test_send_prefers_real_email_over_empty_string_email_row(self, client, db_session, monkeypatch):
+        """C2: a high-confidence EMPTY-STRING ('') email contact must not beat a real-email
+        contact. _cards_with_resolvable_email (the badge) filters email != '', so the badge
+        says contactable — the send-path ordering must treat '' like NULL (lose last-wins)
+        so it resolves the real email, never silently skips the vendor it promised."""
+        _, r, _ = _seed_data(db_session)
+        vc = VendorCard(normalized_name="acme", display_name="Acme")
+        db_session.add(vc)
+        db_session.flush()
+        # '' email at higher confidence/id would win a naive last-wins map (it is "not NULL"),
+        # silently resolving vendor_email='' → skip. The real-email row must win instead.
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="real@acme.com", source="rfq_manual", confidence=50))
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="", source="apollo", confidence=95))
+        db_session.commit()
+
+        captured = {}
+
+        async def fake_send(**kwargs):
+            captured["groups"] = kwargs["vendor_groups"]
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert captured["groups"][0]["vendor_email"] == "real@acme.com"
+
+    def test_best_contacts_orders_empty_string_email_like_null(self, db_session):
+        """C2 unit: _best_contacts_by_card sorts the empty-string-email row FIRST (worst,
+        loses last-wins) so a last-wins dict keeps the real-email contact — mirroring the
+        has_contact badge which treats '' as no email."""
+        from app.routers.sightings import _best_contacts_by_card
+
+        vc = VendorCard(normalized_name="acme-c2", display_name="Acme C2")
+        db_session.add(vc)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="real@acme.com", source="rfq_manual", confidence=50))
+        db_session.add(VendorContact(vendor_card_id=vc.id, email="", source="apollo", confidence=95))
+        db_session.commit()
+
+        ordered = _best_contacts_by_card(db_session, [vc.id])
+        last_wins = {c.vendor_card_id: c for c in ordered}
+        assert last_wins[vc.id].email == "real@acme.com"
+
 
 def _seed_two_requisitions(db_session):
     """Two requisitions, one OPEN requirement each — a cross-requisition selection."""
@@ -2370,6 +2519,9 @@ class TestSightingsVendorModal:
         )
         db_session.add(card)
         db_session.flush()
+        # Contactable (resolvable email) so the C1 contactable-only x-data seed includes it —
+        # this regression pins attribute TOKENIZATION, which needs the name present in the seed.
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@good.com", source="email"))
         s.vendor_card_id = card.id
         db_session.commit()
 

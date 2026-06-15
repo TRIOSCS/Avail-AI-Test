@@ -1833,9 +1833,11 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // existing inline "Add new vendor" form pre-filled with this vendor's display name and
   // focus the email input — the buyer types the known email and the existing
   // composer-vendor POST (createVendor) creates the card + VendorContact. No new endpoint.
-  // $nextTick waits for x-show to mount the form before focusing the (now-visible) input.
+  // Only seed the name when the field is empty so a half-typed manual entry survives a
+  // click on this action (L2 — don't clobber in-progress input). $nextTick waits for
+  // x-show to mount the form before focusing the (now-visible) input.
   addContactFor(name) {
-    this.newVendorName = name || '';
+    if (!this.newVendorName.trim()) this.newVendorName = name || '';
     this.addingVendor = true;
     this.$nextTick(() => this.$refs.newVendorEmail?.focus());
   },

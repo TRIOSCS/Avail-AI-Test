@@ -1473,10 +1473,31 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         if g["card"] is None and card is not None:
             g["card"] = card
 
+    # Fold suffix-mismatch duplicates (F-H1): the SQL fallback join matches NULL-FK rows by
+    # raw lower(trim(vendor_name)) == normalized_name, but cardless grouping keys on
+    # normalize_vendor_name(vendor_name). A NULL-FK row "Acme Inc" thus does NOT join to
+    # card "acme" (the ' inc' suffix survives raw lower(trim)) yet normalizes to "acme" — it
+    # would emit a SECOND, cardless "acme" row with split coverage. Merge any cardless group
+    # whose key equals a CARDED group's normalize_vendor_name(display) into that carded
+    # group BEFORE ranking, so coverage counts union and no duplicate row is emitted; the
+    # carded card / has_contact / display win. Two carded groups never collide on this key
+    # (each carded group keys on a distinct card.id).
+    carded_by_norm: dict[str, object] = {}
+    for ck, cg in groups.items():
+        c = cg["card"]
+        if c is not None:
+            carded_by_norm[normalize_vendor_name(c.display_name or c.normalized_name or "")] = ck
+    for cardless_key in [k for k, g in groups.items() if g["card"] is None and k in carded_by_norm]:
+        src = groups.pop(cardless_key)
+        dst = groups[carded_by_norm[cardless_key]]
+        dst["req_ids"].update(src["req_ids"])
+        dst["scores"].extend(src["scores"])
+        dst["raw_names"].extend(src["raw_names"])
+
     # has_contact: one batched VendorContact lookup over all representative card ids.
     contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
 
-    ranked: list[tuple[int, bool, float, str, RankedVendor]] = []
+    ranked: list[tuple[int, bool, float, tuple[int, object], RankedVendor]] = []
     for key, g in groups.items():
         card = g["card"]
         excl_key: object
@@ -1501,13 +1522,18 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
             has_contact=has_contact,
         )
         engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
-        # Sort tuple: covered desc, has_contact desc, engagement desc nullslast, key asc.
+        # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
+        # (bucket 0), cardless after (bucket 1, keyed by group-key string). str(key) alone
+        # was lexicographic ("10" < "2"), drifting which equally-ranked vendor fell off the
+        # cap-20 vs main's numeric id order.
+        tiebreak: tuple[int, object] = (0, card.id) if card is not None else (1, str(key))
+        # Sort tuple: covered desc, has_contact desc, engagement desc nullslast, then tiebreak.
         ranked.append(
             (
                 -covered,
                 not has_contact,  # False(0) sorts before True(1) → contactable first
                 -(engagement if engagement is not None else float("-inf")),
-                str(key),
+                tiebreak,
                 rv,
             )
         )
@@ -1893,8 +1919,15 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
     VendorContact has no is_primary flag, and a vendor can hold several contacts (an
     rfq_manual row added inline via the composer alongside an Apollo-enriched row). An
     unordered ``{c.vendor_card_id: c for c in contacts}`` lets an arbitrary (possibly
-    NULL-email) row win, which would silently skip the vendor as "had no email". Ordering
-    non-NULL email LAST (then verified, then higher confidence) makes the real email win.
+    EMPTY-email) row win, which would silently skip the vendor as "had no email". Ordering
+    a usable email LAST (then verified, then higher confidence) makes the real email win.
+
+    An EMPTY-OR-NULL email row sorts FIRST (loses last-wins) — both ``NULL`` and ``''`` are
+    unusable (the send path only resolves a non-empty ``contact.email``), and
+    ``_cards_with_resolvable_email`` (the has_contact badge) filters ``email != ''`` too. If
+    only ``is_(None)`` were checked, a higher-confidence ``''``-email row would win last-wins
+    and resolve ``vendor_email=''`` → skip, while the badge promised contactable. Treating
+    ``''`` like NULL here keeps the send path consistent with the badge.
 
     Called by: sightings_preview_inquiry, sightings_send_inquiry.
     """
@@ -1904,7 +1937,8 @@ def _best_contacts_by_card(db: Session, card_ids: list[int]) -> list[VendorConta
         db.query(VendorContact)
         .filter(VendorContact.vendor_card_id.in_(card_ids))
         .order_by(
-            VendorContact.email.is_(None).desc(),  # NULL-email rows first (lose last-wins)
+            # Empty-or-NULL email rows first (lose last-wins) — '' is as unusable as NULL.
+            or_(VendorContact.email.is_(None), VendorContact.email == "").desc(),
             VendorContact.is_verified.asc().nullsfirst(),  # verified rows last
             VendorContact.confidence.asc().nullsfirst(),  # higher confidence last
             VendorContact.id.asc(),  # deterministic tiebreak (newest row wins ties)

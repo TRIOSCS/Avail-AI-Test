@@ -8,9 +8,14 @@
 {# The component logic lives in the rfqVendorModal() factory in app/static/htmx_app.js.
    The vendor-name list and requirement ids are passed via |tojson inside a SINGLE-quoted
    x-data attribute — tojson emits double quotes, which would close a double-quoted
-   attribute and break Alpine init (CLAUDE.md Alpine-quoting anti-pattern). #}
+   attribute and break Alpine init (CLAUDE.md Alpine-quoting anti-pattern).
+   Seed selectedVendors from ONLY the CONTACTABLE rows (has_contact): non-contactable rows
+   render a DISABLED checkbox with no @change, so the buyer can't deselect them — seeding
+   their names would force-count and force-post a vendor the send path then silently skips.
+   Cardless vendors enter the selection only via the explicit Add-contact → createVendor
+   path. #}
 <div class="p-4"
-     x-data='rfqVendorModal({{ suggested_vendors|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'>
+     x-data='rfqVendorModal({{ suggested_vendors|selectattr("has_contact")|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'>
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
   <div x-show="step === 'compose'" x-cloak>
