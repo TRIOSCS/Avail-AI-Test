@@ -408,7 +408,9 @@ MAX_SUBSTITUTES = 20
 def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MAX_SUBSTITUTES) -> list[dict]:
     """Parse structured substitute list, normalize MPNs, and deduplicate.
 
-    Each sub is a dict with 'mpn' and 'manufacturer' keys.
+    Each sub is a dict with 'mpn' and 'manufacturer' keys, plus an optional
+    'source' provenance key (e.g. constants.FRU_ALIAS_SOURCE for system-derived
+    FRU-crosswalk aliases) which is preserved when present.
     Returns normalized, deduped list capped at limit.
 
     Called by: htmx_views.py (add/update/header-save endpoints)
@@ -426,10 +428,12 @@ def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MA
         key = normalize_mpn_key(ns)
         if key and key not in seen_keys:
             seen_keys.add(key)
-            result.append(
-                {
-                    "mpn": ns,
-                    "manufacturer": sub.get("manufacturer", "").strip(),
-                }
-            )
+            entry = {
+                "mpn": ns,
+                "manufacturer": sub.get("manufacturer", "").strip(),
+            }
+            source = sub.get("source")
+            if isinstance(source, str) and source.strip():
+                entry["source"] = source.strip()
+            result.append(entry)
     return result[:limit]

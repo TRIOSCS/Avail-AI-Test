@@ -27,7 +27,7 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
-from .constants import ActivityType, ApiSourceStatus, SourceRunStatus
+from .constants import FRU_ALIAS_SOURCE, ActivityType, ApiSourceStatus, SourceRunStatus
 from .database import SessionLocal
 from .models import (
     ApiSource,
@@ -39,6 +39,7 @@ from .models import (
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
 from .services.activity_service import log_activity
 from .services.credential_service import get_credential, get_credentials_batch
+from .services.fru_matrix_service import get_search_aliases
 from .services.ics_worker.queue_manager import enqueue_for_ics_search
 from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
@@ -47,6 +48,7 @@ from .services.vendor_affinity_service import find_vendor_affinity
 from .services.vendor_unavailability import apply_to_fresh_sightings
 from .utils.async_helpers import safe_background_task
 from .utils.normalization import (
+    MAX_SUBSTITUTES,
     detect_currency,
     normalize_condition,
     normalize_date_code,
@@ -184,6 +186,90 @@ def get_all_pns(req: Requirement) -> list[str]:
     return pns
 
 
+# Cap on FRU-crosswalk aliases injected per requirement as system-derived
+# substitutes (optimization plan 2026-06-12 item 2.7). Priority order is
+# fru_matrix_service.SEARCH_ALIAS_KINDS: mfg_model, drive_pn, option, ibm_11s.
+MAX_FRU_ALIASES: Final[int] = 8
+
+
+def _expand_fru_aliases(db: Session, req: Requirement) -> list[dict]:
+    """New system-derived substitutes from the FRU crosswalk for req's primary MPN.
+
+    Looks up fru_links in both directions (the primary may be the FRU side OR
+    the related side — get_search_aliases handles both with one indexed query)
+    and returns canonical substitute dicts
+    ``{"mpn": ..., "manufacturer": ..., "source": FRU_ALIAS_SOURCE}`` deduped
+    against the primary and the existing substitutes, capped at
+    MAX_FRU_ALIASES without ever pushing the stored list past MAX_SUBSTITUTES.
+
+    Read-only (safe on the caller's session); durable persistence happens in
+    _persist_fru_aliases through its own write session.
+    """
+    primary = (req.primary_mpn or "").strip()
+    if not primary:
+        return []
+    try:
+        candidates = get_search_aliases(db, primary)
+    except Exception as e:
+        logger.warning("FRU alias lookup failed for {}: {}", primary, e)
+        return []
+    if not candidates:
+        return []
+    room = min(MAX_FRU_ALIASES, MAX_SUBSTITUTES - len(req.substitutes or []))
+    if room <= 0:
+        return []
+    taken = {k for k in (normalize_mpn_key(pn) for pn in get_all_pns(req)) if k}
+    aliases: list[dict] = []
+    for cand in candidates:
+        if len(aliases) >= room:
+            break
+        if not cand.norm or cand.norm in taken:
+            continue
+        taken.add(cand.norm)
+        display = normalize_mpn(cand.mpn) or cand.mpn
+        aliases.append({"mpn": display, "manufacturer": cand.manufacturer, "source": FRU_ALIAS_SOURCE})
+    return aliases
+
+
+def _persist_fru_aliases(db: Session, req_id: int, aliases: list[dict]) -> None:
+    """Durably append crosswalk aliases to requirements.substitutes.
+
+    Uses its own short-lived write session (same pattern as search_requirement's main
+    write path) so it works on BOTH search paths — including the all-cached short-
+    circuit, which never opens the main write session — and never dirties the caller's
+    session. Re-deduplicates against the freshly loaded row so concurrent searches of
+    the same requirement stay idempotent. Best-effort: a failure here must not break the
+    search itself.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    _WriteSession = sessionmaker(bind=db.get_bind(), autocommit=False, autoflush=False, expire_on_commit=False)
+    session = _WriteSession()
+    try:
+        row = session.get(Requirement, req_id)
+        if row is None:
+            return
+        current = list(row.substitutes or [])
+        current_keys = {normalize_mpn_key(row.primary_mpn or "")}
+        for sub in current:
+            raw = (sub.get("mpn") if isinstance(sub, dict) else str(sub or "")) or ""
+            key = normalize_mpn_key(raw)
+            if key:
+                current_keys.add(key)
+        fresh = [a for a in aliases if normalize_mpn_key(a["mpn"]) not in current_keys]
+        if not fresh:
+            return
+        # New list object → SQLAlchemy detects the JSON column change.
+        row.substitutes = current + fresh
+        session.commit()
+        logger.info("Req {}: persisted {} FRU crosswalk substitute(s)", req_id, len(fresh))
+    except Exception:
+        session.rollback()
+        logger.warning("FRU alias persistence failed for requirement {}", req_id, exc_info=True)
+    finally:
+        session.close()
+
+
 # How long a MaterialCard.last_searched_at "shields" its MPN from being
 # re-queried at supplier APIs. Per-MPN, not per-requirement, so two
 # requirements that share an MPN don't each burn quota.
@@ -285,6 +371,20 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     pns = get_all_pns(req)
     if not pns:
         return {"sightings": [], "source_stats": [], "mpn_results": {}}
+
+    # FRU crosswalk alias expansion (item 2.7): brokers list canonical
+    # mfg_model/drive_pn numbers, not OEM spare numbers, so a FRU-shaped
+    # primary fans out to its crosswalk equivalents (and vice versa — the
+    # lookup is bidirectional). Aliases are persisted as system-derived
+    # substitutes (source="fru_crosswalk") via a dedicated write session so
+    # existing substitutes rendering and future searches carry them; this
+    # call's fan-out includes them immediately. Appended after the explicit
+    # pns so pns[0] stays the primary MPN.
+    fru_aliases = _expand_fru_aliases(db, req)
+    if fru_aliases:
+        _persist_fru_aliases(db, req.id, fru_aliases)
+        pns = pns + [a["mpn"] for a in fru_aliases]
+        logger.info("Req {} ({}): injected {} FRU crosswalk alias(es) into search", req.id, pns[0], len(fru_aliases))
 
     now = datetime.now(timezone.utc)
 

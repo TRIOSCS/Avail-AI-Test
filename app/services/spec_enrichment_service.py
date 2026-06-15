@@ -275,7 +275,15 @@ async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int
             MaterialCard.deleted_at.is_(None),
             MaterialCard.enrichment_status.in_(_TRUSTWORTHY_STATUSES),
         )
-        .order_by(MaterialCard.search_count.desc().nullslast())
+        .order_by(
+            # Demand telemetry (migration 105 — TRIO's SFDC export): same ordering as
+            # the worker's select_batch, so every spec-pass dollar lands on parts TRIO
+            # actually trades; NULLS LAST drains demanded cards first, id keeps the
+            # selection deterministic across runs.
+            MaterialCard.sourced_qty_90d.desc().nullslast(),
+            MaterialCard.last_sourced_at.desc().nullslast(),
+            MaterialCard.id,
+        )
         .limit(limit)
         .all()
     )

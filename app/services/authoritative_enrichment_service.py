@@ -354,6 +354,7 @@ async def enrich_card(
     disabled: set[str] | None = None,
     cooldown: dict[str, float] | None = None,
     web_meter: WebMeter | None = None,
+    full_pipeline: bool = True,
 ) -> str:
     """Authoritative -> web -> OEM cross-ref/description -> flagged AI inference ->
     not_catalogued/not_found.
@@ -362,6 +363,18 @@ async def enrich_card(
     ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
     ``cooldown`` accumulates sources that hit a transient rate limit (skipped until
     the cooldown window expires, not permanently disabled).
+
+    ``full_pipeline=False`` is the worker's BULK lane (enrich_requested_at IS NULL,
+    settings.enrichment_lane_split_enabled): only the FREE connector tier runs — the
+    web tier, the OEM tiers and the Opus infer_part fallback are all skipped and a
+    connector miss goes straight to the terminal branch (not_found — the OEM tiers
+    never ran, so not_catalogued can never be concluded). This is CALL ROUTING ONLY:
+    every write that does happen still arbitrates through the F1 ladder; no write
+    pre-gates are added anywhere. Independently,
+    settings.enrichment_skip_web_for_oem_mpns skips ONLY the web tier for
+    OEM/FRU-shaped MPNs (any classify_oem_vendor hit) on every lane — the measured
+    ~95% no-trusted-source reject class — while the OEM tiers + Opus fallback still
+    run when ``full_pipeline`` is True.
 
     ``web_meter`` (optional :class:`WebMeter`) is updated in place: ``web_calls`` counts each
     web-search-enabled Claude tier attempt (distributor / cross-ref / OEM-description),
@@ -401,14 +414,20 @@ async def enrich_card(
         apply_authoritative(card, merged, provenance, contributors)
         return MaterialEnrichmentStatus.VERIFIED
 
+    from app.config import settings
+
     web_enabled = not (disabled and "web_search" in disabled)
+    vendor = classify_oem_vendor(card.display_mpn)
+    # OEM/FRU-shaped MPNs skip the web tier on EVERY lane (reseller-only pages — the
+    # measured ~95% no-trusted-source reject class); the OEM tiers below still run.
+    skip_web_for_oem = vendor is not None and settings.enrichment_skip_web_for_oem_mpns
 
     # Distributor / manufacturer web tier.
     # CONCURRENCY INVARIANT: this await is pure async (no DB); the apply_web_sourced
     # that follows performs only SYNCHRONOUS F1-ladder session ops (set_manufacturer's
     # alias-table SELECT, set_category's stale-facet purge SELECT/DELETE) — see the
     # docstring above for the full invariant.
-    if web_enabled:
+    if web_enabled and full_pipeline and not skip_web_for_oem:
         if web_meter is not None:
             web_meter.reserve_web_call()
         web = await extract_part_from_web(card.display_mpn, card.normalized_mpn)
@@ -419,9 +438,8 @@ async def enrich_card(
             return MaterialEnrichmentStatus.WEB_SOURCED
 
     # OEM tiers — only for recognised OEM/FRU codes, only when the web budget is live.
-    vendor = classify_oem_vendor(card.display_mpn)
     oem_attempted = False
-    if vendor and web_enabled:
+    if vendor and web_enabled and full_pipeline:
         oem_attempted = True
         # Tier 3: cross-reference, then INDEPENDENTLY re-verify against distributors.
         if web_meter is not None:
@@ -446,33 +464,37 @@ async def enrich_card(
             apply_oem_sourced(card, oem)
             return MaterialEnrichmentStatus.OEM_SOURCED
 
-    # No authoritative hit -> flagged inference.
-    from app.services.ai_inference_fallback import infer_part
+    # No authoritative hit -> flagged inference (full pipeline only — the bulk lane
+    # skips the Opus fallback: measured 165 calls/day, 0 ladder-accepted writes ever).
+    if full_pipeline:
+        from app.services.ai_inference_fallback import infer_part
 
-    inf = await infer_part(card.display_mpn)
-    if web_meter is not None:
-        web_meter.mark_claude_ok()
-    now = datetime.now(timezone.utc)
-    card.enriched_at = now
-    if inf.status == "ai_inferred":
-        card.description = inf.description
-        # Through the F1 ladder: an Opus inference (claude_opus_inferred, tier 40) fills
-        # an empty category but can never overwrite decode/vendor/TRIO provenance, and
-        # off-vocab junk is rejected instead of persisted.
-        set_category(card, inf.category, "claude_opus_inferred", inf.confidence)
-        card.enrichment_source = "claude_opus_inferred"
-        card.enrichment_status = MaterialEnrichmentStatus.AI_INFERRED
-        # >= 0.95-confidence guess: added, but flagged for human reconfirmation so it
-        # is never mistaken for verified data.
-        card.enrichment_provenance = {
-            "reconfirm_needed": True,
-            "description": {
-                "source": "claude_opus_inferred",
-                "confidence": inf.confidence,
-                "fetched_at": now.isoformat(),
-            },
-        }
-        return MaterialEnrichmentStatus.AI_INFERRED
+        inf = await infer_part(card.display_mpn)
+        if web_meter is not None:
+            web_meter.mark_claude_ok()
+        now = datetime.now(timezone.utc)
+        card.enriched_at = now
+        if inf.status == "ai_inferred":
+            card.description = inf.description
+            # Through the F1 ladder: an Opus inference (claude_opus_inferred, tier 40) fills
+            # an empty category but can never overwrite decode/vendor/TRIO provenance, and
+            # off-vocab junk is rejected instead of persisted.
+            set_category(card, inf.category, "claude_opus_inferred", inf.confidence)
+            card.enrichment_source = "claude_opus_inferred"
+            card.enrichment_status = MaterialEnrichmentStatus.AI_INFERRED
+            # >= 0.95-confidence guess: added, but flagged for human reconfirmation so it
+            # is never mistaken for verified data.
+            card.enrichment_provenance = {
+                "reconfirm_needed": True,
+                "description": {
+                    "source": "claude_opus_inferred",
+                    "confidence": inf.confidence,
+                    "fetched_at": now.isoformat(),
+                },
+            }
+            return MaterialEnrichmentStatus.AI_INFERRED
+    else:
+        card.enriched_at = datetime.now(timezone.utc)
 
     # Terminal: not_catalogued only when a HIGH-PRECISION OEM pattern matched AND the OEM
     # tiers ran. The broad Dell 5-char pattern is excluded (see HIGH_PRECISION_VENDORS) so a

@@ -1201,15 +1201,22 @@ class TestWarnNonCanonicalCategories:
     def test_warns_with_count_and_samples(self, db_session):
         from app.models import MaterialCard
         from app.startup import _warn_non_canonical_categories
+        from tests.conftest import force_card_category
 
-        db_session.add_all(
-            [
-                MaterialCard(normalized_mpn="res-1", display_mpn="RES-1", category="Totally Unknown Category"),
-                MaterialCard(normalized_mpn="res-2", display_mpn="RES-2", category="  Totally Unknown Category "),
-                MaterialCard(normalized_mpn="res-3", display_mpn="RES-3", category="ssd"),  # canonical — not residue
-                MaterialCard(normalized_mpn="res-4", display_mpn="RES-4", category=None),  # NULL — not residue
-            ]
-        )
+        # The non-canonical rows are exactly the legacy residue the @validates guard now
+        # rejects on assignment, so seed them through force_card_category (Core UPDATE) as
+        # a pre-guard writer would have left them — this warning's whole job is to surface
+        # them. Canonical + NULL rows go through the normal constructor.
+        canonical = MaterialCard(normalized_mpn="res-3", display_mpn="RES-3", category="ssd")  # not residue
+        null_cat = MaterialCard(normalized_mpn="res-4", display_mpn="RES-4", category=None)  # not residue
+        residue = [
+            MaterialCard(normalized_mpn="res-1", display_mpn="RES-1"),
+            MaterialCard(normalized_mpn="res-2", display_mpn="RES-2"),
+        ]
+        db_session.add_all([canonical, null_cat, *residue])
+        db_session.flush()
+        force_card_category(db_session, residue[0], "Totally Unknown Category")
+        force_card_category(db_session, residue[1], "  Totally Unknown Category ")
         db_session.flush()
 
         warnings = self._capture_warnings(lambda: _warn_non_canonical_categories(db_session))

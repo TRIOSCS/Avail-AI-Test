@@ -104,7 +104,8 @@ def test_crosswalk_receives_full_batch_ids(db_session):
 
     _run(db_session, fru_mock)
 
-    # select_batch orders by created_at DESC — compare membership, not order.
+    # select_batch orders by demand telemetry (sourced_qty_90d / last_sourced_at, then
+    # id — migration 105); these cards carry none, so compare membership, not order.
     assert sorted(fru_mock.call_args.args[1]) == sorted(c.id for c in cards)
 
 

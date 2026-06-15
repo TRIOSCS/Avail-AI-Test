@@ -145,8 +145,18 @@ def get_facet_counts(
     db: Session,
     commodity: str,
     active_filters: dict | None = None,
+    card_filters: dict | None = None,
 ) -> dict[str, dict[str, int]]:
     """Return facet value counts for a commodity.
+
+    Args:
+        active_filters: spec-facet narrowing ({spec_key: [values]} / {spec_key_min: n}),
+            counted with OR-within-facet self-exclusion (pass 2 below).
+        card_filters: card-level narrowing shared with the results list — keyword args
+            of ``_apply_card_filters`` minus ``commodity``/``sub_filters`` (q,
+            manufacturers, statuses, lifecycle, rohs, condition, has_* flags, internal,
+            searched_within, min_searches). Counts must reflect EVERY active filter or
+            the sidebar overstates versus the visible results.
 
     Returns: {spec_key: {value: count, ...}, ...}
     Only includes text-based facets (enums, booleans).
@@ -154,8 +164,23 @@ def get_facet_counts(
     commodity = commodity.lower().strip()
     active_filters = active_filters or {}
 
+    # Card-level scope — built by the SAME predicate builder as the results list, so
+    # counts can never use different predicates than the list. Always applied (even
+    # with no active card filters) for the universal deleted_at guard and card-category
+    # agreement: facet rows whose card was deleted or re-categorized since the facet
+    # was written must not produce phantom counts.
+    # commodity is the positional arg, and spec narrowing rides active_filters (which
+    # carries the pass-2 self-exclusion) — strip both so a stray sub_filters in
+    # card_filters can never double-narrow pass 2 and silently break self-exclusion.
+    card_level = {k: v for k, v in (card_filters or {}).items() if k not in ("commodity", "sub_filters")}
+    card_scope_query, _ = _apply_card_filters(db.query(MaterialCard.id), db, commodity=commodity, **card_level)
+    card_scope = card_scope_query.subquery()
+
     def _grouped_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
-        base = db.query(MaterialSpecFacet.material_card_id).filter(MaterialSpecFacet.category == commodity)
+        base = db.query(MaterialSpecFacet.material_card_id).filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.material_card_id.in_(db.query(card_scope.c.id)),
+        )
         if narrow_filters:
             base = _apply_facet_filters(base, db, commodity, narrow_filters)
         card_ids_subq = base.distinct().subquery()
@@ -227,32 +252,54 @@ def get_manufacturer_options(
 def get_global_facet_counts(
     db: Session,
     commodity: str | None = None,
+    filters: dict | None = None,
 ) -> dict[str, dict[str, int]]:
     """Return value counts for the global MaterialCard-column facets.
 
     These are columns that live directly on MaterialCard (not spec facets):
-    ``lifecycle_status``, ``rohs_status`` and a derived ``has_datasheet`` boolean.
+    ``lifecycle_status``, ``rohs_status``, ``condition`` and derived
+    ``has_datasheet`` / ``needs_review`` booleans.
 
     Args:
         commodity: If set, scope counts to this commodity only.
+        filters: full active filter set as keyword args of ``_apply_card_filters``
+            (q, sub_filters, manufacturers, statuses, lifecycle, rohs, condition,
+            has_* flags, internal, searched_within, min_searches — everything except
+            ``commodity``, which is passed separately). Each global facet drops its
+            OWN key before counting (self-exclusion, mirroring get_facet_counts
+            pass 2) so checking one lifecycle value never collapses its siblings.
 
     Returns: {"lifecycle": {value: count}, "rohs": {value: count},
               "has_datasheet": {"true": count}}
     """
-    base = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
-    if commodity:
-        base = base.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+    filters = filters or {}
 
-    def _count_col(column) -> dict[str, int]:
+    def _scope(own_key: str | None):
+        # Narrow by every active filter EXCEPT the facet's own selection. The shared
+        # builder owns the deleted_at guard + all predicate logic.
+        scoped, _ = _apply_card_filters(
+            db.query(MaterialCard), db, commodity=commodity, **{k: v for k, v in filters.items() if k != own_key}
+        )
+        return scoped
+
+    def _count_col(column, base) -> dict[str, int]:
         rows = base.with_entities(column, func.count(MaterialCard.id)).filter(column.isnot(None)).group_by(column).all()
         return {val: count for val, count in rows if val}
 
-    lifecycle_counts = _count_col(MaterialCard.lifecycle_status)
-    rohs_counts = _count_col(MaterialCard.rohs_status)
-    condition_counts = _count_col(MaterialCard.condition)
-    has_ds = base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.datasheet_url.isnot(None)).scalar()
+    lifecycle_counts = _count_col(MaterialCard.lifecycle_status, _scope("lifecycle"))
+    rohs_counts = _count_col(MaterialCard.rohs_status, _scope("rohs"))
+    condition_counts = _count_col(MaterialCard.condition, _scope("condition"))
+    has_ds = (
+        _scope("has_datasheet")
+        .with_entities(func.count(MaterialCard.id))
+        .filter(MaterialCard.datasheet_url.isnot(None))
+        .scalar()
+    )
     needs_review = (
-        base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.has_validation_conflict.is_(True)).scalar()
+        _scope("has_validation_conflict")
+        .with_entities(func.count(MaterialCard.id))
+        .filter(MaterialCard.has_validation_conflict.is_(True))
+        .scalar()
     )
 
     return {
@@ -264,7 +311,8 @@ def get_global_facet_counts(
     }
 
 
-def search_materials_faceted(
+def _apply_card_filters(
+    query,
     db: Session,
     *,
     commodity: str | None = None,
@@ -284,52 +332,27 @@ def search_materials_faceted(
     internal: str = "all",
     searched_within: str = "any",
     min_searches: int = 0,
-    limit: int = 50,
-    offset: int = 0,
-) -> tuple[list[MaterialCard], int]:
-    """Search materials with faceted filters.
+):
+    """Apply the FULL card-level filter set to *query* (primary entity MaterialCard).
 
-    Args:
-        commodity: Filter by commodity category (lowercased)
-        q: Text search on MPN/manufacturer/description
-        sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
-        manufacturers: Restrict to cards whose manufacturer OR brand is in this list
-            (the combined dual-brand facet — OR-within, AND-across-facets; the wire
-            param keeps its legacy "manufacturers" name for back-compat)
-        verified_only: Legacy boolean — when True (and ``statuses`` is empty), return only
-            cards with enrichment_status == "verified"
-        statuses: When provided, restrict to cards whose enrichment_status is in this list.
-            Takes precedence over ``verified_only`` (the two are never ANDed).
-        lifecycle: When provided, restrict to cards whose lifecycle_status is in this list
-            (OR-within, e.g. ``["active", "eol"]``).
-        rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
-        has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
-        has_validation_conflict: When True, restrict to cards flagged "needs review" —
-            a tier>=80 authoritative source contradicted a manual value (the partial
-            index ix_material_cards_needs_review backs this predicate).
-        has_stock: When True, restrict to cards with at least one vendor-history row
-            ("has vendor sightings / stock seen").
-        has_price: When True, restrict to cards with a vendor-history row carrying a
-            recorded last_price.
-        has_crosses: When True, restrict to cards with at least one known alternate —
-            a fru_links crosswalk edge on normalized_mpn (either direction) OR a
-            non-empty cross_references JSON list (see has_crosses_predicate).
-        internal: Tri-state — "all" (no-op), "standard" (is_internal_part FALSE/NULL),
-            "internal" (is_internal_part TRUE). Unknown values degrade to "all".
-        searched_within: Recency bucket on last_searched_at — "7d" | "30d" | "90d" |
-            "any" (no-op). Unknown values degrade to "any".
-        min_searches: Minimum search_count (0 = no-op).
-        limit: Max results
-        offset: Pagination offset
+    SINGLE source of predicate truth for the faceted surface: the results list
+    (search_materials_faceted) and BOTH sidebar count paths (get_facet_counts /
+    get_global_facet_counts) run through this builder, so counts can never apply
+    different predicates than the visible results. Includes the universal
+    ``deleted_at IS NULL`` guard. Argument semantics are documented on
+    search_materials_faceted (the public twin of this signature).
 
-    Returns: (materials, total_count)
+    Applies NO ordering — returns ``(query, ts_query | None)``. A non-None ts_query
+    means the PG multi-word FTS branch matched; the list caller orders by
+    ``ts_rank`` with it, count callers ignore it (ORDER BY in a grouped count is
+    meaningless and PG rejects it).
     """
-    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
+    query = query.filter(MaterialCard.deleted_at.is_(None))
 
     if commodity:
         query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
 
-    _fts_applied = False
+    ts_query = None
     if q:
         sb = SearchBuilder(q)
         is_pg = db.get_bind().dialect.name == "postgresql"
@@ -346,11 +369,6 @@ def search_materials_faceted(
                     MaterialCard.normalized_mpn.ilike(f"%{sb.safe}%"),
                 )
             )
-            query = query.order_by(
-                func.ts_rank(MaterialCard.search_vector, ts_query).desc(),
-                MaterialCard.search_count.desc(),
-            )
-            _fts_applied = True
         else:
             # Single-token or SQLite: substring match on all fields
             query = query.filter(
@@ -426,9 +444,104 @@ def search_materials_faceted(
             id_column=MaterialCard.id,
         )
 
+    return query, ts_query
+
+
+def search_materials_faceted(
+    db: Session,
+    *,
+    commodity: str | None = None,
+    q: str | None = None,
+    sub_filters: dict | None = None,
+    manufacturers: list[str] | None = None,
+    verified_only: bool = False,
+    statuses: list[str] | None = None,
+    lifecycle: list[str] | None = None,
+    rohs: list[str] | None = None,
+    condition: list[str] | None = None,
+    has_datasheet: bool = False,
+    has_validation_conflict: bool = False,
+    has_stock: bool = False,
+    has_price: bool = False,
+    has_crosses: bool = False,
+    internal: str = "all",
+    searched_within: str = "any",
+    min_searches: int = 0,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[MaterialCard], int]:
+    """Search materials with faceted filters.
+
+    All filter predicates live in ``_apply_card_filters`` (shared with the sidebar
+    count paths — list and counts must never diverge); this function adds only
+    ordering and pagination.
+
+    Args:
+        commodity: Filter by commodity category (lowercased)
+        q: Text search on MPN/manufacturer/description
+        sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
+        manufacturers: Restrict to cards whose manufacturer OR brand is in this list
+            (the combined dual-brand facet — OR-within, AND-across-facets; the wire
+            param keeps its legacy "manufacturers" name for back-compat)
+        verified_only: Legacy boolean — when True (and ``statuses`` is empty), return only
+            cards with enrichment_status == "verified"
+        statuses: When provided, restrict to cards whose enrichment_status is in this list.
+            Takes precedence over ``verified_only`` (the two are never ANDed).
+        lifecycle: When provided, restrict to cards whose lifecycle_status is in this list
+            (OR-within, e.g. ``["active", "eol"]``).
+        rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
+        has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
+        has_validation_conflict: When True, restrict to cards flagged "needs review" —
+            a tier>=80 authoritative source contradicted a manual value (the partial
+            index ix_material_cards_needs_review backs this predicate).
+        has_stock: When True, restrict to cards with at least one vendor-history row
+            ("has vendor sightings / stock seen").
+        has_price: When True, restrict to cards with a vendor-history row carrying a
+            recorded last_price.
+        has_crosses: When True, restrict to cards with at least one known alternate —
+            a fru_links crosswalk edge on normalized_mpn (either direction) OR a
+            non-empty cross_references JSON list (see has_crosses_predicate).
+        internal: Tri-state — "all" (no-op), "standard" (is_internal_part FALSE/NULL),
+            "internal" (is_internal_part TRUE). Unknown values degrade to "all".
+        searched_within: Recency bucket on last_searched_at — "7d" | "30d" | "90d" |
+            "any" (no-op). Unknown values degrade to "any".
+        min_searches: Minimum search_count (0 = no-op).
+        limit: Max results
+        offset: Pagination offset
+
+    Returns: (materials, total_count)
+    """
+    query, ts_query = _apply_card_filters(
+        db.query(MaterialCard),
+        db,
+        commodity=commodity,
+        q=q,
+        sub_filters=sub_filters,
+        manufacturers=manufacturers,
+        verified_only=verified_only,
+        statuses=statuses,
+        lifecycle=lifecycle,
+        rohs=rohs,
+        condition=condition,
+        has_datasheet=has_datasheet,
+        has_validation_conflict=has_validation_conflict,
+        has_stock=has_stock,
+        has_price=has_price,
+        has_crosses=has_crosses,
+        internal=internal,
+        searched_within=searched_within,
+        min_searches=min_searches,
+    )
+
     total = db.query(func.count()).select_from(query.subquery()).scalar()
 
-    if not _fts_applied:
+    if ts_query is not None:
+        # PG multi-word FTS branch: relevance ranking first.
+        query = query.order_by(
+            func.ts_rank(MaterialCard.search_vector, ts_query).desc(),
+            MaterialCard.search_count.desc(),
+        )
+    else:
         query = query.order_by(MaterialCard.search_count.desc(), MaterialCard.created_at.desc())
 
     materials = query.offset(offset).limit(limit).all()

@@ -33,12 +33,23 @@ from app.management.enrichment_coverage_report import (
 )
 from app.models import MaterialCard, MaterialSpecFacet
 from app.models.fru_link import FruLink
+from app.services.commodity_registry import CANONICAL_COMMODITY_KEYS
+from tests.conftest import force_card_category
 
 
 def _card(db, mpn, **kwargs):
+    # A deliberately non-canonical category (e.g. " Other ") is legacy residue the
+    # coverage report must still bucket; the @validates guard rejects it on assignment,
+    # so seed it post-flush via force_card_category exactly as a pre-guard writer left it.
+    category = kwargs.pop("category", None)
+    residue = category is not None and category not in CANONICAL_COMMODITY_KEYS
     card = MaterialCard(normalized_mpn=mpn, display_mpn=mpn, **kwargs)
+    if not residue and category is not None:
+        card.category = category
     db.add(card)
     db.flush()
+    if residue:
+        force_card_category(db, card, category)
     return card
 
 

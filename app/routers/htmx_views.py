@@ -148,6 +148,92 @@ def _parse_filter_json(raw: str, *, coerce_numeric: bool = False) -> dict:
     return result
 
 
+def _pop_manufacturers(parsed_filters: dict) -> list[str] | None:
+    """Pop the 'manufacturers' key out of a parsed sub_filters dict.
+
+    'manufacturers' is a MaterialCard column (the combined dual-brand facet), not a spec
+    facet — left in the dict it would zero every spec-facet count. Shared by the faceted
+    results route and both sidebar count routes.
+    """
+    if not parsed_filters:
+        return None
+    mfr_val = parsed_filters.pop("manufacturers", None)
+    if not mfr_val:
+        return None
+    return mfr_val if isinstance(mfr_val, list) else [mfr_val]
+
+
+def _parse_card_filter_params(
+    statuses: str,
+    lifecycle: str,
+    rohs: str,
+    condition: str,
+    has_datasheet: str,
+    has_validation_conflict: str,
+    has_stock: str,
+    has_price: str,
+    has_crosses: str,
+    internal: str,
+    searched_within: str,
+    min_searches: str,
+) -> dict:
+    """Parse the card-level faceted filter params shared by the results-list route and
+    BOTH sidebar count routes (sub-filters + global), so the list and the counts can
+    never read the same query string differently.
+
+    Unknown/invalid values (incl. non-numeric/negative min_searches and the boolean
+    flags) degrade to the no-op default — hand-edited URLs must not 500/422 (a 422
+    partial never swaps, htmx shows only the generic error toast) — but each degrade is
+    LOGGED so frontend/backend vocabulary drift (e.g. a bucket added to the UI but not
+    the backend constants) surfaces in logs instead of silently no-op'ing the filter
+    while the active-filter chip claims it is applied.
+
+    Returns keyword args for faceted_search_service (minus commodity / q / sub_filters /
+    manufacturers, which each route binds itself).
+    """
+
+    def _csv_list(raw: str) -> list[str] | None:
+        items = [s.strip() for s in raw.split(",") if s.strip()]
+        return items or None
+
+    def _flag(name: str, raw: str) -> bool:
+        val = raw.strip().lower()
+        if val in {"true", "1", "yes", "on"}:
+            return True
+        if val not in {"false", "0", "", "no", "off"}:
+            logger.warning("materials faceted: invalid {}={!r}, degrading to false", name, raw)
+        return False
+
+    def _choice(name: str, raw: str, valid: tuple[str, ...], default: str) -> str:
+        if raw in valid:
+            return raw
+        logger.warning("materials faceted: unknown {}={!r}, degrading to {!r}", name, raw, default)
+        return default
+
+    try:
+        min_searches_n = int(min_searches)
+    except ValueError:
+        min_searches_n = -1
+    if min_searches_n < 0:
+        logger.warning("materials faceted: invalid min_searches={!r}, degrading to 0", min_searches)
+        min_searches_n = 0
+
+    return {
+        "statuses": _csv_list(statuses),
+        "lifecycle": _csv_list(lifecycle),
+        "rohs": _csv_list(rohs),
+        "condition": _csv_list(condition),
+        "has_datasheet": _flag("has_datasheet", has_datasheet),
+        "has_validation_conflict": _flag("has_validation_conflict", has_validation_conflict),
+        "has_stock": _flag("has_stock", has_stock),
+        "has_price": _flag("has_price", has_price),
+        "has_crosses": _flag("has_crosses", has_crosses),
+        "internal": _choice("internal", internal, INTERNAL_FILTER_VALUES, "all"),
+        "searched_within": _choice("searched_within", searched_within, SEARCHED_WITHIN_VALUES, "any"),
+        "min_searches": min_searches_n,
+    }
+
+
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
     assets = _vite_assets()
@@ -7078,15 +7164,49 @@ async def materials_filters_manufacturers_partial(
 async def materials_filters_global_partial(
     request: Request,
     commodity: str = "",
+    q: str = "",
+    sub_filters: str = "{}",
+    statuses: str = "",
+    lifecycle: str = "",
+    rohs: str = "",
+    condition: str = "",
+    has_datasheet: str = "false",
+    has_validation_conflict: str = "false",
+    has_stock: str = "false",
+    has_price: str = "false",
+    has_crosses: str = "false",
+    internal: str = "all",
+    searched_within: str = "any",
+    min_searches: str = "0",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render global facets (lifecycle / RoHS / has-datasheet) with live counts.
+    """Render global facets (lifecycle / RoHS / condition / has-datasheet) with live
+    counts.
 
-    Mirrors the manufacturer-filter partial: a container that reloads on commodity
-    change so counts reflect the active category.
+    Receives the FULL active filter set (same wire params as the results list) so the
+    rendered counts match the visible results instead of overstating; each facet's own
+    selection is excluded inside get_global_facet_counts (self-exclusion).
     """
-    counts = get_global_facet_counts(db, commodity=commodity or None)
+    parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
+    filters = _parse_card_filter_params(
+        statuses,
+        lifecycle,
+        rohs,
+        condition,
+        has_datasheet,
+        has_validation_conflict,
+        has_stock,
+        has_price,
+        has_crosses,
+        internal,
+        searched_within,
+        min_searches,
+    )
+    filters["manufacturers"] = _pop_manufacturers(parsed_filters)
+    filters["q"] = q or None
+    filters["sub_filters"] = parsed_filters or None
+    counts = get_global_facet_counts(db, commodity=commodity or None, filters=filters)
     ctx = _base_ctx(request, user, "materials")
     ctx["global_facet_counts"] = counts
     return template_response("htmx/partials/materials/filters/global.html", ctx)
@@ -7181,10 +7301,29 @@ async def materials_filters_sub_partial(
     request: Request,
     commodity: str = "",
     sub_filters: str = "{}",
+    q: str = "",
+    statuses: str = "",
+    lifecycle: str = "",
+    rohs: str = "",
+    condition: str = "",
+    has_datasheet: str = "false",
+    has_validation_conflict: str = "false",
+    has_stock: str = "false",
+    has_price: str = "false",
+    has_crosses: str = "false",
+    internal: str = "all",
+    searched_within: str = "any",
+    min_searches: str = "0",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render sub-filters for a selected commodity with live facet counts."""
+    """Render sub-filters for a selected commodity with live facet counts.
+
+    Receives the FULL active filter set (same wire params as the results list) so facet
+    counts reflect active q / brand / confidence / global / sourcing filters instead of
+    overstating; spec-filter self-exclusion (OR-within-facet) stays inside
+    get_facet_counts pass 2.
+    """
     if not commodity.strip():
         # No commodity scope — render the placeholder nudge (skip the facet/coverage
         # service calls; subfilters.html handles the commodity_selected=False branch).
@@ -7192,15 +7331,30 @@ async def materials_filters_sub_partial(
         ctx["commodity_selected"] = False
         return template_response("htmx/partials/materials/filters/subfilters.html", ctx)
 
-    # Parse active filters so facet counts reflect current selection
+    # Parse active filters so facet counts reflect current selection.
     parsed_filters = _parse_filter_json(sub_filters)
-    # 'manufacturers' is a MaterialCard column, not a spec facet — drop it so it does
-    # not zero every facet count (mirrors the faceted-list endpoint).
-    if parsed_filters:
-        parsed_filters.pop("manufacturers", None)
+    # Card-level narrowing — shared wire-param parsing with the results list, plus the
+    # 'manufacturers' entry that rides inside sub_filters (a MaterialCard column, not a
+    # spec facet — left in parsed_filters it would zero every facet count).
+    card_filters = _parse_card_filter_params(
+        statuses,
+        lifecycle,
+        rohs,
+        condition,
+        has_datasheet,
+        has_validation_conflict,
+        has_stock,
+        has_price,
+        has_crosses,
+        internal,
+        searched_within,
+        min_searches,
+    )
+    card_filters["manufacturers"] = _pop_manufacturers(parsed_filters)
+    card_filters["q"] = q or None
 
     subfilter_options = get_subfilter_options(db, commodity)
-    facet_counts = get_facet_counts(db, commodity, active_filters=parsed_filters or None)
+    facet_counts = get_facet_counts(db, commodity, active_filters=parsed_filters or None, card_filters=card_filters)
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
@@ -7265,56 +7419,24 @@ async def materials_faceted_partial(
     from ..models.intelligence import MaterialVendorHistory
 
     parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
+    manufacturers = _pop_manufacturers(parsed_filters)
 
-    manufacturers = None
-    if parsed_filters and "manufacturers" in parsed_filters:
-        mfr_val = parsed_filters.pop("manufacturers")
-        manufacturers = mfr_val if isinstance(mfr_val, list) else [mfr_val]
-
-    def _csv_list(raw: str) -> list[str] | None:
-        items = [s.strip() for s in raw.split(",") if s.strip()]
-        return items or None
-
-    parsed_statuses = _csv_list(statuses)
-    parsed_lifecycle = _csv_list(lifecycle)
-    parsed_rohs = _csv_list(rohs)
-    parsed_condition = _csv_list(condition)
-
-    # Unknown/invalid operational values (incl. non-numeric/negative min_searches and
-    # the boolean flags) degrade to the no-op default — hand-edited URLs must not
-    # 500/422 (a 422 partial never swaps, htmx shows only the generic error toast) —
-    # but each degrade is LOGGED so frontend/backend vocabulary drift (e.g. a bucket
-    # added to the UI but not the backend constants) surfaces in logs instead of
-    # silently no-op'ing the filter while the active-filter chip claims it is applied.
-    def _flag(name: str, raw: str) -> bool:
-        val = raw.strip().lower()
-        if val in {"true", "1", "yes", "on"}:
-            return True
-        if val not in {"false", "0", "", "no", "off"}:
-            logger.warning("materials faceted: invalid {}={!r}, degrading to false", name, raw)
-        return False
-
-    has_datasheet_flag = _flag("has_datasheet", has_datasheet)
-    has_validation_conflict_flag = _flag("has_validation_conflict", has_validation_conflict)
-    has_stock_flag = _flag("has_stock", has_stock)
-    has_price_flag = _flag("has_price", has_price)
-    has_crosses_flag = _flag("has_crosses", has_crosses)
-
-    def _choice(name: str, raw: str, valid: tuple[str, ...], default: str) -> str:
-        if raw in valid:
-            return raw
-        logger.warning("materials faceted: unknown {}={!r}, degrading to {!r}", name, raw, default)
-        return default
-
-    internal = _choice("internal", internal, INTERNAL_FILTER_VALUES, "all")
-    searched_within = _choice("searched_within", searched_within, SEARCHED_WITHIN_VALUES, "any")
-    try:
-        min_searches_n = int(min_searches)
-    except ValueError:
-        min_searches_n = -1
-    if min_searches_n < 0:
-        logger.warning("materials faceted: invalid min_searches={!r}, degrading to 0", min_searches)
-        min_searches_n = 0
+    # Shared degrade-don't-500 parsing — same helper as both sidebar count routes, so
+    # the list and the counts can never read the same query string differently.
+    card_params = _parse_card_filter_params(
+        statuses,
+        lifecycle,
+        rohs,
+        condition,
+        has_datasheet,
+        has_validation_conflict,
+        has_stock,
+        has_price,
+        has_crosses,
+        internal,
+        searched_within,
+        min_searches,
+    )
 
     materials, total = search_materials_faceted(
         db,
@@ -7323,18 +7445,7 @@ async def materials_faceted_partial(
         sub_filters=parsed_filters or None,
         manufacturers=manufacturers,
         verified_only=verified_only,
-        statuses=parsed_statuses,
-        lifecycle=parsed_lifecycle,
-        rohs=parsed_rohs,
-        condition=parsed_condition,
-        has_datasheet=has_datasheet_flag,
-        has_validation_conflict=has_validation_conflict_flag,
-        has_stock=has_stock_flag,
-        has_price=has_price_flag,
-        has_crosses=has_crosses_flag,
-        internal=internal,
-        searched_within=searched_within,
-        min_searches=min_searches_n,
+        **card_params,
         limit=limit,
         offset=offset,
     )

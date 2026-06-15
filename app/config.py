@@ -135,12 +135,37 @@ class Settings(BaseSettings):
     # between mpn-decode (0.95) and desc-parse (0.90) at 0.93. Safe to leave on — values are
     # enum-validated by record_spec. See app/services/fru_crosswalk_enrich.
     fru_crosswalk_enrich_enabled: bool = True
+    # Widen the FRU crosswalk DECODE channel to also decode the drive_pn rel_kind's related
+    # parts (today the decode channel reads mfg_model links only; drive_pn rows still feed the
+    # DESC channel regardless of this flag). GATED on a measured misread rate: a 100-row dry-run
+    # (app.management.run_fru_crosswalk --measure-drive-pn) found 0/3328 drive_pn related parts
+    # decode at all (they are IBM/Lenovo FRU numbers, not canonical manufacturer MPNs), so the
+    # OEM-firmware-suffix misread rate is 0% (≤2% gate) — safe to default ON. The regex gate in
+    # decode_mpn is the source of truth, so a non-canonical drive_pn never misdecodes; record_spec
+    # re-validates every value. Flip OFF only if a future drive_pn ingest carries canonical models
+    # whose firmware suffixes are re-measured above the 2% gate. See app/services/fru_crosswalk_enrich.
+    fru_crosswalk_drive_pn_decode_enabled: bool = True
     # OEM web-resolution crosswalk (PartSurfer/PSREF spare → canonical MPN cache): gates BOTH
     # worker passes — Pass B (the deterministic tier-80 writer over cached oem_crosswalk rows:
     # zero-network, zero-LLM, safe-on) and Pass A (the paced Claude-grounded resolution, which
     # is ADDITIONALLY inert until the per-batch/daily caps allow — see EnrichmentWorkerConfig
     # oem_resolve_per_batch / oem_resolve_daily_cap). See app/services/oem_crosswalk_enrich.
     oem_crosswalk_enrich_enabled: bool = True
+    # Worker lane split (call routing only — never write pre-gating; the F1 ladder still
+    # arbitrates every write). Bulk-lane cards (enrich_requested_at IS NULL) run the FREE
+    # connectors + deterministic passes only: the web tier (extract_part_from_web), the
+    # OEM tiers (cross_reference_mpn / extract_oem_description) and the Opus infer_part
+    # fallback are skipped (measured ~$6-10/day for ~0 accepted writes). Priority-lane
+    # cards (user single-add stamps enrich_requested_at) keep the full pipeline.
+    # Env: ENRICHMENT_LANE_SPLIT_ENABLED.
+    enrichment_lane_split_enabled: bool = True
+    # Skip extract_part_from_web for OEM/FRU-shaped MPNs (any classify_oem_vendor hit:
+    # HP 6digit-3 / option-kit / L-series, Lenovo/IBM FRU shapes, EMC 303-x, Dell 5-char,
+    # Acer, ASUS) on EVERY lane — the measured ~95% no-trusted-source reject class
+    # (reseller-only pages). The OEM tiers + Opus fallback still run on the priority
+    # lane. Interim until the direct-HTTP OEM resolver lands.
+    # Env: ENRICHMENT_SKIP_WEB_FOR_OEM_MPNS.
+    enrichment_skip_web_for_oem_mpns: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90

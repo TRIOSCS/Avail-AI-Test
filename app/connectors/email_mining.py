@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.exc import IntegrityError
 
+from app.shared_constants import RFQ_SUBJECT_TAG_RE
 from app.utils.graph_client import GraphSyncStateExpired
 
 # Common stock list file extensions
@@ -57,8 +58,8 @@ WEBSITE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Subject token pattern: [ref:{req_id}] (new) or [AVAIL-{req_id}] (legacy)
-AVAIL_TOKEN_RE = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
+# Subject token pattern lives in shared_constants.RFQ_SUBJECT_TAG_RE (single
+# source of truth — [ref:{req_id}] current, [AVAIL-{req_id}] legacy).
 
 # Fields requested from Graph API for messages
 MSG_SELECT = "id,subject,from,receivedDateTime,body,hasAttachments,conversationId"
@@ -516,8 +517,9 @@ class EmailMiner:
             msg_id = msg.get("id", "")
             subject = msg.get("subject", "")
 
-            # Only care about AVAIL-tagged RFQs
-            token_match = AVAIL_TOKEN_RE.search(subject)
+            # Only care about AVAIL-tagged RFQs (presence-only check, so a
+            # multi-token cross-requisition subject matches just the same)
+            token_match = RFQ_SUBJECT_TAG_RE.search(subject)
             if not token_match:
                 # Still mark as processed to avoid re-scanning
                 self._mark_processed(msg_id, "sent_scan")
