@@ -358,3 +358,45 @@ class TestStreamSearchMpnDonePayload:
 
         channel_used = mock_broker.publish.call_args[0][0]
         assert channel_used == "search:my-unique-id-999"
+
+
+# ── Test: per-MPN :latest pointer key (Part Dossier market cache-hit contract) ──
+
+
+class TestStreamSearchMpnLatestPointer:
+    async def test_writes_per_mpn_latest_pointer_key(self, db_session: Session):
+        """stream_search_mpn writes search:{normalized_mpn}:latest -> search_id (900s
+        TTL) alongside the results cache, so the Part Dossier market cache-hit path can
+        find the freshest run for an MPN.
+
+        Without it /v2/partials/search/dossier/market never hits the cache and always
+        re-fires the connector sweep.
+        """
+        from app.utils.normalization import normalize_mpn_key
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        # A connector is needed so the flow reaches the results-cache write (zero connectors
+        # short-circuits to an early "done").
+        mock_conn = MagicMock()
+        mock_conn.source_name = "brokerbin"
+        mock_conn.search = AsyncMock(
+            return_value=[{"mpn_matched": "LM317T", "vendor_name": "Arrow", "qty_available": 100}]
+        )
+        mock_rc = MagicMock()
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", return_value=([], [])),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+            patch("app.search_service._get_search_redis", return_value=mock_rc),
+        ):
+            await stream_search_mpn("sid-pointer-1", "LM317T")
+
+        key = normalize_mpn_key("LM317T")
+        setex_keys = {c.args[0]: c.args for c in mock_rc.setex.call_args_list}
+        assert f"search:{key}:latest" in setex_keys, setex_keys
+        assert setex_keys[f"search:{key}:latest"] == (f"search:{key}:latest", 900, "sid-pointer-1")
+        assert "search:sid-pointer-1:results" in setex_keys

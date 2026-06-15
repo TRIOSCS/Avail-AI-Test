@@ -9,8 +9,9 @@ Called by: pytest
 Depends on: app/routers/part_dossier.py, app/routers/htmx_views.py, MaterialCard.
 """
 
+import json
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -130,6 +131,40 @@ def test_market_cache_miss_returns_terminal_frame(client):
     body = resp.text
     assert "/v2/partials/search/run" in body
     assert "load" in body  # hx-trigger="load"
+
+
+def test_market_cache_hit_renders_cached_rows(client):
+    """Market WITH a fresh Redis pointer (search:{key}:latest → id, :results → rows) →
+    200, renders the cached vendor rows in the terminal frame + freshness stamp +
+    Refresh, and does NOT auto-fire the SSE run flow.
+
+    The load-bearing cache-hit path.
+    """
+    rows = [
+        {
+            "vendor_name": "Cached Vendor",
+            "mpn_matched": "LM317T",
+            "manufacturer": "TI",
+            "unit_price": 0.84,
+            "qty_available": 1000,
+            "confidence_color": "green",
+            "confidence_pct": 91,
+            "source_type": "brokerbin",
+            "sources_found": ["brokerbin"],
+        }
+    ]
+    rc = MagicMock()
+    rc.get.side_effect = lambda k: (
+        "sid-cache-1" if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
+    )
+    with patch("app.search_service._get_search_redis", return_value=rc):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Cached Vendor" in body
+    assert "cached" in body
+    assert "refresh=1" in body  # the Refresh-market button
+    assert "/v2/partials/search/run" not in body  # cache hit → no SSE re-fire
 
 
 # ── Recent endpoint ────────────────────────────────────────────────────────

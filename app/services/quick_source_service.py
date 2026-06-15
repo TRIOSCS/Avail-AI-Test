@@ -30,10 +30,14 @@ if TYPE_CHECKING:
 def get_or_create_scratch_req(db: Session, user: User, mpn: str) -> tuple[Requisition, Requirement]:
     """Return (Requisition, Requirement) for a one-off action on ``mpn``.
 
-    Idempotent per (user, normalized mpn) among the user's *active scratch* reqs: a second
-    action on the same part reuses the first scratch req instead of spawning duplicates.
-    Flushes so ids are populated; does NOT commit. ``normalized_mpn`` follows the existing
-    Requirement convention (uppercased primary_mpn), matching ``add_to_requisition``.
+    Best-effort idempotent per (user, normalized mpn) among the user's NON-TERMINAL scratch
+    reqs: a second action on the same part reuses the most-recent matching scratch req
+    instead of spawning duplicates. There is deliberately NO DB unique constraint (a partial
+    unique index would be Postgres-only and break SQLite-test parity), so two truly
+    concurrent same-(user, mpn) POSTs could each create one — benign (duplicate scratch reqs,
+    never an error or data loss) and effectively unreachable on single-user staging. Flushes
+    so ids are populated; does NOT commit. ``normalized_mpn`` follows the existing Requirement
+    convention (uppercased primary_mpn), matching ``add_to_requisition``.
     """
     display = (mpn or "").strip().upper()
     if not display:
@@ -45,7 +49,7 @@ def get_or_create_scratch_req(db: Session, user: User, mpn: str) -> tuple[Requis
         .filter(
             Requisition.created_by == user.id,
             Requisition.is_scratch.is_(True),
-            Requisition.status == RequisitionStatus.ACTIVE,
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
             Requirement.normalized_mpn == display,
         )
         .order_by(Requisition.created_at.desc())

@@ -91,23 +91,31 @@ async def dossier_hero(
         card.last_searched_at = datetime.now(timezone.utc)
         db.commit()
 
+    history_error = False
     try:
         history = get_part_history(db, key)
     except Exception:
+        # Roll back so the session is usable again — a DB error here otherwise leaves the
+        # transaction aborted (InFailedSqlTransaction) and the FRU lookup below would be
+        # guaranteed to fail, masking the real error. Mirrors search_history_panel's guard.
+        db.rollback()
         logger.exception("dossier_hero get_part_history failed mpn={} key={}", mpn, key)
         from ..services.part_history_service import PartHistory
 
         history = PartHistory(found=False)
+        history_error = True
 
-    # FRU crosswalk is additive context only — a failure must never break the hero.
+    # FRU crosswalk is additive context only — skipped on a history failure (the card guard
+    # already suppresses the crosswalk card, and we never run it on a degraded session).
     fru_view = None
-    try:
-        from ..services.fru_matrix_service import get_fru_view
+    if not history_error:
+        try:
+            from ..services.fru_matrix_service import get_fru_view
 
-        fru_view = get_fru_view(db, mpn)
-    except Exception:
-        logger.exception("dossier_hero get_fru_view failed mpn={} key={}", mpn, key)
-        fru_view = None
+            fru_view = get_fru_view(db, mpn)
+        except Exception:
+            logger.exception("dossier_hero get_fru_view failed mpn={} key={}", mpn, key)
+            fru_view = None
 
     ctx = _ctx(request, user)
     ctx.update({"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view})
@@ -200,11 +208,15 @@ async def search_recent(
 
 # ── Quick-source actions — Send RFQ / Add Offer from the dossier ──────────────
 #
-# These give a one-off Search action a home: get_or_create_scratch_req (idempotent per
+# Both give a one-off Search action a home: get_or_create_scratch_req (idempotent per
 # user+mpn) + persist the posted market rows as Sightings, then HX-Redirect to the scratch
-# req's full workspace page where the existing rfq-compose / add-offer UI completes the
-# action. Payload shapes: page-level posts {mpn, items=<JSON array>}; a per-row button
-# posts {mpn, vendor_name} (single vendor). The scratch req is created ONLY here (an
+# req's full workspace page. They are TWO distinct routes (the dossier has two distinct
+# buttons) that deliberately share one flow and land on the SAME workspace — that is where
+# the part + its captured sightings now live and where both Send RFQ (rfq-compose) and Add
+# Offer are one click away. v1 does not deep-link a specific tab (the req page has no
+# tab-by-URL support and partial URLs break on reload); the distinct completion happens in
+# the workspace. Payload shapes: page-level posts {mpn, items=<JSON array>}; a per-row
+# button posts {mpn, vendor_name} (single vendor). The scratch req is created ONLY here (an
 # action), never on a bare search (design decision #4).
 
 

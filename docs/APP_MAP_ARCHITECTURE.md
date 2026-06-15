@@ -109,7 +109,7 @@ authoritative reference. Static-analysis tests in
 | Parts | 13 | partials/parts/ |
 | Quotes | 9 | partials/quotes/ |
 | Sightings | 7 | partials/sightings/ |
-| Search | 8 | partials/search/ |
+| Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
 | Prospecting | 5 | partials/prospecting/ |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |

@@ -5,12 +5,12 @@
                fru_query for the FRU crosswalk card (renders nothing on no hit). #}
 {% set fru_hit = not error and (fru_view or (fru_reverse and fru_reverse.distinct_frus > 0)) %}
 {% if error %}
-<div class="rounded-xl bg-white p-6 text-center border border-amber-200 shadow-sm">
+<div class="p-6 text-center">
   <p class="text-sm font-medium text-amber-700">History could not be loaded.</p>
   <p class="text-xs text-amber-600 mt-1">Try again, or open the part page directly.</p>
 </div>
 {% elif not history.found %}
-<div class="rounded-xl bg-white p-6 text-center border border-gray-100 shadow-sm">
+<div class="p-6 text-center">
   {% if fru_hit %}
   {# A crosswalk-known part isn't "new to us" — only its trading history is empty. #}
   <p class="text-sm font-medium text-gray-500">No trading history yet</p>
@@ -21,7 +21,7 @@
   {% endif %}
 </div>
 {% else %}
-<div class="rounded-xl bg-white border border-gray-100 shadow-sm" x-data="{ open: 'offers' }">
+<div x-data="{ open: 'offers' }">
   {# Header #}
   <div class="p-4 border-b border-gray-100">
     <div class="flex items-center justify-between gap-2">
