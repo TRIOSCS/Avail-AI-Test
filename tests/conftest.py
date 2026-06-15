@@ -126,6 +126,21 @@ def db_session():
         session.close()
 
 
+def force_card_category(db: Session, card: MaterialCard, raw_value: str) -> None:
+    """Write an off-vocab/legacy category via Core UPDATE, bypassing the ORM guard.
+
+    MaterialCard's ``@validates("category")`` rejects non-canonical assignment, but
+    live legacy rows (mixed-case "DRAM", free-text vendor taxonomy) pre-date the
+    guard — tests exercising that residue (faceted lower(trim()) bucketing, the
+    startup residue warning, cleanup_known_bad) seed it here, exactly as a
+    pre-guard writer would have. *card* must be flushed (needs an id).
+    """
+    from sqlalchemy import update as _sa_update
+
+    db.execute(_sa_update(MaterialCard).where(MaterialCard.id == card.id).values(category=raw_value))
+    db.expire(card, ["category"])
+
+
 @pytest.fixture()
 def test_user(db_session: Session) -> User:
     """A standard buyer user."""

@@ -7,13 +7,18 @@ settings.fru_crosswalk_enrich_enabled:
 
 1. **Model decode** (``fru_matrix_decode``, tier 84, confidence 0.93): for each batch
    card whose key-normalized MPN matches ``fru_links.fru_norm``, decodes every linked
-   ``mfg_model`` manufacturer model with the existing pure MPN decoders (zero LLM,
-   zero network), STRICT-INTERSECTS the results (only spec keys present in every
-   decode with equal values survive; a commodity disagreement skips the card
-   entirely), and writes the agreed specs via record_spec. Category is filled from
-   the agreed commodity ONLY when the card has none (via ``spec_tiers.set_category``,
-   stamping tier-84 provenance; an existing DIFFERENT category skips the card before
-   any write).
+   ``mfg_model`` manufacturer model (and ``drive_pn`` links when
+   ``settings.fru_crosswalk_drive_pn_decode_enabled`` — the gated widening, measured 0%
+   misread) with the existing pure MPN decoders (zero LLM, zero network),
+   STRICT-INTERSECTS the results (only spec keys present in every decode with equal
+   values survive; a commodity disagreement skips the card entirely), and writes the
+   agreed specs via record_spec. Category is filled from the agreed commodity ONLY when
+   the card has none (via ``spec_tiers.set_category``, stamping tier-84 provenance; an
+   existing DIFFERENT category skips the card before any write). The card's MANUFACTURER
+   is filled (via ``spec_tiers.set_manufacturer`` at tier 84) ONLY when every decoded
+   substitute identifies the SAME maker — the decoder's regex gate is
+   manufacturer-scheme-specific, so a unanimous vendor is a DETERMINISTIC maker, never a
+   prose inference (D4: the prohibition was on prose inference, not deterministic decode).
 2. **Linked-description parse** (``fru_desc_parse``, tier 82, confidence 0.88): the
    FRU matrix qual sheets stored prose on fru_links rows (drive_pn rows carry strings
    like ``18TB 3.5 HDD 7.2K 12 Gb/s SAS``, mfg_model rows carry bare-drive prose like
@@ -50,7 +55,9 @@ fru_desc_parse 82 sits between desc_parse (83 — the card's OWN description out
 a linked row's prose) and partsurfer (80). Neither channel can overwrite an
 mpn_decode/desc_parse/vendor-API/trio_source prior and both always beat AI
 spec_extraction (60), so there is NO per-writer confidence pre-gate here. The card's
-manufacturer is never touched. Reverse direction (a card that IS a mfg_model) gains
+manufacturer is written ONLY by the decode channel's deterministic maker propagation
+(unanimous decoded vendor; the desc channel never writes a maker). Reverse direction
+(a card that IS a mfg_model) gains
 nothing here — its own MPN already decodes directly at tier 85 and its own
 description already desc-parses at tier 83. Does not commit — the caller manages
 the txn.
@@ -68,12 +75,13 @@ from collections import Counter
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.constants import FruLinkKind
 from app.models import FruLink, MaterialCard
 from app.services.desc_extractor import DescResult, extract_desc
 from app.services.desc_extractor._common import SPEC_COMMODITIES
 from app.services.mpn_decoder import DecodeResult, decode_mpn
-from app.services.spec_tiers import set_category
+from app.services.spec_tiers import set_category, set_manufacturer
 from app.services.spec_write_service import load_schema_cache, record_spec
 from app.utils.normalization import normalize_mpn_key
 
@@ -91,6 +99,30 @@ FRU_DECODE_CONFIDENCE = 0.93
 # deliberately ignored for the same one-hop reason as above; the ladder arbitrates.
 FRU_DESC_SOURCE = "fru_desc_parse"
 FRU_DESC_CONFIDENCE = 0.88
+
+# Confidence for the FRU-side MAKER write (D4 maker propagation). The decode's vendor IS a
+# DETERMINISTIC maker claim — every decoder's regex gate is manufacturer-scheme-specific
+# (an ``M393A…`` part is unambiguously Samsung, an ``ST…`` part unambiguously Seagate), so a
+# unanimous vendor across a FRU's decoded canonical models is a deterministic maker, never a
+# prose inference (the D4 prohibition was about prose inference, not deterministic decode).
+# One notch below the per-spec decode confidence (0.93), exactly like mpn_decoder/writer.py's
+# MAKER_CONFIDENCE sits below DECODE_CONFIDENCE; the F1 ladder (set_manufacturer at tier 84)
+# arbitrates, never this confidence.
+FRU_MAKER_CONFIDENCE = 0.9
+
+
+def agree_vendor(results: "list[DecodeResult]") -> str | None:
+    """Return the single vendor every decode agrees on, else ``None`` (pure, no DB).
+
+    Maker propagation (D4) is deterministic-only: a maker is written for the FRU-side card
+    ONLY when EVERY decoded canonical model identifies the SAME maker via its regex-gated
+    scheme. A vendor disagreement (Seagate vs Western Digital among a FRU's substitutes) or
+    an empty *results* list yields ``None`` — assert no maker rather than guess one. Callers
+    must filter spec-less / unrecognized decodes before calling (same contract as
+    ``intersect_decodes``: the caller already drops ``decode_mpn`` results without specs).
+    """
+    vendors = {r.vendor for r in results if r.vendor}
+    return next(iter(vendors)) if len(vendors) == 1 else None
 
 
 def intersect_decodes(
@@ -149,8 +181,8 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     """Crosswalk-enrich the FRU cards among *card_ids*: decode their mfg_model links AND
     parse their linked qual-sheet descriptions; write the agreed specs.
 
-    Returns {matched, decoded, written, categorized, desc_parsed, desc_written,
-    failed, desc_failed, dropped_conflict, desc_dropped_conflict,
+    Returns {matched, decoded, written, categorized, manufacturers_set, desc_parsed,
+    desc_written, failed, desc_failed, dropped_conflict, desc_dropped_conflict,
     commodity_conflict, desc_commodity_conflict, category_mismatch,
     desc_category_mismatch}:
 
@@ -164,6 +196,13 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     - written: fru_matrix_decode specs persisted.
     - categorized: NULL-category cards categorized from the agreed decode commodity
       (the desc channel never categorizes).
+    - manufacturers_set: cards whose manufacturer was written from the FRU's UNANIMOUS
+      decoded vendor (D4 deterministic maker propagation — set_manufacturer at
+      fru_matrix_decode/84). Only counted on a clean savepoint release, only when the
+      decode commodity agrees with the card's category (shared cross-commodity guard),
+      and only when every decoded substitute identifies the SAME maker (agree_vendor).
+      The desc channel never writes a maker (linked prose is not a deterministic maker
+      proof).
     - desc_parsed: cards that landed ≥1 fru_desc_parse spec from their linked
       descriptions.
     - desc_written: fru_desc_parse specs persisted.
@@ -202,6 +241,7 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
         "decoded": 0,
         "written": 0,
         "categorized": 0,
+        "manufacturers_set": 0,
         "desc_parsed": 0,
         "desc_written": 0,
         "failed": 0,
@@ -239,12 +279,20 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
         )
         .all()
     )
+    # (c) drive_pn DECODE widening (gated). The decode channel reads mfg_model links
+    # always; drive_pn links join the decode set ONLY under the flag (measured 0% misread —
+    # drive_pn related parts are IBM/Lenovo FRU numbers that the regex gates reject, so the
+    # widening writes nothing today but catches a future canonical drive_pn entry). The DESC
+    # channel reads drive_pn descriptions regardless of this flag (unchanged below).
+    decode_rel_kinds = {FruLinkKind.MFG_MODEL.value}
+    if settings.fru_crosswalk_drive_pn_decode_enabled:
+        decode_rel_kinds.add(FruLinkKind.DRIVE_PN.value)
     linked_frus: set[str] = set()  # every FRU with an in-scope link — the "matched" universe
     models_by_fru: dict[str, set[tuple[str, str | None]]] = {}
     descs_by_fru: dict[str, set[str]] = {}
     for link in links:
         linked_frus.add(link.fru_norm)
-        if link.rel_kind == FruLinkKind.MFG_MODEL.value:
+        if link.rel_kind in decode_rel_kinds:
             models_by_fru.setdefault(link.fru_norm, set()).add((link.related_raw, link.manufacturer))
         description = (link.description or "").strip()
         if description:
@@ -286,6 +334,11 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
             continue
         commodity: str | None = None
         agreed: dict[str, str | int | float | bool] = {}
+        # (d) D4 maker propagation: the UNANIMOUS maker across the FRU's decoded canonical
+        # models (every decoder's regex gate is manufacturer-scheme-specific, so a single
+        # agreed vendor is a deterministic maker, never a prose inference). None when the
+        # substitutes disagree on the maker or none decoded — assert no maker then.
+        vendor: str | None = agree_vendor(results)
         if results:
             commodity, agreed, dropped = intersect_decodes(results)
             stats["dropped_conflict"] += dropped  # once per FRU, independent of card outcomes
@@ -325,11 +378,12 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                         elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
                             dropped_out_of_enum[f"{commodity}.{spec_key}={value}"] += 1
                     card_written = 0
+                    did_set_maker = False
                     # SAVEPOINT 1 — decode channel: record_spec flushes, so a DB-level
                     # failure would otherwise poison the shared batch transaction. The
                     # nested txn rolls back ONLY this card's decode writes (including a
-                    # categorize-from-null); counters increment after a clean release
-                    # so a rolled-back card contributes nothing.
+                    # categorize-from-null AND the maker write); counters increment after a
+                    # clean release so a rolled-back card contributes nothing.
                     with db.begin_nested():
                         if not card_cat:
                             # The agreed commodity is regex-gated against strict manufacturer
@@ -338,6 +392,16 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                             # existing=None always loses to the incoming write). record_spec
                             # requires a category, so this precedes the loop.
                             set_category(card, commodity, FRU_DECODE_SOURCE, FRU_DECODE_CONFIDENCE)
+                        # (d) D4 maker propagation: the card reached here only because its
+                        # category agrees with the decoded commodity (the cross-commodity
+                        # guard above), so the unanimous decoded vendor is a SAFE deterministic
+                        # maker for this card. set_manufacturer (tier 84) corrects a legacy OEM
+                        # label sitting in `manufacturer` (unprovenanced, tier 50) but never
+                        # overwrites a vendor-API (90) / trio_source (95) / manual (100) value —
+                        # the F1 ladder, not run order, arbitrates. None vendor (substitutes
+                        # disagree on the maker) writes nothing — never infer a maker.
+                        if vendor is not None:
+                            did_set_maker = set_manufacturer(card, vendor, FRU_DECODE_SOURCE, FRU_MAKER_CONFIDENCE)
                         # No pre-gate: record_spec's F1 tier ladder rejects any write that
                         # loses to a higher-(tier, confidence, updated_at) prior (mpn_decode
                         # 85 / vendor 90 / trio_source 95 all outrank tier 84).
@@ -357,6 +421,8 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                     stats["written"] += card_written
                     if not card_cat:
                         stats["categorized"] += 1
+                    if did_set_maker:
+                        stats["manufacturers_set"] += 1
             except Exception:
                 stats["failed"] += 1
                 logger.exception("fru-crosswalk: failed on card_id={}", card_id)
@@ -475,6 +541,7 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     if (
         stats["written"]
         or stats["categorized"]
+        or stats["manufacturers_set"]
         or stats["desc_written"]
         or stats["failed"]
         or stats["desc_failed"]
@@ -483,12 +550,13 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
     ):
         logger.info(
             "fru-crosswalk: wrote {} decode specs across {} decoded cards "
-            "({} newly categorized) + {} linked-desc specs across {} desc-parsed cards "
+            "({} newly categorized, {} makers set) + {} linked-desc specs across {} desc-parsed cards "
             "({}/{} decode/desc keys dropped by intersection, {} desc commodity conflicts, "
             "{} desc category mismatches, {} cards failed, {} desc channels failed)",
             stats["written"],
             stats["decoded"],
             stats["categorized"],
+            stats["manufacturers_set"],
             stats["desc_written"],
             stats["desc_parsed"],
             stats["dropped_conflict"],

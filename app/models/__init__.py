@@ -124,6 +124,9 @@ from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
 
 # Task Board (pipeline tasks per requisition)
 from .task import RequisitionTask  # noqa: F401
+
+# Trust telemetry (durable reconcile tallies + facet-audit verdicts)
+from .telemetry import FacetAudit, ReconcileRun  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # Unified Score (cross-role leaderboard)

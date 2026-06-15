@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.management.reconcile_decoded_facets import _classify, _facet_matches, reconcile
 from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
+from app.services.spec_tiers import tier_for
 from app.services.spec_write_service import record_spec
 
 _OLD_TS = "2026-01-01T00:00:00+00:00"
@@ -39,6 +40,41 @@ def _seed_wrong(db: Session, card: MaterialCard, spec_key: str, value, source: s
     specs = dict(card.specs_structured)
     specs[spec_key] = {**specs[spec_key], "updated_at": _OLD_TS}
     card.specs_structured = specs
+    db.flush()
+
+
+def _seed_legacy_offenum_text(db: Session, card: MaterialCard, spec_key: str, value: str, source: str) -> None:
+    """Seed a text facet whose value is no longer a valid enum member, bypassing
+    record_spec.
+
+    record_spec now rejects off-enum values (e.g. ``gpu_family='RTX'`` after "RTX" left the
+    seeded enum in the trust hotfix), so a legacy bad row can no longer be written through it
+    — yet such rows DO exist in the live DB from before the fix, and correcting them is exactly
+    what the reconcile command is for. This mirrors what a pre-fix record_spec produced (JSONB
+    source-of-truth entry + facet projection), backdated like _seed_wrong, with NO enum gate.
+    """
+    confidence = 0.95 if source == "mpn_decode" else 0.90
+    tier = tier_for(source)
+    specs = dict(card.specs_structured or {})
+    specs[spec_key] = {
+        "value": value,
+        "source": source,
+        "confidence": confidence,
+        "tier": tier,
+        "updated_at": _OLD_TS,
+    }
+    card.specs_structured = specs
+    db.add(
+        MaterialSpecFacet(
+            material_card_id=card.id,
+            category=card.category,
+            spec_key=spec_key,
+            value_text=value,
+            source=source,
+            confidence=confidence,
+            tier=tier,
+        )
+    )
     db.flush()
 
 
@@ -71,13 +107,16 @@ def _seed_audit_cards(db: Session) -> dict[str, MaterialCard]:
     _seed_wrong(db, cards["stmicro"], "capacity_gb", 232, "mpn_decode")
     _seed_wrong(db, cards["seagate"], "capacity_gb", 373207, "mpn_decode")
     _seed_wrong(db, cards["dram"], "capacity_gb", 2, "desc_parse")
-    _seed_wrong(db, cards["gpu"], "gpu_family", "RTX", "desc_parse")
+    # "RTX" left the seeded gpu_family enum (trust hotfix) so record_spec now rejects it;
+    # seed the legacy bad row directly — correcting it is what reconcile is FOR.
+    _seed_legacy_offenum_text(db, cards["gpu"], "gpu_family", "RTX", "desc_parse")
     _seed_wrong(db, cards["modern"], "capacity_gb", 4000, "mpn_decode")
     _seed_wrong(db, cards["wd_rev"], "capacity_gb", 10100, "mpn_decode")
     _seed_wrong(db, cards["seagate_trunc"], "capacity_gb", 120, "mpn_decode")
     _seed_wrong(db, cards["off_grid"], "capacity_gb", 17000, "mpn_decode")
     _seed_wrong(db, cards["nand"], "capacity_gb", 512, "desc_parse")
-    # The dram card's CORRECT desc-parsed key — outside TARGET_SPEC_KEYS, must survive.
+    # The dram card's CORRECT desc-parsed key — in scope under the generalized default
+    # keys (every schema'd spec_key), but the re-run corroborates it: must survive.
     assert record_spec(db, cards["dram"].id, "ddr_type", "DDR3", source="desc_parse", confidence=0.90)
     db.commit()
     return cards
@@ -91,12 +130,16 @@ def test_dry_run_tallies_without_writing(db_session: Session):
     assert summary["mode"] == "dry-run"
     assert summary["corrected"] == 3  # WD legacy capacity + RTX family + WD revision digit
     assert summary["deleted"] == 6  # STMicro + legacy Seagate + Gb-bit dram + trunc + grid + NAND
-    assert summary["unchanged"] == 1  # modern Seagate control
+    assert summary["unchanged"] == 2  # modern Seagate control + corroborated ddr_type
     assert summary["failed"] == 0
+    assert summary["sources"] == ["mpn_decode", "desc_parse", "fru_matrix_decode", "fru_desc_parse"]
+    assert "ddr_type" in summary["keys"]  # default keys = every schema'd spec_key
     assert summary["by_class"]["legacy_wd"] == {"corrected": 1}
     assert summary["by_class"]["stmicro_gate"] == {"deleted": 1}
     assert summary["by_class"]["legacy_seagate"] == {"deleted": 1}
-    assert summary["by_class"]["gb_bit"] == {"deleted": 1}
+    # The dram card's wrong capacity deletes; its corroborated ddr_type row (same
+    # bit-token description) tallies unchanged in the same class.
+    assert summary["by_class"]["gb_bit"] == {"deleted": 1, "unchanged": 1}
     assert summary["by_class"]["rtx_family"] == {"corrected": 1}
     # Round-2 classes: the modern-shape control row moved from the round-1 legacy_seagate
     # bucket into the (more precise) envelope-gated branch bucket.
@@ -143,7 +186,7 @@ def test_apply_corrects_deletes_and_matches_dry_run(db_session: Session):
     for name in ("stmicro", "seagate", "dram", "seagate_trunc", "off_grid", "nand"):
         assert "capacity_gb" not in _facets(db_session, cards[name].id), name
         assert "capacity_gb" not in (cards[name].specs_structured or {}), name
-    # the dram card's non-targeted desc_parse key survives (only capacity was wrong).
+    # the dram card's corroborated desc_parse key survives (only capacity was wrong).
     assert _facets(db_session, cards["dram"].id)["ddr_type"] == "DDR3"
     # class 5 corrected: one family, the catalog-canonical one.
     assert _facets(db_session, cards["gpu"].id)["gpu_family"] == "GeForce"
@@ -162,7 +205,7 @@ def test_apply_is_idempotent(db_session: Session):
     # Second pass finds the corrected rows already right and the deleted rows gone.
     assert second["corrected"] == 0
     assert second["deleted"] == 0
-    assert second["unchanged"] == 4  # wd + gpu + wd_rev (now right) + modern control
+    assert second["unchanged"] == 5  # wd + gpu + wd_rev (now right) + modern control + ddr_type
 
 
 def test_delete_skipped_when_jsonb_provenance_drifted(db_session: Session):
@@ -315,7 +358,7 @@ def test_facet_matches_no_schema_uses_text_fallback():
 
 
 def test_reconcile_limit_restricts_cards_processed(db_session: Session):
-    """limit=1 causes only the first card to be processed."""
+    """Limit=1 causes only the first card to be processed."""
     seed_commodity_schemas(db_session)
     c1 = _card(db_session, "WD800BB", "hdd")
     c2 = _card(db_session, "WD1200BB", "hdd")
@@ -335,7 +378,8 @@ def test_reconcile_limit_restricts_cards_processed(db_session: Session):
 
 
 def test_reconcile_two_cards_different_categories_loads_schema_cache(db_session: Session):
-    """Each new category triggers a schema_cache load — exercises the cache-miss branch."""
+    """Each new category triggers a schema_cache load — exercises the cache-miss
+    branch."""
     seed_commodity_schemas(db_session)
     hdd_card = _card(db_session, "WD800BB", "hdd")
     dram_card = _card(db_session, "K4B2G1646F", "dram", "Mem, DDR3, 2Gb, 128*16, Samsung")
@@ -353,8 +397,8 @@ def test_reconcile_two_cards_different_categories_loads_schema_cache(db_session:
 
 
 def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Session, monkeypatch):
-    """When record_spec raises inside apply mode the savepoint is rolled back and
-    the card is counted as failed (lines 231-234, 240-242)."""
+    """When record_spec raises inside apply mode the savepoint is rolled back and the
+    card is counted as failed (lines 231-234, 240-242)."""
     seed_commodity_schemas(db_session)
     card = _card(db_session, "WD800BB", "hdd")
     _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
@@ -378,7 +422,8 @@ def test_reconcile_savepoint_rolls_back_on_record_spec_failure(db_session: Sessi
 
 
 def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkeypatch):
-    """When db.get raises for a card_id the outer handler increments totals['failed']."""
+    """When db.get raises for a card_id the outer handler increments
+    totals['failed']."""
     seed_commodity_schemas(db_session)
     card = _card(db_session, "WD800BB", "hdd")
     _seed_wrong(db_session, card, "capacity_gb", 80000, "mpn_decode")
@@ -401,16 +446,18 @@ def test_reconcile_outer_exception_counted_as_failed(db_session: Session, monkey
 
 
 def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
-    """main() with no --apply calls reconcile(apply=False) and then rollback."""
+    """Main() with no --apply calls reconcile(apply=False) and then rollback."""
 
     from app.management import reconcile_decoded_facets as mod
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
-        reconcile_calls.append({"apply": apply, "limit": limit})
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "dry-run",
+            "sources": list(sources or []),
+            "keys": [],
             "corrected": 0,
             "deleted": 0,
             "unchanged": 0,
@@ -422,15 +469,21 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
         }
 
     rollback_called: list[bool] = []
+    commit_called: list[bool] = []
+    recorded: list[dict] = []
 
     class _FakeSession:
         def rollback(self):
             rollback_called.append(True)
 
+        def commit(self):
+            commit_called.append(True)
+
         def close(self):
             pass
 
     monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    monkeypatch.setattr(mod, "record_reconcile_run", lambda db, summary: recorded.append(summary))
     import app.database as db_mod
 
     monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
@@ -448,19 +501,26 @@ def test_reconcile_main_dry_run(db_session: Session, monkeypatch):
 
     assert len(reconcile_calls) == 1
     assert reconcile_calls[0]["apply"] is False
+    assert reconcile_calls[0]["sources"] == tuple(mod.DEFAULT_SOURCES)
+    assert reconcile_calls[0]["keys"] is None  # default: every schema'd spec_key
     assert rollback_called  # dry-run always calls rollback
+    # The durable run report persists AFTER the rollback (the row is the only write).
+    assert len(recorded) == 1 and recorded[0]["mode"] == "dry-run"
+    assert commit_called
 
 
 def test_reconcile_main_apply(db_session: Session, monkeypatch):
-    """main() with --apply calls reconcile(apply=True) and skips rollback."""
+    """Main() with --apply calls reconcile(apply=True) and skips rollback."""
     from app.management import reconcile_decoded_facets as mod
 
     reconcile_calls: list[dict] = []
 
-    def fake_reconcile(db, *, apply, limit):  # noqa: ANN001
-        reconcile_calls.append({"apply": apply, "limit": limit})
+    def fake_reconcile(db, *, apply, limit, sources=None, keys=None):  # noqa: ANN001
+        reconcile_calls.append({"apply": apply, "limit": limit, "sources": sources, "keys": keys})
         return {
             "mode": "apply",
+            "sources": list(sources or []),
+            "keys": list(keys or []),
             "corrected": 0,
             "deleted": 0,
             "unchanged": 0,
@@ -472,15 +532,20 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
         }
 
     rollback_called: list[bool] = []
+    recorded: list[dict] = []
 
     class _FakeSession:
         def rollback(self):
             rollback_called.append(True)
 
+        def commit(self):
+            pass
+
         def close(self):
             pass
 
     monkeypatch.setattr(mod, "reconcile", fake_reconcile)
+    monkeypatch.setattr(mod, "record_reconcile_run", lambda db, summary: recorded.append(summary))
     import app.database as db_mod
 
     monkeypatch.setattr(db_mod, "SessionLocal", lambda: _FakeSession())
@@ -489,14 +554,17 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
 
     old_argv = sys.argv
     try:
-        sys.argv = ["reconcile_decoded_facets", "--apply"]
+        sys.argv = ["reconcile_decoded_facets", "--apply", "--sources", "fru_matrix_decode", "--keys", "capacity_gb"]
         mod.main()
     finally:
         sys.argv = old_argv
 
     assert len(reconcile_calls) == 1
     assert reconcile_calls[0]["apply"] is True
+    assert reconcile_calls[0]["sources"] == ("fru_matrix_decode",)
+    assert reconcile_calls[0]["keys"] == ("capacity_gb",)
     assert not rollback_called  # apply mode skips rollback
+    assert len(recorded) == 1 and recorded[0]["mode"] == "apply"
 
 
 # ── _facet_matches: numeric schema sub-branches (lines 124, 127-128) ─────────

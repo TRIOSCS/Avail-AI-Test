@@ -18,7 +18,14 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
-from app.services.spec_tiers import record_validation_conflict, resolve, tier_for
+from app.services.spec_tiers import (
+    count_ladder_rejection,
+    record_evidence_dissent,
+    record_validation_conflict,
+    resolve,
+    tier_for,
+    values_contradict,
+)
 from app.services.unit_normalizer import normalize_value
 
 _NUMERIC_RE = re.compile(r"^\s*([+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)\s*([a-zA-Zµμ%Ω°/]+.*)?\s*$")
@@ -247,12 +254,18 @@ def record_spec(
         # value and the loser is an authoritative source (tier >= 80) reporting
         # something ELSE, persist the contradiction for human review — the helper
         # gates manual / tier>=80 / values-differ, so this call is safe on every lose.
-        record_validation_conflict(
-            card,
-            spec_key,
-            existing_entry,
-            new_entry,
-            bool(value) if schema.data_type == "boolean" else new_entry["value"],
+        # Non-manual kept entries get the same artifact via record_evidence_dissent
+        # (gates kept!=manual / loser tier>=80 / values-differ — at most one of the
+        # two recorders fires per loss). Every rejection also bumps the persistent
+        # daily counter, classified corroboration vs contradiction; the counter is
+        # telemetry and can never break this write path (wrapped inside).
+        incoming_cmp_value = bool(value) if schema.data_type == "boolean" else new_entry["value"]
+        record_validation_conflict(card, spec_key, existing_entry, new_entry, incoming_cmp_value)
+        record_evidence_dissent(card, spec_key, existing_entry, new_entry, incoming_cmp_value)
+        count_ladder_rejection(
+            (existing_entry or {}).get("source", ""),
+            source,
+            contradiction=values_contradict((existing_entry or {}).get("value"), incoming_cmp_value),
         )
         return False
 

@@ -17,7 +17,10 @@ from app.services.faceted_search_service import (
     get_subfilter_options,
     search_materials_faceted,
 )
-from tests.conftest import engine  # noqa: F401
+from tests.conftest import (
+    engine,  # noqa: F401
+    force_card_category,
+)
 
 
 def _seed_dram_schema(db: Session) -> None:
@@ -42,7 +45,7 @@ def _make_dram_card(db: Session, mpn: str, ddr: str, capacity: float, ecc: bool 
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer="TestCo",
-        category="DRAM",
+        category="dram",
         created_at=datetime.now(timezone.utc),
     )
     db.add(card)
@@ -78,7 +81,7 @@ def test_get_commodity_counts(db_session: Session):
         normalized_mpn="cap-001",
         display_mpn="CAP-001",
         manufacturer="TestCo",
-        category="Capacitors",
+        category="capacitors",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(cap)
@@ -111,18 +114,21 @@ def test_get_commodity_counts_expression_equivalence(db_session: Session):
         ("Capacitors", None),
         ("DDR4", now),  # soft-deleted — must not be counted
     ]
+    # The whole point of this test is non-canonical case/padding residue (legacy
+    # rows the @validates guard would now reject), so seed the raw values through
+    # force_card_category exactly as a pre-guard writer left them in the DB.
     for i, (category, deleted_at) in enumerate(rows):
-        db_session.add(
-            MaterialCard(
-                normalized_mpn=f"eq-{i:03d}",
-                display_mpn=f"EQ-{i:03d}",
-                manufacturer="TestCo",
-                category=category,
-                created_at=now,
-                deleted_at=deleted_at,
-            )
+        card = MaterialCard(
+            normalized_mpn=f"eq-{i:03d}",
+            display_mpn=f"EQ-{i:03d}",
+            manufacturer="TestCo",
+            created_at=now,
+            deleted_at=deleted_at,
         )
-    db_session.flush()
+        db_session.add(card)
+        db_session.flush()
+        if category is not None:
+            force_card_category(db_session, card, category)
 
     assert get_commodity_counts(db_session) == {"ddr4": 2, "capacitors": 1}
 
@@ -152,7 +158,7 @@ def test_search_materials_faceted_by_commodity(db_session: Session):
         normalized_mpn="cap-001",
         display_mpn="CAP-001",
         manufacturer="TestCo",
-        category="Capacitors",
+        category="capacitors",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(cap)
@@ -791,20 +797,20 @@ def test_get_commodity_spec_coverage(db_session: Session):
     no_specs = MaterialCard(
         normalized_mpn="cov-002",
         display_mpn="COV-002",
-        category="DRAM",
+        category="dram",
         created_at=datetime.now(timezone.utc),
     )
     deleted = MaterialCard(
         normalized_mpn="cov-003",
         display_mpn="COV-003",
-        category="DRAM",
+        category="dram",
         deleted_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
     )
     other_cat = MaterialCard(
         normalized_mpn="cov-004",
         display_mpn="COV-004",
-        category="Capacitors",
+        category="capacitors",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add_all([no_specs, deleted, other_cat])

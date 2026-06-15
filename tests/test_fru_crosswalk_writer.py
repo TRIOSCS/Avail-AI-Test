@@ -28,6 +28,7 @@ ZERO_STATS = {
     "decoded": 0,
     "written": 0,
     "categorized": 0,
+    "manufacturers_set": 0,
     "desc_parsed": 0,
     "desc_written": 0,
     "failed": 0,
@@ -93,6 +94,7 @@ def test_writer_writes_intersected_specs_with_source_and_confidence(db_session: 
         matched=1,
         decoded=1,
         written=2,
+        manufacturers_set=1,  # both substitutes decode to Seagate — unanimous maker (D4)
         dropped_conflict=1,  # capacity_gb 4000 vs 8000
     )
     f = _facets(db_session, card.id)
@@ -100,6 +102,9 @@ def test_writer_writes_intersected_specs_with_source_and_confidence(db_session: 
     entry = card.specs_structured["form_factor"]
     assert entry["source"] == FRU_DECODE_SOURCE == "fru_matrix_decode"
     assert entry["confidence"] == FRU_DECODE_CONFIDENCE == 0.93
+    # (d) D4: the unanimous decoded vendor is the deterministic maker, written at tier 84.
+    assert card.manufacturer == "Seagate"
+    assert card.manufacturer_source == FRU_DECODE_SOURCE
 
 
 def test_single_model_writes_all_specs_and_categorizes_null_category(db_session: Session):
@@ -159,9 +164,11 @@ def test_commodity_conflict_skips_card(db_session: Session):
     assert _facets(db_session, card.id) == {}
 
 
-def test_card_manufacturer_never_written(db_session: Session):
-    # The FRU card keeps its IBM/Lenovo manufacturer context — the drive vendor on
-    # the link (Seagate) is display-only and never copied onto the card.
+def test_deterministic_maker_upgrades_legacy_oem_label(db_session: Session):
+    # (d) D4 maker propagation: a legacy IBM/Lenovo OEM label (unprovenanced → ranks at
+    # the legacy_backfill tier 50) is UPGRADED to the DETERMINISTIC maker the decoder
+    # identifies (Seagate, tier 84) — never inferred from prose, always from the
+    # regex-gated decode of the linked canonical model.
     seed_commodity_schemas(db_session)
     card = _card(db_session, "00AJ141", category="hdd", manufacturer="IBM")
     _link(db_session, "00AJ141", "ST4000NM0035", mfg="Seagate")
@@ -170,7 +177,10 @@ def test_card_manufacturer_never_written(db_session: Session):
     db_session.commit()
 
     assert stats["written"] == 3
-    assert card.manufacturer == "IBM"
+    assert stats["manufacturers_set"] == 1
+    assert card.manufacturer == "Seagate"
+    assert card.manufacturer_source == FRU_DECODE_SOURCE
+    assert card.manufacturer_tier == 84
 
 
 def test_ladder_skips_higher_tier_prior_overwrites_lower(db_session: Session):
@@ -661,11 +671,13 @@ def test_decode_filled_category_routes_desc_channel_same_pass(db_session: Sessio
         decoded=1,
         written=3,
         categorized=1,
+        manufacturers_set=1,  # the lone decoding model (ST…) is Seagate — unanimous maker
         desc_parsed=1,
         desc_written=2,  # rpm + interface; capacity_gb lost 82 < 84
     )
     assert card.category == "hdd"
     assert card.category_source == FRU_DECODE_SOURCE  # the desc channel NEVER categorizes
+    assert card.manufacturer == "Seagate"  # the drive_pn IBM FRU (00FJ069) does not decode
     f = _facets(db_session, card.id)
     assert f["capacity_gb"] == 4000  # decode (84) kept over desc prose (82)
     assert f["rpm"] == "10000"

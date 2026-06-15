@@ -174,9 +174,12 @@ def test_same_source_corroboration_keeps_other_sources_entries(db_session: Sessi
     assert card.has_validation_conflict
 
 
-def test_non_manual_existing_never_flags(db_session: Session):
-    """Only manual values raise conflicts — a vendor value beaten by another vendor
-    write is plain ladder arbitration, not a review item."""
+def test_non_manual_existing_flags_dissent(db_session: Session):
+    """A non-manual authoritative value beaten by ANOTHER authoritative write that
+    DIFFERS now records an evidence-dissent (trust architecture): the authoritative-vs-
+    authoritative contradiction the ladder used to resolve silently surfaces in the
+    needs-review filter, tagged kind='dissent', stored under the same
+    validation_conflicts JSONB + has_validation_conflict flag."""
     card = _make_card(db_session)
     _make_schema(db_session)
 
@@ -184,8 +187,63 @@ def test_non_manual_existing_never_flags(db_session: Session):
     record_spec(db_session, card.id, "ddr_type", "DDR3", source="mpn_decode", confidence=0.95)  # loses (85 < 90)
 
     db_session.flush()
+    assert card.has_validation_conflict
+    (entry,) = card.validation_conflicts
+    assert entry["kind"] == "dissent"
+    assert entry["key"] == "ddr_type"
+    assert entry["manual"]["value"] == "DDR4"  # kept value stored under "manual" key
+    assert entry["manual"]["source"] == "digikey_api"
+    assert entry["evidence"]["source"] == "mpn_decode"
+    assert entry["evidence"]["tier"] == 85
+    assert entry["evidence"]["value"] == "DDR3"
+
+
+def test_non_manual_corroboration_never_flags(db_session: Session):
+    """A non-manual authoritative value beaten by another authoritative write that
+    AGREES is plain ladder arbitration (corroboration) — no dissent, no review item."""
+    card = _make_card(db_session)
+    _make_schema(db_session)
+
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.99)
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95)  # agrees, loses
+
+    db_session.flush()
     assert not (card.validation_conflicts or [])
     assert not card.has_validation_conflict
+
+
+def test_below_band_loser_never_flags_dissent(db_session: Session):
+    """A losing write BELOW the authoritative band (tier < 80 — web_search/70) never
+    records a dissent even against a non-manual kept value: too noisy to challenge."""
+    card = _make_card(db_session)
+    _make_schema(db_session)
+
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.99)
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="web_search", confidence=0.99)  # tier 70, loses
+
+    db_session.flush()
+    assert not (card.validation_conflicts or [])
+    assert not card.has_validation_conflict
+
+
+def test_dissent_moves_the_needs_review_count(db_session: Session):
+    """End-to-end (spec §1.2b verify): a tier-84 contradiction of a kept tier-95 value
+    moves the wired needs-review facet count 0 → 1 with zero UI work."""
+    from app.services.faceted_search_service import get_global_facet_counts
+
+    card = _make_card(db_session)
+    _make_schema(db_session)
+
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="trio_source", confidence=0.99)
+    db_session.flush()
+    assert get_global_facet_counts(db_session)["needs_review"]["true"] == 0
+
+    # fru_matrix_decode (tier 84) contradicts the kept trio_source (95) value → dissent.
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="fru_matrix_decode", confidence=0.9)
+    db_session.flush()
+    assert card.has_validation_conflict
+    assert card.validation_conflicts[0]["kind"] == "dissent"
+    assert get_global_facet_counts(db_session)["needs_review"]["true"] == 1
 
 
 # --- set_category hook (V2: category vs decode commodity) ---------------------

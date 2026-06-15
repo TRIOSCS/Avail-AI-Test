@@ -47,6 +47,13 @@ _PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("hpe", OPTION_KIT_RE),
     # HP/HPE L-series spare: L + 5 digits - 3 digits (L15335-001)
     ("hpe", re.compile(r"^L\d{5}-\d{3}$")),
+    # EMC 303-x assembly/spare: 303 - 3 digits - 3 digits + optional rev letter
+    # (303-104-000D, 303-081-103B). The measured bulk of the web tier's
+    # "no trusted source" rejects — EMC PNs surface only on reseller pages, so the
+    # shape gates the OEM-FRU web-extract skip (enrichment_skip_web_for_oem_mpns).
+    # NOT in HIGH_PRECISION_VENDORS: an OEM-tier miss stays not_found (22h retry),
+    # not parked not_catalogued for 30 days.
+    ("emc", re.compile(r"^303-\d{3}-\d{3}[A-Z]?$")),
     # Dell 5-char spare with >=1 letter (HV52W, 66YYK). Broad/low-priority; a false
     # positive costs only a wasted web call (genuine MPNs resolve at earlier tiers first).
     ("dell", re.compile(r"^(?=[A-Z0-9]{5}$)[A-Z0-9]*[A-Z][A-Z0-9]*$")),

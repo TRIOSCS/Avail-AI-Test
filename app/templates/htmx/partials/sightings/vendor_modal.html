@@ -1,7 +1,8 @@
 {# Vendor selection + email compose modal for batch RFQ with preview step.
    Called by: "Send to Vendors" action bar button via @open-modal dispatch
    Depends on: modal.html pattern, HTMX, Alpine.js, preview_inquiry.html
-   Context: suggested_vendors, requirement_ids, parts
+   Context: suggested_vendors, coverage (card id → {count, avg_score, mpns}),
+            requirement_ids, parts
 #}
 
 {# The component logic lives in the rfqVendorModal() factory in app/static/htmx_app.js.
@@ -15,8 +16,10 @@
   <div x-show="step === 'compose'" x-cloak>
     <h3 class="text-lg font-semibold text-gray-900 mb-3">Send Inquiry</h3>
 
-    {# Vendor list #}
-    <div class="mb-4">
+    {# Vendor panel — stable container id; every swap below targets a stable-id
+       SUB-container inside the x-data wrapper, never the wrapper itself
+       (re-initializing rfqVendorModal would wipe runtime selection state). #}
+    <div id="rfq-vendor-panel" class="mb-4">
       <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
         Select Vendors ({{ suggested_vendors|length }} suggested)
       </label>
@@ -29,6 +32,11 @@
                  class="rounded border-gray-300">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-700">{{ v.display_name }}</span>
+            {% set cov = coverage.get(v.id) %}
+            {% if cov %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
+                  title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
+            {% endif %}
             {% if v.response_rate %}
             <span class="ml-2 text-[10px] text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
             {% endif %}
@@ -37,7 +45,97 @@
           <span class="text-[10px] text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
           {% endif %}
         </label>
+        {% else %}
+        <p class="px-3 py-2 text-xs text-gray-400">No vendors with sightings for these parts — search or add one below.</p>
         {% endfor %}
+      </div>
+
+      {# Affinity suggestions (on demand): a stable-id sub-container INSIDE the x-data
+         wrapper — the hx-get targets THIS div, never the wrapper (re-initializing
+         rfqVendorModal would wipe the runtime selection state). The button sits inside
+         the target, so the innerHTML swap replaces it with the rows — a second click
+         is impossible (no-duplicate guarantee). #}
+      {% if requirement_ids %}
+      <div id="rfq-affinity-section" class="mt-2">
+        <button type="button"
+                hx-get="/v2/partials/sightings/vendor-affinity?requirement_ids={{ requirement_ids|join(',') }}"
+                hx-target="#rfq-affinity-section"
+                hx-swap="innerHTML"
+                hx-indicator="#rfq-affinity-spinner"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-lg hover:bg-brand-50 transition-colors">
+          <span id="rfq-affinity-spinner" class="htmx-indicator">
+            <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+          </span>
+          Suggest more vendors
+        </button>
+      </div>
+      {% endif %}
+
+      {# Added vendors (autocomplete picks + inline creates): stable-id append target
+         for composer_vendor_row.html — _addComposerVendor does a raw fetch POST to
+         composer-vendor, then insertAdjacentHTML('beforeend') + htmx.process +
+         Alpine.initTree on THIS div (raw fetch chosen over htmx.ajax to detect 4xx;
+         see _addComposerVendor). #}
+      <div id="rfq-added-vendors"></div>
+      <span id="rfq-added-vendors-spinner" class="htmx-indicator mt-1 inline-flex items-center text-gray-400">
+        <svg class="h-3.5 w-3.5 animate-spin" viewBox="0 0 24 24" fill="none">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+      </span>
+
+      {# Find any vendor: debounced autocomplete against /api/autocomplete/names —
+         vendors only, filtered client-side in searchVendors() (endpoint not forked).
+         Picking a result POSTs to composer-vendor and appends the returned row. #}
+      <div class="mt-2 relative">
+        <input type="text" x-model="vendorQuery"
+               @input.debounce.300ms="searchVendors()"
+               @focus="searchOpen = vendorResults.length > 0"
+               @click.away="searchOpen = false"
+               placeholder="Find any vendor..."
+               autocomplete="off"
+               aria-label="Find any vendor"
+               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+        <div x-show="searchOpen" x-cloak
+             class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+          <template x-for="v in vendorResults" :key="v.id">
+            <button type="button" @click="pickVendor(v.name)"
+                    class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-brand-50 hover:text-brand-700 truncate"
+                    x-text="v.name"></button>
+          </template>
+          <div x-show="vendorResults.length === 0" x-cloak
+               class="px-3 py-1.5 text-xs text-gray-400 italic">No vendors found</div>
+        </div>
+      </div>
+
+      {# Add vendor on the fly: inline mini-form behind a toggle (the unified req
+         modal's "+ New Customer" pattern) — POSTs to the same composer-vendor
+         endpoint via createVendor(). #}
+      <button type="button" @click="addingVendor = !addingVendor"
+              class="mt-2 text-xs font-semibold text-brand-600 hover:text-brand-700">
+        + Add new vendor
+      </button>
+      <div x-show="addingVendor" x-cloak
+           class="mt-2 p-3 bg-gray-50 rounded-lg border border-gray-200 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-semibold text-gray-700">New Vendor</span>
+          <button type="button" @click="addingVendor = false"
+                  class="text-xs text-gray-400 hover:text-gray-600">Cancel</button>
+        </div>
+        <input aria-label="Vendor name" type="text" x-model="newVendorName" placeholder="Vendor name *"
+               class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+        <input aria-label="Website" type="url" x-model="newVendorWebsite" placeholder="Website (optional)"
+               class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+        <input aria-label="Contact email" type="email" x-model="newVendorEmail" placeholder="Contact email (optional)"
+               class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+        <button type="button" :disabled="!newVendorName.trim() || addingVendorBusy"
+                @click="createVendor()"
+                class="px-3 py-1 text-xs font-semibold bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-50">
+          <span x-text="addingVendorBusy ? 'Adding...' : 'Add Vendor'"></span>
+        </button>
       </div>
     </div>
 

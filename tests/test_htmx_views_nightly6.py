@@ -70,7 +70,7 @@ def _make_material_card(db: Session, mpn: str = "LM317T", crosses=None) -> Mater
         normalized_mpn=mpn.lower(),
         display_mpn=mpn,
         manufacturer="Texas Instruments",
-        category="Voltage Regulator",
+        category="voltage_regulators",  # canonical (the @validates guard rejects off-vocab)
         cross_references=crosses,
         created_at=datetime.now(timezone.utc),
     )
