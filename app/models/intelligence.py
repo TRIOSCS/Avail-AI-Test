@@ -115,6 +115,18 @@ class MaterialCard(Base):
     # the partial index ix_material_cards_needs_review (WHERE has_validation_conflict).
     has_validation_conflict = Column(Boolean, nullable=False, default=False, server_default="false")
 
+    # Demand telemetry (migration 105 — TRIO's SFDC Weekly Export, one-shot backfill
+    # via app/management/import_demand_telemetry.py; NO recurring refresh — the export
+    # is a static snapshot, re-import is an explicit operator step). Prioritization
+    # signal ONLY, never a displayed fact: worker select_batch and the spec-pass
+    # selection order by (sourced_qty_90d DESC NULLS LAST, last_sourced_at DESC NULLS
+    # LAST, id) so enrichment slots land on parts TRIO actually trades. NULL = no
+    # telemetry row matched this card's normalized_mpn. Served on PG by the partial
+    # index ix_mc_demand_queue (migration-only — its DESC NULLS LAST keys are not
+    # valid SQLite index DDL, so it is deliberately NOT declared on the model).
+    sourced_qty_90d = Column(Integer)
+    last_sourced_at = Column(UTCDateTime)
+
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
