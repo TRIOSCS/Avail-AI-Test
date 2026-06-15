@@ -2226,8 +2226,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |     containers now reload on `filters-changed from:body` (not just commodity-changed),
     |     carrying the same wire params (hx-vals object literal) as #materials-results.
     |     Containers load while hidden.
-    Live result count "<N> <Commodity> parts" renders at the top of the results pane
-    (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
+    Live result count "<N> results [in <Commodity>] [· matching "<q>"]" renders at the top
+    of the results pane (list.html) every filters-changed cycle (match-framed so the number
+    reads as "how many matched", not a bare part count; singular "result" when N==1), with a
+    parallel sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
 
 Count-consistency invariant (count-honesty, OPTIMIZATION_PLAN §3.3 backend):
@@ -2260,6 +2262,13 @@ SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
     +---> Zero results + active parametric sub_filters + N < M → list.html renders the
     |     "not yet spec-enriched" nudge instead of the generic empty state.
 Result-row upgrades (list.html, server-side in materials_faceted_partial):
+    +---> Condensed 7-column layout (was 9): MPN · Description · Manufacturer · Status ·
+    |     Vendors · Best Price · Last Seen. Category is folded as a muted sub-line under the
+    |     manufacturer (no standalone column); Lifecycle + Condition are merged into the
+    |     Status cell alongside the enrichment-trust badge (one wrapping badge group). Best
+    |     Price renders 2 decimals at/above $1, 4 below (passive precision). Table carries
+    |     the scoped .compact-table--dense modifier (4px row padding; shared .compact-table
+    |     untouched). No data dropped — only regrouped.
     +---> Spec chips also render WITHOUT a commodity: each card's own category's
     |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
     |     3 scalar specs_structured entries, formatted "label: value". Every chip carries
