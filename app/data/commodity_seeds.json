@@ -3683,7 +3683,6 @@
       "enum_values": [
         "GeForce",
         "Quadro",
-        "RTX",
         "Radeon",
         "Radeon Pro",
         "Tesla",

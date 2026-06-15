@@ -305,7 +305,9 @@ def test_emittable_vocabulary_matches_commodity_seeds():
     assert {p[0] for p in tape._IFACE_PATTERNS} == enum_values("tape_drives", "interface")
     assert {p[0] for p in tape._FORM_PATTERNS} <= enum_values("tape_drives", "form_factor")
 
-    gpu_members = {p[0] for p in gpu._FAMILY_PATTERNS} | {gpu.GEFORCE, gpu.RTX}
+    # "RTX" left the seeded enum (trust hotfix 2026-06-12) — the extractor maps
+    # consumer RTX shapes to GeForce and emits nothing for the professional line.
+    gpu_members = {p[0] for p in gpu._FAMILY_PATTERNS} | {gpu.GEFORCE}
     assert gpu_members == enum_values("gpu", "gpu_family")
     assert (gpu._MEM_MIN, gpu._MEM_MAX) == numeric_range("gpu", "memory_gb")
 

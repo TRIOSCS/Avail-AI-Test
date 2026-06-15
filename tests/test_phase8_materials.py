@@ -24,11 +24,13 @@ def material_cards(db_session: Session):
     from app.models.intelligence import MaterialCard
 
     cards = []
+    # Canonical commodity keys (the @validates guard rejects off-vocab); the detail
+    # template renders card.category verbatim, so assertions match these exact strings.
     for mpn, mfr, lifecycle, category, searches in [
-        ("LM317T", "TI", "active", "Voltage Regulator", 42),
-        ("NE555P", "TI", "active", "Timer", 30),
-        ("STM32F103", "STMicro", "eol", "Microcontroller", 15),
-        ("MAX232", "Maxim", "obsolete", "Interface", 5),
+        ("LM317T", "TI", "active", "voltage_regulators", 42),
+        ("NE555P", "TI", "active", "ics_other", 30),
+        ("STM32F103", "STMicro", "eol", "microcontrollers", 15),
+        ("MAX232", "Maxim", "obsolete", "ics_other", 5),
     ]:
         card = MaterialCard(
             normalized_mpn=mpn.lower(),
@@ -146,7 +148,7 @@ class TestMaterialDetail:
         assert resp.status_code == 200
         assert "LM317T" in resp.text
         assert "TI" in resp.text
-        assert "Voltage Regulator" in resp.text
+        assert "voltage_regulators" in resp.text
 
     def test_detail_shows_lifecycle_badge(self, client: TestClient, material_cards):
         card = material_cards[2]  # STM32F103 - EOL
@@ -181,10 +183,12 @@ class TestMaterialUpdate:
     """Tests for updating material card fields."""
 
     def test_update_manufacturer(self, client: TestClient, db_session: Session, material_cards):
-        card = material_cards[0]  # LM317T
+        card = material_cards[0]  # LM317T, seeded category "voltage_regulators"
+        # Post a DIFFERENT canonical category so the ladder records a genuine manual edit
+        # (the route no-ops an unchanged value rather than re-stamping it as manual).
         resp = client.put(
             f"/v2/partials/materials/{card.id}",
-            data={"manufacturer": "Texas Instruments", "category": "voltage_regulators"},
+            data={"manufacturer": "Texas Instruments", "category": "analog_ic"},
         )
         assert resp.status_code == 200
         assert "Texas Instruments" in resp.text
@@ -193,7 +197,7 @@ class TestMaterialUpdate:
         assert card.manufacturer == "Texas Instruments"
         # Category routes through the F1 ladder (set_category) — it lands canonical with
         # manual provenance; off-vocab free text like "Linear Regulator" would be rejected.
-        assert card.category == "voltage_regulators"
+        assert card.category == "analog_ic"
         assert card.category_source == "manual"
 
     def test_update_lifecycle(self, client: TestClient, db_session: Session, material_cards):

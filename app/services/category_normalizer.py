@@ -24,9 +24,7 @@ supplier taxonomies like DigiKey's). The SFDC ingest ladder resolves through
 ``normalize_category`` never consults source-scoped maps.
 """
 
-from app.services.commodity_registry import get_all_commodities
-
-_CANONICAL_KEYS = frozenset(get_all_commodities())
+from app.services.commodity_registry import CANONICAL_COMMODITY_KEYS as _CANONICAL_KEYS
 
 CATEGORY_ALIASES: dict[str, str] = {
     "connectors, interconnects": "connectors",

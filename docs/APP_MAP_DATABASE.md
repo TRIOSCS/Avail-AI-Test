@@ -105,17 +105,28 @@
 
 > UNIQUE `uq_vendor_part_unavail_vendor_mpn` (vendor_name_normalized, normalized_mpn) — marking again for an existing pair is an upsert (the re-arm path), never a duplicate. Written and read only via `app/services/vendor_unavailability.py` (record/clear/apply/release/exclude) and `app/services/sighting_status.py` (reader-authority status branch).
 
-**`contacts`** — RFQ emails sent to vendors
+**`contacts`** — outreach to vendors (RFQ emails, logged calls)
 | Column | Type | Notes |
 |--------|------|-------|
 | id | Integer PK | |
 | requisition_id | FK -> requisitions (CASCADE) | |
 | user_id | FK -> users (CASCADE) | |
-| contact_type | String 20 | rfq\|follow_up\|etc |
+| contact_type | String 20 | email (RFQ sends)\|phone (logged calls) |
 | vendor_name | String 255 | |
 | vendor_contact | String 255 | Email address |
+| parts_included | JSON | Parts asked of the vendor — scoped to THIS row's requisition |
 | graph_message_id | String 500 | Microsoft Graph tracking |
+| graph_conversation_id | String 500 | Graph thread id — inbox-monitor Tier-1 reply matching |
 | status | String 50 | sent\|replied\|etc |
+
+> **Row semantics: one row per (requisition, vendor) pair.** A cross-requisition
+> bulk RFQ (sightings composer) still sends ONE email per vendor, but
+> `send_batch_rfq` writes one Contact per involved requisition — each
+> `parts_included` holding only its own requisition's parts, all of a vendor's
+> rows sharing that one email's `graph_message_id` / `graph_conversation_id`.
+> The inbox monitor therefore treats `graph_conversation_id` as one-to-many
+> (a reply on the thread progresses EVERY contact sharing it). No schema change
+> was needed — multiplicity lives in rows, `requisition_id` stays singular.
 
 **`vendor_responses`** — Replies from vendors to RFQs
 | Column | Type | Notes |
