@@ -1,4 +1,8 @@
-"""Unit 3 — faceted results render a live result count + an aria-live announcement."""
+"""Unit 3 — faceted results render a live result count + an aria-live announcement.
+
+The count is match-framed: "N results [in <commodity>] [· matching "<q>"]" — the word
+"results" (not "parts") makes clear it's how many matched the current search/filters.
+"""
 
 from datetime import datetime, timezone
 
@@ -25,13 +29,12 @@ def test_faceted_renders_live_count_with_commodity(client, db_session: Session):
 
     resp = client.get("/v2/partials/materials/faceted?commodity=dram")
     assert resp.status_code == 200
-    # Count + display name + pluralized noun at the top of the results pane.
+    # Count + display name + match-framed plural noun at the top of the results pane.
     assert "2" in resp.text
     assert "DRAM" in resp.text
-    assert "parts" in resp.text
+    assert "results" in resp.text
     # Screen-reader announcement present.
     assert 'aria-live="polite"' in resp.text
-    assert "parts match" in resp.text
 
 
 def test_faceted_count_singular_no_commodity(client, db_session: Session):
@@ -41,4 +44,6 @@ def test_faceted_count_singular_no_commodity(client, db_session: Session):
     assert resp.status_code == 200
     # Singular noun for a single result, no commodity name.
     assert "1" in resp.text
-    assert "part" in resp.text
+    assert "result" in resp.text
+    # Singular, not pluralized, for exactly one match.
+    assert "results" not in resp.text

@@ -348,6 +348,18 @@ hr { border-color: #BFC4CE; }
   box-shadow: inset 2px 0 0 #5F6878;
 }
 
+/* ── Dense variant — tighter rows for the materials results table ──
+   Scoped modifier so the shared .compact-table (sightings / parts / quotes) is
+   untouched. Applied via "compact-table compact-table--dense" in materials/list.html. */
+.compact-table--dense th {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+.compact-table--dense td {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
 /* Ensure tables don't collapse columns below readable widths */
 table {
   min-width: 100%;

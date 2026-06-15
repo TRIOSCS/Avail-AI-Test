@@ -403,7 +403,7 @@ def test_list_renders_zero_price_and_currency():
     assert "$0.0000" in html0  # zero price is shown, not '--'
 
     html_eur = tmpl.render(materials=[_card(1.5, "EUR")], q="", total=1, limit=50, offset=0, faceted=True)
-    assert "EUR 1.5000" in html_eur  # non-USD currency labelled with its code
+    assert "EUR 1.50" in html_eur  # non-USD currency labelled; ≥$1 → 2 decimals
 
 
 def test_workspace_injects_display_names(client):
@@ -419,8 +419,9 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
     Exercises the real materials_faceted_partial aggregate SQL:
       count(distinct last_currency), max(last_currency), _best_currency derivation.
 
-    Single-currency card → currency label rendered (e.g. "EUR 1.2500").
+    Single-currency card → currency label rendered (e.g. "EUR 1.25").
     Mixed-currency card  → _best_currency is None → falls back to "$" prefix.
+    (Prices ≥ $1 render with 2 decimals per the results-condense change.)
     """
     from app.models.intelligence import MaterialCard, MaterialVendorHistory
 
@@ -485,14 +486,14 @@ def test_faceted_endpoint_currency_aggregate(client, db_session):
     resp = client.get("/v2/partials/materials/faceted")
     assert resp.status_code == 200
 
-    # Single-currency EUR card: best price is 1.2500, labelled "EUR <price>"
-    assert "EUR 1.2500" in resp.text, (
+    # Single-currency EUR card: best price 1.25 (from 1.2500), labelled "EUR <price>"
+    assert "EUR 1.25" in resp.text, (
         "EUR-labelled best price not rendered for single-currency card; "
         "_best_currency derivation (count distinct == 1 → max currency) may be broken"
     )
 
-    # Mixed-currency card: best price is 2.5000 (min), prefix must be "$" not "EUR"
-    assert "$2.5000" in resp.text, (
+    # Mixed-currency card: best price 2.50 (from 2.5000 min), prefix must be "$" not "EUR"
+    assert "$2.50" in resp.text, (
         "Dollar-prefixed price not rendered for mixed-currency card; "
         "_best_currency should be None for mixed currencies (falls back to '$')"
     )

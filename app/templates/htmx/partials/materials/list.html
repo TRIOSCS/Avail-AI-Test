@@ -6,6 +6,10 @@
             section — set when q matches fru_links, see fru_section.html).
   Called by: htmx_views.py materials_faceted_partial endpoint.
   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js materialsFilter().
+
+  Layout: 7-column condensed table — MPN · Description · Manufacturer (category folded
+  in as a muted sub-line) · Status (enrichment-trust + lifecycle + condition badges,
+  merged) · Vendors · Best Price · Last Seen. Density via .compact-table--dense (scoped).
 #}
 
 {# FRU crosswalk — renders only when q hits fru_links (forward matrix and/or
@@ -16,13 +20,15 @@
 {% include "htmx/partials/materials/fru_section.html" %}
 {% endif %}
 
-{# Live result count — re-renders every filters-changed cycle (the feedback loop). #}
+{# Live result count — re-renders every filters-changed cycle (the feedback loop).
+   Match-framed: "N results [in <commodity>] [· matching "<q>"]" reads clearly as how
+   many parts matched the current search/filters (vs the bare "N parts"). #}
 <div class="flex items-baseline gap-2 mb-2 px-1">
   <span class="text-sm font-semibold text-gray-700 tabular-nums">{{ "{:,}".format(total) }}</span>
-  <span class="text-sm text-gray-500">{% if commodity_display %}{{ commodity_display }} {% endif %}part{{ '' if total == 1 else 's' }}</span>
+  <span class="text-sm text-gray-500">result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} &middot; matching &ldquo;{{ q }}&rdquo;{% endif %}</span>
 </div>
 {# Screen-reader announcement of the new count on each swap. #}
-<div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} {% if commodity_display %}{{ commodity_display }} {% endif %}parts match</div>
+<div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} matching {{ q }}{% endif %}</div>
 
 {# Table #}
 <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
@@ -44,20 +50,20 @@
     'Pulled': 'bg-rose-50 text-rose-700 border-rose-200',
     'Unknown': 'bg-gray-100 text-gray-600 border-gray-200',
   } %}
+  {# Enrichment-status values that render a trust badge (everything else → no badge). #}
+  {% set trust_states = ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_found', 'not_catalogued'] %}
   {% if materials %}
   <div class="overflow-x-auto">
-    <table class="compact-table">
+    <table class="compact-table compact-table--dense">
       <thead>
         <tr>
           <th class="text-left">MPN</th>
           <th class="text-left">Description</th>
           <th class="text-left">Manufacturer</th>
-          <th class="text-left">Category</th>
-          <th class="text-left">Lifecycle</th>
           <th class="text-left">Status</th>
           <th class="text-right">Vendors</th>
           <th class="text-right">Best Price</th>
-          <th class="text-left">Last Searched</th>
+          <th class="text-left">Last Seen</th>
         </tr>
       </thead>
       <tbody>
@@ -93,8 +99,8 @@
             <div class="flex flex-wrap gap-1 mt-0.5">
               {% for spec in m._primary_specs[:3] %}
               {# title keeps the label visible on hover when the commodity-scoped
-                 rendering shows the value only. #}
-              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data"
+                 rendering shows the value only. leading-none trims pill height. #}
+              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] leading-none text-gray-500 rounded font-data"
                     title="{{ spec.label }}: {{ spec.value }}">
                 {%- if not commodity and spec.label %}{{ spec.label }}: {% endif %}{{ spec.value }}
               </span>
@@ -103,19 +109,60 @@
             {% endif %}
           </td>
           <td class="td-label text-gray-500 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
-          {# Dual-brand cell: "IBM · Seagate Technology" when brand (OEM label) and
-             manufacturer (actual maker) are both set and DIFFERENT COMPANIES
-             (m._show_maker_suffix — the view compares NORMALIZED forms, so an alias
-             pair like "Hewlett Packard Enterprise"/"HP" renders once, never as a
-             tautological "label · maker"); one value when equal or single; "--" when
-             neither. "·" is the existing codebase idiom (workspace.html,
-             sourcing/results.html). #}
-          <td class="td-label text-gray-600 truncate max-w-[160px]"
-              title="{{ m.brand or m.manufacturer or '' }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}">
-            {{ m.brand or m.manufacturer or "--" }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}</td>
-          <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
+          {# Dual-brand cell with category folded in as a muted sub-line (no standalone
+             Category column). Dual-brand: "IBM · Seagate Technology" when brand (OEM
+             label) and manufacturer (actual maker) are both set and DIFFERENT COMPANIES
+             (m._show_maker_suffix — the view compares NORMALIZED forms, so an alias pair
+             like "Hewlett Packard Enterprise"/"HP" renders once, never a tautological
+             "label · maker"); one value when equal or single; "--" when neither. "·" is
+             the existing codebase idiom (workspace.html, sourcing/results.html). #}
+          <td class="td-label text-gray-600 max-w-[160px]">
+            <div class="truncate" title="{{ m.brand or m.manufacturer or '' }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}">
+              {{ m.brand or m.manufacturer or "--" }}{% if m._show_maker_suffix %} · {{ m.manufacturer }}{% endif %}</div>
+            {% if m.category %}
+            <div class="text-[11px] text-gray-400 truncate" title="Category: {{ m.category }}">{{ m.category }}</div>
+            {% endif %}
+          </td>
+          {# Status: enrichment-trust badge + lifecycle + condition, merged into one
+             wrapping badge group (was two separate columns). #}
           <td>
             <div class="flex flex-wrap items-center gap-1">
+              {% set es = m.enrichment_status %}
+              {% if es == "verified" %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
+                    title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
+                VERIFIED
+              </span>
+              {% elif es == "web_sourced" %}
+              {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+              <a href="{{ _u or '#' }}" target="_blank" rel="noopener"
+                 class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-sky-50 text-sky-700 border-sky-200"
+                 title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
+                WEB-SOURCED
+              </a>
+              {% elif es == "oem_sourced" %}
+              {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+              <a href="{{ _ou or '#' }}" target="_blank" rel="noopener"
+                 class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200"
+                 title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
+                OEM-SOURCED
+              </a>
+              {% elif es == "ai_inferred" %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
+                    title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">
+                AI GUESS · RECONFIRM
+              </span>
+              {% elif es == "not_found" %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-500 border-gray-200"
+                    title="No authoritative source found this part">
+                NOT FOUND
+              </span>
+              {% elif es == "not_catalogued" %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-slate-100 text-slate-600 border-slate-300"
+                    title="Recognised OEM service/FRU part; no public specs published">
+                NOT CATALOGUED
+              </span>
+              {% endif %}
               {% if m.lifecycle_status %}
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
                 {{ m.lifecycle_status|upper }}
@@ -127,55 +174,17 @@
                 {{ m.condition|upper }}
               </span>
               {% endif %}
-              {% if not m.lifecycle_status and not m.condition %}
+              {% if es not in trust_states and not m.lifecycle_status and not m.condition %}
               <span class="text-xs text-gray-400">--</span>
               {% endif %}
             </div>
           </td>
-          <td>
-            {% set es = m.enrichment_status %}
-            {% if es == "verified" %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
-                  title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
-              VERIFIED
-            </span>
-            {% elif es == "web_sourced" %}
-            {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-            <a href="{{ _u or '#' }}" target="_blank" rel="noopener"
-               class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-sky-50 text-sky-700 border-sky-200"
-               title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
-              WEB-SOURCED
-            </a>
-            {% elif es == "oem_sourced" %}
-            {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
-            <a href="{{ _ou or '#' }}" target="_blank" rel="noopener"
-               class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200"
-               title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
-              OEM-SOURCED
-            </a>
-            {% elif es == "ai_inferred" %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
-                  title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">
-              AI GUESS · RECONFIRM
-            </span>
-            {% elif es == "not_found" %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-500 border-gray-200"
-                  title="No authoritative source found this part">
-              NOT FOUND
-            </span>
-            {% elif es == "not_catalogued" %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-slate-100 text-slate-600 border-slate-300"
-                  title="Recognised OEM service/FRU part; no public specs published">
-              NOT CATALOGUED
-            </span>
-            {% else %}
-            <span class="text-xs text-gray-400">--</span>
-            {% endif %}
-          </td>
           <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
           <td class="text-right">
             {% if m._best_price is not none %}
-            <span class="text-emerald-700 font-medium">{{ '$' if (m._best_currency or 'USD') == 'USD' else m._best_currency ~ ' ' }}{{ "%.4f"|format(m._best_price) }}</span>
+            {# 2 decimals at/above $1; keep 4 for sub-dollar parts (passives) so they
+               don't collapse to $0.00. Matches _vendor_row.html "best price seen". #}
+            <span class="text-emerald-700 font-medium">{{ '$' if (m._best_currency or 'USD') == 'USD' else m._best_currency ~ ' ' }}{{ ("%.2f" if m._best_price >= 1 else "%.4f")|format(m._best_price) }}</span>
             {% else %}
             <span class="text-gray-400 text-xs">--</span>
             {% endif %}
