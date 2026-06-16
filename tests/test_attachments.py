@@ -21,15 +21,14 @@ from app.models import (
 )
 
 
-@pytest.fixture()
-def att_client(db_session: Session, test_user: User) -> TestClient:
-    """TestClient with auth overrides and access_token set."""
+def _client_with_token(db_session: Session, test_user: User, access_token: str | None):
+    """Yield a TestClient with auth overrides and the given access_token on
+    test_user."""
     from app.database import get_db
     from app.dependencies import require_buyer, require_user
     from app.main import app
 
-    # Set access_token on test user for OneDrive operations
-    test_user.access_token = "fake-token-for-testing"
+    test_user.access_token = access_token
     db_session.commit()
 
     def _override_db():
@@ -48,6 +47,18 @@ def att_client(db_session: Session, test_user: User) -> TestClient:
     finally:
         for dep in [get_db, require_user, require_buyer]:
             app.dependency_overrides.pop(dep, None)
+
+
+@pytest.fixture()
+def att_client(db_session: Session, test_user: User) -> TestClient:
+    """TestClient with auth overrides and access_token set."""
+    yield from _client_with_token(db_session, test_user, "fake-token-for-testing")
+
+
+def _first_requirement(db_session: Session, test_requisition) -> Requirement:
+    """The first Requirement of test_requisition (created by the requisition
+    fixture)."""
+    return db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -176,7 +187,7 @@ def test_delete_requisition_attachment_not_found(att_client):
 
 def test_list_requirement_attachments_empty(att_client, test_requisition, db_session):
     """GET /api/requirements/{id}/attachments returns empty list when no files."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = att_client.get(f"/api/requirements/{req.id}/attachments")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -184,7 +195,7 @@ def test_list_requirement_attachments_empty(att_client, test_requisition, db_ses
 
 def test_list_requirement_attachments_with_data(att_client, db_session, test_requisition, test_user):
     """Attachments appear in the requirement list response."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="spec.pdf",
@@ -212,7 +223,7 @@ def test_list_requirement_attachments_not_found(att_client):
 @patch("app.http_client.http")
 def test_upload_requirement_attachment(mock_http, _mock_token, att_client, test_requisition, db_session):
     """POST /api/requirements/{id}/attachments uploads to OneDrive."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     mock_resp = MagicMock()
     mock_resp.status_code = 201
     mock_resp.json.return_value = {"id": "od-req-456", "webUrl": "https://onedrive.example.com/spec"}
@@ -238,7 +249,7 @@ def test_upload_requirement_attachment_not_found(att_client):
 
 def test_delete_requirement_attachment(att_client, db_session, test_requisition, test_user):
     """DELETE /api/requirement-attachments/{id} removes the record."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="remove-me.pdf",
@@ -268,29 +279,7 @@ def test_delete_requirement_attachment_not_found(att_client):
 @pytest.fixture()
 def notoken_client(db_session: Session, test_user: User) -> TestClient:
     """TestClient with auth overrides but NO access_token."""
-    from app.database import get_db
-    from app.dependencies import require_buyer, require_user
-    from app.main import app
-
-    test_user.access_token = None
-    db_session.commit()
-
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return test_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    app.dependency_overrides[require_buyer] = _override_user
-
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        for dep in [get_db, require_user, require_buyer]:
-            app.dependency_overrides.pop(dep, None)
+    yield from _client_with_token(db_session, test_user, None)
 
 
 # ── Requisition: no access_token → 401 (line 1251) ──────────────────
@@ -431,7 +420,7 @@ def test_delete_requisition_onedrive_failure(
 @patch("app.http_client.http")
 def test_upload_requirement_too_large(mock_http, att_client, test_requisition, db_session):
     """requisitions.py line 1393: requirement upload > 10 MB → 400."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     big_content = b"x" * (10 * 1024 * 1024 + 1)
     resp = att_client.post(
         f"/api/requirements/{req.id}/attachments",
@@ -442,7 +431,7 @@ def test_upload_requirement_too_large(mock_http, att_client, test_requisition, d
 
 def test_upload_requirement_no_token(notoken_client, test_requisition, db_session):
     """requisitions.py line 1395: no access_token → 401."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = notoken_client.post(
         f"/api/requirements/{req.id}/attachments",
         files={"file": ("test.pdf", BytesIO(b"data"), "application/pdf")},
@@ -457,7 +446,7 @@ def test_upload_requirement_no_token(notoken_client, test_requisition, db_sessio
 @patch("app.http_client.http")
 def test_upload_requirement_onedrive_error(mock_http, _mock_token, att_client, test_requisition, db_session):
     """requisitions.py lines 1410-1411: OneDrive upload failure → 502."""
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     mock_resp = MagicMock()
     mock_resp.status_code = 500
     mock_resp.text = "Internal Server Error"
@@ -479,7 +468,7 @@ def test_delete_requirement_with_onedrive(mock_http, mock_token, att_client, db_
     """requisitions.py lines 1443-1450: delete attachment + OneDrive item."""
     mock_http.delete = AsyncMock(return_value=MagicMock(status_code=204))
 
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="onedrive-req-file.pdf",
@@ -504,7 +493,7 @@ def test_delete_requirement_onedrive_failure(
     """requisitions.py lines 1451-1452: OneDrive delete fails → still succeeds."""
     mock_http.delete = AsyncMock(side_effect=TimeoutError("timed out"))
 
-    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="fail-req-delete.pdf",

@@ -10,6 +10,8 @@ Depends on: app/services/specialty_detector.py, conftest.py
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import Offer, Requirement, Requisition, Sighting, User, VendorCard
 from app.services.specialty_detector import (
     analyze_vendor_specialties,
@@ -21,58 +23,61 @@ from app.services.specialty_detector import (
 
 
 class TestDetectBrandsFromText:
-    def test_empty_text(self):
-        assert detect_brands_from_text("") == []
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            pytest.param("", [], id="empty_text"),
+            pytest.param(None, [], id="none_text"),
+            pytest.param("This text has no brand names whatsoever", [], id="no_match"),
+        ],
+    )
+    def test_returns_empty(self, text, expected):
+        assert detect_brands_from_text(text) == expected
 
-    def test_none_text(self):
-        assert detect_brands_from_text(None) == []
-
-    def test_single_brand(self):
-        result = detect_brands_from_text("We have Intel processors in stock")
-        assert "Intel" in result
-
-    def test_multiple_brands(self):
-        result = detect_brands_from_text("Intel and AMD compete in the CPU market")
-        assert "Intel" in result
-        assert "AMD" in result
-
-    def test_case_insensitive(self):
-        result = detect_brands_from_text("texas instruments makes great chips")
-        assert "Texas Instruments" in result
-
-    def test_no_match(self):
-        result = detect_brands_from_text("This text has no brand names whatsoever")
-        assert result == []
-
-    def test_word_boundary_respected(self):
-        """'NXP' should match, but should not match inside 'UNEXPECTED'."""
-        result = detect_brands_from_text("NXP semiconductors")
-        assert "NXP" in result
-
-    def test_special_chars_escaped(self):
-        """3M has special regex implications but should still match."""
-        result = detect_brands_from_text("3M connectors are reliable")
-        assert "3M" in result
+    @pytest.mark.parametrize(
+        "text,expected_brands",
+        [
+            pytest.param("We have Intel processors in stock", ["Intel"], id="single_brand"),
+            pytest.param("Intel and AMD compete in the CPU market", ["Intel", "AMD"], id="multiple_brands"),
+            pytest.param("texas instruments makes great chips", ["Texas Instruments"], id="case_insensitive"),
+            # 'NXP' should match, but should not match inside 'UNEXPECTED'.
+            pytest.param("NXP semiconductors", ["NXP"], id="word_boundary_respected"),
+            # 3M has special regex implications but should still match.
+            pytest.param("3M connectors are reliable", ["3M"], id="special_chars_escaped"),
+        ],
+    )
+    def test_detects_brands(self, text, expected_brands):
+        result = detect_brands_from_text(text)
+        for brand in expected_brands:
+            assert brand in result
 
 
 # ── detect_commodities_from_text ─────────────────────────────────────
 
 
 class TestDetectCommoditiesFromText:
-    def test_empty_text(self):
-        assert detect_commodities_from_text("") == []
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            pytest.param("", [], id="empty_text"),
+            pytest.param(None, [], id="none_text"),
+            pytest.param("hello world foo bar", [], id="no_match"),
+        ],
+    )
+    def test_returns_empty(self, text, expected):
+        assert detect_commodities_from_text(text) == expected
 
-    def test_none_text(self):
-        assert detect_commodities_from_text(None) == []
-
-    def test_single_commodity(self):
-        result = detect_commodities_from_text("DDR4 SDRAM module 16GB")
-        assert "dram" in result
-
-    def test_multiple_commodities(self):
-        result = detect_commodities_from_text("SSD and DDR SDRAM module")
-        assert "dram" in result
-        assert "ssd" in result
+    @pytest.mark.parametrize(
+        "text,expected_commodities",
+        [
+            pytest.param("DDR4 SDRAM module 16GB", ["dram"], id="single_commodity"),
+            pytest.param("SSD and DDR SDRAM module", ["dram", "ssd"], id="multiple_commodities"),
+        ],
+    )
+    def test_detects_commodities(self, text, expected_commodities):
+        result = detect_commodities_from_text(text)
+        for commodity in expected_commodities:
+            assert commodity in result
 
     def test_sorted_output(self):
         result = detect_commodities_from_text("resistor and capacitor and inductor")
@@ -82,10 +87,6 @@ class TestDetectCommoditiesFromText:
         """Multiple keywords mapping to same category should not duplicate."""
         result = detect_commodities_from_text("ddr sdram dimm rdimm")
         assert result.count("dram") == 1
-
-    def test_no_match(self):
-        result = detect_commodities_from_text("hello world foo bar")
-        assert result == []
 
 
 # ── analyze_vendor_specialties (DB tests) ────────────────────────────

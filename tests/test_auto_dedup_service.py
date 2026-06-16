@@ -62,6 +62,19 @@ def _make_company(db: Session, name: str, **kw) -> Company:
     return co
 
 
+def _candidate(keep_id: int, remove_id: int, score: int = 99, *, auto_keep_id: int = None) -> dict:
+    """Build a company dedup candidate.
+
+    company_a is the keeper unless auto_keep_id overrides.
+    """
+    return {
+        "company_a": {"id": keep_id},
+        "company_b": {"id": remove_id},
+        "auto_keep_id": keep_id if auto_keep_id is None else auto_keep_id,
+        "score": score,
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════
 # run_auto_dedup (top-level)
 # ══════════════════════════════════════════════════════════════════════
@@ -240,14 +253,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corp Dup")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=99)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
@@ -264,14 +270,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corporation")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 95,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=95)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.auto_dedup_service._ai_confirm_company_merge", return_value=True) as mock_ai:
@@ -292,14 +291,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=user2.id)
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=99)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
@@ -317,14 +309,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=user.id)
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=99)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
@@ -340,14 +325,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Dup", account_owner_id=None)
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=99)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
@@ -365,16 +343,7 @@ class TestDedupCompanies:
             companies.append(co)
         db_session.commit()
 
-        candidates = []
-        for i in range(0, 24, 2):
-            candidates.append(
-                {
-                    "company_a": {"id": companies[i].id},
-                    "company_b": {"id": companies[i + 1].id},
-                    "auto_keep_id": companies[i].id,
-                    "score": 99,
-                }
-            )
+        candidates = [_candidate(companies[i].id, companies[i + 1].id, score=99) for i in range(0, 24, 2)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies"):
@@ -393,8 +362,8 @@ class TestDedupCompanies:
         db_session.commit()
 
         candidates = [
-            {"company_a": {"id": keep1.id}, "company_b": {"id": rem1.id}, "auto_keep_id": keep1.id, "score": 99},
-            {"company_a": {"id": keep2.id}, "company_b": {"id": rem2.id}, "auto_keep_id": keep2.id, "score": 99},
+            _candidate(keep1.id, rem1.id, score=99),
+            _candidate(keep2.id, rem2.id, score=99),
         ]
 
         call_count = 0
@@ -418,14 +387,7 @@ class TestDedupCompanies:
         keep = _make_company(db_session, "Real Co")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": 99999},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, 99999, score=99)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
@@ -442,14 +404,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Acme Corporation")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 94,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=94)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.auto_dedup_service._ai_confirm_company_merge", return_value=False):
@@ -467,14 +422,7 @@ class TestDedupCompanies:
         remove = _make_company(db_session, "Remove")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": keep.id},
-                "company_b": {"id": remove.id},
-                "auto_keep_id": keep.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(keep.id, remove.id, score=99, auto_keep_id=keep.id)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
@@ -490,14 +438,7 @@ class TestDedupCompanies:
         co_b = _make_company(db_session, "CoB")
         db_session.commit()
 
-        candidates = [
-            {
-                "company_a": {"id": co_a.id},
-                "company_b": {"id": co_b.id},
-                "auto_keep_id": co_b.id,
-                "score": 99,
-            }
-        ]
+        candidates = [_candidate(co_a.id, co_b.id, score=99, auto_keep_id=co_b.id)]
 
         with patch("app.company_utils.find_company_dedup_candidates", return_value=candidates):
             with patch("app.services.company_merge_service.merge_companies") as mock_merge:
@@ -512,67 +453,50 @@ class TestDedupCompanies:
 
 
 class TestAIConfirmation:
-    def test_ai_confirm_vendor_merge_true(self):
-        """Should return True when Claude says same entity."""
+    @pytest.mark.parametrize(
+        ("claude_return", "claude_side_effect", "expected"),
+        [
+            pytest.param(True, None, True, id="true"),
+            pytest.param(False, None, False, id="false"),
+            pytest.param(None, RuntimeError("API error"), False, id="exception"),
+        ],
+    )
+    def test_ai_confirm_vendor_merge(self, claude_return, claude_side_effect, expected):
+        """Mirrors _ask_claude_merge; exception falls back to False (safe default)."""
         from app.services.auto_dedup_service import _ai_confirm_vendor_merge
 
-        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=True):
+        with patch(
+            "app.services.auto_dedup_service._ask_claude_merge",
+            new_callable=AsyncMock,
+            return_value=claude_return,
+            side_effect=claude_side_effect,
+        ):
             result = _ai_confirm_vendor_merge("Arrow Electronics", "Arrow Elec", 95)
 
-        assert result is True
+        assert result is expected
 
-    def test_ai_confirm_vendor_merge_false(self):
-        """Should return False when Claude says different entity."""
-        from app.services.auto_dedup_service import _ai_confirm_vendor_merge
-
-        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=False):
-            result = _ai_confirm_vendor_merge("Arrow Electronics", "Digi-Key", 92)
-
-        assert result is False
-
-    def test_ai_confirm_vendor_merge_exception(self):
-        """Should return False on exception (safe default)."""
-        from app.services.auto_dedup_service import _ai_confirm_vendor_merge
-
-        with patch(
-            "app.services.auto_dedup_service._ask_claude_merge",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API error"),
-        ):
-            result = _ai_confirm_vendor_merge("A", "B", 95)
-
-        assert result is False
-
-    def test_ai_confirm_company_merge_true(self):
-        """Should return True when Claude confirms company match."""
-        from app.services.auto_dedup_service import _ai_confirm_company_merge
-
-        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=True):
-            result = _ai_confirm_company_merge("Acme Corp", "ACME Corporation", "acme.com", "acme.com", 95)
-
-        assert result is True
-
-    def test_ai_confirm_company_merge_no_domains(self):
-        """Should handle None domains gracefully."""
-        from app.services.auto_dedup_service import _ai_confirm_company_merge
-
-        with patch("app.services.auto_dedup_service._ask_claude_merge", new_callable=AsyncMock, return_value=False):
-            result = _ai_confirm_company_merge("A", "B", None, None, 93)
-
-        assert result is False
-
-    def test_ai_confirm_company_merge_exception(self):
-        """Should return False on exception."""
+    @pytest.mark.parametrize(
+        ("domain_a", "domain_b", "claude_return", "claude_side_effect", "expected"),
+        [
+            pytest.param("acme.com", "acme.com", True, None, True, id="true"),
+            pytest.param(None, None, False, None, False, id="no_domains"),
+            pytest.param(None, None, None, RuntimeError("boom"), False, id="exception"),
+        ],
+    )
+    def test_ai_confirm_company_merge(self, domain_a, domain_b, claude_return, claude_side_effect, expected):
+        """Mirrors _ask_claude_merge; None domains handled gracefully; exception →
+        False."""
         from app.services.auto_dedup_service import _ai_confirm_company_merge
 
         with patch(
             "app.services.auto_dedup_service._ask_claude_merge",
             new_callable=AsyncMock,
-            side_effect=RuntimeError("boom"),
+            return_value=claude_return,
+            side_effect=claude_side_effect,
         ):
-            result = _ai_confirm_company_merge("A", "B", None, None, 95)
+            result = _ai_confirm_company_merge("Acme Corp", "ACME Corporation", domain_a, domain_b, 95)
 
-        assert result is False
+        assert result is expected
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -581,63 +505,26 @@ class TestAIConfirmation:
 
 
 class TestAskClaudeMerge:
-    def test_returns_true_high_confidence(self):
-        """Should return True when same_entity=True and confidence >= 0.85."""
+    @pytest.mark.parametrize(
+        ("claude_response", "expected"),
+        [
+            pytest.param({"same_entity": True, "confidence": 0.95}, True, id="high_confidence"),
+            pytest.param({"same_entity": True, "confidence": 0.60}, False, id="low_confidence"),
+            pytest.param({"same_entity": False, "confidence": 0.99}, False, id="not_same"),
+            pytest.param(None, False, id="none"),
+            pytest.param({}, False, id="missing_keys"),
+            pytest.param({"same_entity": True, "confidence": 0.85}, True, id="boundary_confidence_085"),
+        ],
+    )
+    def test_decision(self, claude_response, expected):
+        """same_entity=True AND confidence >= 0.85 (inclusive) returns True; otherwise
+        False."""
         from app.services.auto_dedup_service import _ask_claude_merge
 
-        mock_result = {"same_entity": True, "confidence": 0.95}
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=claude_response):
             result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
 
-        assert result is True
-
-    def test_returns_false_low_confidence(self):
-        """Should return False when confidence < 0.85."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        mock_result = {"same_entity": True, "confidence": 0.60}
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
-
-        assert result is False
-
-    def test_returns_false_not_same(self):
-        """Should return False when same_entity=False."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        mock_result = {"same_entity": False, "confidence": 0.99}
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
-
-        assert result is False
-
-    def test_returns_false_on_none(self):
-        """Should return False when Claude returns None."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
-
-        assert result is False
-
-    def test_returns_false_missing_keys(self):
-        """Should return False when response is missing keys."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={}):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
-
-        assert result is False
-
-    def test_boundary_confidence_085(self):
-        """Confidence exactly at 0.85 should return True."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        mock_result = {"same_entity": True, "confidence": 0.85}
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("Are A and B the same?"))
-
-        assert result is True
+        assert result is expected
 
 
 # ══════════════════════════════════════════════════════════════════════

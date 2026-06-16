@@ -298,6 +298,18 @@ class TestUnmatchedEndpoints:
             )
         db_session.commit()
 
+    def _make_unmatched(self, db_session, user_id, email, ext_id):
+        a = ActivityLog(
+            user_id=user_id,
+            activity_type="email_received",
+            channel="email",
+            contact_email=email,
+            external_id=ext_id,
+        )
+        db_session.add(a)
+        db_session.commit()
+        return a
+
     def test_list_unmatched_admin(self, admin_client, db_session, admin_user):
         self._seed_unmatched(db_session, admin_user.id)
 
@@ -314,15 +326,7 @@ class TestUnmatchedEndpoints:
         assert resp.status_code == 403
 
     def test_attribute_endpoint(self, admin_client, db_session, admin_user, test_company):
-        a = ActivityLog(
-            user_id=admin_user.id,
-            activity_type="email_received",
-            channel="email",
-            contact_email="x@y.com",
-            external_id="attr-api-1",
-        )
-        db_session.add(a)
-        db_session.commit()
+        a = self._make_unmatched(db_session, admin_user.id, "x@y.com", "attr-api-1")
 
         resp = admin_client.post(
             f"/api/activities/{a.id}/attribute",
@@ -341,15 +345,7 @@ class TestUnmatchedEndpoints:
         assert resp.status_code == 404
 
     def test_attribute_nonexistent_company(self, admin_client, db_session, admin_user):
-        a = ActivityLog(
-            user_id=admin_user.id,
-            activity_type="email_received",
-            channel="email",
-            contact_email="x@y.com",
-            external_id="attr-api-2",
-        )
-        db_session.add(a)
-        db_session.commit()
+        a = self._make_unmatched(db_session, admin_user.id, "x@y.com", "attr-api-2")
 
         resp = admin_client.post(
             f"/api/activities/{a.id}/attribute",
@@ -358,15 +354,7 @@ class TestUnmatchedEndpoints:
         assert resp.status_code == 404
 
     def test_dismiss_endpoint(self, admin_client, db_session, admin_user):
-        a = ActivityLog(
-            user_id=admin_user.id,
-            activity_type="email_received",
-            channel="email",
-            contact_email="dismiss@y.com",
-            external_id="dis-api-1",
-        )
-        db_session.add(a)
-        db_session.commit()
+        a = self._make_unmatched(db_session, admin_user.id, "dismiss@y.com", "dis-api-1")
 
         resp = admin_client.post(f"/api/activities/{a.id}/dismiss")
         assert resp.status_code == 200
@@ -381,29 +369,13 @@ class TestUnmatchedEndpoints:
         assert resp.status_code == 404
 
     def test_dismiss_non_admin_forbidden(self, buyer_client, db_session, test_user):
-        a = ActivityLog(
-            user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
-            contact_email="x@y.com",
-            external_id="dis-api-buyer",
-        )
-        db_session.add(a)
-        db_session.commit()
+        a = self._make_unmatched(db_session, test_user.id, "x@y.com", "dis-api-buyer")
 
         resp = buyer_client.post(f"/api/activities/{a.id}/dismiss")
         assert resp.status_code == 403
 
     def test_activity_to_dict_includes_dismissed_at(self, admin_client, db_session, admin_user):
-        a = ActivityLog(
-            user_id=admin_user.id,
-            activity_type="email_received",
-            channel="email",
-            contact_email="dict@y.com",
-            external_id="dict-1",
-        )
-        db_session.add(a)
-        db_session.commit()
+        self._make_unmatched(db_session, admin_user.id, "dict@y.com", "dict-1")
 
         resp = admin_client.get("/api/activities/unmatched")
         item = resp.json()["items"][0]

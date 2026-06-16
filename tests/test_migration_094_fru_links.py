@@ -11,9 +11,11 @@ Depends on: alembic/versions/094_fru_links.py
 import importlib.util
 import os
 
+import pytest
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.pool import StaticPool
 
 # Load the migration module directly since alembic/versions has no __init__.py.
@@ -74,24 +76,15 @@ class TestExecution:
         assert {"ix_fru_links_fru_norm", "ix_fru_links_related_norm"} <= index_names
 
         # The unique key must reject duplicate edges.
+        insert_edge = text(
+            "INSERT INTO fru_links (fru_raw, fru_norm, related_raw, related_norm, rel_kind, source_sheet) "
+            "VALUES ('00AJ001', '00aj001', '68Y7789', '68y7789', 'ibm_11s', 'Main')"
+        )
         with engine.begin() as conn:
-            conn.execute(
-                text(
-                    "INSERT INTO fru_links (fru_raw, fru_norm, related_raw, related_norm, rel_kind, source_sheet) "
-                    "VALUES ('00AJ001', '00aj001', '68Y7789', '68y7789', 'ibm_11s', 'Main')"
-                )
-            )
-        import pytest
-        from sqlalchemy.exc import IntegrityError
-
+            conn.execute(insert_edge)
         with pytest.raises(IntegrityError):
             with engine.begin() as conn:
-                conn.execute(
-                    text(
-                        "INSERT INTO fru_links (fru_raw, fru_norm, related_raw, related_norm, rel_kind, source_sheet) "
-                        "VALUES ('00AJ001', '00aj001', '68Y7789', '68y7789', 'ibm_11s', 'Main')"
-                    )
-                )
+                conn.execute(insert_edge)
 
         self._run(engine, _mod.downgrade)
         assert not inspect(engine).has_table("fru_links")

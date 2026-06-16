@@ -192,13 +192,14 @@ class TestEditOfferValueErrorBranchesDirect:
 
 
 class TestReviewResponseHtmxDirect:
-    async def test_mark_reviewed_success(self, db_session: Session, test_user: User):
-        """Lines 2803–2815: POST status=reviewed → vr.status = 'reviewed'."""
+    @pytest.mark.parametrize("status", ["reviewed", "rejected"])
+    async def test_mark_status_success(self, db_session: Session, test_user: User, status: str):
+        """Lines 2803–2815: POST status=reviewed/rejected → vr.status updated."""
         from app.routers.htmx_views import review_response_htmx
 
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
-        mock_req = _mock_form_request(fields={"status": "reviewed"})
+        mock_req = _mock_form_request(fields={"status": status})
         with patch("app.routers.htmx_views.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("response card")
             result = await review_response_htmx(
@@ -210,27 +211,7 @@ class TestReviewResponseHtmxDirect:
             )
         assert result.status_code == 200
         db_session.refresh(vr)
-        assert vr.status == "reviewed"
-
-    async def test_mark_rejected_success(self, db_session: Session, test_user: User):
-        """POST status=rejected → vr.status = 'rejected'."""
-        from app.routers.htmx_views import review_response_htmx
-
-        req = _make_req(db_session, test_user)
-        vr = _make_vendor_response(db_session, req)
-        mock_req = _mock_form_request(fields={"status": "rejected"})
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
-            mock_tpl.return_value = HTMLResponse("response card")
-            result = await review_response_htmx(
-                request=mock_req,
-                req_id=req.id,
-                response_id=vr.id,
-                user=test_user,
-                db=db_session,
-            )
-        assert result.status_code == 200
-        db_session.refresh(vr)
-        assert vr.status == "rejected"
+        assert vr.status == status
 
     async def test_invalid_status_raises_400(self, db_session: Session, test_user: User):
         """Invalid status → 400."""

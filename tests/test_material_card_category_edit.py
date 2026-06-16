@@ -50,6 +50,15 @@ def _toast(resp) -> dict | None:
     return json.loads(raw).get("showToast")
 
 
+def _seed_ti_alias(db: Session) -> None:
+    """Seed a real TI alias row so normalize_brand_name exercises the production (non-
+    pass-through) canonicalization path."""
+    from app.models import Manufacturer
+
+    db.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
+    db.commit()
+
+
 def test_manual_category_change_stamps_manual_provenance(client, db_session: Session):
     """A deliberate category change lands canonical with manual/100/1.0 provenance — not
     a raw write that leaves the old provenance attached to the new value."""
@@ -326,10 +335,7 @@ def test_unchanged_alias_manufacturer_not_restamped_with_seeded_alias_table(clie
     manufacturers table makes normalize_brand_name a pass-through, so this test seeds
     a real alias row to exercise the production path.)
     """
-    from app.models import Manufacturer
-
-    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
-    db_session.commit()
+    _seed_ti_alias(db_session)
     card = _card(db_session, "LM317T-ALIAS", manufacturer="TI")  # NULL provenance — legacy
 
     resp = client.put(
@@ -348,10 +354,7 @@ def test_canonical_resubmit_of_stored_alias_not_restamped(client, db_session: Se
     """Canonical-to-canonical equality: re-submitting the CANONICAL form of a stored
     alias ("Texas Instruments" over stored "TI") is the same maker, not an edit — it
     must not be re-stamped manual/100 either."""
-    from app.models import Manufacturer
-
-    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
-    db_session.commit()
+    _seed_ti_alias(db_session)
     card = _card(db_session, "LM317T-CANON", manufacturer="TI")
 
     resp = client.put(
@@ -368,10 +371,7 @@ def test_canonical_resubmit_of_stored_alias_not_restamped(client, db_session: Se
 def test_alias_manufacturer_change_still_lands_with_seeded_alias_table(client, db_session: Session):
     """A GENUINE maker change on an alias-stored card still routes through the ladder at
     manual/100 (the canonical-to-canonical guard must not eat real edits)."""
-    from app.models import Manufacturer
-
-    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
-    db_session.commit()
+    _seed_ti_alias(db_session)
     card = _card(db_session, "LM317T-EDIT", manufacturer="TI")
 
     resp = client.put(f"/v2/partials/materials/{card.id}", data={"manufacturer": "STMicroelectronics"})

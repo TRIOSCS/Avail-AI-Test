@@ -77,6 +77,25 @@ def _mock_http_response(status_code: int = 204, json_data: dict | None = None):
     return resp
 
 
+def _patch_valid_token(token: str | None):
+    """Patch get_valid_token (at its source module) to return the given token."""
+    return patch(
+        "app.scheduler.get_valid_token",
+        new_callable=AsyncMock,
+        return_value=token,
+    )
+
+
+def _patch_graph_delete(status_code: int):
+    """Patch the shared http client's delete to return a response with the given
+    status."""
+    return patch(
+        "app.http_client.http.delete",
+        new_callable=AsyncMock,
+        return_value=_mock_http_response(status_code),
+    )
+
+
 # ── Delete Requisition Attachment ────────────────────────────────────
 
 
@@ -90,18 +109,9 @@ class TestDeleteRequisitionAttachment:
 
     def test_uses_refreshed_token(self, client, req_att, db_session):
         """Delete endpoint must call get_valid_token and use the refreshed token."""
-        mock_resp = _mock_http_response(204)
         with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="refreshed-token-abc",
-            ) as mock_gvt,
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ) as mock_delete,
+            _patch_valid_token("refreshed-token-abc") as mock_gvt,
+            _patch_graph_delete(204) as mock_delete,
         ):
             resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
             assert resp.status_code == 200
@@ -113,69 +123,29 @@ class TestDeleteRequisitionAttachment:
 
     def test_expired_token_returns_401(self, client, req_att):
         """When get_valid_token returns None, endpoint must return 401."""
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
+        with _patch_valid_token(None):
             resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
             assert resp.status_code == 401
             assert "token expired" in resp.json()["error"].lower()
 
-    def test_graph_401_returns_401(self, client, req_att):
-        """When Graph API returns 401, endpoint must surface 401 to caller."""
-        mock_resp = _mock_http_response(401)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
+    @pytest.mark.parametrize(
+        "graph_status,expected_status,error_substr",
+        [
+            pytest.param(401, 401, "token expired", id="graph_401"),
+            pytest.param(403, 403, "access denied", id="graph_403"),
+        ],
+    )
+    def test_graph_auth_error_surfaced(self, client, req_att, graph_status, expected_status, error_substr):
+        """Graph API 401/403 responses must be surfaced to the caller."""
+        with _patch_valid_token("some-token"), _patch_graph_delete(graph_status):
             resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
-            assert resp.status_code == 401
-            assert "token expired" in resp.json()["error"].lower()
-
-    def test_graph_403_returns_403(self, client, req_att):
-        """When Graph API returns 403, endpoint must surface 403 to caller."""
-        mock_resp = _mock_http_response(403)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
-            resp = client.delete(f"/api/requisition-attachments/{req_att.id}")
-            assert resp.status_code == 403
-            assert "access denied" in resp.json()["error"].lower()
+            assert resp.status_code == expected_status
+            assert error_substr in resp.json()["error"].lower()
 
     def test_db_record_not_deleted_on_auth_failure(self, client, req_att, db_session):
         """On 401/403 from Graph, the DB record must NOT be deleted (prevent data
         leak)."""
-        mock_resp = _mock_http_response(401)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
+        with _patch_valid_token("some-token"), _patch_graph_delete(401):
             client.delete(f"/api/requisition-attachments/{req_att.id}")
             # Record should still exist
             att = db_session.get(RequisitionAttachment, req_att.id)
@@ -196,18 +166,9 @@ class TestDeleteRequirementAttachment:
 
     def test_uses_refreshed_token(self, client, reqmt_att, db_session):
         """Delete endpoint must call get_valid_token and use the refreshed token."""
-        mock_resp = _mock_http_response(204)
         with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="refreshed-token-xyz",
-            ) as mock_gvt,
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ) as mock_delete,
+            _patch_valid_token("refreshed-token-xyz") as mock_gvt,
+            _patch_graph_delete(204) as mock_delete,
         ):
             resp = client.delete(f"/api/requirement-attachments/{reqmt_att.id}")
             assert resp.status_code == 200
@@ -218,30 +179,14 @@ class TestDeleteRequirementAttachment:
 
     def test_expired_token_returns_401(self, client, reqmt_att):
         """When get_valid_token returns None, endpoint must return 401."""
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
+        with _patch_valid_token(None):
             resp = client.delete(f"/api/requirement-attachments/{reqmt_att.id}")
             assert resp.status_code == 401
             assert "token expired" in resp.json()["error"].lower()
 
     def test_graph_401_returns_401(self, client, reqmt_att):
         """When Graph API returns 401, endpoint must surface 401 to caller."""
-        mock_resp = _mock_http_response(401)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=mock_resp,
-            ),
-        ):
+        with _patch_valid_token("some-token"), _patch_graph_delete(401):
             resp = client.delete(f"/api/requirement-attachments/{reqmt_att.id}")
             assert resp.status_code == 401
 
@@ -262,11 +207,7 @@ class TestAttachFromOneDrive:
             "size": 4096,
         }
         with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="refreshed-link-token",
-            ) as mock_gvt,
+            _patch_valid_token("refreshed-link-token") as mock_gvt,
             patch(
                 "app.utils.graph_client.GraphClient",
             ) as MockGC,
@@ -285,11 +226,7 @@ class TestAttachFromOneDrive:
 
     def test_expired_token_returns_401(self, client, test_requisition):
         """When get_valid_token returns None, endpoint must return 401."""
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
+        with _patch_valid_token(None):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
                 json={"item_id": "od-123"},
@@ -297,16 +234,18 @@ class TestAttachFromOneDrive:
             assert resp.status_code == 401
             assert "token expired" in resp.json()["error"].lower()
 
-    def test_graph_auth_error_returns_401(self, client, test_requisition):
-        """When Graph returns InvalidAuthenticationToken error, endpoint must return
-        401."""
-        error_response = {"error": {"code": "InvalidAuthenticationToken", "message": "Token expired"}}
+    @pytest.mark.parametrize(
+        "error_code,expected_status",
+        [
+            pytest.param("InvalidAuthenticationToken", 401, id="auth_error"),
+            pytest.param("accessDenied", 403, id="access_denied"),
+        ],
+    )
+    def test_graph_error_surfaced(self, client, test_requisition, error_code, expected_status):
+        """Graph error codes (auth/access-denied) must map to the right HTTP status."""
+        error_response = {"error": {"code": error_code, "message": "denied"}}
         with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
+            _patch_valid_token("some-token"),
             patch(
                 "app.utils.graph_client.GraphClient",
             ) as MockGC,
@@ -317,25 +256,4 @@ class TestAttachFromOneDrive:
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
                 json={"item_id": "od-123"},
             )
-            assert resp.status_code == 401
-
-    def test_graph_access_denied_returns_403(self, client, test_requisition):
-        """When Graph returns accessDenied error, endpoint must return 403."""
-        error_response = {"error": {"code": "accessDenied", "message": "Forbidden"}}
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="some-token",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-            ) as MockGC,
-        ):
-            gc_instance = MockGC.return_value
-            gc_instance.get_json = AsyncMock(return_value=error_response)
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-123"},
-            )
-            assert resp.status_code == 403
+            assert resp.status_code == expected_status

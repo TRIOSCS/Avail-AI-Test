@@ -6,6 +6,8 @@ Depends on: conftest.py, nc_worker modules
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.services.nc_worker.circuit_breaker import CircuitBreaker
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.scheduler import SearchScheduler
@@ -13,44 +15,24 @@ from app.services.nc_worker.scheduler import SearchScheduler
 # ── Scheduler Tests ──────────────────────────────────────────────────
 
 
-def test_scheduler_is_business_hours_weekday():
-    """Business hours check works for weekday within range."""
-    cfg = NcConfig()
-    sched = SearchScheduler(cfg)
-
-    # Mock a Tuesday at 10 AM Eastern
-    with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-        mock_now = MagicMock()
-        mock_now.weekday.return_value = 1  # Tuesday
-        mock_now.hour = 10
-        mock_dt.now.return_value = mock_now
-        assert sched.is_business_hours() is True
-
-
-def test_scheduler_is_business_hours_weekend():
-    """Business hours are False on weekends."""
-    cfg = NcConfig()
-    sched = SearchScheduler(cfg)
+@pytest.mark.parametrize(
+    ("weekday", "hour", "expected"),
+    [
+        pytest.param(1, 10, True, id="weekday_within_range"),  # Tuesday 10 AM
+        pytest.param(5, 10, False, id="weekend"),  # Saturday 10 AM
+        pytest.param(4, 22, False, id="outside_hours"),  # Friday 10 PM (after 5 PM cutoff)
+    ],
+)
+def test_scheduler_is_business_hours(weekday, hour, expected):
+    """Business hours check honors weekday and configured hour range."""
+    sched = SearchScheduler(NcConfig())
 
     with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
         mock_now = MagicMock()
-        mock_now.weekday.return_value = 5  # Saturday
-        mock_now.hour = 10
+        mock_now.weekday.return_value = weekday
+        mock_now.hour = hour
         mock_dt.now.return_value = mock_now
-        assert sched.is_business_hours() is False
-
-
-def test_scheduler_is_business_hours_outside():
-    """Business hours are False outside the configured range (Friday 10 PM)."""
-    cfg = NcConfig()
-    sched = SearchScheduler(cfg)
-
-    with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-        mock_now = MagicMock()
-        mock_now.weekday.return_value = 4  # Friday
-        mock_now.hour = 22  # 10 PM (after 5 PM cutoff)
-        mock_dt.now.return_value = mock_now
-        assert sched.is_business_hours() is False
+        assert sched.is_business_hours() is expected
 
 
 def test_scheduler_next_delay_within_bounds():
@@ -145,32 +127,34 @@ def test_breaker_captcha_detection():
     assert breaker.is_open  # Second time, tripped
 
 
-def test_breaker_rate_limited():
-    """Rate limiting message trips the breaker."""
+@pytest.mark.parametrize(
+    ("body", "url", "expected_result", "expected_open"),
+    [
+        pytest.param(
+            "too many requests. please try again later.",
+            "https://www.netcomponents.com/error",
+            "RATE_LIMITED",
+            True,
+            id="rate_limited_trips",
+        ),
+        pytest.param(
+            "please log in",
+            "https://www.netcomponents.com/account/login",
+            "SESSION_EXPIRED",
+            False,
+            id="session_expired_no_trip",
+        ),
+    ],
+)
+def test_breaker_check_response_health(body, url, expected_result, expected_open):
+    """Rate limiting trips the breaker; a login page is a normal session expiry (no
+    trip)."""
     breaker = CircuitBreaker()
 
-    result = breaker.check_response_health(
-        200,
-        "too many requests. please try again later.",
-        "https://www.netcomponents.com/error",
-    )
+    result = breaker.check_response_health(200, body, url)
 
-    assert result == "RATE_LIMITED"
-    assert breaker.is_open
-
-
-def test_breaker_session_expired():
-    """Login page URL = SESSION_EXPIRED (normal, not a trip)."""
-    breaker = CircuitBreaker()
-
-    result = breaker.check_response_health(
-        200,
-        "please log in",
-        "https://www.netcomponents.com/account/login",
-    )
-
-    assert result == "SESSION_EXPIRED"
-    assert not breaker.is_open  # Not a trip
+    assert result == expected_result
+    assert bool(breaker.is_open) is expected_open
 
 
 def test_breaker_empty_results_streak():

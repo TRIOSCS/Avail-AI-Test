@@ -45,61 +45,46 @@ def _clear_scheduler_jobs():
 # ── _job_auto_archive() ───────────────────────────────────────────────
 
 
-def test_auto_archive_archives_stale(scheduler_db, test_user):
-    """Requisitions last searched >30 days ago get archived."""
-    old = Requisition(
-        name="OLD-001",
+@pytest.mark.parametrize(
+    ("name", "last_searched_at", "expected_status"),
+    [
+        pytest.param(
+            "OLD-001",
+            datetime.now(timezone.utc) - timedelta(days=45),
+            "archived",
+            id="stale_gets_archived",
+        ),
+        pytest.param(
+            "RECENT-001",
+            datetime.now(timezone.utc) - timedelta(days=5),
+            "active",
+            id="recent_skipped",
+        ),
+        pytest.param(
+            "UNSEARCHED-001",
+            None,
+            "active",
+            id="never_searched_skipped",
+        ),
+    ],
+)
+def test_auto_archive_by_last_searched(scheduler_db, test_user, name, last_searched_at, expected_status):
+    """Active requisitions are archived only when last searched >30 days ago."""
+    req = Requisition(
+        name=name,
         status="active",
         created_by=test_user.id,
-        last_searched_at=datetime.now(timezone.utc) - timedelta(days=45),
+        last_searched_at=last_searched_at,
     )
-    scheduler_db.add(old)
+    scheduler_db.add(req)
     scheduler_db.commit()
 
     from app.jobs.core_jobs import _job_auto_archive
 
     asyncio.run(_job_auto_archive())
 
-    scheduler_db.refresh(old)
-    assert old.status == "archived"
-
-
-def test_auto_archive_skips_recent(scheduler_db, test_user):
-    """Requisitions searched recently are not archived."""
-    recent = Requisition(
-        name="RECENT-001",
-        status="active",
-        created_by=test_user.id,
-        last_searched_at=datetime.now(timezone.utc) - timedelta(days=5),
-    )
-    scheduler_db.add(recent)
-    scheduler_db.commit()
-
-    from app.jobs.core_jobs import _job_auto_archive
-
-    asyncio.run(_job_auto_archive())
-
-    scheduler_db.refresh(recent)
-    assert recent.status == "active"
-
-
-def test_auto_archive_skips_never_searched(scheduler_db, test_user):
-    """Requisitions that have never been searched are not archived."""
-    unsearched = Requisition(
-        name="UNSEARCHED-001",
-        status="active",
-        created_by=test_user.id,
-        last_searched_at=None,
-    )
-    scheduler_db.add(unsearched)
-    scheduler_db.commit()
-
-    from app.jobs.core_jobs import _job_auto_archive
-
-    asyncio.run(_job_auto_archive())
-
-    scheduler_db.refresh(unsearched)
-    assert unsearched.status == "active"
+    scheduler_db.refresh(req)
+    assert req.status == expected_status
 
 
 def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
@@ -150,11 +135,39 @@ def test_auto_archive_error_handling(scheduler_db):
 # ── _job_token_refresh() ──────────────────────────────────────────────
 
 
-def test_token_refresh_refreshes_expired(scheduler_db, test_user):
-    """Users with expired tokens get refreshed."""
-    test_user.refresh_token = "rt_test_123"
-    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
-    test_user.access_token = "old_token"
+@pytest.mark.parametrize(
+    ("refresh_token", "access_token", "token_expires_at", "should_refresh"),
+    [
+        pytest.param(
+            "rt_test_123",
+            "old_token",
+            datetime.now(timezone.utc) - timedelta(hours=1),
+            True,
+            id="expired_gets_refreshed",
+        ),
+        pytest.param(
+            "rt_test_123",
+            "still_valid",
+            datetime.now(timezone.utc) + timedelta(hours=1),
+            False,
+            id="valid_skipped",
+        ),
+        pytest.param(
+            "rt_test_789",
+            None,
+            None,
+            True,
+            id="no_access_token_gets_refreshed",
+        ),
+    ],
+)
+def test_token_refresh_by_token_state(
+    scheduler_db, test_user, refresh_token, access_token, token_expires_at, should_refresh
+):
+    """Users are refreshed only when their access token is expired or missing."""
+    test_user.refresh_token = refresh_token
+    test_user.access_token = access_token
+    test_user.token_expires_at = token_expires_at
     scheduler_db.commit()
 
     with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
@@ -162,36 +175,10 @@ def test_token_refresh_refreshes_expired(scheduler_db, test_user):
         from app.jobs.core_jobs import _job_token_refresh
 
         asyncio.run(_job_token_refresh())
-        mock_refresh.assert_called_once()
-
-
-def test_token_refresh_skips_valid(scheduler_db, test_user):
-    """Users with valid tokens are not refreshed."""
-    test_user.refresh_token = "rt_test_123"
-    test_user.token_expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
-    test_user.access_token = "still_valid"
-    scheduler_db.commit()
-
-    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
-        from app.jobs.core_jobs import _job_token_refresh
-
-        asyncio.run(_job_token_refresh())
-        mock_refresh.assert_not_called()
-
-
-def test_token_refresh_refreshes_user_without_access_token(scheduler_db, test_user):
-    """Users with a refresh token but no access token get refreshed."""
-    test_user.refresh_token = "rt_test_789"
-    test_user.access_token = None
-    test_user.token_expires_at = None
-    scheduler_db.commit()
-
-    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
-        mock_refresh.return_value = "new_token"
-        from app.jobs.core_jobs import _job_token_refresh
-
-        asyncio.run(_job_token_refresh())
-        mock_refresh.assert_called_once()
+        if should_refresh:
+            mock_refresh.assert_called_once()
+        else:
+            mock_refresh.assert_not_called()
 
 
 def test_token_refresh_handles_error_per_user(scheduler_db, test_user):
@@ -443,24 +430,27 @@ def test_refresh_access_token_success():
         assert result == ("at_new", "rt_new")
 
 
-def test_refresh_access_token_failure_returns_none():
-    """Non-200 response from Azure AD returns None."""
+def _non_200_post():
     mock_response = MagicMock()
     mock_response.status_code = 400
     mock_response.text = "invalid_grant: The refresh token has expired"
+    return AsyncMock(return_value=mock_response)
 
+
+@pytest.mark.parametrize(
+    "post_mock_factory",
+    [
+        pytest.param(_non_200_post, id="non_200_response"),
+        pytest.param(
+            lambda: AsyncMock(side_effect=Exception("Connection refused")),
+            id="network_error",
+        ),
+    ],
+)
+def test_refresh_access_token_returns_none(post_mock_factory):
+    """Azure AD non-200 responses and network errors both return None."""
     with patch("app.utils.token_manager.http") as mock_http:
-        mock_http.post = AsyncMock(return_value=mock_response)
-        from app.utils.token_manager import _refresh_access_token
-
-        result = asyncio.run(_refresh_access_token("rt_bad", "cid", "cs", "tid"))
-        assert result is None
-
-
-def test_refresh_access_token_exception_returns_none():
-    """Network error during refresh returns None."""
-    with patch("app.utils.token_manager.http") as mock_http:
-        mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
+        mock_http.post = post_mock_factory()
         from app.utils.token_manager import _refresh_access_token
 
         result = asyncio.run(_refresh_access_token("rt", "cid", "cs", "tid"))
@@ -515,12 +505,53 @@ def test_batch_results_handles_error(scheduler_db):
 # ── _job_inbox_scan() ──────────────────────────────────────────────────
 
 
-def test_inbox_scan_scans_connected_user(scheduler_db, test_user):
-    """Connected users with stale last_inbox_scan are scanned."""
+@pytest.mark.parametrize(
+    ("access_token", "m365_connected", "last_inbox_scan", "should_scan"),
+    [
+        pytest.param(
+            "at_inbox",
+            True,
+            datetime.now(timezone.utc) - timedelta(hours=2),
+            True,
+            id="connected_stale_scanned",
+        ),
+        pytest.param(
+            "at_inbox",
+            False,
+            None,
+            False,
+            id="disconnected_skipped",
+        ),
+        pytest.param(
+            None,
+            True,
+            None,
+            False,
+            id="no_access_token_skipped",
+        ),
+        pytest.param(
+            "at_inbox",
+            True,
+            None,
+            True,
+            id="never_scanned_scanned",
+        ),
+        pytest.param(
+            "at_inbox",
+            True,
+            datetime.now(timezone.utc) - timedelta(minutes=5),
+            False,
+            id="recently_scanned_skipped",
+        ),
+    ],
+)
+def test_inbox_scan_eligibility(scheduler_db, test_user, access_token, m365_connected, last_inbox_scan, should_scan):
+    """A user is scanned only when connected, has an access token, and is past the
+    interval."""
     test_user.refresh_token = "rt_inbox"
-    test_user.access_token = "at_inbox"
-    test_user.m365_connected = True
-    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=2)
+    test_user.access_token = access_token
+    test_user.m365_connected = m365_connected
+    test_user.last_inbox_scan = last_inbox_scan
     scheduler_db.commit()
 
     with (
@@ -531,83 +562,10 @@ def test_inbox_scan_scans_connected_user(scheduler_db, test_user):
         from app.jobs.core_jobs import _job_inbox_scan
 
         asyncio.run(_job_inbox_scan())
-        mock_scan.assert_called_once()
-
-
-def test_inbox_scan_skips_disconnected_user(scheduler_db, test_user):
-    """Users without m365_connected=True are skipped."""
-    test_user.refresh_token = "rt_inbox"
-    test_user.access_token = "at_inbox"
-    test_user.m365_connected = False
-    test_user.last_inbox_scan = None
-    scheduler_db.commit()
-
-    with (
-        patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,
-        patch("app.config.settings") as mock_settings,
-    ):
-        mock_settings.inbox_scan_interval_min = 30
-        from app.jobs.core_jobs import _job_inbox_scan
-
-        asyncio.run(_job_inbox_scan())
-        mock_scan.assert_not_called()
-
-
-def test_inbox_scan_skips_user_without_access_token(scheduler_db, test_user):
-    """Users without an access_token are skipped even if connected."""
-    test_user.refresh_token = "rt_inbox"
-    test_user.access_token = None
-    test_user.m365_connected = True
-    test_user.last_inbox_scan = None
-    scheduler_db.commit()
-
-    with (
-        patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,
-        patch("app.config.settings") as mock_settings,
-    ):
-        mock_settings.inbox_scan_interval_min = 30
-        from app.jobs.core_jobs import _job_inbox_scan
-
-        asyncio.run(_job_inbox_scan())
-        mock_scan.assert_not_called()
-
-
-def test_inbox_scan_scans_user_with_no_previous_scan(scheduler_db, test_user):
-    """Users who have never been scanned (last_inbox_scan=None) are scanned."""
-    test_user.refresh_token = "rt_inbox"
-    test_user.access_token = "at_inbox"
-    test_user.m365_connected = True
-    test_user.last_inbox_scan = None
-    scheduler_db.commit()
-
-    with (
-        patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,
-        patch("app.config.settings") as mock_settings,
-    ):
-        mock_settings.inbox_scan_interval_min = 30
-        from app.jobs.core_jobs import _job_inbox_scan
-
-        asyncio.run(_job_inbox_scan())
-        mock_scan.assert_called_once()
-
-
-def test_inbox_scan_skips_recently_scanned_user(scheduler_db, test_user):
-    """Users scanned within the interval are skipped."""
-    test_user.refresh_token = "rt_inbox"
-    test_user.access_token = "at_inbox"
-    test_user.m365_connected = True
-    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(minutes=5)
-    scheduler_db.commit()
-
-    with (
-        patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,
-        patch("app.config.settings") as mock_settings,
-    ):
-        mock_settings.inbox_scan_interval_min = 30
-        from app.jobs.core_jobs import _job_inbox_scan
-
-        asyncio.run(_job_inbox_scan())
-        mock_scan.assert_not_called()
+        if should_scan:
+            mock_scan.assert_called_once()
+        else:
+            mock_scan.assert_not_called()
 
 
 def test_inbox_scan_handles_timeout(scheduler_db, test_user):

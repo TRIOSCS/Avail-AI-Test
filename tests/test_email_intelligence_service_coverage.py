@@ -24,6 +24,8 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.services.email_intelligence_service import (
     classify_email_ai,
     detect_specialties_ai,
@@ -34,6 +36,22 @@ from app.services.email_intelligence_service import (
     summarize_thread,
 )
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
+
+
+def _graph_client_with_messages(messages):
+    """MagicMock GraphClient whose get_all_pages returns the given messages."""
+    gc_mock = MagicMock()
+    gc_mock.get_all_pages = AsyncMock(return_value=messages)
+    return gc_mock
+
+
+def _one_message(content="Body"):
+    return {
+        "from": {"emailAddress": {"address": "v@v.com"}},
+        "body": {"content": content},
+        "receivedDateTime": "2025-01-01T00:00:00Z",
+    }
+
 
 # ── classify_email_ai ─────────────────────────────────────────────────
 
@@ -60,56 +78,39 @@ class TestClassifyEmailAi:
             result = await classify_email_ai("Subject", "Body")
         assert result is None
 
-    async def test_non_dict_result_returns_none(self):
-        """None or non-dict result → returns None (lines 85-86)."""
-        with patch("app.utils.claude_client.claude_json", new=AsyncMock(return_value=None)):
-            result = await classify_email_ai("Subject", "Body")
-        assert result is None
-
-    async def test_invalid_classification_defaults_to_general(self):
-        """Unknown classification → 'general' (lines 91-93)."""
-        with patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(
-                return_value={
-                    "classification": "banana",
-                    "confidence": 0.9,
-                    "has_pricing": False,
-                }
+    @pytest.mark.parametrize(
+        ("claude_return", "expected_field", "expected_value"),
+        [
+            pytest.param(None, None, None, id="non_dict_result_returns_none"),
+            pytest.param(
+                {"classification": "banana", "confidence": 0.9, "has_pricing": False},
+                "classification",
+                "general",
+                id="invalid_classification_defaults_to_general",
             ),
-        ):
-            result = await classify_email_ai("Subject", "Body")
-        assert result["classification"] == "general"
-
-    async def test_confidence_clamped_to_zero_one(self):
-        """Confidence outside [0,1] is clamped (lines 96-99)."""
-        with patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(
-                return_value={
-                    "classification": "offer",
-                    "confidence": 2.5,  # > 1.0
-                    "has_pricing": True,
-                }
+            pytest.param(
+                {"classification": "offer", "confidence": 2.5, "has_pricing": True},
+                "confidence",
+                1.0,
+                id="confidence_clamped_to_zero_one",
             ),
-        ):
-            result = await classify_email_ai("Subject", "Body")
-        assert result["confidence"] == 1.0
-
-    async def test_invalid_confidence_type_defaults_to_half(self):
-        """Non-numeric confidence → 0.5 (lines 97-99)."""
-        with patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(
-                return_value={
-                    "classification": "offer",
-                    "confidence": "high",  # invalid type
-                    "has_pricing": True,
-                }
+            pytest.param(
+                {"classification": "offer", "confidence": "high", "has_pricing": True},
+                "confidence",
+                0.5,
+                id="invalid_confidence_type_defaults_to_half",
             ),
-        ):
+        ],
+    )
+    async def test_result_normalization(self, claude_return, expected_field, expected_value):
+        """None/non-dict → None; unknown classification → 'general'; confidence clamped
+        to [0,1]; non-numeric confidence → 0.5 (lines 85-99)."""
+        with patch("app.utils.claude_client.claude_json", new=AsyncMock(return_value=claude_return)):
             result = await classify_email_ai("Subject", "Body")
-        assert result["confidence"] == 0.5
+        if expected_field is None:
+            assert result is None
+        else:
+            assert result[expected_field] == expected_value
 
 
 # ── extract_pricing_intelligence ─────────────────────────────────────
@@ -561,7 +562,7 @@ class TestSummarizeThread:
 
     async def test_graph_fetch_failure_returns_none(self, db_session, test_user):
         """Graph API fetch raises → returns None (lines 451-453)."""
-        gc_mock = MagicMock()
+        gc_mock = _graph_client_with_messages([])
         gc_mock.get_all_pages = AsyncMock(side_effect=Exception("network error"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=gc_mock):
@@ -570,80 +571,42 @@ class TestSummarizeThread:
 
     async def test_empty_messages_returns_none(self, db_session, test_user):
         """No messages fetched → returns None (lines 455-456)."""
-        gc_mock = MagicMock()
-        gc_mock.get_all_pages = AsyncMock(return_value=[])
+        gc_mock = _graph_client_with_messages([])
 
         with patch("app.utils.graph_client.GraphClient", return_value=gc_mock):
             result = await summarize_thread("tok", "conv-empty", db_session, test_user.id)
         assert result is None
 
-    async def test_claude_unavailable_returns_none(self, db_session, test_user):
-        """ClaudeUnavailableError → returns None (lines 477-479)."""
-        gc_mock = MagicMock()
-        gc_mock.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "from": {"emailAddress": {"address": "v@v.com"}},
-                    "body": {"content": "Some email body"},
-                    "receivedDateTime": "2025-01-01T00:00:00Z",
-                }
-            ]
-        )
+    @pytest.mark.parametrize(
+        ("claude_mock", "conv_id"),
+        [
+            pytest.param(
+                AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+                "conv-unavail",
+                id="claude_unavailable",
+            ),
+            pytest.param(
+                AsyncMock(side_effect=ClaudeError("fail")),
+                "conv-error",
+                id="claude_error",
+            ),
+            pytest.param(
+                AsyncMock(return_value=None),
+                "conv-null",
+                id="non_dict_result",
+            ),
+        ],
+    )
+    async def test_claude_summary_failure_returns_none(self, db_session, test_user, claude_mock, conv_id):
+        """ClaudeUnavailableError / ClaudeError / non-dict summary → returns None (lines
+        477-485)."""
+        gc_mock = _graph_client_with_messages([_one_message()])
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-            patch(
-                "app.utils.claude_client.claude_json",
-                new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
-            ),
+            patch("app.utils.claude_client.claude_json", new=claude_mock),
         ):
-            result = await summarize_thread("tok", "conv-unavail", db_session, test_user.id)
-        assert result is None
-
-    async def test_claude_error_returns_none(self, db_session, test_user):
-        """ClaudeError → returns None (lines 480-482)."""
-        gc_mock = MagicMock()
-        gc_mock.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "from": {"emailAddress": {"address": "v@v.com"}},
-                    "body": {"content": "Body"},
-                    "receivedDateTime": "2025-01-01T00:00:00Z",
-                }
-            ]
-        )
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-            patch(
-                "app.utils.claude_client.claude_json",
-                new=AsyncMock(side_effect=ClaudeError("fail")),
-            ),
-        ):
-            result = await summarize_thread("tok", "conv-error", db_session, test_user.id)
-        assert result is None
-
-    async def test_non_dict_result_returns_none(self, db_session, test_user):
-        """Non-dict summary result → returns None (lines 484-485)."""
-        gc_mock = MagicMock()
-        gc_mock.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "from": {"emailAddress": {"address": "v@v.com"}},
-                    "body": {"content": "Body"},
-                    "receivedDateTime": "2025-01-01T00:00:00Z",
-                }
-            ]
-        )
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-            patch(
-                "app.utils.claude_client.claude_json",
-                new=AsyncMock(return_value=None),
-            ),
-        ):
-            result = await summarize_thread("tok", "conv-null", db_session, test_user.id)
+            result = await summarize_thread("tok", conv_id, db_session, test_user.id)
         assert result is None
 
 

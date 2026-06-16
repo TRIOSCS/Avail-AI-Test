@@ -8,10 +8,17 @@ from app.schemas.crm import (
     AddContactToSite,
     CompanyCreate,
     CompanyUpdate,
+    CustomerImportRow,
     EnrichDomainRequest,
     OfferCreate,
+    OfferUpdate,
+    OneDriveAttach,
+    QuoteCreate,
+    QuoteLineItem,
     QuoteReopen,
     QuoteResult,
+    QuoteSendOverride,
+    QuoteUpdate,
     SuggestedContactItem,
     SuggestedSiteContact,
 )
@@ -150,18 +157,6 @@ class TestAddContactToSite:
         assert payload.contact.full_name == "Jane"
 
 
-# ── Additional coverage for missing lines ───────────────────────────
-
-from app.schemas.crm import (
-    CustomerImportRow,
-    OfferUpdate,
-    OneDriveAttach,
-    QuoteCreate,
-    QuoteLineItem,
-    QuoteSendOverride,
-    QuoteUpdate,
-)
-
 # ── CompanyCreate phone normalization ───────────────────────────────
 
 
@@ -180,25 +175,19 @@ class TestCompanyCreatePhone:
 
 
 class TestCompanyUpdateValidators:
-    def test_normalize_hq_country_none(self) -> None:
-        u = CompanyUpdate(hq_country=None)
-        assert u.hq_country is None
-
-    def test_normalize_hq_country_value(self) -> None:
-        u = CompanyUpdate(hq_country="United States")
-        assert u.hq_country == "US"
-
-    def test_normalize_hq_state_none(self) -> None:
-        u = CompanyUpdate(hq_state=None)
-        assert u.hq_state is None
-
-    def test_normalize_hq_state_value(self) -> None:
-        u = CompanyUpdate(hq_state="California")
-        assert u.hq_state == "CA"
-
-    def test_normalize_phone_none(self) -> None:
-        u = CompanyUpdate(phone=None)
-        assert u.phone is None
+    @pytest.mark.parametrize(
+        "field,value,expected",
+        [
+            pytest.param("hq_country", None, None, id="hq_country_none"),
+            pytest.param("hq_country", "United States", "US", id="hq_country_value"),
+            pytest.param("hq_state", None, None, id="hq_state_none"),
+            pytest.param("hq_state", "California", "CA", id="hq_state_value"),
+            pytest.param("phone", None, None, id="phone_none"),
+        ],
+    )
+    def test_normalize(self, field, value, expected) -> None:
+        u = CompanyUpdate(**{field: value})
+        assert getattr(u, field) == expected
 
     def test_normalize_phone_value(self) -> None:
         u = CompanyUpdate(phone="(555) 123-4567")
@@ -210,29 +199,20 @@ class TestCompanyUpdateValidators:
 
 
 class TestOfferCreateValidators:
-    def test_packaging_none(self) -> None:
-        o = OfferCreate(mpn="LM317T", vendor_name="Arrow")
-        assert o.packaging is None
-
-    def test_packaging_normalized(self) -> None:
-        o = OfferCreate(mpn="LM317T", vendor_name="Arrow", packaging="Tape & Reel")
-        assert o.packaging == "reel"
-
-    def test_date_code_none(self) -> None:
-        o = OfferCreate(mpn="LM317T", vendor_name="Arrow")
-        assert o.date_code is None
-
-    def test_date_code_normalized(self) -> None:
-        o = OfferCreate(mpn="LM317T", vendor_name="Arrow", date_code="DC 2024")
-        assert o.date_code == "2024"
-
-    def test_condition_normalized(self) -> None:
-        o = OfferCreate(mpn="LM317T", vendor_name="Arrow", condition="Factory New")
-        assert o.condition == "new"
-
-    def test_mpn_normalized(self) -> None:
-        o = OfferCreate(mpn="lm317t", vendor_name="Arrow")
-        assert o.mpn == "LM317T"
+    @pytest.mark.parametrize(
+        "overrides,field,expected",
+        [
+            pytest.param({}, "packaging", None, id="packaging_none"),
+            pytest.param({"packaging": "Tape & Reel"}, "packaging", "reel", id="packaging_normalized"),
+            pytest.param({}, "date_code", None, id="date_code_none"),
+            pytest.param({"date_code": "DC 2024"}, "date_code", "2024", id="date_code_normalized"),
+            pytest.param({"condition": "Factory New"}, "condition", "new", id="condition_normalized"),
+            pytest.param({"mpn": "lm317t"}, "mpn", "LM317T", id="mpn_normalized"),
+        ],
+    )
+    def test_field_normalized(self, overrides, field, expected) -> None:
+        o = OfferCreate(**{"mpn": "LM317T", "vendor_name": "Arrow", **overrides})
+        assert getattr(o, field) == expected
 
 
 # ── OfferUpdate validators ─────────────────────────────────────────
@@ -243,29 +223,20 @@ class TestOfferUpdate:
         u = OfferUpdate()
         assert u.mpn is None
 
-    def test_mpn_none(self) -> None:
-        u = OfferUpdate(mpn=None)
-        assert u.mpn is None
-
-    def test_mpn_normalized(self) -> None:
-        u = OfferUpdate(mpn="lm317t")
-        assert u.mpn == "LM317T"
-
-    def test_condition_none(self) -> None:
-        u = OfferUpdate(condition=None)
-        assert u.condition is None
-
-    def test_condition_normalized(self) -> None:
-        u = OfferUpdate(condition="refurbished")
-        assert u.condition == "refurb"
-
-    def test_packaging_none(self) -> None:
-        u = OfferUpdate(packaging=None)
-        assert u.packaging is None
-
-    def test_packaging_normalized(self) -> None:
-        u = OfferUpdate(packaging="Tube")
-        assert u.packaging == "tube"
+    @pytest.mark.parametrize(
+        "field,value,expected",
+        [
+            pytest.param("mpn", None, None, id="mpn_none"),
+            pytest.param("mpn", "lm317t", "LM317T", id="mpn_normalized"),
+            pytest.param("condition", None, None, id="condition_none"),
+            pytest.param("condition", "refurbished", "refurb", id="condition_normalized"),
+            pytest.param("packaging", None, None, id="packaging_none"),
+            pytest.param("packaging", "Tube", "tube", id="packaging_normalized"),
+        ],
+    )
+    def test_field_normalized(self, field, value, expected) -> None:
+        u = OfferUpdate(**{field: value})
+        assert getattr(u, field) == expected
 
 
 # ── QuoteLineItem ──────────────────────────────────────────────────

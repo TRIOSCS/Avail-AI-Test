@@ -152,38 +152,25 @@ class TestStart:
 
 
 class TestCheckSessionHealth:
-    def test_healthy_session(self, manager, mock_page):
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://www.icsource.com/members/Search/NewSearch.aspx", True),  # healthy session
+            ("https://www.icsource.com/home/Login.aspx", False),  # redirected to login
+            ("https://www.icsource.com/home/default.aspx", False),  # redirected to public home
+        ],
+        ids=["healthy_session", "redirected_to_login", "redirected_to_public_home"],
+    )
+    def test_health_by_landing_url(self, manager, mock_page, url, expected):
         manager._page = mock_page
-        mock_page.url = "https://www.icsource.com/members/Search/NewSearch.aspx"
+        mock_page.url = url
 
         async def _run():
             with patch("app.services.ics_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
                 return await manager.check_session_health()
 
         result = asyncio.get_event_loop().run_until_complete(_run())
-        assert result is True
-
-    def test_redirected_to_login(self, manager, mock_page):
-        manager._page = mock_page
-        mock_page.url = "https://www.icsource.com/home/Login.aspx"
-
-        async def _run():
-            with patch("app.services.ics_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
-                return await manager.check_session_health()
-
-        result = asyncio.get_event_loop().run_until_complete(_run())
-        assert result is False
-
-    def test_redirected_to_public_home(self, manager, mock_page):
-        manager._page = mock_page
-        mock_page.url = "https://www.icsource.com/home/default.aspx"
-
-        async def _run():
-            with patch("app.services.ics_worker.session_manager.asyncio.sleep", new_callable=AsyncMock):
-                return await manager.check_session_health()
-
-        result = asyncio.get_event_loop().run_until_complete(_run())
-        assert result is False
+        assert result is expected
 
     def test_exception_returns_false(self, manager, mock_page):
         manager._page = mock_page

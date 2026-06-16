@@ -124,9 +124,6 @@ class TestConfig:
         assert result["status"] == 404
 
 
-# ── Scoring Weights ─────────────────────────────────────────────────
-
-
 # ── System Health ───────────────────────────────────────────────────
 
 
@@ -178,22 +175,10 @@ class TestSystemHealth:
         assert conn["display_name"] == "Test Source"
         assert conn["total_searches"] == 100
 
-    def test_count_exception_returns_neg1(self, db_session, monkeypatch):
-        """If a count query fails, the count is -1."""
-        # Make one of the count queries fail
-
-        original_query = db_session.query
-
-        def patched_query(*args, **kwargs):
-            # Make Quote count fail
-            result = original_query(*args, **kwargs)
-            return result
-
-        # Patch at a finer level: make the Quote model's id attribute throw
-        # Instead, just verify the structure handles errors gracefully
+    def test_count_exception_returns_neg1(self, db_session):
+        """get_system_health returns an int for every db_stats count."""
         result = get_system_health(db_session)
-        # All counts should be >= 0 (no exception thrown in our test)
-        for key, val in result["db_stats"].items():
+        for val in result["db_stats"].values():
             assert isinstance(val, int)
 
 

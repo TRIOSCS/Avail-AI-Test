@@ -19,6 +19,32 @@ from app.models import (
     VendorResponse,
 )
 
+
+def _find_offer_in_groups(data, offer_id):
+    """Locate an offer by id within the grouped /offers response."""
+    for group in data["groups"]:
+        for offer in group.get("offers", []):
+            if offer["id"] == offer_id:
+                return offer
+    return None
+
+
+def _make_vendor_response(db, requisition_id, user_id, *, vendor_name, vendor_email, subject, body):
+    """Create and flush a VendorResponse for auto-parse tests."""
+    vr = VendorResponse(
+        requisition_id=requisition_id,
+        vendor_name=vendor_name,
+        vendor_email=vendor_email,
+        subject=subject,
+        body=body,
+        scanned_by_user_id=user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(vr)
+    db.flush()
+    return vr
+
+
 # ── Changelog / Audit Trail ──────────────────────────────────────────
 
 
@@ -167,24 +193,16 @@ class TestOfferApproval:
         assert pending_offer.status == "rejected"
         assert "Too expensive" in (pending_offer.notes or "")
 
-    def test_approve_non_pending_fails(self, client, test_offer):
-        """Cannot approve an already active offer."""
-        resp = client.put(f"/api/offers/{test_offer.id}/approve")
+    @pytest.mark.parametrize("action", ["approve", "reject"])
+    def test_non_pending_fails(self, client, test_offer, action):
+        """Cannot approve or reject an already active offer."""
+        resp = client.put(f"/api/offers/{test_offer.id}/{action}")
         assert resp.status_code == 400
 
-    def test_reject_non_pending_fails(self, client, test_offer):
-        """Cannot reject an already active offer."""
-        resp = client.put(f"/api/offers/{test_offer.id}/reject")
-        assert resp.status_code == 400
-
-    def test_approve_not_found(self, client):
+    @pytest.mark.parametrize("action", ["approve", "reject"])
+    def test_not_found(self, client, action):
         """404 for nonexistent offer."""
-        resp = client.put("/api/offers/99999/approve")
-        assert resp.status_code == 404
-
-    def test_reject_not_found(self, client):
-        """404 for nonexistent offer."""
-        resp = client.put("/api/offers/99999/reject")
+        resp = client.put(f"/api/offers/99999/{action}")
         assert resp.status_code == 404
 
 
@@ -238,15 +256,7 @@ class TestQuotedOfferBadge:
 
         resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
         assert resp.status_code == 200
-        data = resp.json()
-        groups = data["groups"]
-        # Find the offer in the groups
-        found = None
-        for g in groups:
-            for o in g.get("offers", []):
-                if o["id"] == offer.id:
-                    found = o
-                    break
+        found = _find_offer_in_groups(resp.json(), offer.id)
         assert found is not None
         assert found["quoted_on"] == "Q-2026-0099"
 
@@ -269,14 +279,7 @@ class TestQuotedOfferBadge:
 
         resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
         assert resp.status_code == 200
-        data = resp.json()
-        groups = data["groups"]
-        found = None
-        for g in groups:
-            for o in g.get("offers", []):
-                if o["id"] == offer.id:
-                    found = o
-                    break
+        found = _find_offer_in_groups(resp.json(), offer.id)
         assert found is not None
         assert found.get("quoted_on") is None
 
@@ -287,68 +290,71 @@ class TestQuotedOfferBadge:
 class TestBuyPlanQuoteLineItems:
     """V1 buy plan submission is deprecated and always returns 404."""
 
-    def test_buy_plan_submit_returns_404(self, client, test_requisition, test_offer, db_session, test_user):
-        """V1 submit_buy_plan always returns 404."""
-        from app.models import Company, CustomerSite
-
-        co = Company(name="BP Test Co", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email="x@bp.com")
-        db_session.add(site)
-        db_session.flush()
-
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=site.id,
-            quote_number="Q-2026-0100",
-            status="sent",
-            line_items=[
-                {
-                    "offer_id": test_offer.id,
-                    "mpn": "LM317T",
-                    "vendor_name": "Arrow Electronics",
-                    "qty": 1000,
-                    "cost_price": 0.50,
-                    "lead_time": "2-3 weeks (includes transit)",
-                    "condition": "New Surplus",
-                }
-            ],
-            subtotal=1000.00,
-            total_cost=500.00,
-            total_margin_pct=50.00,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.post(
-            f"/api/quotes/{q.id}/buy-plan",
-            json={
-                "offer_ids": [test_offer.id],
-                "salesperson_notes": "Rush order",
-            },
-        )
-        assert resp.status_code == 404
-
-    def test_buy_plan_fallback_returns_404(self, client, test_requisition, test_offer, db_session, test_user):
+    @pytest.mark.parametrize(
+        ("company_name", "contact_email", "quote_number", "line_items", "salesperson_notes"),
+        [
+            pytest.param(
+                "BP Test Co",
+                "x@bp.com",
+                "Q-2026-0100",
+                [
+                    {
+                        "offer_id": "TEST_OFFER_ID",
+                        "mpn": "LM317T",
+                        "vendor_name": "Arrow Electronics",
+                        "qty": 1000,
+                        "cost_price": 0.50,
+                        "lead_time": "2-3 weeks (includes transit)",
+                        "condition": "New Surplus",
+                    }
+                ],
+                "Rush order",
+                id="with_line_items",
+            ),
+            pytest.param(
+                "BP Fallback Co",
+                "x@fb.com",
+                "Q-2026-0101",
+                [],
+                "",
+                id="empty_line_items",
+            ),
+        ],
+    )
+    def test_buy_plan_returns_404(
+        self,
+        client,
+        test_requisition,
+        test_offer,
+        db_session,
+        test_user,
+        company_name,
+        contact_email,
+        quote_number,
+        line_items,
+        salesperson_notes,
+    ):
         """V1 submit_buy_plan always returns 404 regardless of quote line_items."""
         from app.models import Company, CustomerSite
 
-        co = Company(name="BP Fallback Co", is_active=True, created_at=datetime.now(timezone.utc))
+        co = Company(name=company_name, is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email="x@fb.com")
+        site = CustomerSite(company_id=co.id, site_name="HQ", contact_name="X", contact_email=contact_email)
         db_session.add(site)
         db_session.flush()
+
+        # Resolve the offer-id placeholder now that the fixture offer exists.
+        line_items = [
+            {**li, "offer_id": test_offer.id} if li.get("offer_id") == "TEST_OFFER_ID" else li for li in line_items
+        ]
 
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=site.id,
-            quote_number="Q-2026-0101",
+            quote_number=quote_number,
             status="sent",
-            line_items=[],
+            line_items=line_items,
             subtotal=1000.00,
             total_cost=500.00,
             total_margin_pct=50.00,
@@ -360,7 +366,7 @@ class TestBuyPlanQuoteLineItems:
 
         resp = client.post(
             f"/api/quotes/{q.id}/buy-plan",
-            json={"offer_ids": [test_offer.id], "salesperson_notes": ""},
+            json={"offer_ids": [test_offer.id], "salesperson_notes": salesperson_notes},
         )
         assert resp.status_code == 404
 
@@ -375,17 +381,15 @@ class TestAutoParseOffers:
         """_apply_parsed_result creates Offer records from parsed email."""
         req_item = test_requisition.requirements[0]
 
-        vr = VendorResponse(
-            requisition_id=test_requisition.id,
+        vr = _make_vendor_response(
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_name="Vendor XYZ",
             vendor_email="sales@xyz.com",
             subject="RE: RFQ LM317T",
             body="We can offer LM317T at $0.55",
-            scanned_by_user_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(vr)
-        db_session.flush()
 
         parsed = {
             "confidence": 0.85,
@@ -420,17 +424,15 @@ class TestAutoParseOffers:
 
     def test_dedup_prevents_duplicate_offers(self, db_session, test_requisition, test_user):
         """Re-parsing same email doesn't create duplicate offers."""
-        vr = VendorResponse(
-            requisition_id=test_requisition.id,
+        vr = _make_vendor_response(
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_name="Vendor ABC",
             vendor_email="sales@abc.com",
             subject="RE: RFQ",
             body="Offer: LM317T $0.50",
-            scanned_by_user_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(vr)
-        db_session.flush()
 
         parsed = {
             "confidence": 0.9,
@@ -454,17 +456,15 @@ class TestAutoParseOffers:
 
     def test_low_confidence_skips_offer_creation(self, db_session, test_requisition, test_user):
         """Confidence < 0.5 doesn't create offers."""
-        vr = VendorResponse(
-            requisition_id=test_requisition.id,
+        vr = _make_vendor_response(
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_name="Low Conf",
             vendor_email="sales@low.com",
             subject="RE: RFQ",
             body="Maybe?",
-            scanned_by_user_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(vr)
-        db_session.flush()
 
         parsed = {
             "confidence": 0.3,
@@ -483,17 +483,15 @@ class TestAutoParseOffers:
 
     def test_creates_notification_for_pending_offer(self, db_session, test_requisition, test_user):
         """Auto-parse creates an offer_pending_review ActivityLog entry."""
-        vr = VendorResponse(
-            requisition_id=test_requisition.id,
+        vr = _make_vendor_response(
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_name="Notif Vendor",
             vendor_email="sales@notif.com",
             subject="RE: RFQ",
             body="Offer for LM317T",
-            scanned_by_user_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(vr)
-        db_session.flush()
 
         parsed = {
             "confidence": 0.8,
@@ -545,13 +543,7 @@ class TestOffersListFields:
 
         resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
         assert resp.status_code == 200
-        data = resp.json()
-        found = None
-        for g in data["groups"]:
-            for o in g.get("offers", []):
-                if o["id"] == offer.id:
-                    found = o
-                    break
+        found = _find_offer_in_groups(resp.json(), offer.id)
         assert found is not None
         assert "updated_at" in found
         assert "updated_by" in found

@@ -14,6 +14,12 @@ from pathlib import Path
 import pytest
 
 MIGRATION_DIR = Path(__file__).parent.parent / "alembic" / "versions"
+ENV_PY = Path(__file__).parent.parent / "alembic" / "env.py"
+
+
+def _env_py_source():
+    """Read the alembic env.py source for static-analysis assertions."""
+    return ENV_PY.read_text()
 
 
 def _load_migration():
@@ -102,9 +108,7 @@ def test_initial_migration_downgrade_is_symmetric():
 
 def test_env_py_imports_all_models():
     """env.py must import Base so autogenerate sees all tables."""
-    env_path = Path(__file__).parent.parent / "alembic" / "env.py"
-    content = env_path.read_text()
-    assert "from app.models import Base" in content
+    assert "from app.models import Base" in _env_py_source()
 
 
 def test_env_py_installs_idempotent_op_wrappers():
@@ -116,8 +120,7 @@ def test_env_py_installs_idempotent_op_wrappers():
     well-documented purpose; removing one silently is the failure mode this
     test prevents.
     """
-    env_path = Path(__file__).parent.parent / "alembic" / "env.py"
-    content = env_path.read_text()
+    content = _env_py_source()
     expected_assignments = [
         "op.add_column = _idempotent_add_column",
         "op.alter_column = _idempotent_alter_column",
@@ -142,8 +145,7 @@ def test_env_py_alembic_version_widened_to_128():
     (which retroactively widens the column) gets a chance to run. Pre-creating the table
     at env-setup avoids the bootstrap race.
     """
-    env_path = Path(__file__).parent.parent / "alembic" / "env.py"
-    content = env_path.read_text()
+    content = _env_py_source()
     assert "VARCHAR(128)" in content, "env.py must widen alembic_version.version_num"
     assert "CREATE TABLE IF NOT EXISTS alembic_version" in content
 
@@ -156,8 +158,7 @@ def test_drop_table_cascade_is_env_var_gated():
     caller passes ``cascade=True`` or ``ALEMBIC_ALLOW_CASCADE=1`` is set
     (the latter is what CI uses for chain-replay smoke tests).
     """
-    env_path = Path(__file__).parent.parent / "alembic" / "env.py"
-    content = env_path.read_text()
+    content = _env_py_source()
     assert "ALEMBIC_ALLOW_CASCADE" in content, "Cascade gate env var missing — drop_table must opt into CASCADE."
     # Sanity: the default-False kwarg must be present in the wrapper signature.
     assert "cascade: bool = False" in content

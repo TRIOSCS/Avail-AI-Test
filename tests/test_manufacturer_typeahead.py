@@ -6,21 +6,22 @@ Called by: pytest
 Depends on: conftest.py (client, db_session fixtures), app.models.sourcing.Manufacturer
 """
 
+import pytest
+
 from app.models.sourcing import Manufacturer
 
 
-def test_search_by_canonical_name(client, db_session):
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("texas", id="by_canonical_name"),
+        pytest.param("TI", id="by_alias"),
+    ],
+)
+def test_search_matches_manufacturer(client, db_session, query):
     db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
     db_session.commit()
-    resp = client.get("/v2/partials/manufacturers/search?q=texas")
-    assert resp.status_code == 200
-    assert "Texas Instruments" in resp.text
-
-
-def test_search_by_alias(client, db_session):
-    db_session.add(Manufacturer(canonical_name="Texas Instruments", aliases=["TI"]))
-    db_session.commit()
-    resp = client.get("/v2/partials/manufacturers/search?q=TI")
+    resp = client.get(f"/v2/partials/manufacturers/search?q={query}")
     assert resp.status_code == 200
     assert "Texas Instruments" in resp.text
 

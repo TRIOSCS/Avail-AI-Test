@@ -9,6 +9,8 @@ Depends on: app/file_utils.py
 import sys
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.file_utils import (
     normalize_stock_row,
     parse_tabular_file,
@@ -17,6 +19,17 @@ from app.file_utils import (
 # ═══════════════════════════════════════════════════════════════════════
 #  parse_tabular_file
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _stub_openpyxl_rows(rows):
+    """Wire the patched openpyxl stub so load_workbook().active.iter_rows() yields
+    rows."""
+    mock_openpyxl = sys.modules["openpyxl"]
+    mock_wb = MagicMock()
+    mock_ws = MagicMock()
+    mock_ws.iter_rows.return_value = rows
+    mock_wb.active = mock_ws
+    mock_openpyxl.load_workbook.return_value = mock_wb
 
 
 class TestParseTabularFile:
@@ -42,17 +55,13 @@ class TestParseTabularFile:
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_parsed(self):
-        mock_openpyxl = sys.modules["openpyxl"]
-        mock_wb = MagicMock()
-        mock_ws = MagicMock()
-        mock_ws.iter_rows.return_value = [
-            ("MPN", "Qty", "Price"),
-            ("LM317T", 1000, 0.50),
-            ("NE555P", 500, 0.25),
-        ]
-        mock_wb.active = mock_ws
-        mock_openpyxl.load_workbook.return_value = mock_wb
-
+        _stub_openpyxl_rows(
+            [
+                ("MPN", "Qty", "Price"),
+                ("LM317T", 1000, 0.50),
+                ("NE555P", 500, 0.25),
+            ]
+        )
         rows = parse_tabular_file(b"fake-excel", "stock.xlsx")
         assert len(rows) == 2
         assert rows[0]["mpn"] == "LM317T"
@@ -60,29 +69,19 @@ class TestParseTabularFile:
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_xls_extension(self):
-        mock_openpyxl = sys.modules["openpyxl"]
-        mock_wb = MagicMock()
-        mock_ws = MagicMock()
-        mock_ws.iter_rows.return_value = [("MPN",), ("ABC123",)]
-        mock_wb.active = mock_ws
-        mock_openpyxl.load_workbook.return_value = mock_wb
-
+        _stub_openpyxl_rows([("MPN",), ("ABC123",)])
         rows = parse_tabular_file(b"fake", "file.xls")
         assert len(rows) == 1
 
     @patch.dict("sys.modules", {"openpyxl": MagicMock()})
     def test_excel_empty_rows_skipped(self):
-        mock_openpyxl = sys.modules["openpyxl"]
-        mock_wb = MagicMock()
-        mock_ws = MagicMock()
-        mock_ws.iter_rows.return_value = [
-            ("MPN", "Qty"),
-            (None, None),  # empty row
-            ("LM317T", 100),
-        ]
-        mock_wb.active = mock_ws
-        mock_openpyxl.load_workbook.return_value = mock_wb
-
+        _stub_openpyxl_rows(
+            [
+                ("MPN", "Qty"),
+                (None, None),  # empty row
+                ("LM317T", 100),
+            ]
+        )
         rows = parse_tabular_file(b"fake", "stock.xlsx")
         assert len(rows) == 1
 
@@ -126,92 +125,78 @@ class TestNormalizeStockRow:
         assert result["qty"] == 1000
         assert result["price"] == 0.50
 
-    def test_alternate_mpn_header_pn(self):
-        row = {"pn": "NE555P", "quantity": "500"}
+    @pytest.mark.parametrize(
+        ("row", "expected_mpn"),
+        [
+            ({"pn": "NE555P", "quantity": "500"}, "NE555P"),
+            ({"part number": "ABC123XY", "avail": "200"}, "ABC123XY"),
+            ({" MPN ": "LM317T", " QTY ": "100"}, "LM317T"),
+            ({"sku": "SKU12345", "qty": "50"}, "SKU12345"),
+        ],
+        ids=["pn", "part_number", "stripped_lowered_keys", "sku"],
+    )
+    def test_alternate_mpn_headers(self, row, expected_mpn):
         result = normalize_stock_row(row)
         assert result is not None
-        assert result["mpn"] == "NE555P"
+        assert result["mpn"] == expected_mpn
 
-    def test_alternate_mpn_header_part_number(self):
-        row = {"part number": "ABC123XY", "avail": "200"}
+    @pytest.mark.parametrize(
+        ("row", "expected_qty"),
+        [
+            ({"mpn": "LM317T", "available": "500"}, 500),
+            ({"mpn": "LM317T", "stock": "750"}, 750),
+        ],
+        ids=["available", "stock"],
+    )
+    def test_alternate_qty_headers(self, row, expected_qty):
         result = normalize_stock_row(row)
-        assert result is not None
-        assert result["mpn"] == "ABC123XY"
-
-    def test_alternate_qty_header(self):
-        row = {"mpn": "LM317T", "available": "500"}
-        result = normalize_stock_row(row)
-        assert result["qty"] == 500
-
-    def test_alternate_qty_stock(self):
-        row = {"mpn": "LM317T", "stock": "750"}
-        result = normalize_stock_row(row)
-        assert result["qty"] == 750
+        assert result["qty"] == expected_qty
 
     def test_alternate_price_header(self):
         row = {"mpn": "LM317T", "unit price": "1.25"}
         result = normalize_stock_row(row)
         assert result["price"] == 1.25
 
-    def test_no_mpn_returns_none(self):
-        row = {"qty": "1000", "price": "0.50"}
-        result = normalize_stock_row(row)
-        assert result is None
+    @pytest.mark.parametrize(
+        "row",
+        [
+            {"qty": "1000", "price": "0.50"},  # no mpn
+            {"mpn": "AB"},  # < 3 chars
+            {"mpn": ""},  # empty mpn
+        ],
+        ids=["no_mpn", "short_mpn", "empty_mpn"],
+    )
+    def test_invalid_mpn_returns_none(self, row):
+        assert normalize_stock_row(row) is None
 
-    def test_short_mpn_returns_none(self):
-        row = {"mpn": "AB"}  # < 3 chars
+    @pytest.mark.parametrize(
+        ("row", "field", "expected"),
+        [
+            ({"mpn": "LM317T", "manufacturer": "Texas Instruments"}, "manufacturer", "Texas Instruments"),
+            ({"mpn": "LM317T", "mfr": "TI"}, "manufacturer", "TI"),
+            ({"mpn": "LM317T", "condition": "New"}, "condition", "New"),
+            ({"mpn": "LM317T", "packaging": "Tape & Reel"}, "packaging", "Tape & Reel"),
+            ({"mpn": "LM317T", "date_code": "2024+"}, "date_code", "2024+"),
+            ({"mpn": "LM317T", "lead_time": "4-6 weeks"}, "lead_time", "4-6 weeks"),
+        ],
+        ids=["manufacturer", "mfr_alias", "condition", "packaging", "date_code", "lead_time"],
+    )
+    def test_optional_fields(self, row, field, expected):
         result = normalize_stock_row(row)
-        assert result is None
+        assert result[field] == expected
 
-    def test_empty_mpn_returns_none(self):
-        row = {"mpn": ""}
+    @pytest.mark.parametrize(
+        ("row", "expected_currency"),
+        [
+            ({"mpn": "LM317T", "price": "€1.25"}, "EUR"),
+            ({"mpn": "LM317T", "price": "1.25", "currency": "GBP"}, "GBP"),
+            ({"mpn": "LM317T", "price": "1.25"}, "USD"),
+        ],
+        ids=["from_price_symbol", "from_currency_field", "default_usd"],
+    )
+    def test_currency_detection(self, row, expected_currency):
         result = normalize_stock_row(row)
-        assert result is None
-
-    def test_optional_fields_manufacturer(self):
-        row = {"mpn": "LM317T", "manufacturer": "Texas Instruments"}
-        result = normalize_stock_row(row)
-        assert result["manufacturer"] == "Texas Instruments"
-
-    def test_optional_fields_mfr_alias(self):
-        row = {"mpn": "LM317T", "mfr": "TI"}
-        result = normalize_stock_row(row)
-        assert result["manufacturer"] == "TI"
-
-    def test_optional_fields_condition(self):
-        row = {"mpn": "LM317T", "condition": "New"}
-        result = normalize_stock_row(row)
-        assert result["condition"] == "New"
-
-    def test_optional_fields_packaging(self):
-        row = {"mpn": "LM317T", "packaging": "Tape & Reel"}
-        result = normalize_stock_row(row)
-        assert result["packaging"] == "Tape & Reel"
-
-    def test_optional_fields_date_code(self):
-        row = {"mpn": "LM317T", "date_code": "2024+"}
-        result = normalize_stock_row(row)
-        assert result["date_code"] == "2024+"
-
-    def test_optional_fields_lead_time(self):
-        row = {"mpn": "LM317T", "lead_time": "4-6 weeks"}
-        result = normalize_stock_row(row)
-        assert result["lead_time"] == "4-6 weeks"
-
-    def test_currency_detection_from_price(self):
-        row = {"mpn": "LM317T", "price": "€1.25"}
-        result = normalize_stock_row(row)
-        assert result["currency"] == "EUR"
-
-    def test_currency_detection_from_currency_field(self):
-        row = {"mpn": "LM317T", "price": "1.25", "currency": "GBP"}
-        result = normalize_stock_row(row)
-        assert result["currency"] == "GBP"
-
-    def test_default_currency_usd(self):
-        row = {"mpn": "LM317T", "price": "1.25"}
-        result = normalize_stock_row(row)
-        assert result["currency"] == "USD"
+        assert result["currency"] == expected_currency
 
     def test_no_qty_or_price_still_returns(self):
         row = {"mpn": "LM317T"}
@@ -219,15 +204,3 @@ class TestNormalizeStockRow:
         assert result is not None
         assert result["qty"] is None
         assert result["price"] is None
-
-    def test_header_keys_stripped_and_lowered(self):
-        row = {" MPN ": "LM317T", " QTY ": "100"}
-        result = normalize_stock_row(row)
-        assert result is not None
-        assert result["mpn"] == "LM317T"
-
-    def test_sku_header_as_mpn(self):
-        row = {"sku": "SKU12345", "qty": "50"}
-        result = normalize_stock_row(row)
-        assert result is not None
-        assert result["mpn"] == "SKU12345"

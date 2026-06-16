@@ -5,27 +5,30 @@ Called by: pytest
 Depends on: scripts.check_schema_matches_models
 """
 
+import pytest
+
 from scripts.check_schema_matches_models import filter_allowlist, format_diffs
 
 
-def test_filter_allowlist_drops_numeric_precision_noise():
-    """alembic.compare_metadata sometimes reports Numeric(10,2) vs NUMERIC(10,2) drift
-    that is semantically a no-op.
-
-    Allowlist must drop these.
-    """
-    raw = [
-        ("modify_type", None, "table_x", "col_y", {}, "NUMERIC(10, 2)", "Numeric(precision=10, scale=2)"),
-    ]
-    assert filter_allowlist(raw) == []
-
-
-def test_filter_allowlist_keeps_real_drift():
-    """A genuinely added column must NOT be filtered."""
-    raw = [
-        ("add_column", None, "table_x", "new_col"),
-    ]
-    assert filter_allowlist(raw) == raw
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Numeric(10,2) vs NUMERIC(10,2) is semantic no-op drift the allowlist must drop.
+        pytest.param(
+            [("modify_type", None, "table_x", "col_y", {}, "NUMERIC(10, 2)", "Numeric(precision=10, scale=2)")],
+            [],
+            id="drops-numeric-precision-noise",
+        ),
+        # A genuinely added column must NOT be filtered.
+        pytest.param(
+            [("add_column", None, "table_x", "new_col")],
+            [("add_column", None, "table_x", "new_col")],
+            id="keeps-real-drift",
+        ),
+    ],
+)
+def test_filter_allowlist(raw, expected):
+    assert filter_allowlist(raw) == expected
 
 
 def test_format_diffs_renders_human_readable():

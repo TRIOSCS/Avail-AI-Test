@@ -82,30 +82,20 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
 class TestVendorEmailsTab:
     """Tests for the vendor emails tab."""
 
-    def test_emails_tab_loads(self, client: TestClient, vendor_with_emails: VendorCard):
+    @pytest.mark.parametrize(
+        "expected",
+        [
+            pytest.param(["Outbound RFQs", "Vendor Responses"], id="loads"),
+            pytest.param(["RFQ - LM317T", "sales@emailtest.com"], id="shows_contacts"),
+            pytest.param(["Re: RFQ - LM317T", "Quote", "90%"], id="shows_responses"),
+            pytest.param(["RFQs Sent", "Response Rate"], id="shows_stats"),
+        ],
+    )
+    def test_emails_tab_renders(self, client: TestClient, vendor_with_emails: VendorCard, expected: list[str]):
         resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
         assert resp.status_code == 200
-        assert "Outbound RFQs" in resp.text
-        assert "Vendor Responses" in resp.text
-
-    def test_emails_tab_shows_contacts(self, client: TestClient, vendor_with_emails: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
-        assert resp.status_code == 200
-        assert "RFQ - LM317T" in resp.text
-        assert "sales@emailtest.com" in resp.text
-
-    def test_emails_tab_shows_responses(self, client: TestClient, vendor_with_emails: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
-        assert resp.status_code == 200
-        assert "Re: RFQ - LM317T" in resp.text
-        assert "Quote" in resp.text
-        assert "90%" in resp.text
-
-    def test_emails_tab_shows_stats(self, client: TestClient, vendor_with_emails: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
-        assert resp.status_code == 200
-        assert "RFQs Sent" in resp.text
-        assert "Response Rate" in resp.text
+        for fragment in expected:
+            assert fragment in resp.text
 
     def test_emails_tab_empty_state(self, client: TestClient, db_session: Session):
         """Vendor with no email history shows empty state."""

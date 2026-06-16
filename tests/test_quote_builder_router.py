@@ -4,20 +4,35 @@ Called by: pytest
 Depends on: conftest fixtures (client, test_requisition, test_user, test_customer_site, test_quote)
 """
 
+from contextlib import ExitStack, contextmanager
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Quote, Requisition
 
 
+@contextmanager
+def _patched_builder(requisition, builder_data=None):
+    """Patch the three collaborators used by the data-fetch endpoints.
+
+    Yields the get_builder_data mock so callers can assert on it.
+    """
+    with ExitStack() as stack:
+        stack.enter_context(patch("app.dependencies.get_req_for_user", return_value=requisition))
+        mock_data = stack.enter_context(
+            patch("app.services.quote_builder_service.get_builder_data", return_value=builder_data or [])
+        )
+        stack.enter_context(patch("app.services.quote_builder_service.apply_smart_defaults"))
+        yield mock_data
+
+
 class TestQuoteBuilderData:
     def test_get_data_valid_req(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch("app.services.quote_builder_service.get_builder_data", return_value=[]):
-                with patch("app.services.quote_builder_service.apply_smart_defaults"):
-                    resp = client.get(f"/v2/partials/quote-builder/{test_requisition.id}/data")
+        with _patched_builder(test_requisition):
+            resp = client.get(f"/v2/partials/quote-builder/{test_requisition.id}/data")
         assert resp.status_code == 200
         assert "lines" in resp.json()
 
@@ -27,37 +42,32 @@ class TestQuoteBuilderData:
         assert resp.status_code == 404
 
     def test_get_data_with_requirement_ids(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch("app.services.quote_builder_service.get_builder_data", return_value=[]) as mock_data:
-                with patch("app.services.quote_builder_service.apply_smart_defaults"):
-                    resp = client.get(
-                        f"/v2/partials/quote-builder/{test_requisition.id}/data",
-                        params={"requirement_ids": "1,2,3"},
-                    )
+        with _patched_builder(test_requisition) as mock_data:
+            resp = client.get(
+                f"/v2/partials/quote-builder/{test_requisition.id}/data",
+                params={"requirement_ids": "1,2,3"},
+            )
         assert resp.status_code == 200
         mock_data.assert_called_once()
-        call_kwargs = mock_data.call_args
-        assert call_kwargs[1]["requirement_ids"] == [1, 2, 3]
+        assert mock_data.call_args[1]["requirement_ids"] == [1, 2, 3]
 
 
 class TestQuoteBuilderMultiData:
     def test_multi_data_valid(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch("app.services.quote_builder_service.get_builder_data", return_value=[]):
-                with patch("app.services.quote_builder_service.apply_smart_defaults"):
-                    resp = client.get(
-                        "/v2/partials/quote-builder/multi/data",
-                        params={"requisition_ids": str(test_requisition.id)},
-                    )
+        with _patched_builder(test_requisition):
+            resp = client.get(
+                "/v2/partials/quote-builder/multi/data",
+                params={"requisition_ids": str(test_requisition.id)},
+            )
         assert resp.status_code == 200
         assert "lines" in resp.json()
 
-    def test_multi_data_empty_ids(self, client: TestClient):
-        resp = client.get("/v2/partials/quote-builder/multi/data", params={"requisition_ids": ""})
-        assert resp.status_code == 400
-
-    def test_multi_data_invalid_ids(self, client: TestClient):
-        resp = client.get("/v2/partials/quote-builder/multi/data", params={"requisition_ids": "abc"})
+    @pytest.mark.parametrize(
+        "requisition_ids",
+        [pytest.param("", id="empty_ids"), pytest.param("abc", id="invalid_ids")],
+    )
+    def test_multi_data_bad_ids(self, client: TestClient, requisition_ids):
+        resp = client.get("/v2/partials/quote-builder/multi/data", params={"requisition_ids": requisition_ids})
         assert resp.status_code == 400
 
 

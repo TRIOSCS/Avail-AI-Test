@@ -5,6 +5,33 @@ Covers uncovered line 35: when all connectors are disabled.
 
 from unittest.mock import patch
 
+# Every credential attribute log_connector_status() inspects, defaulted to empty
+# (disabled). Individual tests override only the credentials they want set.
+_ALL_CREDENTIALS = (
+    "nexar_client_id",
+    "nexar_client_secret",
+    "brokerbin_api_key",
+    "brokerbin_api_secret",
+    "ebay_client_id",
+    "ebay_client_secret",
+    "digikey_client_id",
+    "digikey_client_secret",
+    "mouser_api_key",
+    "oemsecrets_api_key",
+    "sourcengine_api_key",
+    "element14_api_key",
+    "anthropic_api_key",
+    "azure_client_id",
+    "azure_client_secret",
+    "azure_tenant_id",
+)
+
+
+def _configure_settings(mock_settings, **overrides):
+    """Set all credentials to empty (disabled), then apply the given overrides."""
+    for name in _ALL_CREDENTIALS:
+        setattr(mock_settings, name, overrides.get(name, ""))
+
 
 class TestLogConnectorStatus:
     def test_all_disabled_returns_dict(self):
@@ -12,23 +39,7 @@ class TestLogConnectorStatus:
         from app.connector_status import log_connector_status
 
         with patch("app.connector_status.settings") as mock_settings:
-            # Set all credentials to empty strings
-            mock_settings.nexar_client_id = ""
-            mock_settings.nexar_client_secret = ""
-            mock_settings.brokerbin_api_key = ""
-            mock_settings.brokerbin_api_secret = ""
-            mock_settings.ebay_client_id = ""
-            mock_settings.ebay_client_secret = ""
-            mock_settings.digikey_client_id = ""
-            mock_settings.digikey_client_secret = ""
-            mock_settings.mouser_api_key = ""
-            mock_settings.oemsecrets_api_key = ""
-            mock_settings.sourcengine_api_key = ""
-            mock_settings.element14_api_key = ""
-            mock_settings.anthropic_api_key = ""
-            mock_settings.azure_client_id = ""
-            mock_settings.azure_client_secret = ""
-            mock_settings.azure_tenant_id = ""
+            _configure_settings(mock_settings)
 
             result = log_connector_status()
 
@@ -40,22 +51,12 @@ class TestLogConnectorStatus:
         from app.connector_status import log_connector_status
 
         with patch("app.connector_status.settings") as mock_settings:
-            mock_settings.nexar_client_id = "id"
-            mock_settings.nexar_client_secret = "secret"
-            mock_settings.brokerbin_api_key = ""
-            mock_settings.brokerbin_api_secret = ""
-            mock_settings.ebay_client_id = ""
-            mock_settings.ebay_client_secret = ""
-            mock_settings.digikey_client_id = ""
-            mock_settings.digikey_client_secret = ""
-            mock_settings.mouser_api_key = "key"
-            mock_settings.oemsecrets_api_key = ""
-            mock_settings.sourcengine_api_key = ""
-            mock_settings.element14_api_key = ""
-            mock_settings.anthropic_api_key = ""
-            mock_settings.azure_client_id = ""
-            mock_settings.azure_client_secret = ""
-            mock_settings.azure_tenant_id = ""
+            _configure_settings(
+                mock_settings,
+                nexar_client_id="id",
+                nexar_client_secret="secret",
+                mouser_api_key="key",
+            )
 
             result = log_connector_status()
 

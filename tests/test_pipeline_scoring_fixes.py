@@ -10,10 +10,6 @@ Called by: pytest
 Depends on: app/routers/dashboard/, app/services/proactive_service.py
 """
 
-# ---- Bug 1: avail_rank recomputed in team-leaderboard ----
-
-
-# ---- Bug 3: Proactive scorecard outlier cap ----
 # Tests for _cap_outlier removed — capping is now done inline via SQL case()
 # expressions in get_scorecard(). Behavior is covered by scorecard integration
 # tests in test_proactive_service.py.

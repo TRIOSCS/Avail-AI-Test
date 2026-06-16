@@ -12,6 +12,16 @@ from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.human_behavior import HumanBehavior
 from app.services.nc_worker.session_manager import NcSessionManager
 
+
+def _run(coro):
+    """Run a coroutine to completion on a fresh, immediately-closed event loop."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
 # ── HumanBehavior Tests ─────────────────────────────────────────────
 
 
@@ -43,15 +53,13 @@ def test_random_delay_gaussian_distribution():
 
 def test_human_type_calls_keyboard(db_session):
     """human_type types each character individually."""
-    loop = asyncio.new_event_loop()
     page = MagicMock()
     page.keyboard = MagicMock()
     page.keyboard.type = AsyncMock()
     locator = MagicMock()
     locator.click = AsyncMock()
 
-    loop.run_until_complete(HumanBehavior.human_type(page, locator, "ABC"))
-    loop.close()
+    _run(HumanBehavior.human_type(page, locator, "ABC"))
 
     locator.click.assert_called_once()
     assert page.keyboard.type.call_count == 3  # One per character
@@ -59,15 +67,13 @@ def test_human_type_calls_keyboard(db_session):
 
 def test_human_click_random_position():
     """human_click clicks within the bounding box, not dead center."""
-    loop = asyncio.new_event_loop()
     page = MagicMock()
     page.mouse = MagicMock()
     page.mouse.click = AsyncMock()
     locator = MagicMock()
     locator.bounding_box = AsyncMock(return_value={"x": 100, "y": 200, "width": 80, "height": 30})
 
-    loop.run_until_complete(HumanBehavior.human_click(page, locator))
-    loop.close()
+    _run(HumanBehavior.human_click(page, locator))
 
     page.mouse.click.assert_called_once()
     call_args = page.mouse.click.call_args[0]
@@ -79,14 +85,12 @@ def test_human_click_random_position():
 
 def test_human_click_fallback_no_bbox():
     """human_click falls back to locator.click() if bounding_box returns None."""
-    loop = asyncio.new_event_loop()
     page = MagicMock()
     locator = MagicMock()
     locator.bounding_box = AsyncMock(return_value=None)
     locator.click = AsyncMock()
 
-    loop.run_until_complete(HumanBehavior.human_click(page, locator))
-    loop.close()
+    _run(HumanBehavior.human_click(page, locator))
 
     locator.click.assert_called_once()
 

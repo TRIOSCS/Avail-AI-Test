@@ -7,15 +7,19 @@ from app.models.purchase_history import CustomerPartHistory
 from app.services.purchase_history_service import upsert_purchase
 
 
-def test_model_creation(db_session):
-    """CustomerPartHistory record can be created with all fields."""
-    co = Company(name="Test Co", is_active=True)
+def _make_company_and_card(db_session, normalized_mpn, display_mpn, company_name="Test Co"):
+    """Create and flush a Company + MaterialCard, returning both."""
+    co = Company(name=company_name, is_active=True)
     db_session.add(co)
-    db_session.flush()
-
-    card = MaterialCard(normalized_mpn="abc123", display_mpn="ABC-123", search_count=0)
+    card = MaterialCard(normalized_mpn=normalized_mpn, display_mpn=display_mpn, search_count=0)
     db_session.add(card)
     db_session.flush()
+    return co, card
+
+
+def test_model_creation(db_session):
+    """CustomerPartHistory record can be created with all fields."""
+    co, card = _make_company_and_card(db_session, "abc123", "ABC-123")
 
     cph = CustomerPartHistory(
         company_id=co.id,
@@ -39,11 +43,7 @@ def test_unique_constraint(db_session):
     """Duplicate (company, material_card, source) raises IntegrityError."""
     from sqlalchemy.exc import IntegrityError
 
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="xyz789", display_mpn="XYZ-789", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "xyz789", "XYZ-789")
 
     db_session.add(
         CustomerPartHistory(
@@ -72,11 +72,7 @@ def test_unique_constraint(db_session):
 
 def test_different_sources_allowed(db_session):
     """Same company+card with different sources creates separate records."""
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="def456", display_mpn="DEF-456", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "def456", "DEF-456")
 
     db_session.add(
         CustomerPartHistory(
@@ -102,11 +98,7 @@ def test_different_sources_allowed(db_session):
 
 def test_upsert_creates_new(db_session):
     """upsert_purchase creates a new record when none exists."""
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="new001", display_mpn="NEW-001", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "new001", "NEW-001")
 
     result = upsert_purchase(
         db_session,
@@ -130,11 +122,7 @@ def test_upsert_creates_new(db_session):
 
 def test_upsert_updates_existing(db_session):
     """upsert_purchase increments count and updates rolling average on second call."""
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="upd001", display_mpn="UPD-001", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "upd001", "UPD-001")
 
     # First purchase: $10, qty 100
     upsert_purchase(
@@ -168,11 +156,7 @@ def test_upsert_updates_existing(db_session):
 
 def test_upsert_no_price(db_session):
     """upsert_purchase handles None price gracefully."""
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="nop001", display_mpn="NOP-001", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "nop001", "NOP-001")
 
     result = upsert_purchase(
         db_session,
@@ -190,11 +174,7 @@ def test_upsert_no_price(db_session):
 
 def test_upsert_updates_source_ref(db_session):
     """Second upsert overwrites source_ref with latest reference."""
-    co = Company(name="Test Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="ref001", display_mpn="REF-001", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "ref001", "REF-001")
 
     upsert_purchase(
         db_session,
@@ -219,11 +199,7 @@ def test_upsert_updates_source_ref(db_session):
 
 def test_cascade_delete_company(db_session):
     """Deleting a company cascades to its purchase history."""
-    co = Company(name="Cascade Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="cas001", display_mpn="CAS-001", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "cas001", "CAS-001", company_name="Cascade Co")
 
     db_session.add(
         CustomerPartHistory(
@@ -244,11 +220,7 @@ def test_cascade_delete_company(db_session):
 
 def test_cascade_delete_material_card(db_session):
     """Deleting a material card cascades to its purchase history."""
-    co = Company(name="Cascade Co", is_active=True)
-    db_session.add(co)
-    card = MaterialCard(normalized_mpn="cas002", display_mpn="CAS-002", search_count=0)
-    db_session.add(card)
-    db_session.flush()
+    co, card = _make_company_and_card(db_session, "cas002", "CAS-002", company_name="Cascade Co")
 
     db_session.add(
         CustomerPartHistory(

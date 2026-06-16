@@ -44,6 +44,23 @@ def sales_client(db_session: Session, sales_user: User) -> TestClient:
             app.dependency_overrides.pop(dep, None)
 
 
+def _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site, *, company_id=None):
+    """Create, persist, and return a 'new' ProactiveMatch for LM317T."""
+    match = ProactiveMatch(
+        offer_id=test_offer.id,
+        requirement_id=test_requisition.id,
+        requisition_id=test_requisition.id,
+        customer_site_id=test_customer_site.id,
+        salesperson_id=test_user.id,
+        mpn="LM317T",
+        status="new",
+        **({"company_id": company_id} if company_id is not None else {}),
+    )
+    db_session.add(match)
+    db_session.commit()
+    return match
+
+
 # ── Matches ──────────────────────────────────────────────────────────
 
 
@@ -93,17 +110,7 @@ def test_count_badge(mock_fn, client):
 
 def test_dismiss_success(client, db_session, test_user, test_requisition, test_offer, test_customer_site):
     """Dismiss match IDs -> 200."""
-    match = ProactiveMatch(
-        offer_id=test_offer.id,
-        requirement_id=test_requisition.id,
-        requisition_id=test_requisition.id,
-        customer_site_id=test_customer_site.id,
-        salesperson_id=test_user.id,
-        mpn="LM317T",
-        status="new",
-    )
-    db_session.add(match)
-    db_session.commit()
+    match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
 
     resp = client.post("/api/proactive/dismiss", json={"match_ids": [match.id]})
     assert resp.status_code == 200
@@ -235,24 +242,20 @@ def test_contacts_site_empty(client):
 
 
 class TestSendValidation:
-    def test_send_empty_match_ids(self, client):
-        """Send with empty match_ids -> 400."""
+    @pytest.mark.parametrize(
+        ("match_ids", "contact_ids"),
+        [
+            pytest.param([], [1], id="empty_match_ids"),
+            pytest.param([1], [], id="empty_contact_ids"),
+        ],
+    )
+    def test_send_empty_ids(self, client, match_ids, contact_ids):
+        """Empty match_ids or contact_ids -> 400."""
         resp = client.post(
             "/api/proactive/send",
             json={
-                "match_ids": [],
-                "contact_ids": [1],
-            },
-        )
-        assert resp.status_code == 400
-
-    def test_send_empty_contact_ids(self, client):
-        """Send with empty contact_ids -> 400."""
-        resp = client.post(
-            "/api/proactive/send",
-            json={
-                "match_ids": [1],
-                "contact_ids": [],
+                "match_ids": match_ids,
+                "contact_ids": contact_ids,
             },
         )
         assert resp.status_code == 400
@@ -365,17 +368,7 @@ class TestDraftEndpoint:
         self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site
     ):
         """AI draft returns subject + body + html."""
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=test_requisition.id,
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
-            mpn="LM317T",
-            status="new",
-        )
-        db_session.add(match)
-        db_session.commit()
+        match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
         resp = client.post(
             "/api/proactive/draft",
             json={
@@ -397,17 +390,7 @@ class TestDraftEndpoint:
         self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site
     ):
         """AI returns None -> 500."""
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=test_requisition.id,
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
-            mpn="LM317T",
-            status="new",
-        )
-        db_session.add(match)
-        db_session.commit()
+        match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
         resp = client.post(
             "/api/proactive/draft",
             json={
@@ -524,18 +507,9 @@ class TestDoNotOffer:
         self, client, db_session, test_company, test_user, test_requisition, test_offer, test_customer_site
     ):
         """Suppression auto-dismisses open proactive matches."""
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=test_requisition.id,
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            company_id=test_company.id,
-            salesperson_id=test_user.id,
-            mpn="LM317T",
-            status="new",
+        match = _make_match(
+            db_session, test_user, test_requisition, test_offer, test_customer_site, company_id=test_company.id
         )
-        db_session.add(match)
-        db_session.commit()
 
         resp = client.post(
             "/api/proactive/do-not-offer",
@@ -569,17 +543,7 @@ class TestDraftWithContactIds:
         db_session.add(contact)
         db_session.flush()
 
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=test_requisition.id,
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
-            mpn="LM317T",
-            status="new",
-        )
-        db_session.add(match)
-        db_session.commit()
+        match = _make_match(db_session, test_user, test_requisition, test_offer, test_customer_site)
 
         resp = client.post(
             "/api/proactive/draft",

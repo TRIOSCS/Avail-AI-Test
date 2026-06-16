@@ -10,6 +10,7 @@ Depends on: app/utils/search_builder.py, conftest.py
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import Column, String
 from sqlalchemy.exc import OperationalError, ProgrammingError
 
@@ -180,8 +181,17 @@ def test_fts_with_results_returns_fts_query():
     assert result is mock_fts_query
 
 
-def test_fts_programming_error_fallback():
-    """ProgrammingError in FTS path falls back to ILIKE (line 80-81)."""
+@pytest.mark.parametrize(
+    ("exc", "orig_msg"),
+    [
+        (ProgrammingError, "pg error"),
+        (OperationalError, "sqlite error"),
+    ],
+    ids=["programming_error", "operational_error"],
+)
+def test_fts_db_error_falls_back_to_ilike(exc, orig_msg):
+    """ProgrammingError/OperationalError in FTS path falls back to ILIKE (line
+    80-81)."""
     sb = SearchBuilder("resistor query long enough")
 
     mock_model = MagicMock()
@@ -193,31 +203,7 @@ def test_fts_programming_error_fallback():
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise ProgrammingError("test", {}, Exception("pg error"))
-        return MagicMock()
-
-    mock_query = MagicMock()
-    mock_query.filter.side_effect = _filter_side_effect
-
-    with patch.object(sb, "ilike_filter", return_value=MagicMock()):
-        result = sb.fts_or_fallback(mock_query, mock_model, [MagicMock()])
-    assert result is not None
-
-
-def test_fts_operational_error_fallback():
-    """OperationalError in FTS path falls back to ILIKE (line 80-81)."""
-    sb = SearchBuilder("resistor query long enough")
-
-    mock_model = MagicMock()
-    mock_model.search_vector = MagicMock()
-
-    call_count = 0
-
-    def _filter_side_effect(*args, **kwargs):
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            raise OperationalError("test", {}, Exception("sqlite error"))
+            raise exc("test", {}, Exception(orig_msg))
         return MagicMock()
 
     mock_query = MagicMock()

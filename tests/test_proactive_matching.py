@@ -109,6 +109,28 @@ def _setup_scenario(db):
     }
 
 
+def _make_offer(db, data, **overrides):
+    """Add the standard Arrow/STM32F407 offer for `data`'s scenario and return it.
+
+    Any field can be overridden via kwargs (e.g. vendor_name, unit_price,
+    material_card_id).
+    """
+    fields = {
+        "requisition_id": data["requisition"].id,
+        "requirement_id": data["requirement"].id,
+        "material_card_id": data["card"].id,
+        "vendor_name": "Arrow",
+        "mpn": "STM32F407",
+        "unit_price": Decimal("8.00"),
+        "status": "active",
+    }
+    fields.update(overrides)
+    offer = Offer(**fields)
+    db.add(offer)
+    db.commit()
+    return offer
+
+
 # ── Scoring tests ────────────────────────────────────────────────────────
 
 
@@ -169,18 +191,7 @@ def test_find_matches_for_offer(db_session):
     data = _setup_scenario(db_session)
 
     # Create an offer for the same part
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow Electronics",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        qty_available=200,
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data, vendor_name="Arrow Electronics", qty_available=200)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -205,17 +216,14 @@ def test_find_matches_no_cph(db_session):
     db_session.add(card2)
     db_session.flush()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
+    offer = _make_offer(
+        db_session,
+        data,
         material_card_id=card2.id,
         vendor_name="Mouser",
         mpn="LM358N",
         unit_price=Decimal("0.50"),
-        status="active",
     )
-    db_session.add(offer)
-    db_session.commit()
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 0
@@ -227,17 +235,7 @@ def test_find_matches_no_owner(db_session):
     data["company"].account_owner_id = None
     db_session.commit()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 0
@@ -247,17 +245,7 @@ def test_find_matches_dedup(db_session):
     """Duplicate matches for same card+company are not created."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     # First call creates match
     matches1 = find_matches_for_offer(offer.id, db_session)
@@ -277,18 +265,7 @@ def test_run_proactive_scan(db_session):
     """Batch scan picks up new offers and creates matches."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer)
-    db_session.commit()
+    _make_offer(db_session, data, created_at=datetime.now(timezone.utc))
 
     # Set watermark so it picks up the offer
     from app.models.config import SystemConfig
@@ -313,17 +290,7 @@ def test_dismiss_match(db_session):
     """Dismissing a match sets status and reason."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -340,17 +307,7 @@ def test_mark_match_sent(db_session):
     """Marking a match as sent updates status."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -368,17 +325,7 @@ def test_expire_old_matches(db_session):
     """Old 'new' matches get expired."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -446,17 +393,7 @@ def test_find_matches_offer_no_material_card(db_session):
     """Offer with no material_card_id returns [] early (line 100)."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=None,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data, material_card_id=None)
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert matches == []
@@ -473,17 +410,7 @@ def test_find_matches_no_active_site(db_session):
     data["site"].is_active = False
     db_session.commit()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 0
@@ -506,17 +433,7 @@ def test_find_matches_do_not_offer_suppression(db_session):
     db_session.add(dno)
     db_session.commit()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 0
@@ -538,17 +455,7 @@ def test_find_matches_throttled(db_session):
     db_session.add(throttle)
     db_session.commit()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     assert len(matches) == 0
@@ -565,17 +472,7 @@ def test_find_matches_below_min_margin(db_session):
     data["cph"].avg_unit_price = Decimal("8.10")
     db_session.commit()
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     # margin = (8.10 - 8.00) / 8.10 * 100 = 1.23% < 5% (mock min_margin)
     with patch("app.services.proactive_matching.settings") as mock_settings:
@@ -785,17 +682,7 @@ def test_run_proactive_scan_commit_failure(db_session):
 
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(offer)
+    _make_offer(db_session, data, created_at=datetime.now(timezone.utc))
     db_session.add(
         SystemConfig(
             key="proactive_last_scan",
@@ -825,17 +712,7 @@ def test_dismiss_match_wrong_user(db_session):
     """Dismissing someone else's match raises ValueError."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()
@@ -870,17 +747,7 @@ def test_mark_match_sent_wrong_user(db_session):
     """Marking someone else's match as sent raises ValueError."""
     data = _setup_scenario(db_session)
 
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.commit()
+    offer = _make_offer(db_session, data)
 
     matches = find_matches_for_offer(offer.id, db_session)
     db_session.commit()

@@ -125,6 +125,39 @@ def _make_site_contact(db: Session, site: CustomerSite) -> SiteContact:
     return sc
 
 
+def _make_match(
+    db: Session,
+    *,
+    offer: Offer,
+    requirement: Requirement,
+    requisition: Requisition,
+    site: CustomerSite,
+    user: User,
+    mpn: str,
+    **kwargs,
+) -> ProactiveMatch:
+    """Create a ProactiveMatch linking an offer to an archived requirement."""
+    match = ProactiveMatch(
+        offer_id=offer.id,
+        requirement_id=requirement.id,
+        requisition_id=requisition.id,
+        customer_site_id=site.id,
+        salesperson_id=user.id,
+        mpn=mpn,
+        **kwargs,
+    )
+    db.add(match)
+    db.flush()
+    return match
+
+
+def _mock_graph_client(*, side_effect=None):
+    """Return a MagicMock GraphClient whose post_json is an AsyncMock."""
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(return_value=None, side_effect=side_effect)
+    return mock_gc
+
+
 # ── send_proactive_offer ───────────────────────────────────────────────
 
 
@@ -149,15 +182,15 @@ class TestSendProactiveOffer:
         """Valid matches but empty contact_ids raises ValueError."""
         # Create a match for the test_offer
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         db_session.commit()
 
         with pytest.raises(ValueError, match="No valid contacts"):
@@ -176,22 +209,19 @@ class TestSendProactiveOffer:
     async def test_send_success(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """Mocked GraphClient.post_json -> creates ProactiveOffer and returns data."""
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -243,22 +273,19 @@ class TestSendProactiveOffer:
         db_session.flush()
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="TOTAL100")
-        match = ProactiveMatch(
-            offer_id=offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="TOTAL100",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -279,20 +306,19 @@ class TestSendProactiveOffer:
     ):
         """GraphClient raises exception -> ProactiveOffer is still saved."""
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(side_effect=Exception("Graph API down"))
+        mock_gc = _mock_graph_client(side_effect=Exception("Graph API down"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = await send_proactive_offer(
@@ -460,17 +486,16 @@ class TestConvertProactiveToWin:
         """ProactiveMatch.status is updated to 'converted' after conversion."""
         # Create a match first
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
             status="sent",
         )
-        db_session.add(match)
-        db_session.flush()
 
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
@@ -670,16 +695,16 @@ class TestGetMatchesForUser:
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        m1 = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
             status="new",
         )
-        db_session.add(m1)
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="new")
@@ -695,16 +720,16 @@ class TestGetMatchesForUser:
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        m = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
             status="sent",
         )
-        db_session.add(m)
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="")
@@ -718,19 +743,19 @@ class TestGetMatchesForUser:
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="DETAILS")
-        m = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="DETAILS",
             status="new",
             match_score=75,
             margin_pct=22.5,
             customer_purchase_count=3,
         )
-        db_session.add(m)
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="new")
@@ -759,22 +784,19 @@ class TestSendProactiveOfferGreetings:
     ):
         """Single named contact gets 'Hi {name},' greeting."""
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -794,15 +816,15 @@ class TestSendProactiveOfferGreetings:
     ):
         """Multiple named contacts get comma-separated names greeting."""
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         contact1 = SiteContact(
             customer_site_id=test_customer_site.id,
             full_name="Alice",
@@ -816,10 +838,7 @@ class TestSendProactiveOfferGreetings:
         db_session.add_all([contact1, contact2])
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -837,15 +856,15 @@ class TestSendProactiveOfferGreetings:
     async def test_greeting_no_name_contact(self, db_session, test_user, test_company, test_customer_site, test_offer):
         """Contact with no full_name gets 'Hello,' greeting."""
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="LM317T")
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="LM317T",
         )
-        db_session.add(match)
         contact = SiteContact(
             customer_site_id=test_customer_site.id,
             full_name="",
@@ -854,10 +873,7 @@ class TestSendProactiveOfferGreetings:
         db_session.add(contact)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -981,22 +997,19 @@ class TestQtyCapping:
         archived_req, req_item = _make_archived_requisition(
             db_session, test_user, test_customer_site, mpn="CAP-QTY-TEST", target_qty=50
         )
-        match = ProactiveMatch(
-            offer_id=offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="CAP-QTY-TEST",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -1042,22 +1055,19 @@ class TestQtyCapping:
         archived_req, req_item = _make_archived_requisition(
             db_session, test_user, test_customer_site, mpn="AVAIL-QTY-TEST", target_qty=500
         )
-        match = ProactiveMatch(
-            offer_id=offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        match = _make_match(
+            db_session,
+            offer=offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="AVAIL-QTY-TEST",
         )
-        db_session.add(match)
         contact = _make_site_contact(db_session, test_customer_site)
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with patch("app.utils.graph_client.GraphClient", return_value=_mock_graph_client()):
             result = await send_proactive_offer(
                 db=db_session,
                 user=test_user,
@@ -1080,16 +1090,16 @@ class TestQtyCapping:
         archived_req, req_item = _make_archived_requisition(
             db_session, test_user, test_customer_site, mpn="TARGET-QTY-TEST", target_qty=250
         )
-        match = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="TARGET-QTY-TEST",
             status="new",
         )
-        db_session.add(match)
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id)
@@ -1108,16 +1118,16 @@ class TestGetMatchCount:
         from app.services.proactive_service import get_match_count
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="COUNT1")
-        m = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="COUNT1",
             status="new",
         )
-        db_session.add(m)
         db_session.commit()
 
         count = get_match_count(db_session, test_user.id)
@@ -1127,16 +1137,16 @@ class TestGetMatchCount:
         from app.services.proactive_service import get_match_count
 
         archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="COUNT2")
-        m = ProactiveMatch(
-            offer_id=test_offer.id,
-            requirement_id=req_item.id,
-            requisition_id=archived_req.id,
-            customer_site_id=test_customer_site.id,
-            salesperson_id=test_user.id,
+        _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
             mpn="COUNT2",
             status="sent",
         )
-        db_session.add(m)
         db_session.commit()
 
         count = get_match_count(db_session, test_user.id)

@@ -27,6 +27,8 @@ os.environ["TESTING"] = "1"
 
 from types import SimpleNamespace
 
+import pytest
+
 from app.services.prospect_priority import build_priority_snapshot
 
 
@@ -192,27 +194,22 @@ class TestBuildPrioritySnapshotAllBranches:
         # Should not crash
         assert isinstance(snapshot, dict)
 
-    def test_procurement_hiring_signal(self):
-        """Hiring type='procurement' → +4, 'Procurement hiring signal' (lines
-        104-106)."""
+    @pytest.mark.parametrize(
+        ("hiring_type", "expected_reason"),
+        [
+            ("procurement", "Procurement hiring signal"),  # +4, lines 104-106
+            ("engineering", "Engineering growth signal"),  # +2, lines 108-110
+        ],
+        ids=["procurement", "engineering"],
+    )
+    def test_hiring_signal(self, hiring_type, expected_reason):
+        """Hiring type maps to its growth-signal reason."""
         snapshot = build_priority_snapshot(
             _prospect(
-                readiness_signals={"hiring": {"type": "procurement"}},
+                readiness_signals={"hiring": {"type": hiring_type}},
             )
         )
-        reasons = snapshot["priority_reasons"]
-        assert "Procurement hiring signal" in reasons
-
-    def test_engineering_hiring_signal(self):
-        """Hiring type='engineering' → +2, 'Engineering growth signal' (lines
-        108-110)."""
-        snapshot = build_priority_snapshot(
-            _prospect(
-                readiness_signals={"hiring": {"type": "engineering"}},
-            )
-        )
-        reasons = snapshot["priority_reasons"]
-        assert "Engineering growth signal" in reasons
+        assert expected_reason in snapshot["priority_reasons"]
 
     def test_new_procurement_hire_signal(self):
         """new_procurement_hire=True → +3, reason added (lines 113-115)."""
@@ -234,38 +231,24 @@ class TestBuildPrioritySnapshotAllBranches:
         reasons = snapshot["priority_reasons"]
         assert "Marked priority" in reasons
 
-    def test_strong_fit_readiness_baseline(self):
-        """Fit>=75 and readiness>=55 → 'Strong fit/readiness baseline' (line 124)."""
+    @pytest.mark.parametrize(
+        ("fit_score", "readiness_score", "expected_reason"),
+        [
+            (78, 58, "Strong fit/readiness baseline"),  # fit>=75 and readiness>=55, line 124
+            (72, 40, "Strong ICP fit"),  # fit>=70 but readiness<55, line 126
+            (55, 65, "Strong near-term timing"),  # readiness>=60 but fit<70, line 128
+        ],
+        ids=["fit_readiness_baseline", "icp_fit_only", "near_term_timing_only"],
+    )
+    def test_baseline_reasons(self, fit_score, readiness_score, expected_reason):
+        """Fit/readiness combinations each yield their baseline reason."""
         snapshot = build_priority_snapshot(
             _prospect(
-                fit_score=78,
-                readiness_score=58,
+                fit_score=fit_score,
+                readiness_score=readiness_score,
             )
         )
-        reasons = snapshot["priority_reasons"]
-        assert "Strong fit/readiness baseline" in reasons
-
-    def test_strong_icp_fit_only(self):
-        """Fit>=70 but readiness<55 → 'Strong ICP fit' (line 126)."""
-        snapshot = build_priority_snapshot(
-            _prospect(
-                fit_score=72,
-                readiness_score=40,
-            )
-        )
-        reasons = snapshot["priority_reasons"]
-        assert "Strong ICP fit" in reasons
-
-    def test_strong_near_term_timing_only(self):
-        """Readiness>=60 but fit<70 → 'Strong near-term timing' (line 128)."""
-        snapshot = build_priority_snapshot(
-            _prospect(
-                fit_score=55,
-                readiness_score=65,
-            )
-        )
-        reasons = snapshot["priority_reasons"]
-        assert "Strong near-term timing" in reasons
+        assert expected_reason in snapshot["priority_reasons"]
 
     def test_no_reasons_gets_default_message(self):
         """All zeros → 'Needs stronger buyer signals' (line 132)."""

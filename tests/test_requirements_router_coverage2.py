@@ -26,29 +26,11 @@ from app.models import (
     Requisition,
     Sighting,
     SourcingLead,
-    User,
 )
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 _VALID_REQ_PAYLOAD = {"primary_mpn": "LM317T", "manufacturer": "ST Micro", "target_qty": 100}
-
-
-def _make_requirement(db: Session, req: Requisition, **kw) -> Requirement:
-    defaults = dict(
-        requisition_id=req.id,
-        primary_mpn="LM317T",
-        normalized_mpn="lm317t",
-        target_qty=100,
-        target_price=0.50,
-        created_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kw)
-    r = Requirement(**defaults)
-    db.add(r)
-    db.commit()
-    db.refresh(r)
-    return r
 
 
 def _make_sighting(db: Session, req_item: Requirement, **kw) -> Sighting:
@@ -84,22 +66,6 @@ def _make_material_card(db: Session, mpn: str = "LM317T") -> MaterialCard:
     db.commit()
     db.refresh(card)
     return card
-
-
-def _make_requisition(db: Session, user: User, **kw) -> Requisition:
-    defaults = dict(
-        name="Test Req",
-        customer_name="Acme",
-        status="active",
-        created_by=user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kw)
-    req = Requisition(**defaults)
-    db.add(req)
-    db.commit()
-    db.refresh(req)
-    return req
 
 
 def _make_sourcing_lead(db: Session, req: Requisition, req_item: Requirement, **kw) -> SourcingLead:

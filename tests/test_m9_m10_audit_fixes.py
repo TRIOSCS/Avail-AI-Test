@@ -20,36 +20,30 @@ from app.utils.sql_helpers import escape_like
 class TestLikeEscapeIntegration:
     """Verify escape_like is applied to user-facing search inputs."""
 
-    def test_percent_in_sales_person_escaped(self):
-        """Percent wildcards in sales_person filter must be escaped."""
-        raw = "100%match"
-        escaped = escape_like(raw)
-        assert "%" not in escaped or r"\%" in escaped
-        assert escaped == r"100\%match"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("100%match", r"100\%match"),
+            ("LM_358", r"LM\_358"),
+            ("100%_test", r"100\%\_test"),
+        ],
+        ids=[
+            "percent_in_sales_person",
+            "underscore_in_search_query",
+            "combined_wildcards_in_tag_search",
+        ],
+    )
+    def test_wildcards_escaped(self, raw, expected):
+        """User-facing search inputs must have LIKE wildcards escaped."""
+        assert escape_like(raw) == expected
 
-    def test_underscore_in_search_query_escaped(self):
-        """Underscore wildcards in q filter must be escaped."""
-        raw = "LM_358"
-        escaped = escape_like(raw)
-        assert escaped == r"LM\_358"
+    @pytest.mark.parametrize("module_name", ["sightings", "tags"])
+    def test_router_imports_escape_like(self, module_name):
+        """sightings.py and tags.py must import escape_like."""
+        import importlib
 
-    def test_combined_wildcards_in_tag_search(self):
-        """Combined wildcards in tag search must all be escaped."""
-        raw = "100%_test"
-        escaped = escape_like(raw)
-        assert escaped == r"100\%\_test"
-
-    def test_sightings_router_imports_escape_like(self):
-        """sightings.py must import escape_like."""
-        from app.routers import sightings
-
-        assert hasattr(sightings, "escape_like")
-
-    def test_tags_router_imports_escape_like(self):
-        """tags.py must import escape_like."""
-        from app.routers import tags
-
-        assert hasattr(tags, "escape_like")
+        router_module = importlib.import_module(f"app.routers.{module_name}")
+        assert hasattr(router_module, "escape_like")
 
 
 # ── M10: Enrichment Connector Error Classification ─────────────────────
@@ -96,9 +90,18 @@ class TestEnrichmentErrorClassification:
         mock_logger.warning.assert_called_once()
         assert "timed out" in mock_logger.warning.call_args[0][0]
 
+    @pytest.mark.parametrize(
+        ("exc_message", "log_level", "expected_substr"),
+        [
+            ("HTTP 401 Unauthorized", "error", "auth failure"),
+            ("HTTP 403 Forbidden", "error", "auth failure"),
+            ("HTTP 429 Too Many Requests", "warning", "rate limited"),
+        ],
+        ids=["auth_401", "auth_403", "rate_limit_429"],
+    )
     @pytest.mark.asyncio()
-    async def test_auth_401_logs_error(self):
-        """401 errors should log at ERROR level with auth failure message."""
+    async def test_classified_error_log_level_and_message(self, exc_message, log_level, expected_substr):
+        """401/403 log at ERROR (auth failure); 429 logs a rate-limited WARNING."""
         import app.services.enrichment as mod
 
         config = _make_config()
@@ -108,62 +111,16 @@ class TestEnrichmentErrorClassification:
             patch.object(mod, "get_credential_cached", return_value="fake-key"),
             patch.object(mod, "importlib") as mock_importlib,
             patch.object(mod, "logger", mock_logger),
-            patch.object(mod.asyncio, "wait_for", side_effect=Exception("HTTP 401 Unauthorized")),
+            patch.object(mod.asyncio, "wait_for", side_effect=Exception(exc_message)),
         ):
-            mock_module = MagicMock()
-            mock_importlib.import_module.return_value = mock_module
+            mock_importlib.import_module.return_value = MagicMock()
 
             result = await mod._try_connector_config(config, "LM358N")
 
         assert result is None
-        mock_logger.error.assert_called_once()
-        assert "auth failure" in mock_logger.error.call_args[0][0]
-
-    @pytest.mark.asyncio()
-    async def test_auth_403_logs_error(self):
-        """403 Forbidden should also be classified as auth failure."""
-        import app.services.enrichment as mod
-
-        config = _make_config()
-        mock_logger = MagicMock()
-
-        with (
-            patch.object(mod, "get_credential_cached", return_value="fake-key"),
-            patch.object(mod, "importlib") as mock_importlib,
-            patch.object(mod, "logger", mock_logger),
-            patch.object(mod.asyncio, "wait_for", side_effect=Exception("HTTP 403 Forbidden")),
-        ):
-            mock_module = MagicMock()
-            mock_importlib.import_module.return_value = mock_module
-
-            result = await mod._try_connector_config(config, "LM358N")
-
-        assert result is None
-        mock_logger.error.assert_called_once()
-        assert "auth failure" in mock_logger.error.call_args[0][0]
-
-    @pytest.mark.asyncio()
-    async def test_rate_limit_logs_warning(self):
-        """429 rate-limit errors should log a warning with rate-limited message."""
-        import app.services.enrichment as mod
-
-        config = _make_config()
-        mock_logger = MagicMock()
-
-        with (
-            patch.object(mod, "get_credential_cached", return_value="fake-key"),
-            patch.object(mod, "importlib") as mock_importlib,
-            patch.object(mod, "logger", mock_logger),
-            patch.object(mod.asyncio, "wait_for", side_effect=Exception("HTTP 429 Too Many Requests")),
-        ):
-            mock_module = MagicMock()
-            mock_importlib.import_module.return_value = mock_module
-
-            result = await mod._try_connector_config(config, "LM358N")
-
-        assert result is None
-        mock_logger.warning.assert_called_once()
-        assert "rate limited" in mock_logger.warning.call_args[0][0]
+        log_method = getattr(mock_logger, log_level)
+        log_method.assert_called_once()
+        assert expected_substr in log_method.call_args[0][0]
 
     @pytest.mark.asyncio()
     async def test_generic_error_logs_warning_with_exc_info(self):
@@ -179,12 +136,10 @@ class TestEnrichmentErrorClassification:
             patch.object(mod, "logger", mock_logger),
             patch.object(mod.asyncio, "wait_for", side_effect=Exception("Connection refused")),
         ):
-            mock_module = MagicMock()
-            mock_importlib.import_module.return_value = mock_module
+            mock_importlib.import_module.return_value = MagicMock()
 
             result = await mod._try_connector_config(config, "LM358N")
 
         assert result is None
         mock_logger.warning.assert_called_once()
-        call_kwargs = mock_logger.warning.call_args
-        assert call_kwargs[1].get("exc_info") is True
+        assert mock_logger.warning.call_args[1].get("exc_info") is True

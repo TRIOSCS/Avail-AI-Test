@@ -73,70 +73,67 @@ class TestDiscoveryRotation:
         assert result["segment"] == "Aerospace & Defense"
         assert result["regions"] == ["US"]
 
-    def test_after_aerospace_us_picks_aerospace_eu_asia(self, db_session):
-        _make_batch(
-            db_session,
-            batch_id="b1",
-            segment="Aerospace & Defense",
-            regions=["US"],
-        )
+    @pytest.mark.parametrize(
+        ("batch_id", "prev_segment", "prev_regions", "next_segment", "next_regions"),
+        [
+            pytest.param(
+                "b1",
+                "Aerospace & Defense",
+                ["US"],
+                "Aerospace & Defense",
+                ["EU", "Asia"],
+                id="aerospace_us-to-aerospace_eu_asia",
+            ),
+            pytest.param(
+                "b2",
+                "Aerospace & Defense",
+                ["EU", "Asia"],
+                "Service Supply Chain",
+                ["US"],
+                id="aerospace_eu-to-service_us",
+            ),
+            pytest.param(
+                "b3",
+                "Service Supply Chain",
+                ["US"],
+                "Service Supply Chain",
+                ["EU", "Asia"],
+                id="service_us-to-service_eu",
+            ),
+            pytest.param(
+                "b4",
+                "Service Supply Chain",
+                ["EU", "Asia"],
+                "EMS / Electronics Mfg",
+                None,
+                id="service_eu-to-ems",
+            ),
+            pytest.param(
+                "b5",
+                "EMS / Electronics Mfg",
+                ["US", "EU", "Asia"],
+                "Automotive + catch-all",
+                None,
+                id="ems-to-automotive",
+            ),
+            pytest.param(
+                "b6",
+                "Automotive + catch-all",
+                ["US", "EU", "Asia"],
+                "Aerospace & Defense",
+                ["US"],
+                id="automotive-wraps-to-aerospace_us",
+            ),
+        ],
+    )
+    def test_rotation_advances(self, db_session, batch_id, prev_segment, prev_regions, next_segment, next_regions):
+        """Each completed slice advances to the next slice; month 6 wraps to the
+        start."""
+        _make_batch(db_session, batch_id=batch_id, segment=prev_segment, regions=prev_regions)
         result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "Aerospace & Defense"
-        assert result["regions"] == ["EU", "Asia"]
-
-    def test_after_aerospace_eu_picks_service_us(self, db_session):
-        _make_batch(
-            db_session,
-            batch_id="b2",
-            segment="Aerospace & Defense",
-            regions=["EU", "Asia"],
-        )
-        result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "Service Supply Chain"
-        assert result["regions"] == ["US"]
-
-    def test_after_service_us_picks_service_eu(self, db_session):
-        _make_batch(
-            db_session,
-            batch_id="b3",
-            segment="Service Supply Chain",
-            regions=["US"],
-        )
-        result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "Service Supply Chain"
-        assert result["regions"] == ["EU", "Asia"]
-
-    def test_after_service_eu_picks_ems(self, db_session):
-        _make_batch(
-            db_session,
-            batch_id="b4",
-            segment="Service Supply Chain",
-            regions=["EU", "Asia"],
-        )
-        result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "EMS / Electronics Mfg"
-
-    def test_after_ems_picks_automotive(self, db_session):
-        _make_batch(
-            db_session,
-            batch_id="b5",
-            segment="EMS / Electronics Mfg",
-            regions=["US", "EU", "Asia"],
-        )
-        result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "Automotive + catch-all"
-
-    def test_wraps_around_after_month_6(self, db_session):
-        """After automotive → back to Aerospace US."""
-        _make_batch(
-            db_session,
-            batch_id="b6",
-            segment="Automotive + catch-all",
-            regions=["US", "EU", "Asia"],
-        )
-        result = get_next_discovery_slice(db_session)
-        assert result["segment"] == "Aerospace & Defense"
-        assert result["regions"] == ["US"]
+        assert result["segment"] == next_segment
+        if next_regions is not None:
+            assert result["regions"] == next_regions
 
     def test_uses_most_recent_batch(self, db_session):
         """Multiple batches — picks based on most recent."""
@@ -200,38 +197,20 @@ class TestDiscoveryRotation:
 
 class TestKillSwitch:
     @pytest.mark.asyncio
-    async def test_discover_skips_when_disabled(self):
+    @pytest.mark.parametrize(
+        "job",
+        [
+            pytest.param(job_discover_prospects, id="discover"),
+            pytest.param(job_enrich_pool, id="enrich"),
+            pytest.param(job_find_contacts, id="contacts"),
+            pytest.param(job_refresh_scores, id="refresh"),
+            pytest.param(job_expire_and_resurface, id="expire"),
+        ],
+    )
+    async def test_job_skips_when_disabled(self, job):
         with patch("app.services.prospect_scheduler.settings") as mock_s:
             mock_s.prospecting_enabled = False
-            result = await job_discover_prospects()
-        assert result["skipped"] is True
-
-    @pytest.mark.asyncio
-    async def test_enrich_skips_when_disabled(self):
-        with patch("app.services.prospect_scheduler.settings") as mock_s:
-            mock_s.prospecting_enabled = False
-            result = await job_enrich_pool()
-        assert result["skipped"] is True
-
-    @pytest.mark.asyncio
-    async def test_contacts_skips_when_disabled(self):
-        with patch("app.services.prospect_scheduler.settings") as mock_s:
-            mock_s.prospecting_enabled = False
-            result = await job_find_contacts()
-        assert result["skipped"] is True
-
-    @pytest.mark.asyncio
-    async def test_refresh_skips_when_disabled(self):
-        with patch("app.services.prospect_scheduler.settings") as mock_s:
-            mock_s.prospecting_enabled = False
-            result = await job_refresh_scores()
-        assert result["skipped"] is True
-
-    @pytest.mark.asyncio
-    async def test_expire_skips_when_disabled(self):
-        with patch("app.services.prospect_scheduler.settings") as mock_s:
-            mock_s.prospecting_enabled = False
-            result = await job_expire_and_resurface()
+            result = await job()
         assert result["skipped"] is True
 
 
@@ -240,95 +219,85 @@ class TestKillSwitch:
 
 class TestExpireLogic:
     @pytest.mark.asyncio
-    async def test_expires_old_low_readiness(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Old Low",
-            domain="oldlow.com",
-            readiness_score=30,
-            created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
-        )
+    @pytest.mark.parametrize(
+        ("overrides", "expected_status"),
+        [
+            pytest.param(
+                {
+                    "name": "Old Low",
+                    "domain": "oldlow.com",
+                    "readiness_score": 30,
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                },
+                "expired",
+                id="expires_old_low_readiness",
+            ),
+            pytest.param(
+                {
+                    "name": "Old High",
+                    "domain": "oldhigh.com",
+                    "readiness_score": 70,
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                },
+                "suggested",
+                id="does_not_expire_high_readiness",
+            ),
+            pytest.param(
+                {
+                    "name": "Recent",
+                    "domain": "recent.com",
+                    "readiness_score": 30,
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=10),
+                },
+                "suggested",
+                id="does_not_expire_recently_enriched",
+            ),
+            pytest.param(
+                {
+                    "name": "Intent",
+                    "domain": "intent.com",
+                    "readiness_score": 30,
+                    "readiness_signals": {"intent": {"strength": "strong"}},
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=100),
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                },
+                "suggested",
+                id="does_not_expire_strong_intent",
+            ),
+            pytest.param(
+                {
+                    "name": "Young",
+                    "domain": "young.com",
+                    "readiness_score": 20,
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=30),
+                },
+                "suggested",
+                id="does_not_expire_young_prospect",
+            ),
+            pytest.param(
+                {
+                    "name": "Boundary",
+                    "domain": "boundary.com",
+                    "readiness_score": 20,
+                    "created_at": datetime.now(timezone.utc) - timedelta(days=89),
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=70),
+                },
+                "suggested",
+                id="within_90_day_boundary",
+            ),
+        ],
+    )
+    async def test_expire_status(self, db_session, overrides, expected_status):
+        """Old low-readiness prospects expire; high-readiness / fresh / strong-intent /
+        young / within-90-day-boundary prospects stay suggested."""
+        p = _make_prospect(db_session, **overrides)
         with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
-        assert p.status == "expired"
-
-    @pytest.mark.asyncio
-    async def test_does_not_expire_high_readiness(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Old High",
-            domain="oldhigh.com",
-            readiness_score=70,
-            created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "suggested"
-
-    @pytest.mark.asyncio
-    async def test_does_not_expire_recently_enriched(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Recent",
-            domain="recent.com",
-            readiness_score=30,
-            created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=10),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "suggested"
-
-    @pytest.mark.asyncio
-    async def test_does_not_expire_strong_intent(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Intent",
-            domain="intent.com",
-            readiness_score=30,
-            readiness_signals={"intent": {"strength": "strong"}},
-            created_at=datetime.now(timezone.utc) - timedelta(days=100),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "suggested"
-
-    @pytest.mark.asyncio
-    async def test_does_not_expire_young_prospect(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Young",
-            domain="young.com",
-            readiness_score=20,
-            created_at=datetime.now(timezone.utc) - timedelta(days=30),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "suggested"
-
-    @pytest.mark.asyncio
-    async def test_within_90_day_boundary(self, db_session):
-        """Prospect created 89 days ago should NOT be expired (cutoff is 90)."""
-        p = _make_prospect(
-            db_session,
-            name="Boundary",
-            domain="boundary.com",
-            readiness_score=20,
-            created_at=datetime.now(timezone.utc) - timedelta(days=89),
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=70),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "suggested"
+        assert p.status == expected_status
 
 
 # ── Resurface Logic ─────────────────────────────────────────────────
@@ -355,70 +324,67 @@ class TestResurfaceLogic:
         assert p.dismiss_reason is None
 
     @pytest.mark.asyncio
-    async def test_resurfaces_expired_with_hiring_signals(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="Expired",
-            domain="expired.com",
-            status="expired",
-            readiness_score=45,
-            readiness_signals={"hiring": {"type": "procurement"}},
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=10),
-        )
+    @pytest.mark.parametrize(
+        ("overrides", "expected_status"),
+        [
+            pytest.param(
+                {
+                    "name": "Expired",
+                    "domain": "expired.com",
+                    "status": "expired",
+                    "readiness_score": 45,
+                    "readiness_signals": {"hiring": {"type": "procurement"}},
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=10),
+                },
+                "suggested",
+                id="resurfaces_expired_with_hiring_signals",
+            ),
+            pytest.param(
+                {
+                    "name": "NoSignals",
+                    "domain": "nosignals.com",
+                    "status": "dismissed",
+                    "readiness_score": 50,
+                    "readiness_signals": {},
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=5),
+                },
+                "dismissed",
+                id="does_not_resurface_without_signals",
+            ),
+            pytest.param(
+                {
+                    "name": "LowRead",
+                    "domain": "lowread.com",
+                    "status": "dismissed",
+                    "readiness_score": 20,
+                    "readiness_signals": {"intent": {"strength": "strong"}},
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=5),
+                },
+                "dismissed",
+                id="does_not_resurface_low_readiness",
+            ),
+            pytest.param(
+                {
+                    "name": "OldEnrich",
+                    "domain": "oldenrich.com",
+                    "status": "dismissed",
+                    "readiness_score": 60,
+                    "readiness_signals": {"intent": {"strength": "strong"}},
+                    "last_enriched_at": datetime.now(timezone.utc) - timedelta(days=45),
+                },
+                "dismissed",
+                id="does_not_resurface_old_enrichment",
+            ),
+        ],
+    )
+    async def test_resurface_status(self, db_session, overrides, expected_status):
+        """Expired/dismissed prospects resurface only with fresh signals AND readiness
+        >= 40; low readiness, no signals, or stale enrichment do not."""
+        p = _make_prospect(db_session, **overrides)
         with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
         db_session.refresh(p)
-        assert p.status == "suggested"
-
-    @pytest.mark.asyncio
-    async def test_does_not_resurface_without_signals(self, db_session):
-        p = _make_prospect(
-            db_session,
-            name="NoSignals",
-            domain="nosignals.com",
-            status="dismissed",
-            readiness_score=50,
-            readiness_signals={},
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "dismissed"
-
-    @pytest.mark.asyncio
-    async def test_does_not_resurface_low_readiness(self, db_session):
-        """Even with signals, readiness < 40 shouldn't resurface."""
-        p = _make_prospect(
-            db_session,
-            name="LowRead",
-            domain="lowread.com",
-            status="dismissed",
-            readiness_score=20,
-            readiness_signals={"intent": {"strength": "strong"}},
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=5),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "dismissed"
-
-    @pytest.mark.asyncio
-    async def test_does_not_resurface_old_enrichment(self, db_session):
-        """Enrichment older than 30 days shouldn't trigger resurface."""
-        p = _make_prospect(
-            db_session,
-            name="OldEnrich",
-            domain="oldenrich.com",
-            status="dismissed",
-            readiness_score=60,
-            readiness_signals={"intent": {"strength": "strong"}},
-            last_enriched_at=datetime.now(timezone.utc) - timedelta(days=45),
-        )
-        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
-            await job_expire_and_resurface()
-        db_session.refresh(p)
-        assert p.status == "dismissed"
+        assert p.status == expected_status
 
 
 # ── Score Refresh ───────────────────────────────────────────────────
@@ -717,25 +683,20 @@ class TestSchedulerCoverageGaps:
         assert result["email_count"] == 0
 
     @pytest.mark.asyncio
-    async def test_refresh_scores_exception_path(self):
-        """Lines 313-317: job_refresh_scores returns error on exception."""
+    @pytest.mark.parametrize(
+        ("job", "boom"),
+        [
+            pytest.param(job_refresh_scores, "Score refresh exploded", id="refresh_scores"),
+            pytest.param(job_expire_and_resurface, "Expire job exploded", id="expire_and_resurface"),
+        ],
+    )
+    async def test_job_returns_error_on_exception(self, job, boom):
+        """job_refresh_scores / job_expire_and_resurface return error on exception."""
         with patch("app.database.SessionLocal") as mock_sl:
             mock_db = MagicMock()
             mock_sl.return_value = mock_db
-            mock_db.query.side_effect = RuntimeError("Score refresh exploded")
+            mock_db.query.side_effect = RuntimeError(boom)
 
-            result = await job_refresh_scores()
-
-        assert "error" in result
-
-    @pytest.mark.asyncio
-    async def test_expire_and_resurface_exception_path(self):
-        """Lines 403-407: job_expire_and_resurface returns error on exception."""
-        with patch("app.database.SessionLocal") as mock_sl:
-            mock_db = MagicMock()
-            mock_sl.return_value = mock_db
-            mock_db.query.side_effect = RuntimeError("Expire job exploded")
-
-            result = await job_expire_and_resurface()
+            result = await job()
 
         assert "error" in result
