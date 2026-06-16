@@ -38,15 +38,19 @@ class EnrichmentWorkerConfig:
     @classmethod
     def from_env(cls) -> "EnrichmentWorkerConfig":
         """Build config from environment variables, falling back to defaults."""
+
+        def env_int(key: str, default: int) -> int:
+            return int(os.environ.get(key, default))
+
         return cls(
-            batch_size=int(os.environ.get("ENRICHMENT_BATCH_SIZE", 5)),
-            daily_cap=int(os.environ.get("ENRICHMENT_DAILY_CAP", 200)),
-            web_daily_cap=int(os.environ.get("ENRICHMENT_WEB_DAILY_CAP", 80)),
-            loop_sleep_seconds=int(os.environ.get("ENRICHMENT_LOOP_SLEEP_SECONDS", 30)),
-            idle_sleep_seconds=int(os.environ.get("ENRICHMENT_IDLE_SLEEP_SECONDS", 60)),
-            not_found_retry_hours=int(os.environ.get("ENRICHMENT_NOT_FOUND_RETRY_HOURS", 22)),
-            not_catalogued_retry_days=int(os.environ.get("ENRICHMENT_NOT_CATALOGUED_RETRY_DAYS", 30)),
-            circuit_breaker_errors=int(os.environ.get("ENRICHMENT_CIRCUIT_BREAKER_ERRORS", 5)),
-            oem_resolve_per_batch=int(os.environ.get("ENRICHMENT_OEM_RESOLVE_PER_BATCH", 2)),
-            oem_resolve_daily_cap=int(os.environ.get("ENRICHMENT_OEM_RESOLVE_DAILY_CAP", 40)),
+            batch_size=env_int("ENRICHMENT_BATCH_SIZE", 5),
+            daily_cap=env_int("ENRICHMENT_DAILY_CAP", 200),
+            web_daily_cap=env_int("ENRICHMENT_WEB_DAILY_CAP", 80),
+            loop_sleep_seconds=env_int("ENRICHMENT_LOOP_SLEEP_SECONDS", 30),
+            idle_sleep_seconds=env_int("ENRICHMENT_IDLE_SLEEP_SECONDS", 60),
+            not_found_retry_hours=env_int("ENRICHMENT_NOT_FOUND_RETRY_HOURS", 22),
+            not_catalogued_retry_days=env_int("ENRICHMENT_NOT_CATALOGUED_RETRY_DAYS", 30),
+            circuit_breaker_errors=env_int("ENRICHMENT_CIRCUIT_BREAKER_ERRORS", 5),
+            oem_resolve_per_batch=env_int("ENRICHMENT_OEM_RESOLVE_PER_BATCH", 2),
+            oem_resolve_daily_cap=env_int("ENRICHMENT_OEM_RESOLVE_DAILY_CAP", 40),
         )

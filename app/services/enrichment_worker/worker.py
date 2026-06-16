@@ -369,14 +369,18 @@ async def run_one_batch(
     # arbitrates every write).
     priority_ids = {int(c.id) for c in batch if c.enrich_requested_at is not None}
 
-    # Clear the priority-lane stamp on EVERY batch card immediately — attribute writes
-    # on already-loaded ORM objects, BEFORE the first await (the worker's
-    # no-query-after-await discipline) — so a card that finishes terminal (not_found)
-    # cannot keep its stamp and pin the lane forever. Persisted by the batch-final
-    # commit below, together with the enrichment results.
-    for card in batch:
-        if card.enrich_requested_at is not None:
-            card.enrich_requested_at = None
+    def _clear_priority_stamps() -> None:
+        # Clear the priority-lane stamp on EVERY batch card — attribute writes on
+        # already-loaded ORM objects — so a card that finishes terminal (not_found)
+        # cannot keep its stamp and pin the lane forever. Persisted by the batch-final
+        # commit below, together with the enrichment results.
+        for card in batch:
+            if card.enrich_requested_at is not None:
+                card.enrich_requested_at = None
+
+    # Done immediately, BEFORE the first await (the worker's no-query-after-await
+    # discipline). Re-applied after any rollback that discards the stamp clears.
+    _clear_priority_stamps()
 
     if disabled is None:
         disabled = set()
@@ -389,6 +393,11 @@ async def run_one_batch(
     # and the in-process tally so the cap holds even when the cache is unavailable and
     # silently no-ops.
     web_calls_today = max(intel_cache.get_count(web_cache_key), web_state.get("web_calls", 0))
+
+    # One lazy import of the settings singleton (cheap Pydantic object), reused by every
+    # feature-flag gate below — the import stays lazy to keep worker import-time light
+    # and patchable, but is hoisted here so it isn't re-imported per pass.
+    from app.config import settings
 
     # OEM web-resolution crosswalk (Pass A + Pass B) — BEFORE the per-card core loop,
     # per the crosswalk-pass pattern (worker-level queries between awaits are fine;
@@ -406,8 +415,6 @@ async def run_one_batch(
     # oem_sourced — which short-circuits enrich_card's early-return below and saves
     # up to 3 web calls per card. Same session, committed with the batch below.
     if batch_ids:
-        from app.config import settings
-
         if settings.oem_crosswalk_enrich_enabled:
             try:
                 web_calls_today = await _oem_resolution_pass(
@@ -421,9 +428,7 @@ async def run_one_batch(
                     # core loop don't die on PendingRollbackError and abort the whole
                     # batch; then re-apply the stamp clears the rollback discarded.
                     db.rollback()
-                    for card in batch:
-                        if card.enrich_requested_at is not None:
-                            card.enrich_requested_at = None
+                    _clear_priority_stamps()
             # The pass bills the counters into web_state BEFORE each await — re-sync
             # the local tally so a swallowed pass exception can't clobber the OEM
             # increments at the per-card flushes / the web_state reconciliation below
@@ -437,9 +442,7 @@ async def run_one_batch(
             except Exception:
                 logger.exception("ENRICH_WORKER: oem-crosswalk failed over {} cards", len(batch_ids))
 
-    from app.config import settings as _settings
-
-    lane_split = _settings.enrichment_lane_split_enabled
+    lane_split = settings.enrichment_lane_split_enabled
     conns = _connectors_in_order(db)
     counts: dict[str, int] = {}
     # Cards that landed a real category this batch (verified / web_sourced / ai_inferred) —
@@ -536,8 +539,6 @@ async def run_one_batch(
     # per-writer "skip keys already held at higher confidence" pre-gates are gone — the
     # ladder owns arbitration in one place. Same session, committed together below.
     if enriched_ids:
-        from app.config import settings
-
         if settings.mpn_decode_enabled:
             from app.services.mpn_decoder.writer import decode_and_record_specs
 
@@ -562,8 +563,6 @@ async def run_one_batch(
     # deterministic and free, and it never touches enrichment_status. Same session,
     # committed together below.
     if batch_ids:
-        from app.config import settings
-
         if settings.fru_crosswalk_enrich_enabled:
             from app.services.fru_crosswalk_enrich import crosswalk_and_record_specs
 
@@ -580,8 +579,6 @@ async def run_one_batch(
     # the AI spec pass (spec_extraction, 60) regardless of the confidence either claims.
     # Same shared post-await session, committed together below.
     if enriched_ids:
-        from app.config import settings
-
         if settings.desc_parse_enabled:
             from app.services.desc_extractor.writer import extract_and_record_specs
 
@@ -786,10 +783,11 @@ async def main() -> None:
                         not_catalogued_today += batch_counts.get(MaterialEnrichmentStatus.NOT_CATALOGUED, 0)
 
                         # Heartbeat + counters
+                        now_ts = datetime.now(timezone.utc)
                         update_enrichment_worker_status(
                             db,
-                            last_heartbeat=datetime.now(timezone.utc),
-                            last_enriched_at=datetime.now(timezone.utc),
+                            last_heartbeat=now_ts,
+                            last_enriched_at=now_ts,
                             enriched_today=enriched_today,
                             web_sourced_today=web_sourced_today,
                             oem_sourced_today=oem_sourced_today,

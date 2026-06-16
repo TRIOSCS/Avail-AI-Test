@@ -15,9 +15,7 @@ Depends on: app.services.enrichment_worker.trusted_domains.
 
 from __future__ import annotations
 
-from urllib.parse import urlparse
-
-from .trusted_domains import is_trusted_domain
+from .trusted_domains import _host_allowed, is_trusted_domain
 
 # Exact-host official OEM/system-vendor parts & support domains.
 OEM_OFFICIAL_HOSTS: frozenset[str] = frozenset(
@@ -46,16 +44,7 @@ OEM_VENDOR_ROOTS: frozenset[str] = frozenset(
 
 def is_oem_domain(url: str) -> bool:
     """Return True if *url* is an official OEM/system-vendor parts/support domain."""
-    try:
-        p = urlparse(url)
-    except Exception:
-        return False
-    if p.scheme not in ("http", "https") or not p.hostname:
-        return False
-    host = p.hostname.lower()
-    if host in OEM_OFFICIAL_HOSTS:
-        return True
-    return any(host == r or host.endswith("." + r) for r in OEM_VENDOR_ROOTS)
+    return _host_allowed(url, OEM_OFFICIAL_HOSTS, OEM_VENDOR_ROOTS)
 
 
 def is_crossref_domain(url: str) -> bool:
