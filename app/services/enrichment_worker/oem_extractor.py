@@ -32,6 +32,15 @@ _MIN_OEM_CONFIDENCE = 0.90
 _CATEGORY_VOCAB = ", ".join(sorted(get_all_commodities()))
 
 
+def _confidence(data: dict) -> float:
+    """Parse the model's ``confidence`` field, defaulting a missing/malformed value to
+    0.0."""
+    try:
+        return float(data.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 # --------------------------------- cross-reference ---------------------------------
 
 
@@ -130,10 +139,7 @@ async def cross_reference_mpn(
         logger.info("OEM_XREF: {} rejected — resolved == original", display_mpn)
         return _XR_FAILED
 
-    try:
-        conf = float(data.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        conf = 0.0
+    conf = _confidence(data)
     if conf < _MIN_CROSSREF_CONFIDENCE:
         logger.info("OEM_XREF: {} rejected — confidence {:.2f} < {:.2f}", display_mpn, conf, _MIN_CROSSREF_CONFIDENCE)
         return _XR_FAILED
@@ -228,10 +234,7 @@ async def extract_oem_description(
         logger.info("OEM_DESC: {} rejected — MPN mismatch (got {})", display_mpn, data.get("exact_mpn_found"))
         return _OEM_FAILED
 
-    try:
-        conf = float(data.get("confidence") or 0.0)
-    except (TypeError, ValueError):
-        conf = 0.0
+    conf = _confidence(data)
     if conf < _MIN_OEM_CONFIDENCE:
         logger.info("OEM_DESC: {} rejected — confidence {:.2f} < {:.2f}", display_mpn, conf, _MIN_OEM_CONFIDENCE)
         return _OEM_FAILED
