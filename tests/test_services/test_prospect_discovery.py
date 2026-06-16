@@ -57,6 +57,17 @@ EXPLORIUM_NO_DOMAIN = {
 }
 
 
+def _mock_response(status_code, *, json_body=None, text=None):
+    """Build a MagicMock httpx-style response for Explorium API patches."""
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    if json_body is not None:
+        mock_resp.json.return_value = json_body
+    if text is not None:
+        mock_resp.text = text
+    return mock_resp
+
+
 # ── Explorium Tests ──────────────────────────────────────────────────
 
 
@@ -139,13 +150,16 @@ class TestExploriumNormalization:
         assert len(result["events"]) == 2
         assert result["events"][0]["type"] == "funding round"
 
-    def test_region_detection(self):
+    @pytest.mark.parametrize(
+        ("country_code", "expected_region"),
+        [("US", "US"), ("DE", "EU"), ("JP", "Asia"), ("BR", "BR")],
+    )
+    def test_region_detection(self, country_code, expected_region):
         from app.services.prospect_discovery_explorium import normalize_explorium_result
 
-        for cc, expected in [("US", "US"), ("DE", "EU"), ("JP", "Asia"), ("BR", "BR")]:
-            raw = {"name": "Test", "domain": "t.com", "country_code": cc}
-            r = normalize_explorium_result(raw, "automotive")
-            assert r["region"] == expected, f"country_code={cc} should map to {expected}"
+        raw = {"name": "Test", "domain": "t.com", "country_code": country_code}
+        result = normalize_explorium_result(raw, "automotive")
+        assert result["region"] == expected_region
 
 
 class TestExploriumDiscovery:
@@ -171,9 +185,7 @@ class TestExploriumDiscovery:
     async def test_successful_search(self):
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": [EXPLORIUM_RAW_RESULT]}
+        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
             with patch("app.services.prospect_discovery_explorium.http") as mock_http:
@@ -187,9 +199,7 @@ class TestExploriumDiscovery:
     async def test_api_error_returns_empty(self):
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
+        mock_resp = _mock_response(500, text="Internal Server Error")
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
             with patch("app.services.prospect_discovery_explorium.http") as mock_http:
@@ -218,9 +228,7 @@ class TestExploriumBatch:
     async def test_dedup_existing_domains(self):
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": [EXPLORIUM_RAW_RESULT]}
+        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
 
         existing = {"raytheon-sensors.com"}  # already in pool
 
@@ -244,9 +252,7 @@ class TestExploriumBatch:
     async def test_batch_returns_prospect_creates(self):
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": [EXPLORIUM_RAW_RESULT]}
+        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
             with patch("app.services.prospect_discovery_explorium.http") as mock_http:
@@ -474,10 +480,8 @@ class TestDedupLogic:
         """Same domain from multiple segment searches is deduped."""
         from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
         # Same company appears in every search
-        mock_resp.json.return_value = {"businesses": [EXPLORIUM_RAW_RESULT]}
+        mock_resp = _mock_response(200, json_body={"businesses": [EXPLORIUM_RAW_RESULT]})
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
             with patch("app.services.prospect_discovery_explorium.http") as mock_http:
@@ -539,9 +543,7 @@ class TestExploriumCoverageGaps:
         """Line 133: businesses is not a list, gets reset to []."""
         from app.services.prospect_discovery_explorium import discover_companies_with_signals
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": "not-a-list"}
+        mock_resp = _mock_response(200, json_body={"businesses": "not-a-list"})
 
         async def run():
             with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
@@ -600,17 +602,23 @@ class TestExploriumCoverageGaps:
         result = normalize_explorium_result(raw, "ems_electronics")
         assert result["hiring"] == {}
 
-    def test_normalize_size_all_ranges(self):
+    @pytest.mark.parametrize(
+        ("company_size", "expected_range"),
+        [
+            (30, "1-50"),
+            (100, "51-200"),
+            (300, "201-500"),
+            (800, "501-1000"),
+            (3000, "1001-5000"),
+            (7000, "5001-10000"),
+            (20000, "10001+"),
+        ],
+    )
+    def test_normalize_size_all_ranges(self, company_size, expected_range):
         """Lines 246-258: all size bracket paths in _normalize_size."""
         from app.services.prospect_discovery_explorium import _normalize_size
 
-        assert _normalize_size({"company_size": 30}) == "1-50"
-        assert _normalize_size({"company_size": 100}) == "51-200"
-        assert _normalize_size({"company_size": 300}) == "201-500"
-        assert _normalize_size({"company_size": 800}) == "501-1000"
-        assert _normalize_size({"company_size": 3000}) == "1001-5000"
-        assert _normalize_size({"company_size": 7000}) == "5001-10000"
-        assert _normalize_size({"company_size": 20000}) == "10001+"
+        assert _normalize_size({"company_size": company_size}) == expected_range
 
     @pytest.mark.asyncio
     async def test_batch_skips_empty_domain(self):
@@ -622,9 +630,7 @@ class TestExploriumCoverageGaps:
             "industry": "Unknown",
         }
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"businesses": [no_domain_result]}
+        mock_resp = _mock_response(200, json_body={"businesses": [no_domain_result]})
 
         with patch("app.services.prospect_discovery_explorium._get_api_key", return_value="key"):
             with patch("app.services.prospect_discovery_explorium.http") as mock_http:

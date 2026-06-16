@@ -33,6 +33,7 @@ import json
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -248,30 +249,20 @@ class TestAddSightingsFromSearch:
 
 
 class TestLeadStatusUpdate:
-    def test_update_status_has_stock(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"status": "has_stock", "note": "Confirmed 1000 units"}, id="has_stock"),
+            pytest.param({"status": "no_stock"}, id="no_stock"),
+            pytest.param({"status": "contacted"}, id="contacted"),
+        ],
+    )
+    def test_update_status_valid(self, client: TestClient, db_session: Session, test_user: User, data: dict):
         req = _make_req(db_session, test_user)
         lead = _make_lead(db_session, req)
         resp = client.post(
             f"/v2/partials/sourcing/leads/{lead.id}/status",
-            data={"status": "has_stock", "note": "Confirmed 1000 units"},
-        )
-        assert resp.status_code == 200
-
-    def test_update_status_no_stock(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        lead = _make_lead(db_session, req)
-        resp = client.post(
-            f"/v2/partials/sourcing/leads/{lead.id}/status",
-            data={"status": "no_stock"},
-        )
-        assert resp.status_code == 200
-
-    def test_update_status_contacted(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        lead = _make_lead(db_session, req)
-        resp = client.post(
-            f"/v2/partials/sourcing/leads/{lead.id}/status",
-            data={"status": "contacted"},
+            data=data,
         )
         assert resp.status_code == 200
 
@@ -328,22 +319,24 @@ class TestLeadFeedback:
 
 
 class TestBulkArchive:
-    def test_bulk_archive_requirement_ids(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("path", ["bulk-archive", "bulk-unarchive"])
+    def test_bulk_requirement_ids(self, client: TestClient, db_session: Session, test_user: User, path: str):
         from app.models import Requirement
 
         req = _make_req(db_session, test_user)
         r = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).first()
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
+            f"/v2/partials/parts/{path}",
             content=json.dumps({"requirement_ids": [r.id], "requisition_ids": []}),
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
 
-    def test_bulk_archive_requisition_ids(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("path", ["bulk-archive", "bulk-unarchive"])
+    def test_bulk_requisition_ids(self, client: TestClient, db_session: Session, test_user: User, path: str):
         req = _make_req(db_session, test_user)
         resp = client.post(
-            "/v2/partials/parts/bulk-archive",
+            f"/v2/partials/parts/{path}",
             content=json.dumps({"requirement_ids": [], "requisition_ids": [req.id]}),
             headers={"Content-Type": "application/json"},
         )
@@ -353,27 +346,6 @@ class TestBulkArchive:
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             content=json.dumps({"requirement_ids": [], "requisition_ids": []}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_unarchive_requirement_ids(self, client: TestClient, db_session: Session, test_user: User):
-        from app.models import Requirement
-
-        req = _make_req(db_session, test_user)
-        r = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).first()
-        resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            content=json.dumps({"requirement_ids": [r.id], "requisition_ids": []}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_unarchive_requisition_cascade(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        resp = client.post(
-            "/v2/partials/parts/bulk-unarchive",
-            content=json.dumps({"requirement_ids": [], "requisition_ids": [req.id]}),
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 200
@@ -488,46 +460,30 @@ class TestLogActivity:
 
 
 class TestReviewResponse:
-    def test_review_as_reviewed(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("status", ["reviewed", "rejected"])
+    def test_review_persists_status(self, client: TestClient, db_session: Session, test_user: User, status: str):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
-            data={"status": "reviewed"},
+            data={"status": status},
         )
         assert resp.status_code == 200
         db_session.refresh(vr)
-        assert vr.status == "reviewed"
-
-    def test_review_as_rejected(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        vr = _make_vendor_response(db_session, req)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
-            data={"status": "rejected"},
-        )
-        assert resp.status_code == 200
+        assert vr.status == status
 
 
 # ── Update Response Status (PATCH) ───────────────────────────────────────
 
 
 class TestUpdateResponseStatus:
-    def test_patch_status_reviewed(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("status", ["reviewed", "flagged"])
+    def test_patch_status_valid(self, client: TestClient, db_session: Session, test_user: User, status: str):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": "reviewed"},
-        )
-        assert resp.status_code == 200
-
-    def test_patch_status_flagged(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        vr = _make_vendor_response(db_session, req)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": "flagged"},
+            data={"status": status},
         )
         assert resp.status_code == 200
 
@@ -687,19 +643,20 @@ class TestAddOfferManual:
         )
         assert resp.status_code == 200
 
-    def test_add_offer_missing_vendor(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"mpn": "LM317T"}, id="missing_vendor"),
+            pytest.param({"vendor_name": "ManualVendor"}, id="missing_mpn"),
+        ],
+    )
+    def test_add_offer_missing_required_field(
+        self, client: TestClient, db_session: Session, test_user: User, data: dict
+    ):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/add-offer",
-            data={"mpn": "LM317T"},
-        )
-        assert resp.status_code == 400
-
-    def test_add_offer_missing_mpn(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/add-offer",
-            data={"vendor_name": "ManualVendor"},
+            data=data,
         )
         assert resp.status_code == 400
 
@@ -780,18 +737,11 @@ class TestBuyPlanCancel:
 
 
 class TestRequisitionsBulkAction:
-    def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("action", ["archive", "activate"])
+    def test_bulk_action_success(self, client: TestClient, db_session: Session, test_user: User, action: str):
         req = _make_req(db_session, test_user)
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
-            data={"ids": str(req.id)},
-        )
-        assert resp.status_code == 200
-
-    def test_bulk_activate(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_req(db_session, test_user)
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/activate",
+            f"/v2/partials/requisitions/bulk/{action}",
             data={"ids": str(req.id)},
         )
         assert resp.status_code == 200

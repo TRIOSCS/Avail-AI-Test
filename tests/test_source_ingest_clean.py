@@ -7,6 +7,8 @@ canon, and source→canonical category mapping.
 
 from __future__ import annotations
 
+import pytest
+
 from app.services.source_ingest.clean import (
     canonicalize_condition,
     clean_record,
@@ -25,12 +27,18 @@ def _rec(**kw) -> SourceRecord:
     return SourceRecord(**base)
 
 
-def test_strip_mpn_suffix_variants():
-    assert strip_mpn_suffix("00AR327 - Pull") == "00AR327"
-    assert strip_mpn_suffix("657239-001 - New") == "657239-001"
-    assert strip_mpn_suffix("P13198-001 - PULL") == "P13198-001"
-    assert strip_mpn_suffix("ABC-x") == "ABC"
-    assert strip_mpn_suffix("ST4000NM0035") == "ST4000NM0035"  # no suffix
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("00AR327 - Pull", "00AR327"),
+        ("657239-001 - New", "657239-001"),
+        ("P13198-001 - PULL", "P13198-001"),
+        ("ABC-x", "ABC"),
+        ("ST4000NM0035", "ST4000NM0035"),  # no suffix
+    ],
+)
+def test_strip_mpn_suffix_variants(raw, expected):
+    assert strip_mpn_suffix(raw) == expected
 
 
 def test_clean_strips_suffix_and_normalizes_key():
@@ -131,23 +139,29 @@ def test_clean_explicit_brand_column_wins_over_trailing_token():
     assert c.brand == "Dell"  # explicit source column beats the description regex
 
 
-def test_canonicalize_condition():
-    # Canon is the MaterialCard.condition documented vocabulary (constants.MaterialCondition):
-    # "Pull" maps to the column's canonical "Pulled", and "Recertified" is reachable.
-    assert canonicalize_condition("New") == "New"
-    assert canonicalize_condition("Pull") == "Pulled"
-    assert canonicalize_condition("Pulled") == "Pulled"
-    assert canonicalize_condition("Refurbished") == "Refurbished"
-    assert canonicalize_condition("Recertified") == "Recertified"
-    assert canonicalize_condition("Factory Recertified") == "Recertified"
-    assert canonicalize_condition("Used") == "Used"
-    assert canonicalize_condition("Factory New") == "New"
-    # Absent / unrecognized input → None (the column stays NULL), NEVER a synthetic
-    # "Unknown" — an Unknown would outvote real sheet conditions in consolidation and
-    # permanently occupy the fill-only-when-empty card column.
-    assert canonicalize_condition("Other") is None
-    assert canonicalize_condition(None) is None
-    assert canonicalize_condition("") is None
+# Canon is the MaterialCard.condition documented vocabulary (constants.MaterialCondition):
+# "Pull" maps to the column's canonical "Pulled", and "Recertified" is reachable.
+# Absent / unrecognized input → None (the column stays NULL), NEVER a synthetic
+# "Unknown" — an Unknown would outvote real sheet conditions in consolidation and
+# permanently occupy the fill-only-when-empty card column.
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("New", "New"),
+        ("Pull", "Pulled"),
+        ("Pulled", "Pulled"),
+        ("Refurbished", "Refurbished"),
+        ("Recertified", "Recertified"),
+        ("Factory Recertified", "Recertified"),
+        ("Used", "Used"),
+        ("Factory New", "New"),
+        ("Other", None),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_canonicalize_condition(raw, expected):
+    assert canonicalize_condition(raw) == expected
 
 
 def test_clean_maps_category_canonical_or_none():
@@ -204,11 +218,12 @@ def test_clean_description_fallback_is_conservative():
     assert clean_record(_rec(raw_mpn="REAL123", category="HDD", description="PSU, 1460W AC Hot Swap")).category == "hdd"
 
 
-def test_clean_blanks_cpu_category_for_polluted_mpn_shapes():
-    # CATALOG.md ingest warning: ~14% of the SFDC 'CPU' bucket is passives/connectors/logic.
-    # Known non-CPU MPN shapes must get their category BLANKED (None — never a tier-95 'cpu'),
-    # because only manual (100) outranks trio_source (95) on the ladder.
-    polluted = [
+# CATALOG.md ingest warning: ~14% of the SFDC 'CPU' bucket is passives/connectors/logic.
+# Known non-CPU MPN shapes must get their category BLANKED (None — never a tier-95 'cpu'),
+# because only manual (100) outranks trio_source (95) on the ladder.
+@pytest.mark.parametrize(
+    "mpn",
+    [
         "GRM155R71C104MA88D",  # Murata MLCC
         "EEEFK1E471GP",  # Panasonic cap
         "SN74ALVC244PWR",  # TI logic
@@ -217,15 +232,16 @@ def test_clean_blanks_cpu_category_for_polluted_mpn_shapes():
         "06035A101JAT2A",  # AVX chip cap
         "640456-9",  # TE connector (single trailing digit)
         "1-640456-0",  # TE connector (prefixed form)
-    ]
-    for mpn in polluted:
-        rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
-        assert rec is not None and rec.category is None, mpn
+    ],
+)
+def test_clean_blanks_cpu_category_for_polluted_mpn_shapes(mpn):
+    rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
+    assert rec is not None and rec.category is None, mpn
 
 
-def test_clean_keeps_cpu_category_for_plausible_cpu_mpns():
-    # Real CPU-shaped MPNs keep the category: Intel s-spec, Intel ordering code, HP spare
-    # (three-char dash suffix — distinct from TE's single trailing digit), IBM FRU.
-    for mpn in ["SR3QS", "CM8068403358316", "732505-001", "01EF243"]:
-        rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
-        assert rec is not None and rec.category == "cpu", mpn
+# Real CPU-shaped MPNs keep the category: Intel s-spec, Intel ordering code, HP spare
+# (three-char dash suffix — distinct from TE's single trailing digit), IBM FRU.
+@pytest.mark.parametrize("mpn", ["SR3QS", "CM8068403358316", "732505-001", "01EF243"])
+def test_clean_keeps_cpu_category_for_plausible_cpu_mpns(mpn):
+    rec = clean_record(_rec(raw_mpn=mpn, category="CPU"))
+    assert rec is not None and rec.category == "cpu", mpn

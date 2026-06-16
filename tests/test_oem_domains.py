@@ -1,11 +1,29 @@
+import pytest
+
 from app.services.enrichment_worker.oem_domains import is_crossref_domain, is_oem_domain
 
 
-def test_official_oem_hosts_accepted():
-    assert is_oem_domain("https://support.lenovo.com/parts/01HW917")
-    assert is_oem_domain("https://partsurfer.hpe.com/Search.aspx?SearchText=918042-601")
-    assert is_oem_domain("http://www.dell.com/support/HV52W")
-    assert is_oem_domain("https://parts.hp.com/x")  # dot-suffix of hp.com root
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        # Official OEM hosts / vendor roots accepted.
+        ("https://support.lenovo.com/parts/01HW917", True),
+        ("https://partsurfer.hpe.com/Search.aspx?SearchText=918042-601", True),
+        ("http://www.dell.com/support/HV52W", True),
+        ("https://parts.hp.com/x", True),  # dot-suffix of hp.com root
+        ("https://www.ibm.com/support/x", True),  # ibm.com vendor root
+        ("HTTPS://SUPPORT.LENOVO.COM/x", True),  # host lowercased before matching
+        # Lookalikes, bad schemes, and non-vendor hosts rejected.
+        ("https://evil-lenovo.com/x", False),
+        ("https://lenovo.com.evil.com/x", False),
+        ("ftp://support.lenovo.com/x", False),
+        ("not a url", False),
+        ("", False),
+        ("https://notlenovo.com/x", False),  # not a vendor root or official host
+    ],
+)
+def test_is_oem_domain(url: str, expected: bool):
+    assert is_oem_domain(url) is expected
 
 
 def test_partsurfer_hp_com_is_explicit_official_host():
@@ -17,14 +35,6 @@ def test_partsurfer_hp_com_is_explicit_official_host():
     assert is_oem_domain("https://partsurfer.hp.com/Search.aspx?SearchText=875942-001")
 
 
-def test_lookalike_and_bad_schemes_rejected():
-    assert not is_oem_domain("https://evil-lenovo.com/x")
-    assert not is_oem_domain("https://lenovo.com.evil.com/x")
-    assert not is_oem_domain("ftp://support.lenovo.com/x")
-    assert not is_oem_domain("not a url")
-    assert not is_oem_domain("")
-
-
 def test_crossref_superset_includes_distributors_and_oem():
     # OEM official
     assert is_crossref_domain("https://support.lenovo.com/x")
@@ -34,9 +44,3 @@ def test_crossref_superset_includes_distributors_and_oem():
     assert is_crossref_domain("https://www.ti.com/product/x")
     # junk
     assert not is_crossref_domain("https://reddit.com/r/x")
-
-
-def test_ibm_and_uppercase_host():
-    assert is_oem_domain("https://www.ibm.com/support/x")  # ibm.com vendor root
-    assert is_oem_domain("HTTPS://SUPPORT.LENOVO.COM/x")  # host lowercased before matching
-    assert not is_oem_domain("https://notlenovo.com/x")  # not a vendor root or official host

@@ -16,6 +16,7 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from tests.conftest import engine  # noqa: F401
@@ -81,91 +82,81 @@ class TestEmailIntelligenceModel:
 
 
 class TestClassifyEmailAI:
-    def test_classify_email_offer(self):
-        """AI correctly classifies an offer email."""
+    @staticmethod
+    def _classify_with_mock(mock_return, subject, body, sender):
+        """Run classify_email_ai with claude_json mocked to mock_return."""
         from app.services.email_intelligence_service import classify_email_ai
 
-        mock_result = {
-            "classification": "offer",
-            "confidence": 0.92,
-            "parts_mentioned": ["LM317T"],
-            "has_pricing": True,
-            "brands_detected": ["TI"],
-            "commodities_detected": ["regulators"],
-        }
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_return):
+            return asyncio.get_event_loop().run_until_complete(classify_email_ai(subject, body, sender))
 
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                classify_email_ai("Quote Response", "LM317T available at $0.50", "vendor@test.com")
-            )
-
-        assert result["classification"] == "offer"
-        assert result["confidence"] == 0.92
-
-    def test_classify_email_ooo(self):
-        """AI classifies out-of-office emails."""
-        from app.services.email_intelligence_service import classify_email_ai
-
-        mock_result = {
-            "classification": "ooo",
-            "confidence": 0.95,
-            "parts_mentioned": [],
-            "has_pricing": False,
-            "brands_detected": [],
-            "commodities_detected": [],
-        }
-
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                classify_email_ai("Out of Office", "I will be out until March 1", "person@test.com")
-            )
-
-        assert result["classification"] == "ooo"
-
-    def test_classify_email_invalid_class_defaults_general(self):
-        """Invalid classification string defaults to 'general'."""
-        from app.services.email_intelligence_service import classify_email_ai
-
-        mock_result = {
-            "classification": "INVALID",
-            "confidence": 0.8,
-            "parts_mentioned": [],
-            "has_pricing": False,
-            "brands_detected": [],
-            "commodities_detected": [],
-        }
-
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
-
-        assert result["classification"] == "general"
+    @pytest.mark.parametrize(
+        ("mock_return", "args", "expected"),
+        [
+            pytest.param(
+                {
+                    "classification": "offer",
+                    "confidence": 0.92,
+                    "parts_mentioned": ["LM317T"],
+                    "has_pricing": True,
+                    "brands_detected": ["TI"],
+                    "commodities_detected": ["regulators"],
+                },
+                ("Quote Response", "LM317T available at $0.50", "vendor@test.com"),
+                {"classification": "offer", "confidence": 0.92},
+                id="offer",
+            ),
+            pytest.param(
+                {
+                    "classification": "ooo",
+                    "confidence": 0.95,
+                    "parts_mentioned": [],
+                    "has_pricing": False,
+                    "brands_detected": [],
+                    "commodities_detected": [],
+                },
+                ("Out of Office", "I will be out until March 1", "person@test.com"),
+                {"classification": "ooo"},
+                id="ooo",
+            ),
+            pytest.param(
+                {
+                    "classification": "INVALID",
+                    "confidence": 0.8,
+                    "parts_mentioned": [],
+                    "has_pricing": False,
+                    "brands_detected": [],
+                    "commodities_detected": [],
+                },
+                ("Test", "Body", "a@b.com"),
+                {"classification": "general"},
+                id="invalid_class_defaults_general",
+            ),
+            pytest.param(
+                {
+                    "classification": "offer",
+                    "confidence": 1.5,
+                    "parts_mentioned": [],
+                    "has_pricing": False,
+                    "brands_detected": [],
+                    "commodities_detected": [],
+                },
+                ("Test", "Body", "a@b.com"),
+                {"confidence": 1.0},
+                id="confidence_clamped",
+            ),
+        ],
+    )
+    def test_classify_email_success(self, mock_return, args, expected):
+        """AI classification maps/clamps fields from Claude's response."""
+        result = self._classify_with_mock(mock_return, *args)
+        for key, value in expected.items():
+            assert result[key] == value
 
     def test_classify_email_claude_failure(self):
         """Returns None when Claude API fails."""
-        from app.services.email_intelligence_service import classify_email_ai
-
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
-
+        result = self._classify_with_mock(None, "Test", "Body", "a@b.com")
         assert result is None
-
-    def test_classify_email_confidence_clamped(self):
-        """Confidence values are clamped to 0.0-1.0."""
-        from app.services.email_intelligence_service import classify_email_ai
-
-        mock_result = {
-            "classification": "offer",
-            "confidence": 1.5,
-            "parts_mentioned": [],
-            "has_pricing": False,
-            "brands_detected": [],
-            "commodities_detected": [],
-        }
-
-        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
-
-        assert result["confidence"] == 1.0
 
 
 # ═══════════════════════════════════════════════════════════════════════

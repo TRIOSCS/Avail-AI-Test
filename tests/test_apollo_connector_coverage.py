@@ -12,25 +12,44 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
+
+
+@contextmanager
+def patched_async_client(mock_client: AsyncMock):
+    """Patch httpx.AsyncClient so its `async with` yields `mock_client`."""
+    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        yield mock_client
+
+
+def make_response(status_code: int, payload: dict) -> MagicMock:
+    """Build a MagicMock httpx response with the given status and JSON body."""
+    response = MagicMock()
+    response.status_code = status_code
+    response.json.return_value = payload
+    return response
+
 
 # -- _parse_company_response --------------------------------------------------
 
 
-def test_parse_company_response_returns_none_when_no_org():
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param({}, id="no_org_key"),
+        pytest.param({"organization": None}, id="org_is_none"),
+    ],
+)
+def test_parse_company_response_returns_none(data):
     from app.connectors.apollo import _parse_company_response
 
-    result = _parse_company_response({})
-    assert result is None
-
-
-def test_parse_company_response_returns_none_when_org_is_none():
-    from app.connectors.apollo import _parse_company_response
-
-    result = _parse_company_response({"organization": None})
-    assert result is None
+    assert _parse_company_response(data) is None
 
 
 def test_parse_company_response_full_org():
@@ -97,18 +116,17 @@ def test_parse_company_response_missing_optional_fields():
 # -- _parse_contacts_response -------------------------------------------------
 
 
-def test_parse_contacts_response_empty():
+@pytest.mark.parametrize(
+    "data",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"other": "data"}, id="no_people_key"),
+    ],
+)
+def test_parse_contacts_response_returns_empty(data):
     from app.connectors.apollo import _parse_contacts_response
 
-    result = _parse_contacts_response({})
-    assert result == []
-
-
-def test_parse_contacts_response_no_people_key():
-    from app.connectors.apollo import _parse_contacts_response
-
-    result = _parse_contacts_response({"other": "data"})
-    assert result == []
+    assert _parse_contacts_response(data) == []
 
 
 def test_parse_contacts_response_single_person():
@@ -168,86 +186,36 @@ def test_parse_contacts_response_missing_fields():
 async def test_search_company_success():
     from app.connectors.apollo import search_company
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "organization": {
-            "name": "Test Corp",
-            "website_url": "https://testcorp.com",
-        }
-    }
-
+    mock_response = make_response(
+        200,
+        {"organization": {"name": "Test Corp", "website_url": "https://testcorp.com"}},
+    )
     mock_client = AsyncMock()
     mock_client.get = AsyncMock(return_value=mock_response)
 
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patched_async_client(mock_client):
         result = await search_company("testcorp.com", "fake-key")
 
     assert result is not None
     assert result["legal_name"] == "Test Corp"
 
 
-async def test_search_company_non_200_returns_none():
-    from app.connectors.apollo import search_company
-
-    mock_response = MagicMock()
-    mock_response.status_code = 403
-    mock_response.json.return_value = {}
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=mock_response)
-
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await search_company("testcorp.com", "fake-key")
-
-    assert result is None
-
-
-async def test_search_company_http_error_returns_none():
+@pytest.mark.parametrize(
+    "get_kwargs",
+    [
+        pytest.param({"return_value": make_response(403, {})}, id="non_200"),
+        pytest.param({"side_effect": httpx.HTTPError("connection error")}, id="http_error"),
+        pytest.param({"side_effect": ValueError("bad value")}, id="value_error"),
+        pytest.param({"return_value": make_response(200, {})}, id="response_no_org"),
+    ],
+)
+async def test_search_company_returns_none(get_kwargs):
     from app.connectors.apollo import search_company
 
     mock_client = AsyncMock()
-    mock_client.get = AsyncMock(side_effect=httpx.HTTPError("connection error"))
+    mock_client.get = AsyncMock(**get_kwargs)
 
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await search_company("testcorp.com", "fake-key")
-
-    assert result is None
-
-
-async def test_search_company_value_error_returns_none():
-    from app.connectors.apollo import search_company
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(side_effect=ValueError("bad value"))
-
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await search_company("testcorp.com", "fake-key")
-
-    assert result is None
-
-
-async def test_search_company_response_no_org_returns_none():
-    from app.connectors.apollo import search_company
-
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {}
-
-    mock_client = AsyncMock()
-    mock_client.get = AsyncMock(return_value=mock_response)
-
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patched_async_client(mock_client):
         result = await search_company("testcorp.com", "fake-key")
 
     assert result is None
@@ -259,67 +227,35 @@ async def test_search_company_response_no_org_returns_none():
 async def test_search_contacts_success():
     from app.connectors.apollo import search_contacts
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {
-        "people": [
-            {"name": "Jane Doe", "email": "jane@co.com", "title": "CEO"},
-        ]
-    }
-
+    mock_response = make_response(
+        200,
+        {"people": [{"name": "Jane Doe", "email": "jane@co.com", "title": "CEO"}]},
+    )
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_response)
 
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patched_async_client(mock_client):
         result = await search_contacts("co.com", "fake-key", limit=5)
 
     assert len(result) == 1
     assert result[0]["full_name"] == "Jane Doe"
 
 
-async def test_search_contacts_non_200_returns_empty():
-    from app.connectors.apollo import search_contacts
-
-    mock_response = MagicMock()
-    mock_response.status_code = 429
-    mock_response.json.return_value = {}
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(return_value=mock_response)
-
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await search_contacts("co.com", "fake-key")
-
-    assert result == []
-
-
-async def test_search_contacts_http_error_returns_empty():
+@pytest.mark.parametrize(
+    "post_kwargs",
+    [
+        pytest.param({"return_value": make_response(429, {})}, id="non_200"),
+        pytest.param({"side_effect": httpx.HTTPError("timeout")}, id="http_error"),
+        pytest.param({"side_effect": KeyError("missing")}, id="key_error"),
+    ],
+)
+async def test_search_contacts_returns_empty(post_kwargs):
     from app.connectors.apollo import search_contacts
 
     mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=httpx.HTTPError("timeout"))
+    mock_client.post = AsyncMock(**post_kwargs)
 
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        result = await search_contacts("co.com", "fake-key")
-
-    assert result == []
-
-
-async def test_search_contacts_key_error_returns_empty():
-    from app.connectors.apollo import search_contacts
-
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock(side_effect=KeyError("missing"))
-
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patched_async_client(mock_client):
         result = await search_contacts("co.com", "fake-key")
 
     assert result == []
@@ -329,16 +265,11 @@ async def test_search_contacts_default_limit():
     """search_contacts should pass per_page=10 by default."""
     from app.connectors.apollo import search_contacts
 
-    mock_response = MagicMock()
-    mock_response.status_code = 200
-    mock_response.json.return_value = {"people": []}
-
+    mock_response = make_response(200, {"people": []})
     mock_client = AsyncMock()
     mock_client.post = AsyncMock(return_value=mock_response)
 
-    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
-        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+    with patched_async_client(mock_client):
         result = await search_contacts("co.com", "fake-key")
 
     # Verify the per_page was sent as 10

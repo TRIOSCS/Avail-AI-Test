@@ -4,6 +4,8 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
+import pytest
+
 from app.models import NcSearchQueue, Sighting
 from app.services.nc_worker.result_parser import NcSighting, parse_quantity, parse_results_html
 from app.services.nc_worker.search_engine import build_search_url
@@ -36,29 +38,20 @@ def test_build_search_url_spaces():
 # ── parse_quantity Tests ─────────────────────────────────────────────
 
 
-def test_parse_quantity_plain():
-    assert parse_quantity("208") == 208
-
-
-def test_parse_quantity_comma():
-    assert parse_quantity("10,000") == 10000
-
-
-def test_parse_quantity_plus():
-    assert parse_quantity("80,000+") == 80000
-
-
-def test_parse_quantity_empty():
-    assert parse_quantity("") is None
-    assert parse_quantity(None) is None
-
-
-def test_parse_quantity_whitespace():
-    assert parse_quantity("  5,000  ") == 5000
-
-
-def test_parse_quantity_invalid():
-    assert parse_quantity("N/A") is None
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        pytest.param("208", 208, id="plain"),
+        pytest.param("10,000", 10000, id="comma"),
+        pytest.param("80,000+", 80000, id="plus"),
+        pytest.param("", None, id="empty_str"),
+        pytest.param(None, None, id="none"),
+        pytest.param("  5,000  ", 5000, id="whitespace"),
+        pytest.param("N/A", None, id="invalid"),
+    ],
+)
+def test_parse_quantity(raw, expected):
+    assert parse_quantity(raw) == expected
 
 
 # ── parse_results_html Tests ────────────────────────────────────────
@@ -163,8 +156,9 @@ def test_parse_results_html_no_data_rows():
 # ── Sighting Writer Tests ───────────────────────────────────────────
 
 
-def test_save_nc_sightings(db_session, test_requisition):
-    """save_nc_sightings creates sighting records from NcSighting list."""
+def _make_queue_item(db_session, test_requisition):
+    """Create and persist an NcSearchQueue item for the requisition's first
+    requirement."""
     req = test_requisition.requirements[0]
     queue_item = NcSearchQueue(
         requirement_id=req.id,
@@ -175,6 +169,12 @@ def test_save_nc_sightings(db_session, test_requisition):
     )
     db_session.add(queue_item)
     db_session.commit()
+    return req, queue_item
+
+
+def test_save_nc_sightings(db_session, test_requisition):
+    """save_nc_sightings creates sighting records from NcSighting list."""
+    req, queue_item = _make_queue_item(db_session, test_requisition)
 
     nc_sightings = [
         NcSighting(
@@ -217,16 +217,7 @@ def test_save_nc_sightings(db_session, test_requisition):
 
 def test_save_nc_sightings_dedup(db_session, test_requisition):
     """Duplicate vendor+mpn+qty combos are not created twice."""
-    req = test_requisition.requirements[0]
-    queue_item = NcSearchQueue(
-        requirement_id=req.id,
-        requisition_id=test_requisition.id,
-        mpn="LM317T",
-        normalized_mpn="LM317T",
-        status="searching",
-    )
-    db_session.add(queue_item)
-    db_session.commit()
+    _req, queue_item = _make_queue_item(db_session, test_requisition)
 
     nc_sightings = [
         NcSighting(part_number="LM317T", quantity=5000, vendor_name="Arrow"),
@@ -239,16 +230,7 @@ def test_save_nc_sightings_dedup(db_session, test_requisition):
 
 def test_save_nc_sightings_empty_vendor_skipped(db_session, test_requisition):
     """Sightings with empty vendor_name are skipped."""
-    req = test_requisition.requirements[0]
-    queue_item = NcSearchQueue(
-        requirement_id=req.id,
-        requisition_id=test_requisition.id,
-        mpn="LM317T",
-        normalized_mpn="LM317T",
-        status="searching",
-    )
-    db_session.add(queue_item)
-    db_session.commit()
+    _req, queue_item = _make_queue_item(db_session, test_requisition)
 
     nc_sightings = [
         NcSighting(part_number="LM317T", quantity=5000, vendor_name=""),

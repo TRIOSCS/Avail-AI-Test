@@ -70,6 +70,55 @@ def _make_material_tag(db, card_id, tag_id, source="ai_classified", confidence=0
     return mt
 
 
+def _connector_config(name="digikey", module=None, klass=None, creds=None, confidence=0.95):
+    """Build a connector config dict for _try_connector_config."""
+    defaults = {
+        "digikey": ("app.connectors.digikey", "DigiKeyConnector"),
+        "mouser": ("app.connectors.mouser", "MouserConnector"),
+        "nexar": ("app.connectors.sources", "NexarConnector"),
+    }
+    default_module, default_class = defaults[name]
+    return {
+        "name": name,
+        "module": module or default_module,
+        "class": klass or default_class,
+        "creds": creds or [(name, f"{name.upper()}_API_KEY")],
+        "confidence": confidence,
+    }
+
+
+def _patch_connector(config, *, search_return=None, search_side_effect=None):
+    """Context-manager group that patches credentials + importlib so
+    _try_connector_config instantiates a mock connector whose .search() behaves as
+    specified."""
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=search_return, side_effect=search_side_effect)
+    mock_module = MagicMock()
+    getattr(mock_module, config["class"]).return_value = mock_connector
+    return (
+        patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
+        patch("app.services.enrichment.importlib.import_module", return_value=mock_module),
+    )
+
+
+def _nexar_query_result(manufacturer_name):
+    """Build a Nexar supSearchMpn payload returning a single part for the given
+    manufacturer."""
+    return {"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": manufacturer_name}}}]}}}
+
+
+def _patch_nexar(*, query_return=None, query_side_effect=None):
+    """Context-manager group that patches credentials + NexarConnector with a mock whose
+    _run_query behaves as specified."""
+    mock_connector = MagicMock()
+    mock_connector.AGGREGATE_QUERY = "query"
+    mock_connector._run_query = AsyncMock(return_value=query_return, side_effect=query_side_effect)
+    return (
+        patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
+        patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  _try_connector_config
 # ═══════════════════════════════════════════════════════════════════════
@@ -81,13 +130,9 @@ class TestTryConnectorConfig:
         """No credentials => returns None."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID"), ("digikey", "DIGIKEY_CLIENT_SECRET")],
-            "confidence": 0.95,
-        }
+        config = _connector_config(
+            "digikey", creds=[("digikey", "DIGIKEY_CLIENT_ID"), ("digikey", "DIGIKEY_CLIENT_SECRET")]
+        )
         with patch("app.services.enrichment.get_credential_cached", return_value=None):
             result = await _try_connector_config(config, "LM317T")
         assert result is None
@@ -97,26 +142,12 @@ class TestTryConnectorConfig:
         """Connector returns valid manufacturer data."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(
-            return_value=[{"manufacturer": "Texas Instruments", "category": "Voltage Regulators"}]
+        config = _connector_config("digikey", creds=[("digikey", "DIGIKEY_CLIENT_ID")])
+        cred_patch, import_patch = _patch_connector(
+            config,
+            search_return=[{"manufacturer": "Texas Instruments", "category": "Voltage Regulators"}],
         )
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.DigiKeyConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
+        with cred_patch, import_patch:
             result = await _try_connector_config(config, "LM317T")
 
         assert result is not None
@@ -126,163 +157,28 @@ class TestTryConnectorConfig:
         assert result["confidence"] == 0.95
 
     @pytest.mark.asyncio
-    async def test_ignored_manufacturer_skipped(self):
-        """Manufacturer in _IGNORED_MANUFACTURERS returns None."""
+    @pytest.mark.parametrize(
+        ("connector_name", "search_return", "search_side_effect"),
+        [
+            ("mouser", [{"manufacturer": "Unknown", "category": "Test"}], None),  # ignored manufacturer
+            ("mouser", [], None),  # empty results
+            ("digikey", None, asyncio.TimeoutError()),  # timeout
+            ("digikey", None, Exception("401 Unauthorized")),  # auth error
+            ("digikey", None, Exception("429 rate limited")),  # rate limit
+            ("digikey", None, Exception("Network error")),  # generic error
+        ],
+        ids=["ignored_manufacturer", "empty_results", "timeout", "auth_error", "rate_limit", "generic_error"],
+    )
+    async def test_returns_none_on_bad_search(self, connector_name, search_return, search_side_effect):
+        """Connector search yielding no usable data (ignored maker, empty, or error) =>
+        None."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "mouser",
-            "module": "app.connectors.mouser",
-            "class": "MouserConnector",
-            "creds": [("mouser", "MOUSER_API_KEY")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(return_value=[{"manufacturer": "Unknown", "category": "Test"}])
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.MouserConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
-            result = await _try_connector_config(config, "LM317T")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_empty_results_returns_none(self):
-        """Connector returns empty results."""
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "mouser",
-            "module": "app.connectors.mouser",
-            "class": "MouserConnector",
-            "creds": [("mouser", "MOUSER_API_KEY")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(return_value=[])
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.MouserConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
-            result = await _try_connector_config(config, "LM317T")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_timeout_returns_none(self):
-        """Connector times out."""
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=asyncio.TimeoutError())
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.DigiKeyConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
-            result = await _try_connector_config(config, "LM317T")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_auth_error_returns_none(self):
-        """Connector returns 401 auth error."""
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=Exception("401 Unauthorized"))
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.DigiKeyConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
-            result = await _try_connector_config(config, "LM317T")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_rate_limit_error_returns_none(self):
-        """Connector returns 429 rate limit error."""
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=Exception("429 rate limited"))
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.DigiKeyConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
-            result = await _try_connector_config(config, "LM317T")
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_generic_error_returns_none(self):
-        """Connector raises generic error."""
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=Exception("Network error"))
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.DigiKeyConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
+        config = _connector_config(connector_name)
+        cred_patch, import_patch = _patch_connector(
+            config, search_return=search_return, search_side_effect=search_side_effect
+        )
+        with cred_patch, import_patch:
             result = await _try_connector_config(config, "LM317T")
 
         assert result is None
@@ -292,26 +188,12 @@ class TestTryConnectorConfig:
         """Uses description as category fallback when category is None."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "mouser",
-            "module": "app.connectors.mouser",
-            "class": "MouserConnector",
-            "creds": [("mouser", "MOUSER_API_KEY")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(
-            return_value=[{"manufacturer": "Microchip", "category": None, "description": "Microcontroller"}]
+        config = _connector_config("mouser")
+        cred_patch, import_patch = _patch_connector(
+            config,
+            search_return=[{"manufacturer": "Microchip", "category": None, "description": "Microcontroller"}],
         )
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.MouserConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
+        with cred_patch, import_patch:
             result = await _try_connector_config(config, "PIC16F877A")
 
         assert result["category"] == "Microcontroller"
@@ -321,24 +203,9 @@ class TestTryConnectorConfig:
         """Returns None category when neither category nor description present."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "mouser",
-            "module": "app.connectors.mouser",
-            "class": "MouserConnector",
-            "creds": [("mouser", "MOUSER_API_KEY")],
-            "confidence": 0.95,
-        }
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(return_value=[{"manufacturer": "STMicro"}])
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.importlib.import_module") as mock_import,
-        ):
-            mock_module = MagicMock()
-            mock_module.MouserConnector.return_value = mock_connector
-            mock_import.return_value = mock_module
-
+        config = _connector_config("mouser")
+        cred_patch, import_patch = _patch_connector(config, search_return=[{"manufacturer": "STMicro"}])
+        with cred_patch, import_patch:
             result = await _try_connector_config(config, "STM32F4")
 
         assert result["manufacturer"] == "STMicro"
@@ -349,13 +216,7 @@ class TestTryConnectorConfig:
         """Config with 2 credentials checks both; second missing => None."""
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "nexar",
-            "module": "app.connectors.sources",
-            "class": "NexarConnector",
-            "creds": [("nexar", "NEXAR_CLIENT_ID"), ("nexar", "NEXAR_CLIENT_SECRET")],
-            "confidence": 0.95,
-        }
+        config = _connector_config("nexar", creds=[("nexar", "NEXAR_CLIENT_ID"), ("nexar", "NEXAR_CLIENT_SECRET")])
 
         def mock_cred(source, env):
             if env == "NEXAR_CLIENT_ID":
@@ -927,18 +788,8 @@ class TestNexarBulkValidate:
         mt = _make_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
         db_session.commit()
 
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(
-            return_value={
-                "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
-            }
-        )
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
+        cred_patch, nexar_patch = _patch_nexar(query_return=_nexar_query_result("Texas Instruments"))
+        with cred_patch, nexar_patch:
             result = await nexar_bulk_validate(db_session, limit=100)
 
         db_session.refresh(mt)
@@ -955,17 +806,10 @@ class TestNexarBulkValidate:
         mt = _make_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
         db_session.commit()
 
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(
-            return_value={
-                "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Microchip Technology"}}}]}}
-            }
-        )
-
+        cred_patch, nexar_patch = _patch_nexar(query_return=_nexar_query_result("Microchip Technology"))
         with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
+            cred_patch,
+            nexar_patch,
             patch("app.services.enrichment._apply_enrichment_to_card") as mock_apply,
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
@@ -974,69 +818,27 @@ class TestNexarBulkValidate:
         mock_apply.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_nexar_no_results(self, db_session):
-        """Nexar returns empty results => no_result count incremented."""
+    @pytest.mark.parametrize(
+        ("brand", "query_return", "query_side_effect"),
+        [
+            ("SomeBrand", {"data": {"supSearchMpn": {"results": []}}}, None),  # empty results
+            ("Brand", None, Exception("API error")),  # query error
+            ("Brand", _nexar_query_result("Unknown"), None),  # ignored manufacturer
+        ],
+        ids=["empty_results", "query_error", "ignored_manufacturer"],
+    )
+    async def test_nexar_no_result_cases(self, db_session, brand, query_return, query_side_effect):
+        """Nexar yielding no usable manufacturer (empty, error, or ignored) =>
+        no_result."""
         from app.services.enrichment import nexar_bulk_validate
 
         card = _make_card(db_session)
-        tag = _make_brand_tag(db_session, "SomeBrand")
+        tag = _make_brand_tag(db_session, brand)
         _make_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
         db_session.commit()
 
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
-            result = await nexar_bulk_validate(db_session, limit=100)
-
-        assert result["no_result"] == 1
-
-    @pytest.mark.asyncio
-    async def test_nexar_query_error(self, db_session):
-        """Nexar query raises exception => no_result."""
-        from app.services.enrichment import nexar_bulk_validate
-
-        card = _make_card(db_session)
-        tag = _make_brand_tag(db_session, "Brand")
-        _make_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
-        db_session.commit()
-
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(side_effect=Exception("API error"))
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
-            result = await nexar_bulk_validate(db_session, limit=100)
-
-        assert result["no_result"] == 1
-
-    @pytest.mark.asyncio
-    async def test_nexar_ignored_manufacturer(self, db_session):
-        """Nexar returns ignored manufacturer ('unknown') => no_result."""
-        from app.services.enrichment import nexar_bulk_validate
-
-        card = _make_card(db_session)
-        tag = _make_brand_tag(db_session, "Brand")
-        _make_material_tag(db_session, card.id, tag.id, source="ai_classified", confidence=0.7)
-        db_session.commit()
-
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(
-            return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Unknown"}}}]}}}
-        )
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
+        cred_patch, nexar_patch = _patch_nexar(query_return=query_return, query_side_effect=query_side_effect)
+        with cred_patch, nexar_patch:
             result = await nexar_bulk_validate(db_session, limit=100)
 
         assert result["no_result"] == 1
@@ -1077,17 +879,10 @@ class TestNexarBackfillUntagged:
         card = _make_card(db_session)
         db_session.commit()
 
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(
-            return_value={
-                "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
-            }
-        )
-
+        cred_patch, nexar_patch = _patch_nexar(query_return=_nexar_query_result("Texas Instruments"))
         with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
+            cred_patch,
+            nexar_patch,
             patch("app.services.enrichment._apply_enrichment_to_card") as mock_apply,
         ):
             result = await nexar_backfill_untagged(db_session, limit=100)
@@ -1096,63 +891,25 @@ class TestNexarBackfillUntagged:
         mock_apply.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_backfill_no_result(self, db_session):
-        """Nexar returns empty => no_result."""
+    @pytest.mark.parametrize(
+        ("query_return", "query_side_effect"),
+        [
+            ({"data": {"supSearchMpn": {"results": []}}}, None),  # empty results
+            (None, Exception("API failure")),  # query error
+            (_nexar_query_result("N/A"), None),  # ignored manufacturer
+        ],
+        ids=["empty_results", "error_handled", "ignored_manufacturer"],
+    )
+    async def test_backfill_no_result_cases(self, db_session, query_return, query_side_effect):
+        """Nexar yielding no usable manufacturer (empty, error, or ignored) =>
+        no_result."""
         from app.services.enrichment import nexar_backfill_untagged
 
         card = _make_card(db_session)
         db_session.commit()
 
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
-            result = await nexar_backfill_untagged(db_session, limit=100)
-
-        assert result["no_result"] == 1
-
-    @pytest.mark.asyncio
-    async def test_backfill_error_handled(self, db_session):
-        """Nexar query error => no_result, doesn't crash."""
-        from app.services.enrichment import nexar_backfill_untagged
-
-        card = _make_card(db_session)
-        db_session.commit()
-
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(side_effect=Exception("API failure"))
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
-            result = await nexar_backfill_untagged(db_session, limit=100)
-
-        assert result["no_result"] == 1
-
-    @pytest.mark.asyncio
-    async def test_backfill_ignored_manufacturer(self, db_session):
-        """Nexar returns 'n/a' manufacturer => no_result."""
-        from app.services.enrichment import nexar_backfill_untagged
-
-        card = _make_card(db_session)
-        db_session.commit()
-
-        mock_connector = MagicMock()
-        mock_connector.AGGREGATE_QUERY = "query"
-        mock_connector._run_query = AsyncMock(
-            return_value={"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "N/A"}}}]}}}
-        )
-
-        with (
-            patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
-        ):
+        cred_patch, nexar_patch = _patch_nexar(query_return=query_return, query_side_effect=query_side_effect)
+        with cred_patch, nexar_patch:
             result = await nexar_backfill_untagged(db_session, limit=100)
 
         assert result["no_result"] == 1

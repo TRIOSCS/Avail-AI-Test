@@ -67,22 +67,18 @@ def _patch_claude_json(return_value=None, side_effect=None):
 
 
 @pytest.mark.asyncio
-async def test_interpret_returns_none_for_short_query():
-    """Queries with fewer than 3 words should return None without calling API."""
-    result = await interpret_search_query("DDR5")
-    assert result is None
-
-    result = await interpret_search_query("DDR5 memory")
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_interpret_returns_none_for_empty_query():
-    """Empty or None queries should return None."""
-    result = await interpret_search_query("")
-    assert result is None
-
-    result = await interpret_search_query(None)
+@pytest.mark.parametrize(
+    "query",
+    [
+        pytest.param("DDR5", id="one_word"),
+        pytest.param("DDR5 memory", id="two_words"),
+        pytest.param("", id="empty"),
+        pytest.param(None, id="none"),
+    ],
+)
+async def test_interpret_returns_none_without_api_call(query):
+    """Short, empty, or None queries should return None without calling the API."""
+    result = await interpret_search_query(query)
     assert result is None
 
 

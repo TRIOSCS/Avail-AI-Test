@@ -97,6 +97,11 @@ class TestExecution:
             with Operations.context(ctx):
                 fn()
 
+    @staticmethod
+    def _categories(engine):
+        with engine.connect() as conn:
+            return dict(conn.execute(text("SELECT normalized_mpn, category FROM material_cards")).fetchall())
+
     def test_upgrade_downgrade_upgrade_normalizes_new_aliases(self):
         engine = self._scratch_engine()
 
@@ -112,18 +117,12 @@ class TestExecution:
         }
 
         self._run(engine, _mod.upgrade)
-        with engine.connect() as conn:
-            got = dict(conn.execute(text("SELECT normalized_mpn, category FROM material_cards")).fetchall())
-        assert got == expected
+        assert self._categories(engine) == expected
 
         # Downgrade is a documented no-op (many-to-one normalization is irreversible).
         self._run(engine, _mod.downgrade)
-        with engine.connect() as conn:
-            got = dict(conn.execute(text("SELECT normalized_mpn, category FROM material_cards")).fetchall())
-        assert got == expected
+        assert self._categories(engine) == expected
 
         # Re-upgrade is idempotent.
         self._run(engine, _mod.upgrade)
-        with engine.connect() as conn:
-            got = dict(conn.execute(text("SELECT normalized_mpn, category FROM material_cards")).fetchall())
-        assert got == expected
+        assert self._categories(engine) == expected

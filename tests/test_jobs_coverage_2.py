@@ -47,6 +47,31 @@ def _mock_db():
     return db
 
 
+def _two_session_factory(first_db, second_db):
+    """Return a SessionLocal side_effect: first call -> first_db, rest -> second_db.
+
+    Mirrors the selector/task split used by token-refresh and inbox-scan jobs.
+    """
+    call_count = [0]
+
+    def session_factory():
+        call_count[0] += 1
+        return first_db if call_count[0] == 1 else second_db
+
+    return session_factory
+
+
+def _digikey_config():
+    """Standard DigiKey connector config dict used by _try_connector_config tests."""
+    return {
+        "name": "digikey",
+        "module": "app.connectors.digikey",
+        "class": "DigiKeyConnector",
+        "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
+        "confidence": 0.95,
+    }
+
+
 # ===========================================================================
 # offers_jobs.py
 # ===========================================================================
@@ -55,42 +80,27 @@ def _mock_db():
 class TestRegisterOffersJobs:
     """Tests for register_offers_jobs()."""
 
-    def test_register_with_proactive_matching_enabled(self):
+    @pytest.mark.parametrize(
+        "enabled, scan_interval_hours, expected_jobs",
+        [
+            # 6 jobs: proactive_matching + performance_tracking + proactive_offer_expiry
+            # + flag_stale_offers + expire_strategic_vendors + warn_strategic_expiring
+            pytest.param(True, 4, 6, id="enabled"),
+            # 5 jobs (no proactive_matching)
+            pytest.param(False, None, 5, id="disabled"),
+            pytest.param(True, 0, 6, id="interval_below_min"),
+        ],
+    )
+    def test_register(self, enabled, scan_interval_hours, expected_jobs):
         from app.jobs.offers_jobs import register_offers_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
-        settings.proactive_matching_enabled = True
-        settings.proactive_scan_interval_hours = 4
+        settings.proactive_matching_enabled = enabled
+        settings.proactive_scan_interval_hours = scan_interval_hours
 
         register_offers_jobs(scheduler, settings)
-
-        # 6 jobs: proactive_matching + performance_tracking + proactive_offer_expiry
-        # + flag_stale_offers + expire_strategic_vendors + warn_strategic_expiring
-        assert scheduler.add_job.call_count == 6
-
-    def test_register_with_proactive_matching_disabled(self):
-        from app.jobs.offers_jobs import register_offers_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.proactive_matching_enabled = False
-
-        register_offers_jobs(scheduler, settings)
-
-        # 5 jobs (no proactive_matching)
-        assert scheduler.add_job.call_count == 5
-
-    def test_proactive_scan_interval_minimum_1(self):
-        from app.jobs.offers_jobs import register_offers_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.proactive_matching_enabled = True
-        settings.proactive_scan_interval_hours = 0  # below min
-
-        register_offers_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 6
+        assert scheduler.add_job.call_count == expected_jobs
 
 
 class TestJobProactiveMatching:
@@ -738,27 +748,23 @@ class TestParseStockFile:
 
 
 class TestRegisterCoreJobs:
-    def test_registers_with_activity_tracking(self):
+    @pytest.mark.parametrize(
+        "activity_tracking_enabled, expected_jobs",
+        [
+            pytest.param(True, 7, id="with_activity_tracking"),
+            pytest.param(False, 6, id="without_activity_tracking"),
+        ],
+    )
+    def test_registers(self, activity_tracking_enabled, expected_jobs):
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 5
-        settings.activity_tracking_enabled = True
+        settings.activity_tracking_enabled = activity_tracking_enabled
 
         register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 7
-
-    def test_registers_without_activity_tracking(self):
-        from app.jobs.core_jobs import register_core_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.inbox_scan_interval_min = 5
-        settings.activity_tracking_enabled = False
-
-        register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 6
+        assert scheduler.add_job.call_count == expected_jobs
 
 
 class TestJobAutoArchive:
@@ -854,15 +860,7 @@ class TestJobTokenRefresh:
         task_db = _mock_db()
         task_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return task_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
             with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=None):
                     with patch(
@@ -889,15 +887,7 @@ class TestJobTokenRefresh:
         task_db = _mock_db()
         task_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return task_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
             with patch("app.cache.intel_cache._get_redis", return_value=None):
                 with patch(
                     "app.utils.token_manager.refresh_user_token",
@@ -1212,15 +1202,7 @@ class TestJobInboxScan:
         scan_db = _mock_db()
         scan_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return scan_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, scan_db)):
             with patch("app.config.settings") as mock_settings:
                 mock_settings.inbox_scan_interval_min = 5
                 with patch(
@@ -1672,13 +1654,7 @@ class TestTryConnectorConfig:
     def test_missing_credentials(self):
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
+        config = _digikey_config()
 
         with patch("app.services.enrichment.get_credential_cached", return_value=None):
             out = _run(_try_connector_config(config, "LM358"))
@@ -1688,13 +1664,7 @@ class TestTryConnectorConfig:
     def test_successful_search(self):
         from app.services.enrichment import _try_connector_config
 
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
+        config = _digikey_config()
 
         mock_connector = MagicMock()
         mock_connector.search = AsyncMock(return_value=[{"manufacturer": "Texas Instruments", "category": "IC"}])
@@ -1711,97 +1681,47 @@ class TestTryConnectorConfig:
         assert out["manufacturer"] == "Texas Instruments"
         assert out["source"] == "digikey"
 
-    def test_timeout(self):
+    @pytest.mark.parametrize(
+        "config, wait_for_kwargs",
+        [
+            pytest.param(
+                _digikey_config(),
+                {"side_effect": asyncio.TimeoutError},
+                id="timeout",
+            ),
+            pytest.param(
+                _digikey_config(),
+                {"side_effect": Exception("401 Unauthorized")},
+                id="auth_error",
+            ),
+            pytest.param(
+                {
+                    "name": "mouser",
+                    "module": "app.connectors.mouser",
+                    "class": "MouserConnector",
+                    "creds": [("mouser", "MOUSER_API_KEY")],
+                    "confidence": 0.95,
+                },
+                {"side_effect": Exception("429 rate limit exceeded")},
+                id="rate_limit_error",
+            ),
+            pytest.param(
+                _digikey_config(),
+                {"return_value": [{"manufacturer": "Unknown", "category": ""}]},
+                id="ignored_manufacturer",
+            ),
+        ],
+    )
+    def test_returns_none(self, config, wait_for_kwargs):
         from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
 
         with patch("app.services.enrichment.get_credential_cached", return_value="key123"):
             with patch("app.services.enrichment.importlib.import_module") as mock_import:
-                mock_module = MagicMock()
-                mock_import.return_value = mock_module
+                mock_import.return_value = MagicMock()
                 with patch(
                     "app.services.enrichment.asyncio.wait_for",
                     new_callable=AsyncMock,
-                    side_effect=asyncio.TimeoutError,
-                ):
-                    out = _run(_try_connector_config(config, "LM358"))
-
-        assert out is None
-
-    def test_auth_error(self):
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-
-        with patch("app.services.enrichment.get_credential_cached", return_value="key123"):
-            with patch("app.services.enrichment.importlib.import_module") as mock_import:
-                mock_module = MagicMock()
-                mock_import.return_value = mock_module
-                with patch(
-                    "app.services.enrichment.asyncio.wait_for",
-                    new_callable=AsyncMock,
-                    side_effect=Exception("401 Unauthorized"),
-                ):
-                    out = _run(_try_connector_config(config, "LM358"))
-
-        assert out is None
-
-    def test_rate_limit_error(self):
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "mouser",
-            "module": "app.connectors.mouser",
-            "class": "MouserConnector",
-            "creds": [("mouser", "MOUSER_API_KEY")],
-            "confidence": 0.95,
-        }
-
-        with patch("app.services.enrichment.get_credential_cached", return_value="key123"):
-            with patch("app.services.enrichment.importlib.import_module") as mock_import:
-                mock_module = MagicMock()
-                mock_import.return_value = mock_module
-                with patch(
-                    "app.services.enrichment.asyncio.wait_for",
-                    new_callable=AsyncMock,
-                    side_effect=Exception("429 rate limit exceeded"),
-                ):
-                    out = _run(_try_connector_config(config, "LM358"))
-
-        assert out is None
-
-    def test_ignored_manufacturer(self):
-        from app.services.enrichment import _try_connector_config
-
-        config = {
-            "name": "digikey",
-            "module": "app.connectors.digikey",
-            "class": "DigiKeyConnector",
-            "creds": [("digikey", "DIGIKEY_CLIENT_ID")],
-            "confidence": 0.95,
-        }
-
-        with patch("app.services.enrichment.get_credential_cached", return_value="key123"):
-            with patch("app.services.enrichment.importlib.import_module") as mock_import:
-                mock_module = MagicMock()
-                mock_import.return_value = mock_module
-                with patch(
-                    "app.services.enrichment.asyncio.wait_for",
-                    new_callable=AsyncMock,
-                    return_value=[{"manufacturer": "Unknown", "category": ""}],
+                    **wait_for_kwargs,
                 ):
                     out = _run(_try_connector_config(config, "LM358"))
 
@@ -2619,15 +2539,7 @@ class TestJobTokenRefreshEdgeCases:
         mock_redis = MagicMock()
         mock_redis.set.return_value = True
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return task_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
             with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
                     with patch(
@@ -2659,15 +2571,7 @@ class TestJobTokenRefreshEdgeCases:
         mock_redis = MagicMock()
         mock_redis.set.return_value = False
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return task_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
             with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
                     _run(_job_token_refresh.__wrapped__())
@@ -2690,15 +2594,7 @@ class TestJobTokenRefreshEdgeCases:
         task_db = _mock_db()
         task_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return task_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, task_db)):
             with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
                 with patch("app.cache.intel_cache._get_redis", return_value=None):
                     with patch(
@@ -2742,15 +2638,7 @@ class TestJobInboxScanEdgeCases:
         scan_db = _mock_db()
         scan_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return scan_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, scan_db)):
             with patch("app.config.settings") as mock_settings:
                 mock_settings.inbox_scan_interval_min = 5
                 with patch(
@@ -2779,15 +2667,7 @@ class TestJobInboxScanEdgeCases:
         scan_db = _mock_db()
         scan_db.get.return_value = user
 
-        call_count = [0]
-
-        def session_factory():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                return selector_db
-            return scan_db
-
-        with patch("app.database.SessionLocal", side_effect=session_factory):
+        with patch("app.database.SessionLocal", side_effect=_two_session_factory(selector_db, scan_db)):
             with patch("app.config.settings") as mock_settings:
                 mock_settings.inbox_scan_interval_min = 5
                 with patch(

@@ -139,54 +139,56 @@ def test_render_op_create_index_emits_valid_python():
 # alembic op.create_index path unchanged.
 
 
-def test_parse_pg_dump_extracts_index_with_desc_ordering():
-    """An index column with trailing ASC/DESC must be parsed as (column, ordering) not
-    as a single column named 'col DESC'."""
-    sql = textwrap.dedent("""
-    CREATE TABLE public.sightings (id integer NOT NULL, requirement_id integer, score double precision);
-    CREATE INDEX ix_sightings_req_score ON public.sightings USING btree (requirement_id, score DESC);
-    """)
-    result = parse_pg_dump(sql)
-    assert len(result.indexes) == 1
-    ix = result.indexes[0]
-    assert ix.columns == ["requirement_id", "score"], f"DESC must split off the column name; got columns={ix.columns!r}"
-    assert ix.column_orderings == [None, "DESC"]
-    assert ix.where_clause is None
+@pytest.mark.parametrize(
+    ("sql", "expected_columns", "expected_orderings", "expected_where"),
+    [
+        pytest.param(
+            """
+            CREATE TABLE public.sightings (id integer NOT NULL, requirement_id integer, score double precision);
+            CREATE INDEX ix_sightings_req_score ON public.sightings USING btree (requirement_id, score DESC);
+            """,
+            ["requirement_id", "score"],
+            [None, "DESC"],
+            None,
+            id="desc_ordering",
+        ),
+        pytest.param(
+            """
+            CREATE TABLE public.activity_log (id integer NOT NULL, company_id integer, created_at timestamp without time zone);
+            CREATE INDEX ix_activity_company ON public.activity_log USING btree (company_id, created_at) WHERE (company_id IS NOT NULL);
+            """,
+            ["company_id", "created_at"],
+            [None, None],
+            "(company_id IS NOT NULL)",
+            id="partial_where",
+        ),
+        pytest.param(
+            """
+            CREATE TABLE public.ics_search_queue (id integer NOT NULL, normalized_mpn varchar(255), last_searched_at timestamp without time zone, status varchar(50));
+            CREATE INDEX ix_ics_queue_dedup ON public.ics_search_queue USING btree (normalized_mpn, last_searched_at DESC) WHERE ((status)::text = 'completed'::text);
+            """,
+            ["normalized_mpn", "last_searched_at"],
+            [None, "DESC"],
+            "((status)::text = 'completed'::text)",
+            id="desc_and_where",
+        ),
+    ],
+)
+def test_parse_pg_dump_extracts_index_qualifiers(sql, expected_columns, expected_orderings, expected_where):
+    """Index columns with trailing ASC/DESC must split the ordering off the column name,
+    and partial-index WHERE predicates must be captured.
 
-
-def test_parse_pg_dump_extracts_partial_index():
-    """An index with WHERE clause must capture the predicate and still parse columns.
-
-    The old regex (anchored on ``);``) silently dropped these.
+    Covers DESC-only, WHERE-only, and the real-world DESC+WHERE combo
+    (``ix_ics_queue_dedup`` / ``ix_nc_queue_dedup``). The old parser treated
+    ``score DESC`` as one column name and (anchored on ``);``) silently dropped
+    partial-index lines entirely.
     """
-    sql = textwrap.dedent("""
-    CREATE TABLE public.activity_log (id integer NOT NULL, company_id integer, created_at timestamp without time zone);
-    CREATE INDEX ix_activity_company ON public.activity_log USING btree (company_id, created_at) WHERE (company_id IS NOT NULL);
-    """)
-    result = parse_pg_dump(sql)
-    assert len(result.indexes) == 1, (
-        f"partial index must still be parsed (the old regex dropped it); got {len(result.indexes)}"
-    )
+    result = parse_pg_dump(textwrap.dedent(sql))
+    assert len(result.indexes) == 1, f"index must be parsed (the old regex dropped partials); got {len(result.indexes)}"
     ix = result.indexes[0]
-    assert ix.columns == ["company_id", "created_at"]
-    assert ix.column_orderings == [None, None]
-    assert ix.where_clause == "(company_id IS NOT NULL)"
-
-
-def test_parse_pg_dump_extracts_index_with_both_desc_and_where():
-    """Real-world combo from this codebase: ``ix_ics_queue_dedup`` /
-    ``ix_nc_queue_dedup``. Both DESC ordering AND a partial-index WHERE clause
-    on the same index. Both must be captured."""
-    sql = textwrap.dedent("""
-    CREATE TABLE public.ics_search_queue (id integer NOT NULL, normalized_mpn varchar(255), last_searched_at timestamp without time zone, status varchar(50));
-    CREATE INDEX ix_ics_queue_dedup ON public.ics_search_queue USING btree (normalized_mpn, last_searched_at DESC) WHERE ((status)::text = 'completed'::text);
-    """)
-    result = parse_pg_dump(sql)
-    assert len(result.indexes) == 1
-    ix = result.indexes[0]
-    assert ix.columns == ["normalized_mpn", "last_searched_at"]
-    assert ix.column_orderings == [None, "DESC"]
-    assert ix.where_clause == "((status)::text = 'completed'::text)"
+    assert ix.columns == expected_columns, f"DESC must split off the column name; got columns={ix.columns!r}"
+    assert ix.column_orderings == expected_orderings
+    assert ix.where_clause == expected_where
 
 
 def test_render_op_create_index_falls_back_to_execute_for_complex_indexes():

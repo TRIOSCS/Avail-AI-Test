@@ -8,6 +8,7 @@ Called by: pytest
 Depends on: conftest fixtures (db_session, client, test_user), buyplan_workflow
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -131,6 +132,20 @@ def _make_plan_with_lines(
     return plan
 
 
+@contextmanager
+def _mock_graph_search(*, return_value=None, side_effect=None):
+    """Patch token + GraphClient so search_sent_messages returns/raises as
+    configured."""
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
+        patch("app.utils.graph_client.GraphClient") as MockGC,
+    ):
+        mock_client = AsyncMock()
+        mock_client.search_sent_messages = AsyncMock(return_value=return_value, side_effect=side_effect)
+        MockGC.return_value = mock_client
+        yield
+
+
 # ── Tests ────────────────────────────────────────────────────────────
 
 
@@ -148,14 +163,7 @@ async def test_verify_po_found_in_sent_folder(db_session: Session, test_user: Us
         }
     ]
 
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-        patch("app.utils.graph_client.GraphClient") as MockGC,
-    ):
-        mock_client = AsyncMock()
-        mock_client.search_sent_messages = AsyncMock(return_value=mock_messages)
-        MockGC.return_value = mock_client
-
+    with _mock_graph_search(return_value=mock_messages):
         results = await verify_po_sent_v3(plan, db_session)
 
     assert "PO-12345" in results
@@ -175,14 +183,7 @@ async def test_verify_po_not_found(db_session: Session, test_user: User):
     """PO not found in sent folder — line stays in pending_verify."""
     plan = _make_plan_with_lines(db_session, test_user, ["PO-99999"])
 
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-        patch("app.utils.graph_client.GraphClient") as MockGC,
-    ):
-        mock_client = AsyncMock()
-        mock_client.search_sent_messages = AsyncMock(return_value=[])
-        MockGC.return_value = mock_client
-
+    with _mock_graph_search(return_value=[]):
         results = await verify_po_sent_v3(plan, db_session)
 
     assert results["PO-99999"]["verified"] is False
@@ -197,14 +198,7 @@ async def test_verify_po_graph_error(db_session: Session, test_user: User):
     """Graph API error handled gracefully — returns error reason."""
     plan = _make_plan_with_lines(db_session, test_user, ["PO-ERR-001"])
 
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-        patch("app.utils.graph_client.GraphClient") as MockGC,
-    ):
-        mock_client = AsyncMock()
-        mock_client.search_sent_messages = AsyncMock(side_effect=RuntimeError("Graph 503"))
-        MockGC.return_value = mock_client
-
+    with _mock_graph_search(side_effect=RuntimeError("Graph 503")):
         results = await verify_po_sent_v3(plan, db_session)
 
     assert results["PO-ERR-001"]["verified"] is False
@@ -230,14 +224,7 @@ async def test_verify_po_all_verified_auto_completes(db_session: Session, test_u
         }
     ]
 
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-        patch("app.utils.graph_client.GraphClient") as MockGC,
-    ):
-        mock_client = AsyncMock()
-        mock_client.search_sent_messages = AsyncMock(return_value=mock_messages)
-        MockGC.return_value = mock_client
-
+    with _mock_graph_search(return_value=mock_messages):
         results = await verify_po_sent_v3(plan, db_session)
 
     assert results["PO-A"]["verified"] is True

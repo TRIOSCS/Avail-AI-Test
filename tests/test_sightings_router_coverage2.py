@@ -97,66 +97,23 @@ class TestSightingsRefresh:
 
 
 class TestSightingsListFilters:
-    def test_filter_by_status(self, client: TestClient, req_with_item: tuple):
+    @pytest.mark.parametrize(
+        "params",
+        [
+            pytest.param({"status": "open"}, id="filter_by_status"),
+            pytest.param({"sales_person": "Test"}, id="filter_by_sales_person"),
+            pytest.param({"assigned": "mine"}, id="filter_assigned_mine"),
+            pytest.param({"q": "STM32"}, id="filter_by_query"),
+            pytest.param({"sort": "mpn", "dir": "asc"}, id="sort_by_mpn"),
+            pytest.param({"sort": "created", "dir": "desc"}, id="sort_by_created"),
+            pytest.param({"group_by": "manufacturer"}, id="group_by_manufacturer"),
+            pytest.param({"group_by": "brand"}, id="group_by_brand"),
+        ],
+    )
+    def test_list_filter(self, client: TestClient, req_with_item: tuple, params: dict):
         resp = client.get(
             "/v2/partials/sightings",
-            params={"status": "open"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_filter_by_sales_person(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"sales_person": "Test"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_filter_assigned_mine(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"assigned": "mine"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_filter_by_query(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"q": "STM32"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_sort_by_mpn(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"sort": "mpn", "dir": "asc"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_sort_by_created(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"sort": "created", "dir": "desc"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_group_by_manufacturer(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"group_by": "manufacturer"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_group_by_brand(self, client: TestClient, req_with_item: tuple):
-        resp = client.get(
-            "/v2/partials/sightings",
-            params={"group_by": "brand"},
+            params=params,
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -188,39 +145,20 @@ class TestSightingsDetail:
         )
         assert resp.status_code == 200
 
-    def test_detail_sourcing_status_no_rfqs(self, client: TestClient, req_with_item: tuple, db_session: Session):
+    @pytest.mark.parametrize(
+        "sourcing_status",
+        [
+            pytest.param("sourcing", id="sourcing_status_no_rfqs"),
+            pytest.param("offered", id="offered_status"),
+            pytest.param("quoted", id="quoted_status"),
+            pytest.param("won", id="won_status"),
+        ],
+    )
+    def test_detail_by_sourcing_status(
+        self, client: TestClient, req_with_item: tuple, db_session: Session, sourcing_status: str
+    ):
         _, item = req_with_item
-        item.sourcing_status = "sourcing"
-        db_session.commit()
-        resp = client.get(
-            f"/v2/partials/sightings/{item.id}/detail",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_detail_offered_status(self, client: TestClient, req_with_item: tuple, db_session: Session):
-        _, item = req_with_item
-        item.sourcing_status = "offered"
-        db_session.commit()
-        resp = client.get(
-            f"/v2/partials/sightings/{item.id}/detail",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_detail_quoted_status(self, client: TestClient, req_with_item: tuple, db_session: Session):
-        _, item = req_with_item
-        item.sourcing_status = "quoted"
-        db_session.commit()
-        resp = client.get(
-            f"/v2/partials/sightings/{item.id}/detail",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_detail_won_status(self, client: TestClient, req_with_item: tuple, db_session: Session):
-        _, item = req_with_item
-        item.sourcing_status = "won"
+        item.sourcing_status = sourcing_status
         db_session.commit()
         resp = client.get(
             f"/v2/partials/sightings/{item.id}/detail",
@@ -261,47 +199,35 @@ class TestAssignBuyerWithId:
 
 
 class TestLogActivity:
-    def test_log_note_success(self, client: TestClient, req_with_item: tuple):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"notes": "test note", "channel": "note"}, id="note"),
+            pytest.param({"notes": "called vendor", "channel": "call", "vendor_name": "Acme Vendor"}, id="call"),
+            pytest.param({"notes": "sent email", "channel": "email"}, id="email"),
+        ],
+    )
+    def test_log_activity_success(self, client: TestClient, req_with_item: tuple, data: dict):
         _, item = req_with_item
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/log-activity",
-            data={"notes": "test note", "channel": "note"},
+            data=data,
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
 
-    def test_log_call_success(self, client: TestClient, req_with_item: tuple):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"notes": "   ", "channel": "note"}, id="empty_notes"),
+            pytest.param({"notes": "hello", "channel": "invalid"}, id="invalid_channel"),
+        ],
+    )
+    def test_log_activity_bad_request(self, client: TestClient, req_with_item: tuple, data: dict):
         _, item = req_with_item
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/log-activity",
-            data={"notes": "called vendor", "channel": "call", "vendor_name": "Acme Vendor"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_log_email_success(self, client: TestClient, req_with_item: tuple):
-        _, item = req_with_item
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/log-activity",
-            data={"notes": "sent email", "channel": "email"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-
-    def test_log_empty_notes(self, client: TestClient, req_with_item: tuple):
-        _, item = req_with_item
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/log-activity",
-            data={"notes": "   ", "channel": "note"},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400
-
-    def test_log_invalid_channel(self, client: TestClient, req_with_item: tuple):
-        _, item = req_with_item
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/log-activity",
-            data={"notes": "hello", "channel": "invalid"},
+            data=data,
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 400

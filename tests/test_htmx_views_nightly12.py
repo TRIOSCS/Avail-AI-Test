@@ -16,6 +16,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -91,6 +92,10 @@ def _make_buy_plan(
     return bp
 
 
+def _first_requirement(db: Session, req: Requisition) -> Requirement:
+    return db.query(Requirement).filter_by(requisition_id=req.id).first()
+
+
 # ── Parts list ────────────────────────────────────────────────────────────
 
 
@@ -123,120 +128,48 @@ class TestPartsListPartial:
 # ── Parts tabs ────────────────────────────────────────────────────────────
 
 
-class TestPartTabOffers:
-    def test_offers_tab_200(
+# Each part-detail partial returns 200 for a real requirement; the same path
+# returns 404 for a missing one. Identical arrange/assert across all tabs and
+# the header, so parametrize over the path suffix. (The notes tab has no 404
+# GET case in the original suite, hence the separate 200-only list.)
+_PART_PARTIAL_404_SUFFIXES = [
+    "tab/offers",
+    "tab/sourcing",
+    "tab/req-details",
+    "header",
+    "tab/activity",
+    "tab/comms",
+]
+_PART_PARTIAL_200_SUFFIXES = [*_PART_PARTIAL_404_SUFFIXES, "tab/notes"]
+
+
+class TestPartPartials:
+    @pytest.mark.parametrize("suffix", _PART_PARTIAL_200_SUFFIXES)
+    def test_partial_200(
         self,
         client: TestClient,
         db_session: Session,
         test_requisition: Requisition,
+        suffix: str,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/offers")
+        req = _first_requirement(db_session, test_requisition)
+        resp = client.get(f"/v2/partials/parts/{req.id}/{suffix}")
         assert resp.status_code == 200
 
-    def test_offers_tab_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/tab/offers")
-        assert resp.status_code == 404
-
-
-class TestPartTabSourcing:
-    def test_sourcing_tab_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/sourcing")
-        assert resp.status_code == 200
-
-    def test_sourcing_tab_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/tab/sourcing")
-        assert resp.status_code == 404
-
-
-class TestPartTabReqDetails:
-    def test_req_details_tab_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/req-details")
-        assert resp.status_code == 200
-
-    def test_req_details_tab_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/tab/req-details")
-        assert resp.status_code == 404
-
-
-class TestPartHeader:
-    def test_header_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/header")
-        assert resp.status_code == 200
-
-    def test_header_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/header")
-        assert resp.status_code == 404
-
-
-class TestPartTabActivity:
-    def test_activity_tab_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/activity")
-        assert resp.status_code == 200
-
-    def test_activity_tab_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/tab/activity")
-        assert resp.status_code == 404
-
-
-class TestPartTabComms:
-    def test_comms_tab_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/comms")
-        assert resp.status_code == 200
-
-    def test_comms_tab_not_found(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/parts/99999/tab/comms")
+    @pytest.mark.parametrize("suffix", _PART_PARTIAL_404_SUFFIXES)
+    def test_partial_not_found(self, client: TestClient, suffix: str) -> None:
+        resp = client.get(f"/v2/partials/parts/99999/{suffix}")
         assert resp.status_code == 404
 
 
 class TestPartTabNotes:
-    def test_notes_tab_200(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        resp = client.get(f"/v2/partials/parts/{req.id}/tab/notes")
-        assert resp.status_code == 200
-
     def test_save_notes(
         self,
         client: TestClient,
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         resp = client.patch(
             f"/v2/partials/parts/{req.id}/notes",
             data={"sale_notes": "Important: check lead times"},
@@ -260,7 +193,7 @@ class TestCreatePartTask:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         resp = client.post(
             f"/v2/partials/parts/{req.id}/tasks",
             data={"title": "Call vendor for quote"},
@@ -276,7 +209,7 @@ class TestCreatePartTask:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         resp = client.post(f"/v2/partials/parts/{req.id}/tasks", data={"title": ""})
         assert resp.status_code == 422
 
@@ -293,7 +226,7 @@ class TestMarkTaskDone:
         test_requisition: Requisition,
         test_user: User,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         task = _make_task(db_session, test_requisition, req, test_user)
         resp = client.post(f"/v2/partials/parts/tasks/{task.id}/done")
         assert resp.status_code == 200
@@ -313,7 +246,7 @@ class TestReopenTask:
         test_requisition: Requisition,
         test_user: User,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         task = _make_task(db_session, test_requisition, req, test_user, status="done")
         resp = client.post(f"/v2/partials/parts/tasks/{task.id}/reopen")
         assert resp.status_code == 200
@@ -335,7 +268,7 @@ class TestArchiveSinglePart:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         resp = client.patch(f"/v2/partials/parts/{req.id}/archive")
         assert resp.status_code == 200
         db_session.refresh(req)
@@ -351,7 +284,7 @@ class TestArchiveSinglePart:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         req.sourcing_status = "archived"
         db_session.commit()
         resp = client.patch(f"/v2/partials/parts/{req.id}/unarchive")
@@ -405,7 +338,7 @@ class TestBulkArchive:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
             json={"requirement_ids": [req.id], "requisition_ids": []},
@@ -434,7 +367,7 @@ class TestBulkArchive:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+        req = _first_requirement(db_session, test_requisition)
         req.sourcing_status = "archived"
         db_session.commit()
         resp = client.post(

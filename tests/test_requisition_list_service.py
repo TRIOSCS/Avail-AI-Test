@@ -9,6 +9,8 @@ Depends on: app/services/requisition_list_service.py, conftest fixtures
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import Requisition
 from app.schemas.requisitions2 import ReqListFilters, ReqStatus, SortColumn, SortOrder
 from app.services.requisition_list_service import (
@@ -21,20 +23,37 @@ from app.services.requisition_list_service import (
     list_requisitions,
 )
 
+
+def _make_req(db_session, name, created_by, *, status="active", created_at=None, **extra):
+    """Build, persist, and return a Requisition with sensible test defaults."""
+    req = Requisition(
+        name=name,
+        status=status,
+        created_by=created_by,
+        created_at=created_at or datetime.now(timezone.utc),
+        **extra,
+    )
+    db_session.add(req)
+    return req
+
+
 # ── helpers: _hours_until_bid_due / _resolve_deal_value ──────────────
 
 
-def test_hours_until_bid_due_none_and_empty():
-    assert _hours_until_bid_due(None) is None
-    assert _hours_until_bid_due("") is None
-    assert _hours_until_bid_due("   ") is None
-
-
-def test_hours_until_bid_due_unparseable_returns_none():
-    # Literal "ASAP" and other non-ISO strings must degrade to None,
-    # not raise, so the urgency accent just doesn't render.
-    assert _hours_until_bid_due("ASAP") is None
-    assert _hours_until_bid_due("next week") is None
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="none"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        # Literal "ASAP" and other non-ISO strings must degrade to None,
+        # not raise, so the urgency accent just doesn't render.
+        pytest.param("ASAP", id="literal_asap"),
+        pytest.param("next week", id="prose"),
+    ],
+)
+def test_hours_until_bid_due_returns_none(value):
+    assert _hours_until_bid_due(value) is None
 
 
 def test_hours_until_bid_due_iso_date_treated_as_end_of_day():
@@ -54,40 +73,26 @@ def test_hours_until_bid_due_iso_datetime_parses():
 # ── _resolve_deal_value (extended signature) ─────────────────────────
 
 
-def test_resolve_deal_value_prefers_entered():
-    val, src = _resolve_deal_value(opportunity_value=50000.0, priced_sum=10.0, priced_count=1, requirement_count=5)
-    assert val == 50000.0
-    assert src == "entered"
-
-
-def test_resolve_deal_value_all_priced_is_computed():
-    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=2500.0, priced_count=3, requirement_count=3)
-    assert val == 2500.0
-    assert src == "computed"
-
-
-def test_resolve_deal_value_some_priced_is_partial():
-    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=1800.0, priced_count=3, requirement_count=5)
-    assert val == 1800.0
-    assert src == "partial"
-
-
-def test_resolve_deal_value_zero_price_counts_as_priced():
-    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=1500.0, priced_count=4, requirement_count=4)
-    assert val == 1500.0
-    assert src == "computed"
-
-
-def test_resolve_deal_value_none_priced_is_none():
-    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=0.0, priced_count=0, requirement_count=3)
-    assert val is None
-    assert src == "none"
-
-
-def test_resolve_deal_value_zero_opportunity_falls_through():
-    val, src = _resolve_deal_value(opportunity_value=0.0, priced_sum=1500.0, priced_count=2, requirement_count=2)
-    assert val == 1500.0
-    assert src == "computed"
+@pytest.mark.parametrize(
+    ("opportunity_value", "priced_sum", "priced_count", "requirement_count", "expected_val", "expected_src"),
+    [
+        pytest.param(50000.0, 10.0, 1, 5, 50000.0, "entered", id="prefers_entered"),
+        pytest.param(None, 2500.0, 3, 3, 2500.0, "computed", id="all_priced_is_computed"),
+        pytest.param(None, 1800.0, 3, 5, 1800.0, "partial", id="some_priced_is_partial"),
+        pytest.param(None, 1500.0, 4, 4, 1500.0, "computed", id="zero_price_counts_as_priced"),
+        pytest.param(None, 0.0, 0, 3, None, "none", id="none_priced_is_none"),
+        pytest.param(0.0, 1500.0, 2, 2, 1500.0, "computed", id="zero_opportunity_falls_through"),
+    ],
+)
+def test_resolve_deal_value(opportunity_value, priced_sum, priced_count, requirement_count, expected_val, expected_src):
+    val, src = _resolve_deal_value(
+        opportunity_value=opportunity_value,
+        priced_sum=priced_sum,
+        priced_count=priced_count,
+        requirement_count=requirement_count,
+    )
+    assert val == expected_val
+    assert src == expected_src
 
 
 # ── list_requisitions ────────────────────────────────────────────────
@@ -150,13 +155,7 @@ def test_list_pagination_math(db_session, test_user):
     """Pagination computes correct total_pages."""
     # Create 3 requisitions
     for i in range(3):
-        req = Requisition(
-            name=f"PAGE-REQ-{i}",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        _make_req(db_session, f"PAGE-REQ-{i}", test_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, per_page=2)
@@ -169,13 +168,7 @@ def test_list_pagination_math(db_session, test_user):
 def test_list_pagination_page_2(db_session, test_user):
     """Page 2 returns remaining items."""
     for i in range(3):
-        req = Requisition(
-            name=f"PAGE-REQ-{i}",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        _make_req(db_session, f"PAGE-REQ-{i}", test_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, per_page=2, page=2)
@@ -185,19 +178,8 @@ def test_list_pagination_page_2(db_session, test_user):
 
 def test_list_sort_ascending(db_session, test_user):
     """Sort ascending by name orders A before Z."""
-    req_a = Requisition(
-        name="AAA-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_z = Requisition(
-        name="ZZZ-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_a, req_z])
+    _make_req(db_session, "AAA-REQ", test_user.id)
+    _make_req(db_session, "ZZZ-REQ", test_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, sort=SortColumn.name, order=SortOrder.asc)
@@ -209,19 +191,8 @@ def test_list_sort_ascending(db_session, test_user):
 
 def test_list_sort_descending(db_session, test_user):
     """Sort descending by name orders Z before A."""
-    req_a = Requisition(
-        name="AAA-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_z = Requisition(
-        name="ZZZ-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_a, req_z])
+    _make_req(db_session, "AAA-REQ", test_user.id)
+    _make_req(db_session, "ZZZ-REQ", test_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, sort=SortColumn.name, order=SortOrder.desc)
@@ -233,19 +204,8 @@ def test_list_sort_descending(db_session, test_user):
 
 def test_sales_role_filtering(db_session, test_user, sales_user):
     """Sales role only sees own requisitions."""
-    req_buyer = Requisition(
-        name="BUYER-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_sales = Requisition(
-        name="SALES-REQ",
-        status="active",
-        created_by=sales_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_buyer, req_sales])
+    _make_req(db_session, "BUYER-REQ", test_user.id)
+    _make_req(db_session, "SALES-REQ", sales_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active)
@@ -298,19 +258,8 @@ def test_detail_with_customer_site(db_session, test_user, test_requisition, test
 
 def test_list_filter_by_owner(db_session, test_user, sales_user):
     """Owner filter restricts to specific user."""
-    req_buyer = Requisition(
-        name="BUYER-OWN",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_sales = Requisition(
-        name="SALES-OWN",
-        status="active",
-        created_by=sales_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_buyer, req_sales])
+    _make_req(db_session, "BUYER-OWN", test_user.id)
+    _make_req(db_session, "SALES-OWN", sales_user.id)
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, owner=test_user.id)
@@ -322,21 +271,8 @@ def test_list_filter_by_owner(db_session, test_user, sales_user):
 
 def test_list_filter_by_urgency(db_session, test_user):
     """Urgency filter restricts to matching requisitions."""
-    req_hot = Requisition(
-        name="HOT-REQ",
-        status="active",
-        urgency="hot",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_normal = Requisition(
-        name="NORMAL-REQ",
-        status="active",
-        urgency="normal",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_hot, req_normal])
+    _make_req(db_session, "HOT-REQ", test_user.id, urgency="hot")
+    _make_req(db_session, "NORMAL-REQ", test_user.id, urgency="normal")
     db_session.commit()
 
     from app.schemas.requisitions2 import Urgency
@@ -352,13 +288,7 @@ def test_list_filter_by_date_from(db_session, test_user):
     """date_from filter excludes older requisitions."""
     from datetime import date as date_type
 
-    req = Requisition(
-        name="OLD-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
-    )
-    db_session.add(req)
+    _make_req(db_session, "OLD-REQ", test_user.id, created_at=datetime(2020, 1, 1, tzinfo=timezone.utc))
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, date_from=date_type(2025, 1, 1))
@@ -371,13 +301,7 @@ def test_list_filter_by_date_to(db_session, test_user):
     """date_to filter excludes newer requisitions."""
     from datetime import date as date_type
 
-    req = Requisition(
-        name="NEW-REQ",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime(2099, 1, 1, tzinfo=timezone.utc),
-    )
-    db_session.add(req)
+    _make_req(db_session, "NEW-REQ", test_user.id, created_at=datetime(2099, 1, 1, tzinfo=timezone.utc))
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.active, date_to=date_type(2026, 12, 31))
@@ -388,19 +312,8 @@ def test_list_filter_by_date_to(db_session, test_user):
 
 def test_list_status_all(db_session, test_user):
     """Status 'all' shows all requisitions regardless of status."""
-    req_active = Requisition(
-        name="ALL-ACTIVE",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_archived = Requisition(
-        name="ALL-ARCHIVED",
-        status="archived",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_active, req_archived])
+    _make_req(db_session, "ALL-ACTIVE", test_user.id)
+    _make_req(db_session, "ALL-ARCHIVED", test_user.id, status="archived")
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.all)
@@ -412,19 +325,8 @@ def test_list_status_all(db_session, test_user):
 
 def test_list_status_archived(db_session, test_user):
     """Status 'archived' shows only archived/won/lost/closed."""
-    req_active = Requisition(
-        name="ARCH-ACTIVE",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    req_archived = Requisition(
-        name="ARCH-ARCHIVED",
-        status="archived",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([req_active, req_archived])
+    _make_req(db_session, "ARCH-ACTIVE", test_user.id)
+    _make_req(db_session, "ARCH-ARCHIVED", test_user.id, status="archived")
     db_session.commit()
 
     filters = ReqListFilters(status=ReqStatus.archived)

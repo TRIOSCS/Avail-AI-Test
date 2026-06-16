@@ -14,9 +14,30 @@ os.environ["TESTING"] = "1"
 
 import base64
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from app.models.trouble_ticket import TroubleTicket
+
+
+def _make_ticket(db_session, test_user, ticket_number, title, description, **kwargs):
+    """Helper: build, commit, and refresh a low-risk submitted TroubleTicket."""
+    ticket = TroubleTicket(
+        ticket_number=ticket_number,
+        submitted_by=test_user.id,
+        title=title,
+        description=description,
+        status="submitted",
+        source="report_button",
+        risk_tier="low",
+        category="other",
+        created_at=datetime.now(timezone.utc),
+        **kwargs,
+    )
+    db_session.add(ticket)
+    db_session.commit()
+    db_session.refresh(ticket)
+    return ticket
+
 
 # ── Invalid JSON body ─────────────────────────────────────────────────────
 
@@ -95,21 +116,14 @@ class TestScreenshotEndpointCoverage:
         png_bytes = b"\x89PNG\r\n\x1a\n"
         b64_data = base64.b64encode(png_bytes).decode()
 
-        ticket = TroubleTicket(
-            ticket_number="TT-B64-001",
-            submitted_by=test_user.id,
-            title="B64 screenshot test",
-            description="Testing b64 fallback",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
+        ticket = _make_ticket(
+            db_session,
+            test_user,
+            "TT-B64-001",
+            "B64 screenshot test",
+            "Testing b64 fallback",
             screenshot_b64=b64_data,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(ticket)
-        db_session.commit()
-        db_session.refresh(ticket)
 
         resp = client.get(f"/api/trouble-tickets/{ticket.id}/screenshot")
         assert resp.status_code == 200
@@ -117,20 +131,13 @@ class TestScreenshotEndpointCoverage:
 
     def test_screenshot_no_image_at_all_returns_404(self, client, db_session, test_user):
         """Ticket with neither screenshot_path nor screenshot_b64 returns 404."""
-        ticket = TroubleTicket(
-            ticket_number="TT-NOPIC-001",
-            submitted_by=test_user.id,
-            title="No screenshot",
-            description="No image attached",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        ticket = _make_ticket(
+            db_session,
+            test_user,
+            "TT-NOPIC-001",
+            "No screenshot",
+            "No image attached",
         )
-        db_session.add(ticket)
-        db_session.commit()
-        db_session.refresh(ticket)
 
         resp = client.get(f"/api/trouble-tickets/{ticket.id}/screenshot")
         assert resp.status_code == 404
@@ -142,20 +149,13 @@ class TestScreenshotEndpointCoverage:
 class TestUpdateTicketStatusVariants:
     def test_update_status_to_in_progress(self, client, db_session, test_user):
         """PATCH with status=in_progress does NOT set resolved_at."""
-        ticket = TroubleTicket(
-            ticket_number="TT-INPROG-001",
-            submitted_by=test_user.id,
-            title="In progress test",
-            description="Testing in_progress status",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        ticket = _make_ticket(
+            db_session,
+            test_user,
+            "TT-INPROG-001",
+            "In progress test",
+            "Testing in_progress status",
         )
-        db_session.add(ticket)
-        db_session.commit()
-        db_session.refresh(ticket)
 
         resp = client.patch(
             f"/api/trouble-tickets/{ticket.id}",
@@ -170,20 +170,13 @@ class TestUpdateTicketStatusVariants:
 
     def test_update_ticket_status_only_no_notes(self, client, db_session, test_user):
         """PATCH with only status field (no resolution_notes) is accepted."""
-        ticket = TroubleTicket(
-            ticket_number="TT-STATONLY-001",
-            submitted_by=test_user.id,
-            title="Status only test",
-            description="Testing status-only update",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        ticket = _make_ticket(
+            db_session,
+            test_user,
+            "TT-STATONLY-001",
+            "Status only test",
+            "Testing status-only update",
         )
-        db_session.add(ticket)
-        db_session.commit()
-        db_session.refresh(ticket)
 
         resp = client.patch(
             f"/api/trouble-tickets/{ticket.id}",
@@ -194,20 +187,13 @@ class TestUpdateTicketStatusVariants:
 
     def test_update_trouble_ticket_path_also_works(self, client, db_session, test_user):
         """PATCH /api/trouble-tickets/{id} mirrors /api/error-reports/{id}."""
-        ticket = TroubleTicket(
-            ticket_number="TT-TTPATH-001",
-            submitted_by=test_user.id,
-            title="Trouble ticket path test",
-            description="Testing trouble ticket update path",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        ticket = _make_ticket(
+            db_session,
+            test_user,
+            "TT-TTPATH-001",
+            "Trouble ticket path test",
+            "Testing trouble ticket update path",
         )
-        db_session.add(ticket)
-        db_session.commit()
-        db_session.refresh(ticket)
 
         resp = client.patch(
             f"/api/trouble-tickets/{ticket.id}",
@@ -222,21 +208,13 @@ class TestUpdateTicketStatusVariants:
 class TestAnalyzeClaudeUnavailablePath:
     def test_analyze_tickets_claude_unavailable_returns_fallback(self, client, db_session, test_user):
         """ClaudeUnavailableError during analyze returns amber fallback HTML."""
-        from unittest.mock import AsyncMock
-
-        ticket = TroubleTicket(
-            ticket_number="TT-UNAVAIL-001",
-            submitted_by=test_user.id,
-            title="Unavailable test",
-            description="Testing ClaudeUnavailableError path",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        _make_ticket(
+            db_session,
+            test_user,
+            "TT-UNAVAIL-001",
+            "Unavailable test",
+            "Testing ClaudeUnavailableError path",
         )
-        db_session.add(ticket)
-        db_session.commit()
 
         from app.utils.claude_errors import ClaudeUnavailableError
 
@@ -253,21 +231,13 @@ class TestAnalyzeClaudeUnavailablePath:
     def test_analyze_returns_no_groups_key_in_result(self, client, db_session, test_user):
         """When claude_structured returns dict without 'groups', fallback HTML is
         shown."""
-        from unittest.mock import AsyncMock
-
-        ticket = TroubleTicket(
-            ticket_number="TT-NOGROUPS-001",
-            submitted_by=test_user.id,
-            title="No groups test",
-            description="Testing missing groups key",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
+        _make_ticket(
+            db_session,
+            test_user,
+            "TT-NOGROUPS-001",
+            "No groups test",
+            "Testing missing groups key",
         )
-        db_session.add(ticket)
-        db_session.commit()
 
         with patch(
             "app.utils.claude_client.claude_structured",

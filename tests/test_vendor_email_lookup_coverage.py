@@ -251,6 +251,11 @@ class TestFindVendorsForParts:
         assert results[""] == []
 
 
+def _arrow_vendor() -> dict:
+    """A single reachable Arrow vendor entry (has an email)."""
+    return {"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}
+
+
 class TestBuildInquiryGroups:
     def test_empty_vendor_results_returns_empty_list(self):
         groups = build_inquiry_groups({}, [])
@@ -289,45 +294,39 @@ class TestBuildInquiryGroups:
         assert len(groups) == 0
 
     def test_multiple_parts_same_vendor(self):
-        vendor_results = {
-            "LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}],
-            "STM32F4": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}],
-        }
+        vendor_results = {"LM317T": [_arrow_vendor()], "STM32F4": [_arrow_vendor()]}
         parts = [{"mpn": "LM317T", "qty": 100}, {"mpn": "STM32F4", "qty": 50}]
         groups = build_inquiry_groups(vendor_results, parts)
         assert len(groups) == 1  # Same email → grouped together
 
     def test_subject_truncated_beyond_3_parts(self):
-        vendor_results = {
-            f"PART{i}": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]
-            for i in range(5)
-        }
+        vendor_results = {f"PART{i}": [_arrow_vendor()] for i in range(5)}
         parts = [{"mpn": f"PART{i}", "qty": 10} for i in range(5)]
         groups = build_inquiry_groups(vendor_results, parts)
         assert len(groups) == 1
         assert "+ 2 more" in groups[0]["subject"]
 
     def test_body_contains_part_numbers(self):
-        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
+        vendor_results = {"LM317T": [_arrow_vendor()]}
         parts = [{"mpn": "LM317T", "qty": 500}]
         groups = build_inquiry_groups(vendor_results, parts)
         assert "LM317T" in groups[0]["body"]
 
     def test_body_contains_sender_info(self):
-        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
+        vendor_results = {"LM317T": [_arrow_vendor()]}
         parts = [{"mpn": "LM317T", "qty": 500}]
         groups = build_inquiry_groups(vendor_results, parts, company_name="Acme Corp", sender_name="Bob Smith")
         assert "Acme Corp" in groups[0]["body"]
         assert "Bob Smith" in groups[0]["body"]
 
     def test_qty_in_body(self):
-        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
+        vendor_results = {"LM317T": [_arrow_vendor()]}
         parts = [{"mpn": "LM317T", "qty": 750}]
         groups = build_inquiry_groups(vendor_results, parts)
         assert "750" in groups[0]["body"]
 
     def test_zero_qty_omitted_from_body(self):
-        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
+        vendor_results = {"LM317T": [_arrow_vendor()]}
         parts = [{"mpn": "LM317T"}]  # no qty
         groups = build_inquiry_groups(vendor_results, parts)
         # Should still generate a group, just without qty display

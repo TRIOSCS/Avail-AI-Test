@@ -78,6 +78,46 @@ def _setup_quote_scenario(db: Session, user: User, company: Company, site: Custo
     return req, quote, card
 
 
+def _setup_offer_scenario(
+    db: Session,
+    user: User,
+    site: CustomerSite,
+    *,
+    req_name: str,
+    vendor_name: str,
+    mpn: str,
+    unit_price: float,
+    qty_available: int,
+    status: str = "active",
+    with_card: bool = True,
+    req_has_site: bool = True,
+) -> Offer:
+    """Create a requisition + offer, returning the offer."""
+    card = _make_card(db, mpn) if with_card else None
+    req = Requisition(
+        name=req_name,
+        customer_site_id=site.id if req_has_site else None,
+        status="active",
+        created_by=user.id,
+    )
+    db.add(req)
+    db.flush()
+    offer = Offer(
+        requisition_id=req.id,
+        vendor_name=vendor_name,
+        mpn=mpn,
+        material_card_id=card.id if card else None,
+        qty_available=qty_available,
+        unit_price=unit_price,
+        entered_by_id=user.id,
+        status=status,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(offer)
+    db.commit()
+    return offer
+
+
 # ── Quote Won → CPH Hook ───────────────────────────────────────────
 
 
@@ -225,28 +265,16 @@ class TestQuoteWonCPHHook:
 class TestOfferWonCPHHook:
     def test_offer_won_creates_cph(self, client, db_session, test_user, test_company, test_customer_site):
         """Updating offer status to 'won' creates a CPH record."""
-        card = _make_card(db_session, "LM7805")
-        req = Requisition(
-            name="REQ-OFFER-WON",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(req)
-        db_session.flush()
-        offer = Offer(
-            requisition_id=req.id,
+        offer = _setup_offer_scenario(
+            db_session,
+            test_user,
+            test_customer_site,
+            req_name="REQ-OFFER-WON",
             vendor_name="Arrow",
             mpn="LM7805",
-            material_card_id=card.id,
-            qty_available=500,
             unit_price=0.75,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
+            qty_available=500,
         )
-        db_session.add(offer)
-        db_session.commit()
 
         resp = client.put(
             f"/api/offers/{offer.id}",
@@ -258,7 +286,7 @@ class TestOfferWonCPHHook:
             db_session.query(CustomerPartHistory)
             .filter_by(
                 company_id=test_company.id,
-                material_card_id=card.id,
+                material_card_id=offer.material_card_id,
                 source="avail_offer",
             )
             .first()
@@ -270,28 +298,16 @@ class TestOfferWonCPHHook:
 
     def test_offer_status_active_no_cph(self, client, db_session, test_user, test_company, test_customer_site):
         """Updating offer to non-won status doesn't create CPH."""
-        card = _make_card(db_session, "SN7400")
-        req = Requisition(
-            name="REQ-OFFER-ACTIVE",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(req)
-        db_session.flush()
-        offer = Offer(
-            requisition_id=req.id,
+        offer = _setup_offer_scenario(
+            db_session,
+            test_user,
+            test_customer_site,
+            req_name="REQ-OFFER-ACTIVE",
             vendor_name="Mouser",
             mpn="SN7400",
-            material_card_id=card.id,
-            qty_available=100,
             unit_price=0.30,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
+            qty_available=100,
         )
-        db_session.add(offer)
-        db_session.commit()
 
         resp = client.put(
             f"/api/offers/{offer.id}",
@@ -301,35 +317,24 @@ class TestOfferWonCPHHook:
 
         cph_count = (
             db_session.query(CustomerPartHistory)
-            .filter_by(company_id=test_company.id, material_card_id=card.id)
+            .filter_by(company_id=test_company.id, material_card_id=offer.material_card_id)
             .count()
         )
         assert cph_count == 0
 
     def test_offer_already_won_no_double_cph(self, client, db_session, test_user, test_company, test_customer_site):
         """Updating an already-won offer doesn't trigger CPH again."""
-        card = _make_card(db_session, "NE555")
-        req = Requisition(
-            name="REQ-OFFER-ALREADY",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(req)
-        db_session.flush()
-        offer = Offer(
-            requisition_id=req.id,
+        offer = _setup_offer_scenario(
+            db_session,
+            test_user,
+            test_customer_site,
+            req_name="REQ-OFFER-ALREADY",
             vendor_name="DigiKey",
             mpn="NE555",
-            material_card_id=card.id,
-            qty_available=200,
             unit_price=0.40,
-            entered_by_id=test_user.id,
+            qty_available=200,
             status="won",
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(offer)
-        db_session.commit()
 
         # Update notes on already-won offer
         resp = client.put(
@@ -340,33 +345,24 @@ class TestOfferWonCPHHook:
 
         cph_count = (
             db_session.query(CustomerPartHistory)
-            .filter_by(company_id=test_company.id, material_card_id=card.id)
+            .filter_by(company_id=test_company.id, material_card_id=offer.material_card_id)
             .count()
         )
         assert cph_count == 0
 
     def test_offer_won_no_card_skipped(self, client, db_session, test_user, test_customer_site):
         """Offer without material_card_id doesn't trigger CPH."""
-        req = Requisition(
-            name="REQ-NOCARD-OFFER",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(req)
-        db_session.flush()
-        offer = Offer(
-            requisition_id=req.id,
+        offer = _setup_offer_scenario(
+            db_session,
+            test_user,
+            test_customer_site,
+            req_name="REQ-NOCARD-OFFER",
             vendor_name="Arrow",
             mpn="NOCARD",
-            qty_available=100,
             unit_price=1.00,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
+            qty_available=100,
+            with_card=False,
         )
-        db_session.add(offer)
-        db_session.commit()
 
         resp = client.put(
             f"/api/offers/{offer.id}",
@@ -374,29 +370,19 @@ class TestOfferWonCPHHook:
         )
         assert resp.status_code == 200
 
-    def test_offer_won_no_site_no_error(self, client, db_session, test_user):
+    def test_offer_won_no_site_no_error(self, client, db_session, test_user, test_customer_site):
         """Offer won with no customer site doesn't error."""
-        card = _make_card(db_session, "XTAL1")
-        req = Requisition(
-            name="REQ-NOSITE-OFFER",
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(req)
-        db_session.flush()
-        offer = Offer(
-            requisition_id=req.id,
+        offer = _setup_offer_scenario(
+            db_session,
+            test_user,
+            test_customer_site,
+            req_name="REQ-NOSITE-OFFER",
             vendor_name="Arrow",
             mpn="XTAL1",
-            material_card_id=card.id,
-            qty_available=50,
             unit_price=2.00,
-            entered_by_id=test_user.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
+            qty_available=50,
+            req_has_site=False,
         )
-        db_session.add(offer)
-        db_session.commit()
 
         resp = client.put(
             f"/api/offers/{offer.id}",

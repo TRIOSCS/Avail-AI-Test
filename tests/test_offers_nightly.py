@@ -55,6 +55,20 @@ def _make_offer(
     return offer
 
 
+def _make_committed_offer(
+    db: Session,
+    user_id: int,
+    status: str = "active",
+    evidence_tier: str | None = None,
+) -> Offer:
+    """Create + commit a requisition and an offer attached to it, returning the
+    offer."""
+    req = _make_requisition(db, user_id)
+    offer = _make_offer(db, req.id, user_id, status=status, evidence_tier=evidence_tier)
+    db.commit()
+    return offer
+
+
 # ── list_offers — 404 path (line 62) ─────────────────────────────────
 
 
@@ -102,9 +116,7 @@ class TestReviewQueue:
 
     def test_list_review_queue_with_t4_offer(self, client, db_session, test_user):
         """GET /api/offers/review-queue returns T4 pending_review offers."""
-        req = _make_requisition(db_session, test_user.id)
-        offer = _make_offer(db_session, req.id, test_user.id, status="pending_review", evidence_tier="T4")
-        db_session.commit()
+        offer = _make_committed_offer(db_session, test_user.id, status="pending_review", evidence_tier="T4")
 
         resp = client.get("/api/offers/review-queue")
         assert resp.status_code == 200
@@ -113,9 +125,7 @@ class TestReviewQueue:
 
     def test_list_review_queue_excludes_non_t4(self, client, db_session, test_user):
         """Review queue does not include active (non-T4) offers."""
-        req = _make_requisition(db_session, test_user.id)
-        _make_offer(db_session, req.id, test_user.id, status="active", evidence_tier="T5")
-        db_session.commit()
+        _make_committed_offer(db_session, test_user.id, status="active", evidence_tier="T5")
 
         resp = client.get("/api/offers/review-queue")
         assert resp.status_code == 200
@@ -130,9 +140,7 @@ class TestReviewQueue:
 class TestPromoteOffer:
     def test_promote_t4_offer_success(self, client, db_session, test_user):
         """POST /api/offers/{id}/promote promotes T4 pending_review → T5 active."""
-        req = _make_requisition(db_session, test_user.id)
-        offer = _make_offer(db_session, req.id, test_user.id, status="pending_review", evidence_tier="T4")
-        db_session.commit()
+        offer = _make_committed_offer(db_session, test_user.id, status="pending_review", evidence_tier="T4")
 
         resp = client.post(f"/api/offers/{offer.id}/promote")
         assert resp.status_code == 200
@@ -147,9 +155,7 @@ class TestPromoteOffer:
 
     def test_promote_non_t4_returns_400(self, client, db_session, test_user):
         """POST /api/offers/{id}/promote on T5 offer returns 400."""
-        req = _make_requisition(db_session, test_user.id)
-        offer = _make_offer(db_session, req.id, test_user.id, status="active", evidence_tier="T5")
-        db_session.commit()
+        offer = _make_committed_offer(db_session, test_user.id, status="active", evidence_tier="T5")
 
         resp = client.post(f"/api/offers/{offer.id}/promote")
         assert resp.status_code == 400
@@ -166,9 +172,7 @@ class TestPromoteOffer:
 class TestRejectOffer:
     def test_reject_pending_review_offer_success(self, client, db_session, test_user):
         """POST /api/offers/{id}/reject marks offer as rejected."""
-        req = _make_requisition(db_session, test_user.id)
-        offer = _make_offer(db_session, req.id, test_user.id, status="pending_review", evidence_tier="T4")
-        db_session.commit()
+        offer = _make_committed_offer(db_session, test_user.id, status="pending_review", evidence_tier="T4")
 
         resp = client.post(f"/api/offers/{offer.id}/reject")
         assert resp.status_code == 200
@@ -180,9 +184,7 @@ class TestRejectOffer:
 
     def test_reject_active_offer_returns_400(self, client, db_session, test_user):
         """POST /api/offers/{id}/reject on active offer returns 400."""
-        req = _make_requisition(db_session, test_user.id)
-        offer = _make_offer(db_session, req.id, test_user.id, status="active")
-        db_session.commit()
+        offer = _make_committed_offer(db_session, test_user.id, status="active")
 
         resp = client.post(f"/api/offers/{offer.id}/reject")
         assert resp.status_code == 400

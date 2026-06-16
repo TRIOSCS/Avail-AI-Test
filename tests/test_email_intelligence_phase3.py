@@ -15,6 +15,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import engine  # noqa: F401
 
+
+def make_graph_client(method: str, **async_mock_kwargs) -> MagicMock:
+    """Build a mock GraphClient with `method` as an AsyncMock
+    (return_value/side_effect)."""
+    gc = MagicMock()
+    setattr(gc, method, AsyncMock(**async_mock_kwargs))
+    return gc
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  3A: Mailbox Settings
 # ═══════════════════════════════════════════════════════════════════════
@@ -25,8 +34,8 @@ class TestMailboxIntelligence:
         """Fetches timezone and working hours from Graph and stores on User."""
         from app.services.mailbox_intelligence import fetch_and_store_mailbox_settings
 
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(
+        mock_gc = make_graph_client(
+            "get_json",
             return_value={
                 "timeZone": "Eastern Standard Time",
                 "workingHours": {
@@ -38,7 +47,7 @@ class TestMailboxIntelligence:
                 "automaticRepliesSetting": {
                     "status": "disabled",
                 },
-            }
+            },
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -56,8 +65,7 @@ class TestMailboxIntelligence:
         """Returns None on Graph API failure."""
         from app.services.mailbox_intelligence import fetch_and_store_mailbox_settings
 
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(side_effect=Exception("Graph API error"))
+        mock_gc = make_graph_client("get_json", side_effect=Exception("Graph API error"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -70,8 +78,7 @@ class TestMailboxIntelligence:
         """Returns None on empty/error response."""
         from app.services.mailbox_intelligence import fetch_and_store_mailbox_settings
 
-        mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={"error": {"code": "ErrorAccessDenied"}})
+        mock_gc = make_graph_client("get_json", return_value={"error": {"code": "ErrorAccessDenied"}})
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -154,8 +161,8 @@ class TestCalendarIntelligence:
         """Calendar scan detects meetings with external (vendor) attendees."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(
+        mock_gc = make_graph_client(
+            "get_all_pages",
             return_value=[
                 {
                     "subject": "Quarterly Business Review",
@@ -174,7 +181,7 @@ class TestCalendarIntelligence:
                     "location": {"displayName": "Zoom"},
                     "organizer": {"emailAddress": {"address": "buyer@trioscs.com"}},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -190,8 +197,8 @@ class TestCalendarIntelligence:
         """Calendar scan detects trade show events by keyword."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(
+        mock_gc = make_graph_client(
+            "get_all_pages",
             return_value=[
                 {
                     "subject": "Electronica 2026 Munich",
@@ -201,7 +208,7 @@ class TestCalendarIntelligence:
                     "location": {"displayName": "Messe München"},
                     "organizer": {},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -215,8 +222,8 @@ class TestCalendarIntelligence:
         """Internal meetings (only own-domain attendees) are not logged."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(
+        mock_gc = make_graph_client(
+            "get_all_pages",
             return_value=[
                 {
                     "subject": "Team Standup",
@@ -228,7 +235,7 @@ class TestCalendarIntelligence:
                     "location": {},
                     "organizer": {},
                 },
-            ]
+            ],
         )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
@@ -243,8 +250,7 @@ class TestCalendarIntelligence:
         """Returns empty result on Graph API failure."""
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Calendar API error"))
+        mock_gc = make_graph_client("get_all_pages", side_effect=Exception("Calendar API error"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -268,8 +274,7 @@ class TestCalendarIntelligence:
             "organizer": {},
         }
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[event])
+        mock_gc = make_graph_client("get_all_pages", return_value=[event])
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             # First scan

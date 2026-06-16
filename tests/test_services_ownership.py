@@ -433,57 +433,27 @@ class TestSendManagerDigestEmail:
 
 
 class TestGetMyAccountsStatuses:
-    def test_no_activity_status(self, db_session):
-        """Account with no last_activity_at → 'no_activity'."""
-        sales = _make_sales_user(db_session, "stat1@t.com")
-        _make_company(db_session, name="No Activity Co", owner_id=sales.id, last_activity_at=None)
+    @pytest.mark.parametrize(
+        ("email", "name", "days_inactive", "expected_status"),
+        [
+            ("stat1@t.com", "No Activity Co", None, "no_activity"),
+            ("stat2@t.com", "Green Co", 5, "green"),
+            ("stat3@t.com", "Yellow Co", 24, "yellow"),
+            ("stat4@t.com", "Red Co", 31, "red"),
+        ],
+        ids=["no_activity", "green_zone", "yellow_zone", "red_zone"],
+    )
+    def test_status_classification(self, db_session, email, name, days_inactive, expected_status):
+        """last_activity_at age → health status (none → no_activity, 5 → green, 24 →
+        yellow, 31 → red)."""
+        sales = _make_sales_user(db_session, email)
+        last_activity_at = None if days_inactive is None else datetime.now(timezone.utc) - timedelta(days=days_inactive)
+        _make_company(db_session, name=name, owner_id=sales.id, last_activity_at=last_activity_at)
         db_session.commit()
 
         result = get_my_accounts(sales.id, db_session)
         assert len(result) == 1
-        assert result[0]["status"] == "no_activity"
-
-    def test_green_zone(self, db_session):
-        """Recent activity → 'green'."""
-        sales = _make_sales_user(db_session, "stat2@t.com")
-        _make_company(
-            db_session,
-            name="Green Co",
-            owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
-        )
-        db_session.commit()
-
-        result = get_my_accounts(sales.id, db_session)
-        assert result[0]["status"] == "green"
-
-    def test_yellow_zone(self, db_session):
-        """24 days inactive (in 23-30 window) → 'yellow'."""
-        sales = _make_sales_user(db_session, "stat3@t.com")
-        _make_company(
-            db_session,
-            name="Yellow Co",
-            owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=24),
-        )
-        db_session.commit()
-
-        result = get_my_accounts(sales.id, db_session)
-        assert result[0]["status"] == "yellow"
-
-    def test_red_zone(self, db_session):
-        """31 days inactive (past 30-day limit) → 'red'."""
-        sales = _make_sales_user(db_session, "stat4@t.com")
-        _make_company(
-            db_session,
-            name="Red Co",
-            owner_id=sales.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=31),
-        )
-        db_session.commit()
-
-        result = get_my_accounts(sales.id, db_session)
-        assert result[0]["status"] == "red"
+        assert result[0]["status"] == expected_status
 
     def test_strategic_account_longer_limit(self, db_session):
         """Strategic account at 35 days → still 'green' (90-day limit)."""
@@ -537,11 +507,19 @@ class TestSendWarningAlert:
             mock_gc_class.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_graph_error_caught(self, db_session):
+    @pytest.mark.parametrize(
+        ("email", "error_message"),
+        [
+            ("grapherr@t.com", "Graph error"),
+            ("teamserr@t.com", "Send failed"),
+        ],
+        ids=["graph_error", "teams_error"],
+    )
+    async def test_post_json_error_caught(self, db_session, email, error_message):
         """Graph API error during warning email is caught, not raised."""
         from app.services.ownership_service import _send_warning_alert
 
-        sales = _make_sales_user(db_session, "grapherr@t.com")
+        sales = _make_sales_user(db_session, email)
         co = _make_company(db_session, owner_id=sales.id)
         db_session.commit()
 
@@ -550,25 +528,7 @@ class TestSendWarningAlert:
             patch("app.utils.graph_client.GraphClient") as mock_gc_class,
         ):
             mock_gc = mock_gc_class.return_value
-            mock_gc.post_json = AsyncMock(side_effect=Exception("Graph error"))
-            # Should not raise — error is caught internally
-            await _send_warning_alert(co, 25, 30, db_session)
-
-    @pytest.mark.asyncio
-    async def test_teams_error_caught(self, db_session):
-        """Graph API error during warning email is caught, not raised."""
-        from app.services.ownership_service import _send_warning_alert
-
-        sales = _make_sales_user(db_session, "teamserr@t.com")
-        co = _make_company(db_session, owner_id=sales.id)
-        db_session.commit()
-
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
-            patch("app.utils.graph_client.GraphClient") as mock_gc_class,
-        ):
-            mock_gc = mock_gc_class.return_value
-            mock_gc.post_json = AsyncMock(side_effect=Exception("Send failed"))
+            mock_gc.post_json = AsyncMock(side_effect=Exception(error_message))
             # Should not raise — error is caught internally
             await _send_warning_alert(co, 25, 30, db_session)
 

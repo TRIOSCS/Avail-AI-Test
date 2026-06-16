@@ -2,31 +2,36 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.company_utils import find_company_dedup_candidates, normalize_company_name
 from app.models import Company, CustomerSite
 
 
 class TestNormalizeCompanyName:
-    def test_empty_string(self):
-        assert normalize_company_name("") == ""
-
-    def test_lowercase(self):
-        assert normalize_company_name("ACME CORP") == "acme"
-
-    def test_strip_inc(self):
-        assert normalize_company_name("Mouser Electronics, Inc.") == "mouser electronics"
-
-    def test_strip_llc(self):
-        assert normalize_company_name("Acme Solutions LLC") == "acme solutions"
-
-    def test_strip_corp(self):
-        assert normalize_company_name("DigiKey Corp.") == "digikey"
-
-    def test_leading_the(self):
-        assert normalize_company_name("The Phoenix Company") == "phoenix"
-
-    def test_collapse_whitespace(self):
-        assert normalize_company_name("  Foo   Bar   ") == "foo bar"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("", ""),
+            ("ACME CORP", "acme"),
+            ("Mouser Electronics, Inc.", "mouser electronics"),
+            ("Acme Solutions LLC", "acme solutions"),
+            ("DigiKey Corp.", "digikey"),
+            ("The Phoenix Company", "phoenix"),
+            ("  Foo   Bar   ", "foo bar"),
+        ],
+        ids=[
+            "empty_string",
+            "lowercase",
+            "strip_inc",
+            "strip_llc",
+            "strip_corp",
+            "leading_the",
+            "collapse_whitespace",
+        ],
+    )
+    def test_normalizes(self, raw, expected):
+        assert normalize_company_name(raw) == expected
 
     def test_no_false_strip(self):
         """Should not strip 'inc' from middle of word like 'Incipio'."""

@@ -28,6 +28,26 @@ def _facets(db: Session, card_id: int) -> dict:
     return {r.spec_key: (r.value_text if r.value_text is not None else r.value_numeric) for r in rows}
 
 
+def _get_card(db: Session, normalized_mpn: str = "st4000nm0035") -> MaterialCard | None:
+    return db.query(MaterialCard).filter_by(normalized_mpn=normalized_mpn).first()
+
+
+def _manual_maker_card(db: Session) -> MaterialCard:
+    # A card whose manufacturer is pinned at manual(tier 100) — resists trio_source(95).
+    card = MaterialCard(
+        normalized_mpn="st4000nm0035",
+        display_mpn="ST4000NM0035",
+        category="hdd",
+        manufacturer="Seagate Technology",
+        manufacturer_source="manual",
+        manufacturer_confidence=1.0,
+        manufacturer_tier=100,
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
 def test_augment_creates_new_card_with_category_desc_specs(db_session: Session):
     seed_commodity_schemas(db_session)
     part = _part(
@@ -38,7 +58,7 @@ def test_augment_creates_new_card_with_category_desc_specs(db_session: Session):
     )
     stats = ingest(db_session, [part], apply=True)
 
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card is not None
     assert card.display_mpn == "ST4000NM0035"
     assert card.manufacturer == "Seagate"
@@ -81,7 +101,7 @@ def test_dry_run_writes_nothing_and_stats_match(db_session: Session):
     stats = ingest(db_session, [part], apply=False)
 
     # No card created.
-    assert db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first() is None
+    assert _get_card(db_session) is None
     assert stats["would_create"] == 1
     assert stats["created"] == 0
     assert stats["categories_set"] == 1
@@ -113,7 +133,7 @@ def test_later_lower_tier_cannot_overwrite_trio_source(db_session: Session):
     # trio_source(95) lands first; a later mpn_decode(85) write must lose.
     seed_commodity_schemas(db_session)
     ingest(db_session, [_part(specs={"capacity_gb": "4000"})], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     cache = load_schema_cache(db_session, "hdd")
 
     wrote = record_spec(
@@ -129,7 +149,7 @@ def test_ai_inferred_category_uses_trio_source_ai_tier(db_session: Session):
     seed_commodity_schemas(db_session)
     part = _part(category=None, ai_category="hdd", ai_category_confidence=0.9)
     ingest(db_session, [part], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.category == "hdd"
     assert card.category_source == "trio_source_ai"
     assert card.category_tier == 88
@@ -144,7 +164,7 @@ def test_ai_description_fill_credits_trio_source_ai(db_session: Session):
     dry = ingest(db_session, [part], apply=False)
     stats = ingest(db_session, [part], apply=True)
 
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.description == "AI standardized text"
     for s in (dry, stats):
         assert s["descriptions_filled"] == 1
@@ -155,7 +175,7 @@ def test_ai_specs_written_at_trio_source_ai(db_session: Session):
     seed_commodity_schemas(db_session)
     part = _part(ai_specs={"rpm": {"value": "7200", "confidence": 0.9}})
     ingest(db_session, [part], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.specs_structured["rpm"]["source"] == "trio_source_ai"
     assert card.specs_structured["rpm"]["tier"] == 88
 
@@ -168,7 +188,7 @@ def test_unknown_condition_never_written(db_session: Session):
     # a written Unknown would permanently block a later real value.
     seed_commodity_schemas(db_session)
     stats = ingest(db_session, [_part(condition="Unknown")], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.condition is None
     assert stats["conditions_filled"] == 0
 
@@ -229,7 +249,7 @@ def test_failed_part_is_isolated_counted_and_siblings_ingest(db_session: Session
     assert stats["created"] == 1  # the failed part is NOT in created
     # The bad part's card was rolled back wholesale; the good sibling persisted fully.
     assert db_session.query(MaterialCard).filter_by(normalized_mpn="badpart").first() is None
-    good_card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    good_card = _get_card(db_session)
     assert good_card is not None
     assert good_card.condition == "New"
     assert _facets(db_session, good_card.id)["capacity_gb"] == 4000
@@ -362,7 +382,7 @@ def test_dry_run_does_not_count_specs_without_resolvable_category(db_session: Se
 def test_new_card_manufacturer_written_via_ladder_with_provenance(db_session: Session):
     seed_commodity_schemas(db_session)
     stats = ingest(db_session, [_part(manufacturer="Seagate")], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.manufacturer == "Seagate"  # verbatim — manufacturers table unseeded here
     assert card.manufacturer_source == "trio_source"
     assert card.manufacturer_tier == 95
@@ -373,7 +393,7 @@ def test_new_card_manufacturer_written_via_ladder_with_provenance(db_session: Se
 def test_brand_written_via_ladder(db_session: Session):
     seed_commodity_schemas(db_session)
     stats = ingest(db_session, [_part(brand="IBM", manufacturer="Seagate")], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.brand == "IBM"
     assert card.brand_source == "trio_source"
     assert card.brand_tier == 95
@@ -385,7 +405,7 @@ def test_brand_written_via_ladder(db_session: Session):
 def test_none_brand_and_manufacturer_are_noops(db_session: Session):
     seed_commodity_schemas(db_session)
     stats = ingest(db_session, [_part()], apply=True)
-    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    card = _get_card(db_session)
     assert card.brand is None
     assert card.manufacturer is None
     assert stats["brands_set"] == 0
@@ -394,17 +414,7 @@ def test_none_brand_and_manufacturer_are_noops(db_session: Session):
 
 def test_higher_tier_manufacturer_not_overwritten_by_ingest(db_session: Session):
     seed_commodity_schemas(db_session)
-    card = MaterialCard(
-        normalized_mpn="st4000nm0035",
-        display_mpn="ST4000NM0035",
-        category="hdd",
-        manufacturer="Seagate Technology",
-        manufacturer_source="manual",
-        manufacturer_confidence=1.0,
-        manufacturer_tier=100,
-    )
-    db_session.add(card)
-    db_session.flush()
+    card = _manual_maker_card(db_session)
 
     stats = ingest(db_session, [_part(manufacturer="WrongCo")], apply=True)
     db_session.refresh(card)
@@ -454,17 +464,7 @@ def test_trio_brand_maker_ladder_losses_are_warned(db_session: Session):
     from loguru import logger as loguru_logger
 
     seed_commodity_schemas(db_session)
-    card = MaterialCard(
-        normalized_mpn="st4000nm0035",
-        display_mpn="ST4000NM0035",
-        category="hdd",
-        manufacturer="Seagate Technology",
-        manufacturer_source="manual",
-        manufacturer_confidence=1.0,
-        manufacturer_tier=100,
-    )
-    db_session.add(card)
-    db_session.flush()
+    _manual_maker_card(db_session)
 
     warnings: list[str] = []
     sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
@@ -481,17 +481,7 @@ def test_trio_same_value_loss_is_agreement_not_conflict(db_session: Session):
     # returns False (95 < 100) but no conflict is counted — the counter must stay a
     # pure data-conflict signal.
     seed_commodity_schemas(db_session)
-    card = MaterialCard(
-        normalized_mpn="st4000nm0035",
-        display_mpn="ST4000NM0035",
-        category="hdd",
-        manufacturer="Seagate Technology",
-        manufacturer_source="manual",
-        manufacturer_confidence=1.0,
-        manufacturer_tier=100,
-    )
-    db_session.add(card)
-    db_session.flush()
+    _manual_maker_card(db_session)
 
     stats = ingest(db_session, [_part(manufacturer="Seagate Technology")], apply=True)
     assert stats["manufacturers_set"] == 0

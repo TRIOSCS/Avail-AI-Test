@@ -18,6 +18,7 @@ Covers:
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialCardAudit, MaterialVendorHistory, Offer, Requirement, Sighting
@@ -108,6 +109,21 @@ def _make_card(db: Session, norm: str = "lm317t", display: str = "LM317T") -> Ma
     db.add(c)
     db.commit()
     return c
+
+
+def _orphan_card_via_dangling_delete(db: Session, card_id) -> None:
+    """Delete a card with SQLite FK checks disabled to simulate a dangling FK.
+
+    SQLite enforces FKs, so we temporarily disable them to reproduce the dangling state
+    that can occur in PostgreSQL via race conditions or direct SQL manipulation.
+    """
+    from sqlalchemy import text
+
+    db.execute(text("PRAGMA foreign_keys=OFF"))
+    db.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
+    db.commit()
+    db.execute(text("PRAGMA foreign_keys=ON"))
+    db.expire_all()  # Expire ORM cache so it re-reads from DB
 
 
 # ── resolve_material_card Tests ──────────────────────────────────────
@@ -339,50 +355,25 @@ class TestDanglingFKs:
         assert result["requirements"] == 0
 
     def test_detects_dangling_after_card_delete(self, db_session):
-        """If a card is deleted and FK goes to a non-existent ID, detect it.
-
-        SQLite enforces FKs, so we temporarily disable them to simulate the dangling
-        state that can occur in PostgreSQL via race conditions or direct SQL
-        manipulation.
-        """
-        from sqlalchemy import text
-
+        """If a card is deleted and FK goes to a non-existent ID, detect it."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         card = _make_card(db_session)
-        req = _make_requirement(db_session, reqn, card_id=card.id)
-        card_id = card.id
-        req_id = req.id
+        _make_requirement(db_session, reqn, card_id=card.id)
 
-        # Temporarily disable FK checks to simulate dangling state
-        db_session.execute(text("PRAGMA foreign_keys=OFF"))
-        db_session.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
-        db_session.commit()
-        db_session.execute(text("PRAGMA foreign_keys=ON"))
-
-        # Expire ORM cache so it re-reads from DB
-        db_session.expire_all()
+        _orphan_card_via_dangling_delete(db_session, card.id)
 
         result = check_dangling_fks(db_session)
         assert result["requirements"] == 1
 
     def test_clear_dangling_fks(self, db_session):
         """clear_dangling_fks sets material_card_id to NULL for dangling refs."""
-        from sqlalchemy import text
-
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         card = _make_card(db_session)
         req = _make_requirement(db_session, reqn, card_id=card.id)
-        card_id = card.id
-        req_id = req.id
 
-        # Create dangling state by deleting card with FKs disabled
-        db_session.execute(text("PRAGMA foreign_keys=OFF"))
-        db_session.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
-        db_session.commit()
-        db_session.execute(text("PRAGMA foreign_keys=ON"))
-        db_session.expire_all()
+        _orphan_card_via_dangling_delete(db_session, card.id)
 
         result = clear_dangling_fks(db_session)
         assert result["requirements"] == 1
@@ -460,20 +451,12 @@ class TestRunIntegrityCheck:
 
     def test_clears_and_heals_dangling(self, db_session):
         """Dangling FKs are cleared, then the now-orphaned records are healed."""
-        from sqlalchemy import text
-
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         card = _make_card(db_session)
         req = _make_requirement(db_session, reqn, mpn="LM317T", card_id=card.id)
-        card_id = card.id
 
-        # Create dangling state
-        db_session.execute(text("PRAGMA foreign_keys=OFF"))
-        db_session.execute(text("DELETE FROM material_cards WHERE id = :cid"), {"cid": card_id})
-        db_session.commit()
-        db_session.execute(text("PRAGMA foreign_keys=ON"))
-        db_session.expire_all()
+        _orphan_card_via_dangling_delete(db_session, card.id)
 
         report = run_integrity_check(db_session)
 
@@ -944,49 +927,33 @@ class TestSoftDelete:
 
 
 class TestHealExceptionPaths:
-    def test_sighting_heal_exception_rolls_back(self, db_session):
-        """Lines 186-188: exception healing a sighting is caught and rolled back."""
+    @pytest.mark.parametrize(
+        ("entity_key", "fail_mpn"),
+        [
+            ("sightings", "FAIL-SIGHT"),
+            ("offers", "FAIL-OFFER"),
+        ],
+    )
+    def test_heal_exception_rolls_back(self, db_session, entity_key, fail_mpn):
+        """Exception healing a sighting/offer is caught and rolled back (not healed)."""
         from unittest.mock import patch
 
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
         req = _make_requirement(db_session, reqn, card_id=None)
-        _make_sighting(db_session, req, mpn="FAIL-SIGHT", card_id=None)
+        if entity_key == "sightings":
+            _make_sighting(db_session, req, mpn=fail_mpn, card_id=None)
+        else:
+            _make_offer(db_session, reqn, req, mpn=fail_mpn, card_id=None)
 
-        # Make resolve_material_card raise only for sightings by tracking calls
         original = resolve_material_card
-        call_count = [0]
 
         def failing_resolve(mpn, db_arg):
-            call_count[0] += 1
-            if mpn == "FAIL-SIGHT":
-                raise RuntimeError("sighting heal fail")
+            if mpn == fail_mpn:
+                raise RuntimeError(f"{entity_key} heal fail")
             return original(mpn, db_arg)
 
         with patch("app.search_service.resolve_material_card", side_effect=failing_resolve):
             result = heal_orphaned_records(db_session)
 
-        # Sighting should not have been healed
-        assert result["sightings"] == 0
-
-    def test_offer_heal_exception_rolls_back(self, db_session):
-        """Lines 210-212: exception healing an offer is caught and rolled back."""
-        from unittest.mock import patch
-
-        user = _make_user(db_session)
-        reqn = _make_requisition(db_session, user)
-        req = _make_requirement(db_session, reqn, card_id=None)
-        _make_offer(db_session, reqn, req, mpn="FAIL-OFFER", card_id=None)
-
-        original = resolve_material_card
-
-        def failing_resolve(mpn, db_arg):
-            if mpn == "FAIL-OFFER":
-                raise RuntimeError("offer heal fail")
-            return original(mpn, db_arg)
-
-        with patch("app.search_service.resolve_material_card", side_effect=failing_resolve):
-            result = heal_orphaned_records(db_session)
-
-        # Offer should not have been healed
-        assert result["offers"] == 0
+        assert result[entity_key] == 0

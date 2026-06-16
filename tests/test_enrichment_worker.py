@@ -6,6 +6,8 @@ create_all builds the table but does not run migrations, so the row may be absen
 test tolerates None (row is None or id==1).
 """
 
+import pytest
+
 
 def test_worker_status_singleton(db_session):
     from app.models.enrichment_worker_status import EnrichmentWorkerStatus
@@ -23,18 +25,21 @@ def test_worker_status_model_importable():
     )
 
     cols = {c.key for c in EnrichmentWorkerStatus.__table__.columns}
-    assert "id" in cols
-    assert "is_running" in cols
-    assert "last_heartbeat" in cols
-    assert "last_enriched_at" in cols
-    assert "enriched_today" in cols
-    assert "web_sourced_today" in cols
-    assert "ai_inferred_today" in cols
-    assert "not_found_today" in cols
-    assert "circuit_breaker_open" in cols
-    assert "circuit_breaker_reason" in cols
-    assert "daily_stats_json" in cols
-    assert "updated_at" in cols
+    expected_cols = {
+        "id",
+        "is_running",
+        "last_heartbeat",
+        "last_enriched_at",
+        "enriched_today",
+        "web_sourced_today",
+        "ai_inferred_today",
+        "not_found_today",
+        "circuit_breaker_open",
+        "circuit_breaker_reason",
+        "daily_stats_json",
+        "updated_at",
+    }
+    assert expected_cols <= cols
     assert callable(update_enrichment_worker_status)
 
 
@@ -646,8 +651,16 @@ def test_run_one_batch_stamps_enriched_at_and_returns_counts(db_session, monkeyp
         assert c.enriched_at is not None
 
 
-def test_run_one_batch_web_cap_disables_web_tier(db_session, monkeypatch):
-    """When web daily cap is reached, 'web_search' is added to disabled set."""
+@pytest.mark.parametrize(
+    ("mpn", "web_daily_cap", "cached_count", "web_disabled"),
+    [
+        ("testpart", 10, 10, True),  # at cap → web tier disabled
+        ("testpart2", 80, 5, False),  # well below cap → web tier enabled
+    ],
+    ids=["at_cap", "below_cap"],
+)
+def test_run_one_batch_web_cap_gating(db_session, mpn, web_daily_cap, cached_count, web_disabled):
+    """The web tier is disabled iff the cached daily count has reached web_daily_cap."""
     import asyncio
     from datetime import datetime, timezone
     from unittest.mock import patch
@@ -660,8 +673,8 @@ def test_run_one_batch_web_cap_disables_web_tier(db_session, monkeypatch):
     now = datetime.now(timezone.utc)
     db_session.add(
         MaterialCard(
-            normalized_mpn="testpart",
-            display_mpn="TESTPART",
+            normalized_mpn=mpn,
+            display_mpn=mpn.upper(),
             enrichment_status="unenriched",
             created_at=now,
         )
@@ -674,7 +687,7 @@ def test_run_one_batch_web_cap_disables_web_tier(db_session, monkeypatch):
         captured_disabled.append(set(disabled) if disabled else set())
         return "not_found"
 
-    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=10)
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=web_daily_cap)
     breaker = EnrichmentCircuitBreaker(cfg)
 
     with (
@@ -688,66 +701,14 @@ def test_run_one_batch_web_cap_disables_web_tier(db_session, monkeypatch):
         ),
         patch(
             "app.services.enrichment_worker.worker.intel_cache.get_cached",
-            return_value={"count": 10},  # at cap
+            return_value={"count": cached_count},
         ),
         patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
     ):
         asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
 
     assert len(captured_disabled) == 1
-    assert "web_search" in captured_disabled[0]
-
-
-def test_run_one_batch_below_web_cap_does_not_disable(db_session):
-    """When below web daily cap, 'web_search' is NOT in the disabled set."""
-    import asyncio
-    from datetime import datetime, timezone
-    from unittest.mock import patch
-
-    from app.models import MaterialCard
-    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
-    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
-    from app.services.enrichment_worker.worker import run_one_batch
-
-    now = datetime.now(timezone.utc)
-    db_session.add(
-        MaterialCard(
-            normalized_mpn="testpart2",
-            display_mpn="TESTPART2",
-            enrichment_status="unenriched",
-            created_at=now,
-        )
-    )
-    db_session.flush()
-
-    captured_disabled: list[set] = []
-
-    async def fake_enrich_card(card, db, disabled=None, **kw):
-        captured_disabled.append(set(disabled) if disabled else set())
-        return "not_found"
-
-    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
-    breaker = EnrichmentCircuitBreaker(cfg)
-
-    with (
-        patch(
-            "app.services.enrichment_worker.worker.enrich_card",
-            side_effect=fake_enrich_card,
-        ),
-        patch(
-            "app.services.enrichment_worker.worker._connectors_in_order",
-            return_value=[],
-        ),
-        patch(
-            "app.services.enrichment_worker.worker.intel_cache.get_cached",
-            return_value={"count": 5},  # well below cap
-        ),
-        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
-    ):
-        asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
-
-    assert len(captured_disabled) == 1
-    assert "web_search" not in captured_disabled[0]
+    assert ("web_search" in captured_disabled[0]) is web_disabled
 
 
 # ---------------------------------------------------------------------------
@@ -1173,10 +1134,21 @@ def test_verified_only_does_not_reset_breaker(db_session):
 # ---------------------------------------------------------------------------
 
 
-def test_run_one_batch_triggers_spec_extraction_for_enriched_cards(db_session):
+@pytest.mark.parametrize(
+    ("mpns", "real_status", "miss_status"),
+    [
+        # ONLY the verified card gets a spec pass; the not_found one is excluded.
+        (("sv", "snf"), "VERIFIED", "NOT_FOUND"),
+        # Merge-integration guard: oem_sourced (a real category) is INCLUDED;
+        # not_catalogued (a terminal miss, like not_found) is EXCLUDED.
+        (("soem", "snc"), "OEM_SOURCED", "NOT_CATALOGUED"),
+    ],
+    ids=["verified_vs_not_found", "oem_sourced_vs_not_catalogued"],
+)
+def test_run_one_batch_spec_extraction_only_real_categories(db_session, mpns, real_status, miss_status):
     """After core enrichment, run_one_batch triggers a single spec-extraction pass for
-    ONLY the cards that landed a real category (verified/web_sourced/ai_inferred) —
-    never the not_found ones."""
+    ONLY the cards that landed a real category (verified/web_sourced/ai_inferred/
+    oem_sourced) — never the terminal-miss ones (not_found/not_catalogued)."""
     import asyncio
     from datetime import datetime, timedelta, timezone
     from unittest.mock import AsyncMock, patch
@@ -1189,17 +1161,23 @@ def test_run_one_batch_triggers_spec_extraction_for_enriched_cards(db_session):
 
     now = datetime.now(timezone.utc)
     # Distinct created_at so selection order is deterministic (newest first):
-    # verified first, then not_found.
-    verified_card = MaterialCard(normalized_mpn="sv", display_mpn="SV", enrichment_status="unenriched", created_at=now)
-    nf_card = MaterialCard(
-        normalized_mpn="snf", display_mpn="SNF", enrichment_status="unenriched", created_at=now - timedelta(seconds=1)
+    # the real-category card is processed before the terminal-miss one.
+    real_mpn, miss_mpn = mpns
+    real_card = MaterialCard(
+        normalized_mpn=real_mpn, display_mpn=real_mpn.upper(), enrichment_status="unenriched", created_at=now
     )
-    db_session.add(verified_card)
-    db_session.add(nf_card)
+    miss_card = MaterialCard(
+        normalized_mpn=miss_mpn,
+        display_mpn=miss_mpn.upper(),
+        enrichment_status="unenriched",
+        created_at=now - timedelta(seconds=1),
+    )
+    db_session.add(real_card)
+    db_session.add(miss_card)
     db_session.flush()
-    verified_id = verified_card.id
+    real_id = real_card.id
 
-    returns = [MaterialEnrichmentStatus.VERIFIED, MaterialEnrichmentStatus.NOT_FOUND]
+    returns = [getattr(MaterialEnrichmentStatus, real_status), getattr(MaterialEnrichmentStatus, miss_status)]
     idx = [0]
 
     async def fake_enrich_card(card, db, **kw):
@@ -1223,58 +1201,7 @@ def test_run_one_batch_triggers_spec_extraction_for_enriched_cards(db_session):
 
     spec_mock.assert_awaited_once()
     passed_ids = spec_mock.await_args.args[0]
-    assert passed_ids == [verified_id]  # ONLY the verified card; not the not_found one
-
-
-def test_run_one_batch_spec_extraction_includes_oem_sourced_excludes_not_catalogued(db_session):
-    """Merge-integration guard: the second-pass spec extraction must INCLUDE oem_sourced
-    (a real category) and EXCLUDE not_catalogued (a terminal miss, like not_found)."""
-    import asyncio
-    from datetime import datetime, timedelta, timezone
-    from unittest.mock import AsyncMock, patch
-
-    from app.constants import MaterialEnrichmentStatus
-    from app.models import MaterialCard
-    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
-    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
-    from app.services.enrichment_worker.worker import run_one_batch
-
-    now = datetime.now(timezone.utc)
-    # Newest-first selection → oem_sourced card is processed before the not_catalogued one.
-    oem_card = MaterialCard(normalized_mpn="soem", display_mpn="SOEM", enrichment_status="unenriched", created_at=now)
-    nc_card = MaterialCard(
-        normalized_mpn="snc", display_mpn="SNC", enrichment_status="unenriched", created_at=now - timedelta(seconds=1)
-    )
-    db_session.add(oem_card)
-    db_session.add(nc_card)
-    db_session.flush()
-    oem_id = oem_card.id
-
-    returns = [MaterialEnrichmentStatus.OEM_SOURCED, MaterialEnrichmentStatus.NOT_CATALOGUED]
-    idx = [0]
-
-    async def fake_enrich_card(card, db, **kw):
-        st = returns[idx[0]]
-        idx[0] += 1
-        card.enrichment_status = st
-        return st
-
-    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
-    breaker = EnrichmentCircuitBreaker(cfg)
-    spec_mock = AsyncMock(return_value={"cards_processed": 1, "specs_written": 2})
-
-    with (
-        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
-        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
-        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
-        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
-        patch("app.services.spec_enrichment_service.enrich_card_specs", spec_mock),
-    ):
-        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
-
-    spec_mock.assert_awaited_once()
-    passed_ids = spec_mock.await_args.args[0]
-    assert passed_ids == [oem_id]  # oem_sourced included; not_catalogued excluded
+    assert passed_ids == [real_id]  # ONLY the real-category card; not the terminal-miss one
 
 
 def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):

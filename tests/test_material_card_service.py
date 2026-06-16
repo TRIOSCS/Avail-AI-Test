@@ -252,17 +252,20 @@ class TestMergeMaterialCards:
         db_session.refresh(item)
         assert item.material_card_id == target.id
 
-    def test_same_id_raises(self, db_session: Session, test_material_card):
-        with pytest.raises(ValueError, match="Cannot merge a card with itself"):
-            merge_material_cards(db_session, test_material_card.id, test_material_card.id, "x@test.com")
-
-    def test_source_not_found_raises(self, db_session: Session, test_material_card):
-        with pytest.raises(ValueError, match="Source card 99999 not found"):
-            merge_material_cards(db_session, 99999, test_material_card.id, "x@test.com")
-
-    def test_target_not_found_raises(self, db_session: Session, test_material_card):
-        with pytest.raises(ValueError, match="Target card 99999 not found"):
-            merge_material_cards(db_session, test_material_card.id, 99999, "x@test.com")
+    @pytest.mark.parametrize(
+        "source_id_self,target_id,match",
+        [
+            (True, "self", "Cannot merge a card with itself"),
+            (False, "card", "Source card 99999 not found"),
+            (True, "missing", "Target card 99999 not found"),
+        ],
+        ids=["same_id", "source_not_found", "target_not_found"],
+    )
+    def test_invalid_merge_raises(self, db_session: Session, test_material_card, source_id_self, target_id, match):
+        source = test_material_card.id if source_id_self else 99999
+        target = {"self": test_material_card.id, "card": test_material_card.id, "missing": 99999}[target_id]
+        with pytest.raises(ValueError, match=match):
+            merge_material_cards(db_session, source, target, "x@test.com")
 
     @patch("app.services.audit_service.log_audit")
     def test_merge_vendor_histories_combined(self, mock_audit, db_session: Session):

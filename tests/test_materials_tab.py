@@ -1,6 +1,17 @@
 # tests/test_materials_tab.py
 """Integration tests for Materials tab routes."""
 
+import pytest
+
+from app.models import MaterialCard
+
+
+def _add_card(db_session, mpn, **kwargs):
+    card = MaterialCard(normalized_mpn=mpn, display_mpn=mpn, **kwargs)
+    db_session.add(card)
+    db_session.commit()
+    return card
+
 
 def test_materials_list_returns_workspace(client, db_session):
     """GET /v2/partials/materials returns faceted workspace shell."""
@@ -12,11 +23,7 @@ def test_materials_list_returns_workspace(client, db_session):
 
 def test_materials_faceted_returns_results(client, db_session):
     """GET /v2/partials/materials/faceted returns material rows."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="INT-TEST-001", display_mpn="INT-TEST-001", manufacturer="TestMfg")
-    db_session.add(card)
-    db_session.commit()
+    _add_card(db_session, "INT-TEST-001", manufacturer="TestMfg")
 
     resp = client.get("/v2/partials/materials/faceted")
     assert resp.status_code == 200
@@ -25,96 +32,42 @@ def test_materials_faceted_returns_results(client, db_session):
 
 def test_materials_faceted_search_mpn(client, db_session):
     """Faceted search by MPN returns matching material."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="LM358DR", display_mpn="LM358DR")
-    db_session.add(card)
-    db_session.commit()
+    _add_card(db_session, "LM358DR")
 
     resp = client.get("/v2/partials/materials/faceted?q=LM358")
     assert resp.status_code == 200
     assert "LM358DR" in resp.text
 
 
-def test_material_detail_returns_html(client, db_session):
-    """GET /v2/partials/materials/{id} returns detail page."""
-    from app.models import MaterialCard
+@pytest.mark.parametrize(
+    ("mpn", "path", "expected_substring"),
+    [
+        pytest.param("DETAIL-001", "", "DETAIL-001", id="detail"),
+        pytest.param("TAB-001", "/tab/vendors", "No vendor history", id="tab_vendors"),
+        pytest.param("CUST-001", "/tab/customers", "No customer purchase history", id="tab_customers"),
+        pytest.param("SRC-001", "/tab/sourcing", "No sourcing activity", id="tab_sourcing"),
+        pytest.param("PRICE-001", "/tab/price_history", "Price tracking active", id="tab_price_history_empty"),
+    ],
+)
+def test_material_detail_and_tabs_render(client, db_session, mpn, path, expected_substring):
+    """Material detail and each tab partial return HTML with the expected content."""
+    card = _add_card(db_session, mpn)
 
-    card = MaterialCard(normalized_mpn="DETAIL-001", display_mpn="DETAIL-001")
-    db_session.add(card)
-    db_session.commit()
-
-    resp = client.get(f"/v2/partials/materials/{card.id}")
+    resp = client.get(f"/v2/partials/materials/{card.id}{path}")
     assert resp.status_code == 200
-    assert "DETAIL-001" in resp.text
-
-
-def test_material_tab_vendors(client, db_session):
-    """GET /v2/partials/materials/{id}/tab/vendors returns vendor table."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="TAB-001", display_mpn="TAB-001")
-    db_session.add(card)
-    db_session.commit()
-
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/vendors")
-    assert resp.status_code == 200
-    assert "No vendor history" in resp.text
-
-
-def test_material_tab_customers(client, db_session):
-    """Customers tab returns HTML."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="CUST-001", display_mpn="CUST-001")
-    db_session.add(card)
-    db_session.commit()
-
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/customers")
-    assert resp.status_code == 200
-    assert "No customer purchase history" in resp.text
-
-
-def test_material_tab_sourcing(client, db_session):
-    """Sourcing tab returns HTML."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="SRC-001", display_mpn="SRC-001")
-    db_session.add(card)
-    db_session.commit()
-
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/sourcing")
-    assert resp.status_code == 200
-    assert "No sourcing activity" in resp.text
-
-
-def test_material_tab_price_history_empty(client, db_session):
-    """Price history tab shows empty state."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="PRICE-001", display_mpn="PRICE-001")
-    db_session.add(card)
-    db_session.commit()
-
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/price_history")
-    assert resp.status_code == 200
-    assert "Price tracking active" in resp.text
+    assert expected_substring in resp.text
 
 
 def test_material_detail_shows_cross_references(client, db_session):
     """Cross-references section appears on material detail when data exists."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(
-        normalized_mpn="XREF-001",
-        display_mpn="XREF-001",
+    card = _add_card(
+        db_session,
+        "XREF-001",
         cross_references=[
             {"mpn": "ALT-100", "manufacturer": "Micron"},
             {"mpn": "ALT-200", "manufacturer": "SK Hynix"},
         ],
     )
-    db_session.add(card)
-    db_session.commit()
 
     resp = client.get(f"/v2/partials/materials/{card.id}")
     assert resp.status_code == 200
@@ -126,11 +79,7 @@ def test_material_detail_shows_cross_references(client, db_session):
 
 def test_material_detail_shows_find_crosses_button_when_empty(client, db_session):
     """Crosses section always visible; shows Find Crosses button when no data."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="NOXREF-001", display_mpn="NOXREF-001")
-    db_session.add(card)
-    db_session.commit()
+    card = _add_card(db_session, "NOXREF-001")
 
     resp = client.get(f"/v2/partials/materials/{card.id}")
     assert resp.status_code == 200
@@ -141,11 +90,7 @@ def test_material_detail_shows_find_crosses_button_when_empty(client, db_session
 
 def test_material_tab_unknown_returns_404(client, db_session):
     """Unknown tab name returns 404."""
-    from app.models import MaterialCard
-
-    card = MaterialCard(normalized_mpn="UNK-001", display_mpn="UNK-001")
-    db_session.add(card)
-    db_session.commit()
+    card = _add_card(db_session, "UNK-001")
 
     resp = client.get(f"/v2/partials/materials/{card.id}/tab/nonexistent")
     assert resp.status_code == 404

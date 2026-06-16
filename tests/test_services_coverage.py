@@ -25,6 +25,48 @@ from app.services.prospect_contacts import (
     mask_email,
 )
 
+
+def _patch_graph_client(*, pages_return=None, pages_side_effect=None):
+    """Patch GraphClient with a mock whose get_all_pages is stubbed.
+
+    Returns the patch context manager so callers can use it in a `with` block.
+    """
+    mock_gc = MagicMock()
+    if pages_side_effect is not None:
+        mock_gc.get_all_pages = AsyncMock(side_effect=pages_side_effect)
+    else:
+        mock_gc.get_all_pages = AsyncMock(return_value=pages_return)
+    return patch("app.utils.graph_client.GraphClient", return_value=mock_gc)
+
+
+def _add_requirement(db_session, customer_site_id, *, req_name, mpn, brand, qty):
+    """Create a Requisition (linked to a customer site) plus one Requirement.
+
+    Returns the flushed Requirement so callers can attach sightings, etc.
+    """
+    from app.models import Requirement, Requisition
+
+    req = Requisition(
+        name=req_name,
+        customer_name="Acme",
+        customer_site_id=customer_site_id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+    item = Requirement(
+        requisition_id=req.id,
+        primary_mpn=mpn,
+        brand=brand,
+        target_qty=qty,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    db_session.flush()
+    return item
+
+
 # ── Health Service ──────────────────────────────────────────────────────
 
 
@@ -313,36 +355,22 @@ class TestMailboxIntelligence:
         assert result["timezone"] == "UTC"
         assert result["auto_reply_status"] == "disabled"
 
-    def test_is_within_working_hours_true(self, db_session):
+    @pytest.mark.parametrize(
+        "start, end, hour, expected",
+        [
+            ("08:00", "17:00", 10, True),  # within
+            ("08:00", "17:00", 20, False),  # after hours
+            (None, None, 10, True),  # no config
+            ("08:00", "17:00", 8, True),  # start boundary inclusive
+            ("08:00", "17:00", 17, False),  # end boundary exclusive
+            ("invalid", "also-bad", 10, True),  # bad format
+        ],
+    )
+    def test_is_within_working_hours(self, db_session, start, end, hour, expected):
         from app.services.mailbox_intelligence import is_within_working_hours
 
-        user = SimpleNamespace(working_hours_start="08:00", working_hours_end="17:00")
-        assert is_within_working_hours(user, 10) is True
-
-    def test_is_within_working_hours_false(self, db_session):
-        from app.services.mailbox_intelligence import is_within_working_hours
-
-        user = SimpleNamespace(working_hours_start="08:00", working_hours_end="17:00")
-        assert is_within_working_hours(user, 20) is False
-
-    def test_is_within_working_hours_no_config(self, db_session):
-        from app.services.mailbox_intelligence import is_within_working_hours
-
-        user = SimpleNamespace(working_hours_start=None, working_hours_end=None)
-        assert is_within_working_hours(user, 10) is True
-
-    def test_is_within_working_hours_boundary(self, db_session):
-        from app.services.mailbox_intelligence import is_within_working_hours
-
-        user = SimpleNamespace(working_hours_start="08:00", working_hours_end="17:00")
-        assert is_within_working_hours(user, 8) is True
-        assert is_within_working_hours(user, 17) is False
-
-    def test_is_within_working_hours_bad_format(self, db_session):
-        from app.services.mailbox_intelligence import is_within_working_hours
-
-        user = SimpleNamespace(working_hours_start="invalid", working_hours_end="also-bad")
-        assert is_within_working_hours(user, 10) is True
+        user = SimpleNamespace(working_hours_start=start, working_hours_end=end)
+        assert is_within_working_hours(user, hour) is expected
 
 
 # ── Prospect Contacts ───────────────────────────────────────────────────
@@ -351,62 +379,64 @@ class TestMailboxIntelligence:
 class TestProspectContacts:
     """Tests for app/services/prospect_contacts.py."""
 
-    def test_classify_decision_maker(self, db_session):
-        assert classify_contact_seniority("VP of Sales") == "decision_maker"
-        assert classify_contact_seniority("Director of Engineering") == "decision_maker"
-        assert classify_contact_seniority("Chief Technology Officer") == "decision_maker"
-        assert classify_contact_seniority("CEO") == "decision_maker"
-        assert classify_contact_seniority("Head of Procurement") == "decision_maker"
-        assert classify_contact_seniority("SVP Operations") == "decision_maker"
-        assert classify_contact_seniority("EVP Sales") == "decision_maker"
+    @pytest.mark.parametrize(
+        "title, expected",
+        [
+            ("VP of Sales", "decision_maker"),
+            ("Director of Engineering", "decision_maker"),
+            ("Chief Technology Officer", "decision_maker"),
+            ("CEO", "decision_maker"),
+            ("Head of Procurement", "decision_maker"),
+            ("SVP Operations", "decision_maker"),
+            ("EVP Sales", "decision_maker"),
+            ("Senior Engineer", "influencer"),
+            ("Project Manager", "influencer"),
+            ("Team Lead", "influencer"),
+            ("Commodity Manager", "influencer"),
+            ("Principal Architect", "influencer"),
+            ("Buyer", "executor"),
+            ("Purchasing Agent", "executor"),
+            ("Procurement Coordinator", "executor"),
+            ("Supply Chain Analyst", "executor"),
+            ("Planning Specialist", "executor"),
+            ("Planner", "executor"),
+            ("Assistant Buyer", "executor"),
+            ("Receptionist", "other"),
+            ("", "other"),
+            (None, "other"),
+        ],
+    )
+    def test_classify_contact_seniority(self, db_session, title, expected):
+        assert classify_contact_seniority(title) == expected
 
-    def test_classify_influencer(self, db_session):
-        assert classify_contact_seniority("Senior Engineer") == "influencer"
-        assert classify_contact_seniority("Project Manager") == "influencer"
-        assert classify_contact_seniority("Team Lead") == "influencer"
-        assert classify_contact_seniority("Commodity Manager") == "influencer"
-        assert classify_contact_seniority("Principal Architect") == "influencer"
+    @pytest.mark.parametrize(
+        "email, expected",
+        [
+            ("john.smith@company.com", "j***@comp..."),
+            ("a@b.co", "a***@b.co"),
+            ("", ""),
+            (None, ""),
+            ("invalid", ""),
+        ],
+    )
+    def test_mask_email(self, db_session, email, expected):
+        assert mask_email(email) == expected
 
-    def test_classify_executor(self, db_session):
-        assert classify_contact_seniority("Buyer") == "executor"
-        assert classify_contact_seniority("Purchasing Agent") == "executor"
-        assert classify_contact_seniority("Procurement Coordinator") == "executor"
-        assert classify_contact_seniority("Supply Chain Analyst") == "executor"
-        assert classify_contact_seniority("Planning Specialist") == "executor"
-        assert classify_contact_seniority("Planner") == "executor"
-        assert classify_contact_seniority("Assistant Buyer") == "executor"
-
-    def test_classify_other(self, db_session):
-        assert classify_contact_seniority("Receptionist") == "other"
-        assert classify_contact_seniority("") == "other"
-        assert classify_contact_seniority(None) == "other"
-
-    def test_mask_email_standard(self, db_session):
-        assert mask_email("john.smith@company.com") == "j***@comp..."
-
-    def test_mask_email_short_domain(self, db_session):
-        assert mask_email("a@b.co") == "a***@b.co"
-
-    def test_mask_email_empty(self, db_session):
-        assert mask_email("") == ""
-        assert mask_email(None) == ""
-
-    def test_mask_email_no_at(self, db_session):
-        assert mask_email("invalid") == ""
-
-    def test_is_personal_email_true(self, db_session):
-        assert _is_personal_email("user@gmail.com") is True
-        assert _is_personal_email("user@yahoo.com") is True
-        assert _is_personal_email("user@hotmail.com") is True
-        assert _is_personal_email("user@protonmail.com") is True
-
-    def test_is_personal_email_false(self, db_session):
-        assert _is_personal_email("user@company.com") is False
-
-    def test_is_personal_email_edge(self, db_session):
-        assert _is_personal_email("") is False
-        assert _is_personal_email(None) is False
-        assert _is_personal_email("no-at-sign") is False
+    @pytest.mark.parametrize(
+        "email, expected",
+        [
+            ("user@gmail.com", True),
+            ("user@yahoo.com", True),
+            ("user@hotmail.com", True),
+            ("user@protonmail.com", True),
+            ("user@company.com", False),
+            ("", False),
+            (None, False),
+            ("no-at-sign", False),
+        ],
+    )
+    def test_is_personal_email(self, db_session, email, expected):
+        assert _is_personal_email(email) is expected
 
     def test_is_new_hire_recent(self, db_session):
         recent = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
@@ -458,28 +488,16 @@ class TestCustomerAnalysisService:
 
     @pytest.mark.asyncio
     async def test_analyze_with_parts(self, db_session, test_company, test_customer_site):
-        from app.models import Requirement, Requisition
         from app.services.customer_analysis_service import analyze_customer_materials
 
-        # Create a requisition linked to customer site
-        req = Requisition(
-            name="REQ-ANALYSIS",
-            customer_name="Acme",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
+        _add_requirement(
+            db_session,
+            test_customer_site.id,
+            req_name="REQ-ANALYSIS",
+            mpn="LM317T",
             brand="Texas Instruments",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            qty=100,
         )
-        db_session.add(item)
-        db_session.flush()
 
         mock_result = {"brands": ["Texas Instruments"], "commodities": ["Voltage Regulators"]}
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
@@ -491,27 +509,17 @@ class TestCustomerAnalysisService:
 
     @pytest.mark.asyncio
     async def test_analyze_with_sightings(self, db_session, test_company, test_customer_site):
-        from app.models import Requirement, Requisition, Sighting
+        from app.models import Sighting
         from app.services.customer_analysis_service import analyze_customer_materials
 
-        req = Requisition(
-            name="REQ-SIGHTING",
-            customer_name="Acme",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="IC-CHIP-001",
+        item = _add_requirement(
+            db_session,
+            test_customer_site.id,
+            req_name="REQ-SIGHTING",
+            mpn="IC-CHIP-001",
             brand="Intel",
-            target_qty=50,
-            created_at=datetime.now(timezone.utc),
+            qty=50,
         )
-        db_session.add(item)
-        db_session.flush()
         # Add a sighting with a different MPN to exercise the sighting loop
         sighting = Sighting(
             requirement_id=item.id,
@@ -533,27 +541,16 @@ class TestCustomerAnalysisService:
 
     @pytest.mark.asyncio
     async def test_analyze_claude_returns_none(self, db_session, test_company, test_customer_site):
-        from app.models import Requirement, Requisition
         from app.services.customer_analysis_service import analyze_customer_materials
 
-        req = Requisition(
-            name="REQ-ANALYSIS2",
-            customer_name="Acme",
-            customer_site_id=test_customer_site.id,
-            status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
+        _add_requirement(
+            db_session,
+            test_customer_site.id,
+            req_name="REQ-ANALYSIS2",
+            mpn="LM317T",
             brand="TI",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
+            qty=100,
         )
-        db_session.add(item)
-        db_session.flush()
 
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None):
             result = await analyze_customer_materials(test_company.id, db_session=db_session)
@@ -708,10 +705,7 @@ class TestCalendarIntelligence:
     async def test_scan_calendar_api_error(self, db_session, test_user):
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Graph API error"))
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_side_effect=Exception("Graph API error")):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["events_scanned"] == 0
 
@@ -719,10 +713,7 @@ class TestCalendarIntelligence:
     async def test_scan_calendar_no_events(self, db_session, test_user):
         from app.services.calendar_intelligence import scan_calendar_events
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[])
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=[]):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["events_scanned"] == 0
         assert result["vendor_meetings"] == 0
@@ -748,10 +739,7 @@ class TestCalendarIntelligence:
                 "location": {"displayName": "Teams"},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["events_scanned"] == 1
         assert result["vendor_meetings"] == 1
@@ -770,10 +758,7 @@ class TestCalendarIntelligence:
                 "location": {"displayName": "Munich"},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["trade_shows"] == 1
         assert result["activities_logged"] == 1
@@ -798,10 +783,7 @@ class TestCalendarIntelligence:
                 "location": {},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["vendor_meetings"] == 0
         assert result["activities_logged"] == 0
@@ -819,10 +801,7 @@ class TestCalendarIntelligence:
                 "location": {},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             # First scan
             r1 = await scan_calendar_events("token", test_user.id, db_session)
             assert r1["activities_logged"] == 1
@@ -843,9 +822,6 @@ class TestCalendarIntelligence:
                 "location": {},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
         # Use a mock db that raises on commit
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.first.return_value = None
@@ -853,7 +829,7 @@ class TestCalendarIntelligence:
         mock_db.commit.side_effect = Exception("commit error")
         mock_db.rollback = MagicMock()
 
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             result = await scan_calendar_events("token", test_user.id, mock_db)
         mock_db.rollback.assert_called_once()
 
@@ -873,10 +849,7 @@ class TestCalendarIntelligence:
                 "location": {},
             }
         ]
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=events)
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        with _patch_graph_client(pages_return=events):
             result = await scan_calendar_events("token", test_user.id, db_session)
         assert result["vendor_meetings"] == 0
 
@@ -887,45 +860,41 @@ class TestCalendarIntelligence:
 class TestCustomerEnrichmentService:
     """Tests for app/services/customer_enrichment_service.py."""
 
-    def test_classify_contact_role_decision_maker(self, db_session):
+    @pytest.mark.parametrize(
+        "title, expected",
+        [
+            ("VP of Sales", "decision_maker"),
+            ("Director", "decision_maker"),
+            ("CEO", "decision_maker"),
+            ("Chief Operating Officer", "decision_maker"),
+            ("Senior Buyer", "buyer"),
+            ("Procurement Manager", "buyer"),
+            ("Supply Chain Lead", "buyer"),
+            ("Design Engineer", "technical"),
+            ("Quality Manager", "technical"),
+            ("Office Manager", "operations"),
+            (None, "unknown"),
+            ("", "unknown"),
+        ],
+    )
+    def test_classify_contact_role(self, db_session, title, expected):
         from app.services.customer_enrichment_service import _classify_contact_role
 
-        assert _classify_contact_role("VP of Sales") == "decision_maker"
-        assert _classify_contact_role("Director") == "decision_maker"
-        assert _classify_contact_role("CEO") == "decision_maker"
-        assert _classify_contact_role("Chief Operating Officer") == "decision_maker"
+        assert _classify_contact_role(title) == expected
 
-    def test_classify_contact_role_buyer(self, db_session):
-        from app.services.customer_enrichment_service import _classify_contact_role
-
-        assert _classify_contact_role("Senior Buyer") == "buyer"
-        assert _classify_contact_role("Procurement Manager") == "buyer"
-        assert _classify_contact_role("Supply Chain Lead") == "buyer"
-
-    def test_classify_contact_role_technical(self, db_session):
-        from app.services.customer_enrichment_service import _classify_contact_role
-
-        assert _classify_contact_role("Design Engineer") == "technical"
-        assert _classify_contact_role("Quality Manager") == "technical"
-
-    def test_classify_contact_role_operations(self, db_session):
-        from app.services.customer_enrichment_service import _classify_contact_role
-
-        assert _classify_contact_role("Office Manager") == "operations"
-
-    def test_classify_contact_role_unknown(self, db_session):
-        from app.services.customer_enrichment_service import _classify_contact_role
-
-        assert _classify_contact_role(None) == "unknown"
-        assert _classify_contact_role("") == "unknown"
-
-    def test_is_direct_dial(self, db_session):
+    @pytest.mark.parametrize(
+        "phone_type, expected",
+        [
+            ("direct_dial", True),
+            ("mobile", True),
+            ("switchboard", False),
+            (None, False),
+        ],
+    )
+    def test_is_direct_dial(self, db_session, phone_type, expected):
         from app.services.customer_enrichment_service import _is_direct_dial
 
-        assert _is_direct_dial("direct_dial") is True
-        assert _is_direct_dial("mobile") is True
-        assert _is_direct_dial("switchboard") is False
-        assert _is_direct_dial(None) is False
+        assert _is_direct_dial(phone_type) is expected
 
     def test_contacts_needed(self, db_session, test_company, test_customer_site):
         from app.services.customer_enrichment_service import _contacts_needed
@@ -940,20 +909,20 @@ class TestCustomerEnrichmentService:
         needed = _contacts_needed(db_session, 99999, 5)
         assert needed == 5
 
-    def test_get_company_domain(self, db_session):
+    @pytest.mark.parametrize(
+        "domain, website, expected",
+        [
+            ("example.com", None, "example.com"),
+            (None, "https://www.example.com/about", "example.com"),
+            (None, None, None),
+            ("", "", None),
+        ],
+    )
+    def test_get_company_domain(self, db_session, domain, website, expected):
         from app.services.customer_enrichment_service import _get_company_domain
 
-        co = SimpleNamespace(domain="example.com", website=None)
-        assert _get_company_domain(co) == "example.com"
-
-        co2 = SimpleNamespace(domain=None, website="https://www.example.com/about")
-        assert _get_company_domain(co2) == "example.com"
-
-        co3 = SimpleNamespace(domain=None, website=None)
-        assert _get_company_domain(co3) is None
-
-        co4 = SimpleNamespace(domain="", website="")
-        assert _get_company_domain(co4) is None
+        co = SimpleNamespace(domain=domain, website=website)
+        assert _get_company_domain(co) == expected
 
     @pytest.mark.asyncio
     async def test_enrich_disabled(self, db_session):

@@ -17,6 +17,24 @@ import pytest
 
 from app.models.trouble_ticket import TroubleTicket
 
+
+def _make_ticket(submitted_by, **overrides):
+    """Build a submitted TroubleTicket with sensible defaults; override any field."""
+    fields = {
+        "ticket_number": "TT-TEST-001",
+        "submitted_by": submitted_by,
+        "title": "Test ticket",
+        "description": "Test description",
+        "status": "submitted",
+        "source": "report_button",
+        "risk_tier": "low",
+        "category": "other",
+        "created_at": datetime.now(timezone.utc),
+    }
+    fields.update(overrides)
+    return TroubleTicket(**fields)
+
+
 # ── _save_screenshot helper tests ────────────────────────────────────
 
 
@@ -93,16 +111,10 @@ def test_ensure_upload_dir_runs_once(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_generate_ai_summary_success(db_session, test_user):
     """AI summary is stored when claude_text returns a value."""
-    ticket = TroubleTicket(
+    ticket = _make_ticket(
+        test_user.id,
         ticket_number="TT-SUM-001",
-        submitted_by=test_user.id,
-        title="Test ticket",
         description="Something went wrong on the search page with filters",
-        status="submitted",
-        source="report_button",
-        risk_tier="low",
-        category="other",
-        created_at=datetime.now(timezone.utc),
     )
     db_session.add(ticket)
     db_session.commit()
@@ -197,16 +209,11 @@ async def test_generate_ai_summary_handles_claude_exception(test_user, db_sessio
 class TestScreenshotSecurity:
     def test_path_traversal_blocked(self, client, db_session, test_user):
         """Ticket with screenshot_path outside UPLOAD_DIR returns 403."""
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-TRAV-001",
-            submitted_by=test_user.id,
             title="Traversal test",
             description="Testing path traversal",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         ticket.screenshot_path = "/etc/passwd"
         db_session.add(ticket)
@@ -229,17 +236,12 @@ class TestScreenshotSecurity:
         orig_upload_dir = error_reports.UPLOAD_DIR
         try:
             error_reports.UPLOAD_DIR = str(tmp_path)
-            ticket = TroubleTicket(
+            ticket = _make_ticket(
+                test_user.id,
                 ticket_number="TT-FILE-001",
-                submitted_by=test_user.id,
                 title="File test",
                 description="Testing file serve",
-                status="submitted",
-                source="report_button",
-                risk_tier="low",
-                category="other",
                 screenshot_path=str(fake_png),
-                created_at=datetime.now(timezone.utc),
             )
             db_session.add(ticket)
             db_session.commit()
@@ -326,16 +328,11 @@ class TestAnalyzeTicketsCoverage:
         from app.utils.claude_errors import ClaudeError
 
         # Create a ticket so analyze has something to work with
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-ANAL-001",
-            submitted_by=test_user.id,
             title="Analyze error test",
             description="Testing analyze error path",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -350,16 +347,11 @@ class TestAnalyzeTicketsCoverage:
         """Analyze updates existing RootCauseGroup if title matches."""
         from app.models.root_cause_group import RootCauseGroup
 
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-ANAL-002",
-            submitted_by=test_user.id,
             title="Existing group test",
             description="Testing existing group update",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -386,16 +378,11 @@ class TestAnalyzeTicketsCoverage:
     @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
     def test_analyze_groups_missing_from_ticket_map(self, mock_claude, client, db_session, test_user):
         """analyze_tickets handles ticket_ids that don't exist in ticket_map."""
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-ANAL-003",
-            submitted_by=test_user.id,
             title="Missing ticket test",
             description="Testing missing ticket ids",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -518,20 +505,11 @@ class TestJsonApiCrud:
 
     def test_list_error_reports_with_status_filter(self, client, db_session, test_user):
         """GET /api/error-reports?status=submitted filters by status."""
-        from datetime import datetime, timezone
-
-        from app.models.trouble_ticket import TroubleTicket
-
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-LIST-001",
-            submitted_by=test_user.id,
             title="List filter test",
             description="Testing list filter",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -547,20 +525,11 @@ class TestJsonApiCrud:
         assert resp.status_code == 404
 
     def test_get_error_report_found(self, client, db_session, test_user):
-        from datetime import datetime, timezone
-
-        from app.models.trouble_ticket import TroubleTicket
-
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-GET-001",
-            submitted_by=test_user.id,
             title="Get test",
             description="Testing get endpoint",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -571,20 +540,11 @@ class TestJsonApiCrud:
         assert resp.json()["ticket_number"] == ticket.ticket_number
 
     def test_update_ticket_status_to_resolved(self, client, db_session, test_user):
-        from datetime import datetime, timezone
-
-        from app.models.trouble_ticket import TroubleTicket
-
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-UPD-001",
-            submitted_by=test_user.id,
             title="Update test",
             description="Testing update",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
@@ -605,20 +565,11 @@ class TestJsonApiCrud:
         assert resp.status_code == 404
 
     def test_update_ticket_resolution_notes_only(self, client, db_session, test_user):
-        from datetime import datetime, timezone
-
-        from app.models.trouble_ticket import TroubleTicket
-
-        ticket = TroubleTicket(
+        ticket = _make_ticket(
+            test_user.id,
             ticket_number="TT-UPD-002",
-            submitted_by=test_user.id,
             title="Notes test",
             description="Testing notes update",
-            status="submitted",
-            source="report_button",
-            risk_tier="low",
-            category="other",
-            created_at=datetime.now(timezone.utc),
         )
         db_session.add(ticket)
         db_session.commit()
