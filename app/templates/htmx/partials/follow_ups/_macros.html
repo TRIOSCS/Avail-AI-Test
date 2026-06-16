@@ -1,0 +1,22 @@
+{# _macros.html — Follow-up-cluster-local Jinja2 macros (follow_ups/* templates only).
+
+   What it does: factors out the parts-summary expression that the follow-up
+   queue renders in two places (the "Parts:" line and the compose-form
+   placeholder) so the string-vs-list handling lives in one source of truth.
+   What calls it: follow_ups/list.html.
+   What it depends on: nothing (pure value formatting).
+
+   Usage: import parts_summary from this file, then call
+     parts_summary(fu.parts)               -> "" when parts is falsy
+     parts_summary(fu.parts, "your parts")  -> fallback string when parts is falsy
+#}
+
+
+{# ── Parts summary ────────────────────────────────────────────────────
+   A follow-up's parts arrive either as a pre-joined string or as a list of
+   MPNs; render either form as a single comma-joined string. When parts is
+   falsy (None / empty list) emit `fallback` (default ""). Whitespace-trimmed
+   so the call site emits exactly the original expression result. #}
+{% macro parts_summary(parts, fallback="") -%}
+{%- if parts is string -%}{{ parts }}{%- elif parts -%}{{ parts|join(', ') }}{%- else -%}{{ fallback }}{%- endif -%}
+{%- endmacro %}
