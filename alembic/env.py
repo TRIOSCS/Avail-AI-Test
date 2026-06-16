@@ -258,16 +258,10 @@ def _idempotent_alter_column(table_name, column_name, **kwargs):
     current = current_cols[column_name]
     requested_type = kwargs.get("type_")
     requested_nullable = kwargs.get("nullable")
-    type_mismatch = False
-    nullable_mismatch = False
-    if requested_type is not None:
-        # SQLAlchemy types compare poorly across dialect-vs-generic and
-        # instance-vs-class; repr() comparison is pragmatic.
-        if repr(current.get("type")) != repr(requested_type):
-            type_mismatch = True
-    if requested_nullable is not None:
-        if bool(current.get("nullable")) != bool(requested_nullable):
-            nullable_mismatch = True
+    # SQLAlchemy types compare poorly across dialect-vs-generic and
+    # instance-vs-class; repr() comparison is pragmatic.
+    type_mismatch = requested_type is not None and repr(current.get("type")) != repr(requested_type)
+    nullable_mismatch = requested_nullable is not None and bool(current.get("nullable")) != bool(requested_nullable)
 
     # If neither type nor nullable is being changed (e.g. server_default-only
     # alter, or rename), fall through and call the original — the rename and
@@ -355,13 +349,14 @@ def _idempotent_drop_constraint(constraint_name, table_name, type_=None, **kwarg
     if not _table_exists(bind, table_name, schema):
         _skip("drop_constraint (table missing)", name=constraint_name, table=table_name)
         return None
+    insp = sa.inspect(bind)
     existing: set[str | None] = set()
     if type_ in (None, "foreignkey"):
-        existing |= {fk.get("name") for fk in sa.inspect(bind).get_foreign_keys(table_name, schema=schema)}
+        existing |= {fk.get("name") for fk in insp.get_foreign_keys(table_name, schema=schema)}
     if type_ in (None, "unique"):
-        existing |= {uc.get("name") for uc in sa.inspect(bind).get_unique_constraints(table_name, schema=schema)}
+        existing |= {uc.get("name") for uc in insp.get_unique_constraints(table_name, schema=schema)}
     if type_ in (None, "check"):
-        existing |= {cc.get("name") for cc in sa.inspect(bind).get_check_constraints(table_name, schema=schema)}
+        existing |= {cc.get("name") for cc in insp.get_check_constraints(table_name, schema=schema)}
     if type_ in (None, "primary"):
         pk = _pk_constraint_name(bind, table_name, schema)
         if pk:
