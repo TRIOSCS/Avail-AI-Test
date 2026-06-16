@@ -167,10 +167,7 @@ def extract_trailing_oem(description: str | None) -> str | None:
         return None
     candidate = parts[-1]
     # A manufacturer token is short, has no digits-only payload, and isn't a spec phrase.
-    if not candidate or len(candidate) > 40:
-        return None
-    word_count = len(candidate.split())
-    if word_count > 4:
+    if not candidate or len(candidate) > 40 or len(candidate.split()) > 4:
         return None
     # Reject obvious non-OEM trailers (pure measurements/connectors left after a comma).
     if re.fullmatch(r"[\d.\s\"'/-]+", candidate):
