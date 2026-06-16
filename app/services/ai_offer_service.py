@@ -188,16 +188,7 @@ def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None
         )
         db.add(offer)
         db.flush()
-        log_activity(
-            db,
-            activity_type=ActivityType.OFFER_CREATED,
-            requisition_id=offer.requisition_id,
-            requirement_id=offer.requirement_id,
-            user_id=user_id,
-            vendor_card_id=offer.vendor_card_id,
-            description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-            details={"offer_id": offer.id, "source": offer.source},
-        )
+        _log_offer_created(db, offer, user_id)
         created.append(offer.id)
 
     logger.info(
@@ -339,16 +330,7 @@ def save_freeform_offers(
         # Offer hook: freeform offers are saved ACTIVE after user review — user-
         # initiated proof of availability, release matching active records.
         maybe_release_on_offer(db, req_id, offer.vendor_name, user)
-        log_activity(
-            db,
-            activity_type=ActivityType.OFFER_CREATED,
-            requisition_id=offer.requisition_id,
-            requirement_id=offer.requirement_id,
-            user_id=user_id,
-            vendor_card_id=offer.vendor_card_id,
-            description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-            details={"offer_id": offer.id, "source": offer.source},
-        )
+        _log_offer_created(db, offer, user_id)
         created.append(offer.id)
 
     logger.info(
@@ -368,3 +350,17 @@ def _match_requirement(mpn: str, requirements: list[Requirement]) -> int | None:
         if fuzzy_mpn_match(mpn, r.primary_mpn):
             return r.id
     return None
+
+
+def _log_offer_created(db: Session, offer: Offer, user_id: int) -> None:
+    """Log an OFFER_CREATED activity for a freshly saved offer (must be flushed)."""
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_CREATED,
+        requisition_id=offer.requisition_id,
+        requirement_id=offer.requirement_id,
+        user_id=user_id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+        details={"offer_id": offer.id, "source": offer.source},
+    )

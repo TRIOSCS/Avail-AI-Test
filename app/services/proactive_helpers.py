@@ -15,6 +15,12 @@ from ..config import settings
 from ..models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
 
 
+def _throttle_cutoff(days: int | None) -> datetime:
+    """Earliest last_offered_at that still counts as throttled (now - throttle window)."""
+    throttle_days = days or settings.proactive_throttle_days
+    return datetime.now(timezone.utc) - timedelta(days=throttle_days)
+
+
 def is_do_not_offer(db: Session, mpn: str, company_id: int) -> bool:
     """Check if MPN is permanently suppressed for a company."""
     mpn_upper = mpn.strip().upper()
@@ -32,8 +38,7 @@ def is_do_not_offer(db: Session, mpn: str, company_id: int) -> bool:
 def is_throttled(db: Session, mpn: str, site_id: int, days: int | None = None) -> bool:
     """Check if MPN was recently offered to a customer site."""
     mpn_upper = mpn.strip().upper()
-    throttle_days = days or settings.proactive_throttle_days
-    cutoff = datetime.now(timezone.utc) - timedelta(days=throttle_days)
+    cutoff = _throttle_cutoff(days)
     return (
         db.query(ProactiveThrottle.id)
         .filter(
@@ -73,8 +78,7 @@ def build_batch_throttle_set(db: Session, mpn: str, site_ids: set[int], days: in
     if not site_ids:
         return set()
     mpn_upper = mpn.strip().upper()
-    throttle_days = days or settings.proactive_throttle_days
-    cutoff = datetime.now(timezone.utc) - timedelta(days=throttle_days)
+    cutoff = _throttle_cutoff(days)
     return {
         row[0]
         for row in db.query(ProactiveThrottle.customer_site_id)

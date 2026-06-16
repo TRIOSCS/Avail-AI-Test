@@ -49,6 +49,23 @@ _BATCH_SCHEMA = {
 }
 
 
+def _untagged_by_brand(db: Session) -> list:
+    """Cards with NO brand tag — (id, normalized_mpn) rows, ordered by id."""
+    tagged_brand_ids = (
+        db.query(MaterialTag.material_card_id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .filter(Tag.tag_type == "brand")
+        .distinct()
+        .subquery()
+    )
+    return (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
+        .order_by(MaterialCard.id)
+        .all()
+    )
+
+
 async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # pragma: no cover
     """Submit all untagged cards to Anthropic Batch API. 50% cheaper, no rate limits.
 
@@ -57,20 +74,7 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
     from app.utils.claude_client import claude_batch_submit
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
-    # Find cards with NO brand tag
-    tagged_brand_ids = (
-        db.query(MaterialTag.material_card_id)
-        .join(Tag, MaterialTag.tag_id == Tag.id)
-        .filter(Tag.tag_type == "brand")
-        .distinct()
-        .subquery()
-    )
-    untagged = (
-        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
-        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
-        .order_by(MaterialCard.id)
-        .all()
-    )
+    untagged = _untagged_by_brand(db)
 
     if not untagged:
         logger.info("No untagged cards for batch AI backfill")
@@ -78,15 +82,15 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
 
     logger.info(f"Batch AI backfill: preparing {len(untagged)} cards in batches of {batch_size}")
 
-    # Build batch requests — each request classifies batch_size MPNs
+    # Build batch requests (each classifies batch_size MPNs) and the
+    # custom_id → [(card_id, mpn)] map used to apply results later.
     requests = []
+    batch_meta = {}
     for i in range(0, len(untagged), batch_size):
         batch = untagged[i : i + batch_size]
-        mpns = [row.normalized_mpn for row in batch]
-        mpn_list = "\n".join(f"- {mpn}" for mpn in mpns)
-        prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
-
         custom_id = f"batch_{i // batch_size}"
+        mpn_list = "\n".join(f"- {row.normalized_mpn}" for row in batch)
+        prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
         requests.append(
             {
@@ -98,14 +102,7 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
                 "max_tokens": 4096,
             }
         )
-
-    # Store batch metadata for result processing
-    # Save card_id→mpn mapping to a temp table or file
-    batch_meta = {}
-    for i in range(0, len(untagged), batch_size):
-        batch = untagged[i : i + batch_size]
-        batch_key = f"batch_{i // batch_size}"
-        batch_meta[batch_key] = [(row.id, row.normalized_mpn) for row in batch]
+        batch_meta[custom_id] = [(row.id, row.normalized_mpn) for row in batch]
 
     logger.info(f"Submitting {len(requests)} batch requests ({len(untagged)} MPNs)")
 
@@ -132,7 +129,7 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
         json.dump(
             {
                 "batch_ids": batch_ids,
-                "batch_meta": {k: v for k, v in batch_meta.items()},
+                "batch_meta": batch_meta,
                 "total_mpns": len(untagged),
             },
             f,
@@ -254,20 +251,7 @@ async def run_ai_backfill(db: Session, batch_size: int = 50, concurrency: int = 
 
     Returns: {total_processed, total_matched, total_unknown}
     """
-    # Find cards with NO brand tag
-    tagged_brand_ids = (
-        db.query(MaterialTag.material_card_id)
-        .join(Tag, MaterialTag.tag_id == Tag.id)
-        .filter(Tag.tag_type == "brand")
-        .distinct()
-        .subquery()
-    )
-    untagged = (
-        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
-        .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
-        .order_by(MaterialCard.id)
-        .all()
-    )
+    untagged = _untagged_by_brand(db)
 
     if not untagged:
         logger.info("No untagged cards for AI backfill")
@@ -389,8 +373,6 @@ async def submit_targeted_backfill(db: Session, limit: int = 50000) -> dict:
         "anthropic-version": "2023-06-01",
         "content-type": "application/json",
     }
-
-    # Write requests as JSONL
     resp = await http.post(
         "https://api.anthropic.com/v1/messages/batches",
         headers=headers,

@@ -72,7 +72,7 @@ async def mine_unknown_domains(
     Returns list of dicts: [{domain, email_count, sample_senders}]
     """
     # Get known domains to exclude
-    customer_domains = set(
+    customer_domains = {
         row[0].lower()
         for row in db.query(Company.domain)
         .filter(
@@ -81,17 +81,16 @@ async def mine_unknown_domains(
         )
         .all()
         if row[0]
-    )
+    }
 
     vendor_domains = set()
     for row in db.query(VendorCard.emails).filter(VendorCard.emails.isnot(None)).limit(5000).all():
-        if row[0]:
-            for email in row[0]:
-                d = _normalize_domain(email)
-                if d:
-                    vendor_domains.add(d)
+        for email in row[0] or []:
+            d = _normalize_domain(email)
+            if d:
+                vendor_domains.add(d)
 
-    prospect_domains = set(row[0].lower() for row in db.query(ProspectAccount.domain).limit(5000).all() if row[0])
+    prospect_domains = {row[0].lower() for row in db.query(ProspectAccount.domain).limit(5000).all() if row[0]}
 
     exclude_domains = customer_domains | vendor_domains | prospect_domains | FREEMAIL_DOMAINS | INTERNAL_DOMAINS
 
@@ -115,22 +114,14 @@ async def mine_unknown_domains(
             if not domain or domain in exclude_domains:
                 continue
 
-            if domain not in domain_counts:
-                domain_counts[domain] = {
-                    "domain": domain,
-                    "email_count": 0,
-                    "sample_senders": [],
-                }
-
-            domain_counts[domain]["email_count"] += 1
+            info = domain_counts.setdefault(
+                domain,
+                {"domain": domain, "email_count": 0, "sample_senders": []},
+            )
+            info["email_count"] += 1
             name = sender.get("name", "")
-            if name and len(domain_counts[domain]["sample_senders"]) < 3:
-                domain_counts[domain]["sample_senders"].append(
-                    {
-                        "name": name,
-                        "email": email,
-                    }
-                )
+            if name and len(info["sample_senders"]) < 3:
+                info["sample_senders"].append({"name": name, "email": email})
 
     except Exception as e:
         logger.error("Email mining Graph API error: {}", e)
@@ -171,19 +162,14 @@ async def enrich_email_domains(
         domain = d_info["domain"]
         company_data = None
 
-        # Try primary enrichment (Explorium)
-        if enrich_fn:
+        # Try primary enrichment (Explorium), then fall back to Apollo.
+        for source, fn in (("Explorium", enrich_fn), ("Apollo", apollo_enrich_fn)):
+            if company_data or not fn:
+                continue
             try:
-                company_data = await enrich_fn(domain)
+                company_data = await fn(domain)
             except Exception as e:
-                logger.warning("Explorium enrich failed for {}: {}", domain, e)
-
-        # Fallback to Apollo
-        if not company_data and apollo_enrich_fn:
-            try:
-                company_data = await apollo_enrich_fn(domain)
-            except Exception as e:
-                logger.warning("Apollo enrich failed for {}: {}", domain, e)
+                logger.warning("{} enrich failed for {}: {}", source, domain, e)
 
         if not company_data:
             logger.debug("Skip {}: no enrichment data available", domain)

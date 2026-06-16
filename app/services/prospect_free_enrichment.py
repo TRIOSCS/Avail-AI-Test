@@ -211,12 +211,12 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
 
                 # Update NAICS code if we found one and prospect doesn't have it
                 if not prospect.naics_code and sam_data.get("naics_codes"):
+                    naics_codes = sam_data["naics_codes"]
                     primary = next(
-                        (n for n in sam_data["naics_codes"] if n.get("primary")),
-                        sam_data["naics_codes"][0] if sam_data["naics_codes"] else None,
+                        (n for n in naics_codes if n.get("primary")),
+                        naics_codes[0],
                     )
-                    if primary:
-                        prospect.naics_code = primary["code"]
+                    prospect.naics_code = primary["code"]
 
         # Google News
         news = await enrich_from_google_news(prospect)

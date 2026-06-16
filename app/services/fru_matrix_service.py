@@ -85,6 +85,18 @@ def _plural(n: int, noun: str) -> str:
     return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
 
 
+def _canonical_key(raw: str) -> tuple[int, str]:
+    """Sort/compare key picking the canonical raw spelling of a PN.
+
+    Sheets disagree on the raw spelling of the same FRU (Lenovo FRU-PN stores the SAP-
+    padded "0000000NV340_E00", Main stores "00NV340"); the shortest form, then
+    alphabetical, is the canonical de-padded choice. Every spot that picks a display
+    spelling across sheets (get_fru_view, get_reverse_context, get_search_aliases) must
+    use this key so they agree.
+    """
+    return (len(raw), raw)
+
+
 @dataclass(frozen=True)
 class FruLinkItem:
     """One deduplicated related part under a FRU."""
@@ -315,10 +327,9 @@ def get_fru_view(db: Session, mpn: str) -> FruView | None:
 
     series = tuple(dict.fromkeys(link.series for link in links if link.series))
     machines = tuple(dict.fromkeys(link.machine for link in links if link.machine))
-    # Sheets disagree on the raw spelling of the same FRU (Lenovo FRU-PN stores the
-    # SAP-padded "0000000NV340_E00", Main stores "00NV340") — display the shortest
-    # (canonical de-padded) form deterministically.
-    fru_raw = min((link.fru_raw for link in links), key=lambda r: (len(r), r))
+    # Display the canonical (shortest, de-padded) raw spelling deterministically — see
+    # _canonical_key for why sheets disagree on the same FRU's spelling.
+    fru_raw = min((link.fru_raw for link in links), key=_canonical_key)
     return FruView(
         fru_raw=fru_raw,
         fru_norm=norm,
@@ -403,7 +414,7 @@ def get_reverse_context(db: Session, mpn: str) -> ReverseContext:
     best_raw: dict[str, str] = {}
     for fru_norm, fru_raw in rows:
         current = best_raw.get(fru_norm)
-        if current is None or (len(fru_raw), fru_raw) < (len(current), current):
+        if current is None or _canonical_key(fru_raw) < _canonical_key(current):
             best_raw[fru_norm] = fru_raw
     return ReverseContext(distinct_frus=distinct, top_frus=tuple(sorted(best_raw.values())[:3]))
 
@@ -483,7 +494,7 @@ def get_search_aliases(db: Session, mpn: str) -> list[SearchAlias]:
             continue
         if priority[rel_kind] < priority[entry["kind"]]:
             entry["kind"] = rel_kind
-        if (len(alias_raw), alias_raw) < (len(entry["raw"]), entry["raw"]):
+        if _canonical_key(alias_raw) < _canonical_key(entry["raw"]):
             entry["raw"] = alias_raw
         if not entry["mfr"] and alias_mfr:
             entry["mfr"] = alias_mfr

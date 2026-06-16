@@ -245,6 +245,13 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
 
     now = datetime.now(timezone.utc)
     schema_caches: dict[str, dict] = {}  # one schema load per commodity, reused across cards
+
+    def get_schema_cache(commodity: str) -> dict:
+        cache = schema_caches.get(commodity)
+        if cache is None:
+            cache = schema_caches[commodity] = load_schema_cache(db, commodity)
+        return cache
+
     for spare_norm in sorted(rows_by_norm):
         spare_rows = rows_by_norm[spare_norm]
         spare_card_ids = key_to_card_ids[spare_norm]
@@ -294,9 +301,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
                             # manufacturer schemes — a safe FILL for a missing category
                             # (record_spec requires a category, so this precedes the loop).
                             categorized = set_category(card, decode.commodity, source, OEM_DECODE_CONFIDENCE)
-                        cache = schema_caches.get(decode.commodity)
-                        if cache is None:
-                            cache = schema_caches[decode.commodity] = load_schema_cache(db, decode.commodity)
+                        cache = get_schema_cache(decode.commodity)
                         # No pre-gate: the F1 ladder rejects any write that loses to a
                         # higher-(tier, confidence, updated_at) prior.
                         for spec_key, value in decode.specs.items():
@@ -319,9 +324,7 @@ def oem_crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> Counter:
                     hint = title_cat if title_cat in SPEC_COMMODITIES else None
                     desc = extract_desc(title_input, commodity_hint=hint)
                     if desc is not None and desc.specs and title_cat:
-                        t_cache = schema_caches.get(title_cat)
-                        if t_cache is None:
-                            t_cache = schema_caches[title_cat] = load_schema_cache(db, title_cat)
+                        t_cache = get_schema_cache(title_cat)
                         for spec_key, value in desc.specs.items():
                             if record_spec(
                                 db,

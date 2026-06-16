@@ -9,9 +9,10 @@ Depends on: SQLAlchemy models, app/utils/sql_helpers.py, app/utils/claude_client
 """
 
 import hashlib
+from collections.abc import Callable
 
 from loguru import logger
-from sqlalchemy import String, cast, func, or_
+from sqlalchemy import String, cast, func
 from sqlalchemy.orm import Session
 
 from app.models.crm import Company, SiteContact
@@ -68,10 +69,37 @@ def _to_dict(obj, fields: list[str], entity_type: str) -> dict:
     """Convert a SQLAlchemy model to a search result dict."""
     d = {"type": entity_type, "id": obj.id}
     for f in fields:
-        val = getattr(obj, f, None)
-        # Convert non-serializable types to string
-        d[f] = val
+        d[f] = getattr(obj, f, None)
     return d
+
+
+def _part_dedup_key(r) -> str:
+    """Dedup key for parts: normalized (or primary) MPN, case-folded."""
+    return (r.normalized_mpn or r.primary_mpn or "").lower()
+
+
+def _offer_dedup_key(r) -> tuple[str, str]:
+    """Dedup key for offers: (MPN, vendor name), case-folded."""
+    return ((r.mpn or "").lower(), (r.vendor_name or "").lower())
+
+
+def _dedup_to_dicts(rows, key_fn: Callable[[object], object], fields: list[str], entity_type: str) -> list[dict]:
+    """Dedup over-fetched rows by key_fn, keeping the first of each key.
+
+    Result dicts (built via _to_dict) are capped at RESULT_LIMIT; callers fetch extra
+    (RESULT_LIMIT * 3) so distinct keys still fill the page after near-duplicates drop.
+    """
+    seen: set = set()
+    result: list[dict] = []
+    for r in rows:
+        key = key_fn(r)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(_to_dict(r, fields, entity_type))
+        if len(result) >= RESULT_LIMIT:
+            break
+    return result
 
 
 # ── Empty result template ─────────────────────────────────────────────
@@ -104,14 +132,13 @@ def fast_search(query: str, db: Session) -> dict:
         return _empty_result()
 
     sb = SearchBuilder(query.strip())
-    pattern = f"%{sb.safe}%"
     use_pg = _is_postgres(db)
 
     groups = {}
     all_results = []
 
     # --- Requisitions ---
-    q = db.query(Requisition).filter(Requisition.name.ilike(pattern) | Requisition.customer_name.ilike(pattern))
+    q = db.query(Requisition).filter(sb.ilike_filter(Requisition.name, Requisition.customer_name))
     if use_pg:
         q = q.order_by(
             func.greatest(
@@ -124,7 +151,7 @@ def fast_search(query: str, db: Session) -> dict:
     all_results.extend(groups["requisitions"])
 
     # --- Companies ---
-    q = db.query(Company).filter(Company.name.ilike(pattern) | Company.domain.ilike(pattern))
+    q = db.query(Company).filter(sb.ilike_filter(Company.name, Company.domain))
     if use_pg:
         q = q.order_by(func.similarity(Company.name, query).desc())
     rows = q.limit(RESULT_LIMIT).all()
@@ -133,11 +160,13 @@ def fast_search(query: str, db: Session) -> dict:
 
     # --- Vendors (includes JSON emails/phones cast to string) ---
     q = db.query(VendorCard).filter(
-        VendorCard.display_name.ilike(pattern)
-        | VendorCard.normalized_name.ilike(pattern)
-        | VendorCard.domain.ilike(pattern)
-        | cast(VendorCard.emails, String).ilike(pattern)
-        | cast(VendorCard.phones, String).ilike(pattern)
+        sb.ilike_filter(
+            VendorCard.display_name,
+            VendorCard.normalized_name,
+            VendorCard.domain,
+            cast(VendorCard.emails, String),
+            cast(VendorCard.phones, String),
+        )
     )
     if use_pg:
         q = q.order_by(func.similarity(VendorCard.display_name, query).desc())
@@ -147,7 +176,7 @@ def fast_search(query: str, db: Session) -> dict:
 
     # --- Vendor Contacts ---
     q = db.query(VendorContact).filter(
-        VendorContact.full_name.ilike(pattern) | VendorContact.email.ilike(pattern) | VendorContact.phone.ilike(pattern)
+        sb.ilike_filter(VendorContact.full_name, VendorContact.email, VendorContact.phone)
     )
     if use_pg:
         q = q.order_by(func.similarity(VendorContact.full_name, query).desc())
@@ -156,9 +185,7 @@ def fast_search(query: str, db: Session) -> dict:
     all_results.extend(groups["vendor_contacts"])
 
     # --- Site Contacts ---
-    q = db.query(SiteContact).filter(
-        SiteContact.full_name.ilike(pattern) | SiteContact.email.ilike(pattern) | SiteContact.phone.ilike(pattern)
-    )
+    q = db.query(SiteContact).filter(sb.ilike_filter(SiteContact.full_name, SiteContact.email, SiteContact.phone))
     if use_pg:
         q = q.order_by(func.similarity(SiteContact.full_name, query).desc())
     rows = q.limit(RESULT_LIMIT).all()
@@ -167,43 +194,29 @@ def fast_search(query: str, db: Session) -> dict:
 
     # --- Parts (Requirements) — dedup by normalized_mpn so same part across reqs shows once ---
     q = db.query(Requirement).filter(
-        Requirement.primary_mpn.ilike(pattern)
-        | Requirement.normalized_mpn.ilike(pattern)
-        | Requirement.brand.ilike(pattern)
-        | Requirement.substitutes_text.ilike(pattern)
+        sb.ilike_filter(
+            Requirement.primary_mpn,
+            Requirement.normalized_mpn,
+            Requirement.brand,
+            Requirement.substitutes_text,
+        )
     )
     if use_pg:
         q = q.order_by(func.similarity(Requirement.primary_mpn, query).desc())
     rows = q.limit(RESULT_LIMIT * 3).all()  # fetch extra to dedup from
-    seen_mpns: set[str] = set()
-    deduped_parts = []
-    for r in rows:
-        mpn_key = (r.normalized_mpn or r.primary_mpn or "").lower()
-        if mpn_key not in seen_mpns:
-            seen_mpns.add(mpn_key)
-            deduped_parts.append(_to_dict(r, ["primary_mpn", "normalized_mpn", "brand", "requisition_id"], "part"))
-            if len(deduped_parts) >= RESULT_LIMIT:
-                break
-    groups["parts"] = deduped_parts
+    groups["parts"] = _dedup_to_dicts(
+        rows, _part_dedup_key, ["primary_mpn", "normalized_mpn", "brand", "requisition_id"], "part"
+    )
     all_results.extend(groups["parts"])
 
     # --- Offers — dedup by (mpn, vendor_name) so same offer combo shows once ---
-    q = db.query(Offer).filter(Offer.vendor_name.ilike(pattern) | Offer.mpn.ilike(pattern))
+    q = db.query(Offer).filter(sb.ilike_filter(Offer.vendor_name, Offer.mpn))
     if use_pg:
         q = q.order_by(func.similarity(Offer.mpn, query).desc())
     rows = q.limit(RESULT_LIMIT * 3).all()
-    seen_offers: set[tuple[str, str]] = set()
-    deduped_offers = []
-    for r in rows:
-        offer_key = ((r.mpn or "").lower(), (r.vendor_name or "").lower())
-        if offer_key not in seen_offers:
-            seen_offers.add(offer_key)
-            deduped_offers.append(
-                _to_dict(r, ["vendor_name", "mpn", "unit_price", "qty_available", "requisition_id"], "offer")
-            )
-            if len(deduped_offers) >= RESULT_LIMIT:
-                break
-    groups["offers"] = deduped_offers
+    groups["offers"] = _dedup_to_dicts(
+        rows, _offer_dedup_key, ["vendor_name", "mpn", "unit_price", "qty_available", "requisition_id"], "offer"
+    )
     all_results.extend(groups["offers"])
 
     # --- Best match: first result from first non-empty group ---
@@ -346,20 +359,15 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
 
     model, search_fields, display_fields, group_key = config
     sb_intent = SearchBuilder(text_query.strip()) if text_query.strip() else None
-    pattern = f"%{sb_intent.safe}%" if sb_intent and sb_intent.safe else None
-
-    # Build ILIKE conditions on search fields
-    conditions = []
-    if pattern:
-        for field_name in search_fields:
-            col = getattr(model, field_name, None)
-            if col is not None:
-                conditions.append(col.ilike(pattern))
-
-    if not conditions:
+    if not sb_intent or not sb_intent.safe:
         return (group_key, [])
 
-    q = db.query(model).filter(or_(*conditions))
+    # Resolve search fields to columns (skips any config typo missing on the model).
+    columns = [col for field_name in search_fields if (col := getattr(model, field_name, None)) is not None]
+    if not columns:
+        return (group_key, [])
+
+    q = db.query(model).filter(sb_intent.ilike_filter(*columns))
 
     # Apply structured filters
     for filter_name, filter_value in (filters or {}).items():
@@ -386,29 +394,11 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
     # Dedup parts by normalized_mpn, offers by (mpn, vendor_name)
     if entity_type == "part":
         rows = q.limit(RESULT_LIMIT * 3).all()
-        seen: set[str] = set()
-        deduped = []
-        for r in rows:
-            mpn_key = (getattr(r, "normalized_mpn", None) or getattr(r, "primary_mpn", None) or "").lower()
-            if mpn_key not in seen:
-                seen.add(mpn_key)
-                deduped.append(_to_dict(r, display_fields, entity_type))
-                if len(deduped) >= RESULT_LIMIT:
-                    break
-        return (group_key, deduped)
+        return (group_key, _dedup_to_dicts(rows, _part_dedup_key, display_fields, entity_type))
 
     if entity_type == "offer":
         rows = q.limit(RESULT_LIMIT * 3).all()
-        seen_offers: set[tuple[str, str]] = set()
-        deduped = []
-        for r in rows:
-            key = ((getattr(r, "mpn", None) or "").lower(), (getattr(r, "vendor_name", None) or "").lower())
-            if key not in seen_offers:
-                seen_offers.add(key)
-                deduped.append(_to_dict(r, display_fields, entity_type))
-                if len(deduped) >= RESULT_LIMIT:
-                    break
-        return (group_key, deduped)
+        return (group_key, _dedup_to_dicts(rows, _offer_dedup_key, display_fields, entity_type))
 
     rows = q.limit(RESULT_LIMIT).all()
     return (group_key, [_to_dict(r, display_fields, entity_type) for r in rows])

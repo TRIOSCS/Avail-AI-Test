@@ -515,47 +515,59 @@ def build_context(db: Session, *, requisition_id: int) -> str:
     return "\n\n".join(sections)
 
 
-async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
-    """Generate AI insights for a requisition using the context engine."""
+async def _regenerate_insights(
+    db: Session,
+    *,
+    context: str,
+    delete_filters: tuple,
+    prompt: str,
+    system: str,
+    entry_kwargs: dict,
+    no_context_log: str,
+    unavailable_log: str,
+    failed_log: str,
+    no_results_log: str,
+    generated_log: str,
+    generated_args: tuple = (),
+) -> list[KnowledgeEntry]:
+    """Shared insight pipeline: replace cached insights for one scope.
+
+    Deletes the existing ``ai_insight`` rows matched by ``delete_filters``, asks
+    Claude for fresh insights, and recreates them linked via ``entry_kwargs``.
+    The single-arg ``*_log`` strings are pre-formatted (logged verbatim) so each
+    caller keeps its exact wording; ``generated_log``/``failed_log`` are loguru
+    templates whose runtime values (count, scope id, error) are passed as args.
+    """
     from app.utils.claude_client import claude_structured
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
-    context = build_context(db, requisition_id=requisition_id)
     if not context:
-        logger.debug("No context for req {} — skipping insight generation", requisition_id)
+        logger.debug(no_context_log)
         return []
 
-    # Delete old AI insights for this req
-    old_insights = (
-        db.query(KnowledgeEntry)
-        .filter(
-            KnowledgeEntry.requisition_id == requisition_id,
-            KnowledgeEntry.entry_type == "ai_insight",
-        )
-        .all()
-    )
+    old_insights = db.query(KnowledgeEntry).filter(*delete_filters).all()
     for old in old_insights:
         db.delete(old)
     db.flush()
 
     try:
         result = await claude_structured(
-            prompt="Analyze this knowledge base and generate insights:\n\n{}".format(context),
+            prompt=prompt,
             schema=INSIGHT_SCHEMA,
-            system=INSIGHT_SYSTEM_PROMPT,
+            system=system,
             model_tier="smart",
             max_tokens=2048,
             thinking_budget=5000,
         )
     except ClaudeUnavailableError:
-        logger.info("Claude not configured — skipping insight generation")
+        logger.info(unavailable_log)
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for insight generation: {}", e)
+        logger.warning(failed_log, e)
         return []
 
     if not result or "insights" not in result:
-        logger.warning("AI insight generation returned no results for req {}", requisition_id)
+        logger.warning(no_results_log)
         return []
 
     entries = []
@@ -569,12 +581,34 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
             source="ai_generated",
             confidence=insight.get("confidence", 0.8),
             expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
-            requisition_id=requisition_id,
+            **entry_kwargs,
         )
         entries.append(entry)
 
-    logger.info("Generated {} insights for req {}", len(entries), requisition_id)
+    logger.info(generated_log, len(entries), *generated_args)
     return entries
+
+
+async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
+    """Generate AI insights for a requisition using the context engine."""
+    context = build_context(db, requisition_id=requisition_id)
+    return await _regenerate_insights(
+        db,
+        context=context,
+        delete_filters=(
+            KnowledgeEntry.requisition_id == requisition_id,
+            KnowledgeEntry.entry_type == "ai_insight",
+        ),
+        prompt="Analyze this knowledge base and generate insights:\n\n{}".format(context),
+        system=INSIGHT_SYSTEM_PROMPT,
+        entry_kwargs={"requisition_id": requisition_id},
+        no_context_log="No context for req {} — skipping insight generation".format(requisition_id),
+        unavailable_log="Claude not configured — skipping insight generation",
+        failed_log="Claude AI failed for insight generation: {}",
+        no_results_log="AI insight generation returned no results for req {}".format(requisition_id),
+        generated_log="Generated {} insights for req {}",
+        generated_args=(requisition_id,),
+    )
 
 
 def get_cached_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
@@ -952,251 +986,92 @@ def build_company_context(db: Session, *, company_id: int) -> str:
 
 async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
     """Generate AI insights for an MPN using the context engine."""
-    from app.utils.claude_client import claude_structured
-    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
-
     context = build_mpn_context(db, mpn=mpn)
-    if not context:
-        logger.debug("No context for MPN {} — skipping insight generation", mpn)
-        return []
-
-    # Delete old AI insights for this MPN (not tied to a specific requisition)
-    old_insights = (
-        db.query(KnowledgeEntry)
-        .filter(
+    return await _regenerate_insights(
+        db,
+        context=context,
+        # Old MPN insights are not tied to a specific requisition.
+        delete_filters=(
             KnowledgeEntry.mpn == mpn,
             KnowledgeEntry.entry_type == "ai_insight",
             KnowledgeEntry.requisition_id.is_(None),
-        )
-        .all()
+        ),
+        prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
+        system=MPN_INSIGHT_PROMPT,
+        entry_kwargs={"mpn": mpn},
+        no_context_log="No context for MPN {} — skipping insight generation".format(mpn),
+        unavailable_log="Claude not configured — skipping MPN insight generation",
+        failed_log="Claude AI failed for MPN insight generation: {}",
+        no_results_log="AI insight generation returned no results for MPN {}".format(mpn),
+        generated_log="Generated {} insights for MPN {}",
+        generated_args=(mpn,),
     )
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
-
-    try:
-        result = await claude_structured(
-            prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
-            schema=INSIGHT_SCHEMA,
-            system=MPN_INSIGHT_PROMPT,
-            model_tier="smart",
-            max_tokens=2048,
-            thinking_budget=5000,
-        )
-    except ClaudeUnavailableError:
-        logger.info("Claude not configured — skipping MPN insight generation")
-        return []
-    except ClaudeError as e:
-        logger.warning("Claude AI failed for MPN insight generation: {}", e)
-        return []
-
-    if not result or "insights" not in result:
-        logger.warning("AI insight generation returned no results for MPN {}", mpn)
-        return []
-
-    entries = []
-    now = datetime.now(timezone.utc)
-    for insight in result["insights"][:5]:
-        entry = create_entry(
-            db,
-            user_id=None,
-            entry_type="ai_insight",
-            content=insight["content"],
-            source="ai_generated",
-            confidence=insight.get("confidence", 0.8),
-            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
-            mpn=mpn,
-        )
-        entries.append(entry)
-
-    logger.info("Generated {} insights for MPN {}", len(entries), mpn)
-    return entries
 
 
 async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
     """Generate AI insights for a vendor using the context engine."""
-    from app.utils.claude_client import claude_structured
-    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
-
     context = build_vendor_context(db, vendor_card_id=vendor_card_id)
-    if not context:
-        logger.debug("No context for vendor {} — skipping insight generation", vendor_card_id)
-        return []
-
-    # Delete old AI insights for this vendor
-    old_insights = (
-        db.query(KnowledgeEntry)
-        .filter(
+    return await _regenerate_insights(
+        db,
+        context=context,
+        delete_filters=(
             KnowledgeEntry.vendor_card_id == vendor_card_id,
             KnowledgeEntry.entry_type == "ai_insight",
-        )
-        .all()
+        ),
+        prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
+        system=VENDOR_INSIGHT_PROMPT,
+        entry_kwargs={"vendor_card_id": vendor_card_id},
+        no_context_log="No context for vendor {} — skipping insight generation".format(vendor_card_id),
+        unavailable_log="Claude not configured — skipping vendor insight generation",
+        failed_log="Claude AI failed for vendor insight generation: {}",
+        no_results_log="AI insight generation returned no results for vendor {}".format(vendor_card_id),
+        generated_log="Generated {} insights for vendor {}",
+        generated_args=(vendor_card_id,),
     )
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
-
-    try:
-        result = await claude_structured(
-            prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
-            schema=INSIGHT_SCHEMA,
-            system=VENDOR_INSIGHT_PROMPT,
-            model_tier="smart",
-            max_tokens=2048,
-            thinking_budget=5000,
-        )
-    except ClaudeUnavailableError:
-        logger.info("Claude not configured — skipping vendor insight generation")
-        return []
-    except ClaudeError as e:
-        logger.warning("Claude AI failed for vendor insight generation: {}", e)
-        return []
-
-    if not result or "insights" not in result:
-        logger.warning("AI insight generation returned no results for vendor {}", vendor_card_id)
-        return []
-
-    entries = []
-    now = datetime.now(timezone.utc)
-    for insight in result["insights"][:5]:
-        entry = create_entry(
-            db,
-            user_id=None,
-            entry_type="ai_insight",
-            content=insight["content"],
-            source="ai_generated",
-            confidence=insight.get("confidence", 0.8),
-            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
-            vendor_card_id=vendor_card_id,
-        )
-        entries.append(entry)
-
-    logger.info("Generated {} insights for vendor {}", len(entries), vendor_card_id)
-    return entries
 
 
 async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
     """Generate AI insights for the overall pipeline health."""
-    from app.utils.claude_client import claude_structured
-    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
-
     context = build_pipeline_context(db)
-    if not context:
-        logger.debug("No context for pipeline — skipping insight generation")
-        return []
-
-    # Delete old pipeline insights (sentinel mpn='__pipeline__')
-    old_insights = (
-        db.query(KnowledgeEntry)
-        .filter(
+    return await _regenerate_insights(
+        db,
+        context=context,
+        # Pipeline insights are stored under the sentinel mpn='__pipeline__'.
+        delete_filters=(
             KnowledgeEntry.mpn == "__pipeline__",
             KnowledgeEntry.entry_type == "ai_insight",
-        )
-        .all()
+        ),
+        prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
+        system=PIPELINE_INSIGHT_PROMPT,
+        entry_kwargs={"mpn": "__pipeline__"},
+        no_context_log="No context for pipeline — skipping insight generation",
+        unavailable_log="Claude not configured — skipping pipeline insight generation",
+        failed_log="Claude AI failed for pipeline insight generation: {}",
+        no_results_log="AI insight generation returned no results for pipeline",
+        generated_log="Generated {} pipeline insights",
     )
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
-
-    try:
-        result = await claude_structured(
-            prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
-            schema=INSIGHT_SCHEMA,
-            system=PIPELINE_INSIGHT_PROMPT,
-            model_tier="smart",
-            max_tokens=2048,
-            thinking_budget=5000,
-        )
-    except ClaudeUnavailableError:
-        logger.info("Claude not configured — skipping pipeline insight generation")
-        return []
-    except ClaudeError as e:
-        logger.warning("Claude AI failed for pipeline insight generation: {}", e)
-        return []
-
-    if not result or "insights" not in result:
-        logger.warning("AI insight generation returned no results for pipeline")
-        return []
-
-    entries = []
-    now = datetime.now(timezone.utc)
-    for insight in result["insights"][:5]:
-        entry = create_entry(
-            db,
-            user_id=None,
-            entry_type="ai_insight",
-            content=insight["content"],
-            source="ai_generated",
-            confidence=insight.get("confidence", 0.8),
-            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
-            mpn="__pipeline__",
-        )
-        entries.append(entry)
-
-    logger.info("Generated {} pipeline insights", len(entries))
-    return entries
 
 
 async def generate_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
     """Generate AI insights for a company using the context engine."""
-    from app.utils.claude_client import claude_structured
-    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
-
     context = build_company_context(db, company_id=company_id)
-    if not context:
-        logger.debug("No context for company {} — skipping insight generation", company_id)
-        return []
-
-    # Delete old AI insights for this company
-    old_insights = (
-        db.query(KnowledgeEntry)
-        .filter(
+    return await _regenerate_insights(
+        db,
+        context=context,
+        delete_filters=(
             KnowledgeEntry.company_id == company_id,
             KnowledgeEntry.entry_type == "ai_insight",
-        )
-        .all()
+        ),
+        prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
+        system=COMPANY_INSIGHT_PROMPT,
+        entry_kwargs={"company_id": company_id},
+        no_context_log="No context for company {} — skipping insight generation".format(company_id),
+        unavailable_log="Claude not configured — skipping company insight generation",
+        failed_log="Claude AI failed for company insight generation: {}",
+        no_results_log="AI insight generation returned no results for company {}".format(company_id),
+        generated_log="Generated {} insights for company {}",
+        generated_args=(company_id,),
     )
-    for old in old_insights:
-        db.delete(old)
-    db.flush()
-
-    try:
-        result = await claude_structured(
-            prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
-            schema=INSIGHT_SCHEMA,
-            system=COMPANY_INSIGHT_PROMPT,
-            model_tier="smart",
-            max_tokens=2048,
-            thinking_budget=5000,
-        )
-    except ClaudeUnavailableError:
-        logger.info("Claude not configured — skipping company insight generation")
-        return []
-    except ClaudeError as e:
-        logger.warning("Claude AI failed for company insight generation: {}", e)
-        return []
-
-    if not result or "insights" not in result:
-        logger.warning("AI insight generation returned no results for company {}", company_id)
-        return []
-
-    entries = []
-    now = datetime.now(timezone.utc)
-    for insight in result["insights"][:5]:
-        entry = create_entry(
-            db,
-            user_id=None,
-            entry_type="ai_insight",
-            content=insight["content"],
-            source="ai_generated",
-            confidence=insight.get("confidence", 0.8),
-            expires_at=now + timedelta(days=EXPIRY_AI_INSIGHT),
-            company_id=company_id,
-        )
-        entries.append(entry)
-
-    logger.info("Generated {} insights for company {}", len(entries), company_id)
-    return entries
 
 
 # ---------------------------------------------------------------------------

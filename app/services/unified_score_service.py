@@ -105,12 +105,34 @@ def _merge_trader_categories(
     """
     if buyer_cats and sales_cats:
         return {k: (buyer_cats[k] + sales_cats[k]) / 2 for k in CATEGORY_WEIGHTS}
-    return buyer_cats or sales_cats or {k: 0.0 for k in CATEGORY_WEIGHTS}
+    return buyer_cats or sales_cats or _zero_categories()
 
 
 def _weighted_score(cats: dict[str, float]) -> float:
     """Apply category weights to produce unified score 0-100."""
     return sum(cats.get(k, 0) * w for k, w in CATEGORY_WEIGHTS.items())
+
+
+def _zero_categories() -> dict[str, float]:
+    """All four categories at 0% — the fallback when a role has no data."""
+    return {k: 0.0 for k in CATEGORY_WEIGHTS}
+
+
+def _index_by_user_role(snaps: list) -> dict[tuple[int, str], object]:
+    """Index role-scoped snapshots by (user_id, role_type)."""
+    return {(s.user_id, s.role_type): s for s in snaps}
+
+
+def _get_snapshot(db: Session, user_id: int, month: date) -> UnifiedScoreSnapshot | None:
+    """Fetch the UnifiedScoreSnapshot for one user in a given month, if any."""
+    return (
+        db.query(UnifiedScoreSnapshot)
+        .filter(
+            UnifiedScoreSnapshot.user_id == user_id,
+            UnifiedScoreSnapshot.month == month,
+        )
+        .first()
+    )
 
 
 def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
@@ -124,18 +146,13 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
     _human = [User.is_active.is_(True), ~User.email.like("%@availai.local")]
     users = db.query(User).filter(*_human).all()
 
-    # Load all AvailScoreSnapshots for this month
-    avail_snaps = db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all()
-    # Index by (user_id, role_type)
-    avail_idx: dict[tuple[int, str], AvailScoreSnapshot] = {}
-    for s in avail_snaps:
-        avail_idx[(s.user_id, s.role_type)] = s
+    # Load all AvailScoreSnapshots for this month, indexed by (user_id, role_type)
+    avail_idx = _index_by_user_role(db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all())
 
     # Load MultiplierScoreSnapshots for cached display
-    mult_snaps = db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
-    mult_idx: dict[tuple[int, str], MultiplierScoreSnapshot] = {}
-    for s in mult_snaps:
-        mult_idx[(s.user_id, s.role_type)] = s
+    mult_idx = _index_by_user_role(
+        db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
+    )
 
     results = []
     for user in users:
@@ -153,10 +170,10 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
             cats = _merge_trader_categories(buyer_cats, sales_cats)
             primary_role = "trader"
         elif user.role in (UserRole.SALES, UserRole.MANAGER):
-            cats = sales_cats or {k: 0.0 for k in CATEGORY_WEIGHTS}
+            cats = sales_cats or _zero_categories()
             primary_role = "sales"
         else:
-            cats = buyer_cats or {k: 0.0 for k in CATEGORY_WEIGHTS}
+            cats = buyer_cats or _zero_categories()
             primary_role = "buyer"
 
         score = _weighted_score(cats)
@@ -187,17 +204,8 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
     # Upsert snapshots
     saved = 0
     for r in results:
-        existing = (
-            db.query(UnifiedScoreSnapshot)
-            .filter(
-                UnifiedScoreSnapshot.user_id == r["user_id"],
-                UnifiedScoreSnapshot.month == month,
-            )
-            .first()
-        )
-        if existing:
-            snap = existing
-        else:
+        snap = _get_snapshot(db, r["user_id"], month)
+        if snap is None:
             snap = UnifiedScoreSnapshot(user_id=r["user_id"], month=month)
             db.add(snap)
 
@@ -231,14 +239,7 @@ def _refresh_blurbs(db: Session, month: date, results: list[dict]) -> None:
     total = len(results)
 
     for r in results:
-        snap = (
-            db.query(UnifiedScoreSnapshot)
-            .filter(
-                UnifiedScoreSnapshot.user_id == r["user_id"],
-                UnifiedScoreSnapshot.month == month,
-            )
-            .first()
-        )
+        snap = _get_snapshot(db, r["user_id"], month)
         if not snap:
             continue
 
@@ -338,15 +339,10 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
     )
 
     # Load full AvailScore + Multiplier breakdowns for expandable rows
-    avail_snaps = db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all()
-    avail_idx: dict[tuple[int, str], AvailScoreSnapshot] = {}
-    for s in avail_snaps:
-        avail_idx[(s.user_id, s.role_type)] = s
-
-    mult_snaps = db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
-    mult_idx: dict[tuple[int, str], MultiplierScoreSnapshot] = {}
-    for s in mult_snaps:
-        mult_idx[(s.user_id, s.role_type)] = s
+    avail_idx = _index_by_user_role(db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all())
+    mult_idx = _index_by_user_role(
+        db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
+    )
 
     # Build user name lookup
     user_ids = [s.user_id for s in snaps]

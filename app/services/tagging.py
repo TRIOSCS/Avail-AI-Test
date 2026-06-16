@@ -115,6 +115,10 @@ _CATEGORY_MAP: dict[str, str] = {
 }
 
 
+# Keywords ordered longest-first for greedy substring matching (precomputed once).
+_CATEGORY_KEYWORDS_BY_LENGTH: list[str] = sorted(_CATEGORY_MAP, key=len, reverse=True)
+
+
 def _map_category_to_commodity(category: str) -> str | None:
     """Map a free-text category to the closest commodity taxonomy tag."""
     lower = category.lower().strip()
@@ -122,7 +126,7 @@ def _map_category_to_commodity(category: str) -> str | None:
     if lower in _CATEGORY_MAP:
         return _CATEGORY_MAP[lower]
     # Try substring match (longest keyword first)
-    for keyword in sorted(_CATEGORY_MAP, key=len, reverse=True):
+    for keyword in _CATEGORY_KEYWORDS_BY_LENGTH:
         if keyword in lower:
             return _CATEGORY_MAP[keyword]
     return None
@@ -172,9 +176,9 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
     to handle concurrent inserts without TOCTOU race.
     """
     normalized = manufacturer_name.strip()
-    tag = db.execute(
-        select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
-    ).scalar_one_or_none()
+    by_name = select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
+
+    tag = db.execute(by_name).scalar_one_or_none()
     if tag:
         return tag
 
@@ -186,9 +190,7 @@ def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
         return tag
     except IntegrityError:
         # Concurrent insert won — savepoint rolled back, re-fetch
-        return db.execute(
-            select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
-        ).scalar_one()
+        return db.execute(by_name).scalar_one()
 
 
 def get_or_create_commodity_tag(commodity_name: str, db: Session) -> Tag | None:
