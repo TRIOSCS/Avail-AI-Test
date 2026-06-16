@@ -23,7 +23,6 @@ Depends on: desc_extractor.writer.categorize_and_record, desc_extractor.categori
 """
 
 import argparse
-import re
 from collections import Counter
 
 from loguru import logger
@@ -37,6 +36,7 @@ from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE
 from app.services.desc_extractor.categorizer import categorize_from_desc
 from app.services.desc_extractor.writer import categorize_and_record
 from app.services.spec_tiers import SOURCE_TIER
+from app.utils.normalization import normalize_mpn_key
 
 # FRU-linked descriptions are a ONE-HOP prose (the FRU's row, not the card's own
 # description), so they write at fru_desc_parse / tier 82 — strictly below the own-desc
@@ -49,16 +49,10 @@ FRU_DESC_CONFIDENCE = DESC_CONFIDENCE
 # description IS just the MPN carry zero extractable signal and are excluded.
 MIN_REAL_DESC_LEN = 15
 
-_NON_ALNUM = re.compile(r"[^a-z0-9]+")
-
-
-def _alnum_norm(text: str | None) -> str:
-    """Lower-cased, alphanumeric-only form — for the desc-vs-MPN comparison + length
-    gate (so "00AR327" == "00AR327 " == "00-AR-327" and a description that is just the
-    MPN with punctuation/spacing noise is recognized as NOT a real description)."""
-    if not text:
-        return ""
-    return _NON_ALNUM.sub("", text.lower())
+# Lower-cased, alphanumeric-only form — the shared dedup-key normalizer (so "00AR327" ==
+# "00AR327 " == "00-AR-327" and a description that is just the MPN with punctuation/
+# spacing noise is recognized as NOT a real description).
+_alnum_norm = normalize_mpn_key
 
 
 def _has_real_own_desc(card: MaterialCard) -> bool:

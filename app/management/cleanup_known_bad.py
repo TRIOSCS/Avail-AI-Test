@@ -124,6 +124,16 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
         .order_by(MaterialCard.id)
         .all()
     )
+
+    def _null_category(card: MaterialCard) -> None:
+        """Clear the category cell and all four provenance columns (junk that resolves
+        nowhere — the value the vocabulary rejects, and any attestation of it)."""
+        card.category = None
+        card.category_source = None
+        card.category_confidence = None
+        card.category_tier = None
+        card.category_updated_at = None
+
     for card in cards:
         raw = card.category
         source_before = card.category_source
@@ -139,11 +149,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
             else:
                 mode = "nulled"
                 if apply:
-                    card.category = None
-                    card.category_source = None
-                    card.category_confidence = None
-                    card.category_tier = None
-                    card.category_updated_at = None
+                    _null_category(card)
         else:
             if target is not None:
                 # Provenanced but non-canonical (e.g. a pre-alias-map vendor string):
@@ -170,11 +176,7 @@ def cleanup_junk_categories(db: Session, *, apply: bool = False) -> dict:
                 # write of a value the vocabulary rejects — clear both.
                 mode = "nulled"
                 if apply:
-                    card.category = None
-                    card.category_source = None
-                    card.category_confidence = None
-                    card.category_tier = None
-                    card.category_updated_at = None
+                    _null_category(card)
         tally[mode] += 1
         transitions[f"{raw!r} -> {target if mode.startswith('normalized') else None}"] += 1
         if apply and mode != "skipped_ladder":

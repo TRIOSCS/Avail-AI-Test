@@ -53,11 +53,12 @@ def _discover_files(pattern: str) -> tuple[list[Path], Path | None]:
         p = Path(raw)
         if not p.is_file():
             continue
-        if _is_manufacturers_lookup(p) and p.suffix.lower() == ".csv":
+        suffix = p.suffix.lower()
+        if _is_manufacturers_lookup(p) and suffix == ".csv":
             manufacturers = p
-        elif _is_sfdc_master(p) and p.suffix.lower() == ".csv":
+        elif _is_sfdc_master(p) and suffix == ".csv":
             paths.append(p)
-        elif p.suffix.lower() in _SHEET_SUFFIXES and not p.name.lower().endswith(".md"):
+        elif suffix in _SHEET_SUFFIXES and not p.name.lower().endswith(".md"):
             paths.append(p)
     return paths, manufacturers
 

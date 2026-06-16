@@ -350,6 +350,12 @@ def _join(pairs: list[tuple[str, str]]) -> str:
     return " · ".join(f"{k if k.strip() else repr(k)} {v}" for k, v in pairs) if pairs else "(none)"
 
 
+def _join_counts(counts: dict[str, int]) -> str:
+    """``_join`` for the common label→count mapping (spec/category/facet sources,
+    status)."""
+    return _join([(k, str(v)) for k, v in counts.items()])
+
+
 def format_report(metrics: dict[str, Any], deltas: dict[str, int] | None = None, prev_ts: str | None = None) -> str:
     """One compact human-readable block."""
     cards, facets = metrics["cards"], metrics["facets"]
@@ -367,11 +373,10 @@ def format_report(metrics: dict[str, Any], deltas: dict[str, int] | None = None,
         ),
         "  By commodity: "
         + _join([(c["commodity"], f"{c['rows']} rows/{c['spec_keys']} keys") for c in facets["by_commodity"]]),
-        f"Spec sources ({metrics['spec_entries_total']} entries): "
-        + _join([(k, str(v)) for k, v in metrics["spec_sources"].items()]),
-        "Category sources: " + _join([(k, str(v)) for k, v in metrics["category_sources"].items()]),
-        "Facet sources: " + _join([(k, str(v)) for k, v in metrics["facet_sources"].items()]),
-        "Status: " + _join([(k, str(v)) for k, v in metrics["enrichment_status"].items()]),
+        f"Spec sources ({metrics['spec_entries_total']} entries): " + _join_counts(metrics["spec_sources"]),
+        "Category sources: " + _join_counts(metrics["category_sources"]),
+        "Facet sources: " + _join_counts(metrics["facet_sources"]),
+        "Status: " + _join_counts(metrics["enrichment_status"]),
     ]
     if metrics["unregistered_sources"]:
         lines.append(
