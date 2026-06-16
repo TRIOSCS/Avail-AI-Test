@@ -3,7 +3,7 @@
   Receives: prospect (ProspectAccount ORM object).
   Called by: prospecting/list.html (loop include), claim/dismiss endpoints (OOB swap).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
-#}
+#}{% import "htmx/partials/prospecting/_macros.html" as score %}
 {% set prospect_status_colors = {
   'suggested': 'bg-brand-100 text-brand-600',
   'claimed': 'bg-emerald-50 text-emerald-700',
@@ -36,10 +36,10 @@
       {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
         <span class="text-gray-500">Fit</span>
-        <span class="font-medium {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ fit }}%</span>
+        <span class="font-medium {{ score.score_text_color(fit) }}">{{ fit }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}"
              style="width: {{ fit }}%"></div>
       </div>
     </div>
@@ -49,10 +49,10 @@
       {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
         <span class="text-gray-500">Readiness</span>
-        <span class="font-medium {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ ready }}%</span>
+        <span class="font-medium {{ score.score_text_color(ready) }}">{{ ready }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}"
              style="width: {{ ready }}%"></div>
       </div>
     </div>

@@ -1,0 +1,19 @@
+{#
+  prospecting/_macros.html — Shared Jinja macros for the prospecting cluster.
+  Called by: prospecting/_card.html, prospecting/detail.html (import).
+  Depends on: Tailwind CSS with brand palette.
+
+  These macros encapsulate copy-pasted score/threshold markup so the card and
+  detail templates stay in sync. Each macro emits output byte-identical to the
+  inline markup it replaced.
+#}
+
+{# Tailwind text-color class for a 0-100 score (>=70 good, >=40 warn, else bad). #}
+{%- macro score_text_color(score) -%}
+{% if score >= 70 %}text-emerald-600{% elif score >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}
+{%- endmacro -%}
+
+{# Tailwind bg-color class for a 0-100 score progress-bar fill. #}
+{%- macro score_bar_color(score) -%}
+{% if score >= 70 %}bg-emerald-500{% elif score >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}
+{%- endmacro -%}
