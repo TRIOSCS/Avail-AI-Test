@@ -223,14 +223,15 @@ async def _download_and_import_stock_list(
     imported_for_matching: list[dict] = []
 
     # Pre-load existing MaterialCards in one query instead of per-row
-    valid_mpns = list(
-        {
-            normalize_mpn_key((row.get("mpn") or "").strip())
-            for row in rows
-            if (row.get("mpn") or "").strip() and len((row.get("mpn") or "").strip()) >= 3
-        }
-    )
-    valid_mpns = [k for k in valid_mpns if k]  # filter empty keys
+    valid_mpn_keys = set()
+    for row in rows:
+        raw_mpn = (row.get("mpn") or "").strip()
+        if len(raw_mpn) < 3:
+            continue
+        key = normalize_mpn_key(raw_mpn)
+        if key:
+            valid_mpn_keys.add(key)
+    valid_mpns = list(valid_mpn_keys)
     card_map = {}
     mvh_map = {}
     if valid_mpns:
@@ -284,20 +285,15 @@ async def _download_and_import_stock_list(
                 continue
 
         # Add/update vendor history (richer fields from Upgrade 2)
+        price = row.get("unit_price") or row.get("price")
         mvh = mvh_map.get(card.id)
         if mvh:
             mvh.last_seen = datetime.now(timezone.utc)
             mvh.times_seen = (mvh.times_seen or 0) + 1
             if row.get("qty"):
                 mvh.last_qty = row["qty"]
-            if row.get("unit_price"):
-                mvh.last_price = row["unit_price"]
-            elif row.get("price"):
-                mvh.last_price = row["price"]
-            price = row.get("unit_price") or row.get("price")
-            record_price_snapshot(
-                db=db, material_card_id=card.id, vendor_name=norm_vendor, price=price, source="email_auto_import"
-            )
+            if price:
+                mvh.last_price = price
             if row.get("manufacturer"):
                 mvh.last_manufacturer = row["manufacturer"]
         else:
@@ -307,17 +303,13 @@ async def _download_and_import_stock_list(
                 vendor_name_normalized=norm_vendor,
                 source_type="excess_list" if is_excess_list else "email_auto_import",
                 last_qty=row.get("qty"),
-                last_price=row.get("unit_price") or row.get("price"),
+                last_price=price,
                 last_manufacturer=row.get("manufacturer", ""),
             )
             db.add(mvh)
-            record_price_snapshot(
-                db=db,
-                material_card_id=card.id,
-                vendor_name=norm_vendor,
-                price=row.get("unit_price") or row.get("price"),
-                source="email_auto_import",
-            )
+        record_price_snapshot(
+            db=db, material_card_id=card.id, vendor_name=norm_vendor, price=price, source="email_auto_import"
+        )
 
         imported += 1
         imported_for_matching.append(

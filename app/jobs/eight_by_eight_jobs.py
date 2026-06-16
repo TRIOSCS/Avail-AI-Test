@@ -97,13 +97,12 @@ async def _process_cdrs(db, settings) -> dict:
 
     # Load watermark
     watermark_row = db.query(SystemConfig).filter(SystemConfig.key == "8x8_last_poll").first()
+    since = datetime.now(timezone.utc) - timedelta(hours=24)
     if watermark_row:
         try:
             since = datetime.fromisoformat(watermark_row.value)
         except (ValueError, TypeError):
-            since = datetime.now(timezone.utc) - timedelta(hours=24)
-    else:
-        since = datetime.now(timezone.utc) - timedelta(hours=24)
+            pass
 
     until = datetime.now(timezone.utc)
 

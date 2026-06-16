@@ -115,24 +115,19 @@ async def _job_performance_tracking():
         from ..services.vendor_scorecard import compute_all_vendor_scorecards
 
         loop = asyncio.get_running_loop()
+
+        async def _run(fn, *args, timeout):
+            return await asyncio.wait_for(loop.run_in_executor(None, fn, db, *args), timeout=timeout)
+
         # Vendor scorecards
-        vs_result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_all_vendor_scorecards, db),
-            timeout=600,
-        )
+        vs_result = await _run(compute_all_vendor_scorecards, timeout=600)
         logger.info(f"Vendor scorecards: {vs_result['updated']} updated, {vs_result['skipped_cold_start']} cold-start")
         current_month = now.date().replace(day=1)
         # Buyer leaderboard
-        bl_result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month),
-            timeout=300,
-        )
+        bl_result = await _run(compute_buyer_leaderboard, current_month, timeout=300)
         logger.info(f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}")
         # Avail Scores
-        as_result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_all_avail_scores, db, current_month),
-            timeout=300,
-        )
+        as_result = await _run(compute_all_avail_scores, current_month, timeout=300)
         logger.info(
             f"Avail Scores: {as_result['buyers']} buyers, "
             f"{as_result['sales']} sales, {as_result['saved']} saved for {current_month}"
@@ -140,10 +135,7 @@ async def _job_performance_tracking():
         # Multiplier Scores
         from ..services.multiplier_score_service import compute_all_multiplier_scores
 
-        ms_result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_all_multiplier_scores, db, current_month),
-            timeout=300,
-        )
+        ms_result = await _run(compute_all_multiplier_scores, current_month, timeout=300)
         logger.info(
             f"Multiplier Scores: {ms_result['buyers']} buyers, "
             f"{ms_result['sales']} sales, {ms_result['saved']} saved for {current_month}"
@@ -151,30 +143,15 @@ async def _job_performance_tracking():
         # Unified Scores (cross-role leaderboard)
         from ..services.unified_score_service import compute_all_unified_scores
 
-        us_result = await asyncio.wait_for(
-            loop.run_in_executor(None, compute_all_unified_scores, db, current_month),
-            timeout=300,
-        )
+        us_result = await _run(compute_all_unified_scores, current_month, timeout=300)
         logger.info(f"Unified Scores: {us_result['computed']} computed, {us_result['saved']} saved for {current_month}")
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
-            await asyncio.wait_for(
-                loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month),
-                timeout=300,
-            )
-            await asyncio.wait_for(
-                loop.run_in_executor(None, compute_all_avail_scores, db, prev_month),
-                timeout=300,
-            )
-            await asyncio.wait_for(
-                loop.run_in_executor(None, compute_all_multiplier_scores, db, prev_month),
-                timeout=300,
-            )
-            await asyncio.wait_for(
-                loop.run_in_executor(None, compute_all_unified_scores, db, prev_month),
-                timeout=300,
-            )
+            await _run(compute_buyer_leaderboard, prev_month, timeout=300)
+            await _run(compute_all_avail_scores, prev_month, timeout=300)
+            await _run(compute_all_multiplier_scores, prev_month, timeout=300)
+            await _run(compute_all_unified_scores, prev_month, timeout=300)
     except asyncio.TimeoutError:
         logger.error("Performance tracking timed out")
         db.rollback()
