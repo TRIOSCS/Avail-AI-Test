@@ -1,0 +1,27 @@
+{# _inline_field_form.html — shared <form> chrome for inline_cell.html field editors.
+   Every inline editor (name/status/urgency/deadline/owner) wraps an identical
+   hx-patch form with the same Escape-restore <template> and field/context hidden
+   inputs; only the control inside differs. This macro renders that common chrome
+   and yields the per-field control via {% call %}.
+
+   Receives:
+     req         the Requisition being edited
+     field       field name (also the hidden "field" value)
+     context     'row' | 'header' | 'tab'
+     target_id   pre-computed target id (used when context != 'tab')
+     swap_style  hx-swap value
+     orig_display rendered original-display fragment for Escape restore
+   Used by: requisitions/inline_cell.html (one {% call %} per field).
+   Keep the form attributes byte-identical to the original inline_cell forms. #}
+{% macro field_form(req, field, context, target_id, swap_style, orig_display) -%}
+<form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
+      hx-swap="{{ swap_style }}"
+      data-loading-disable
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
+  <input type="hidden" name="field" value="{{ field }}">
+  <input type="hidden" name="context" value="{{ context }}">
+  {{- caller() }}</form>
+{%- endmacro %}

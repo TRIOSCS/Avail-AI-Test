@@ -1,0 +1,22 @@
+{# quote_builder/_macros.html — Reusable Jinja macros for the quote builder modal.
+   Imported by: htmx/partials/quote_builder/modal.html
+   Depends on: brand palette / compact-table CSS, Alpine.js quoteBuilder component.
+
+   These macros emit byte-identical markup to the inline blocks they replaced; the
+   modal supplies the static x-data / Alpine bindings (treated as opaque values here).
+#}
+
+{# One Customer-Requirements field: a small uppercase label over a mono value.
+   `expr` is the opaque Alpine x-text expression (kept verbatim). When `emphasis`
+   is true the value uses the semibold variant (Qty Needed / Target Price). #}
+{%- macro spec_field(label, expr, emphasis=False) -%}
+<div>
+              <span class="text-[10px] text-gray-400 uppercase tracking-wide">{{ label }}</span>
+              <p class="text-sm font-mono {% if emphasis %}font-semibold {% endif %}text-gray-900" x-text="{{ expr | safe }}"></p>
+            </div>
+{%- endmacro -%}
+
+{# One keyboard <kbd> chip in the nav-hints footer. #}
+{%- macro kbd(key) -%}
+<kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">{{ key }}</kbd>
+{%- endmacro -%}
