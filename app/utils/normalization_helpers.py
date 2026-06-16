@@ -217,7 +217,7 @@ _COUNTRY_MAP = {
 }
 
 # Valid ISO 3166-1 alpha-2 codes (for pass-through)
-_VALID_ISO2 = {v for v in _COUNTRY_MAP.values()}
+_VALID_ISO2 = set(_COUNTRY_MAP.values())
 
 
 def normalize_country(raw: str | None) -> str | None:
@@ -314,7 +314,7 @@ _US_STATE_MAP = {
     "american samoa": "AS",
 }
 
-_VALID_STATE_CODES = {v for v in _US_STATE_MAP.values()}
+_VALID_STATE_CODES = set(_US_STATE_MAP.values())
 
 
 def normalize_us_state(raw: str | None) -> str | None:

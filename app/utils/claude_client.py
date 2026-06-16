@@ -61,6 +61,63 @@ def _headers(*, cache: bool = False) -> dict:
     return h
 
 
+# Tool definition that pins the model to a JSON Schema (H9: Structured Outputs).
+_STRUCTURED_OUTPUT_TOOL_NAME = "structured_output"
+
+
+def _structured_output_tool(schema: dict) -> dict:
+    """Tool definition that forces schema-conforming JSON output."""
+    return {
+        "name": _STRUCTURED_OUTPUT_TOOL_NAME,
+        "description": "Return structured data matching the required schema.",
+        "input_schema": schema,
+    }
+
+
+def _system_blocks(system: str, *, cache: bool) -> list[dict]:
+    """Build the `system` field, optionally marking it cacheable (H10)."""
+    if not system:
+        return []
+    block: dict[str, Any] = {"type": "text", "text": system}
+    if cache:
+        block["cache_control"] = {"type": "ephemeral"}
+    return [block]
+
+
+_MISSING = object()
+
+
+def _extract_tool_input(content: list[dict]) -> Any:
+    """Return the structured_output tool input, or `_MISSING` if no such block."""
+    for block in content:
+        if block.get("type") == "tool_use" and block.get("name") == _STRUCTURED_OUTPUT_TOOL_NAME:
+            return block.get("input")
+    return _MISSING
+
+
+def _raise_for_status(resp: httpx.Response, *, context: str) -> None:
+    """Map a non-200 Claude API response to the matching ClaudeError subclass."""
+    if resp.status_code in (401, 403):
+        raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
+    if resp.status_code == 429:
+        raise ClaudeRateLimitError("Rate limit exceeded after retries")
+    if resp.status_code >= 500:
+        raise ClaudeServerError(f"Claude API error: {resp.status_code}")
+    raise ClaudeError(f"{context}: {resp.status_code}")
+
+
+def _record_usage(span: Any, usage: dict) -> None:
+    """Copy token-usage counters from a response into the Sentry span."""
+    span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
+    span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
+    span.set_data(
+        "ai.total_tokens.used",
+        usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+    )
+    if usage.get("cache_read_input_tokens"):
+        span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+
+
 async def claude_structured(
     prompt: str,
     schema: dict,
@@ -104,20 +161,13 @@ async def claude_structured(
     else:
         model = MODELS.get(model_tier, MODELS["fast"])
 
-    # Build system with optional cache control (H10)
-    system_blocks = []
-    if system:
-        block = {"type": "text", "text": system}
-        if cache_system:
-            block["cache_control"] = {"type": "ephemeral"}
-        system_blocks.append(block)
-
     body: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    system_blocks = _system_blocks(system, cache=cache_system)
     if system_blocks:
         body["system"] = system_blocks
 
@@ -127,16 +177,9 @@ async def claude_structured(
         # Ensure max_tokens covers both thinking and output
         body["max_tokens"] = max(max_tokens, thinking_budget + 1024)
 
-    # H9: Structured Outputs — guaranteed valid JSON
-    # Use tool-based approach for schema enforcement
-    body["tools"] = [
-        {
-            "name": "structured_output",
-            "description": "Return structured data matching the required schema.",
-            "input_schema": schema,
-        }
-    ]
-    body["tool_choice"] = {"type": "tool", "name": "structured_output"}
+    # H9: Structured Outputs — guaranteed valid JSON via tool-based schema enforcement
+    body["tools"] = [_structured_output_tool(schema)]
+    body["tool_choice"] = {"type": "tool", "name": _STRUCTURED_OUTPUT_TOOL_NAME}
 
     max_attempts = 3
     for attempt in range(1, max_attempts + 1):
@@ -168,32 +211,17 @@ async def claude_structured(
                 if resp.status_code != 200:
                     span.set_data("ai.response.status_code", resp.status_code)
                     logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    if resp.status_code in (401, 403):
-                        raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
-                    if resp.status_code == 429:
-                        raise ClaudeRateLimitError("Rate limit exceeded after retries")
-                    if resp.status_code >= 500:
-                        raise ClaudeServerError(f"Claude API error: {resp.status_code}")
-                    raise ClaudeError(f"Claude API error: {resp.status_code}")
+                    _raise_for_status(resp, context="Claude API error")
 
                 data = resp.json()
-                usage = data.get("usage", {})
-                span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
-                span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
-                span.set_data(
-                    "ai.total_tokens.used",
-                    usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-                )
-                if usage.get("cache_read_input_tokens"):
-                    span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+                _record_usage(span, data.get("usage", {}))
 
                 # Tool use response — extract the tool input (guaranteed valid JSON)
-                for block in data.get("content", []):
-                    if block.get("type") == "tool_use" and block.get("name") == "structured_output":
-                        return block.get("input")
-
-                logger.warning("Claude structured output: no tool_use block in response")
-                return None
+                tool_input = _extract_tool_input(data.get("content", []))
+                if tool_input is _MISSING:
+                    logger.warning("Claude structured output: no tool_use block in response")
+                    return None
+                return tool_input
 
         except (ClaudeError,):
             raise
@@ -252,19 +280,13 @@ async def claude_text(
 
     model = MODELS.get(model_tier, MODELS["fast"])
 
-    system_blocks = []
-    if system:
-        block = {"type": "text", "text": system}
-        if cache_system:
-            block["cache_control"] = {"type": "ephemeral"}
-        system_blocks.append(block)
-
     body: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
     }
 
+    system_blocks = _system_blocks(system, cache=cache_system)
     if system_blocks:
         body["system"] = system_blocks
     if tools:
@@ -300,24 +322,10 @@ async def claude_text(
                 if resp.status_code != 200:
                     span.set_data("ai.response.status_code", resp.status_code)
                     logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    if resp.status_code in (401, 403):
-                        raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
-                    if resp.status_code == 429:
-                        raise ClaudeRateLimitError("Rate limit exceeded after retries")
-                    if resp.status_code >= 500:
-                        raise ClaudeServerError(f"Claude API error: {resp.status_code}")
-                    raise ClaudeError(f"Claude API error: {resp.status_code}")
+                    _raise_for_status(resp, context="Claude API error")
 
                 data = resp.json()
-                usage = data.get("usage", {})
-                span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
-                span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
-                span.set_data(
-                    "ai.total_tokens.used",
-                    usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-                )
-                if usage.get("cache_read_input_tokens"):
-                    span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+                _record_usage(span, data.get("usage", {}))
 
                 # Extract text from response (may be interleaved with tool use)
                 texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
@@ -418,24 +426,15 @@ def _build_batch_request(
     """Build a single request entry for the Batch API."""
     model = MODELS.get(model_tier, MODELS["fast"])
 
-    system_blocks = []
-    if system:
-        system_blocks.append({"type": "text", "text": system})
-
     params: dict[str, Any] = {
         "model": model,
         "max_tokens": max_tokens,
         "messages": [{"role": "user", "content": prompt}],
-        "tools": [
-            {
-                "name": "structured_output",
-                "description": "Return structured data matching the required schema.",
-                "input_schema": schema,
-            }
-        ],
-        "tool_choice": {"type": "tool", "name": "structured_output"},
+        "tools": [_structured_output_tool(schema)],
+        "tool_choice": {"type": "tool", "name": _STRUCTURED_OUTPUT_TOOL_NAME},
     }
 
+    system_blocks = _system_blocks(system, cache=False)
     if system_blocks:
         params["system"] = system_blocks
 
@@ -570,19 +569,17 @@ async def claude_batch_results(
                 if result.get("type") == "succeeded":
                     message = result.get("message", {})
                     # Extract tool_use input (same as claude_structured)
-                    for block in message.get("content", []):
-                        if block.get("type") == "tool_use" and block.get("name") == "structured_output":
-                            raw_input = block.get("input")
-                            # API occasionally returns tool input as JSON string
-                            if isinstance(raw_input, str):
-                                try:
-                                    raw_input = json.loads(raw_input)
-                                except (json.JSONDecodeError, TypeError):
-                                    raw_input = None
-                            parsed[cid] = raw_input
-                            break
-                    else:
+                    raw_input = _extract_tool_input(message.get("content", []))
+                    if raw_input is _MISSING:
                         parsed[cid] = None
+                    else:
+                        # API occasionally returns tool input as JSON string
+                        if isinstance(raw_input, str):
+                            try:
+                                raw_input = json.loads(raw_input)
+                            except (json.JSONDecodeError, TypeError):
+                                raw_input = None
+                        parsed[cid] = raw_input
                 else:
                     error = result.get("error", {})
                     logger.warning(f"Batch item {cid} failed: {error.get('type', 'unknown')}")

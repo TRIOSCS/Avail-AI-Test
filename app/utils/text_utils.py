@@ -6,6 +6,20 @@ Depends on: re (stdlib)
 
 import re
 
+# Block-level tags that become line breaks; remaining tags collapse to spaces.
+_BLOCK_TAG_RE = re.compile(r"<br\s*/?>|</p>|</tr>|</li>", re.IGNORECASE)
+_TAG_RE = re.compile(r"<[^>]+>")
+_INLINE_WS_RE = re.compile(r"[^\S\n]+")
+_BLANK_LINES_RE = re.compile(r"\n{3,}")
+_DISCLAIMER_RES = [
+    re.compile(pat, re.IGNORECASE | re.DOTALL)
+    for pat in (
+        r"this email and any attachments.*?(?=\n\n|\Z)",
+        r"confidentiality notice.*?(?=\n\n|\Z)",
+        r"disclaimer.*?(?=\n\n|\Z)",
+    )
+]
+
 
 def clean_email_body(body: str) -> str:
     """Strip HTML, excessive whitespace, and email disclaimers.
@@ -14,15 +28,10 @@ def clean_email_body(body: str) -> str:
     """
     if not body:
         return ""
-    text = re.sub(r"<br\s*/?>|</p>|</tr>|</li>", "\n", body, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    text = re.sub(r"[^\S\n]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    disclaimer_patterns = [
-        r"(?i)this email and any attachments.*?(?=\n\n|\Z)",
-        r"(?i)confidentiality notice.*?(?=\n\n|\Z)",
-        r"(?i)DISCLAIMER.*?(?=\n\n|\Z)",
-    ]
-    for pat in disclaimer_patterns:
-        text = re.sub(pat, "", text, flags=re.DOTALL)
+    text = _BLOCK_TAG_RE.sub("\n", body)
+    text = _TAG_RE.sub(" ", text)
+    text = _INLINE_WS_RE.sub(" ", text)
+    text = _BLANK_LINES_RE.sub("\n\n", text)
+    for disclaimer_re in _DISCLAIMER_RES:
+        text = disclaimer_re.sub("", text)
     return text.strip()

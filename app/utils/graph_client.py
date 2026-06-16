@@ -10,6 +10,7 @@ Usage:
 """
 
 import asyncio
+import os
 
 from loguru import logger
 
@@ -22,17 +23,14 @@ class GraphSyncStateExpired(Exception):
     """Raised when Graph API returns 410 — the delta token is stale and must be
     discarded."""
 
-    pass
-
 
 # H1: Immutable IDs — prevents ID changes when messages are moved between folders
 IMMUTABLE_ID_HEADER = {"Prefer": 'IdType="ImmutableId"'}
 
 # H6: Retry config — in TESTING mode, fail fast (no retries, no sleep)
-import os as _os
-
-MAX_RETRIES = 0 if _os.environ.get("TESTING") else 3
-BACKOFF_BASE = 0 if _os.environ.get("TESTING") else 2  # seconds — exponential: 2, 4, 8
+_TESTING = bool(os.environ.get("TESTING"))
+MAX_RETRIES = 0 if _TESTING else 3
+BACKOFF_BASE = 0 if _TESTING else 2  # seconds — exponential: 2, 4, 8
 
 
 class GraphClient:
@@ -210,21 +208,13 @@ class GraphClient:
                     logger.warning("Graph 410 SyncStateNotFound — delta token expired")
                     raise GraphSyncStateExpired(resp.text[:300])
 
-                # Throttled — respect Retry-After, use max of backoff and header
-                if resp.status_code == 429:
+                # Throttled (429) / Service Unavailable (503) — respect Retry-After,
+                # using the max of backoff and header so we never wait less than asked.
+                if resp.status_code in (429, 503):
                     backoff_wait = BACKOFF_BASE ** (attempt + 1)
                     retry_after = _parse_retry_after(resp)
                     wait = max(backoff_wait, retry_after) if retry_after else backoff_wait
-                    logger.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
-                    await asyncio.sleep(wait)
-                    continue
-
-                # 503 Service Unavailable — retry with Retry-After if present
-                if resp.status_code == 503:
-                    backoff_wait = BACKOFF_BASE ** (attempt + 1)
-                    retry_after = _parse_retry_after(resp)
-                    wait = max(backoff_wait, retry_after) if retry_after else backoff_wait
-                    logger.warning(f"Graph 503 — retry in {wait}s (attempt {attempt + 1})")
+                    logger.warning(f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait)
                     continue
 
