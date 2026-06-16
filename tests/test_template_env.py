@@ -14,6 +14,7 @@ import pytest
 from app.template_env import (
     _elapsed_seconds,
     _fmtdate_filter,
+    _sanitize_html_filter,
     _timeago_filter,
     _timesince_filter,
     template_response,
@@ -182,34 +183,24 @@ class TestFmtdateFilter:
 
 class TestSanitizeHtmlFilter:
     def test_empty_string(self):
-        from app.template_env import _sanitize_html_filter
-
         assert _sanitize_html_filter("") == ""
 
     def test_none_returns_empty(self):
-        from app.template_env import _sanitize_html_filter
-
         assert _sanitize_html_filter(None) == ""
 
     def test_allows_safe_tags(self):
-        from app.template_env import _sanitize_html_filter
-
         html = "<p>Hello <strong>world</strong></p>"
         result = _sanitize_html_filter(html)
         assert "<p>" in result
         assert "<strong>" in result
 
     def test_strips_script_tags(self):
-        from app.template_env import _sanitize_html_filter
-
         html = "<p>Safe</p><script>alert('xss')</script>"
         result = _sanitize_html_filter(html)
         assert "<script>" not in result
         assert "alert" not in result
 
     def test_preserves_links_with_href(self):
-        from app.template_env import _sanitize_html_filter
-
         html = '<a href="https://example.com" title="Example">Link</a>'
         result = _sanitize_html_filter(html)
         assert "https://example.com" in result

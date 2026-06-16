@@ -14,6 +14,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import ActivityLog
 from app.models.crm import Company, CustomerSite, SiteContact
 
@@ -74,66 +76,26 @@ class TestContactStatusCompute:
             finally:
                 loop.close()
 
-    def test_active_contact(self, db_session, test_user):
-        """Contact with activity ≤7 days ago → 'active'."""
+    @pytest.mark.parametrize(
+        ("name", "status", "created_days_ago", "activity_days_ago", "expected"),
+        [
+            pytest.param("Active Person", "new", 0, 3, "active", id="active_contact"),
+            pytest.param("Quiet Person", "new", 0, 45, "quiet", id="quiet_contact"),
+            pytest.param("Gone Person", "new", 0, 120, "inactive", id="inactive_contact"),
+            pytest.param("Champion Person", "champion", 0, 120, "champion", id="champion_never_downgraded"),
+            pytest.param("New Person", "new", 5, None, "new", id="no_activity_new_stays_new"),
+            pytest.param("Old Person", "new", 120, None, "inactive", id="no_activity_old_goes_inactive"),
+        ],
+    )
+    def test_status_compute(self, db_session, test_user, name, status, created_days_ago, activity_days_ago, expected):
+        """The auto-compute job derives contact_status from recency, never downgrading
+        champions."""
         site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "Active Person")
-        self._make_activity(db_session, test_user.id, sc.id, days_ago=3)
+        sc = self._make_contact(db_session, site.id, name, status=status, created_days_ago=created_days_ago)
+        if activity_days_ago is not None:
+            self._make_activity(db_session, test_user.id, sc.id, days_ago=activity_days_ago)
         db_session.commit()
 
         self._run_job(db_session)
         db_session.refresh(sc)
-        assert sc.contact_status == "active"
-
-    def test_quiet_contact(self, db_session, test_user):
-        """Contact with activity 30-90 days ago → 'quiet'."""
-        site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "Quiet Person")
-        self._make_activity(db_session, test_user.id, sc.id, days_ago=45)
-        db_session.commit()
-
-        self._run_job(db_session)
-        db_session.refresh(sc)
-        assert sc.contact_status == "quiet"
-
-    def test_inactive_contact(self, db_session, test_user):
-        """Contact with activity >90 days ago → 'inactive'."""
-        site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "Gone Person")
-        self._make_activity(db_session, test_user.id, sc.id, days_ago=120)
-        db_session.commit()
-
-        self._run_job(db_session)
-        db_session.refresh(sc)
-        assert sc.contact_status == "inactive"
-
-    def test_champion_never_downgraded(self, db_session, test_user):
-        """Champion status is never changed by the auto-compute job."""
-        site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "Champion Person", status="champion")
-        self._make_activity(db_session, test_user.id, sc.id, days_ago=120)
-        db_session.commit()
-
-        self._run_job(db_session)
-        db_session.refresh(sc)
-        assert sc.contact_status == "champion"
-
-    def test_no_activity_new_stays_new(self, db_session):
-        """Contact created recently with no activity stays 'new'."""
-        site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "New Person", created_days_ago=5)
-        db_session.commit()
-
-        self._run_job(db_session)
-        db_session.refresh(sc)
-        assert sc.contact_status == "new"
-
-    def test_no_activity_old_goes_inactive(self, db_session):
-        """Contact created >90 days ago with no activity → 'inactive'."""
-        site = self._make_site(db_session)
-        sc = self._make_contact(db_session, site.id, "Old Person", created_days_ago=120)
-        db_session.commit()
-
-        self._run_job(db_session)
-        db_session.refresh(sc)
-        assert sc.contact_status == "inactive"
+        assert sc.contact_status == expected

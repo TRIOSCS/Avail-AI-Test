@@ -11,6 +11,19 @@ from app.models import MaterialCard
 from app.utils.claude_errors import ClaudeError
 
 
+def _seed_not_found(db_session, n):
+    """Add n NOT_FOUND MaterialCards (01HW000..) and commit."""
+    for i in range(n):
+        db_session.add(
+            MaterialCard(
+                display_mpn=f"01HW{i:03d}",
+                normalized_mpn=f"01hw{i:03d}",
+                enrichment_status=MaterialEnrichmentStatus.NOT_FOUND,
+            )
+        )
+    db_session.commit()
+
+
 @pytest.mark.asyncio
 async def test_dry_run_writes_csv_and_no_commit(db_session, tmp_path):
     import scripts.backfill_oem_enrichment as bf
@@ -40,15 +53,7 @@ async def test_dry_run_writes_csv_and_no_commit(db_session, tmp_path):
 async def test_budget_cap_halts(db_session, tmp_path):
     import scripts.backfill_oem_enrichment as bf
 
-    for i in range(5):
-        db_session.add(
-            MaterialCard(
-                display_mpn=f"01HW{i:03d}",
-                normalized_mpn=f"01hw{i:03d}",
-                enrichment_status=MaterialEnrichmentStatus.NOT_FOUND,
-            )
-        )
-    db_session.commit()
+    _seed_not_found(db_session, 5)
 
     async def fake_enrich(card, db, *, web_meter=None, **kw):
         if web_meter is not None:
@@ -96,15 +101,7 @@ async def test_select_includes_not_catalogued(db_session, tmp_path):
 async def test_bad_card_does_not_abort_run(db_session, tmp_path):
     import scripts.backfill_oem_enrichment as bf
 
-    for i in range(3):
-        db_session.add(
-            MaterialCard(
-                display_mpn=f"01HW{i:03d}",
-                normalized_mpn=f"01hw{i:03d}",
-                enrichment_status=MaterialEnrichmentStatus.NOT_FOUND,
-            )
-        )
-    db_session.commit()
+    _seed_not_found(db_session, 3)
 
     calls = {"n": 0}
 
@@ -128,15 +125,7 @@ async def test_bad_card_does_not_abort_run(db_session, tmp_path):
 async def test_consecutive_claude_errors_abort(db_session, tmp_path):
     import scripts.backfill_oem_enrichment as bf
 
-    for i in range(10):
-        db_session.add(
-            MaterialCard(
-                display_mpn=f"01HW{i:03d}",
-                normalized_mpn=f"01hw{i:03d}",
-                enrichment_status=MaterialEnrichmentStatus.NOT_FOUND,
-            )
-        )
-    db_session.commit()
+    _seed_not_found(db_session, 10)
 
     async def fake_enrich(card, db, **kw):
         raise ClaudeError("backend down")

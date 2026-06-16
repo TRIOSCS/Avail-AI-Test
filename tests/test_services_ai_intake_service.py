@@ -28,24 +28,24 @@ from app.services.ai_intake_parser import (
 
 
 class TestCleanText:
-    def test_strips_whitespace(self):
-        assert _clean_text("  hello  ") == "hello"
-
-    def test_normalizes_crlf(self):
-        assert _clean_text("a\r\nb\rc") == "a\nb\nc"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("  hello  ", "hello"),
+            ("a\r\nb\rc", "a\nb\nc"),
+            ("", ""),
+            (None, ""),
+            ("Line 1\n  Line 2\n    Line 3", "Line 1\n  Line 2\n    Line 3"),
+        ],
+        ids=["strips_whitespace", "normalizes_crlf", "empty_str", "none", "preserves_structure"],
+    )
+    def test_clean_text(self, raw, expected):
+        assert _clean_text(raw) == expected
 
     def test_collapses_blank_runs(self):
         result = _clean_text("a\n\n\n\n\nb")
         # _clean_text allows up to 2 consecutive blank lines (3 newlines)
         assert "\n\n\n\n" not in result
-
-    def test_empty_input(self):
-        assert _clean_text("") == ""
-        assert _clean_text(None) == ""
-
-    def test_preserves_structure(self):
-        text = "Line 1\n  Line 2\n    Line 3"
-        assert _clean_text(text) == text
 
 
 # ---------------------------------------------------------------------------
@@ -54,23 +54,20 @@ class TestCleanText:
 
 
 class TestCoerceJsonList:
-    def test_list_passthrough(self):
-        assert _coerce_json_list([1, 2, 3]) == [1, 2, 3]
-
-    def test_json_string(self):
-        assert _coerce_json_list('[{"mpn": "ABC"}]') == [{"mpn": "ABC"}]
-
-    def test_invalid_json(self):
-        assert _coerce_json_list("not json") == []
-
-    def test_none(self):
-        assert _coerce_json_list(None) == []
-
-    def test_non_array_json(self):
-        assert _coerce_json_list('{"key": "val"}') == []
-
-    def test_integer(self):
-        assert _coerce_json_list(42) == []
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ([1, 2, 3], [1, 2, 3]),
+            ('[{"mpn": "ABC"}]', [{"mpn": "ABC"}]),
+            ("not json", []),
+            (None, []),
+            ('{"key": "val"}', []),
+            (42, []),
+        ],
+        ids=["list_passthrough", "json_string", "invalid_json", "none", "non_array_json", "integer"],
+    )
+    def test_coerce_json_list(self, value, expected):
+        assert _coerce_json_list(value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -79,18 +76,19 @@ class TestCoerceJsonList:
 
 
 class TestCleanScalar:
-    def test_none(self):
-        assert _clean_scalar(None) is None
-
-    def test_empty_string(self):
-        assert _clean_scalar("") is None
-        assert _clean_scalar("   ") is None
-
-    def test_collapses_whitespace(self):
-        assert _clean_scalar("  hello   world  ") == "hello world"
-
-    def test_non_string(self):
-        assert _clean_scalar(42) == "42"
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (None, None),
+            ("", None),
+            ("   ", None),
+            ("  hello   world  ", "hello world"),
+            (42, "42"),
+        ],
+        ids=["none", "empty_string", "blank_string", "collapses_whitespace", "non_string"],
+    )
+    def test_clean_scalar(self, value, expected):
+        assert _clean_scalar(value) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -245,34 +243,23 @@ class TestNormalizeOffers:
 
 
 class TestBackfillDocumentType:
-    def test_no_change_when_not_unclear(self):
-        result = {"document_type": "rfq", "requirements": [], "offers": []}
+    @pytest.mark.parametrize(
+        "result,expected",
+        [
+            ({"document_type": "rfq", "requirements": [], "offers": []}, "rfq"),
+            ({"document_type": "unclear", "requirements": [], "offers": [{"mpn": "A"}]}, "offer"),
+            ({"document_type": "unclear", "requirements": [{"mpn": "A"}], "offers": []}, "rfq"),
+            (
+                {"document_type": "unclear", "requirements": [{"mpn": "A"}], "offers": [{"mpn": "B"}, {"mpn": "C"}]},
+                "offer",
+            ),
+            ({"document_type": "unclear", "requirements": [], "offers": []}, "unclear"),
+        ],
+        ids=["no_change_when_not_unclear", "infers_offer", "infers_rfq", "offer_wins_when_more", "stays_unclear"],
+    )
+    def test_backfill_document_type(self, result, expected):
         _backfill_document_type(result)
-        assert result["document_type"] == "rfq"
-
-    def test_infers_offer(self):
-        result = {"document_type": "unclear", "requirements": [], "offers": [{"mpn": "A"}]}
-        _backfill_document_type(result)
-        assert result["document_type"] == "offer"
-
-    def test_infers_rfq(self):
-        result = {"document_type": "unclear", "requirements": [{"mpn": "A"}], "offers": []}
-        _backfill_document_type(result)
-        assert result["document_type"] == "rfq"
-
-    def test_offer_wins_when_more(self):
-        result = {
-            "document_type": "unclear",
-            "requirements": [{"mpn": "A"}],
-            "offers": [{"mpn": "B"}, {"mpn": "C"}],
-        }
-        _backfill_document_type(result)
-        assert result["document_type"] == "offer"
-
-    def test_stays_unclear_when_empty(self):
-        result = {"document_type": "unclear", "requirements": [], "offers": []}
-        _backfill_document_type(result)
-        assert result["document_type"] == "unclear"
+        assert result["document_type"] == expected
 
 
 # ---------------------------------------------------------------------------
@@ -286,20 +273,18 @@ class TestBackfillRequisitionName:
         _backfill_requisition_name(result)
         assert result["requisition_name"] == "My Req"
 
-    def test_generates_rfq_name(self):
-        result = {"requisition_name": None, "document_type": "rfq", "customer_name": "Acme"}
+    @pytest.mark.parametrize(
+        "result,expected_substr",
+        [
+            ({"requisition_name": None, "document_type": "rfq", "customer_name": "Acme"}, "Acme RFQ intake"),
+            ({"requisition_name": None, "document_type": "offer", "vendor_name": "DigiKey"}, "DigiKey offer intake"),
+            ({"requisition_name": None, "document_type": "unclear"}, "AI intake draft"),
+        ],
+        ids=["rfq_name", "offer_name", "fallback_name"],
+    )
+    def test_generates_name(self, result, expected_substr):
         _backfill_requisition_name(result)
-        assert "Acme RFQ intake" in result["requisition_name"]
-
-    def test_generates_offer_name(self):
-        result = {"requisition_name": None, "document_type": "offer", "vendor_name": "DigiKey"}
-        _backfill_requisition_name(result)
-        assert "DigiKey offer intake" in result["requisition_name"]
-
-    def test_generates_fallback_name(self):
-        result = {"requisition_name": None, "document_type": "unclear"}
-        _backfill_requisition_name(result)
-        assert "AI intake draft" in result["requisition_name"]
+        assert expected_substr in result["requisition_name"]
 
 
 # ---------------------------------------------------------------------------

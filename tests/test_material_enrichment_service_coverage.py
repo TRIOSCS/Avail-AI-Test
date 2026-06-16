@@ -23,6 +23,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models import MaterialCard
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 
 @pytest.fixture
@@ -197,56 +198,35 @@ async def test_batch_enrich_returns_none_when_no_cards(db):
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_batch_enrich_claude_unavailable_returns_none(db):
-    """ClaudeUnavailableError → returns None (lines 294-296)."""
-    from app.services.material_enrichment_service import batch_enrich_materials
-    from app.utils.claude_errors import ClaudeUnavailableError
-
-    _make_card(db, "PART-A")
-
-    mock_redis = MagicMock()
-    mock_redis.get.return_value = None
-    with (
-        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
-        patch(
-            "app.services.material_enrichment_service.claude_batch_submit",
-            new_callable=AsyncMock,
-            side_effect=ClaudeUnavailableError("not configured"),
+@pytest.mark.parametrize(
+    ("card_name", "submit_kwargs"),
+    [
+        # ClaudeUnavailableError → returns None (lines 294-296)
+        pytest.param(
+            "PART-A",
+            {"side_effect": ClaudeUnavailableError("not configured")},
+            id="claude_unavailable",
         ),
-    ):
-        result = await batch_enrich_materials(db)
-    assert result is None
-
-
-@pytest.mark.asyncio
-async def test_batch_enrich_claude_error_returns_none(db):
-    """ClaudeError → returns None (lines 297-299)."""
-    from app.services.material_enrichment_service import batch_enrich_materials
-    from app.utils.claude_errors import ClaudeError
-
-    _make_card(db, "PART-B")
-
-    mock_redis = MagicMock()
-    mock_redis.get.return_value = None
-    with (
-        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
-        patch(
-            "app.services.material_enrichment_service.claude_batch_submit",
-            new_callable=AsyncMock,
-            side_effect=ClaudeError("api error"),
+        # ClaudeError → returns None (lines 297-299)
+        pytest.param(
+            "PART-B",
+            {"side_effect": ClaudeError("api error")},
+            id="claude_error",
         ),
-    ):
-        result = await batch_enrich_materials(db)
-    assert result is None
-
-
+        # claude_batch_submit returns None → returns None (lines 300-302)
+        pytest.param(
+            "PART-C",
+            {"return_value": None},
+            id="none_batch_id",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_batch_enrich_none_batch_id_returns_none(db):
-    """claude_batch_submit returns None → returns None (lines 300-302)."""
+async def test_batch_enrich_submit_failure_returns_none(db, card_name, submit_kwargs):
+    """A failing/empty claude_batch_submit makes batch_enrich_materials return None."""
     from app.services.material_enrichment_service import batch_enrich_materials
 
-    _make_card(db, "PART-C")
+    _make_card(db, card_name)
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
@@ -255,7 +235,7 @@ async def test_batch_enrich_none_batch_id_returns_none(db):
         patch(
             "app.services.material_enrichment_service.claude_batch_submit",
             new_callable=AsyncMock,
-            return_value=None,
+            **submit_kwargs,
         ),
     ):
         result = await batch_enrich_materials(db)
@@ -352,7 +332,6 @@ async def test_process_batch_returns_none_when_still_processing(db):
 async def test_process_batch_claude_error_returns_none(db):
     """ClaudeError during poll → returns None (lines 332-335)."""
     from app.services.material_enrichment_service import process_material_batch_results
-    from app.utils.claude_errors import ClaudeError
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = "batch-456"

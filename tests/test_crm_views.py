@@ -6,6 +6,7 @@ Depends on: app.routers.crm.views
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -23,32 +24,25 @@ class TestCRMShell:
         assert resp.status_code == 200
         assert "text/html" in resp.headers.get("content-type", "")
 
-    def test_crm_shell_has_customers_tab(self, client: TestClient):
-        """Shell renders Customers tab button."""
+    @pytest.mark.parametrize(
+        "snippet",
+        [
+            pytest.param("Customers", id="customers_tab"),
+            pytest.param("Vendors", id="vendors_tab"),
+            pytest.param('id="crm-tab-content"', id="tab_content_container"),
+        ],
+    )
+    def test_crm_shell_renders_element(self, client: TestClient, snippet: str):
+        """Shell renders the tab buttons and the #crm-tab-content container."""
         resp = client.get("/v2/partials/crm/shell")
-        assert "Customers" in resp.text
-
-    def test_crm_shell_has_vendors_tab(self, client: TestClient):
-        """Shell renders Vendors tab button."""
-        resp = client.get("/v2/partials/crm/shell")
-        assert "Vendors" in resp.text
-
-    def test_crm_shell_has_tab_content_container(self, client: TestClient):
-        """Shell renders #crm-tab-content container."""
-        resp = client.get("/v2/partials/crm/shell")
-        assert 'id="crm-tab-content"' in resp.text
+        assert snippet in resp.text
 
 
 class TestCRMFullPage:
     """Test CRM full-page route via v2_page dispatcher."""
 
     def test_v2_crm_returns_200(self, client: TestClient):
-        """GET /v2/crm returns 200."""
-        resp = client.get("/v2/crm")
-        assert resp.status_code == 200
-
-    def test_v2_crm_loads_shell_partial(self, client: TestClient):
-        """GET /v2/crm loads the CRM shell partial."""
+        """GET /v2/crm returns 200 (loads the CRM shell partial)."""
         resp = client.get("/v2/crm")
         assert resp.status_code == 200
 
@@ -56,17 +50,26 @@ class TestCRMFullPage:
 class TestVendorListEmbedding:
     """Test vendor list can be embedded in CRM shell."""
 
-    def test_vendor_list_with_custom_target(self, client: TestClient):
-        """Vendor list respects hx_target query parameter."""
-        resp = client.get("/v2/partials/vendors?hx_target=%23crm-tab-content")
+    @pytest.mark.parametrize(
+        ("url", "expected_target"),
+        [
+            pytest.param(
+                "/v2/partials/vendors?hx_target=%23crm-tab-content",
+                'hx-target="#crm-tab-content"',
+                id="custom_target",
+            ),
+            pytest.param(
+                "/v2/partials/vendors",
+                'hx-target="#main-content"',
+                id="default_target",
+            ),
+        ],
+    )
+    def test_vendor_list_target(self, client: TestClient, url: str, expected_target: str):
+        """Vendor list respects hx_target override, defaulting to #main-content."""
+        resp = client.get(url)
         assert resp.status_code == 200
-        assert 'hx-target="#crm-tab-content"' in resp.text
-
-    def test_vendor_list_default_target(self, client: TestClient):
-        """Vendor list defaults to #main-content when no override."""
-        resp = client.get("/v2/partials/vendors")
-        assert resp.status_code == 200
-        assert 'hx-target="#main-content"' in resp.text
+        assert expected_target in resp.text
 
 
 class TestCustomerWorkspace:
@@ -418,57 +421,36 @@ class TestCustomerStaleness:
         assert resp.status_code == 200
         assert "rounded-full" in resp.text
 
-    def test_overdue_company_shows_rose(self, client: TestClient, db_session: Session, test_user: User):
-        """Company with 30+ day old activity shows rose indicator."""
+    @pytest.mark.parametrize(
+        ("name", "days_ago", "expected_class"),
+        [
+            pytest.param("Stale Corp", 45, "bg-rose-500", id="overdue_shows_rose"),
+            pytest.param("New Corp", None, "bg-brand-300", id="new_shows_brand"),
+            pytest.param("DueSoon Corp", 20, "bg-amber-400", id="due_soon_shows_amber"),
+            pytest.param("Recent Corp", 5, "bg-emerald-400", id="recent_shows_emerald"),
+        ],
+    )
+    def test_staleness_tier_indicator(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        name: str,
+        days_ago: int | None,
+        expected_class: str,
+    ):
+        """Each staleness tier renders its indicator color.
 
-        c = Company(
-            name="Stale Corp",
-            is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
-        )
+        overdue (30+d) → rose, never-contacted → brand, due-soon (14-29d) → amber,
+        recent (<14d) → emerald.
+        """
+        last_activity = None if days_ago is None else datetime.now(timezone.utc) - timedelta(days=days_ago)
+        c = Company(name=name, is_active=True, last_activity_at=last_activity)
         db_session.add(c)
         db_session.commit()
 
         resp = client.get("/v2/partials/customers")
-        assert "bg-rose-500" in resp.text
-
-    def test_new_company_shows_brand(self, client: TestClient, db_session: Session, test_user: User):
-        """Company with no activity shows brand indicator."""
-
-        c = Company(name="New Corp", is_active=True, last_activity_at=None)
-        db_session.add(c)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/customers")
-        assert "bg-brand-300" in resp.text
-
-    def test_due_soon_company_shows_amber(self, client: TestClient, db_session: Session, test_user: User):
-        """Company with 14-29 day old activity shows amber indicator."""
-
-        c = Company(
-            name="DueSoon Corp",
-            is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=20),
-        )
-        db_session.add(c)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/customers")
-        assert "bg-amber-400" in resp.text
-
-    def test_recent_company_shows_emerald(self, client: TestClient, db_session: Session, test_user: User):
-        """Company with <14 day old activity shows emerald indicator."""
-
-        c = Company(
-            name="Recent Corp",
-            is_active=True,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
-        )
-        db_session.add(c)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/customers")
-        assert "bg-emerald-400" in resp.text
+        assert expected_class in resp.text
 
     def test_default_sort_is_staleness(self, client: TestClient, db_session: Session, test_user: User):
         """Customer list sorts by staleness (nulls first, then oldest)."""

@@ -85,6 +85,23 @@ def _create_req_with_requirement(client):
     return req["id"], items["created"][0]["id"]
 
 
+def _make_vendor_card(db_session, normalized_name, display_name, **kwargs):
+    """Helper: create + commit a VendorCard, return the refreshed instance."""
+    from app.models import VendorCard
+
+    card = VendorCard(
+        normalized_name=normalized_name,
+        display_name=display_name,
+        emails=[],
+        phones=[],
+        **kwargs,
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+    return card
+
+
 def test_create_offer(client):
     req_id, req_item_id = _create_req_with_requirement(client)
     resp = client.post(
@@ -193,18 +210,7 @@ def test_delete_nonexistent_offer(client):
 
 def test_offer_fuzzy_match_reuses_existing_card(client, db_session):
     """Fuzzy match reuses existing VendorCard instead of creating a new one."""
-    from app.models import VendorCard
-
-    card = VendorCard(
-        normalized_name="arrow electronics",
-        display_name="Arrow Electronics",
-        emails=[],
-        phones=[],
-        sighting_count=10,
-    )
-    db_session.add(card)
-    db_session.commit()
-    db_session.refresh(card)
+    card = _make_vendor_card(db_session, "arrow electronics", "Arrow Electronics", sighting_count=10)
 
     req_id, req_item_id = _create_req_with_requirement(client)
     # "Arrow Electronic" (missing trailing 's') — close enough for fuzzy ≥88
@@ -226,17 +232,7 @@ def test_offer_fuzzy_match_reuses_existing_card(client, db_session):
 
 def test_offer_vendor_card_id_skips_name_matching(client, db_session):
     """When vendor_card_id is provided, skip all name matching."""
-    from app.models import VendorCard
-
-    card = VendorCard(
-        normalized_name="totally different name",
-        display_name="Totally Different Name",
-        emails=[],
-        phones=[],
-    )
-    db_session.add(card)
-    db_session.commit()
-    db_session.refresh(card)
+    card = _make_vendor_card(db_session, "totally different name", "Totally Different Name")
 
     req_id, req_item_id = _create_req_with_requirement(client)
     resp = client.post(
@@ -255,17 +251,7 @@ def test_offer_vendor_card_id_skips_name_matching(client, db_session):
 
 def test_offer_exact_match_before_fuzzy(client, db_session):
     """Exact normalized match is preferred over fuzzy match."""
-    from app.models import VendorCard
-
-    card = VendorCard(
-        normalized_name="mouser electronics",
-        display_name="Mouser Electronics",
-        emails=[],
-        phones=[],
-    )
-    db_session.add(card)
-    db_session.commit()
-    db_session.refresh(card)
+    card = _make_vendor_card(db_session, "mouser electronics", "Mouser Electronics")
 
     req_id, req_item_id = _create_req_with_requirement(client)
     resp = client.post(

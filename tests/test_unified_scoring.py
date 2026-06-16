@@ -7,27 +7,29 @@ Called by: pytest
 Depends on: app.scoring
 """
 
+import pytest
+
 from app.scoring import confidence_color, score_unified
 
 # -- confidence_color ------------------------------------------------------
 
 
-def test_confidence_color_green():
-    assert confidence_color(75) == "green"
-    assert confidence_color(100) == "green"
-    assert confidence_color(90) == "green"
-
-
-def test_confidence_color_amber():
-    assert confidence_color(50) == "amber"
-    assert confidence_color(74) == "amber"
-    assert confidence_color(60) == "amber"
-
-
-def test_confidence_color_red():
-    assert confidence_color(49) == "red"
-    assert confidence_color(0) == "red"
-    assert confidence_color(10) == "red"
+@pytest.mark.parametrize(
+    ("pct", "expected"),
+    [
+        (75, "green"),
+        (100, "green"),
+        (90, "green"),
+        (50, "amber"),
+        (74, "amber"),
+        (60, "amber"),
+        (49, "red"),
+        (0, "red"),
+        (10, "red"),
+    ],
+)
+def test_confidence_color(pct, expected):
+    assert confidence_color(pct) == expected
 
 
 # -- Live API scoring ------------------------------------------------------

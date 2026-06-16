@@ -16,6 +16,7 @@ import pytest
 
 from app.services.ai_part_normalizer import (
     _cache,
+    _call_normalizer,
     _fallback,
     _validate_result,
     clear_cache,
@@ -389,79 +390,45 @@ def test_normalize_parts_endpoint_ai_disabled(client):
 class TestCallNormalizerResponseFormats:
     """Tests for _call_normalizer handling various response formats."""
 
+    @pytest.mark.parametrize(
+        "part, response_key",
+        [
+            ("LM317T", "results"),
+            ("LM358DR", "normalized"),
+            ("NE555P", "parts"),
+        ],
+        ids=["results_key", "normalized_key", "parts_key"],
+    )
     @pytest.mark.asyncio
-    async def test_dict_with_results_key(self):
-        """Response as dict with 'results' key extracts the list."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        mock_response = {"results": [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}]}
+    async def test_dict_with_list_key_extracts_list(self, part, response_key):
+        """Response as dict with a recognized list key extracts the list."""
+        mock_response = {response_key: [{"original": part, "normalized": part, "confidence": 0.9}]}
         with patch(
             "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
-            result = await _call_normalizer(["LM317T"])
+            result = await _call_normalizer([part])
 
         assert result is not None
         assert len(result) == 1
-        assert result[0]["normalized"] == "LM317T"
+        assert result[0]["normalized"] == part
 
+    @pytest.mark.parametrize(
+        "mock_response",
+        [
+            {"unexpected_key": "data"},  # dict without recognized keys
+            "just a string",  # non-dict, non-list response
+        ],
+        ids=["unexpected_dict", "string_response"],
+    )
     @pytest.mark.asyncio
-    async def test_dict_with_normalized_key(self):
-        """Response as dict with 'normalized' key extracts the list."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        mock_response = {"normalized": [{"original": "LM358DR", "normalized": "LM358DR", "confidence": 0.9}]}
+    async def test_unrecognized_format_returns_none(self, mock_response):
+        """Unrecognized response shapes return None."""
         with patch(
             "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
-        ):
-            result = await _call_normalizer(["LM358DR"])
-
-        assert result is not None
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_dict_with_parts_key(self):
-        """Response as dict with 'parts' key extracts the list."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        mock_response = {"parts": [{"original": "NE555P", "normalized": "NE555P", "confidence": 0.85}]}
-        with patch(
-            "app.services.ai_part_normalizer.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ):
-            result = await _call_normalizer(["NE555P"])
-
-        assert result is not None
-        assert len(result) == 1
-
-    @pytest.mark.asyncio
-    async def test_unexpected_format_returns_none(self):
-        """Dict without recognized keys returns None and logs warning."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        mock_response = {"unexpected_key": "data"}
-        with patch(
-            "app.services.ai_part_normalizer.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_response,
-        ):
-            result = await _call_normalizer(["SOME-PART"])
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_string_response_returns_none(self):
-        """Non-dict, non-list response returns None."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        with patch(
-            "app.services.ai_part_normalizer.claude_json",
-            new_callable=AsyncMock,
-            return_value="just a string",
         ):
             result = await _call_normalizer(["SOME-PART"])
 

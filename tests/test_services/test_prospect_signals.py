@@ -18,12 +18,18 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
 from app.models.prospect_account import ProspectAccount
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _run(coro):
+    """Run a coroutine to completion on the active event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _make_prospect(db: Session, **overrides) -> ProspectAccount:
@@ -191,7 +197,7 @@ class TestEnrichMissingSignals:
             },
         )
 
-        result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+        result = _run(enrich_missing_signals(p.id, db_session))
         assert result is False
 
     @patch("app.http_client.http")
@@ -223,7 +229,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -252,7 +258,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -269,14 +275,14 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
     def test_backfill_nonexistent_prospect(self, db_session):
         from app.services.prospect_signals import enrich_missing_signals
 
-        result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(99999, db_session))
+        result = _run(enrich_missing_signals(99999, db_session))
         assert result is False
 
     @patch("app.http_client.http")
@@ -299,7 +305,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -320,7 +326,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -341,7 +347,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -359,7 +365,7 @@ class TestEnrichMissingSignals:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is False
 
@@ -539,42 +545,35 @@ class TestFindSimilarCustomers:
 
 
 class TestComparesSizes:
-    def test_same_bracket(self):
+    @pytest.mark.parametrize(
+        ("a", "b", "expected"),
+        [
+            ("201-500", "201-500", True),
+            ("201-500", "501-1000", True),
+            ("1-50", "10001+", False),
+            (None, "201-500", False),
+            ("201-500", None, False),
+            (None, None, False),
+            ("300", "400", True),
+            ("10001+", "5001-10000", True),
+            ("lots", "many", False),
+        ],
+        ids=[
+            "same_bracket",
+            "adjacent_bracket",
+            "distant_brackets",
+            "none_first",
+            "none_second",
+            "none_both",
+            "numeric_string",
+            "plus_format",
+            "unparseable",
+        ],
+    )
+    def test_compare_sizes(self, a, b, expected):
         from app.services.prospect_signals import _compare_sizes
 
-        assert _compare_sizes("201-500", "201-500") is True
-
-    def test_adjacent_bracket(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("201-500", "501-1000") is True
-
-    def test_distant_brackets(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("1-50", "10001+") is False
-
-    def test_none_values(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes(None, "201-500") is False
-        assert _compare_sizes("201-500", None) is False
-        assert _compare_sizes(None, None) is False
-
-    def test_numeric_string(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("300", "400") is True
-
-    def test_plus_format(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("10001+", "5001-10000") is True
-
-    def test_unparseable(self):
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("lots", "many") is False
+        assert _compare_sizes(a, b) is expected
 
 
 # ── AI Writeup Generation ───────────────────────────────────────────
@@ -599,7 +598,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value="BorgWarner is a major automotive Tier 1 supplier. They show strong buying intent for electronic components.",
         ):
-            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
+            result = _run(generate_ai_writeup(p, db_session))
 
         assert "BorgWarner" in result
         db_session.refresh(p)
@@ -625,7 +624,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
+            result = _run(generate_ai_writeup(p, db_session))
 
         assert "FallbackCorp" in result
         assert "501-1000" in result
@@ -646,7 +645,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             side_effect=Exception("API down"),
         ):
-            result = asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
+            result = _run(generate_ai_writeup(p, db_session))
 
         assert "ExceptionCorp" in result
         db_session.refresh(p)
@@ -662,7 +661,7 @@ class TestGenerateAIWriteup:
             new_callable=AsyncMock,
             return_value="StoreCorp is a great prospect.",
         ):
-            asyncio.get_event_loop().run_until_complete(generate_ai_writeup(p, db_session))
+            _run(generate_ai_writeup(p, db_session))
 
         db_session.refresh(p)
         assert p.ai_writeup == "StoreCorp is a great prospect."
@@ -836,7 +835,7 @@ class TestRunSignalEnrichmentBatch:
         mock_writeup.return_value = "Great prospect."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["signals_added"] >= 1
         assert result["similar_computed"] >= 1
@@ -856,7 +855,7 @@ class TestRunSignalEnrichmentBatch:
         )
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["signals_added"] == 0
         assert result["similar_computed"] == 0
@@ -879,7 +878,7 @@ class TestRunSignalEnrichmentBatch:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         # Should still attempt writeups despite similar_customers error
@@ -948,7 +947,7 @@ class TestEnrichMissingSignalsHiringAndEvents:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -986,7 +985,7 @@ class TestEnrichMissingSignalsHiringAndEvents:
             "app.services.prospect_discovery_explorium._get_api_key",
             return_value="test-key",
         ):
-            result = asyncio.get_event_loop().run_until_complete(enrich_missing_signals(p.id, db_session))
+            result = _run(enrich_missing_signals(p.id, db_session))
 
         assert result is True
         db_session.refresh(p)
@@ -1039,32 +1038,31 @@ class TestFindSimilarCustomersWeakMatch:
 
 
 class TestToBracketIndexEdgeCases:
-    def test_plus_format_valid(self):
-        """Lines 405-406: _to_bracket_index with '10000+' format."""
+    """_to_bracket_index edge cases exercised through _compare_sizes."""
+
+    @pytest.mark.parametrize(
+        ("a", "b", "expected"),
+        [
+            # Lines 405-406: "10000+" parses to 10000, in bracket (5001, 10000).
+            ("10000+", "5001-10000", True),
+            # Lines 405-406: "abc+" fails to parse -> None -> False.
+            ("abc+", "1001-5000", False),
+            # Lines 411-412: non-parseable dash range -> None -> False.
+            ("abc-def", "1001-5000", False),
+            # Line 425: 2000000 exceeds the largest bracket (10001, 999999).
+            ("2000000", "1001-5000", False),
+        ],
+        ids=[
+            "plus_format_valid",
+            "plus_format_invalid",
+            "dash_format_invalid",
+            "exceeds_all_brackets",
+        ],
+    )
+    def test_compare_sizes_edge_cases(self, a, b, expected):
         from app.services.prospect_signals import _compare_sizes
 
-        # "10000+" should parse to 10000, which is in bracket (5001, 10000)
-        assert _compare_sizes("10000+", "5001-10000") is True
-
-    def test_plus_format_invalid(self):
-        """Lines 405-406: _to_bracket_index with unparseable '+' format."""
-        from app.services.prospect_signals import _compare_sizes
-
-        # "abc+" should fail to parse -> None -> False
-        assert _compare_sizes("abc+", "1001-5000") is False
-
-    def test_dash_format_invalid(self):
-        """Lines 411-412: _to_bracket_index with non-parseable range."""
-        from app.services.prospect_signals import _compare_sizes
-
-        assert _compare_sizes("abc-def", "1001-5000") is False
-
-    def test_exceeds_all_brackets(self):
-        """Line 425: _to_bracket_index returns None when num > max bracket."""
-        from app.services.prospect_signals import _compare_sizes
-
-        # 2000000 exceeds the largest bracket (10001, 999999)
-        assert _compare_sizes("2000000", "1001-5000") is False
+        assert _compare_sizes(a, b) is expected
 
 
 # ── Coverage: run_signal_enrichment_batch error handling ─────────────
@@ -1093,7 +1091,7 @@ class TestRunBatchErrorPaths:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         assert result["signals_added"] == 0
@@ -1117,7 +1115,7 @@ class TestRunBatchErrorPaths:
         mock_writeup.return_value = "Writeup."
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         # similar_customers already set → find_similar_customers should NOT be called
         mock_similar.assert_not_called()
@@ -1146,7 +1144,7 @@ class TestRunBatchErrorPaths:
         mock_similar.return_value = []
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            result = asyncio.get_event_loop().run_until_complete(run_signal_enrichment_batch(min_fit_score=40))
+            result = _run(run_signal_enrichment_batch(min_fit_score=40))
 
         assert result["errors"] >= 1
         assert result["writeups_generated"] == 0

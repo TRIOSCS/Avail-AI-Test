@@ -84,22 +84,23 @@ class TestBuildPrompt:
 # ── _build_batch_requests tests ───────────────────────────────────────
 
 
+def _cards(count):
+    return [{"id": i, "display_mpn": f"MPN{i}", "manufacturer": None, "description": None} for i in range(count)]
+
+
 class TestBuildBatchRequests:
     def test_single_batch(self):
-        cards = [{"id": i, "display_mpn": f"MPN{i}", "manufacturer": None, "description": None} for i in range(10)]
-        requests = _build_batch_requests(cards)
+        requests = _build_batch_requests(_cards(10))
         assert len(requests) == 1
         assert requests[0]["model_tier"] == "smart"
 
     def test_multiple_batches(self):
-        cards = [{"id": i, "display_mpn": f"MPN{i}", "manufacturer": None, "description": None} for i in range(120)]
-        requests = _build_batch_requests(cards)
+        requests = _build_batch_requests(_cards(120))
         # 120 cards / 50 per batch = 3 batches
         assert len(requests) == 3
 
     def test_custom_ids_unique(self):
-        cards = [{"id": i, "display_mpn": f"MPN{i}", "manufacturer": None, "description": None} for i in range(120)]
-        requests = _build_batch_requests(cards)
+        requests = _build_batch_requests(_cards(120))
         custom_ids = [r["custom_id"] for r in requests]
         assert len(custom_ids) == len(set(custom_ids))
 

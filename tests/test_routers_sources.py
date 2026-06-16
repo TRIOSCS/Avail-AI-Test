@@ -44,12 +44,19 @@ def test_get_connector_unknown_source():
     assert result is None
 
 
-def test_get_connector_email_mining_when_enabled(monkeypatch):
-    """Email mining returns test connector when enabled."""
+@pytest.mark.parametrize(
+    ("enabled", "expect_connector"),
+    [
+        pytest.param(True, True, id="enabled"),
+        pytest.param(False, False, id="disabled"),
+    ],
+)
+def test_get_connector_email_mining(monkeypatch, enabled, expect_connector):
+    """Email mining returns the test connector only when enabled."""
     monkeypatch.setattr(
         "app.routers.sources.settings",
         SimpleNamespace(
-            email_mining_enabled=True,
+            email_mining_enabled=enabled,
             nexar_client_id=None,
             brokerbin_api_key=None,
             ebay_client_id=None,
@@ -60,26 +67,10 @@ def test_get_connector_email_mining_when_enabled(monkeypatch):
         ),
     )
     result = _get_connector_for_source("email_mining")
-    assert isinstance(result, _EmailMiningTestConnector)
-
-
-def test_get_connector_email_mining_when_disabled(monkeypatch):
-    """Email mining returns None when disabled."""
-    monkeypatch.setattr(
-        "app.routers.sources.settings",
-        SimpleNamespace(
-            email_mining_enabled=False,
-            nexar_client_id=None,
-            brokerbin_api_key=None,
-            ebay_client_id=None,
-            digikey_client_id=None,
-            mouser_api_key=None,
-            oemsecrets_api_key=None,
-            sourcengine_api_key=None,
-        ),
-    )
-    result = _get_connector_for_source("email_mining")
-    assert result is None
+    if expect_connector:
+        assert isinstance(result, _EmailMiningTestConnector)
+    else:
+        assert result is None
 
 
 # ── _create_sightings_from_attachment ────────────────────────────────
@@ -785,226 +776,167 @@ def test_get_connector_nexar_with_octopart_key():
             assert result is not None
 
 
-def test_get_connector_nexar_with_client_id():
-    """Nexar source returns NexarConnector when NEXAR_CLIENT_ID is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": "nid",
-        "NEXAR_CLIENT_SECRET": "nsec",
-        "OCTOPART_API_KEY": None,
-    }
+@pytest.mark.parametrize(
+    ("source", "connector_path", "creds"),
+    [
+        pytest.param(
+            "nexar",
+            "app.connectors.sources.NexarConnector",
+            {
+                "NEXAR_CLIENT_ID": "nid",
+                "NEXAR_CLIENT_SECRET": "nsec",
+                "OCTOPART_API_KEY": None,
+            },
+            id="nexar-client-id",
+        ),
+        pytest.param(
+            "brokerbin",
+            "app.connectors.sources.BrokerBinConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": "bb_key",
+                "BROKERBIN_API_SECRET": "bb_sec",
+            },
+            id="brokerbin",
+        ),
+        pytest.param(
+            "ebay",
+            "app.connectors.ebay.EbayConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": "ebay_id",
+                "EBAY_CLIENT_SECRET": "ebay_sec",
+            },
+            id="ebay",
+        ),
+        pytest.param(
+            "digikey",
+            "app.connectors.digikey.DigiKeyConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": None,
+                "EBAY_CLIENT_SECRET": None,
+                "DIGIKEY_CLIENT_ID": "dk_id",
+                "DIGIKEY_CLIENT_SECRET": "dk_sec",
+            },
+            id="digikey",
+        ),
+        pytest.param(
+            "mouser",
+            "app.connectors.mouser.MouserConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": None,
+                "EBAY_CLIENT_SECRET": None,
+                "DIGIKEY_CLIENT_ID": None,
+                "DIGIKEY_CLIENT_SECRET": None,
+                "MOUSER_API_KEY": "mouser_key",
+            },
+            id="mouser",
+        ),
+        pytest.param(
+            "oemsecrets",
+            "app.connectors.oemsecrets.OEMSecretsConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": None,
+                "EBAY_CLIENT_SECRET": None,
+                "DIGIKEY_CLIENT_ID": None,
+                "DIGIKEY_CLIENT_SECRET": None,
+                "MOUSER_API_KEY": None,
+                "OEMSECRETS_API_KEY": "oem_key",
+            },
+            id="oemsecrets",
+        ),
+        pytest.param(
+            "sourcengine",
+            "app.connectors.sourcengine.SourcengineConnector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": None,
+                "EBAY_CLIENT_SECRET": None,
+                "DIGIKEY_CLIENT_ID": None,
+                "DIGIKEY_CLIENT_SECRET": None,
+                "MOUSER_API_KEY": None,
+                "OEMSECRETS_API_KEY": None,
+                "SOURCENGINE_API_KEY": "src_key",
+            },
+            id="sourcengine",
+        ),
+        pytest.param(
+            "element14",
+            "app.connectors.element14.Element14Connector",
+            {
+                "NEXAR_CLIENT_ID": None,
+                "NEXAR_CLIENT_SECRET": None,
+                "OCTOPART_API_KEY": None,
+                "BROKERBIN_API_KEY": None,
+                "BROKERBIN_API_SECRET": None,
+                "EBAY_CLIENT_ID": None,
+                "EBAY_CLIENT_SECRET": None,
+                "DIGIKEY_CLIENT_ID": None,
+                "DIGIKEY_CLIENT_SECRET": None,
+                "MOUSER_API_KEY": None,
+                "OEMSECRETS_API_KEY": None,
+                "SOURCENGINE_API_KEY": None,
+                "ELEMENT14_API_KEY": "e14_key",
+            },
+            id="newark",
+        ),
+    ],
+)
+def test_get_connector_for_keyed_source(source, connector_path, creds):
+    """Each keyed source returns its connector when the relevant credential is set."""
 
     def fake_cred(db, name, var):
         return creds.get(var)
 
     with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.sources.NexarConnector"):
-            result = _get_connector_for_source("nexar", db=MagicMock())
+        with patch(connector_path):
+            result = _get_connector_for_source(source, db=MagicMock())
             assert result is not None
 
 
-def test_get_connector_brokerbin():
-    """BrokerBin source returns BrokerBinConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": "bb_key",
-        "BROKERBIN_API_SECRET": "bb_sec",
-    }
+@pytest.mark.parametrize(
+    ("source", "connector_attr"),
+    [
+        pytest.param("anthropic_ai", "_AnthropicTestConnector", id="anthropic_ai"),
+        pytest.param("teams_notifications", "_TeamsTestConnector", id="teams_notifications"),
+        pytest.param("apollo_enrichment", "_ApolloTestConnector", id="apollo_enrichment"),
+        pytest.param("explorium_enrichment", "_ExploriumTestConnector", id="explorium_enrichment"),
+        pytest.param("azure_oauth", "_AzureOAuthTestConnector", id="azure_oauth"),
+    ],
+)
+def test_get_connector_for_test_only_source(source, connector_attr):
+    """Built-in test-only sources return their dedicated test connector (no env_vars
+    needed)."""
+    import app.routers.sources as sources_module
 
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.sources.BrokerBinConnector"):
-            result = _get_connector_for_source("brokerbin", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_ebay():
-    """EBay source returns EbayConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": "ebay_id",
-        "EBAY_CLIENT_SECRET": "ebay_sec",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.ebay.EbayConnector"):
-            result = _get_connector_for_source("ebay", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_digikey():
-    """DigiKey source returns DigiKeyConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None,
-        "DIGIKEY_CLIENT_ID": "dk_id",
-        "DIGIKEY_CLIENT_SECRET": "dk_sec",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.digikey.DigiKeyConnector"):
-            result = _get_connector_for_source("digikey", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_mouser():
-    """Mouser source returns MouserConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None,
-        "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None,
-        "MOUSER_API_KEY": "mouser_key",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.mouser.MouserConnector"):
-            result = _get_connector_for_source("mouser", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_oemsecrets():
-    """OEMSecrets source returns OEMSecretsConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None,
-        "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None,
-        "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": "oem_key",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.oemsecrets.OEMSecretsConnector"):
-            result = _get_connector_for_source("oemsecrets", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_sourcengine():
-    """Sourcengine source returns SourcengineConnector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None,
-        "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None,
-        "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None,
-        "SOURCENGINE_API_KEY": "src_key",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.sourcengine.SourcengineConnector"):
-            result = _get_connector_for_source("sourcengine", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_newark():
-    """Newark source returns Element14Connector when key is set."""
-    creds = {
-        "NEXAR_CLIENT_ID": None,
-        "NEXAR_CLIENT_SECRET": None,
-        "OCTOPART_API_KEY": None,
-        "BROKERBIN_API_KEY": None,
-        "BROKERBIN_API_SECRET": None,
-        "EBAY_CLIENT_ID": None,
-        "EBAY_CLIENT_SECRET": None,
-        "DIGIKEY_CLIENT_ID": None,
-        "DIGIKEY_CLIENT_SECRET": None,
-        "MOUSER_API_KEY": None,
-        "OEMSECRETS_API_KEY": None,
-        "SOURCENGINE_API_KEY": None,
-        "ELEMENT14_API_KEY": "e14_key",
-    }
-
-    def fake_cred(db, name, var):
-        return creds.get(var)
-
-    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
-        with patch("app.connectors.element14.Element14Connector"):
-            result = _get_connector_for_source("element14", db=MagicMock())
-            assert result is not None
-
-
-def test_get_connector_anthropic_ai():
-    """Anthropic AI returns _AnthropicTestConnector (no env_vars needed)."""
-    from app.routers.sources import _AnthropicTestConnector
-
-    result = _get_connector_for_source("anthropic_ai")
-    assert isinstance(result, _AnthropicTestConnector)
-
-
-def test_get_connector_teams_notifications():
-    """Teams returns _TeamsTestConnector."""
-    from app.routers.sources import _TeamsTestConnector
-
-    result = _get_connector_for_source("teams_notifications")
-    assert isinstance(result, _TeamsTestConnector)
-
-
-def test_get_connector_apollo_enrichment():
-    """Apollo returns _ApolloTestConnector."""
-    from app.routers.sources import _ApolloTestConnector
-
-    result = _get_connector_for_source("apollo_enrichment")
-    assert isinstance(result, _ApolloTestConnector)
-
-
-def test_get_connector_explorium_enrichment():
-    """Explorium returns _ExploriumTestConnector."""
-    from app.routers.sources import _ExploriumTestConnector
-
-    result = _get_connector_for_source("explorium_enrichment")
-    assert isinstance(result, _ExploriumTestConnector)
-
-
-def test_get_connector_azure_oauth():
-    """Azure OAuth returns _AzureOAuthTestConnector."""
-    from app.routers.sources import _AzureOAuthTestConnector
-
-    result = _get_connector_for_source("azure_oauth")
-    assert isinstance(result, _AzureOAuthTestConnector)
+    connector_cls = getattr(sources_module, connector_attr)
+    result = _get_connector_for_source(source)
+    assert isinstance(result, connector_cls)
 
 
 def test_get_connector_no_db_env_fallback(monkeypatch):
@@ -1035,19 +967,10 @@ async def test_anthropic_test_connector_search_success():
 
 
 @pytest.mark.asyncio
-async def test_anthropic_test_connector_no_key():
-    """_AnthropicTestConnector raises when claude_text returns None (no API key)."""
-    from app.routers.sources import _AnthropicTestConnector
-
-    connector = _AnthropicTestConnector()
-    with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value=None):
-        with pytest.raises(ValueError, match="Anthropic API returned no response"):
-            await connector.search("LM358N")
-
-
-@pytest.mark.asyncio
-async def test_anthropic_test_connector_api_error():
-    """_AnthropicTestConnector raises when claude_text returns None."""
+@pytest.mark.parametrize("scenario", ["no_key", "api_error"])
+async def test_anthropic_test_connector_no_response(scenario):
+    """_AnthropicTestConnector raises when claude_text returns None (no API key / API
+    error)."""
     from app.routers.sources import _AnthropicTestConnector
 
     connector = _AnthropicTestConnector()

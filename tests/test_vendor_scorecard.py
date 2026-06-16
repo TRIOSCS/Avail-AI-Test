@@ -69,37 +69,68 @@ def _make_requisition(db: Session, user: User) -> Requisition:
     return r
 
 
+def _add_contacts(db: Session, vc: VendorCard, user: User, req: Requisition, count: int) -> None:
+    """Add `count` email contacts (RFQs sent) tied to the given vendor/requisition."""
+    for _ in range(count):
+        db.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=user.id,
+                contact_type="email",
+                vendor_name=vc.display_name,
+                vendor_name_normalized=vc.normalized_name,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+    db.flush()
+
+
+def _add_offers(db: Session, vc: VendorCard, user: User, req: Requisition, count: int) -> list[Offer]:
+    """Add `count` active offers for the vendor; return them in creation order."""
+    offers = []
+    for _ in range(count):
+        o = Offer(
+            requisition_id=req.id,
+            vendor_name=vc.display_name,
+            vendor_card_id=vc.id,
+            mpn="LM317T",
+            qty_available=100,
+            unit_price=0.50,
+            entered_by_id=user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(o)
+        db.flush()
+        offers.append(o)
+    return offers
+
+
 # ── _compute_composite tests ─────────────────────────────────────────
 
 
 class TestComputeComposite:
-    def test_all_metrics_present(self):
-        result = _compute_composite(0.8, 0.6, 0.4, 0.9)
-        # (0.8*0.25 + 0.6*0.25 + 0.4*0.25 + 0.9*0.25) / 1.0 = 0.675
-        assert result == pytest.approx(0.675, abs=0.001)
-
-    def test_only_response_rate(self):
-        result = _compute_composite(0.5)
-        # 0.5*0.25 / 0.25 = 0.5
-        assert result == pytest.approx(0.5, abs=0.001)
-
-    def test_no_metrics(self):
-        result = _compute_composite(None)
-        assert result is None
-
-    def test_values_capped_at_1(self):
-        result = _compute_composite(1.5, 2.0)
-        # Both capped to 1.0: (1.0*0.25 + 1.0*0.25) / 0.5 = 1.0
-        assert result == pytest.approx(1.0, abs=0.001)
-
-    def test_two_metrics(self):
-        result = _compute_composite(0.6, 0.4)
-        # (0.6*0.25 + 0.4*0.25) / 0.5 = 0.5
-        assert result == pytest.approx(0.5, abs=0.001)
-
-    def test_zero_values(self):
-        result = _compute_composite(0.0, 0.0, 0.0, 0.0)
-        assert result == pytest.approx(0.0, abs=0.001)
+    @pytest.mark.parametrize(
+        ("args", "expected"),
+        [
+            # (0.8*0.25 + 0.6*0.25 + 0.4*0.25 + 0.9*0.25) / 1.0 = 0.675
+            pytest.param((0.8, 0.6, 0.4, 0.9), 0.675, id="all_metrics_present"),
+            # 0.5*0.25 / 0.25 = 0.5
+            pytest.param((0.5,), 0.5, id="only_response_rate"),
+            pytest.param((None,), None, id="no_metrics"),
+            # Both capped to 1.0: (1.0*0.25 + 1.0*0.25) / 0.5 = 1.0
+            pytest.param((1.5, 2.0), 1.0, id="values_capped_at_1"),
+            # (0.6*0.25 + 0.4*0.25) / 0.5 = 0.5
+            pytest.param((0.6, 0.4), 0.5, id="two_metrics"),
+            pytest.param((0.0, 0.0, 0.0, 0.0), 0.0, id="zero_values"),
+        ],
+    )
+    def test_composite(self, args, expected):
+        result = _compute_composite(*args)
+        if expected is None:
+            assert result is None
+        else:
+            assert result == pytest.approx(expected, abs=0.001)
 
 
 # ── compute_vendor_scorecard tests ───────────────────────────────────
@@ -128,17 +159,7 @@ class TestComputeVendorScorecard:
         req = _make_requisition(db_session, user)
 
         # Add fewer than COLD_START_THRESHOLD contacts
-        for i in range(COLD_START_THRESHOLD - 1):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
-        db_session.flush()
+        _add_contacts(db_session, vc, user, req, COLD_START_THRESHOLD - 1)
 
         result = compute_vendor_scorecard(db_session, vc.id)
         assert result["is_sufficient_data"] is False
@@ -150,17 +171,7 @@ class TestComputeVendorScorecard:
         req = _make_requisition(db_session, user)
 
         # Add enough contacts to cross threshold
-        for i in range(COLD_START_THRESHOLD + 1):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
-        db_session.flush()
+        _add_contacts(db_session, vc, user, req, COLD_START_THRESHOLD + 1)
 
         result = compute_vendor_scorecard(db_session, vc.id)
         assert result["is_sufficient_data"] is True
@@ -172,16 +183,7 @@ class TestComputeVendorScorecard:
         req = _make_requisition(db_session, user)
 
         # 4 RFQs sent
-        for i in range(4):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
+        _add_contacts(db_session, vc, user, req, 4)
 
         # 2 responses from vendor domain
         for i in range(2):
@@ -204,22 +206,7 @@ class TestComputeVendorScorecard:
         req = _make_requisition(db_session, user)
 
         # Create offers
-        offers = []
-        for i in range(4):
-            o = Offer(
-                requisition_id=req.id,
-                vendor_name=vc.display_name,
-                vendor_card_id=vc.id,
-                mpn="LM317T",
-                qty_available=100,
-                unit_price=0.50,
-                entered_by_id=user.id,
-                status="active",
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(o)
-            db_session.flush()
-            offers.append(o)
+        offers = _add_offers(db_session, vc, user, req, 4)
 
         # Preload: 2 of 4 offers are in quotes
         quoted_offer_ids = {offers[0].id, offers[1].id}
@@ -232,22 +219,7 @@ class TestComputeVendorScorecard:
         user = _make_user(db_session)
         req = _make_requisition(db_session, user)
 
-        offers = []
-        for i in range(5):
-            o = Offer(
-                requisition_id=req.id,
-                vendor_name=vc.display_name,
-                vendor_card_id=vc.id,
-                mpn="LM317T",
-                qty_available=100,
-                unit_price=0.50,
-                entered_by_id=user.id,
-                status="active",
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(o)
-            db_session.flush()
-            offers.append(o)
+        offers = _add_offers(db_session, vc, user, req, 5)
 
         po_offer_ids = {offers[0].id}
         result = compute_vendor_scorecard(db_session, vc.id, quoted_offer_ids=set(), po_offer_ids=po_offer_ids)
@@ -277,16 +249,7 @@ class TestComputeVendorScorecard:
         req = _make_requisition(db_session, user)
 
         # 2 RFQs sent
-        for _ in range(2):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
+        _add_contacts(db_session, vc, user, req, 2)
 
         # 1 noise response (should be excluded)
         vr = VendorResponse(
@@ -305,15 +268,7 @@ class TestComputeVendorScorecard:
         user = _make_user(db_session)
         req = _make_requisition(db_session, user)
 
-        c = Contact(
-            requisition_id=req.id,
-            user_id=user.id,
-            contact_type="email",
-            vendor_name=vc.display_name,
-            vendor_name_normalized=vc.normalized_name,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(c)
+        _add_contacts(db_session, vc, user, req, 1)
 
         # Response from alias domain
         vr = VendorResponse(
@@ -343,17 +298,7 @@ class TestComputeAllVendorScorecards:
         req = _make_requisition(db_session, user)
 
         # Create enough interactions to cross cold-start threshold
-        for i in range(COLD_START_THRESHOLD + 1):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
-        db_session.flush()
+        _add_contacts(db_session, vc, user, req, COLD_START_THRESHOLD + 1)
 
         result = compute_all_vendor_scorecards(db_session)
         assert result["updated"] == 1
@@ -373,17 +318,7 @@ class TestComputeAllVendorScorecards:
         user = _make_user(db_session)
         req = _make_requisition(db_session, user)
 
-        for i in range(COLD_START_THRESHOLD + 1):
-            c = Contact(
-                requisition_id=req.id,
-                user_id=user.id,
-                contact_type="email",
-                vendor_name=vc.display_name,
-                vendor_name_normalized=vc.normalized_name,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(c)
-        db_session.flush()
+        _add_contacts(db_session, vc, user, req, COLD_START_THRESHOLD + 1)
 
         # Run twice — should upsert, not duplicate
         compute_all_vendor_scorecards(db_session)

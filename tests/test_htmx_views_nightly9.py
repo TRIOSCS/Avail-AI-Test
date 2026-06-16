@@ -12,6 +12,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -124,50 +125,31 @@ def _req(db: Session, user: User, **kw) -> Requisition:
 class TestVendorReviews:
     """Covers add_vendor_review and delete_vendor_review."""
 
-    def test_add_review_success(
+    @pytest.mark.parametrize(
+        ("data", "expected_rating"),
+        [
+            ({"rating": "5", "comment": "Excellent"}, 5),
+            ({"rating": "not-a-number", "comment": ""}, 3),
+            ({"rating": "99"}, 5),
+        ],
+        ids=["valid", "invalid_defaults_to_3", "clamps_above_5"],
+    )
+    def test_add_review_rating(
         self,
         client: TestClient,
         db_session: Session,
         test_vendor_card: VendorCard,
+        data: dict,
+        expected_rating: int,
     ):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
-            data={"rating": "5", "comment": "Excellent"},
+            data=data,
         )
         assert resp.status_code == 200
         review = db_session.query(VendorReview).filter_by(vendor_card_id=test_vendor_card.id).first()
         assert review is not None
-        assert review.rating == 5
-
-    def test_add_review_invalid_rating_defaults_to_3(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_vendor_card: VendorCard,
-    ):
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
-            data={"rating": "not-a-number", "comment": ""},
-        )
-        assert resp.status_code == 200
-        review = db_session.query(VendorReview).filter_by(vendor_card_id=test_vendor_card.id).first()
-        assert review is not None
-        assert review.rating == 3
-
-    def test_add_review_clamps_rating_above_5(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_vendor_card: VendorCard,
-    ):
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
-            data={"rating": "99"},
-        )
-        assert resp.status_code == 200
-        review = db_session.query(VendorReview).filter_by(vendor_card_id=test_vendor_card.id).first()
-        assert review is not None
-        assert review.rating == 5
+        assert review.rating == expected_rating
 
     def test_add_review_vendor_not_found(self, client: TestClient):
         resp = client.post("/v2/partials/vendors/99999/reviews", data={"rating": "3"})
@@ -763,51 +745,33 @@ class TestEditQuoteMetadata:
 class TestUpdateResponseStatus:
     """Covers update_response_status (lines 5515-5550)."""
 
-    def test_update_status_to_reviewed(
+    @pytest.mark.parametrize(
+        ("status", "verify_stored"),
+        [
+            ("reviewed", True),
+            ("rejected", True),
+            ("flagged", False),
+        ],
+        ids=["reviewed", "rejected", "flagged"],
+    )
+    def test_update_status_valid(
         self,
         client: TestClient,
         db_session: Session,
         test_user: User,
+        status: str,
+        verify_stored: bool,
     ):
         req = _req(db_session, test_user)
         vr = _vendor_response(db_session, req)
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": "reviewed"},
+            data={"status": status},
         )
         assert resp.status_code == 200
-        db_session.refresh(vr)
-        assert vr.status == "reviewed"
-
-    def test_update_status_to_rejected(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_user: User,
-    ):
-        req = _req(db_session, test_user)
-        vr = _vendor_response(db_session, req)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": "rejected"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(vr)
-        assert vr.status == "rejected"
-
-    def test_update_status_to_flagged(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_user: User,
-    ):
-        req = _req(db_session, test_user)
-        vr = _vendor_response(db_session, req)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/status",
-            data={"status": "flagged"},
-        )
-        assert resp.status_code == 200
+        if verify_stored:
+            db_session.refresh(vr)
+            assert vr.status == status
 
     def test_update_status_invalid_raises_400(
         self,

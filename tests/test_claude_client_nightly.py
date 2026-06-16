@@ -303,33 +303,22 @@ class TestClaudeBatchSubmitGaps:
     _base_request = [{"custom_id": "r1", "prompt": "parse this", "schema": {"type": "object"}}]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "text", "expected_exc"),
+        [
+            pytest.param(401, "Unauthorized", ClaudeAuthError, id="401_auth_error"),
+            pytest.param(403, "Forbidden", ClaudeAuthError, id="403_auth_error"),
+            pytest.param(429, "Rate Limited", ClaudeRateLimitError, id="429_rate_limit_error"),
+        ],
+    )
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_401_raises_auth_error(self, mock_http, mock_cred):
-        """Line 485: 401 response raises ClaudeAuthError."""
-        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
+    async def test_error_status_raises(self, mock_http, mock_cred, status_code, text, expected_exc):
+        """Lines 485, 487: 401/403 raise ClaudeAuthError, 429 raises
+        ClaudeRateLimitError."""
+        mock_http.post = AsyncMock(return_value=_mock_response(status_code, text=text))
 
-        with pytest.raises(ClaudeAuthError):
-            await claude_batch_submit(self._base_request)
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_403_raises_auth_error(self, mock_http, mock_cred):
-        """Line 485: 403 response raises ClaudeAuthError."""
-        mock_http.post = AsyncMock(return_value=_mock_response(403, text="Forbidden"))
-
-        with pytest.raises(ClaudeAuthError):
-            await claude_batch_submit(self._base_request)
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_429_raises_rate_limit_error(self, mock_http, mock_cred):
-        """Line 487: 429 response raises ClaudeRateLimitError."""
-        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate Limited"))
-
-        with pytest.raises(ClaudeRateLimitError):
+        with pytest.raises(expected_exc):
             await claude_batch_submit(self._base_request)
 
     @pytest.mark.asyncio

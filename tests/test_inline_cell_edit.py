@@ -11,6 +11,8 @@ Depends on: conftest fixtures (client, db_session, test_user)
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.models import Requirement, Requisition
 from tests.conftest import engine  # noqa: F401
 
@@ -47,15 +49,20 @@ def _make_requirement(db, requisition_id, **kwargs):
     return item
 
 
+@pytest.fixture()
+def part(db_session, test_user):
+    """A committed requisition + default requirement, returning the requirement."""
+    requisition = _make_requisition(db_session, test_user.id)
+    item = _make_requirement(db_session, requisition.id)
+    db_session.commit()
+    return item
+
+
 # ── GET /cell/edit/{field} ───────────────────────────────────────────
 
 
-def test_cell_edit_status_returns_select(client, db_session, test_user):
+def test_cell_edit_status_returns_select(client, part):
     """GET cell/edit/sourcing_status returns a <select> element."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.get(f"/v2/partials/parts/{part.id}/cell/edit/sourcing_status")
     assert resp.status_code == 200
     html = resp.text
@@ -64,12 +71,8 @@ def test_cell_edit_status_returns_select(client, db_session, test_user):
     assert 'name="value"' in html
 
 
-def test_cell_edit_qty_returns_input(client, db_session, test_user):
+def test_cell_edit_qty_returns_input(client, part):
     """GET cell/edit/target_qty returns a number input."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.get(f"/v2/partials/parts/{part.id}/cell/edit/target_qty")
     assert resp.status_code == 200
     html = resp.text
@@ -77,12 +80,8 @@ def test_cell_edit_qty_returns_input(client, db_session, test_user):
     assert f"cell-target_qty-{part.id}" in html
 
 
-def test_cell_edit_price_returns_input(client, db_session, test_user):
+def test_cell_edit_price_returns_input(client, part):
     """GET cell/edit/target_price returns a number input with step."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.get(f"/v2/partials/parts/{part.id}/cell/edit/target_price")
     assert resp.status_code == 200
     html = resp.text
@@ -91,12 +90,8 @@ def test_cell_edit_price_returns_input(client, db_session, test_user):
     assert f"cell-target_price-{part.id}" in html
 
 
-def test_cell_edit_invalid_field_returns_400(client, db_session, test_user):
+def test_cell_edit_invalid_field_returns_400(client, part):
     """GET cell/edit with invalid field returns 400."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.get(f"/v2/partials/parts/{part.id}/cell/edit/bogus_field")
     assert resp.status_code == 400
 
@@ -146,10 +141,8 @@ def test_cell_display_price(client, db_session, test_user):
     assert "$2.5000" in resp.text
 
 
-def test_cell_display_null_fields(client, db_session, test_user):
+def test_cell_display_null_fields(client, db_session, part):
     """Display cells render em-dash for null values."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
     # Force null after creation (bypasses column default=1)
     part.target_qty = None
     part.target_price = None
@@ -157,7 +150,6 @@ def test_cell_display_null_fields(client, db_session, test_user):
 
     resp_qty = client.get(f"/v2/partials/parts/{part.id}/cell/display/target_qty")
     assert resp_qty.status_code == 200
-    print("QTY RESPONSE:", repr(resp_qty.text))
     assert "$" not in resp_qty.text  # no dollar formatting for null
 
     resp_price = client.get(f"/v2/partials/parts/{part.id}/cell/display/target_price")
@@ -165,12 +157,8 @@ def test_cell_display_null_fields(client, db_session, test_user):
     assert "$" not in resp_price.text  # no dollar sign for null price
 
 
-def test_cell_display_invalid_field_returns_400(client, db_session, test_user):
+def test_cell_display_invalid_field_returns_400(client, part):
     """GET cell/display with invalid field returns 400."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.get(f"/v2/partials/parts/{part.id}/cell/display/bogus")
     assert resp.status_code == 400
 
@@ -184,12 +172,8 @@ def test_cell_display_missing_part_returns_404(client, db_session, test_user):
 # ── PATCH /cell (save) ───────────────────────────────────────────────
 
 
-def test_cell_save_qty(client, db_session, test_user):
+def test_cell_save_qty(client, db_session, part):
     """PATCH cell saves target_qty and returns display cell."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, target_qty=5000)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "target_qty", "value": "7500"},
@@ -202,12 +186,8 @@ def test_cell_save_qty(client, db_session, test_user):
     assert part.target_qty == 7500
 
 
-def test_cell_save_price(client, db_session, test_user):
+def test_cell_save_price(client, db_session, part):
     """PATCH cell saves target_price and returns display cell."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "target_price", "value": "3.7500"},
@@ -219,12 +199,8 @@ def test_cell_save_price(client, db_session, test_user):
     assert part.target_price == Decimal("3.7500")
 
 
-def test_cell_save_status(client, db_session, test_user):
+def test_cell_save_status(client, part):
     """PATCH cell saves sourcing_status via transition_requirement."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, sourcing_status="open")
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "sourcing_status", "value": "sourcing"},
@@ -233,12 +209,8 @@ def test_cell_save_status(client, db_session, test_user):
     assert "sourcing" in resp.text
 
 
-def test_cell_save_empty_qty_sets_none(client, db_session, test_user):
+def test_cell_save_empty_qty_sets_none(client, db_session, part):
     """PATCH cell with empty value sets target_qty to None."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, target_qty=5000)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "target_qty", "value": ""},
@@ -249,12 +221,8 @@ def test_cell_save_empty_qty_sets_none(client, db_session, test_user):
     assert part.target_qty is None
 
 
-def test_cell_save_invalid_qty_sets_none(client, db_session, test_user):
+def test_cell_save_invalid_qty_sets_none(client, db_session, part):
     """PATCH cell with non-numeric qty sets target_qty to None."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, target_qty=5000)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "target_qty", "value": "abc"},
@@ -265,12 +233,8 @@ def test_cell_save_invalid_qty_sets_none(client, db_session, test_user):
     assert part.target_qty is None
 
 
-def test_cell_save_invalid_field_returns_400(client, db_session, test_user):
+def test_cell_save_invalid_field_returns_400(client, part):
     """PATCH cell with invalid field returns 400."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "bogus", "value": "x"},
@@ -287,12 +251,8 @@ def test_cell_save_missing_part_returns_404(client, db_session, test_user):
     assert resp.status_code == 404
 
 
-def test_cell_save_triggers_part_updated(client, db_session, test_user):
+def test_cell_save_triggers_part_updated(client, part):
     """PATCH cell includes HX-Trigger header with part-updated event."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
-
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/cell",
         data={"field": "target_qty", "value": "999"},
