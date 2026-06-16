@@ -10,9 +10,8 @@ from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 
-from app.models.base import Base
-
 from ..database import UTCDateTime
+from .base import Base
 
 
 class Notification(Base):
