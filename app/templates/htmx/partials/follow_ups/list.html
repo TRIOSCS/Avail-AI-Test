@@ -4,6 +4,7 @@
   Called by: htmx_views.py follow_ups_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{%- from "htmx/partials/follow_ups/_macros.html" import parts_summary %}
 
 <div class="max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-6">
@@ -73,7 +74,7 @@
           {% if fu.parts %}
           <p class="text-xs text-gray-400 truncate">
             <span class="text-gray-500 font-medium">Parts:</span>
-            <span class="font-mono">{{ fu.parts if fu.parts is string else fu.parts|join(', ') }}</span>
+            <span class="font-mono">{{ parts_summary(fu.parts) }}</span>
           </p>
           {% endif %}
 
@@ -110,7 +111,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Follow-Up Message <span class="text-gray-400">(optional -- uses default if blank)</span></label>
           <textarea name="body" rows="3"
-                    placeholder="Hi, following up on our RFQ regarding {{ fu.parts if fu.parts is string else fu.parts|join(', ') if fu.parts else 'your parts' }}..."
+                    placeholder="Hi, following up on our RFQ regarding {{ parts_summary(fu.parts, 'your parts') }}..."
                     class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 bg-white"></textarea>
         </div>
         <button type="submit"

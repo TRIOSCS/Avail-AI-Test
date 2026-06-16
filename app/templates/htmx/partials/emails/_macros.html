@@ -1,0 +1,32 @@
+{# _macros.html — Email-cluster-local Jinja2 macros (emails/* templates only).
+
+   What it does: factors out the dashboard stat-card markup that repeats four
+   times (verbatim except for icon color, icon path, label, value, and value
+   color) so each card is described by data instead of copy-pasted markup.
+   What calls it: emails/intelligence_dashboard.html.
+   What it depends on: Tailwind CSS brand palette.
+
+   Usage:
+     {% from "htmx/partials/emails/_macros.html" import stat_card %}
+     {% for circle_bg, icon_color, icon_path, label, value, value_color in cards %}
+     {{ stat_card(circle_bg, icon_color, icon_path, label, value, value_color) }}
+     {% endfor %}
+
+   The macro body is indented to sit two levels deep inside the stat grid; the
+   first line is unindented so the call site supplies the leading indent, and a
+   matching `{%- endmacro %}` trims the trailing newline so consecutive cards
+   render exactly as the original hand-written block did.
+#}
+{% macro stat_card(circle_bg, icon_color, icon_path, label, value, value_color) -%}
+<div class="bg-white rounded-lg border border-brand-200 p-4">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="flex items-center justify-center w-8 h-8 rounded-full {{ circle_bg }}">
+          <svg class="h-4 w-4 {{ icon_color }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
+          </svg>
+        </div>
+        <p class="text-xs text-gray-500 font-medium">{{ label }}</p>
+      </div>
+      <p class="text-2xl font-bold {{ value_color }}">{{ value }}</p>
+    </div>
+{%- endmacro %}

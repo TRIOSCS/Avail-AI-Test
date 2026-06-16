@@ -1,0 +1,32 @@
+{# _macros.html — Quote-cluster-local Jinja2 macros (quotes/* templates only).
+
+   What it does: factors out markup that repeats verbatim across the quote
+   detail/line/list partials so each call site stays a single source of truth.
+   What calls it: quotes/detail.html, quotes/line_row.html, quotes/list.html.
+   What it depends on: Tailwind CSS brand palette + the global `spinner` /
+   `data-loading` loading-state convention (htmx_app.js).
+
+   Usage:
+     {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color, margin_badge %}
+     {{ loading_spinner("h-4 w-4 spinner") }}
+     <p class="text-lg font-semibold {{ margin_text_color(margin) }}">...</p>
+     {{ margin_badge(mp) }}
+#}
+
+
+{# ── Loading Spinner ──────────────────────────────────────────────────
+   The `data-loading` SVG shown while an htmx request is in flight. The
+   inner circle is identical everywhere; only the wrapper classes vary, so
+   they are passed in. Rendered with whitespace trim so the call site emits
+   exactly the original single-line <svg>…</svg>. #}
+{% macro loading_spinner(cls) -%}
+<svg data-loading class="{{ cls }}" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+{%- endmacro %}
+
+
+{# ── Margin % → text color tier ───────────────────────────────────────
+   Used for the bare-text margin figure in the quote detail summary stats.
+   >=30% emerald, >=15% amber, else rose. #}
+{% macro margin_text_color(pct) -%}
+{%- if pct >= 30 -%}text-emerald-700{%- elif pct >= 15 -%}text-amber-700{%- else -%}text-rose-700{%- endif -%}
+{%- endmacro %}
