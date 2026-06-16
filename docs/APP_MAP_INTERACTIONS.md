@@ -1513,10 +1513,16 @@ owns arbitration in one place:
        writer.categorize_and_record(source="partsurfer_desc"). PartSurfer's Product
        Number just echoes the spare (so the canonical-MPN crosswalk is useless for
        HP); the rich DESCRIPTION is the win — it categorizes the ~70k uncategorized
-       HP cards. Best-effort: fetch_partsurfer_description never raises (any
-       non-200 / missing span / httpx error → None); categorize_and_record is
-       fill-only (a card already categorized this batch is skipped via the
-       NULL-category gate). partsurfer_desc (84) outranks the card's own desc_parse
+       HP cards. Resilient: fetch_partsurfer_description returns None on a GENUINE
+       no-result (404/3xx, missing/empty span, invalid input) but RAISES
+       PartSurferTransient on a throttle/outage (429, 5xx, or any httpx
+       transport/timeout error) — the pass then BREAKS for the rest of this batch
+       (stops hammering a struggling host; descriptions already fetched are kept).
+       Each card's categorize_and_record is wrapped per-card (mirrors
+       extract_and_record_specs) so one bad card (IntegrityError/DataError on the
+       shared session) can't abort the pass — failures are tallied into the summary's
+       "failed" key. categorize_and_record is fill-only (a card already categorized
+       this batch is skipped via the NULL-category gate). partsurfer_desc (84) outranks the card's own desc_parse
        (83) — OEM catalog text beats the card's own desc — but loses to the
        deterministic decoders (mpn_decode 85); it ties fru_matrix_decode (84, a
        different vendor — tie not load-bearing).

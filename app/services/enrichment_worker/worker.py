@@ -319,15 +319,23 @@ async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
     no-ops on an already-categorized card), so a card a prior pass categorized this batch
     is skipped without a fetch via the NULL-category gate below.
 
-    Best-effort: ``fetch_partsurfer_description`` never raises (returns None on any error),
-    and each card's write is in ``categorize_and_record``'s own per-card SAVEPOINT.
-    Returns an aggregate {fetched, categorized, specs_written} summary for the log line.
+    Resilient: on a throttle/outage ``fetch_partsurfer_description`` raises
+    ``PartSurferTransient`` — the pass BREAKS (stops hammering the host this batch) rather
+    than burning the remaining candidates against a struggling host; the descriptions
+    already fetched are kept. Each card's ``categorize_and_record`` is wrapped per-card so
+    one bad card (an IntegrityError/DataError on the shared session) can't abort the pass
+    and waste the other fetched descriptions; ``categorize_and_record`` also wraps its own
+    write in a per-card SAVEPOINT. Returns an aggregate
+    {fetched, categorized, specs_written, failed} summary for the log line.
     """
     from app.config import settings
     from app.services.desc_extractor._common import PARTSURFER_DESC_CONFIDENCE, PARTSURFER_DESC_SOURCE
     from app.services.desc_extractor.writer import categorize_and_record
     from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
-    from app.services.enrichment_worker.partsurfer_resolver import fetch_partsurfer_description
+    from app.services.enrichment_worker.partsurfer_resolver import (
+        PartSurferTransient,
+        fetch_partsurfer_description,
+    )
 
     # Uncategorized HP/HPE cards only, deduped by display_mpn (one fetch covers every card
     # sharing the spare). dict preserves insertion order → deterministic fetch order.
@@ -339,30 +347,43 @@ async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
             continue
         candidates.setdefault(card.display_mpn, []).append(card)
     if not candidates:
-        return {"fetched": 0, "categorized": 0, "specs_written": 0}
+        return {"fetched": 0, "categorized": 0, "specs_written": 0, "failed": 0}
 
     fetch_cap = settings.partsurfer_fetch_per_batch
-    fetched = categorized = specs_written = 0
+    fetched = categorized = specs_written = failed = 0
     for i, (spare, cards) in enumerate(candidates.items()):
         if fetched >= fetch_cap:
             break
         if i:
             # 1 request / 2s politeness — between fetches only (not before the first).
             await asyncio.sleep(2.0)
-        desc = await fetch_partsurfer_description(spare)
+        try:
+            desc = await fetch_partsurfer_description(spare)
+        except PartSurferTransient as exc:
+            # The host is throttling / down — stop hammering it for the rest of this batch.
+            # The aborted fetch is NOT counted; descriptions already fetched are kept.
+            logger.warning("partsurfer-desc: backing off this batch — {}", exc)
+            break
         fetched += 1
         if not desc:
             continue
         for card in cards:
             # categorize_and_record is fill-only (no-op on an already-set category) and
-            # wraps category + facets in one SAVEPOINT — already-categorized cards skip.
-            was_categorized, written = categorize_and_record(
-                db, card, description=desc, source=PARTSURFER_DESC_SOURCE, confidence=PARTSURFER_DESC_CONFIDENCE
-            )
+            # wraps category + facets in one SAVEPOINT. Per-card try/except (mirrors
+            # extract_and_record_specs) so one bad card never aborts the pass and wastes the
+            # other fetched descriptions.
+            try:
+                was_categorized, written = categorize_and_record(
+                    db, card, description=desc, source=PARTSURFER_DESC_SOURCE, confidence=PARTSURFER_DESC_CONFIDENCE
+                )
+            except Exception:
+                failed += 1
+                logger.exception("partsurfer-desc: failed on card_id={}", card.id)
+                continue
             if was_categorized:
                 categorized += 1
                 specs_written += written
-    return {"fetched": fetched, "categorized": categorized, "specs_written": specs_written}
+    return {"fetched": fetched, "categorized": categorized, "specs_written": specs_written, "failed": failed}
 
 
 async def run_one_batch(

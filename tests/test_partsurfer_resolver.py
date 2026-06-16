@@ -3,8 +3,10 @@
 Covers: app/services/enrichment_worker/partsurfer_resolver.py. Patches the shared
 ``app.http_client.http_redirect.get`` with an AsyncMock so ZERO live network is touched —
 the two real fixtures (a DIMM + an SSD captured from partsurfer.hpe.com) drive the happy
-path; the fabricated not-found fixture, a non-200 status, and a raised httpx.HTTPError
-drive the resilience contract (every failure → None, never a raise into the worker).
+path; the fabricated not-found fixture and a genuine non-200 (e.g. 404) drive the
+no-result contract (→ None). The throttle/outage contract is separate: a 429/5xx response
+or a raised httpx error must raise ``PartSurferTransient`` so the caller backs off this
+batch instead of mistaking a throttle for "no result".
 Depends on: tests/fixtures/partsurfer/*.html.
 """
 
@@ -15,8 +17,12 @@ import httpx
 import pytest
 
 from app.services.enrichment_worker import partsurfer_resolver
+from app.services.enrichment_worker.partsurfer_resolver import PartSurferTransient
 
 _FIXTURES = Path(__file__).parent / "fixtures" / "partsurfer"
+
+# The honest contact UA the fetcher must send (matches the module constant).
+_EXPECTED_UA = "AvailAI-PartLookup/1.0 (+sourcing enrichment; contact mkhoury@trioscs.com)"
 
 
 def _fixture(name: str) -> str:
@@ -48,6 +54,19 @@ async def test_ssd_fixture_returns_exact_description():
 
 
 @pytest.mark.asyncio
+async def test_outbound_request_uses_exact_url_and_contact_ua():
+    # Outbound contract: the GET targets the Search.aspx URL with the spare as SearchText
+    # and carries the honest contact User-Agent (robots.txt allows Search.aspx).
+    resp = _resp(_fixture("dimm_726719-B21.html"))
+    get = AsyncMock(return_value=resp)
+    with patch.object(partsurfer_resolver.http_redirect, "get", new=get):
+        await partsurfer_resolver.fetch_partsurfer_description("726719-B21")
+    url = get.await_args.args[0]
+    assert url == "https://partsurfer.hpe.com/Search.aspx?SearchText=726719-B21"
+    assert get.await_args.kwargs["headers"]["User-Agent"] == _EXPECTED_UA
+
+
+@pytest.mark.asyncio
 async def test_not_found_fixture_returns_none():
     # A real-shaped Search.aspx page with no lblDescription span → None (no guess).
     resp = _resp(_fixture("notfound.html"))
@@ -56,17 +75,63 @@ async def test_not_found_fixture_returns_none():
 
 
 @pytest.mark.asyncio
-async def test_non_200_returns_none():
-    resp = _resp(_fixture("dimm_726719-B21.html"), status_code=503)
+async def test_genuine_non_200_returns_none():
+    # A 404/3xx is a GENUINE no-result (not a throttle) → None, the spare moves on.
+    resp = _resp(_fixture("dimm_726719-B21.html"), status_code=404)
     with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
         assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
 
 
 @pytest.mark.asyncio
-async def test_http_error_is_swallowed_to_none():
-    # ANY httpx error must be caught and returned as None — never raised into the worker.
+async def test_503_raises_transient():
+    # A 5xx is a throttle/outage → PartSurferTransient so the caller backs off this batch.
+    resp = _resp(_fixture("dimm_726719-B21.html"), status_code=503)
+    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
+        with pytest.raises(PartSurferTransient):
+            await partsurfer_resolver.fetch_partsurfer_description("726719-B21")
+
+
+@pytest.mark.asyncio
+async def test_429_raises_transient_and_logs_warning():
+    # A 429 (rate-limited) is the canonical throttle signal → PartSurferTransient + WARNING.
+    resp = _resp(_fixture("dimm_726719-B21.html"), status_code=429)
+    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
+        with patch.object(partsurfer_resolver.logger, "warning") as warn:
+            with pytest.raises(PartSurferTransient):
+                await partsurfer_resolver.fetch_partsurfer_description("726719-B21")
+    assert warn.called
+
+
+@pytest.mark.asyncio
+async def test_http_error_raises_transient():
+    # ANY httpx transport error (timeout/connect/transient) → PartSurferTransient (back off),
+    # NOT None — a throttle masquerading as a no-result would hammer the host.
     boom = AsyncMock(side_effect=httpx.ConnectError("connection refused"))
     with patch.object(partsurfer_resolver.http_redirect, "get", new=boom):
+        with pytest.raises(PartSurferTransient):
+            await partsurfer_resolver.fetch_partsurfer_description("726719-B21")
+
+
+@pytest.mark.asyncio
+async def test_invalid_url_returns_none():
+    # Permanently-bad input for this spare — a retry can't help → genuine no-result (None).
+    boom = AsyncMock(side_effect=httpx.InvalidURL("bad url"))
+    with patch.object(partsurfer_resolver.http_redirect, "get", new=boom):
+        assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
+
+
+@pytest.mark.asyncio
+async def test_text_attribute_raises_returns_none():
+    # A pathological 200 whose .text raises → swallowed to None (a parse failure on a 200 is
+    # a genuine no-description, not a throttle — never raises PartSurferTransient).
+    class _BadText:
+        status_code = 200
+
+        @property
+        def text(self):
+            raise ValueError("decode boom")
+
+    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=_BadText())):
         assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
 
 
