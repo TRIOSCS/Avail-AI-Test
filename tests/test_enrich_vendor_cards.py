@@ -35,24 +35,28 @@ def _make_card(db, normalized_name, display_name, **kwargs):
     return card
 
 
-def _make_results(*vendor_names):
-    """Build a fake search results dict with one sighting per vendor name."""
-    return {
-        "LM317T": {
-            "sightings": [
-                {
-                    "vendor_name": name,
-                    "mpn_matched": "LM317T",
-                    "vendor_email": None,
-                    "vendor_phone": None,
-                    "vendor_url": None,
-                    "is_historical": False,
-                    "is_material_history": False,
-                }
-                for name in vendor_names
-            ]
-        }
+def _sighting(vendor_name, mpn="LM317T", **overrides):
+    """Build a single fake sighting dict with sensible defaults."""
+    sighting = {
+        "vendor_name": vendor_name,
+        "mpn_matched": mpn,
+        "vendor_email": None,
+        "vendor_phone": None,
+        "vendor_url": None,
+        "is_historical": False,
+        "is_material_history": False,
     }
+    sighting.update(overrides)
+    return sighting
+
+
+def _make_results(*vendor_names, mpn="LM317T", **overrides):
+    """Build a fake search results dict with one sighting per vendor name (all under the
+    given mpn).
+
+    Per-sighting fields can be overridden via kwargs.
+    """
+    return {mpn: {"sightings": [_sighting(name, mpn=mpn, **overrides) for name in vendor_names]}}
 
 
 class TestEnrichWithVendorCards:
@@ -96,63 +100,21 @@ class TestEnrichWithVendorCards:
         assert results["LM317T"]["blacklisted_count"] == 1
 
     def test_garbage_vendor_name_filtered_out(self, db_session):
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "no seller listed",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": None,
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("no seller listed")
         _enrich_with_vendor_cards(results, db_session)
         assert results["LM317T"]["sightings"] == []
 
     def test_empty_vendor_name_returns_early(self, db_session):
         # When ALL vendor names are empty/None, the function returns early
         # and the sightings are left unchanged (no enrichment, no filtering)
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": None,
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("")
         _enrich_with_vendor_cards(results, db_session)
         # Returns early — sightings are untouched (no vendor_card key added)
         assert "vendor_card" not in results["LM317T"]["sightings"][0]
 
     def test_email_harvested_and_merged_into_card(self, db_session):
         _make_card(db_session, "harvest vendor", "Harvest Vendor", emails=[])
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "Harvest Vendor",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": "sales@harvestvendor.com",
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("Harvest Vendor", vendor_email="sales@harvestvendor.com")
         _enrich_with_vendor_cards(results, db_session)
         card = db_session.query(VendorCard).filter_by(normalized_name="harvest vendor").first()
         db_session.refresh(card)
@@ -160,21 +122,7 @@ class TestEnrichWithVendorCards:
 
     def test_phone_harvested_and_merged_into_card(self, db_session):
         _make_card(db_session, "phone vendor", "Phone Vendor", phones=[])
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "Phone Vendor",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": None,
-                        "vendor_phone": "+1-555-0100",
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("Phone Vendor", vendor_phone="+1-555-0100")
         _enrich_with_vendor_cards(results, db_session)
         card = db_session.query(VendorCard).filter_by(normalized_name="phone vendor").first()
         db_session.refresh(card)
@@ -182,21 +130,7 @@ class TestEnrichWithVendorCards:
 
     def test_website_set_on_card_if_missing(self, db_session):
         _make_card(db_session, "web vendor", "Web Vendor", website=None)
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "Web Vendor",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": None,
-                        "vendor_phone": None,
-                        "vendor_url": "https://webvendor.com",
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("Web Vendor", vendor_url="https://webvendor.com")
         _enrich_with_vendor_cards(results, db_session)
         card = db_session.query(VendorCard).filter_by(normalized_name="web vendor").first()
         db_session.refresh(card)
@@ -204,21 +138,7 @@ class TestEnrichWithVendorCards:
 
     def test_historical_sightings_not_counted_for_mpn(self, db_session):
         _make_card(db_session, "hist vendor", "Hist Vendor")
-        results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "Hist Vendor",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": "hist@vendor.com",
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": True,
-                        "is_material_history": False,
-                    }
-                ]
-            }
-        }
+        results = _make_results("Hist Vendor", vendor_email="hist@vendor.com", is_historical=True)
         _enrich_with_vendor_cards(results, db_session)
         # Historical sightings should still get enriched but not counted for mpn_count
 
@@ -258,32 +178,8 @@ class TestEnrichWithVendorCards:
     def test_multiple_groups_each_enriched(self, db_session):
         _make_card(db_session, "arrow electronics", "Arrow Electronics")
         results = {
-            "LM317T": {
-                "sightings": [
-                    {
-                        "vendor_name": "Arrow Electronics",
-                        "mpn_matched": "LM317T",
-                        "vendor_email": None,
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            },
-            "BC547": {
-                "sightings": [
-                    {
-                        "vendor_name": "Arrow Electronics",
-                        "mpn_matched": "BC547",
-                        "vendor_email": None,
-                        "vendor_phone": None,
-                        "vendor_url": None,
-                        "is_historical": False,
-                        "is_material_history": False,
-                    }
-                ]
-            },
+            **_make_results("Arrow Electronics", mpn="LM317T"),
+            **_make_results("Arrow Electronics", mpn="BC547"),
         }
         _enrich_with_vendor_cards(results, db_session)
         assert "vendor_card" in results["LM317T"]["sightings"][0]

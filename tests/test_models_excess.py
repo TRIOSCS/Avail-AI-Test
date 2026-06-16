@@ -224,17 +224,17 @@ class TestExcessLineItemSchemas:
         schema = ExcessLineItemCreate(part_number="LM358N", quantity=100)
         assert schema.part_number == "LM358N"
 
-    def test_create_blank_part_number_rejected(self):
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({"part_number": "  ", "quantity": 100}, id="blank_part_number"),
+            pytest.param({"part_number": "LM358N", "quantity": 0}, id="zero_quantity"),
+            pytest.param({"part_number": "LM358N", "quantity": 1, "asking_price": -1.0}, id="negative_price"),
+        ],
+    )
+    def test_create_invalid_rejected(self, kwargs):
         with pytest.raises(ValidationError):
-            ExcessLineItemCreate(part_number="  ", quantity=100)
-
-    def test_create_zero_quantity_rejected(self):
-        with pytest.raises(ValidationError):
-            ExcessLineItemCreate(part_number="LM358N", quantity=0)
-
-    def test_create_negative_price_rejected(self):
-        with pytest.raises(ValidationError):
-            ExcessLineItemCreate(part_number="LM358N", quantity=1, asking_price=-1.0)
+            ExcessLineItemCreate(**kwargs)
 
     def test_create_defaults(self):
         schema = ExcessLineItemCreate(part_number="SN74HC595N", quantity=1)
@@ -247,13 +247,16 @@ class TestBidSchemas:
         schema = BidCreateRequest(unit_price=0.50, quantity_wanted=100)
         assert schema.source == "manual"
 
-    def test_create_missing_unit_price_rejected(self):
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            pytest.param({"quantity_wanted": 100}, id="missing_unit_price"),
+            pytest.param({"unit_price": 0.50}, id="missing_quantity"),
+        ],
+    )
+    def test_create_missing_required_rejected(self, kwargs):
         with pytest.raises(ValidationError):
-            BidCreateRequest(quantity_wanted=100)
-
-    def test_create_missing_quantity_rejected(self):
-        with pytest.raises(ValidationError):
-            BidCreateRequest(unit_price=0.50)
+            BidCreateRequest(**kwargs)
 
     def test_update_valid(self):
         schema = BidUpdate(status="accepted", unit_price=0.60)

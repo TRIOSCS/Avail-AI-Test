@@ -27,38 +27,40 @@ from app.schemas.requisitions import (
 
 
 class TestDeadlineValidator:
-    def test_valid_iso_date(self):
-        req = RequisitionCreate(name="Test", deadline="2025-06-15")
-        assert req.deadline == "2025-06-15"
+    @pytest.mark.parametrize(
+        "deadline",
+        [
+            pytest.param("2025-06-15", id="iso_date"),
+            pytest.param("06/15/2025", id="us_date_format"),
+            pytest.param("2025-06-15T00:00:00", id="iso_datetime"),
+        ],
+    )
+    def test_valid_deadline_passthrough(self, deadline):
+        req = RequisitionCreate(name="Test", deadline=deadline)
+        assert req.deadline == deadline
 
-    def test_valid_us_date_format(self):
-        req = RequisitionCreate(name="Test", deadline="06/15/2025")
-        assert req.deadline == "06/15/2025"
-
-    def test_valid_iso_datetime(self):
-        req = RequisitionCreate(name="Test", deadline="2025-06-15T00:00:00")
-        assert req.deadline == "2025-06-15T00:00:00"
-
-    def test_none_deadline_is_valid(self):
-        req = RequisitionCreate(name="Test", deadline=None)
+    @pytest.mark.parametrize(
+        "deadline",
+        [
+            pytest.param(None, id="none"),
+            pytest.param("", id="empty_string"),
+            pytest.param("   ", id="whitespace_only"),
+        ],
+    )
+    def test_blank_deadline_returns_none(self, deadline):
+        req = RequisitionCreate(name="Test", deadline=deadline)
         assert req.deadline is None
 
-    def test_empty_string_deadline_returns_none(self):
-        req = RequisitionCreate(name="Test", deadline="")
-        assert req.deadline is None
-
-    def test_whitespace_only_deadline_returns_none(self):
-        req = RequisitionCreate(name="Test", deadline="   ")
-        assert req.deadline is None
-
-    def test_invalid_date_raises(self):
+    @pytest.mark.parametrize(
+        "deadline",
+        [
+            pytest.param("not-a-date", id="invalid"),
+            pytest.param("2025-02-30", id="impossible"),
+        ],
+    )
+    def test_bad_deadline_raises(self, deadline):
         with pytest.raises(ValidationError) as exc_info:
-            RequisitionCreate(name="Test", deadline="not-a-date")
-        assert "Invalid date" in str(exc_info.value)
-
-    def test_impossible_date_raises(self):
-        with pytest.raises(ValidationError) as exc_info:
-            RequisitionCreate(name="Test", deadline="2025-02-30")
+            RequisitionCreate(name="Test", deadline=deadline)
         assert "Invalid date" in str(exc_info.value)
 
     def test_update_deadline_valid(self):
@@ -127,21 +129,21 @@ class TestRequirementCreateValidators:
         assert "" not in req.substitutes
         assert len(req.substitutes) == 2
 
-    def test_condition_normalized(self):
-        req = self._base(condition="new")
-        assert req.condition is not None
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            pytest.param("condition", "new", id="condition_normalized"),
+            pytest.param("packaging", "tape and reel", id="packaging_normalized"),
+        ],
+    )
+    def test_field_normalized(self, field, value):
+        req = self._base(**{field: value})
+        assert getattr(req, field) is not None
 
-    def test_condition_none_passthrough(self):
-        req = self._base(condition=None)
-        assert req.condition is None
-
-    def test_packaging_normalized(self):
-        req = self._base(packaging="tape and reel")
-        assert req.packaging is not None
-
-    def test_packaging_none_passthrough(self):
-        req = self._base(packaging=None)
-        assert req.packaging is None
+    @pytest.mark.parametrize("field", ["condition", "packaging"])
+    def test_field_none_passthrough(self, field):
+        req = self._base(**{field: None})
+        assert getattr(req, field) is None
 
 
 # ── RequirementUpdate validators ─────────────────────────────────────
@@ -169,47 +171,44 @@ class TestRequirementUpdateValidators:
         req = RequirementUpdate(substitutes=None)
         assert req.substitutes is None
 
-    def test_condition_normalized(self):
-        req = RequirementUpdate(condition="new")
-        assert req.condition is not None
+    @pytest.mark.parametrize(
+        "field, value",
+        [
+            pytest.param("condition", "new", id="condition_normalized"),
+            pytest.param("packaging", "tube", id="packaging_normalized"),
+        ],
+    )
+    def test_field_normalized(self, field, value):
+        req = RequirementUpdate(**{field: value})
+        assert getattr(req, field) is not None
 
-    def test_condition_none_passthrough(self):
-        req = RequirementUpdate(condition=None)
-        assert req.condition is None
-
-    def test_packaging_normalized(self):
-        req = RequirementUpdate(packaging="tube")
-        assert req.packaging is not None
-
-    def test_packaging_none_passthrough(self):
-        req = RequirementUpdate(packaging=None)
-        assert req.packaging is None
+    @pytest.mark.parametrize("field", ["condition", "packaging"])
+    def test_field_none_passthrough(self, field):
+        req = RequirementUpdate(**{field: None})
+        assert getattr(req, field) is None
 
 
 # ── RequisitionOutcome ────────────────────────────────────────────────
 
 
 class TestRequisitionOutcome:
-    def test_won_valid(self):
-        outcome = RequisitionOutcome(outcome="won")
-        assert outcome.outcome == "won"
-
-    def test_lost_valid(self):
-        outcome = RequisitionOutcome(outcome="lost")
-        assert outcome.outcome == "lost"
-
-    def test_case_insensitive(self):
-        outcome = RequisitionOutcome(outcome="WON")
-        assert outcome.outcome == "won"
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            pytest.param("won", "won", id="won_valid"),
+            pytest.param("lost", "lost", id="lost_valid"),
+            pytest.param("WON", "won", id="case_insensitive"),
+            pytest.param("  lost  ", "lost", id="whitespace_stripped"),
+        ],
+    )
+    def test_valid_outcome_normalized(self, raw, expected):
+        outcome = RequisitionOutcome(outcome=raw)
+        assert outcome.outcome == expected
 
     def test_invalid_outcome_raises(self):
         with pytest.raises(ValidationError) as exc_info:
             RequisitionOutcome(outcome="pending")
         assert "outcome must be 'won' or 'lost'" in str(exc_info.value)
-
-    def test_whitespace_stripped(self):
-        outcome = RequisitionOutcome(outcome="  lost  ")
-        assert outcome.outcome == "lost"
 
 
 # ── RequirementNoteAdd ────────────────────────────────────────────────

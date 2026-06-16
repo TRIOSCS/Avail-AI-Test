@@ -19,6 +19,15 @@ from app.services.tagging import (
     get_or_create_commodity_tag,
 )
 
+
+def add_tag(db_session, name, tag_type):
+    """Insert and flush a Tag, returning the persisted instance."""
+    tag = Tag(name=name, tag_type=tag_type, created_at=datetime.now(timezone.utc))
+    db_session.add(tag)
+    db_session.flush()
+    return tag
+
+
 # ── get_or_create_brand_tag ──────────────────────────────────────────
 
 
@@ -36,9 +45,7 @@ class TestGetOrCreateBrandTag:
 
     def test_returns_existing_tag_case_insensitive(self, db_session):
         """Returns existing tag via case-insensitive match."""
-        existing = Tag(name="Microchip", tag_type="brand", created_at=datetime.now(timezone.utc))
-        db_session.add(existing)
-        db_session.flush()
+        existing = add_tag(db_session, "Microchip", "brand")
 
         tag = get_or_create_brand_tag("microchip", db_session)
         assert tag.id == existing.id
@@ -50,9 +57,7 @@ class TestGetOrCreateBrandTag:
 
     def test_returns_existing_tag_exact_match(self, db_session):
         """Returns existing tag on exact match without creating duplicate."""
-        existing = Tag(name="NXP", tag_type="brand", created_at=datetime.now(timezone.utc))
-        db_session.add(existing)
-        db_session.flush()
+        existing = add_tag(db_session, "NXP", "brand")
 
         tag = get_or_create_brand_tag("NXP", db_session)
         assert tag.id == existing.id
@@ -61,10 +66,7 @@ class TestGetOrCreateBrandTag:
         """Simulates TOCTOU race: first SELECT returns None, INSERT hits
         IntegrityError, re-fetch finds the tag created by concurrent session."""
         # Pre-insert a tag to be found on re-fetch
-        existing = Tag(name="STMicroelectronics", tag_type="brand", created_at=datetime.now(timezone.utc))
-        db_session.add(existing)
-        db_session.flush()
-        existing_id = existing.id
+        existing_id = add_tag(db_session, "STMicroelectronics", "brand").id
 
         # Patch begin_nested to raise IntegrityError (simulating concurrent insert)
         original_execute = db_session.execute
@@ -94,9 +96,7 @@ class TestGetOrCreateBrandTag:
 
     def test_does_not_match_commodity_tag_with_same_name(self, db_session):
         """A commodity tag with the same name should not be returned as a brand tag."""
-        commodity = Tag(name="Resistors", tag_type="commodity", created_at=datetime.now(timezone.utc))
-        db_session.add(commodity)
-        db_session.flush()
+        commodity = add_tag(db_session, "Resistors", "commodity")
 
         tag = get_or_create_brand_tag("Resistors", db_session)
         assert tag.id != commodity.id
@@ -110,9 +110,7 @@ class TestGetOrCreateCommodityTag:
     """Tests for commodity tag lookup (pre-seeded, no creation)."""
 
     def test_finds_existing_commodity(self, db_session):
-        existing = Tag(name="Capacitors", tag_type="commodity", created_at=datetime.now(timezone.utc))
-        db_session.add(existing)
-        db_session.flush()
+        existing = add_tag(db_session, "Capacitors", "commodity")
 
         result = get_or_create_commodity_tag("Capacitors", db_session)
         assert result is not None

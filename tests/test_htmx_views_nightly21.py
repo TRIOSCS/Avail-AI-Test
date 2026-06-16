@@ -20,6 +20,7 @@ os.environ["TESTING"] = "1"
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -60,12 +61,9 @@ def _make_quote(db: Session, req: Requisition, user: User) -> Quote:
 
 
 class TestPricingHistory:
-    def test_pricing_history_no_data(self, client: TestClient):
-        resp = client.get("/v2/partials/pricing-history/NE555")
-        assert resp.status_code == 200
-
-    def test_pricing_history_empty_mpn(self, client: TestClient):
-        resp = client.get("/v2/partials/pricing-history/XYZ999")
+    @pytest.mark.parametrize("mpn", ["NE555", "XYZ999"], ids=["no_data", "empty_mpn"])
+    def test_pricing_history_ok(self, client: TestClient, mpn: str):
+        resp = client.get(f"/v2/partials/pricing-history/{mpn}")
         assert resp.status_code == 200
 
 
@@ -117,40 +115,19 @@ class TestRfqPreparePanel:
 
 
 class TestSourcingResultsPartial:
-    def test_sourcing_empty_results(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    @pytest.mark.parametrize(
+        "query",
+        ["", "?confidence=green", "?sort=freshest", "?freshness=7d", "?corroborated=yes"],
+        ids=["empty_results", "confidence_filter", "sort", "freshness_filter", "corroborated_filter"],
+    )
+    def test_sourcing_ok(self, client: TestClient, db_session: Session, test_requisition: Requisition, query: str):
         req_item = _make_requirement(db_session, test_requisition)
-        resp = client.get(f"/v2/partials/sourcing/{req_item.id}")
+        resp = client.get(f"/v2/partials/sourcing/{req_item.id}{query}")
         assert resp.status_code == 200
 
     def test_sourcing_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/sourcing/99999")
         assert resp.status_code == 404
-
-    def test_sourcing_with_confidence_filter(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
-    ):
-        req_item = _make_requirement(db_session, test_requisition)
-        resp = client.get(f"/v2/partials/sourcing/{req_item.id}?confidence=green")
-        assert resp.status_code == 200
-
-    def test_sourcing_with_sort(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        req_item = _make_requirement(db_session, test_requisition)
-        resp = client.get(f"/v2/partials/sourcing/{req_item.id}?sort=freshest")
-        assert resp.status_code == 200
-
-    def test_sourcing_with_freshness_filter(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
-    ):
-        req_item = _make_requirement(db_session, test_requisition)
-        resp = client.get(f"/v2/partials/sourcing/{req_item.id}?freshness=7d")
-        assert resp.status_code == 200
-
-    def test_sourcing_with_corroborated_filter(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
-    ):
-        req_item = _make_requirement(db_session, test_requisition)
-        resp = client.get(f"/v2/partials/sourcing/{req_item.id}?corroborated=yes")
-        assert resp.status_code == 200
 
 
 # ── Lead Detail ───────────────────────────────────────────────────────────

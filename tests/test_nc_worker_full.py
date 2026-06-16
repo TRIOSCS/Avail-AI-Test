@@ -49,59 +49,31 @@ pytestmark = pytest.mark.slow
 
 
 class TestMpnNormalizer:
-    def test_empty_string(self):
-        assert normalize_mpn("") == ""
-
-    def test_none_input(self):
-        assert normalize_mpn(None) == ""
-
-    def test_whitespace_only(self):
-        assert normalize_mpn("   ") == ""
-
-    def test_basic_uppercase(self):
-        assert normalize_mpn("stm32f103c8t6") == "STM32F103C8T6"
-
-    def test_strip_whitespace_internal(self):
-        assert normalize_mpn("LM 317 T") == "LM317T"
-
-    def test_strip_tape_and_reel_slash(self):
-        assert normalize_mpn("STM32F103C8T6/TR") == "STM32F103C8T6"
-
-    def test_strip_tape_and_reel_dash(self):
-        assert normalize_mpn("STM32F103C8T6-TR") == "STM32F103C8T6"
-
-    def test_strip_cut_tape_slash(self):
-        assert normalize_mpn("LM317T/CT") == "LM317T"
-
-    def test_strip_cut_tape_dash(self):
-        assert normalize_mpn("LM317T-CT") == "LM317T"
-
-    def test_strip_nd_suffix(self):
-        assert normalize_mpn("LM358DR-ND") == "LM358DR"
-
-    def test_strip_dkr_suffix(self):
-        assert normalize_mpn("AD8232ACPZ-DKR") == "AD8232ACPZ"
-
-    def test_strip_pbf_hash(self):
-        assert normalize_mpn("IRF3205#PBF") == "IRF3205"
-
-    def test_strip_pbf_dash(self):
-        assert normalize_mpn("IRF3205-PBF") == "IRF3205"
-
-    def test_strip_nopb_slash(self):
-        assert normalize_mpn("TPS54302DDCR/NOPB") == "TPS54302DDCR"
-
-    def test_strip_nopb_dash(self):
-        assert normalize_mpn("TPS54302DDCR-NOPB") == "TPS54302DDCR"
-
-    def test_strip_reel_suffix(self):
-        assert normalize_mpn("ADP3338AKCZ-3.3-RL") == "ADP3338AKCZ-3.3"
-
-    def test_strip_reel_with_number(self):
-        assert normalize_mpn("ADP3338AKCZ-RL7") == "ADP3338AKCZ"
-
-    def test_case_insensitive_suffix(self):
-        assert normalize_mpn("lm317t/tr") == "LM317T"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("", "", id="empty_string"),
+            pytest.param(None, "", id="none_input"),
+            pytest.param("   ", "", id="whitespace_only"),
+            pytest.param("stm32f103c8t6", "STM32F103C8T6", id="basic_uppercase"),
+            pytest.param("LM 317 T", "LM317T", id="strip_whitespace_internal"),
+            pytest.param("STM32F103C8T6/TR", "STM32F103C8T6", id="strip_tape_and_reel_slash"),
+            pytest.param("STM32F103C8T6-TR", "STM32F103C8T6", id="strip_tape_and_reel_dash"),
+            pytest.param("LM317T/CT", "LM317T", id="strip_cut_tape_slash"),
+            pytest.param("LM317T-CT", "LM317T", id="strip_cut_tape_dash"),
+            pytest.param("LM358DR-ND", "LM358DR", id="strip_nd_suffix"),
+            pytest.param("AD8232ACPZ-DKR", "AD8232ACPZ", id="strip_dkr_suffix"),
+            pytest.param("IRF3205#PBF", "IRF3205", id="strip_pbf_hash"),
+            pytest.param("IRF3205-PBF", "IRF3205", id="strip_pbf_dash"),
+            pytest.param("TPS54302DDCR/NOPB", "TPS54302DDCR", id="strip_nopb_slash"),
+            pytest.param("TPS54302DDCR-NOPB", "TPS54302DDCR", id="strip_nopb_dash"),
+            pytest.param("ADP3338AKCZ-3.3-RL", "ADP3338AKCZ-3.3", id="strip_reel_suffix"),
+            pytest.param("ADP3338AKCZ-RL7", "ADP3338AKCZ", id="strip_reel_with_number"),
+            pytest.param("lm317t/tr", "LM317T", id="case_insensitive_suffix"),
+        ],
+    )
+    def test_normalize_mpn(self, raw, expected):
+        assert normalize_mpn(raw) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2218,21 +2190,20 @@ class TestMainModule:
 
 
 class TestCircuitBreakerGaps:
-    def test_http_429_trips(self):
-        """HTTP 429 rate-limited trips breaker immediately (lines 44-45)."""
+    @pytest.mark.parametrize(
+        ("status_code", "expected_result"),
+        [
+            pytest.param(429, "RATE_LIMITED", id="http_429_rate_limited"),
+            pytest.param(403, "ACCESS_DENIED", id="http_403_access_denied"),
+        ],
+    )
+    def test_http_status_trips(self, status_code, expected_result):
+        """HTTP 429/403 trips breaker immediately with the status in trip_reason."""
         breaker = CircuitBreaker()
-        result = breaker.check_response_health(429, "", "https://www.netcomponents.com/search")
-        assert result == "RATE_LIMITED"
+        result = breaker.check_response_health(status_code, "", "https://www.netcomponents.com/search")
+        assert result == expected_result
         assert breaker.is_open
-        assert "429" in breaker.trip_reason
-
-    def test_http_403_trips(self):
-        """HTTP 403 access denied trips breaker immediately (lines 47-48)."""
-        breaker = CircuitBreaker()
-        result = breaker.check_response_health(403, "", "https://www.netcomponents.com/search")
-        assert result == "ACCESS_DENIED"
-        assert breaker.is_open
-        assert "403" in breaker.trip_reason
+        assert str(status_code) in breaker.trip_reason
 
     def test_session_expired(self):
         """Login redirect returns SESSION_EXPIRED (line 40)."""
@@ -2314,83 +2285,29 @@ class TestNcSchedulerFull:
         with patch.dict(os.environ, {"FORCE_BUSINESS_HOURS": "1"}):
             assert sched.is_business_hours() is True
 
-    def test_business_hours_saturday(self):
-        """Saturday returns False."""
+    @pytest.mark.parametrize(
+        ("weekday", "hour", "expected"),
+        [
+            pytest.param(5, 12, False, id="saturday"),
+            pytest.param(6, 10, False, id="sunday_before_6pm"),
+            pytest.param(6, 18, True, id="sunday_after_6pm"),
+            pytest.param(4, 12, True, id="friday_before_5pm"),
+            pytest.param(4, 17, False, id="friday_after_5pm"),
+            pytest.param(2, 3, True, id="weekday_mon_thu"),
+        ],
+    )
+    def test_business_hours_by_day(self, weekday, hour, expected):
+        """is_business_hours() respects weekday/hour windows (env override off)."""
         cfg = NcConfig()
         sched = SearchScheduler(cfg)
         with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
-            mock_now.weekday.return_value = 5
-            mock_now.hour = 12
+            mock_now.weekday.return_value = weekday
+            mock_now.hour = hour
             mock_dt.now.return_value = mock_now
             with patch.dict(os.environ, {}, clear=False):
                 os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is False
-
-    def test_business_hours_sunday_before_6pm(self):
-        """Sunday before 6 PM returns False."""
-        cfg = NcConfig()
-        sched = SearchScheduler(cfg)
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 6
-            mock_now.hour = 10
-            mock_dt.now.return_value = mock_now
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is False
-
-    def test_business_hours_sunday_after_6pm(self):
-        """Sunday at 6 PM+ returns True."""
-        cfg = NcConfig()
-        sched = SearchScheduler(cfg)
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 6
-            mock_now.hour = 18
-            mock_dt.now.return_value = mock_now
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is True
-
-    def test_business_hours_friday_before_5pm(self):
-        """Friday before 5 PM returns True."""
-        cfg = NcConfig()
-        sched = SearchScheduler(cfg)
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4
-            mock_now.hour = 12
-            mock_dt.now.return_value = mock_now
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is True
-
-    def test_business_hours_friday_after_5pm(self):
-        """Friday at 5 PM+ returns False."""
-        cfg = NcConfig()
-        sched = SearchScheduler(cfg)
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4
-            mock_now.hour = 17
-            mock_dt.now.return_value = mock_now
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is False
-
-    def test_business_hours_weekday(self):
-        """Mon-Thu always returns True."""
-        cfg = NcConfig()
-        sched = SearchScheduler(cfg)
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 2
-            mock_now.hour = 3
-            mock_dt.now.return_value = mock_now
-            with patch.dict(os.environ, {}, clear=False):
-                os.environ.pop("FORCE_BUSINESS_HOURS", None)
-                assert sched.is_business_hours() is True
+                assert sched.is_business_hours() is expected
 
     def test_next_delay_bounds(self):
         """next_delay returns value within configured bounds."""

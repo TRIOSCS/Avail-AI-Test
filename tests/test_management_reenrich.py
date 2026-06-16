@@ -12,9 +12,46 @@ import sys
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+def _mock_db(card_ids=(), cards=()):
+    """Build a mock DB session whose two query chains return the given card IDs (first
+    query) and full card objects (second, post-enrichment query)."""
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = list(
+        card_ids
+    )
+    mock_db.query.return_value.filter.return_value.all.return_value = list(cards)
+    return mock_db
+
+
+@contextmanager
+def _patched_main(mock_db, *, enrich_return=None, enrich_side_effect=None, record_side_effect=None):
+    """Patch SessionLocal → mock_db, enrich_material_cards, and record_spec, then yield
+    the record_spec mock. Patch targets stay at the source modules.
+
+    NOTE: do NOT patch app.models.MaterialCard here — main() lazily imports
+    app.services.spec_write_service, and if that module's FIRST import in this xdist
+    worker happens inside such a patch window, its module-level
+    `from app.models import MaterialCard` captures the MagicMock permanently, breaking
+    every later record_spec test on the same worker. The mocked db makes it unnecessary.
+    """
+    enrich_kwargs = {"new_callable": AsyncMock}
+    if enrich_side_effect is not None:
+        enrich_kwargs["side_effect"] = enrich_side_effect
+    else:
+        enrich_kwargs["return_value"] = enrich_return if enrich_return is not None else {"enriched": 0, "failed": 0}
+
+    with (
+        patch("app.database.SessionLocal", MagicMock(return_value=mock_db)),
+        patch("app.services.material_enrichment_service.enrich_material_cards", **enrich_kwargs),
+        patch("app.services.spec_write_service.record_spec", side_effect=record_side_effect) as mock_record,
+    ):
+        yield mock_record
 
 
 class TestReenrichMain:
@@ -22,26 +59,9 @@ class TestReenrichMain:
     async def test_main_empty_cards_list(self):
         """Main() with no cards still runs without error and doesn't call
         record_spec."""
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        mock_db.query.return_value.filter.return_value.all.return_value = []
-        mock_session_cls = MagicMock(return_value=mock_db)
+        mock_db = _mock_db()
 
-        # NOTE: do NOT patch("app.models.MaterialCard", MagicMock()) here — main() lazily
-        # imports app.services.spec_write_service, and if that module's FIRST import in
-        # this xdist worker happens inside such a patch window, its module-level
-        # `from app.models import MaterialCard` captures the MagicMock permanently,
-        # breaking every later record_spec test on the same worker. The mocked db makes
-        # the patch unnecessary anyway.
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 0, "failed": 0},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
+        with _patched_main(mock_db) as mock_record:
             from app.management.reenrich import main
 
             await main(limit=10, batch_size=5)
@@ -53,8 +73,6 @@ class TestReenrichMain:
     @pytest.mark.asyncio
     async def test_main_calls_record_spec_for_spec_values(self):
         """Main() calls record_spec for each non-None spec value in specs_structured."""
-        mock_db = MagicMock()
-
         card = MagicMock()
         card.id = 42
         card.category = "capacitor"
@@ -64,25 +82,9 @@ class TestReenrichMain:
             "voltage": {"value": "50V"},
             "tolerance": {"value": None},  # None value should be skipped
         }
+        mock_db = _mock_db(card_ids=[(42,)], cards=[card])
 
-        # First query returns card IDs
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (42,)
-        ]
-        # Second query (after enrichment) returns full cards
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
-
-        mock_session_cls = MagicMock(return_value=mock_db)
-
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 1},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
+        with _patched_main(mock_db, enrich_return={"enriched": 1}) as mock_record:
             from app.management.reenrich import main
 
             await main(limit=100, batch_size=10)
@@ -99,7 +101,6 @@ class TestReenrichMain:
         """A record_spec rejection (no-schema / enum drift / ladder loss) counts as
         skipped, never as backfilled — the closing log must not overstate what the facet
         projection actually holds."""
-        mock_db = MagicMock()
         card = MagicMock()
         card.id = 42
         card.category = "dram"
@@ -108,28 +109,16 @@ class TestReenrichMain:
             "bogus_key": {"value": "x"},  # rejected by the gates → skipped
             "speed_mhz": {"value": "junk"},  # rejected → skipped
         }
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (42,)
-        ]
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
+        mock_db = _mock_db(card_ids=[(42,)], cards=[card])
 
         from loguru import logger
 
         messages: list[str] = []
         sink_id = logger.add(lambda m: messages.append(str(m)), level="INFO")
         try:
-            with (
-                patch("app.database.SessionLocal", MagicMock(return_value=mock_db)),
-                patch(
-                    "app.services.material_enrichment_service.enrich_material_cards",
-                    new_callable=AsyncMock,
-                    return_value={"enriched": 1},
-                ),
-                patch(
-                    "app.services.spec_write_service.record_spec",
-                    side_effect=[True, False, False],
-                ) as mock_record,
-            ):
+            with _patched_main(
+                mock_db, enrich_return={"enriched": 1}, record_side_effect=[True, False, False]
+            ) as mock_record:
                 from app.management.reenrich import main
 
                 await main(limit=10, batch_size=5)
@@ -142,61 +131,22 @@ class TestReenrichMain:
         )
 
     @pytest.mark.asyncio
-    async def test_main_skips_card_without_specs_structured(self):
-        """Main() skips record_spec for cards with None specs_structured."""
-        mock_db = MagicMock()
-
+    @pytest.mark.parametrize(
+        ("card_id", "category", "specs_structured"),
+        [
+            pytest.param(10, "resistor", None, id="no_specs_structured"),
+            pytest.param(20, None, {"voltage": {"value": "50V"}}, id="no_category"),
+        ],
+    )
+    async def test_main_skips_card_without_required_fields(self, card_id, category, specs_structured):
+        """Main() skips record_spec for cards missing specs_structured or category."""
         card = MagicMock()
-        card.id = 10
-        card.category = "resistor"
-        card.specs_structured = None  # No specs
+        card.id = card_id
+        card.category = category
+        card.specs_structured = specs_structured
+        mock_db = _mock_db(card_ids=[(card_id,)], cards=[card])
 
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (10,)
-        ]
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
-        mock_session_cls = MagicMock(return_value=mock_db)
-
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 0},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
-            from app.management.reenrich import main
-
-            await main()
-
-        mock_record.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_main_skips_card_without_category(self):
-        """Main() skips record_spec for cards with None category."""
-        mock_db = MagicMock()
-
-        card = MagicMock()
-        card.id = 20
-        card.category = None  # No category
-        card.specs_structured = {"voltage": {"value": "50V"}}
-
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (20,)
-        ]
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
-        mock_session_cls = MagicMock(return_value=mock_db)
-
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 0},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
+        with _patched_main(mock_db, enrich_return={"enriched": 0}) as mock_record:
             from app.management.reenrich import main
 
             await main()
@@ -207,8 +157,6 @@ class TestReenrichMain:
     async def test_main_handles_plain_string_spec_values(self):
         """Main() handles specs_structured where values are plain strings (not
         dicts)."""
-        mock_db = MagicMock()
-
         card = MagicMock()
         card.id = 30
         card.category = "transistor"
@@ -217,22 +165,9 @@ class TestReenrichMain:
             "package": "TO-92",  # plain string value, not dict
             "gain": None,  # None plain value, should skip
         }
+        mock_db = _mock_db(card_ids=[(30,)], cards=[card])
 
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (30,)
-        ]
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
-        mock_session_cls = MagicMock(return_value=mock_db)
-
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 1},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
+        with _patched_main(mock_db, enrich_return={"enriched": 1}) as mock_record:
             from app.management.reenrich import main
 
             await main()
@@ -257,8 +192,6 @@ class TestReenrichMain:
 
         The 0.85 default applies only to entries with NO stored confidence.
         """
-        mock_db = MagicMock()
-
         card = MagicMock()
         card.id = 50
         card.category = "dram"
@@ -266,22 +199,9 @@ class TestReenrichMain:
             "ddr_type": {"value": "DDR4", "source": "spec_extraction", "confidence": 0.0},
             "capacity_gb": {"value": 16, "source": "spec_extraction"},  # no confidence key
         }
+        mock_db = _mock_db(card_ids=[(50,)], cards=[card])
 
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            (50,)
-        ]
-        mock_db.query.return_value.filter.return_value.all.return_value = [card]
-        mock_session_cls = MagicMock(return_value=mock_db)
-
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                return_value={"enriched": 1},
-            ),
-            patch("app.services.spec_write_service.record_spec") as mock_record,
-        ):
+        with _patched_main(mock_db, enrich_return={"enriched": 1}) as mock_record:
             from app.management.reenrich import main
 
             await main()
@@ -294,18 +214,9 @@ class TestReenrichMain:
     @pytest.mark.asyncio
     async def test_main_db_always_closed(self):
         """Main() closes DB session even if enrichment raises."""
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        mock_session_cls = MagicMock(return_value=mock_db)
+        mock_db = _mock_db()
 
-        with (
-            patch("app.database.SessionLocal", mock_session_cls),
-            patch(
-                "app.services.material_enrichment_service.enrich_material_cards",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("enrichment crashed"),
-            ),
-        ):
+        with _patched_main(mock_db, enrich_side_effect=RuntimeError("enrichment crashed")):
             from app.management.reenrich import main
 
             with pytest.raises(RuntimeError):

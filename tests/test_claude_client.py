@@ -94,6 +94,13 @@ def _cred_side_effect(service, key):
     return None
 
 
+def _tool_use_response(tool_input=None):
+    """200 response carrying a single structured_output tool_use block."""
+    return _mock_response(
+        200, {"content": [{"type": "tool_use", "name": "structured_output", "input": tool_input or {}}]}
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  claude_structured — mock HTTP
 # ═══════════════════════════════════════════════════════════════════════
@@ -104,50 +111,28 @@ class TestClaudeStructured:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_success_extracts_tool_input(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {"parsed": True}}]}
-            )
-        )
+        mock_http.post = AsyncMock(return_value=_tool_use_response({"parsed": True}))
 
         result = await claude_structured("test prompt", {"type": "object"})
         assert result == {"parsed": True}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body_text", "expected_exc"),
+        [
+            (500, "Server Error", ClaudeServerError),
+            (401, "Unauthorized", ClaudeAuthError),
+            (403, "Forbidden", ClaudeAuthError),
+            (429, "Rate limited", ClaudeRateLimitError),
+        ],
+        ids=["500_server", "401_auth", "403_auth", "429_rate_limit"],
+    )
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_api_500_raises_server_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
+    async def test_api_error_status_raises(self, mock_http, mock_cred, status_code, body_text, expected_exc):
+        mock_http.post = AsyncMock(return_value=_mock_response(status_code, text=body_text))
 
-        with pytest.raises(ClaudeServerError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_api_401_raises_auth_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
-
-        with pytest.raises(ClaudeAuthError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_api_403_raises_auth_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(403, text="Forbidden"))
-
-        with pytest.raises(ClaudeAuthError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_api_429_after_retries_raises_rate_limit(self, mock_http, mock_cred):
-        """429 on last attempt raises ClaudeRateLimitError."""
-        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
-
-        with pytest.raises(ClaudeRateLimitError):
+        with pytest.raises(expected_exc):
             await claude_structured("test", {"type": "object"})
 
     @pytest.mark.asyncio
@@ -168,32 +153,15 @@ class TestClaudeStructured:
         assert result is None
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("model_tier", ["fast", "smart"], ids=["fast_haiku", "smart_sonnet"])
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_fast_tier_uses_haiku(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
-            )
-        )
+    async def test_model_tier_selects_model(self, mock_http, mock_cred, model_tier):
+        mock_http.post = AsyncMock(return_value=_tool_use_response())
 
-        await claude_structured("test", {"type": "object"}, model_tier="fast")
+        await claude_structured("test", {"type": "object"}, model_tier=model_tier)
         body = mock_http.post.call_args.kwargs["json"]
-        assert body["model"] == MODELS["fast"]
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_smart_tier_uses_sonnet(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
-            )
-        )
-
-        await claude_structured("test", {"type": "object"}, model_tier="smart")
-        body = mock_http.post.call_args.kwargs["json"]
-        assert body["model"] == MODELS["smart"]
+        assert body["model"] == MODELS[model_tier]
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -248,21 +216,20 @@ class TestClaudeText:
             await claude_text("test")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body_text", "expected_exc"),
+        [
+            (500, "Error", ClaudeServerError),
+            (401, "Unauthorized", ClaudeAuthError),
+        ],
+        ids=["500_server", "401_auth"],
+    )
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_api_500_raises_server_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Error"))
+    async def test_api_error_status_raises(self, mock_http, mock_cred, status_code, body_text, expected_exc):
+        mock_http.post = AsyncMock(return_value=_mock_response(status_code, text=body_text))
 
-        with pytest.raises(ClaudeServerError):
-            await claude_text("test")
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_api_401_raises_auth_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
-
-        with pytest.raises(ClaudeAuthError):
+        with pytest.raises(expected_exc):
             await claude_text("test")
 
     @pytest.mark.asyncio
@@ -345,32 +312,23 @@ class TestBuildBatchRequest:
         )
         assert "system" not in req["params"]
 
-    def test_fast_tier_routing(self):
+    @pytest.mark.parametrize(
+        ("custom_id", "model_tier", "expected_tier"),
+        [
+            ("req-004", "fast", "fast"),
+            ("req-005", "smart", "smart"),
+            ("req-006", "nonexistent", "fast"),
+        ],
+        ids=["fast", "smart", "unknown_defaults_to_fast"],
+    )
+    def test_tier_routing(self, custom_id, model_tier, expected_tier):
         req = _build_batch_request(
-            custom_id="req-004",
+            custom_id=custom_id,
             prompt="test",
             schema={"type": "object"},
-            model_tier="fast",
+            model_tier=model_tier,
         )
-        assert req["params"]["model"] == MODELS["fast"]
-
-    def test_smart_tier_routing(self):
-        req = _build_batch_request(
-            custom_id="req-005",
-            prompt="test",
-            schema={"type": "object"},
-            model_tier="smart",
-        )
-        assert req["params"]["model"] == MODELS["smart"]
-
-    def test_unknown_tier_defaults_to_fast(self):
-        req = _build_batch_request(
-            custom_id="req-006",
-            prompt="test",
-            schema={"type": "object"},
-            model_tier="nonexistent",
-        )
-        assert req["params"]["model"] == MODELS["fast"]
+        assert req["params"]["model"] == MODELS[expected_tier]
 
     def test_custom_max_tokens(self):
         req = _build_batch_request(
@@ -718,11 +676,7 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_thinking_budget_forces_smart_model(self, mock_http, mock_cred):
         """When thinking_budget is set, uses SMART model regardless of model_tier."""
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {"x": 1}}]}
-            )
-        )
+        mock_http.post = AsyncMock(return_value=_tool_use_response({"x": 1}))
 
         await claude_structured("test", {"type": "object"}, model_tier="fast", thinking_budget=5000)
         body = mock_http.post.call_args.kwargs["json"]
@@ -736,11 +690,7 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_no_system_prompt_excluded(self, mock_http, mock_cred):
         """When system is empty, no system key in body."""
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
-            )
-        )
+        mock_http.post = AsyncMock(return_value=_tool_use_response())
 
         await claude_structured("test", {"type": "object"}, system="")
         body = mock_http.post.call_args.kwargs["json"]
@@ -751,11 +701,7 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_cache_system_false_no_cache_control(self, mock_http, mock_cred):
         """When cache_system=False, system block has no cache_control."""
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
-            )
-        )
+        mock_http.post = AsyncMock(return_value=_tool_use_response())
 
         await claude_structured("test", {"type": "object"}, system="system prompt", cache_system=False)
         body = mock_http.post.call_args.kwargs["json"]
@@ -767,11 +713,7 @@ class TestClaudeStructuredAdditional:
     @patch("app.utils.claude_client.http")
     async def test_unknown_model_tier_defaults_fast(self, mock_http, mock_cred):
         """Unknown model_tier falls back to 'fast'."""
-        mock_http.post = AsyncMock(
-            return_value=_mock_response(
-                200, {"content": [{"type": "tool_use", "name": "structured_output", "input": {}}]}
-            )
-        )
+        mock_http.post = AsyncMock(return_value=_tool_use_response())
 
         await claude_structured("test", {"type": "object"}, model_tier="nonexistent")
         body = mock_http.post.call_args.kwargs["json"]
@@ -830,17 +772,13 @@ class TestErrorHierarchy:
     def test_base_is_exception(self):
         assert issubclass(ClaudeError, Exception)
 
-    def test_auth_inherits_base(self):
-        assert issubclass(ClaudeAuthError, ClaudeError)
-
-    def test_rate_limit_inherits_base(self):
-        assert issubclass(ClaudeRateLimitError, ClaudeError)
-
-    def test_server_inherits_base(self):
-        assert issubclass(ClaudeServerError, ClaudeError)
-
-    def test_unavailable_inherits_base(self):
-        assert issubclass(ClaudeUnavailableError, ClaudeError)
+    @pytest.mark.parametrize(
+        "exc_type",
+        [ClaudeAuthError, ClaudeRateLimitError, ClaudeServerError, ClaudeUnavailableError],
+        ids=["auth", "rate_limit", "server", "unavailable"],
+    )
+    def test_subtype_inherits_base(self, exc_type):
+        assert issubclass(exc_type, ClaudeError)
 
     def test_catch_base_catches_all(self):
         """Catching ClaudeError catches all subtypes."""
@@ -875,82 +813,52 @@ class TestErrorDifferentiation:
     """Verify that different HTTP status codes produce distinguishable exceptions."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body_text", "expected_exc"),
+        [
+            (401, "Unauthorized", ClaudeAuthError),
+            (429, "Rate limited", ClaudeRateLimitError),
+            (500, "Server Error", ClaudeServerError),
+            (503, "Overloaded", ClaudeServerError),
+        ],
+        ids=["401_auth", "429_rate_limit", "500_server", "503_server"],
+    )
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_structured_401_is_auth_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
-        with pytest.raises(ClaudeAuthError):
+    async def test_structured_status_maps_to_exc(self, mock_http, mock_cred, status_code, body_text, expected_exc):
+        mock_http.post = AsyncMock(return_value=_mock_response(status_code, text=body_text))
+        with pytest.raises(expected_exc):
             await claude_structured("test", {"type": "object"})
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "body_text", "expected_exc"),
+        [
+            (401, "Unauthorized", ClaudeAuthError),
+            (429, "Rate limited", ClaudeRateLimitError),
+            (500, "Server Error", ClaudeServerError),
+        ],
+        ids=["401_auth", "429_rate_limit", "500_server"],
+    )
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_structured_429_is_rate_limit(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
-        with pytest.raises(ClaudeRateLimitError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_structured_500_is_server_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
-        with pytest.raises(ClaudeServerError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_structured_503_is_server_error(self, mock_http, mock_cred):
-        """503 on final attempt raises ClaudeServerError."""
-        mock_http.post = AsyncMock(return_value=_mock_response(503, text="Overloaded"))
-        with pytest.raises(ClaudeServerError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_text_401_is_auth_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
-        with pytest.raises(ClaudeAuthError):
+    async def test_text_status_maps_to_exc(self, mock_http, mock_cred, status_code, body_text, expected_exc):
+        mock_http.post = AsyncMock(return_value=_mock_response(status_code, text=body_text))
+        with pytest.raises(expected_exc):
             await claude_text("test")
 
     @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_text_429_is_rate_limit(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
-        with pytest.raises(ClaudeRateLimitError):
-            await claude_text("test")
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_text_500_is_server_error(self, mock_http, mock_cred):
-        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
-        with pytest.raises(ClaudeServerError):
-            await claude_text("test")
-
-    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "call",
+        [
+            lambda: claude_structured("test", {"type": "object"}),
+            lambda: claude_text("test"),
+            lambda: claude_batch_submit([{"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}}]),
+            lambda: claude_batch_results("batch_123"),
+        ],
+        ids=["structured", "text", "batch_submit", "batch_results"],
+    )
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_structured_no_key_is_unavailable(self, mock_cred):
+    async def test_no_key_is_unavailable(self, mock_cred, call):
         with pytest.raises(ClaudeUnavailableError):
-            await claude_structured("test", {"type": "object"})
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_text_no_key_is_unavailable(self, mock_cred):
-        with pytest.raises(ClaudeUnavailableError):
-            await claude_text("test")
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_batch_submit_no_key_is_unavailable(self, mock_cred):
-        with pytest.raises(ClaudeUnavailableError):
-            await claude_batch_submit([{"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}}])
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_batch_results_no_key_is_unavailable(self, mock_cred):
-        with pytest.raises(ClaudeUnavailableError):
-            await claude_batch_results("batch_123")
+            await call()

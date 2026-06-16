@@ -10,6 +10,8 @@ Depends on: routers/requisitions.py, conftest fixtures
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 # ── Requisition CRUD ──────────────────────────────────────────────────
 
 
@@ -511,9 +513,6 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, te
     assert resp.status_code in (403, 404)
 
 
-# ── Sales Role Access ─────────────────────────────────────────────────
-
-
 # ── Bulk Operations ──────────────────────────────────────────────────
 
 
@@ -804,18 +803,10 @@ def test_update_requisition_empty_name_preserves_old(client, db_session, test_re
     assert resp.json()["name"] == old_name
 
 
-def test_toggle_archive_won_status(client, db_session, test_requisition):
-    """Archiving a 'won' requisition transitions it to 'active'."""
-    test_requisition.status = "won"
-    db_session.commit()
-    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "active"
-
-
-def test_toggle_archive_lost_status(client, db_session, test_requisition):
-    """Archiving a 'lost' requisition transitions it to 'active'."""
-    test_requisition.status = "lost"
+@pytest.mark.parametrize("status", ["won", "lost"])
+def test_toggle_archive_terminal_status(client, db_session, test_requisition, status):
+    """Archiving a 'won'/'lost' requisition transitions it to 'active'."""
+    test_requisition.status = status
     db_session.commit()
     resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
     assert resp.status_code == 200
@@ -917,17 +908,41 @@ def test_update_requirement_all_fields(client, db_session, test_requisition):
     assert resp.json()["ok"] is True
 
 
-def test_update_requirement_unauthorized(client, db_session, test_user, test_requisition):
-    """Update requirement with different user's requisition returns 403."""
+@pytest.mark.parametrize(
+    ("email", "azure_id", "action"),
+    [
+        pytest.param(
+            "other2@trioscs.com",
+            "az-other-unauth",
+            lambda c, rid: c.put(f"/api/requirements/{rid}", json={"target_qty": 999}),
+            id="update",
+        ),
+        pytest.param(
+            "other3@trioscs.com",
+            "az-other-del",
+            lambda c, rid: c.delete(f"/api/requirements/{rid}"),
+            id="delete",
+        ),
+        pytest.param(
+            "other4@trioscs.com",
+            "az-other-search",
+            lambda c, rid: c.post(f"/api/requirements/{rid}/search"),
+            id="search",
+        ),
+    ],
+)
+def test_requirement_action_unauthorized(client, db_session, test_user, test_requisition, email, azure_id, action):
+    """Update/delete/search a requirement on another user's requisition returns
+    403/404."""
     from app.dependencies import require_buyer, require_user
     from app.main import app
     from app.models import Requirement, User
 
     other = User(
-        email="other2@trioscs.com",
-        name="Other2",
+        email=email,
+        name="Other",
         role="sales",
-        azure_id="az-other-unauth",
+        azure_id=azure_id,
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
@@ -938,66 +953,7 @@ def test_update_requirement_unauthorized(client, db_session, test_user, test_req
     app.dependency_overrides[require_user] = lambda: other
     app.dependency_overrides[require_buyer] = lambda: other
     try:
-        resp = client.put(
-            f"/api/requirements/{req_item.id}",
-            json={"target_qty": 999},
-        )
-        assert resp.status_code in (403, 404)
-    finally:
-        app.dependency_overrides[require_user] = lambda: test_user
-        app.dependency_overrides[require_buyer] = lambda: test_user
-
-
-def test_delete_requirement_unauthorized(client, db_session, test_user, test_requisition):
-    """Delete requirement with different user's requisition returns 403."""
-    from app.dependencies import require_buyer, require_user
-    from app.main import app
-    from app.models import Requirement, User
-
-    other = User(
-        email="other3@trioscs.com",
-        name="Other3",
-        role="sales",
-        azure_id="az-other-del",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(other)
-    db_session.commit()
-
-    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-
-    app.dependency_overrides[require_user] = lambda: other
-    app.dependency_overrides[require_buyer] = lambda: other
-    try:
-        resp = client.delete(f"/api/requirements/{req_item.id}")
-        assert resp.status_code in (403, 404)
-    finally:
-        app.dependency_overrides[require_user] = lambda: test_user
-        app.dependency_overrides[require_buyer] = lambda: test_user
-
-
-def test_search_one_unauthorized(client, db_session, test_user, test_requisition):
-    """Search one returns 403 when user does not have access to parent req."""
-    from app.dependencies import require_buyer, require_user
-    from app.main import app
-    from app.models import Requirement, User
-
-    other = User(
-        email="other4@trioscs.com",
-        name="Other4",
-        role="sales",
-        azure_id="az-other-search",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(other)
-    db_session.commit()
-
-    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-
-    app.dependency_overrides[require_user] = lambda: other
-    app.dependency_overrides[require_buyer] = lambda: other
-    try:
-        resp = client.post(f"/api/requirements/{req_item.id}/search")
+        resp = action(client, req_item.id)
         assert resp.status_code in (403, 404)
     finally:
         app.dependency_overrides[require_user] = lambda: test_user

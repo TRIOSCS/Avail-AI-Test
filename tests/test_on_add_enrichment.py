@@ -25,6 +25,24 @@ def _get_card(db: Session, mpn: str) -> MaterialCard:
     return card
 
 
+def _make_card(db: Session, normalized_mpn: str, display_mpn: str, **fields) -> MaterialCard:
+    """Build, add, and flush a MaterialCard with created_at defaulted to now."""
+    fields.setdefault("created_at", datetime.now(timezone.utc))
+    card = MaterialCard(normalized_mpn=normalized_mpn, display_mpn=display_mpn, **fields)
+    db.add(card)
+    db.flush()
+    return card
+
+
+def _category_conflict() -> dict:
+    """The standard manual=dram vs mpn_decode=hdd category conflict record."""
+    return {
+        "key": "category",
+        "manual": {"value": "dram", "updated_at": ""},
+        "evidence": {"source": "mpn_decode", "tier": 85, "confidence": 0.95, "value": "hdd", "observed_at": ""},
+    }
+
+
 # --- Single-add ---------------------------------------------------------------
 
 
@@ -87,12 +105,8 @@ def test_add_part_blanks_stay_blank(client, db_session: Session):
 
 
 def test_add_part_existing_card_resolves_not_duplicates(client, db_session: Session):
-    existing = MaterialCard(
-        normalized_mpn="zztestpart88",  # canonical dedup key (normalize_mpn_key strips dashes)
-        display_mpn="ZZTESTPART-88",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(existing)
+    # canonical dedup key (normalize_mpn_key strips dashes)
+    existing = _make_card(db_session, "zztestpart88", "ZZTESTPART-88")
     db_session.commit()
 
     resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-88", "manufacturer": "NewCo"})
@@ -168,14 +182,13 @@ def test_readd_of_enriched_card_does_not_stamp(client, db_session: Session):
     """The priority lane stamps only cards select_batch can pick — an already-enriched
     re-add would hold a stamp nothing ever clears (run_one_batch is the sole
     clearer)."""
-    existing = MaterialCard(
-        normalized_mpn="zztestpart66",
-        display_mpn="ZZTESTPART-66",
+    existing = _make_card(
+        db_session,
+        "zztestpart66",
+        "ZZTESTPART-66",
         enrichment_status="verified",
         enriched_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(existing)
     db_session.commit()
 
     resp = client.post("/api/materials/add", data={"mpn": "ZZTESTPART-66"})
@@ -189,13 +202,7 @@ def test_readd_with_category_clears_conflict(client, db_session: Session):
     it clears the category conflict exactly like both PUT paths."""
     from app.services.spec_tiers import set_category
 
-    card = MaterialCard(
-        normalized_mpn="zztestpart55",
-        display_mpn="ZZTESTPART-55",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
-    db_session.flush()
+    card = _make_card(db_session, "zztestpart55", "ZZTESTPART-55")
     set_category(card, "dram", "manual", 1.0)
     set_category(card, "hdd", "mpn_decode", 0.95)  # loses, records the conflict
     db_session.commit()
@@ -215,13 +222,7 @@ def test_readd_with_manufacturer_clears_conflict(client, db_session: Session):
     _set_provenanced_column, so manufacturer carries the full conflict contract)."""
     from app.services.spec_tiers import set_manufacturer
 
-    card = MaterialCard(
-        normalized_mpn="zztestpart56",
-        display_mpn="ZZTESTPART-56",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
-    db_session.flush()
+    card = _make_card(db_session, "zztestpart56", "ZZTESTPART-56")
     set_manufacturer(card, "Seagate Technology", "manual", 1.0)
     set_manufacturer(card, "Samsung", "mpn_decode", 0.95)  # loses, records the conflict
     db_session.commit()
@@ -245,13 +246,7 @@ def test_put_rejects_offvocab_category_422(client, db_session: Session):
     silently dropped is indistinguishable from acceptance."""
     from app.services.spec_tiers import set_category
 
-    card = MaterialCard(
-        normalized_mpn="zztestpart44",
-        display_mpn="ZZTESTPART-44",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
-    db_session.flush()
+    card = _make_card(db_session, "zztestpart44", "ZZTESTPART-44")
     set_category(card, "dram", "manual", 1.0)
     db_session.commit()
 
@@ -379,13 +374,7 @@ def test_stock_import_runs_passes_warns_and_does_not_stamp(client, db_session: S
 
 
 def test_enrich_status_unenriched_polls(client, db_session: Session):
-    card = MaterialCard(
-        normalized_mpn="poll-001",
-        display_mpn="POLL-001",
-        enrichment_status="unenriched",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
+    card = _make_card(db_session, "poll-001", "POLL-001", enrichment_status="unenriched")
     db_session.commit()
 
     resp = client.get(f"/v2/partials/materials/{card.id}/enrich-status")
@@ -395,14 +384,13 @@ def test_enrich_status_unenriched_polls(client, db_session: Session):
 
 
 def test_enrich_status_terminal_returns_286(client, db_session: Session):
-    card = MaterialCard(
-        normalized_mpn="poll-002",
-        display_mpn="POLL-002",
+    card = _make_card(
+        db_session,
+        "poll-002",
+        "POLL-002",
         enrichment_status="verified",
         enriched_at=datetime.now(timezone.utc),
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(card)
     db_session.commit()
 
     resp = client.get(f"/v2/partials/materials/{card.id}/enrich-status")
@@ -423,25 +411,14 @@ def test_enrich_status_missing_card_stops_polling(client, db_session: Session):
 
 
 def test_needs_review_filter_narrows(client, db_session: Session):
-    flagged = MaterialCard(
-        normalized_mpn="review-001",
-        display_mpn="REVIEW-001",
+    _make_card(
+        db_session,
+        "review-001",
+        "REVIEW-001",
         has_validation_conflict=True,
-        validation_conflicts=[
-            {
-                "key": "category",
-                "manual": {"value": "dram", "updated_at": ""},
-                "evidence": {"source": "mpn_decode", "tier": 85, "confidence": 0.95, "value": "hdd", "observed_at": ""},
-            }
-        ],
-        created_at=datetime.now(timezone.utc),
+        validation_conflicts=[_category_conflict()],
     )
-    clean = MaterialCard(
-        normalized_mpn="clean-001",
-        display_mpn="CLEAN-001",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add_all([flagged, clean])
+    _make_card(db_session, "clean-001", "CLEAN-001")
     db_session.commit()
 
     resp = client.get("/v2/partials/materials/faceted", params={"has_validation_conflict": "true"})
@@ -456,20 +433,13 @@ def test_needs_review_filter_narrows(client, db_session: Session):
 
 
 def test_detail_renders_conflict_badge_and_accept(client, db_session: Session):
-    card = MaterialCard(
-        normalized_mpn="review-002",
-        display_mpn="REVIEW-002",
+    card = _make_card(
+        db_session,
+        "review-002",
+        "REVIEW-002",
         has_validation_conflict=True,
-        validation_conflicts=[
-            {
-                "key": "category",
-                "manual": {"value": "dram", "updated_at": ""},
-                "evidence": {"source": "mpn_decode", "tier": 85, "confidence": 0.95, "value": "hdd", "observed_at": ""},
-            }
-        ],
-        created_at=datetime.now(timezone.utc),
+        validation_conflicts=[_category_conflict()],
     )
-    db_session.add(card)
     db_session.commit()
 
     resp = client.get(f"/v2/partials/materials/{card.id}")

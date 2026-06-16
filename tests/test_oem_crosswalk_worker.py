@@ -8,6 +8,8 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
+import pytest
+
 from app.constants import MaterialEnrichmentStatus, OemCrosswalkStatus
 from app.models import MaterialCard, OemCrosswalk
 from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
@@ -193,21 +195,18 @@ def test_pass_a_skips_non_hpe_cards(db_session):
     resolve_mock.assert_not_awaited()
 
 
-def test_pass_a_respects_web_daily_cap(db_session):
+@pytest.mark.parametrize(
+    "cache_counts",
+    [
+        pytest.param({"web_calls": 80}, id="web_daily_cap"),
+        pytest.param({"oem_resolves": 40}, id="oem_daily_sub_cap"),
+    ],
+)
+def test_pass_a_respects_daily_cap(db_session, cache_counts):
     _seed_card(db_session, "875942-001")
     resolve_mock = AsyncMock(return_value=RESOLVED)
 
-    _run(db_session, resolve_mock, cache_counts={"web_calls": 80})
-
-    resolve_mock.assert_not_awaited()
-    assert db_session.query(OemCrosswalk).count() == 0
-
-
-def test_pass_a_respects_oem_daily_sub_cap(db_session):
-    _seed_card(db_session, "875942-001")
-    resolve_mock = AsyncMock(return_value=RESOLVED)
-
-    _run(db_session, resolve_mock, cache_counts={"oem_resolves": 40})
+    _run(db_session, resolve_mock, cache_counts=cache_counts)
 
     resolve_mock.assert_not_awaited()
     assert db_session.query(OemCrosswalk).count() == 0
@@ -233,32 +232,27 @@ def test_pass_a_claude_error_feeds_breaker_writes_no_row_still_bills(db_session)
     assert web_state["oem_resolves"] == 1
 
 
-def test_pass_a_web_cap_boundary_mid_pass(db_session):
-    # Boundary, not exhaustion: at 79/80 with two pending candidates the contract is
-    # EXACTLY one resolve then stop — an off-by-one in the gate (>= vs >) or a reserve
-    # moved above the cap check would leak past the cap or strand the final slot.
+@pytest.mark.parametrize(
+    "cache_counts, expected_oem_resolves",
+    [
+        # Boundary, not exhaustion: at 79/80 with two pending candidates the contract is
+        # EXACTLY one resolve then stop — an off-by-one in the gate (>= vs >) or a reserve
+        # moved above the cap check would leak past the cap or strand the final slot.
+        pytest.param({"web_calls": 79}, 1, id="web_cap"),
+        # Mirror boundary for the sub-cap: 39/40 with two pending → exactly one resolve.
+        pytest.param({"oem_resolves": 39}, 40, id="oem_sub_cap"),
+    ],
+)
+def test_pass_a_cap_boundary_mid_pass(db_session, cache_counts, expected_oem_resolves):
     _seed_card(db_session, "875940-001")
     _seed_card(db_session, "875941-001")
     resolve_mock = AsyncMock(return_value=RESOLVED)
 
-    _, web_state, _ = _run(db_session, resolve_mock, cache_counts={"web_calls": 79})
+    _, web_state, _ = _run(db_session, resolve_mock, cache_counts=cache_counts)
 
     assert resolve_mock.await_count == 1
     assert db_session.query(OemCrosswalk).count() == 1
-    assert web_state["oem_resolves"] == 1  # exactly the one boundary slot was spent
-
-
-def test_pass_a_oem_sub_cap_boundary_mid_pass(db_session):
-    # Mirror boundary for the sub-cap: 39/40 with two pending → exactly one resolve.
-    _seed_card(db_session, "875940-001")
-    _seed_card(db_session, "875941-001")
-    resolve_mock = AsyncMock(return_value=RESOLVED)
-
-    _, web_state, _ = _run(db_session, resolve_mock, cache_counts={"oem_resolves": 39})
-
-    assert resolve_mock.await_count == 1
-    assert db_session.query(OemCrosswalk).count() == 1
-    assert web_state["oem_resolves"] == 40
+    assert web_state["oem_resolves"] == expected_oem_resolves
 
 
 def test_pass_a_upsert_race_skips_spare_and_batch_survives(db_session):

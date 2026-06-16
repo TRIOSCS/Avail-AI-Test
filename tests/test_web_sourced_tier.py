@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from app.models import MaterialCard
-from app.services.authoritative_enrichment_service import enrich_card
+from app.services.authoritative_enrichment_service import apply_web_sourced, enrich_card
 from app.services.enrichment_worker.web_extractor import WebExtractResult
 
 
@@ -65,8 +65,6 @@ def test_falls_through_to_ai_when_web_fails(mock_conns, mock_web, mock_claude, d
 @patch("app.services.authoritative_enrichment_service._connectors_in_order")
 def test_web_tier_skipped_when_web_search_disabled(mock_conns, mock_web, db_session):
     """When 'web_search' is in disabled, the web tier must be skipped entirely."""
-    from unittest.mock import AsyncMock, patch
-
     from tests.test_authoritative_enrichment import _FakeConn
 
     mock_conns.return_value = [_FakeConn("digikey", [])]
@@ -98,8 +96,6 @@ def test_apply_web_sourced_sets_fields(db_session):
     category/manufacturer route through the F1 ladder at web_search (tier 70) — the
     provenance columns are stamped, never raw-set.
     """
-    from app.services.authoritative_enrichment_service import apply_web_sourced
-
     card = _card(db_session, "TEST1")
     result = WebExtractResult(
         status="web_sourced",
@@ -142,10 +138,6 @@ def test_apply_web_sourced_sets_fields(db_session):
 def test_apply_web_sourced_category_loses_to_decode_85(db_session):
     """web_search (70) can never overwrite a decode-85 category — the ladder keeps the
     decode value and the rejected write gets no per-field provenance entry."""
-    from datetime import datetime, timezone
-
-    from app.services.authoritative_enrichment_service import apply_web_sourced
-
     card = _card(db_session, "TEST3")
     card.category = "hdd"
     card.category_source = "mpn_decode"
@@ -173,8 +165,6 @@ def test_apply_web_sourced_category_loses_to_decode_85(db_session):
 def test_apply_web_sourced_off_vocab_category_rejected(db_session):
     """An off-vocab web category is rejected by the ladder's normalizer — never
     persisted as junk, and absent from the per-field provenance."""
-    from app.services.authoritative_enrichment_service import apply_web_sourced
-
     card = _card(db_session, "TEST4")
     result = WebExtractResult(
         status="web_sourced",
@@ -195,8 +185,6 @@ def test_apply_web_sourced_off_vocab_category_rejected(db_session):
 
 def test_apply_web_sourced_skips_empty_fields(db_session):
     """apply_web_sourced must not overwrite None/empty fields on the card."""
-    from app.services.authoritative_enrichment_service import apply_web_sourced
-
     card = _card(db_session, "TEST2")
     card.description = "existing desc"
     result = WebExtractResult(

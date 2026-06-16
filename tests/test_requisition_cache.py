@@ -10,6 +10,8 @@ Verifies:
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import MaterialCard
 
 # ── Requisition list caching ────────────────────────────────────────
@@ -42,41 +44,25 @@ class TestRequisitionListCache:
         cache_key = mock_set.call_args[0][0]
         assert cache_key.startswith("req_list:")
 
-    def test_create_requisition_invalidates_cache(self, client, db_session, test_user):
-        """Creating a requisition invalidates the req_list cache."""
+    @pytest.mark.parametrize(
+        "method,path_template,json_body",
+        [
+            ("post", "/api/requisitions", {"name": "Test Req"}),
+            ("put", "/api/requisitions/{req_id}", {"name": "Updated Name"}),
+            ("put", "/api/requisitions/{req_id}/archive", None),
+            ("put", "/api/requisitions/bulk-archive", None),
+            ("post", "/api/requisitions/{req_id}/dismiss-new-offers", None),
+        ],
+        ids=["create", "update", "archive", "bulk-archive", "dismiss-new-offers"],
+    )
+    def test_mutation_invalidates_cache(
+        self, client, db_session, test_requisition, test_user, method, path_template, json_body
+    ):
+        """Create/update/archive/bulk-archive/dismiss-offers all invalidate the req_list
+        cache."""
+        path = path_template.format(req_id=test_requisition.id)
         with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.post("/api/requisitions", json={"name": "Test Req"})
-            assert resp.status_code == 200
-            mock_inv.assert_called_with("req_list")
-
-    def test_update_requisition_invalidates_cache(self, client, db_session, test_requisition, test_user):
-        """Updating a requisition invalidates the req_list cache."""
-        with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.put(
-                f"/api/requisitions/{test_requisition.id}",
-                json={"name": "Updated Name"},
-            )
-            assert resp.status_code == 200
-            mock_inv.assert_called_with("req_list")
-
-    def test_archive_requisition_invalidates_cache(self, client, db_session, test_requisition, test_user):
-        """Archiving a requisition invalidates the req_list cache."""
-        with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
-            assert resp.status_code == 200
-            mock_inv.assert_called_with("req_list")
-
-    def test_bulk_archive_invalidates_cache(self, client, db_session, test_user):
-        """Bulk archive invalidates the req_list cache."""
-        with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.put("/api/requisitions/bulk-archive")
-            assert resp.status_code == 200
-            mock_inv.assert_called_with("req_list")
-
-    def test_dismiss_new_offers_invalidates_cache(self, client, db_session, test_requisition, test_user):
-        """Dismissing new offers invalidates the req_list cache."""
-        with patch("app.routers.requisitions.invalidate_prefix") as mock_inv:
-            resp = client.post(f"/api/requisitions/{test_requisition.id}/dismiss-new-offers")
+            resp = client.request(method.upper(), path, json=json_body)
             assert resp.status_code == 200
             mock_inv.assert_called_with("req_list")
 

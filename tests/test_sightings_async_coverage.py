@@ -17,26 +17,15 @@ from unittest.mock import AsyncMock, patch
 from app.models import Requirement
 
 
-async def _async_client(app, db_session, test_user):
-    """Create an async HTTPX client with auth/db overrides."""
-    from app.database import get_db
-    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return test_user
-
-    async def _override_fresh_token():
-        return "mock-token"
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    app.dependency_overrides[require_admin] = _override_user
-    app.dependency_overrides[require_buyer] = _override_user
-    app.dependency_overrides[require_fresh_token] = _override_fresh_token
-    return app
+def _make_requirement(db_session, requisition, **overrides) -> Requirement:
+    """Persist a Requirement under the given requisition; overrides win over
+    defaults."""
+    fields = {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 10}
+    fields.update(overrides)
+    r = Requirement(requisition_id=requisition.id, **fields)
+    db_session.add(r)
+    db_session.commit()
+    return r
 
 
 # ── batch-assign ──────────────────────────────────────────────────────
@@ -52,15 +41,7 @@ class TestBatchAssignAsync:
         assert "No requirements" in resp.text
 
     async def test_batch_assign_valid(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         resp = client.post(
             "/v2/partials/sightings/batch-assign",
@@ -72,15 +53,7 @@ class TestBatchAssignAsync:
         assert resp.status_code == 200
 
     async def test_batch_assign_no_buyer(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="BC547",
-            manufacturer="TI",
-            target_qty=5,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition, primary_mpn="BC547", target_qty=5)
 
         resp = client.post(
             "/v2/partials/sightings/batch-assign",
@@ -105,15 +78,7 @@ class TestBatchStatusAsync:
         assert "No requirements" in resp.text
 
     async def test_batch_status_invalid_status(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         resp = client.post(
             "/v2/partials/sightings/batch-status",
@@ -125,15 +90,7 @@ class TestBatchStatusAsync:
         assert resp.status_code == 400
 
     async def test_batch_status_valid_transition(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         resp = client.post(
             "/v2/partials/sightings/batch-status",
@@ -176,16 +133,11 @@ class TestBatchRefreshAsync:
     async def test_batch_refresh_search_exception(self, client, db_session, test_user, test_requisition):
         from datetime import datetime, timedelta, timezone
 
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
+        r = _make_requirement(
+            db_session,
+            test_requisition,
             last_searched_at=datetime.now(timezone.utc) - timedelta(hours=2),  # Stale
         )
-        db_session.add(r)
-        db_session.commit()
 
         async def _fail(*args, **kwargs):
             raise Exception("Search failed")
@@ -212,15 +164,7 @@ class TestPreviewInquiryAsync:
         assert resp.status_code == 400
 
     async def test_preview_inquiry_valid(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         with patch("app.routers.sightings.template_response") as mock_tpl:
             from fastapi.responses import HTMLResponse
@@ -249,15 +193,7 @@ class TestSendInquiryAsync:
         assert resp.status_code == 400
 
     async def test_send_inquiry_success(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock, return_value=[{"vendor": "Arrow"}]):
             resp = client.post(
@@ -271,15 +207,7 @@ class TestSendInquiryAsync:
         assert resp.status_code == 200
 
     async def test_send_inquiry_send_fails(self, client, db_session, test_user, test_requisition):
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = _make_requirement(db_session, test_requisition)
 
         async def _fail_send(*args, **kwargs):
             raise Exception("Graph API error")

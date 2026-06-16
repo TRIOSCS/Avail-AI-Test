@@ -114,7 +114,8 @@ _MANUFACTURERS_CSV = "Id,Name\n001,Seagate Technology\n002,Western Digital\n"
 
 
 async def test_run_with_manufacturers_lookup_csv(tmp_path, db_session: Session, monkeypatch):
-    """run() parses the Manufacturers__c CSV and passes the lookup dict to the parser."""
+    """Run() parses the Manufacturers__c CSV and passes the lookup dict to the
+    parser."""
     seed_commodity_schemas(db_session)
     (tmp_path / "LSC1__Material__c.csv").write_text(_SFDC_CSV, encoding="utf-8")
     (tmp_path / "LSC1__Manufacturers__c.csv").write_text(_MANUFACTURERS_CSV, encoding="utf-8")
@@ -132,7 +133,8 @@ async def test_run_with_manufacturers_lookup_csv(tmp_path, db_session: Session, 
 
 
 async def test_run_ai_correct_flag_populates_ai_stats(tmp_path, db_session: Session, monkeypatch):
-    """When ai_correct_flag=True the ai_correct coroutine is called and its result stored."""
+    """When ai_correct_flag=True the ai_correct coroutine is called and its result
+    stored."""
     seed_commodity_schemas(db_session)
     (tmp_path / "Inventory 2.12.26.csv").write_text(_INVENTORY_CSV, encoding="utf-8")
     _patch_session(monkeypatch, db_session)
@@ -228,8 +230,9 @@ def test_print_report_with_failures(capsys):
 # ── main() (lines 202-211) ───────────────────────────────────────────────────
 
 
-def test_main_calls_run_and_returns_report(tmp_path, monkeypatch):
-    """main() parses argv, calls asyncio.run(run(...)), prints the report, and returns it."""
+def test_main_calls_run_and_returns_report(tmp_path):
+    """Main() parses argv, calls asyncio.run(run(...)), prints the report, and returns
+    it."""
     synthetic_report = _make_report(apply=False)
     # Patch asyncio.run so we never actually invoke the pipeline.
     with patch("app.management.ingest_source_data.asyncio.run", return_value=synthetic_report):
@@ -237,7 +240,7 @@ def test_main_calls_run_and_returns_report(tmp_path, monkeypatch):
     assert result is synthetic_report
 
 
-def test_main_apply_flag_forwarded(monkeypatch):
+def test_main_apply_flag_forwarded():
     """--apply is forwarded to run() via asyncio.run."""
     synthetic_report = _make_report(apply=True)
     captured: list = []

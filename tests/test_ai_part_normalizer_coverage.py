@@ -22,28 +22,19 @@ class TestCallNormalizerExceptions:
     """Tests for exception paths in _call_normalizer."""
 
     @pytest.mark.asyncio
-    async def test_claude_unavailable_returns_none(self):
-        """ClaudeUnavailableError → returns None."""
+    @pytest.mark.parametrize(
+        "exc",
+        [ClaudeUnavailableError("not configured"), ClaudeError("API failed")],
+        ids=["claude_unavailable", "claude_error"],
+    )
+    async def test_claude_exception_returns_none(self, exc):
+        """ClaudeUnavailableError / ClaudeError → returns None."""
         from app.services.ai_part_normalizer import _call_normalizer
 
         with patch(
             "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
-            side_effect=ClaudeUnavailableError("not configured"),
-        ):
-            result = await _call_normalizer(["LM317T"])
-
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_claude_error_returns_none(self):
-        """ClaudeError → returns None."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        with patch(
-            "app.services.ai_part_normalizer.claude_json",
-            new_callable=AsyncMock,
-            side_effect=ClaudeError("API failed"),
+            side_effect=exc,
         ):
             result = await _call_normalizer(["LM317T"])
 
@@ -54,36 +45,22 @@ class TestCallNormalizerDictResponse:
     """Tests for dict response format in _call_normalizer."""
 
     @pytest.mark.asyncio
-    async def test_dict_with_parts_key_returns_list(self):
-        """Dict response with 'parts' key → returns the list."""
+    @pytest.mark.parametrize("key", ["parts", "results"])
+    async def test_dict_with_known_key_returns_list(self, key):
+        """Dict response with a known list key ('parts'/'results') → returns the
+        list."""
         from app.services.ai_part_normalizer import _call_normalizer
 
-        parts_list = [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}]
+        expected = [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}]
 
         with patch(
             "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
-            return_value={"parts": parts_list},
+            return_value={key: expected},
         ):
             result = await _call_normalizer(["LM317T"])
 
-        assert result == parts_list
-
-    @pytest.mark.asyncio
-    async def test_dict_with_results_key_returns_list(self):
-        """Dict response with 'results' key → returns the list."""
-        from app.services.ai_part_normalizer import _call_normalizer
-
-        results_list = [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.90}]
-
-        with patch(
-            "app.services.ai_part_normalizer.claude_json",
-            new_callable=AsyncMock,
-            return_value={"results": results_list},
-        ):
-            result = await _call_normalizer(["LM317T"])
-
-        assert result == results_list
+        assert result == expected
 
     @pytest.mark.asyncio
     async def test_dict_without_matching_key_returns_none(self):

@@ -35,63 +35,53 @@ from app.services.prospect_discovery_explorium import (
 
 
 class TestNormalizeSize:
-    def test_string_passthrough(self):
-        assert _normalize_size({"company_size": "201-500"}) == "201-500"
-
-    def test_int_small(self):
-        assert _normalize_size({"employee_count": 30}) == "1-50"
-
-    def test_int_medium(self):
-        assert _normalize_size({"estimated_num_employees": 100}) == "51-200"
-
-    def test_int_201_500(self):
-        assert _normalize_size({"company_size": 300}) == "201-500"
-
-    def test_int_501_1000(self):
-        assert _normalize_size({"company_size": 800}) == "501-1000"
-
-    def test_int_1001_5000(self):
-        assert _normalize_size({"company_size": 3000}) == "1001-5000"
-
-    def test_int_5001_10000(self):
-        assert _normalize_size({"company_size": 7000}) == "5001-10000"
-
-    def test_int_large(self):
-        assert _normalize_size({"company_size": 20000}) == "10001+"
-
-    def test_none_returns_none(self):
-        assert _normalize_size({}) is None
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param({"company_size": "201-500"}, "201-500", id="string_passthrough"),
+            pytest.param({"employee_count": 30}, "1-50", id="int_small"),
+            pytest.param({"estimated_num_employees": 100}, "51-200", id="int_medium"),
+            pytest.param({"company_size": 300}, "201-500", id="int_201_500"),
+            pytest.param({"company_size": 800}, "501-1000", id="int_501_1000"),
+            pytest.param({"company_size": 3000}, "1001-5000", id="int_1001_5000"),
+            pytest.param({"company_size": 7000}, "5001-10000", id="int_5001_10000"),
+            pytest.param({"company_size": 20000}, "10001+", id="int_large"),
+            pytest.param({}, None, id="none_returns_none"),
+        ],
+    )
+    def test_normalize_size(self, raw, expected):
+        assert _normalize_size(raw) == expected
 
 
 class TestBuildLocation:
-    def test_full(self):
-        assert _build_location({"city": "Dallas", "state": "TX", "country": "US"}) == "Dallas, TX, US"
-
-    def test_partial(self):
-        assert _build_location({"hq_city": "Berlin", "country_code": "DE"}) == "Berlin, DE"
-
-    def test_empty(self):
-        assert _build_location({}) is None
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param({"city": "Dallas", "state": "TX", "country": "US"}, "Dallas, TX, US", id="full"),
+            pytest.param({"hq_city": "Berlin", "country_code": "DE"}, "Berlin, DE", id="partial"),
+            pytest.param({}, None, id="empty"),
+        ],
+    )
+    def test_build_location(self, raw, expected):
+        assert _build_location(raw) == expected
 
 
 class TestDetectRegion:
-    def test_us(self):
-        assert _detect_region({"country_code": "US"}) == "US"
-        assert _detect_region({"country_code": "USA"}) == "US"
-
-    def test_eu(self):
-        assert _detect_region({"country_code": "DE"}) == "EU"
-        assert _detect_region({"country_code": "FR"}) == "EU"
-
-    def test_asia(self):
-        assert _detect_region({"country_code": "JP"}) == "Asia"
-        assert _detect_region({"country_code": "TW"}) == "Asia"
-
-    def test_other(self):
-        assert _detect_region({"country_code": "BR"}) == "BR"
-
-    def test_empty(self):
-        assert _detect_region({}) is None
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param({"country_code": "US"}, "US", id="us"),
+            pytest.param({"country_code": "USA"}, "US", id="usa"),
+            pytest.param({"country_code": "DE"}, "EU", id="eu_de"),
+            pytest.param({"country_code": "FR"}, "EU", id="eu_fr"),
+            pytest.param({"country_code": "JP"}, "Asia", id="asia_jp"),
+            pytest.param({"country_code": "TW"}, "Asia", id="asia_tw"),
+            pytest.param({"country_code": "BR"}, "BR", id="other"),
+            pytest.param({}, None, id="empty"),
+        ],
+    )
+    def test_detect_region(self, raw, expected):
+        assert _detect_region(raw) == expected
 
 
 class TestNormalizeExploriumResult:
@@ -340,20 +330,18 @@ from app.services.unified_score_service import (
 
 
 class TestSafePct:
-    def test_normal(self):
-        assert _safe_pct(15, 30) == 50.0
-
-    def test_max_clamp(self):
-        assert _safe_pct(40, 30) == 100.0
-
-    def test_min_clamp(self):
-        assert _safe_pct(-5, 30) == 0.0
-
-    def test_zero_max(self):
-        assert _safe_pct(10, 0) == 0.0
-
-    def test_full_score(self):
-        assert _safe_pct(30, 30) == 100.0
+    @pytest.mark.parametrize(
+        ("value", "max_value", "expected"),
+        [
+            pytest.param(15, 30, 50.0, id="normal"),
+            pytest.param(40, 30, 100.0, id="max_clamp"),
+            pytest.param(-5, 30, 0.0, id="min_clamp"),
+            pytest.param(10, 0, 0.0, id="zero_max"),
+            pytest.param(30, 30, 100.0, id="full_score"),
+        ],
+    )
+    def test_safe_pct(self, value, max_value, expected):
+        assert _safe_pct(value, max_value) == expected
 
 
 class TestBuyerCategories:
@@ -665,51 +653,47 @@ from app.enrichment_service import (
 
 
 class TestCleanDomain:
-    def test_basic(self):
-        assert _clean_domain("https://www.example.com/page") == "example.com"
-
-    def test_http(self):
-        assert _clean_domain("http://example.com") == "example.com"
-
-    def test_trailing_dot(self):
-        assert _clean_domain("example.com.") == "example.com"
-
-    def test_trailing_slash(self):
-        assert _clean_domain("example.com/") == "example.com"
-
-    def test_uppercase(self):
-        assert _clean_domain("EXAMPLE.COM") == "example.com"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("https://www.example.com/page", "example.com", id="basic"),
+            pytest.param("http://example.com", "example.com", id="http"),
+            pytest.param("example.com.", "example.com", id="trailing_dot"),
+            pytest.param("example.com/", "example.com", id="trailing_slash"),
+            pytest.param("EXAMPLE.COM", "example.com", id="uppercase"),
+        ],
+    )
+    def test_clean_domain(self, raw, expected):
+        assert _clean_domain(raw) == expected
 
 
 class TestNameLooksSuspicious:
-    def test_normal_name(self):
-        assert _name_looks_suspicious("Acme Electronics") is False
-
-    def test_suspicious_no_vowels(self):
-        assert _name_looks_suspicious("Xylmnk Corp") is True
-
-    def test_acronym_preserved(self):
-        assert _name_looks_suspicious("IBM Corp") is False
-
-    def test_short_words_ignored(self):
-        assert _name_looks_suspicious("AB CD") is False
-
-    def test_empty(self):
-        assert _name_looks_suspicious("") is False
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            pytest.param("Acme Electronics", False, id="normal_name"),
+            pytest.param("Xylmnk Corp", True, id="suspicious_no_vowels"),
+            pytest.param("IBM Corp", False, id="acronym_preserved"),
+            pytest.param("AB CD", False, id="short_words_ignored"),
+            pytest.param("", False, id="empty"),
+        ],
+    )
+    def test_name_looks_suspicious(self, name, expected):
+        assert _name_looks_suspicious(name) is expected
 
 
 class TestTitleCasePreserveAcronyms:
-    def test_normal(self):
-        assert _title_case_preserve_acronyms("acme electronics") == "Acme Electronics"
-
-    def test_acronyms(self):
-        assert _title_case_preserve_acronyms("ibm corp") == "IBM CORP"
-
-    def test_mixed(self):
-        assert _title_case_preserve_acronyms("texas instruments ti") == "Texas Instruments TI"
-
-    def test_empty(self):
-        assert _title_case_preserve_acronyms("") == ""
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("acme electronics", "Acme Electronics", id="normal"),
+            pytest.param("ibm corp", "IBM CORP", id="acronyms"),
+            pytest.param("texas instruments ti", "Texas Instruments TI", id="mixed"),
+            pytest.param("", "", id="empty"),
+        ],
+    )
+    def test_title_case_preserve_acronyms(self, raw, expected):
+        assert _title_case_preserve_acronyms(raw) == expected
 
 
 class TestNormalizeCompanyInput:
@@ -1072,24 +1056,20 @@ from app.services.prospect_signals import (
 
 
 class TestCompareSizes:
-    def test_same_bracket(self):
-        assert _compare_sizes("201-500", "300") is True
-
-    def test_adjacent_bracket(self):
-        assert _compare_sizes("201-500", "501-1000") is True
-
-    def test_far_brackets(self):
-        assert _compare_sizes("1-50", "5001-10000") is False
-
-    def test_plus_notation(self):
-        assert _compare_sizes("10001+", "5001-10000") is True
-
-    def test_none_values(self):
-        assert _compare_sizes(None, "200") is False
-        assert _compare_sizes("200", None) is False
-
-    def test_invalid_string(self):
-        assert _compare_sizes("unknown", "200") is False
+    @pytest.mark.parametrize(
+        ("size_a", "size_b", "expected"),
+        [
+            pytest.param("201-500", "300", True, id="same_bracket"),
+            pytest.param("201-500", "501-1000", True, id="adjacent_bracket"),
+            pytest.param("1-50", "5001-10000", False, id="far_brackets"),
+            pytest.param("10001+", "5001-10000", True, id="plus_notation"),
+            pytest.param(None, "200", False, id="none_first"),
+            pytest.param("200", None, False, id="none_second"),
+            pytest.param("unknown", "200", False, id="invalid_string"),
+        ],
+    )
+    def test_compare_sizes(self, size_a, size_b, expected):
+        assert _compare_sizes(size_a, size_b) is expected
 
 
 class TestEnrichWithIntent:
@@ -1098,13 +1078,9 @@ class TestEnrichWithIntent:
         prospect.readiness_signals = {}
         prospect.name = "Test Co"
 
-        with (
-            patch(
-                "app.services.prospect_signals.db.get"
-                if False
-                else "app.services.prospect_signals.calculate_readiness_score",
-                return_value=(50, {}),
-            ),
+        with patch(
+            "app.services.prospect_signals.calculate_readiness_score",
+            return_value=(50, {}),
         ):
             db = MagicMock()
             db.get.return_value = prospect

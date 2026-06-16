@@ -30,14 +30,74 @@ async def test_generate_description_no_sources_no_existing():
     assert result["verified"] is False
 
 
+@pytest.mark.parametrize(
+    (
+        "mock_sources",
+        "claude_return",
+        "mpn",
+        "manufacturer",
+        "expected_confidence",
+        "expected_sources_used",
+        "expected_verified",
+        "desc_contains",
+    ),
+    [
+        pytest.param(
+            [
+                {"source": "digikey", "description": "IC MCU 32BIT 168MHZ 1MB LQFP100"},
+                {"source": "mouser", "description": "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100"},
+                {"source": "element14", "description": "MCU 32BIT ARM 168MHZ 1MB FLASH"},
+            ],
+            "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100",
+            "STM32F407VGT6",
+            "STMicroelectronics",
+            0.98,
+            3,
+            True,
+            "IC MCU",
+            id="three_sources_verified",
+        ),
+        pytest.param(
+            [
+                {"source": "digikey", "description": "CAPACITOR MLCC 100NF 50V 0402"},
+                {"source": "mouser", "description": "CAP MLCC 100NF 50V X7R 0402"},
+            ],
+            "CAP MLCC 100NF 50V X7R 0402",
+            "CL05B104KO5NNNC",
+            "Samsung",
+            0.90,
+            2,
+            False,
+            None,
+            id="two_sources",
+        ),
+        pytest.param(
+            [
+                {"source": "oemsecrets", "description": "RES SMD 10K OHM 1% 0402"},
+            ],
+            "RES SMD 10K 1% 0402",
+            "RC0402FR-0710KL",
+            "Yageo",
+            0.75,
+            1,
+            None,
+            None,
+            id="one_source",
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_generate_description_three_sources_verified():
-    """With 3+ sources, confidence should be 0.98 and verified=True."""
-    mock_sources = [
-        {"source": "digikey", "description": "IC MCU 32BIT 168MHZ 1MB LQFP100"},
-        {"source": "mouser", "description": "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100"},
-        {"source": "element14", "description": "MCU 32BIT ARM 168MHZ 1MB FLASH"},
-    ]
+async def test_generate_description_source_confidence(
+    mock_sources,
+    claude_return,
+    mpn,
+    manufacturer,
+    expected_confidence,
+    expected_sources_used,
+    expected_verified,
+    desc_contains,
+):
+    """Confidence and verified flag scale with the number of corroborating sources."""
     with (
         patch(
             "app.services.description_service._collect_db_descriptions",
@@ -46,66 +106,18 @@ async def test_generate_description_three_sources_verified():
         patch(
             "app.utils.claude_client.claude_text",
             new_callable=AsyncMock,
-            return_value="IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100",
+            return_value=claude_return,
         ),
     ):
         from app.services.description_service import generate_verified_description
 
-        result = await generate_verified_description("STM32F407VGT6", "STMicroelectronics")
-    assert result["confidence"] == 0.98
-    assert result["sources_used"] == 3
-    assert result["verified"] is True
-    assert "IC MCU" in result["description"]
-
-
-@pytest.mark.asyncio
-async def test_generate_description_two_sources():
-    """With 2 sources, confidence should be 0.90."""
-    mock_sources = [
-        {"source": "digikey", "description": "CAPACITOR MLCC 100NF 50V 0402"},
-        {"source": "mouser", "description": "CAP MLCC 100NF 50V X7R 0402"},
-    ]
-    with (
-        patch(
-            "app.services.description_service._collect_db_descriptions",
-            return_value=mock_sources,
-        ),
-        patch(
-            "app.utils.claude_client.claude_text",
-            new_callable=AsyncMock,
-            return_value="CAP MLCC 100NF 50V X7R 0402",
-        ),
-    ):
-        from app.services.description_service import generate_verified_description
-
-        result = await generate_verified_description("CL05B104KO5NNNC", "Samsung")
-    assert result["confidence"] == 0.90
-    assert result["sources_used"] == 2
-    assert result["verified"] is False
-
-
-@pytest.mark.asyncio
-async def test_generate_description_one_source():
-    """With 1 source, confidence should be 0.75."""
-    mock_sources = [
-        {"source": "oemsecrets", "description": "RES SMD 10K OHM 1% 0402"},
-    ]
-    with (
-        patch(
-            "app.services.description_service._collect_db_descriptions",
-            return_value=mock_sources,
-        ),
-        patch(
-            "app.utils.claude_client.claude_text",
-            new_callable=AsyncMock,
-            return_value="RES SMD 10K 1% 0402",
-        ),
-    ):
-        from app.services.description_service import generate_verified_description
-
-        result = await generate_verified_description("RC0402FR-0710KL", "Yageo")
-    assert result["confidence"] == 0.75
-    assert result["sources_used"] == 1
+        result = await generate_verified_description(mpn, manufacturer)
+    assert result["confidence"] == expected_confidence
+    assert result["sources_used"] == expected_sources_used
+    if expected_verified is not None:
+        assert result["verified"] is expected_verified
+    if desc_contains is not None:
+        assert desc_contains in result["description"]
 
 
 @pytest.mark.asyncio

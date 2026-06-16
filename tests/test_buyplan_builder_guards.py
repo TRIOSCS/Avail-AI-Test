@@ -111,15 +111,10 @@ def _setup_quote_with_offer(db: Session, *, quote_status="won"):
 
 
 class TestBuildBuyPlanQuoteStatus:
-    def test_rejects_draft_quote(self, db_session):
-        """Should not build buy plan from a draft quote."""
-        quote, *_ = _setup_quote_with_offer(db_session, quote_status="draft")
-        with pytest.raises(ValueError, match="must be won or sent"):
-            build_buy_plan(quote.id, db_session)
-
-    def test_rejects_lost_quote(self, db_session):
-        """Should not build buy plan from a lost quote."""
-        quote, *_ = _setup_quote_with_offer(db_session, quote_status="lost")
+    @pytest.mark.parametrize("quote_status", ["draft", "lost"])
+    def test_rejects_invalid_quote_status(self, db_session, quote_status):
+        """Should not build buy plan from a draft or lost quote."""
+        quote, *_ = _setup_quote_with_offer(db_session, quote_status=quote_status)
         with pytest.raises(ValueError, match="must be won or sent"):
             build_buy_plan(quote.id, db_session)
 

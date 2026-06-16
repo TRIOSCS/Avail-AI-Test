@@ -1,5 +1,7 @@
 """Tests for the real scan-now endpoints (TESTING guard => no Graph)."""
 
+import pytest
+
 
 def test_settings_scan_now_returns_card(client, monkeypatch):
     # Under TESTING=1, the endpoint must NOT call Graph and must return the card partial.
@@ -20,9 +22,6 @@ def test_requisition_poll_inbox_returns_responses_tab(client, test_requisition):
     resp = client.post(f"/v2/partials/requisitions/{test_requisition.id}/poll-inbox")
     assert resp.status_code == 200
     assert len(resp.text) > 0
-
-
-import pytest
 
 
 @pytest.mark.asyncio

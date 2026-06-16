@@ -157,8 +157,15 @@ def _make_review(db, card_id, user_id, rating):
 
 
 class TestComputeVendorScore:
-    def test_cold_start_below_threshold(self):
-        result = compute_vendor_score(4, 4.0, None)
+    @pytest.mark.parametrize(
+        ("offer_count", "stage_points", "rating"),
+        [
+            pytest.param(4, 4.0, None, id="below_threshold"),
+            pytest.param(0, 0.0, None, id="zero_offers"),
+        ],
+    )
+    def test_cold_start(self, offer_count, stage_points, rating):
+        result = compute_vendor_score(offer_count, stage_points, rating)
         assert result["vendor_score"] is None
         assert result["is_new_vendor"] is True
 
@@ -174,17 +181,18 @@ class TestComputeVendorScore:
         expected_advancement = (10 / (10 * 8)) * 100  # 12.5
         assert result["advancement_score"] == round(expected_advancement, 1)
 
-    def test_perfect_score(self):
-        # All PO confirmed (8pts each) + 5.0 rating
-        result = compute_vendor_score(5, 40.0, 5.0)
-        # advancement = (40/40)*100 = 100, review = (5/5)*100 = 100
-        # score = 100*0.8 + 100*0.2 = 100.0
-        assert result["vendor_score"] == 100.0
-
-    def test_none_rating_uses_advancement_only(self):
-        # None rating → vendor_score = advancement_score alone (no review blend)
-        result = compute_vendor_score(5, 40.0, None)
-        # advancement = (40 / (5*8)) * 100 = 100.0
+    @pytest.mark.parametrize(
+        "rating",
+        [
+            # All PO confirmed (8pts each) + 5.0 rating:
+            # advancement = (40/40)*100 = 100, review = (5/5)*100 = 100 → 100*0.8 + 100*0.2 = 100.0
+            pytest.param(5.0, id="perfect_score"),
+            # None rating → vendor_score = advancement_score alone (no review blend) = 100.0
+            pytest.param(None, id="none_rating_uses_advancement_only"),
+        ],
+    )
+    def test_full_advancement_scores_100(self, rating):
+        result = compute_vendor_score(5, 40.0, rating)
         assert result["vendor_score"] == 100.0
 
     def test_low_rating_lowers_score(self):
@@ -196,11 +204,6 @@ class TestComputeVendorScore:
         result = compute_vendor_score(5, 40.0, 5.0)
         assert 0.0 <= result["vendor_score"] <= 100.0
 
-    def test_zero_offers_cold_start(self):
-        result = compute_vendor_score(0, 0.0, None)
-        assert result["vendor_score"] is None
-        assert result["is_new_vendor"] is True
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _calc_stage_points — pure set logic
@@ -208,32 +211,18 @@ class TestComputeVendorScore:
 
 
 class TestCalcStagePoints:
-    def test_all_base_stage(self):
-        offer_ids = {1, 2, 3}
-        result = _calc_stage_points(offer_ids, set(), set(), set())
-        assert result == 3.0  # 1pt each
-
-    def test_highest_stage_wins(self):
-        # Offer 1 is PO confirmed (8), not 8+5+3+1
-        offer_ids = {1}
-        result = _calc_stage_points(offer_ids, {1}, {1}, {1})
-        assert result == 8.0
-
-    def test_mixed_stages(self):
-        # Offer 1: base (1pt), Offer 2: quote (3pt), Offer 3: PO confirmed (8pt)
-        offer_ids = {1, 2, 3}
-        result = _calc_stage_points(offer_ids, {2}, set(), {3})
-        assert result == 12.0  # 1 + 3 + 8
-
-    def test_empty_set(self):
-        result = _calc_stage_points(set(), set(), set(), set())
-        assert result == 0.0
-
-    def test_awarded_not_confirmed(self):
-        # Offer 1: awarded (5pt) but not PO confirmed
-        offer_ids = {1}
-        result = _calc_stage_points(offer_ids, set(), {1}, set())
-        assert result == 5.0
+    @pytest.mark.parametrize(
+        ("offer_ids", "quote_ids", "awarded_ids", "confirmed_ids", "expected"),
+        [
+            pytest.param({1, 2, 3}, set(), set(), set(), 3.0, id="all_base_stage"),  # 1pt each
+            pytest.param({1}, {1}, {1}, {1}, 8.0, id="highest_stage_wins"),  # PO confirmed (8), not 8+5+3+1
+            pytest.param({1, 2, 3}, {2}, set(), {3}, 12.0, id="mixed_stages"),  # base 1 + quote 3 + PO 8
+            pytest.param(set(), set(), set(), set(), 0.0, id="empty_set"),
+            pytest.param({1}, set(), {1}, set(), 5.0, id="awarded_not_confirmed"),  # awarded (5pt), not confirmed
+        ],
+    )
+    def test_stage_points(self, offer_ids, quote_ids, awarded_ids, confirmed_ids, expected):
+        assert _calc_stage_points(offer_ids, quote_ids, awarded_ids, confirmed_ids) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -716,26 +705,26 @@ class TestGetBuyplanOfferIds:
 
 
 class TestComputeVendorScoreEdges:
-    def test_rating_at_zero(self):
-        """Rating of 0 results in review_factor = 0."""
-        result = compute_vendor_score(10, 80.0, 0.0)
-        assert result["vendor_score"] == 80.0
+    @pytest.mark.parametrize(
+        ("offer_count", "stage_points", "rating", "expected_score"),
+        [
+            # Rating of 0 results in review_factor = 0.
+            pytest.param(10, 80.0, 0.0, 80.0, id="rating_at_zero"),
+            # Score clamped at exactly 100.
+            pytest.param(5, 40.0, 5.0, 100.0, id="score_exactly_100"),
+            # High rating boosts low advancement score via 80/20 blend.
+            pytest.param(10, 10.0, 5.0, 30.0, id="high_rating_with_low_advancement"),
+        ],
+    )
+    def test_vendor_score_value(self, offer_count, stage_points, rating, expected_score):
+        result = compute_vendor_score(offer_count, stage_points, rating)
+        assert result["vendor_score"] == expected_score
 
     def test_very_low_stage_points(self):
         """Very low stage points with many offers gives low score."""
         result = compute_vendor_score(100, 100.0, None)
         assert result["advancement_score"] == 12.5
         assert result["vendor_score"] == 12.5
-
-    def test_score_exactly_100(self):
-        """Score clamped at exactly 100."""
-        result = compute_vendor_score(5, 40.0, 5.0)
-        assert result["vendor_score"] == 100.0
-
-    def test_high_rating_with_low_advancement(self):
-        """High rating boosts low advancement score via 80/20 blend."""
-        result = compute_vendor_score(10, 10.0, 5.0)
-        assert result["vendor_score"] == 30.0
 
 
 # ═══════════════════════════════════════════════════════════════════════

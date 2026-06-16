@@ -345,24 +345,18 @@ class TestCaptureRfqResponseFact:
 
 
 class TestIsExpired:
-    def test_not_expired_future(self):
-        future = datetime.now(timezone.utc) + timedelta(days=30)
+    @pytest.mark.parametrize(
+        ("make_expires_at", "expected"),
+        [
+            pytest.param(lambda: datetime.now(timezone.utc) + timedelta(days=30), False, id="not_expired_future"),
+            pytest.param(lambda: datetime.now(timezone.utc) - timedelta(days=1), True, id="expired_past"),
+            pytest.param(lambda: None, False, id="no_expiry_returns_false"),
+            pytest.param(lambda: datetime.utcnow() - timedelta(hours=1), True, id="naive_datetime_handled"),
+        ],
+    )
+    def test_is_expired(self, make_expires_at, expected):
         now = datetime.now(timezone.utc)
-        assert knowledge_service._is_expired(future, now) is False
-
-    def test_expired_past(self):
-        past = datetime.now(timezone.utc) - timedelta(days=1)
-        now = datetime.now(timezone.utc)
-        assert knowledge_service._is_expired(past, now) is True
-
-    def test_no_expiry_returns_false(self):
-        now = datetime.now(timezone.utc)
-        assert knowledge_service._is_expired(None, now) is False
-
-    def test_naive_datetime_handled(self):
-        past_naive = datetime.utcnow() - timedelta(hours=1)
-        now = datetime.now(timezone.utc)
-        assert knowledge_service._is_expired(past_naive, now) is True
+        assert knowledge_service._is_expired(make_expires_at(), now) is expected
 
 
 class TestGetCachedInsights:

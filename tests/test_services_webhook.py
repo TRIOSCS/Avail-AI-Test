@@ -21,6 +21,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import GraphSubscription, User
@@ -58,47 +59,49 @@ def _run(coro):
 
 
 class TestExtractEmail:
-    def test_valid_recipient(self):
-        recipient = {"emailAddress": {"address": "alice@example.com", "name": "Alice"}}
-        assert _extract_email(recipient) == "alice@example.com"
-
-    def test_none_recipient(self):
-        assert _extract_email(None) is None
-
-    def test_empty_dict(self):
-        assert _extract_email({}) is None
-
-    def test_missing_address_key(self):
-        recipient = {"emailAddress": {"name": "Alice"}}
-        assert _extract_email(recipient) is None
-
-    def test_missing_email_address_key(self):
-        recipient = {"other": "data"}
-        assert _extract_email(recipient) is None
-
-    def test_empty_email_address(self):
-        recipient = {"emailAddress": {}}
-        assert _extract_email(recipient) is None
+    @pytest.mark.parametrize(
+        ("recipient", "expected"),
+        [
+            ({"emailAddress": {"address": "alice@example.com", "name": "Alice"}}, "alice@example.com"),
+            (None, None),
+            ({}, None),
+            ({"emailAddress": {"name": "Alice"}}, None),
+            ({"other": "data"}, None),
+            ({"emailAddress": {}}, None),
+        ],
+        ids=[
+            "valid_recipient",
+            "none_recipient",
+            "empty_dict",
+            "missing_address_key",
+            "missing_email_address_key",
+            "empty_email_address",
+        ],
+    )
+    def test_extract_email(self, recipient, expected):
+        assert _extract_email(recipient) == expected
 
 
 class TestExtractName:
-    def test_valid_recipient(self):
-        recipient = {"emailAddress": {"address": "alice@example.com", "name": "Alice Smith"}}
-        assert _extract_name(recipient) == "Alice Smith"
-
-    def test_none_recipient(self):
-        assert _extract_name(None) is None
-
-    def test_empty_dict(self):
-        assert _extract_name({}) is None
-
-    def test_missing_name_key(self):
-        recipient = {"emailAddress": {"address": "alice@example.com"}}
-        assert _extract_name(recipient) is None
-
-    def test_missing_email_address_key(self):
-        recipient = {"other": "data"}
-        assert _extract_name(recipient) is None
+    @pytest.mark.parametrize(
+        ("recipient", "expected"),
+        [
+            ({"emailAddress": {"address": "alice@example.com", "name": "Alice Smith"}}, "Alice Smith"),
+            (None, None),
+            ({}, None),
+            ({"emailAddress": {"address": "alice@example.com"}}, None),
+            ({"other": "data"}, None),
+        ],
+        ids=[
+            "valid_recipient",
+            "none_recipient",
+            "empty_dict",
+            "missing_name_key",
+            "missing_email_address_key",
+        ],
+    )
+    def test_extract_name(self, recipient, expected):
+        assert _extract_name(recipient) == expected
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -107,7 +110,11 @@ class TestExtractName:
 
 
 def _make_subscription(
-    db: Session, user: User, sub_id: str = "sub-001", client_state: str = "state123"
+    db: Session,
+    user: User,
+    sub_id: str = "sub-001",
+    client_state: str = "state123",
+    expires_in_hours: int = 48,
 ) -> GraphSubscription:
     """Create a GraphSubscription record for testing."""
     sub = GraphSubscription(
@@ -115,13 +122,28 @@ def _make_subscription(
         subscription_id=sub_id,
         resource="/me/messages",
         change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
+        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=expires_in_hours),
         client_state=client_state,
     )
     db.add(sub)
     db.commit()
     db.refresh(sub)
     return sub
+
+
+def _make_user(db: Session, email: str, role: str, azure_id: str, m365_connected: bool) -> User:
+    """Create and persist a User record for testing."""
+    user = User(
+        email=email,
+        name=email.split("@")[0],
+        role=role,
+        azure_id=azure_id,
+        m365_connected=m365_connected,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(user)
+    db.commit()
+    return user
 
 
 def _make_notification(
@@ -697,16 +719,7 @@ class TestCreateMailSubscription:
         from app.services.webhook_service import create_mail_subscription
 
         # Create an expired subscription
-        expired_sub = GraphSubscription(
-            user_id=test_user.id,
-            subscription_id="expired-sub",
-            resource="/me/messages",
-            change_type="created",
-            expiration_dt=datetime.now(timezone.utc) - timedelta(hours=1),
-            client_state="old-state",
-        )
-        db_session.add(expired_sub)
-        db_session.commit()
+        _make_subscription(db_session, test_user, sub_id="expired-sub", client_state="old-state", expires_in_hours=-1)
 
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={"id": "fresh-sub-id"})
@@ -874,16 +887,7 @@ class TestRenewExpiringSubscriptions:
         from app.services.webhook_service import renew_expiring_subscriptions
 
         # Sub expiring in 2 hours (< RENEW_BUFFER_HOURS)
-        sub = GraphSubscription(
-            user_id=test_user.id,
-            subscription_id="sub-expiring",
-            resource="/me/messages",
-            change_type="created",
-            expiration_dt=datetime.now(timezone.utc) + timedelta(hours=2),
-            client_state="st",
-        )
-        db_session.add(sub)
-        db_session.commit()
+        _make_subscription(db_session, test_user, sub_id="sub-expiring", client_state="st", expires_in_hours=2)
 
         with patch("app.services.webhook_service.renew_subscription", new_callable=AsyncMock) as mock_renew:
             mock_renew.return_value = True
@@ -895,16 +899,7 @@ class TestRenewExpiringSubscriptions:
         from app.services.webhook_service import renew_expiring_subscriptions
 
         # Sub expiring far in the future
-        sub = GraphSubscription(
-            user_id=test_user.id,
-            subscription_id="sub-fresh",
-            resource="/me/messages",
-            change_type="created",
-            expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-            client_state="st",
-        )
-        db_session.add(sub)
-        db_session.commit()
+        _make_subscription(db_session, test_user, sub_id="sub-fresh", client_state="st", expires_in_hours=48)
 
         with patch("app.services.webhook_service.renew_subscription", new_callable=AsyncMock) as mock_renew:
             _run(renew_expiring_subscriptions(db_session))
@@ -923,16 +918,7 @@ class TestRenewExpiringSubscriptions:
         from app.services.webhook_service import renew_expiring_subscriptions
 
         for i, user in enumerate([test_user, sales_user]):
-            sub = GraphSubscription(
-                user_id=user.id,
-                subscription_id=f"sub-expiring-{i}",
-                resource="/me/messages",
-                change_type="created",
-                expiration_dt=datetime.now(timezone.utc) + timedelta(hours=1),
-                client_state=f"st-{i}",
-            )
-            db_session.add(sub)
-        db_session.commit()
+            _make_subscription(db_session, user, sub_id=f"sub-expiring-{i}", client_state=f"st-{i}", expires_in_hours=1)
 
         with patch("app.services.webhook_service.renew_subscription", new_callable=AsyncMock) as mock_renew:
             mock_renew.return_value = True
@@ -964,39 +950,20 @@ class TestEnsureAllUsersSubscribed:
             _run(ensure_all_users_subscribed(db_session))
             mock_create.assert_not_called()
 
-    def test_skips_non_m365_user(self, db_session):
-        """Does not create subscriptions for users without m365_connected."""
+    @pytest.mark.parametrize(
+        ("role", "azure_id", "m365_connected"),
+        [
+            ("buyer", "az-noconn", False),
+            ("admin", "az-admin", True),
+            ("manager", "az-mgr", True),
+        ],
+        ids=["non_m365_user", "admin_role", "manager_role"],
+    )
+    def test_skips_ineligible_user(self, db_session, role, azure_id, m365_connected):
+        """Only m365-connected buyer/sales/trader users are subscribed."""
         from app.services.webhook_service import ensure_all_users_subscribed
 
-        user = User(
-            email="noconnection@trioscs.com",
-            name="No Connection",
-            role="buyer",
-            azure_id="az-noconn",
-            m365_connected=False,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-
-        with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
-            _run(ensure_all_users_subscribed(db_session))
-            mock_create.assert_not_called()
-
-    def test_skips_admin_role(self, db_session):
-        """Admin-role users are not subscribed (only buyer/sales/trader)."""
-        from app.services.webhook_service import ensure_all_users_subscribed
-
-        admin = User(
-            email="admin@trioscs.com",
-            name="Admin",
-            role="admin",
-            azure_id="az-admin",
-            m365_connected=True,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(admin)
-        db_session.commit()
+        _make_user(db_session, f"{azure_id}@trioscs.com", role, azure_id, m365_connected)
 
         with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
             _run(ensure_all_users_subscribed(db_session))
@@ -1007,16 +974,7 @@ class TestEnsureAllUsersSubscribed:
         from app.services.webhook_service import ensure_all_users_subscribed
 
         for role in ("buyer", "sales", "trader"):
-            u = User(
-                email=f"{role}@trioscs.com",
-                name=f"Test {role}",
-                role=role,
-                azure_id=f"az-{role}",
-                m365_connected=True,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(u)
-        db_session.commit()
+            _make_user(db_session, f"{role}@trioscs.com", role, f"az-{role}", m365_connected=True)
 
         with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
             _run(ensure_all_users_subscribed(db_session))
@@ -1027,39 +985,11 @@ class TestEnsureAllUsersSubscribed:
         from app.services.webhook_service import ensure_all_users_subscribed
 
         # Create an expired subscription
-        expired = GraphSubscription(
-            user_id=test_user.id,
-            subscription_id="expired-ensure",
-            resource="/me/messages",
-            change_type="created",
-            expiration_dt=datetime.now(timezone.utc) - timedelta(hours=1),
-            client_state="old",
-        )
-        db_session.add(expired)
-        db_session.commit()
+        _make_subscription(db_session, test_user, sub_id="expired-ensure", client_state="old", expires_in_hours=-1)
 
         with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
             _run(ensure_all_users_subscribed(db_session))
             mock_create.assert_called_once()
-
-    def test_skips_manager_role(self, db_session):
-        """Manager-role users are not subscribed."""
-        from app.services.webhook_service import ensure_all_users_subscribed
-
-        mgr = User(
-            email="manager@trioscs.com",
-            name="Manager",
-            role="manager",
-            azure_id="az-mgr",
-            m365_connected=True,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(mgr)
-        db_session.commit()
-
-        with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
-            _run(ensure_all_users_subscribed(db_session))
-            mock_create.assert_not_called()
 
 
 # ══════════════════════════════════════════════════════════════════════

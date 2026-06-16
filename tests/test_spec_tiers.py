@@ -9,6 +9,7 @@ category_source/confidence/tier through the ladder.
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
@@ -17,28 +18,34 @@ from app.services.spec_tiers import SOURCE_TIER, resolve, set_category, tier_for
 # --- tier_for ---------------------------------------------------------------
 
 
-def test_tier_for_known_sources():
-    assert tier_for("manual") == 100
-    assert tier_for("trio_source") == 95  # TRIO ground truth — above vendor APIs
-    assert tier_for("digikey_api") == 90
-    assert tier_for("mouser_api") == 90
-    assert tier_for("nexar_api") == 90
-    assert tier_for("element14_api") == 90
-    assert tier_for("oemsecrets_api") == 90
-    assert tier_for("trio_source_ai") == 88  # AI-corrected TRIO — below vendor, above decode
-    assert tier_for("mpn_decode") == 85
-    assert tier_for("partsurfer") == 80
-    assert tier_for("psref") == 80
-    assert tier_for("web_search") == 70
-    assert tier_for("brokerbin") == 65
-    assert tier_for("spec_extraction") == 60
-    assert tier_for("ai_guess") == 40
-    assert tier_for("claude_opus_inferred") == 40
+@pytest.mark.parametrize(
+    ("source", "expected_tier"),
+    [
+        ("manual", 100),
+        ("trio_source", 95),  # TRIO ground truth — above vendor APIs
+        ("digikey_api", 90),
+        ("mouser_api", 90),
+        ("nexar_api", 90),
+        ("element14_api", 90),
+        ("oemsecrets_api", 90),
+        ("trio_source_ai", 88),  # AI-corrected TRIO — below vendor, above decode
+        ("mpn_decode", 85),
+        ("partsurfer", 80),
+        ("psref", 80),
+        ("web_search", 70),
+        ("brokerbin", 65),
+        ("spec_extraction", 60),
+        ("ai_guess", 40),
+        ("claude_opus_inferred", 40),
+    ],
+)
+def test_tier_for_known_sources(source: str, expected_tier: int):
+    assert tier_for(source) == expected_tier
 
 
-def test_tier_for_unknown_source_is_zero():
-    assert tier_for("something_made_up") == 0
-    assert tier_for("") == 0
+@pytest.mark.parametrize("source", ["something_made_up", ""])
+def test_tier_for_unknown_source_is_zero(source: str):
+    assert tier_for(source) == 0
 
 
 def test_source_tier_map_has_expected_keys():
@@ -685,15 +692,11 @@ class TestCategoryValidatesGuard:
         assert card.category is None
 
     def test_off_vocab_assignment_raises(self, db_session: Session):
-        import pytest
-
         card = _card(db_session, normalized_mpn="guard-bad", category=None)
         with pytest.raises(ValueError, match="canonical commodity key or None"):
             card.category = "IGBT Modules"  # the pre-#267 bypass-writer junk class
 
     def test_off_vocab_at_construction_raises(self, db_session: Session):
-        import pytest
-
         with pytest.raises(ValueError, match="canonical commodity key or None"):
             MaterialCard(normalized_mpn="guard-ctor", display_mpn="GUARD-CTOR", category="Voltage Regulator")
 
