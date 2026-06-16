@@ -11,6 +11,7 @@ Depends on: app.connectors.email_mining, app.services.email_intelligence_service
             app.scheduler
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -33,6 +34,23 @@ def _fake_msg(msg_id="msg-1", body="Test body", subject="Test subject"):
     }
 
 
+def _scheduler_settings():
+    """Minimal settings MagicMock for configure_scheduler() registration tests."""
+    return MagicMock(
+        inbox_scan_interval_min=30,
+        contacts_sync_enabled=False,
+        activity_tracking_enabled=False,
+        po_verify_interval_min=15,
+        buyplan_auto_complete_hour=18,
+        buyplan_auto_complete_tz="UTC",
+        proactive_matching_enabled=False,
+        contact_scoring_enabled=False,
+        eight_by_eight_enabled=False,
+        prospecting_enabled=False,
+        customer_enrichment_enabled=False,
+    )
+
+
 class TestScanInboxStoresRegexEmails:
     """Verify that scan_inbox calls process_email_intelligence for ALL emails, including
     those with 2+ regex matches (previously gated out)."""
@@ -47,16 +65,11 @@ class TestScanInboxStoresRegexEmails:
         miner.user_id = user_id
         return miner
 
-    @pytest.mark.asyncio
-    async def test_regex_offer_stored_in_email_intelligence(self):
-        """2+ regex matches → process_email_intelligence still called."""
-        mock_process = AsyncMock(return_value={"id": 1, "classification": "offer"})
-        mock_db = MagicMock()
-
+    @contextmanager
+    def _patched_scan(self, msg, mock_process):
+        """Patch EmailMiner internals + process_email_intelligence for a scan_inbox
+        run."""
         from app.connectors.email_mining import EmailMiner
-
-        # Body with 3 offer patterns: "in stock", "unit price", "lead time"
-        msg = _fake_msg(body="We have LM358 in stock, unit price $1.50, lead time 2 weeks")
 
         with (
             patch.object(EmailMiner, "_already_processed", return_value=set()),
@@ -73,7 +86,18 @@ class TestScanInboxStoresRegexEmails:
                 mock_process,
             ),
         ):
-            miner = self._make_miner(mock_db, user_id=1)
+            yield
+
+    @pytest.mark.asyncio
+    async def test_regex_offer_stored_in_email_intelligence(self):
+        """2+ regex matches → process_email_intelligence still called."""
+        mock_process = AsyncMock(return_value={"id": 1, "classification": "offer"})
+
+        # Body with 3 offer patterns: "in stock", "unit price", "lead time"
+        msg = _fake_msg(body="We have LM358 in stock, unit price $1.50, lead time 2 weeks")
+
+        with self._patched_scan(msg, mock_process):
+            miner = self._make_miner(MagicMock(), user_id=1)
             await miner.scan_inbox(lookback_days=7, max_messages=10, use_delta=False)
 
             mock_process.assert_called_once()
@@ -84,28 +108,11 @@ class TestScanInboxStoresRegexEmails:
     async def test_ambiguous_email_still_stored(self):
         """0 regex matches → process_email_intelligence still called (regression)."""
         mock_process = AsyncMock(return_value={"id": 2, "classification": "general"})
-        mock_db = MagicMock()
-
-        from app.connectors.email_mining import EmailMiner
 
         msg = _fake_msg(body="Sounds good, see you then.")
 
-        with (
-            patch.object(EmailMiner, "_already_processed", return_value=set()),
-            patch.object(EmailMiner, "_mark_processed"),
-            patch.object(EmailMiner, "_get_delta_token", return_value=None),
-            patch.object(
-                EmailMiner,
-                "_search_messages",
-                new_callable=AsyncMock,
-                return_value=[msg],
-            ),
-            patch(
-                "app.services.email_intelligence_service.process_email_intelligence",
-                mock_process,
-            ),
-        ):
-            miner = self._make_miner(mock_db, user_id=1)
+        with self._patched_scan(msg, mock_process):
+            miner = self._make_miner(MagicMock(), user_id=1)
             await miner.scan_inbox(lookback_days=7, max_messages=10, use_delta=False)
 
             mock_process.assert_called_once()
@@ -115,25 +122,9 @@ class TestScanInboxStoresRegexEmails:
         """EmailMiner(db=None) → process_email_intelligence never called."""
         mock_process = AsyncMock()
 
-        from app.connectors.email_mining import EmailMiner
-
         msg = _fake_msg(body="We have LM358 in stock, unit price $2.00")
 
-        with (
-            patch.object(EmailMiner, "_already_processed", return_value=set()),
-            patch.object(EmailMiner, "_mark_processed"),
-            patch.object(EmailMiner, "_get_delta_token", return_value=None),
-            patch.object(
-                EmailMiner,
-                "_search_messages",
-                new_callable=AsyncMock,
-                return_value=[msg],
-            ),
-            patch(
-                "app.services.email_intelligence_service.process_email_intelligence",
-                mock_process,
-            ),
-        ):
+        with self._patched_scan(msg, mock_process):
             miner = self._make_miner(db=None, user_id=None)
             await miner.scan_inbox(lookback_days=7, max_messages=10, use_delta=False)
 
@@ -168,52 +159,47 @@ class TestNeedsReviewLogic:
             parsed_quotes=parsed_quotes,
         )
 
-    def test_spam_high_confidence_no_review(self, db_session, test_user):
-        """Spam at 0.9 → needs_review=False, auto_applied=False."""
-        rec = self._store(db_session, "spam", 0.9)
-        assert rec.needs_review is False
-        assert rec.auto_applied is False
-
-    def test_ooo_high_confidence_no_review(self, db_session, test_user):
-        """Ooo at 0.8 → needs_review=False, auto_applied=False."""
-        rec = self._store(db_session, "ooo", 0.8)
-        assert rec.needs_review is False
-        assert rec.auto_applied is False
-
-    def test_general_mid_confidence_no_review(self, db_session, test_user):
-        """General at 0.6 → needs_review=False, auto_applied=False."""
-        rec = self._store(db_session, "general", 0.6)
-        assert rec.needs_review is False
-        assert rec.auto_applied is False
-
-    def test_offer_high_with_quotes_auto_applied(self, db_session, test_user):
-        """Offer at 0.85 + parsed_quotes → auto_applied=True, needs_review=False."""
-        rec = self._store(
-            db_session,
-            "offer",
-            0.85,
-            parsed_quotes={"lines": [{"mpn": "LM358", "price": 1.5}]},
-        )
-        assert rec.auto_applied is True
-        assert rec.needs_review is False
-
-    def test_offer_high_without_quotes_informational(self, db_session, test_user):
-        """Offer at 0.85 without parsed_quotes → both False."""
-        rec = self._store(db_session, "offer", 0.85)
-        assert rec.auto_applied is False
-        assert rec.needs_review is False
-
-    def test_offer_mid_confidence_needs_review(self, db_session, test_user):
-        """Offer at 0.65 → needs_review=True."""
-        rec = self._store(db_session, "offer", 0.65)
-        assert rec.needs_review is True
-        assert rec.auto_applied is False
-
-    def test_offer_low_confidence_no_flags(self, db_session, test_user):
-        """Offer at 0.3 → both False."""
-        rec = self._store(db_session, "offer", 0.3)
-        assert rec.needs_review is False
-        assert rec.auto_applied is False
+    @pytest.mark.parametrize(
+        ("cls_type", "confidence", "parsed_quotes", "needs_review", "auto_applied"),
+        [
+            # Spam at 0.9 → both False
+            ("spam", 0.9, None, False, False),
+            # Ooo at 0.8 → both False
+            ("ooo", 0.8, None, False, False),
+            # General at 0.6 → both False
+            ("general", 0.6, None, False, False),
+            # Offer at 0.85 + parsed_quotes → auto_applied, no review
+            ("offer", 0.85, {"lines": [{"mpn": "LM358", "price": 1.5}]}, False, True),
+            # Offer at 0.85 without parsed_quotes → both False (informational)
+            ("offer", 0.85, None, False, False),
+            # Offer at 0.65 → needs_review
+            ("offer", 0.65, None, True, False),
+            # Offer at 0.3 → both False
+            ("offer", 0.3, None, False, False),
+        ],
+        ids=[
+            "spam_high_confidence_no_review",
+            "ooo_high_confidence_no_review",
+            "general_mid_confidence_no_review",
+            "offer_high_with_quotes_auto_applied",
+            "offer_high_without_quotes_informational",
+            "offer_mid_confidence_needs_review",
+            "offer_low_confidence_no_flags",
+        ],
+    )
+    def test_review_flags(
+        self,
+        db_session,
+        test_user,
+        cls_type,
+        confidence,
+        parsed_quotes,
+        needs_review,
+        auto_applied,
+    ):
+        rec = self._store(db_session, cls_type, confidence, parsed_quotes=parsed_quotes)
+        assert rec.needs_review is needs_review
+        assert rec.auto_applied is auto_applied
 
 
 # ── Fix 3: _job_email_health_update ────────────────────────────────────
@@ -268,22 +254,7 @@ class TestJobEmailHealthUpdate:
         mock_scheduler = MagicMock()
         with (
             patch("app.scheduler.scheduler", mock_scheduler),
-            patch(
-                "app.config.settings",
-                MagicMock(
-                    inbox_scan_interval_min=30,
-                    contacts_sync_enabled=False,
-                    activity_tracking_enabled=False,
-                    po_verify_interval_min=15,
-                    buyplan_auto_complete_hour=18,
-                    buyplan_auto_complete_tz="UTC",
-                    proactive_matching_enabled=False,
-                    contact_scoring_enabled=False,
-                    eight_by_eight_enabled=False,
-                    prospecting_enabled=False,
-                    customer_enrichment_enabled=False,
-                ),
-            ),
+            patch("app.config.settings", _scheduler_settings()),
         ):
             configure_scheduler()
 
@@ -402,22 +373,7 @@ class TestJobCalendarScan:
         mock_scheduler = MagicMock()
         with (
             patch("app.scheduler.scheduler", mock_scheduler),
-            patch(
-                "app.config.settings",
-                MagicMock(
-                    inbox_scan_interval_min=30,
-                    contacts_sync_enabled=False,
-                    activity_tracking_enabled=False,
-                    po_verify_interval_min=15,
-                    buyplan_auto_complete_hour=18,
-                    buyplan_auto_complete_tz="UTC",
-                    proactive_matching_enabled=False,
-                    contact_scoring_enabled=False,
-                    eight_by_eight_enabled=False,
-                    prospecting_enabled=False,
-                    customer_enrichment_enabled=False,
-                ),
-            ),
+            patch("app.config.settings", _scheduler_settings()),
         ):
             configure_scheduler()
 

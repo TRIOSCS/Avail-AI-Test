@@ -9,6 +9,13 @@ from datetime import datetime, timezone
 from app.models import Offer, Requirement, Requisition
 
 
+def _clone_ok(client, req_id):
+    """POST the clone endpoint, assert a 200, and return the new requisition ID."""
+    resp = client.post(f"/api/requisitions/{req_id}/clone")
+    assert resp.status_code == 200
+    return resp.json()["id"]
+
+
 class TestCloneRequisition:
     """POST /api/requisitions/{req_id}/clone."""
 
@@ -28,9 +35,7 @@ class TestCloneRequisition:
 
     def test_cloned_req_has_different_id_but_same_data(self, client, db_session, test_user, test_requisition):
         """The cloned requisition preserves customer info and records the source."""
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
-        new_id = resp.json()["id"]
+        new_id = _clone_ok(client, test_requisition.id)
 
         cloned = db_session.get(Requisition, new_id)
         assert cloned is not None
@@ -57,9 +62,7 @@ class TestCloneRequisition:
         orig_count = len(test_requisition.requirements)
         assert orig_count == 2
 
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
-        new_id = resp.json()["id"]
+        new_id = _clone_ok(client, test_requisition.id)
 
         cloned_reqs = db_session.query(Requirement).filter_by(requisition_id=new_id).all()
         assert len(cloned_reqs) == orig_count
@@ -71,9 +74,7 @@ class TestCloneRequisition:
 
     def test_active_offers_are_cloned_as_reference(self, client, db_session, test_user, test_requisition, test_offer):
         """Active offers on the original req are cloned with status='reference'."""
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
-        assert resp.status_code == 200
-        new_id = resp.json()["id"]
+        new_id = _clone_ok(client, test_requisition.id)
 
         cloned_offers = db_session.query(Offer).filter_by(requisition_id=new_id).all()
         assert len(cloned_offers) == 1

@@ -4,6 +4,8 @@ Called by: pytest
 Depends on: app.scoring
 """
 
+import pytest
+
 from app.scoring import (
     MISSING_DATA_SCORE,
     NEW_VENDOR_BASELINE,
@@ -23,23 +25,19 @@ from app.scoring import (
 
 
 class TestScoreSighting:
-    def test_authorized_returns_100(self):
-        assert score_sighting(50.0, is_authorized=True) == 100.0
-
-    def test_authorized_ignores_vendor_score(self):
-        assert score_sighting(None, is_authorized=True) == 100.0
-
-    def test_none_vendor_score_returns_baseline(self):
-        assert score_sighting(None, is_authorized=False) == NEW_VENDOR_BASELINE
-
-    def test_specific_vendor_score_rounded(self):
-        assert score_sighting(72.456, is_authorized=False) == 72.5
-
-    def test_zero_vendor_score(self):
-        assert score_sighting(0.0, is_authorized=False) == 0.0
-
-    def test_full_vendor_score(self):
-        assert score_sighting(100.0, is_authorized=False) == 100.0
+    @pytest.mark.parametrize(
+        ("vendor_score", "is_authorized", "expected"),
+        [
+            pytest.param(50.0, True, 100.0, id="authorized_returns_100"),
+            pytest.param(None, True, 100.0, id="authorized_ignores_vendor_score"),
+            pytest.param(None, False, NEW_VENDOR_BASELINE, id="none_vendor_score_returns_baseline"),
+            pytest.param(72.456, False, 72.5, id="specific_vendor_score_rounded"),
+            pytest.param(0.0, False, 0.0, id="zero_vendor_score"),
+            pytest.param(100.0, False, 100.0, id="full_vendor_score"),
+        ],
+    )
+    def test_score_sighting(self, vendor_score, is_authorized, expected):
+        assert score_sighting(vendor_score, is_authorized=is_authorized) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -167,52 +165,44 @@ class TestScoreSightingV2:
 
 
 class TestClassifyLead:
-    def test_authorized_with_price_is_strong(self):
-        assert classify_lead(50, is_authorized=True, has_price=True) == "strong"
+    @pytest.mark.parametrize(
+        ("score", "kwargs", "expected"),
+        [
+            pytest.param(
+                50, {"is_authorized": True, "has_price": True}, "strong", id="authorized_with_price_is_strong"
+            ),
+            pytest.param(55, {"has_price": True, "has_qty": True}, "strong", id="high_score_two_actionable_is_strong"),
+            pytest.param(
+                60,
+                {"has_price": True, "has_qty": True, "has_contact": True},
+                "strong",
+                id="high_score_three_actionable_is_strong",
+            ),
+            pytest.param(40, {"has_price": True}, "moderate", id="mid_score_one_actionable_is_moderate"),
+            pytest.param(40, {}, "weak", id="mid_score_no_actionable_is_weak"),
+            pytest.param(35, {"evidence_tier": "T1"}, "moderate", id="t1_tier_score_35_is_moderate"),
+            pytest.param(35, {"evidence_tier": "T2"}, "moderate", id="t2_tier_score_35_is_moderate"),
+            pytest.param(20, {"evidence_tier": "T1"}, "weak", id="t1_tier_low_score_is_weak"),
+            pytest.param(35, {"evidence_tier": "T3"}, "weak", id="t3_tier_not_promoted"),
+            pytest.param(10, {}, "weak", id="low_score_nothing_is_weak"),
+            pytest.param(55, {"has_price": True, "has_qty": True}, "strong", id="boundary_score_55_two_actionable"),
+            pytest.param(
+                54,
+                {"has_price": True, "has_qty": True},
+                "moderate",
+                id="boundary_score_54_two_actionable_not_strong",
+            ),
+            pytest.param(35, {"evidence_tier": "t1"}, "moderate", id="tier_case_insensitive"),
+            pytest.param(35, {"evidence_tier": None}, "weak", id="none_evidence_tier"),
+        ],
+    )
+    def test_classify_lead(self, score, kwargs, expected):
+        assert classify_lead(score, **kwargs) == expected
 
     def test_authorized_without_price_not_auto_strong(self):
         # Authorized but no price — falls through to other rules
         result = classify_lead(30, is_authorized=True, has_price=False)
         assert result in ("moderate", "weak")
-
-    def test_high_score_two_actionable_is_strong(self):
-        assert classify_lead(55, has_price=True, has_qty=True) == "strong"
-
-    def test_high_score_three_actionable_is_strong(self):
-        assert classify_lead(60, has_price=True, has_qty=True, has_contact=True) == "strong"
-
-    def test_mid_score_one_actionable_is_moderate(self):
-        assert classify_lead(40, has_price=True) == "moderate"
-
-    def test_mid_score_no_actionable_is_weak(self):
-        assert classify_lead(40) == "weak"
-
-    def test_t1_tier_score_35_is_moderate(self):
-        assert classify_lead(35, evidence_tier="T1") == "moderate"
-
-    def test_t2_tier_score_35_is_moderate(self):
-        assert classify_lead(35, evidence_tier="T2") == "moderate"
-
-    def test_t1_tier_low_score_is_weak(self):
-        assert classify_lead(20, evidence_tier="T1") == "weak"
-
-    def test_t3_tier_not_promoted(self):
-        assert classify_lead(35, evidence_tier="T3") == "weak"
-
-    def test_low_score_nothing_is_weak(self):
-        assert classify_lead(10) == "weak"
-
-    def test_boundary_score_55_two_actionable(self):
-        assert classify_lead(55, has_price=True, has_qty=True) == "strong"
-
-    def test_boundary_score_54_two_actionable_not_strong(self):
-        assert classify_lead(54, has_price=True, has_qty=True) == "moderate"
-
-    def test_tier_case_insensitive(self):
-        assert classify_lead(35, evidence_tier="t1") == "moderate"
-
-    def test_none_evidence_tier(self):
-        assert classify_lead(35, evidence_tier=None) == "weak"
 
 
 # ---------------------------------------------------------------------------
@@ -221,79 +211,66 @@ class TestClassifyLead:
 
 
 class TestExplainLead:
-    def test_authorized_vendor(self):
-        result = explain_lead("Digi-Key", is_authorized=True)
-        assert "authorized distributor" in result
-        assert "Digi-Key" in result
-
-    def test_proven_vendor(self):
-        result = explain_lead("Acme", vendor_score=70.0)
-        assert "proven vendor" in result
-
-    def test_developing_vendor(self):
-        result = explain_lead("NewCo", vendor_score=40.0)
-        assert "developing vendor" in result
-
-    def test_unknown_vendor(self):
-        result = explain_lead(None)
-        assert "Unknown vendor" in result
-
-    def test_low_score_vendor(self):
-        result = explain_lead("BadCo", vendor_score=10.0)
-        assert "BadCo" in result
-        assert "proven" not in result
-        assert "developing" not in result
-
-    def test_price_and_qty(self):
-        result = explain_lead("X", unit_price=1.50, qty_available=5000)
-        assert "5,000 pcs" in result
-        assert "$1.50" in result
-
-    def test_sub_dollar_price(self):
-        result = explain_lead("X", unit_price=0.0523, qty_available=100)
-        assert "$0.0523" in result
-
-    def test_qty_no_price(self):
-        result = explain_lead("X", qty_available=1000)
-        assert "1,000 pcs" in result
-        assert "no price listed" in result
-
-    def test_price_no_qty(self):
-        result = explain_lead("X", unit_price=5.00)
-        assert "$5.00" in result
-        assert "qty unknown" in result
-
-    def test_below_market_price(self):
-        result = explain_lead("X", unit_price=8.0, median_price=10.0)
-        assert "below market" in result
-
-    def test_above_market_price(self):
-        result = explain_lead("X", unit_price=15.0, median_price=10.0)
-        assert "above market" in result
-
-    def test_full_order_coverage(self):
-        result = explain_lead("X", unit_price=1.0, qty_available=1000, target_qty=500)
-        assert "covers full order qty" in result
-
-    def test_partial_order_coverage(self):
-        result = explain_lead("X", unit_price=1.0, qty_available=600, target_qty=1000)
-        assert "covers 60% of order qty" in result
-
-    def test_contact_info_available(self):
-        result = explain_lead("X", has_contact=True)
-        assert "contact info available" in result
-
-    def test_no_contact_not_authorized(self):
-        result = explain_lead("X", has_contact=False, is_authorized=False)
-        assert "no contact info" in result
-
-    def test_old_data_warning(self):
-        result = explain_lead("X", age_days=45)
-        assert "45 days old" in result
-
-    def test_recent_data_no_warning(self):
-        result = explain_lead("X", age_days=10)
-        assert "days old" not in result
+    @pytest.mark.parametrize(
+        ("args", "kwargs", "contains", "excludes"),
+        [
+            pytest.param(
+                ("Digi-Key",),
+                {"is_authorized": True},
+                ["authorized distributor", "Digi-Key"],
+                [],
+                id="authorized_vendor",
+            ),
+            pytest.param(("Acme",), {"vendor_score": 70.0}, ["proven vendor"], [], id="proven_vendor"),
+            pytest.param(("NewCo",), {"vendor_score": 40.0}, ["developing vendor"], [], id="developing_vendor"),
+            pytest.param((None,), {}, ["Unknown vendor"], [], id="unknown_vendor"),
+            pytest.param(
+                ("BadCo",), {"vendor_score": 10.0}, ["BadCo"], ["proven", "developing"], id="low_score_vendor"
+            ),
+            pytest.param(
+                ("X",), {"unit_price": 1.50, "qty_available": 5000}, ["5,000 pcs", "$1.50"], [], id="price_and_qty"
+            ),
+            pytest.param(("X",), {"unit_price": 0.0523, "qty_available": 100}, ["$0.0523"], [], id="sub_dollar_price"),
+            pytest.param(("X",), {"qty_available": 1000}, ["1,000 pcs", "no price listed"], [], id="qty_no_price"),
+            pytest.param(("X",), {"unit_price": 5.00}, ["$5.00", "qty unknown"], [], id="price_no_qty"),
+            pytest.param(
+                ("X",), {"unit_price": 8.0, "median_price": 10.0}, ["below market"], [], id="below_market_price"
+            ),
+            pytest.param(
+                ("X",), {"unit_price": 15.0, "median_price": 10.0}, ["above market"], [], id="above_market_price"
+            ),
+            pytest.param(
+                ("X",),
+                {"unit_price": 1.0, "qty_available": 1000, "target_qty": 500},
+                ["covers full order qty"],
+                [],
+                id="full_order_coverage",
+            ),
+            pytest.param(
+                ("X",),
+                {"unit_price": 1.0, "qty_available": 600, "target_qty": 1000},
+                ["covers 60% of order qty"],
+                [],
+                id="partial_order_coverage",
+            ),
+            pytest.param(("X",), {"has_contact": True}, ["contact info available"], [], id="contact_info_available"),
+            pytest.param(
+                ("X",),
+                {"has_contact": False, "is_authorized": False},
+                ["no contact info"],
+                [],
+                id="no_contact_not_authorized",
+            ),
+            pytest.param(("X",), {"age_days": 45}, ["45 days old"], [], id="old_data_warning"),
+            pytest.param(("X",), {"age_days": 10}, [], ["days old"], id="recent_data_no_warning"),
+        ],
+    )
+    def test_explain_lead(self, args, kwargs, contains, excludes):
+        result = explain_lead(*args, **kwargs)
+        for substring in contains:
+            assert substring in result
+        for substring in excludes:
+            assert substring not in result
 
 
 # ---------------------------------------------------------------------------
@@ -302,33 +279,23 @@ class TestExplainLead:
 
 
 class TestIsWeakLead:
-    def test_authorized_never_weak(self):
-        assert is_weak_lead(0, is_authorized=True) is False
-
-    def test_t1_with_price_not_weak(self):
-        assert is_weak_lead(20, evidence_tier="T1", has_price=True) is False
-
-    def test_t2_with_qty_not_weak(self):
-        assert is_weak_lead(20, evidence_tier="T2", has_qty=True) is False
-
-    def test_t1_no_data_is_weak(self):
-        # T1 but no price/qty — falls through, below threshold with no data
-        assert is_weak_lead(20, evidence_tier="T1") is True
-
-    def test_below_threshold_no_data_is_weak(self):
-        assert is_weak_lead(WEAK_LEAD_THRESHOLD - 1) is True
-
-    def test_at_threshold_no_data_not_weak(self):
-        assert is_weak_lead(WEAK_LEAD_THRESHOLD) is False
-
-    def test_below_threshold_with_price_not_weak(self):
-        assert is_weak_lead(10, has_price=True) is False
-
-    def test_below_threshold_with_qty_not_weak(self):
-        assert is_weak_lead(10, has_qty=True) is False
-
-    def test_above_threshold_no_data_not_weak(self):
-        assert is_weak_lead(50) is False
+    @pytest.mark.parametrize(
+        ("score", "kwargs", "expected"),
+        [
+            pytest.param(0, {"is_authorized": True}, False, id="authorized_never_weak"),
+            pytest.param(20, {"evidence_tier": "T1", "has_price": True}, False, id="t1_with_price_not_weak"),
+            pytest.param(20, {"evidence_tier": "T2", "has_qty": True}, False, id="t2_with_qty_not_weak"),
+            # T1 but no price/qty — falls through, below threshold with no data
+            pytest.param(20, {"evidence_tier": "T1"}, True, id="t1_no_data_is_weak"),
+            pytest.param(WEAK_LEAD_THRESHOLD - 1, {}, True, id="below_threshold_no_data_is_weak"),
+            pytest.param(WEAK_LEAD_THRESHOLD, {}, False, id="at_threshold_no_data_not_weak"),
+            pytest.param(10, {"has_price": True}, False, id="below_threshold_with_price_not_weak"),
+            pytest.param(10, {"has_qty": True}, False, id="below_threshold_with_qty_not_weak"),
+            pytest.param(50, {}, False, id="above_threshold_no_data_not_weak"),
+        ],
+    )
+    def test_is_weak_lead(self, score, kwargs, expected):
+        assert is_weak_lead(score, **kwargs) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -337,26 +304,20 @@ class TestIsWeakLead:
 
 
 class TestConfidenceColor:
-    def test_green_at_75(self):
-        assert confidence_color(75) == "green"
-
-    def test_green_above_75(self):
-        assert confidence_color(90) == "green"
-
-    def test_amber_at_50(self):
-        assert confidence_color(50) == "amber"
-
-    def test_amber_at_74(self):
-        assert confidence_color(74) == "amber"
-
-    def test_red_at_49(self):
-        assert confidence_color(49) == "red"
-
-    def test_red_at_0(self):
-        assert confidence_color(0) == "red"
-
-    def test_green_at_100(self):
-        assert confidence_color(100) == "green"
+    @pytest.mark.parametrize(
+        ("score", "expected"),
+        [
+            pytest.param(75, "green", id="green_at_75"),
+            pytest.param(90, "green", id="green_above_75"),
+            pytest.param(50, "amber", id="amber_at_50"),
+            pytest.param(74, "amber", id="amber_at_74"),
+            pytest.param(49, "red", id="red_at_49"),
+            pytest.param(0, "red", id="red_at_0"),
+            pytest.param(100, "green", id="green_at_100"),
+        ],
+    )
+    def test_confidence_color(self, score, expected):
+        assert confidence_color(score) == expected
 
 
 # ---------------------------------------------------------------------------

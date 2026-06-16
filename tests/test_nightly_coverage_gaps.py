@@ -123,26 +123,20 @@ class TestGraphClientPatchRetry:
 class TestParseRetryAfterBadValue:
     """Covers lines 267-268: ValueError/TypeError in _parse_retry_after."""
 
-    def test_non_integer_returns_none(self):
+    @pytest.mark.parametrize(
+        ("header_value", "expected"),
+        [
+            pytest.param("not-a-number", None, id="non-integer"),
+            pytest.param("1.5", None, id="float-string"),
+            pytest.param("30", 30, id="integer-string"),
+        ],
+    )
+    def test_parse_retry_after(self, header_value, expected):
         from app.utils.graph_client import _parse_retry_after
 
         resp = MagicMock()
-        resp.headers = {"Retry-After": "not-a-number"}
-        assert _parse_retry_after(resp) is None
-
-    def test_float_string_returns_none(self):
-        from app.utils.graph_client import _parse_retry_after
-
-        resp = MagicMock()
-        resp.headers = {"Retry-After": "1.5"}
-        assert _parse_retry_after(resp) is None
-
-    def test_integer_string_returns_int(self):
-        from app.utils.graph_client import _parse_retry_after
-
-        resp = MagicMock()
-        resp.headers = {"Retry-After": "30"}
-        assert _parse_retry_after(resp) == 30
+        resp.headers = {"Retry-After": header_value}
+        assert _parse_retry_after(resp) == expected
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -153,20 +147,18 @@ class TestParseRetryAfterBadValue:
 class TestGetWatermarkBadIso:
     """Covers lines 125, 127-129: ValueError/TypeError in _get_watermark."""
 
-    def test_bad_iso_returns_default(self, db_session):
+    @pytest.mark.parametrize(
+        "stored_value",
+        [
+            pytest.param("not-a-date", id="bad-iso"),
+            pytest.param("", id="empty-value"),
+        ],
+    )
+    def test_unparseable_value_returns_default(self, db_session, stored_value):
         from app.models.config import SystemConfig
         from app.services.proactive_matching import _WATERMARK_KEY, _get_watermark
 
-        db_session.add(SystemConfig(key=_WATERMARK_KEY, value="not-a-date"))
-        db_session.flush()
-        ts = _get_watermark(db_session)
-        assert isinstance(ts, datetime)
-
-    def test_empty_value_returns_default(self, db_session):
-        from app.models.config import SystemConfig
-        from app.services.proactive_matching import _WATERMARK_KEY, _get_watermark
-
-        db_session.add(SystemConfig(key=_WATERMARK_KEY, value=""))
+        db_session.add(SystemConfig(key=_WATERMARK_KEY, value=stored_value))
         db_session.flush()
         ts = _get_watermark(db_session)
         assert isinstance(ts, datetime)

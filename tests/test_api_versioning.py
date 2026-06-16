@@ -9,6 +9,7 @@ Depends on: conftest.py client fixture (uses test DB + auth overrides)
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -19,15 +20,16 @@ class TestApiVersionMiddleware:
         resp = client.get("/health")
         assert resp.headers.get("X-API-Version") == "v1"
 
-    def test_old_api_path_still_works(self, client: TestClient):
-        resp = client.get("/api/admin/health")
-        assert resp.status_code in (200, 401, 403)
-        assert resp.headers.get("X-API-Version") == "v1"
-
-    def test_v1_prefix_rewrites_to_api(self, client: TestClient):
-        """GET /api/v1/admin/health should reach the same endpoint as
-        /api/admin/health."""
-        resp = client.get("/api/v1/admin/health")
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/api/admin/health",  # old /api/... path still works
+            "/api/v1/admin/health",  # /api/v1/ rewrites to the same endpoint
+        ],
+        ids=["old_api_path", "v1_prefix_rewrites"],
+    )
+    def test_admin_health_reachable_with_version_header(self, client: TestClient, path: str):
+        resp = client.get(path)
         assert resp.status_code in (200, 401, 403)
         assert resp.headers.get("X-API-Version") == "v1"
 

@@ -18,6 +18,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -142,21 +143,20 @@ class TestEditVendor:
 
 
 class TestToggleBlacklist:
-    def test_toggle_blacklist_on(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
-        test_vendor_card.is_blacklisted = False
+    @pytest.mark.parametrize(
+        ("initial", "expected"),
+        [(False, True), (True, False)],
+        ids=["on", "off"],
+    )
+    def test_toggle_blacklist(
+        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard, initial: bool, expected: bool
+    ) -> None:
+        test_vendor_card.is_blacklisted = initial
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/toggle-blacklist")
         assert resp.status_code == 200
         db_session.refresh(test_vendor_card)
-        assert test_vendor_card.is_blacklisted is True
-
-    def test_toggle_blacklist_off(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
-        test_vendor_card.is_blacklisted = True
-        db_session.commit()
-        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/toggle-blacklist")
-        assert resp.status_code == 200
-        db_session.refresh(test_vendor_card)
-        assert test_vendor_card.is_blacklisted is False
+        assert test_vendor_card.is_blacklisted is expected
 
     def test_toggle_blacklist_not_found(self, client: TestClient) -> None:
         resp = client.post("/v2/partials/vendors/99999/toggle-blacklist")
@@ -561,20 +561,19 @@ class TestAddToRequisition:
 
 
 class TestCompaniesRedirect:
-    def test_companies_redirects_to_customers(self, client: TestClient) -> None:
-        resp = client.get("/v2/companies", follow_redirects=False)
+    @pytest.mark.parametrize(
+        ("path", "expected_location"),
+        [
+            ("/v2/companies", "/v2/customers"),
+            ("/v2/companies/123", "/v2/customers/123"),
+            ("/v2/partials/companies", "/v2/partials/customers"),
+        ],
+        ids=["companies", "companies_path", "partials_companies"],
+    )
+    def test_companies_redirects(self, client: TestClient, path: str, expected_location: str) -> None:
+        resp = client.get(path, follow_redirects=False)
         assert resp.status_code == 301
-        assert "/v2/customers" in resp.headers["location"]
-
-    def test_companies_path_redirects(self, client: TestClient) -> None:
-        resp = client.get("/v2/companies/123", follow_redirects=False)
-        assert resp.status_code == 301
-        assert "/v2/customers/123" in resp.headers["location"]
-
-    def test_partials_companies_redirects(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/companies", follow_redirects=False)
-        assert resp.status_code == 301
-        assert "/v2/partials/customers" in resp.headers["location"]
+        assert expected_location in resp.headers["location"]
 
 
 # ── AI cleanup email ──────────────────────────────────────────────────────
@@ -610,17 +609,18 @@ class TestAiCleanupEmail:
 
 
 class TestLogActivity:
-    def test_log_activity_note(self, client: TestClient, test_requisition: Requisition) -> None:
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {"activity_type": "note", "notes": "Called vendor today"},
+            {"activity_type": "phone_call", "vendor_name": "Arrow"},
+        ],
+        ids=["note", "phone_call"],
+    )
+    def test_log_activity(self, client: TestClient, test_requisition: Requisition, data: dict) -> None:
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/log-activity",
-            data={"activity_type": "note", "notes": "Called vendor today"},
-        )
-        assert resp.status_code == 200
-
-    def test_log_activity_phone_call(self, client: TestClient, test_requisition: Requisition) -> None:
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/log-activity",
-            data={"activity_type": "phone_call", "vendor_name": "Arrow"},
+            data=data,
         )
         assert resp.status_code == 200
 

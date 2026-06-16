@@ -12,6 +12,7 @@ Depends on: conftest.py fixtures, app.routers.htmx_views
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -159,6 +160,15 @@ def _make_buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
     return bp
 
 
+def _assert_lazy_load_targets_self(html: str, hx_get: str) -> None:
+    """A lazy-load ``hx-get`` must pair with ``hx-target="this"`` so its swap does not
+    inherit ``<main id="main-content" hx-target="this">`` and replace the page."""
+    marker = f'hx-get="{hx_get}"'
+    assert marker in html
+    start = html.index(marker)
+    assert 'hx-target="this"' in html[start : start + 280]
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # Full Page Entry Points
 # ══════════════════════════════════════════════════════════════════════════
@@ -167,12 +177,28 @@ def _make_buy_plan(db: Session, quote: Quote, user: User, **kw) -> BuyPlan:
 class TestV2FullPages:
     """Test the multi-decorated v2_page handler for all entry URLs."""
 
-    def test_v2_root(self, client: TestClient):
-        resp = client.get("/v2")
-        assert resp.status_code == 200
-
-    def test_v2_requisitions(self, client: TestClient):
-        resp = client.get("/v2/requisitions")
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/v2",
+            "/v2/requisitions",
+            "/v2/search",
+            "/v2/vendors",
+            "/v2/customers",
+            "/v2/buy-plans",
+            "/v2/excess",
+            "/v2/quotes",
+            "/v2/settings",
+            "/v2/prospecting",
+            "/v2/proactive",
+            "/v2/materials",
+            "/v2/follow-ups",
+            "/v2/sightings",
+            "/v2/trouble-tickets",
+        ],
+    )
+    def test_v2_page(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200
 
     def test_v2_requisitions_detail(self, client: TestClient, db_session: Session, test_user: User):
@@ -181,68 +207,16 @@ class TestV2FullPages:
         resp = client.get(f"/v2/requisitions/{req.id}")
         assert resp.status_code == 200
 
-    def test_v2_search(self, client: TestClient):
-        resp = client.get("/v2/search")
-        assert resp.status_code == 200
-
-    def test_v2_vendors(self, client: TestClient):
-        resp = client.get("/v2/vendors")
-        assert resp.status_code == 200
-
     def test_v2_vendors_detail(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
         db_session.commit()
         resp = client.get(f"/v2/vendors/{vc.id}")
         assert resp.status_code == 200
 
-    def test_v2_customers(self, client: TestClient):
-        resp = client.get("/v2/customers")
-        assert resp.status_code == 200
-
     def test_v2_customers_detail(self, client: TestClient, db_session: Session):
         co = _make_company(db_session)
         db_session.commit()
         resp = client.get(f"/v2/customers/{co.id}")
-        assert resp.status_code == 200
-
-    def test_v2_buy_plans(self, client: TestClient):
-        resp = client.get("/v2/buy-plans")
-        assert resp.status_code == 200
-
-    def test_v2_excess(self, client: TestClient):
-        resp = client.get("/v2/excess")
-        assert resp.status_code == 200
-
-    def test_v2_quotes(self, client: TestClient):
-        resp = client.get("/v2/quotes")
-        assert resp.status_code == 200
-
-    def test_v2_settings(self, client: TestClient):
-        resp = client.get("/v2/settings")
-        assert resp.status_code == 200
-
-    def test_v2_prospecting(self, client: TestClient):
-        resp = client.get("/v2/prospecting")
-        assert resp.status_code == 200
-
-    def test_v2_proactive(self, client: TestClient):
-        resp = client.get("/v2/proactive")
-        assert resp.status_code == 200
-
-    def test_v2_materials(self, client: TestClient):
-        resp = client.get("/v2/materials")
-        assert resp.status_code == 200
-
-    def test_v2_follow_ups(self, client: TestClient):
-        resp = client.get("/v2/follow-ups")
-        assert resp.status_code == 200
-
-    def test_v2_sightings(self, client: TestClient):
-        resp = client.get("/v2/sightings")
-        assert resp.status_code == 200
-
-    def test_v2_trouble_tickets(self, client: TestClient):
-        resp = client.get("/v2/trouble-tickets")
         assert resp.status_code == 200
 
 
@@ -565,12 +539,7 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}")
         assert resp.status_code == 200
-        # Lazy insights hx-get must pair with hx-target="this" so swaps do not inherit
-        # <main id="main-content" hx-target="this"> (which would replace the whole main column).
-        marker = f'hx-get="/v2/partials/requisitions/{req.id}/insights"'
-        assert marker in resp.text
-        start = resp.text.index(marker)
-        assert 'hx-target="this"' in resp.text[start : start + 280]
+        _assert_lazy_load_targets_self(resp.text, f"/v2/partials/requisitions/{req.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/999999")
@@ -590,107 +559,68 @@ class TestRequisitionDetail:
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
         assert resp.status_code == 200
 
-    def test_tab_quotes(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "tab, expected_status",
+        [
+            ("quotes", 200),
+            ("buy_plans", 200),
+            ("tasks", 200),
+            ("activity", 200),
+            ("responses", 200),
+            ("invalid_tab", 404),
+        ],
+    )
+    def test_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str, expected_status: int):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/quotes")
-        assert resp.status_code == 200
-
-    def test_tab_buy_plans(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/buy_plans")
-        assert resp.status_code == 200
-
-    def test_tab_tasks(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/tasks")
-        assert resp.status_code == 200
-
-    def test_tab_activity(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
-        assert resp.status_code == 200
-
-    def test_tab_responses(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/responses")
-        assert resp.status_code == 200
-
-    def test_tab_invalid(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/invalid_tab")
-        assert resp.status_code == 404
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/{tab}")
+        assert resp.status_code == expected_status
 
 
 class TestRequisitionInlineEdit:
     """Test inline edit cell and save."""
 
-    def test_edit_cell_name(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "field, expected_status",
+        [
+            ("name", 200),
+            ("status", 200),
+            ("owner", 200),
+            ("bogus", 400),
+        ],
+    )
+    def test_edit_cell(
+        self, client: TestClient, db_session: Session, test_user: User, field: str, expected_status: int
+    ):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/edit/name")
-        assert resp.status_code == 200
-
-    def test_edit_cell_status(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/edit/status")
-        assert resp.status_code == 200
-
-    def test_edit_cell_owner(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/edit/owner")
-        assert resp.status_code == 200
-
-    def test_edit_cell_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/requisitions/{req.id}/edit/bogus")
-        assert resp.status_code == 400
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/edit/{field}")
+        assert resp.status_code == expected_status
 
     def test_edit_cell_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/999999/edit/name")
         assert resp.status_code == 404
 
-    def test_inline_save_name(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "field, value, context",
+        [
+            ("name", "New Name", "row"),
+            ("urgency", "hot", "row"),
+            ("deadline", "2026-04-01", "row"),
+            ("deadline", "", "row"),  # clear deadline
+            ("name", "Renamed", "header"),
+            ("name", "Renamed Tab", "tab"),
+        ],
+        ids=["name_row", "urgency_row", "deadline_row", "deadline_clear", "name_header", "name_tab"],
+    )
+    def test_inline_save(
+        self, client: TestClient, db_session: Session, test_user: User, field: str, value: str, context: str
+    ):
         req = _make_requisition(db_session, test_user)
         db_session.commit()
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "name", "value": "New Name", "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_urgency(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "urgency", "value": "hot", "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_deadline(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "deadline", "value": "2026-04-01", "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_deadline_clear(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "deadline", "value": "", "context": "row"},
+            data={"field": field, "value": value, "context": context},
         )
         assert resp.status_code == 200
 
@@ -712,24 +642,6 @@ class TestRequisitionInlineEdit:
                 data={"field": "status", "value": "archived", "context": "row"},
             )
             assert resp.status_code == 200
-
-    def test_inline_save_header_context(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "name", "value": "Renamed", "context": "header"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_tab_context(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "name", "value": "Renamed Tab", "context": "tab"},
-        )
-        assert resp.status_code == 200
 
     def test_inline_save_not_found(self, client: TestClient):
         resp = client.patch(
@@ -1200,10 +1112,7 @@ class TestVendorDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/vendors/{vc.id}")
         assert resp.status_code == 200
-        marker = f'hx-get="/v2/partials/vendors/{vc.id}/insights"'
-        assert marker in resp.text
-        start = resp.text.index(marker)
-        assert 'hx-target="this"' in resp.text[start : start + 280]
+        _assert_lazy_load_targets_self(resp.text, f"/v2/partials/vendors/{vc.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/vendors/999999")
@@ -1213,29 +1122,20 @@ class TestVendorDetail:
 class TestVendorTabs:
     """Test vendor tab endpoints."""
 
-    def test_tab_contacts(self, client: TestClient, db_session: Session):
+    @pytest.mark.parametrize(
+        "tab, expected_status",
+        [
+            ("contacts", 200),
+            ("overview", 200),
+            ("offers", 200),
+            ("bogus", 404),
+        ],
+    )
+    def test_tab(self, client: TestClient, db_session: Session, tab: str, expected_status: int):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/contacts")
-        assert resp.status_code == 200
-
-    def test_tab_sightings(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/overview")
-        assert resp.status_code == 200
-
-    def test_tab_offers(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/offers")
-        assert resp.status_code == 200
-
-    def test_tab_invalid(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/bogus")
-        assert resp.status_code == 404
+        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/{tab}")
+        assert resp.status_code == expected_status
 
 
 class TestVendorEdit:
@@ -1309,10 +1209,7 @@ class TestCustomerDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
-        marker = f'hx-get="/v2/partials/customers/{co.id}/insights"'
-        assert marker in resp.text
-        start = resp.text.index(marker)
-        assert 'hx-target="this"' in resp.text[start : start + 280]
+        _assert_lazy_load_targets_self(resp.text, f"/v2/partials/customers/{co.id}/insights")
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/customers/999999")
@@ -1477,16 +1374,13 @@ class TestSettings:
 class TestBuyPlans:
     """Test buy plan list and detail partials."""
 
-    def test_list(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans")
-        assert resp.status_code == 200
-
-    def test_list_with_status(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans?status=pending")
-        assert resp.status_code == 200
-
-    def test_list_mine(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans?mine=true")
+    @pytest.mark.parametrize(
+        "query",
+        ["", "?status=pending", "?mine=true"],
+        ids=["all", "status", "mine"],
+    )
+    def test_list(self, client: TestClient, query: str):
+        resp = client.get(f"/v2/partials/buy-plans{query}")
         assert resp.status_code == 200
 
 
@@ -1498,12 +1392,9 @@ class TestBuyPlans:
 class TestQuotesList:
     """Test quotes list partial."""
 
-    def test_list(self, client: TestClient):
-        resp = client.get("/v2/partials/quotes")
-        assert resp.status_code == 200
-
-    def test_list_with_status(self, client: TestClient):
-        resp = client.get("/v2/partials/quotes?status=draft")
+    @pytest.mark.parametrize("query", ["", "?status=draft"], ids=["all", "status"])
+    def test_list(self, client: TestClient, query: str):
+        resp = client.get(f"/v2/partials/quotes{query}")
         assert resp.status_code == 200
 
 
@@ -1619,12 +1510,9 @@ class TestTroubleTickets:
         resp = client.get("/v2/partials/trouble-tickets/workspace")
         assert resp.status_code == 200
 
-    def test_list(self, client: TestClient):
-        resp = client.get("/v2/partials/trouble-tickets/list")
-        assert resp.status_code == 200
-
-    def test_list_with_status(self, client: TestClient):
-        resp = client.get("/v2/partials/trouble-tickets/list?status=open")
+    @pytest.mark.parametrize("query", ["", "?status=open"], ids=["all", "status"])
+    def test_list(self, client: TestClient, query: str):
+        resp = client.get(f"/v2/partials/trouble-tickets/list{query}")
         assert resp.status_code == 200
 
     def test_detail_not_found(self, client: TestClient):
@@ -1728,10 +1616,7 @@ class TestInsights:
         target="this">."""
         resp = client.get("/v2/partials/dashboard")
         assert resp.status_code == 200
-        marker = 'hx-get="/v2/partials/dashboard/pipeline-insights"'
-        assert marker in resp.text
-        start = resp.text.index(marker)
-        assert 'hx-target="this"' in resp.text[start : start + 280]
+        _assert_lazy_load_targets_self(resp.text, "/v2/partials/dashboard/pipeline-insights")
 
     def test_pipeline_insights(self, client: TestClient):
         with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):
@@ -1785,46 +1670,12 @@ class TestPartsList:
 class TestPartTabs:
     """Test part-level tab endpoints."""
 
-    def test_offers_tab(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("tab", ["offers", "sourcing", "req-details", "activity", "comms", "notes"])
+    def test_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str):
         req = _make_requisition(db_session, test_user)
         item = _make_requirement(db_session, req)
         db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/offers")
-        assert resp.status_code == 200
-
-    def test_sourcing_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/sourcing")
-        assert resp.status_code == 200
-
-    def test_req_details_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/req-details")
-        assert resp.status_code == 200
-
-    def test_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/activity")
-        assert resp.status_code == 200
-
-    def test_comms_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/comms")
-        assert resp.status_code == 200
-
-    def test_notes_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        item = _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/notes")
+        resp = client.get(f"/v2/partials/parts/{item.id}/tab/{tab}")
         assert resp.status_code == 200
 
 

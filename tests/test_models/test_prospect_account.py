@@ -310,21 +310,27 @@ class TestDiscoveryBatchModel:
 class TestMigrationScript:
     """Tests for the SF pool migration logic (normalize_domain)."""
 
-    def test_normalize_domain_basic(self):
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("Example.COM", "example.com", id="uppercase"),
+            pytest.param("www.example.com", "example.com", id="www_prefix"),
+            pytest.param("https://www.example.com/", "example.com", id="https_www_trailing_slash"),
+            pytest.param("http://example.com", "example.com", id="http_scheme"),
+            pytest.param("  EXAMPLE.com  ", "example.com", id="whitespace_uppercase"),
+            pytest.param(None, None, id="none"),
+            pytest.param("", None, id="empty_string"),
+            pytest.param("   ", None, id="whitespace_only"),
+        ],
+    )
+    def test_normalize_domain(self, raw, expected):
         from scripts.migrate_sf_pool import normalize_domain
 
-        assert normalize_domain("Example.COM") == "example.com"
-        assert normalize_domain("www.example.com") == "example.com"
-        assert normalize_domain("https://www.example.com/") == "example.com"
-        assert normalize_domain("http://example.com") == "example.com"
-        assert normalize_domain("  EXAMPLE.com  ") == "example.com"
-
-    def test_normalize_domain_empty(self):
-        from scripts.migrate_sf_pool import normalize_domain
-
-        assert normalize_domain(None) is None
-        assert normalize_domain("") is None
-        assert normalize_domain("   ") is None
+        result = normalize_domain(raw)
+        if expected is None:
+            assert result is None
+        else:
+            assert result == expected
 
     def test_migrate_creates_prospects(self, db_session: Session):
         """Migration script copies unowned companies into prospect_accounts."""

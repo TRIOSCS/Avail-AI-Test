@@ -5,6 +5,8 @@ Verifies cache hit/miss behavior, key generation, and prefix invalidation.
 
 from unittest.mock import patch
 
+import pytest
+
 
 def test_cache_miss_calls_function():
     """On cache miss, the wrapped function is called and result is cached."""
@@ -104,47 +106,58 @@ def test_key_params_none_uses_all_kwargs():
     mock_get.assert_called_once()
 
 
-def test_cache_read_error_handled():
-    """get_cached exception is caught, function still runs (lines 56-57)."""
+@pytest.mark.parametrize(
+    ("prefix", "get_kwargs", "set_kwargs"),
+    [
+        # get_cached exception is caught, function still runs (lines 56-57)
+        pytest.param(
+            "test_read_err",
+            {"side_effect": Exception("Redis error")},
+            {},
+            id="read-error",
+        ),
+        # set_cached exception is caught, result still returned (lines 67-68)
+        pytest.param(
+            "test_write_err",
+            {"return_value": None},
+            {"side_effect": Exception("Write failed")},
+            id="write-error",
+        ),
+    ],
+)
+def test_cache_error_handled(prefix, get_kwargs, set_kwargs):
+    """Cache read/write exceptions are caught; the function result is still returned."""
     from app.cache.decorators import cached_endpoint
 
-    @cached_endpoint(prefix="test_read_err", ttl_hours=1, key_params=["x"])
+    @cached_endpoint(prefix=prefix, ttl_hours=1, key_params=["x"])
     def my_func(x):
         return {"value": x}
 
     with (
-        patch("app.cache.decorators.get_cached", side_effect=Exception("Redis error")),
-        patch("app.cache.decorators.set_cached"),
+        patch("app.cache.decorators.get_cached", **get_kwargs),
+        patch("app.cache.decorators.set_cached", **set_kwargs),
     ):
         result = my_func(x=1)
 
     assert result == {"value": 1}
 
 
-def test_cache_write_error_handled():
-    """set_cached exception is caught, result still returned (lines 67-68)."""
+@pytest.mark.parametrize(
+    ("prefix", "return_value", "should_cache"),
+    [
+        # Non-dict/list results (e.g. Response objects) are NOT cached.
+        pytest.param("test_no_cache", "plain string", False, id="non-dict-not-cached"),
+        # List results are cached (same as dict).
+        pytest.param("test_list", [1, 2, 3], True, id="list-is-cached"),
+    ],
+)
+def test_result_caching_by_type(prefix, return_value, should_cache):
+    """Only dict/list results are cached; other types are passed through uncached."""
     from app.cache.decorators import cached_endpoint
 
-    @cached_endpoint(prefix="test_write_err", ttl_hours=1, key_params=["x"])
+    @cached_endpoint(prefix=prefix, ttl_hours=1, key_params=["x"])
     def my_func(x):
-        return {"value": x}
-
-    with (
-        patch("app.cache.decorators.get_cached", return_value=None),
-        patch("app.cache.decorators.set_cached", side_effect=Exception("Write failed")),
-    ):
-        result = my_func(x=1)
-
-    assert result == {"value": 1}
-
-
-def test_non_dict_result_not_cached():
-    """Non-dict/list results (e.g. Response objects) are NOT cached."""
-    from app.cache.decorators import cached_endpoint
-
-    @cached_endpoint(prefix="test_no_cache", ttl_hours=1, key_params=["x"])
-    def my_func(x):
-        return "plain string"
+        return return_value
 
     with (
         patch("app.cache.decorators.get_cached", return_value=None),
@@ -152,26 +165,11 @@ def test_non_dict_result_not_cached():
     ):
         result = my_func(x=1)
 
-    assert result == "plain string"
-    mock_set.assert_not_called()
-
-
-def test_list_result_is_cached():
-    """List results are cached (same as dict)."""
-    from app.cache.decorators import cached_endpoint
-
-    @cached_endpoint(prefix="test_list", ttl_hours=1, key_params=["x"])
-    def my_func(x):
-        return [1, 2, 3]
-
-    with (
-        patch("app.cache.decorators.get_cached", return_value=None),
-        patch("app.cache.decorators.set_cached") as mock_set,
-    ):
-        result = my_func(x=1)
-
-    assert result == [1, 2, 3]
-    mock_set.assert_called_once()
+    assert result == return_value
+    if should_cache:
+        mock_set.assert_called_once()
+    else:
+        mock_set.assert_not_called()
 
 
 def test_cache_prefix_attribute():

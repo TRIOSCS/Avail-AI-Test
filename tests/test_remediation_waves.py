@@ -8,6 +8,7 @@ Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
 import pytest
+from fastapi import HTTPException
 
 from app.services.status_machine import require_valid_transition, validate_transition
 
@@ -24,14 +25,10 @@ class TestStatusMachine:
         assert validate_transition("offer", "active", "won") is True
 
     def test_offer_invalid_transition(self):
-        import pytest
-
         with pytest.raises(ValueError, match="Invalid offer status transition"):
             validate_transition("offer", "sold", "active")
 
     def test_offer_terminal_state(self):
-        import pytest
-
         with pytest.raises(ValueError):
             validate_transition("offer", "rejected", "active")
 
@@ -41,8 +38,6 @@ class TestStatusMachine:
         assert validate_transition("quote", "sent", "lost") is True
 
     def test_quote_invalid_transition(self):
-        import pytest
-
         with pytest.raises(ValueError):
             validate_transition("quote", "revised", "draft")
 
@@ -53,8 +48,6 @@ class TestStatusMachine:
         assert validate_transition("buy_plan", "halted", "draft") is True
 
     def test_buy_plan_invalid_transition(self):
-        import pytest
-
         with pytest.raises(ValueError):
             validate_transition("buy_plan", "completed", "active")
 
@@ -85,15 +78,11 @@ class TestRequireValidTransition:
         require_valid_transition("offer", "pending_review", "active")
 
     def test_invalid_transition_raises_http_409(self):
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             require_valid_transition("offer", "sold", "active")
         assert exc_info.value.status_code == 409
 
     def test_terminal_state_raises_http_409(self):
-        from fastapi import HTTPException
-
         with pytest.raises(HTTPException) as exc_info:
             require_valid_transition("buy_plan", "completed", "active")
         assert exc_info.value.status_code == 409

@@ -401,43 +401,42 @@ class TestConnectorHealth:
         assert c["last_error"] is None
         assert c["last_error_at"] is None
 
-    def test_connector_health_auto_degraded(self, admin_client, db_session):
+    @pytest.mark.parametrize(
+        ("name", "display_name", "category", "total_searches", "error_count_24h", "expected_status"),
+        [
+            ("bad_src", "Bad Source", "broker", 10, 8, "degraded"),
+            ("ok_src", "OK Source", "distributor", 100, 3, "live"),
+        ],
+        ids=["high_errors_degraded", "low_errors_live"],
+    )
+    def test_connector_health_degraded_threshold(
+        self,
+        admin_client,
+        db_session,
+        name,
+        display_name,
+        category,
+        total_searches,
+        error_count_24h,
+        expected_status,
+    ):
         src = ApiSource(
-            name="bad_src",
-            display_name="Bad Source",
-            category="broker",
+            name=name,
+            display_name=display_name,
+            category=category,
             source_type="api",
             status="live",
             is_active=True,
-            total_searches=10,
-            error_count_24h=8,
+            total_searches=total_searches,
+            error_count_24h=error_count_24h,
         )
         db_session.add(src)
         db_session.commit()
 
         resp = admin_client.get("/api/admin/connector-health")
         connectors = resp.json()["connectors"]
-        match = [c for c in connectors if c["name"] == "bad_src"][0]
-        assert match["status"] == "degraded"
-
-    def test_connector_health_not_degraded_low_errors(self, admin_client, db_session):
-        src = ApiSource(
-            name="ok_src",
-            display_name="OK Source",
-            category="distributor",
-            source_type="api",
-            status="live",
-            is_active=True,
-            total_searches=100,
-            error_count_24h=3,
-        )
-        db_session.add(src)
-        db_session.commit()
-
-        resp = admin_client.get("/api/admin/connector-health")
-        connectors = resp.json()["connectors"]
-        match = [c for c in connectors if c["name"] == "ok_src"][0]
-        assert match["status"] == "live"
+        match = [c for c in connectors if c["name"] == name][0]
+        assert match["status"] == expected_status
 
 
 class TestIntegrityCheck:

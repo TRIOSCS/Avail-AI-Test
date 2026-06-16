@@ -19,24 +19,13 @@ from app.services.email_intelligence_service import (
 )
 
 
-@pytest.fixture
-def mock_db():
-    """Create a mock database session with chainable query mock."""
-    db = MagicMock()
-    # The function calls db.query(VendorCard).filter(...).first() for vendor lookup
-    # and db.query(KnowledgeEntry).filter(...).filter(...).count() for dedup.
-    # Since both use db.query, we need a flexible mock.
-    # Default: no vendor found, no dedup matches.
-    filter_chain = MagicMock()
-    filter_chain.filter.return_value = filter_chain
-    filter_chain.count.return_value = 0
-    filter_chain.first.return_value = None
-    db.query.return_value.filter.return_value = filter_chain
-    return db
-
-
 def _make_db_mock(dedup_count=0, vendor=None):
-    """Create a mock db session with specific dedup/vendor behavior."""
+    """Create a mock db session with specific dedup/vendor behavior.
+
+    The function calls db.query(VendorCard).filter(...).first() for vendor lookup
+    and db.query(KnowledgeEntry).filter(...).filter(...).count() for dedup. Both
+    use db.query, so a single flexible chainable mock covers both.
+    """
     db = MagicMock()
     filter_chain = MagicMock()
     filter_chain.filter.return_value = filter_chain

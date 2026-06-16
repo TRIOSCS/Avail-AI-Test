@@ -19,6 +19,50 @@ import pytest
 from app.connectors.ai_live_web import AIWebSearchConnector
 
 
+async def _search(connector: AIWebSearchConnector, part: str, response):
+    """Patch claude_json at its source module with `response`, then run a search."""
+    with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=response)):
+        return await connector._do_search(part)
+
+
+# Payloads the quality gate must reject entirely (output is always []).
+_REJECTED_RESPONSES = {
+    "non_dict_response": ["bad", "shape"],
+    "no_stock_signal_or_url": {
+        "offers": [
+            {
+                "vendor_name": "NoSignal Vendor",
+                "mpn": "LM324",
+                "qty_available": 300,
+                "vendor_url": "",
+                "evidence_note": "Please contact sales for details",
+            },
+            {
+                "vendor_name": "NoSignal2 Vendor",
+                "mpn": "LM324",
+                "qty_available": 100,
+                "vendor_url": "https://example.com/lm324",
+                "evidence_note": "Call us for quote",
+                "in_stock_explicit": False,
+            },
+        ]
+    },
+    "stale_listing": {
+        "offers": [
+            {
+                "vendor_name": "Old Listing Vendor",
+                "mpn": "NE555",
+                "qty_available": 42,
+                "vendor_url": "https://example.com/ne555",
+                "in_stock_explicit": True,
+                "listing_age_days": 120,
+                "evidence_note": "In stock qty 42",
+            }
+        ]
+    },
+}
+
+
 class TestAIWebSearchConnector:
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_api_key(self):
@@ -50,8 +94,7 @@ class TestAIWebSearchConnector:
             ]
         }
 
-        with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=payload)):
-            out = await connector._do_search("LM358DR")
+        out = await _search(connector, "LM358DR", payload)
 
         assert len(out) == 1
         row = out[0]
@@ -65,13 +108,6 @@ class TestAIWebSearchConnector:
         assert row["raw_data"]["evidence_note"] == "In stock listing"
         assert row["raw_data"]["in_stock_explicit"] is True
         assert row["raw_data"]["listing_age_days"] == 1
-
-    @pytest.mark.asyncio
-    async def test_handles_non_dict_response(self):
-        connector = AIWebSearchConnector(api_key="test-key")
-        with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=["bad", "shape"])):
-            out = await connector._do_search("LM317")
-        assert out == []
 
     @pytest.mark.asyncio
     async def test_filters_missing_vendor_and_bad_numbers(self):
@@ -93,8 +129,7 @@ class TestAIWebSearchConnector:
             ]
         }
 
-        with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=payload)):
-            out = await connector._do_search("LM317T")
+        out = await _search(connector, "LM317T", payload)
 
         assert len(out) == 1
         row = out[0]
@@ -106,48 +141,9 @@ class TestAIWebSearchConnector:
         # Currency is uppercased and clipped to first 3 chars
         assert row["currency"] == "USD"
 
+    @pytest.mark.parametrize("case", list(_REJECTED_RESPONSES))
     @pytest.mark.asyncio
-    async def test_quality_gate_rejects_no_stock_signal_or_url(self):
+    async def test_rejects_low_quality_responses(self, case):
         connector = AIWebSearchConnector(api_key="test-key")
-        payload = {
-            "offers": [
-                {
-                    "vendor_name": "NoSignal Vendor",
-                    "mpn": "LM324",
-                    "qty_available": 300,
-                    "vendor_url": "",
-                    "evidence_note": "Please contact sales for details",
-                },
-                {
-                    "vendor_name": "NoSignal2 Vendor",
-                    "mpn": "LM324",
-                    "qty_available": 100,
-                    "vendor_url": "https://example.com/lm324",
-                    "evidence_note": "Call us for quote",
-                    "in_stock_explicit": False,
-                },
-            ]
-        }
-        with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=payload)):
-            out = await connector._do_search("LM324")
-        assert out == []
-
-    @pytest.mark.asyncio
-    async def test_quality_gate_rejects_stale_listing(self):
-        connector = AIWebSearchConnector(api_key="test-key")
-        payload = {
-            "offers": [
-                {
-                    "vendor_name": "Old Listing Vendor",
-                    "mpn": "NE555",
-                    "qty_available": 42,
-                    "vendor_url": "https://example.com/ne555",
-                    "in_stock_explicit": True,
-                    "listing_age_days": 120,
-                    "evidence_note": "In stock qty 42",
-                }
-            ]
-        }
-        with patch("app.connectors.ai_live_web.claude_json", new=AsyncMock(return_value=payload)):
-            out = await connector._do_search("NE555")
+        out = await _search(connector, "LM317", _REJECTED_RESPONSES[case])
         assert out == []

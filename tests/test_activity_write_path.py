@@ -8,6 +8,8 @@ Called by: pytest
 Depends on: app/constants.py, app/services/activity_service.py, conftest.py
 """
 
+import pytest
+
 from app.constants import ActivityType
 from app.models import ActivityLog
 from app.services.activity_service import (
@@ -93,9 +95,16 @@ def test_log_call_activity_accepts_requisition_id(db_session, test_requisition, 
     assert record.requisition_id == test_requisition.id
 
 
-def test_avail_tag_re_matches_ref_format():
-    """The sent-folder scan must recognise the [ref:N] tag that RFQ send writes."""
-    assert RFQ_SUBJECT_TAG_RE.search("Quote request RE part [ref:4321]").group(1) == "4321"
+@pytest.mark.parametrize(
+    ("subject", "expected"),
+    [
+        pytest.param("Quote request RE part [ref:4321]", "4321", id="ref_format"),
+        pytest.param("Quote request [AVAIL-99]", "99", id="legacy_format"),
+    ],
+)
+def test_avail_tag_re_matches(subject, expected):
+    """The sent-folder scan must recognise the [ref:N] and legacy [AVAIL-N] tags."""
+    assert RFQ_SUBJECT_TAG_RE.search(subject).group(1) == expected
 
 
 def test_log_email_activity_accepts_none_user(db_session, test_requisition):
@@ -113,10 +122,6 @@ def test_log_email_activity_accepts_none_user(db_session, test_requisition):
     assert record is not None
     assert record.user_id is None
     assert record.requisition_id == test_requisition.id
-
-
-def test_avail_tag_re_matches_legacy_format():
-    assert RFQ_SUBJECT_TAG_RE.search("Quote request [AVAIL-99]").group(1) == "99"
 
 
 def test_get_requisition_activities_returns_scoped_rows(db_session, test_requisition, test_user):
@@ -279,30 +284,36 @@ async def test_poll_inbox_logs_email_received_activity(db_session, test_requisit
     assert len(rows) == 1
 
 
-def test_log_activity_marks_meaningful_types(db_session, test_requisition, test_user):
-    """Inherently-meaningful activity types are flagged is_meaningful=True at write
-    time."""
+@pytest.mark.parametrize(
+    ("activity_type", "description", "expected_meaningful"),
+    [
+        pytest.param(
+            ActivityType.STATUS_CHANGED,
+            "status changed",
+            True,
+            id="meaningful_type_flagged_true",
+        ),
+        pytest.param(
+            ActivityType.SIGHTING_ADDED,
+            "12 sightings added",
+            None,
+            id="ai_scored_type_left_none",
+        ),
+    ],
+)
+def test_log_activity_is_meaningful_flag(
+    db_session, test_requisition, test_user, activity_type, description, expected_meaningful
+):
+    """Inherently-meaningful types are flagged True at write time; AI-scored types
+    (sighting_added) are left None for the quality pass."""
     rec = log_activity(
         db_session,
-        activity_type=ActivityType.STATUS_CHANGED,
+        activity_type=activity_type,
         requisition_id=test_requisition.id,
         user_id=test_user.id,
-        description="status changed",
+        description=description,
     )
-    assert rec.is_meaningful is True
-
-
-def test_log_activity_leaves_ai_scored_types_unflagged(db_session, test_requisition, test_user):
-    """AI-scored types (sighting_added) are left is_meaningful=None for the quality
-    pass."""
-    rec = log_activity(
-        db_session,
-        activity_type=ActivityType.SIGHTING_ADDED,
-        requisition_id=test_requisition.id,
-        user_id=test_user.id,
-        description="12 sightings added",
-    )
-    assert rec.is_meaningful is None
+    assert rec.is_meaningful is expected_meaningful
 
 
 def test_get_requisition_activities_meaningful_only_filter(db_session, test_requisition, test_user):

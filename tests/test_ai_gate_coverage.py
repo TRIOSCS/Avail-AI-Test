@@ -14,6 +14,7 @@ import time
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.services.search_worker_base.ai_gate import AIGate, _build_schema, _build_system_prompt
@@ -34,6 +35,15 @@ def _make_queue_item(mpn: str, manufacturer: str = "TI", description: str = "") 
     item.updated_at = None
     item.created_at = datetime.now(timezone.utc)
     return item
+
+
+def _db_returning(*items: MagicMock) -> MagicMock:
+    """A db-session mock whose pending-item query yields the given items."""
+    db_mock = MagicMock()
+    db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = list(
+        items
+    )
+    return db_mock
 
 
 # ── Unit tests ────────────────────────────────────────────────────────────────
@@ -100,35 +110,19 @@ class TestClassifyPartsBatch:
         assert result[0]["mpn"] == "LM317T"
         assert result[0]["search_ics"] is True
 
-    async def test_api_failure_returns_none(self):
+    @pytest.mark.parametrize(
+        "structured_mock",
+        [
+            AsyncMock(side_effect=RuntimeError("API down")),
+            AsyncMock(return_value={"unexpected": "format"}),
+            AsyncMock(return_value=None),
+        ],
+        ids=["api_failure", "unexpected_response_format", "none_response"],
+    )
+    async def test_bad_response_returns_none(self, structured_mock):
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
 
-        async def _fail(*a, **kw):
-            raise RuntimeError("API down")
-
-        with patch("app.utils.llm_router.routed_structured", new=_fail):
-            result = await gate.classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": ""}])
-
-        assert result is None
-
-    async def test_unexpected_response_format_returns_none(self):
-        gate = AIGate(MagicMock(), "ICsource", "search_ics")
-
-        async def _bad(*a, **kw):
-            return {"unexpected": "format"}
-
-        with patch("app.utils.llm_router.routed_structured", new=_bad):
-            result = await gate.classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": ""}])
-
-        assert result is None
-
-    async def test_none_response_returns_none(self):
-        gate = AIGate(MagicMock(), "ICsource", "search_ics")
-
-        async def _none(*a, **kw):
-            return None
-
-        with patch("app.utils.llm_router.routed_structured", new=_none):
+        with patch("app.utils.llm_router.routed_structured", new=structured_mock):
             result = await gate.classify_parts_batch([{"mpn": "LM317T", "manufacturer": "TI", "description": ""}])
 
         assert result is None
@@ -140,13 +134,9 @@ class TestProcessAIGate:
         MockModel.status = MagicMock()
         MockModel.created_at = MagicMock()
 
-        # query returns empty list
-        db_session_mock = MagicMock()
-        db_session_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-
         gate = AIGate(MockModel, "ICsource", "search_ics")
         # Should not raise
-        await gate.process_ai_gate(db_session_mock)
+        await gate.process_ai_gate(_db_returning())
 
     async def test_cooldown_prevents_processing(self, db_session: Session):
         gate = AIGate(MagicMock(), "ICsource", "search_ics")
@@ -164,10 +154,7 @@ class TestProcessAIGate:
         item.normalized_mpn = "lm317t"
         item.manufacturer = "TI"
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         # Pre-populate cache
@@ -188,10 +175,7 @@ class TestProcessAIGate:
         item.normalized_mpn = "crcw0402100kfked"
         item.manufacturer = "Vishay"
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         gate._classification_cache[("crcw0402100kfked", "vishay")] = ("passive", "skip", "standard resistor")
@@ -204,10 +188,7 @@ class TestProcessAIGate:
 
         item = _make_queue_item("LM317T")
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
 
@@ -223,10 +204,7 @@ class TestProcessAIGate:
 
         item = _make_queue_item("LM317T")
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         classification = [
@@ -247,10 +225,7 @@ class TestProcessAIGate:
 
         item = _make_queue_item("CRCW0402100K")
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         classification = [
@@ -268,10 +243,7 @@ class TestProcessAIGate:
 
         item = _make_queue_item("MISSING_MPN")
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            item
-        ]
+        db_mock = _db_returning(item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         # Return empty classifications (no match for MISSING_MPN)
@@ -294,11 +266,7 @@ class TestProcessAIGate:
         uncached_item.normalized_mpn = "stm32f4"
         uncached_item.manufacturer = "STMicro"
 
-        db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
-            cached_item,
-            uncached_item,
-        ]
+        db_mock = _db_returning(cached_item, uncached_item)
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         gate._classification_cache[("lm317t", "ti")] = ("semiconductor", "search", "voltage regulator IC")

@@ -5,11 +5,17 @@ import pytest
 from app.services.category_normalizer import normalize_category, normalize_trio_category
 
 
-def test_known_alias_maps_to_canonical():
-    assert normalize_category("solid state drives - ssd") == "ssd"
-    assert normalize_category("connectors, interconnects") == "connectors"
-    assert normalize_category("memory - modules, cards") == "dram"
-    assert normalize_category("battery products") == "batteries"
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("solid state drives - ssd", "ssd"),
+        ("connectors, interconnects", "connectors"),
+        ("memory - modules, cards", "dram"),
+        ("battery products", "batteries"),
+    ],
+)
+def test_known_alias_maps_to_canonical(raw, expected):
+    assert normalize_category(raw) == expected
 
 
 @pytest.mark.parametrize(
@@ -64,11 +70,11 @@ def test_trio_source_map_targets_are_tree_keys():
         )
 
 
-def test_legacy_generic_ic_bucket_maps_to_ics_other():
+@pytest.mark.parametrize("raw", ["Integrated Circuits (ICs)", "integrated circuits (ics)"])
+def test_legacy_generic_ic_bucket_maps_to_ics_other(raw):
     """'Integrated Circuits (ICs)' was ambiguous before ics_other existed; now it
     maps."""
-    assert normalize_category("Integrated Circuits (ICs)") == "ics_other"
-    assert normalize_category("integrated circuits (ics)") == "ics_other"
+    assert normalize_category(raw) == "ics_other"
 
 
 @pytest.mark.parametrize(
@@ -93,37 +99,54 @@ def test_distributor_taxonomy_strings_normalize(raw, expected):
     assert normalize_category(raw) == expected
 
 
-def test_legacy_capitalized_canonical_variants_resolve():
+@pytest.mark.parametrize("raw,expected", [("Capacitors", "capacitors"), ("Resistors", "resistors")])
+def test_legacy_capitalized_canonical_variants_resolve(raw, expected):
     """Capitalized variants of canonical keys (live-DB legacy rows) resolve to
     lowercase."""
-    assert normalize_category("Capacitors") == "capacitors"
-    assert normalize_category("Resistors") == "resistors"
+    assert normalize_category(raw) == expected
 
 
-def test_canonical_value_passes_through():
-    assert normalize_category("ssd") == "ssd"
-    assert normalize_category("connectors") == "connectors"
-    assert normalize_category("tape_drives") == "tape_drives"
-    assert normalize_category("ics_other") == "ics_other"
-    assert normalize_category("oem_assemblies") == "oem_assemblies"
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("ssd", "ssd"),
+        ("connectors", "connectors"),
+        ("tape_drives", "tape_drives"),
+        ("ics_other", "ics_other"),
+        ("oem_assemblies", "oem_assemblies"),
+    ],
+)
+def test_canonical_value_passes_through(raw, expected):
+    assert normalize_category(raw) == expected
 
 
-def test_case_insensitive_and_trimmed():
-    assert normalize_category("  SSD  ") == "ssd"
-    assert normalize_category("Connectors, Interconnects") == "connectors"
-    assert normalize_category("  Hard Drive  ") == "hdd"
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("  SSD  ", "ssd"),
+        ("Connectors, Interconnects", "connectors"),
+        ("  Hard Drive  ", "hdd"),
+    ],
+)
+def test_case_insensitive_and_trimmed(raw, expected):
+    assert normalize_category(raw) == expected
 
 
-def test_unknown_returns_none():
-    # Strings with no unambiguous canonical bucket are intentionally NOT mapped.
-    assert normalize_category("discrete semiconductor products") is None
-    assert normalize_category("random garbage xyz") is None
+@pytest.mark.parametrize(
+    "raw",
+    [
+        # Strings with no unambiguous canonical bucket are intentionally NOT mapped.
+        "discrete semiconductor products",
+        "random garbage xyz",
+    ],
+)
+def test_unknown_returns_none(raw):
+    assert normalize_category(raw) is None
 
 
-def test_empty_or_none_returns_none():
-    assert normalize_category(None) is None
-    assert normalize_category("") is None
-    assert normalize_category("   ") is None
+@pytest.mark.parametrize("raw", [None, "", "   "])
+def test_empty_or_none_returns_none(raw):
+    assert normalize_category(raw) is None
 
 
 def test_idempotent():

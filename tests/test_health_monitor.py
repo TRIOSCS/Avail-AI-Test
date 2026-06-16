@@ -7,6 +7,7 @@ Depends on: conftest fixtures, unittest.mock
 import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.config import ApiSource, ApiUsageLog
@@ -136,44 +137,26 @@ class TestCheckStatusTransition:
 
 
 class TestCheckQuotaThreshold:
-    def test_no_monthly_quota(self, db_session):
-        source = _make_source(db_session, monthly_quota=None)
+    @pytest.mark.parametrize(
+        ("monthly_quota", "calls_this_month", "expected_event"),
+        [
+            pytest.param(None, 0, None, id="no_monthly_quota"),
+            pytest.param(0, 0, None, id="zero_quota"),
+            pytest.param(100, 50, None, id="below_warning_threshold"),
+            pytest.param(100, 85, "api_quota_warning", id="warning_threshold"),
+            pytest.param(100, 96, "api_quota_critical", id="critical_threshold"),
+            pytest.param(100, 80, "api_quota_warning", id="exactly_at_warning"),
+        ],
+    )
+    def test_quota_threshold_notification(self, db_session, monthly_quota, calls_this_month, expected_event):
+        source = _make_source(db_session, monthly_quota=monthly_quota, calls_this_month=calls_this_month)
         with patch("app.services.health_monitor._notify_admins") as mock_notify:
             _check_quota_threshold(source, db_session)
-            mock_notify.assert_not_called()
-
-    def test_zero_quota(self, db_session):
-        source = _make_source(db_session, monthly_quota=0)
-        with patch("app.services.health_monitor._notify_admins") as mock_notify:
-            _check_quota_threshold(source, db_session)
-            mock_notify.assert_not_called()
-
-    def test_below_warning_threshold(self, db_session):
-        source = _make_source(db_session, monthly_quota=100, calls_this_month=50)
-        with patch("app.services.health_monitor._notify_admins") as mock_notify:
-            _check_quota_threshold(source, db_session)
-            mock_notify.assert_not_called()
-
-    def test_warning_threshold(self, db_session):
-        source = _make_source(db_session, monthly_quota=100, calls_this_month=85)
-        with patch("app.services.health_monitor._notify_admins") as mock_notify:
-            _check_quota_threshold(source, db_session)
-            mock_notify.assert_called_once()
-            assert mock_notify.call_args[1]["event_type"] == "api_quota_warning"
-
-    def test_critical_threshold(self, db_session):
-        source = _make_source(db_session, monthly_quota=100, calls_this_month=96)
-        with patch("app.services.health_monitor._notify_admins") as mock_notify:
-            _check_quota_threshold(source, db_session)
-            mock_notify.assert_called_once()
-            assert mock_notify.call_args[1]["event_type"] == "api_quota_critical"
-
-    def test_exactly_at_warning(self, db_session):
-        source = _make_source(db_session, monthly_quota=100, calls_this_month=80)
-        with patch("app.services.health_monitor._notify_admins") as mock_notify:
-            _check_quota_threshold(source, db_session)
-            mock_notify.assert_called_once()
-            assert mock_notify.call_args[1]["event_type"] == "api_quota_warning"
+            if expected_event is None:
+                mock_notify.assert_not_called()
+            else:
+                mock_notify.assert_called_once()
+                assert mock_notify.call_args[1]["event_type"] == expected_event
 
 
 # ── ping_source tests ────────────────────────────────────────────────
@@ -548,13 +531,27 @@ class TestPingSourceTypedErrors:
     auth → rotate creds, rate-limit → auto-recovers, quota → upgrade plan.
     """
 
-    def test_auth_error_message(self, db_session):
-        """ConnectorAuthError → last_error mentions 'rotate credentials'."""
-        from app.connectors.errors import ConnectorAuthError
+    @pytest.mark.parametrize(
+        ("error_name", "raw_message", "guidance_options", "check_raw_message"),
+        [
+            pytest.param("ConnectorAuthError", "bad creds", ("rotate credentials",), True, id="auth"),
+            pytest.param(
+                "ConnectorRateLimitError",
+                "hit window",
+                ("rate limited", "auto-recover", "auto recovers"),
+                False,
+                id="rate_limit",
+            ),
+            pytest.param("ConnectorQuotaError", "plan limit", ("quota", "upgrade"), False, id="quota"),
+        ],
+    )
+    def test_typed_error_message(self, db_session, error_name, raw_message, guidance_options, check_raw_message):
+        import app.connectors.errors as connector_errors
 
+        error_cls = getattr(connector_errors, error_name)
         source = _make_source(db_session, status="live", error_count_24h=0)
         mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorAuthError("bad creds"))
+        mock_connector.search = AsyncMock(side_effect=error_cls(raw_message))
 
         with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
             with patch("app.services.health_monitor._check_status_transition"):
@@ -562,43 +559,10 @@ class TestPingSourceTypedErrors:
 
         assert result["success"] is False
         assert source.status == "error"
-        assert "rotate credentials" in (source.last_error or "").lower()
-        assert "bad creds" in (source.last_error or "")
-
-    def test_rate_limit_error_message(self, db_session):
-        """ConnectorRateLimitError → last_error mentions 'rate limited' or 'auto-
-        recover'."""
-        from app.connectors.errors import ConnectorRateLimitError
-
-        source = _make_source(db_session, status="live", error_count_24h=0)
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorRateLimitError("hit window"))
-
-        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
-            with patch("app.services.health_monitor._check_status_transition"):
-                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
-
-        assert result["success"] is False
-        assert source.status == "error"
-        msg = (source.last_error or "").lower()
-        assert "rate limited" in msg or "auto-recover" in msg or "auto recovers" in msg
-
-    def test_quota_error_message(self, db_session):
-        """ConnectorQuotaError → last_error mentions 'quota' or 'upgrade plan'."""
-        from app.connectors.errors import ConnectorQuotaError
-
-        source = _make_source(db_session, status="live", error_count_24h=0)
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorQuotaError("plan limit"))
-
-        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
-            with patch("app.services.health_monitor._check_status_transition"):
-                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
-
-        assert result["success"] is False
-        assert source.status == "error"
-        msg = (source.last_error or "").lower()
-        assert "quota" in msg or "upgrade" in msg
+        last_error = source.last_error or ""
+        assert any(option in last_error.lower() for option in guidance_options)
+        if check_raw_message:
+            assert raw_message in last_error
 
 
 # ── deep_test_source typed-error branches ────────────────────────────
@@ -607,12 +571,27 @@ class TestPingSourceTypedErrors:
 class TestDeepTestSourceTypedErrors:
     """deep_test_source handles each ConnectorError subtype with a distinct message."""
 
-    def test_auth_error_message(self, db_session):
-        from app.connectors.errors import ConnectorAuthError
+    @pytest.mark.parametrize(
+        ("error_name", "raw_message", "guidance_options", "check_raw_message"),
+        [
+            pytest.param("ConnectorAuthError", "bad token", ("rotate credentials",), True, id="auth"),
+            pytest.param(
+                "ConnectorRateLimitError",
+                "too many",
+                ("rate limited", "auto-recover", "auto recovers"),
+                False,
+                id="rate_limit",
+            ),
+            pytest.param("ConnectorQuotaError", "exhausted", ("quota", "upgrade"), False, id="quota"),
+        ],
+    )
+    def test_typed_error_message(self, db_session, error_name, raw_message, guidance_options, check_raw_message):
+        import app.connectors.errors as connector_errors
 
+        error_cls = getattr(connector_errors, error_name)
         source = _make_source(db_session, status="live", error_count_24h=0)
         mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorAuthError("bad token"))
+        mock_connector.search = AsyncMock(side_effect=error_cls(raw_message))
 
         with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
             with patch("app.services.health_monitor._check_status_transition"):
@@ -621,52 +600,10 @@ class TestDeepTestSourceTypedErrors:
         assert result["success"] is False
         assert result["results_count"] == 0
         assert source.status == "error"
-        assert "rotate credentials" in (source.last_error or "").lower()
-        assert "bad token" in (source.last_error or "")
-
-        logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
-        assert len(logs) == 1
-        assert logs[0].check_type == "deep"
-        assert logs[0].success is False
-
-    def test_rate_limit_error_message(self, db_session):
-        from app.connectors.errors import ConnectorRateLimitError
-
-        source = _make_source(db_session, status="live", error_count_24h=0)
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorRateLimitError("too many"))
-
-        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
-            with patch("app.services.health_monitor._check_status_transition"):
-                result = asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
-
-        assert result["success"] is False
-        assert result["results_count"] == 0
-        assert source.status == "error"
-        msg = (source.last_error or "").lower()
-        assert "rate limited" in msg or "auto-recover" in msg or "auto recovers" in msg
-
-        logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
-        assert len(logs) == 1
-        assert logs[0].check_type == "deep"
-        assert logs[0].success is False
-
-    def test_quota_error_message(self, db_session):
-        from app.connectors.errors import ConnectorQuotaError
-
-        source = _make_source(db_session, status="live", error_count_24h=0)
-        mock_connector = MagicMock()
-        mock_connector.search = AsyncMock(side_effect=ConnectorQuotaError("exhausted"))
-
-        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
-            with patch("app.services.health_monitor._check_status_transition"):
-                result = asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
-
-        assert result["success"] is False
-        assert result["results_count"] == 0
-        assert source.status == "error"
-        msg = (source.last_error or "").lower()
-        assert "quota" in msg or "upgrade" in msg
+        last_error = source.last_error or ""
+        assert any(option in last_error.lower() for option in guidance_options)
+        if check_raw_message:
+            assert raw_message in last_error
 
         logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
         assert len(logs) == 1

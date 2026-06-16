@@ -40,19 +40,17 @@ class TestCommoditySpecs:
             assert "specs" in schema, f"{cat} missing specs"
             assert len(schema["specs"]) >= 2, f"{cat} has too few specs"
 
-    def test_dram_specs(self):
-        specs = COMMODITY_SPECS["dram"]["specs"]
-        keys = [s["key"] for s in specs]
-        assert "ddr_type" in keys
-        assert "capacity_gb" in keys
-        assert "ecc" in keys
-
-    def test_capacitors_specs(self):
-        specs = COMMODITY_SPECS["capacitors"]["specs"]
-        keys = [s["key"] for s in specs]
-        assert "capacitance" in keys
-        assert "voltage_rating" in keys
-        assert "dielectric" in keys
+    @pytest.mark.parametrize(
+        "category, expected_keys",
+        [
+            pytest.param("dram", ("ddr_type", "capacity_gb", "ecc"), id="dram"),
+            pytest.param("capacitors", ("capacitance", "voltage_rating", "dielectric"), id="capacitors"),
+        ],
+    )
+    def test_commodity_spec_keys(self, category, expected_keys):
+        keys = [s["key"] for s in COMMODITY_SPECS[category]["specs"]]
+        for expected in expected_keys:
+            assert expected in keys
 
 
 # ── _build_spec_prompt tests ──────────────────────────────────────────

@@ -16,6 +16,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -196,8 +197,9 @@ class TestVendorDetailPartial:
 
 
 class TestVendorTabPartial:
-    def test_tab_overview(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/overview")
+    @pytest.mark.parametrize("tab", ["overview", "find_contacts", "emails", "offers"])
+    def test_tab_returns_200(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard, tab: str):
+        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/{tab}")
         assert resp.status_code == 200
 
     def test_tab_overview_with_safety_lead(
@@ -236,14 +238,6 @@ class TestVendorTabPartial:
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/contacts")
         assert resp.status_code == 200
 
-    def test_tab_find_contacts(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/find_contacts")
-        assert resp.status_code == 200
-
-    def test_tab_emails(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/emails")
-        assert resp.status_code == 200
-
     def test_tab_analytics(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/analytics")
         assert resp.status_code == 200
@@ -261,10 +255,6 @@ class TestVendorTabPartial:
         db_session.commit()
 
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/reviews")
-        assert resp.status_code == 200
-
-    def test_tab_offers_empty(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/offers")
         assert resp.status_code == 200
 
     def test_invalid_tab_returns_404(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
@@ -400,47 +390,25 @@ class TestPartHeaderSaveErrors:
             )
         assert resp.status_code == 200
 
-    def test_target_qty_field(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "field,value",
+        [
+            ("target_qty", "250"),
+            ("target_price", "1.25"),
+            ("manufacturer", "Texas Instruments"),
+            ("notes", "Some notes here"),
+        ],
+    )
+    def test_valid_field_returns_200(
+        self, client: TestClient, db_session: Session, test_user: User, field: str, value: str
+    ):
         req = _req(db_session, test_user)
         requirement = _requirement(db_session, req)
         db_session.commit()
 
         resp = client.patch(
             f"/v2/partials/parts/{requirement.id}/header",
-            data={"field": "target_qty", "value": "250"},
-        )
-        assert resp.status_code == 200
-
-    def test_target_price_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{requirement.id}/header",
-            data={"field": "target_price", "value": "1.25"},
-        )
-        assert resp.status_code == 200
-
-    def test_manufacturer_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{requirement.id}/header",
-            data={"field": "manufacturer", "value": "Texas Instruments"},
-        )
-        assert resp.status_code == 200
-
-    def test_notes_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{requirement.id}/header",
-            data={"field": "notes", "value": "Some notes here"},
+            data={"field": field, "value": value},
         )
         assert resp.status_code == 200
 
@@ -449,44 +417,28 @@ class TestPartHeaderSaveErrors:
 
 
 class TestPartCellEdit:
-    def test_cell_edit_valid_field(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "mode,field,expected",
+        [
+            ("edit", "target_qty", 200),
+            ("edit", "invalid_field", 400),
+            ("display", "target_qty", 200),
+            ("display", "badfield", 400),
+        ],
+    )
+    def test_cell_get_field(
+        self, client: TestClient, db_session: Session, test_user: User, mode: str, field: str, expected: int
+    ):
         req = _req(db_session, test_user)
         requirement = _requirement(db_session, req)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/cell/edit/target_qty")
-        assert resp.status_code == 200
+        resp = client.get(f"/v2/partials/parts/{requirement.id}/cell/{mode}/{field}")
+        assert resp.status_code == expected
 
-    def test_cell_edit_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/cell/edit/invalid_field")
-        assert resp.status_code == 400
-
-    def test_cell_edit_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/parts/99999/cell/edit/target_qty")
-        assert resp.status_code == 404
-
-    def test_cell_display_valid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/cell/display/target_qty")
-        assert resp.status_code == 200
-
-    def test_cell_display_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/cell/display/badfield")
-        assert resp.status_code == 400
-
-    def test_cell_display_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/parts/99999/cell/display/target_qty")
+    @pytest.mark.parametrize("mode", ["edit", "display"])
+    def test_cell_get_not_found(self, client: TestClient, mode: str):
+        resp = client.get(f"/v2/partials/parts/99999/cell/{mode}/target_qty")
         assert resp.status_code == 404
 
     def test_cell_save_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
@@ -512,21 +464,20 @@ class TestPartCellEdit:
 
 
 class TestPartSpecEdit:
-    def test_spec_edit_condition_field(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "field,expected",
+        [
+            ("condition", 200),
+            ("nonexistent_field", 400),
+        ],
+    )
+    def test_spec_edit_field(self, client: TestClient, db_session: Session, test_user: User, field: str, expected: int):
         req = _req(db_session, test_user)
         requirement = _requirement(db_session, req)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/edit-spec/condition")
-        assert resp.status_code == 200
-
-    def test_spec_edit_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/edit-spec/nonexistent_field")
-        assert resp.status_code == 400
+        resp = client.get(f"/v2/partials/parts/{requirement.id}/edit-spec/{field}")
+        assert resp.status_code == expected
 
     def test_spec_edit_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/parts/99999/edit-spec/condition")
@@ -573,45 +524,19 @@ class TestPartSpecEdit:
 # ── Tests: Part tab routes ────────────────────────────────────────────
 
 
-class TestPartTabActivity:
-    def test_returns_activity_tab(self, client: TestClient, db_session: Session, test_user: User):
+class TestPartTabRoutes:
+    @pytest.mark.parametrize("tab", ["activity", "comms", "notes"])
+    def test_returns_tab(self, client: TestClient, db_session: Session, test_user: User, tab: str):
         req = _req(db_session, test_user)
         requirement = _requirement(db_session, req)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/tab/activity")
+        resp = client.get(f"/v2/partials/parts/{requirement.id}/tab/{tab}")
         assert resp.status_code == 200
 
-    def test_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/parts/99999/tab/activity")
-        assert resp.status_code == 404
-
-
-class TestPartTabComms:
-    def test_returns_comms_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/tab/comms")
-        assert resp.status_code == 200
-
-    def test_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/parts/99999/tab/comms")
-        assert resp.status_code == 404
-
-
-class TestPartTabNotes:
-    def test_returns_notes_tab(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/tab/notes")
-        assert resp.status_code == 200
-
-    def test_not_found(self, client: TestClient):
-        resp = client.get("/v2/partials/parts/99999/tab/notes")
+    @pytest.mark.parametrize("tab", ["activity", "comms", "notes"])
+    def test_not_found(self, client: TestClient, tab: str):
+        resp = client.get(f"/v2/partials/parts/99999/tab/{tab}")
         assert resp.status_code == 404
 
 
@@ -619,61 +544,35 @@ class TestPartTabNotes:
 
 
 class TestPartHeaderEditCell:
-    def test_edit_notes_field(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "field,expected",
+        [
+            ("notes", 200),
+            ("invalid", 400),
+            ("sourcing_status", 200),
+            ("condition", 200),
+        ],
+    )
+    def test_edit_field(self, client: TestClient, db_session: Session, test_user: User, field: str, expected: int):
         req = _req(db_session, test_user)
         requirement = _requirement(db_session, req)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/header/edit/notes")
-        assert resp.status_code == 200
-
-    def test_edit_invalid_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/header/edit/invalid")
-        assert resp.status_code == 400
+        resp = client.get(f"/v2/partials/parts/{requirement.id}/header/edit/{field}")
+        assert resp.status_code == expected
 
     def test_edit_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/parts/99999/header/edit/notes")
         assert resp.status_code == 404
-
-    def test_edit_sourcing_status_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/header/edit/sourcing_status")
-        assert resp.status_code == 200
-
-    def test_edit_condition_field(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        requirement = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{requirement.id}/header/edit/condition")
-        assert resp.status_code == 200
 
 
 # ── Tests: Company tab routes ─────────────────────────────────────────
 
 
 class TestCompanyTabRoutes:
-    def test_sites_tab_empty(self, client: TestClient, db_session: Session, test_company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/sites")
-        assert resp.status_code == 200
-
-    def test_contacts_tab_empty(self, client: TestClient, db_session: Session, test_company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/contacts")
-        assert resp.status_code == 200
-
-    def test_requisitions_tab_empty(self, client: TestClient, db_session: Session, test_company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/requisitions")
-        assert resp.status_code == 200
-
-    def test_activity_tab_empty(self, client: TestClient, db_session: Session, test_company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/activity")
+    @pytest.mark.parametrize("tab", ["sites", "contacts", "requisitions", "activity"])
+    def test_tab_empty_returns_200(self, client: TestClient, db_session: Session, test_company, tab: str):
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/{tab}")
         assert resp.status_code == 200
 
     def test_invalid_tab_returns_404(self, client: TestClient, db_session: Session, test_company):

@@ -62,6 +62,13 @@ def _make_excess_list(db: Session, company: Company, user: User, title: str = "T
     return create_excess_list(db, title=title, company_id=company.id, owner_id=user.id)
 
 
+def _setup_list(db: Session, title: str = "Test Excess") -> tuple[Company, User, ExcessList]:
+    """Create a company + user + excess list in one step (common arrange block)."""
+    company = _make_company(db)
+    user = _make_user(db)
+    return company, user, _make_excess_list(db, company, user, title=title)
+
+
 @pytest.fixture()
 def company(db_session: Session) -> Company:
     return _make_company(db_session)
@@ -132,9 +139,7 @@ class TestCreateExcessList:
 
 class TestGetExcessList:
     def test_get_existing(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         fetched = get_excess_list(db_session, el.id)
         assert fetched.id == el.id
@@ -197,9 +202,7 @@ class TestListExcessLists:
 
 class TestUpdateExcessList:
     def test_updates_title(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         updated = update_excess_list(db_session, el.id, title="New Title")
         assert updated.title == "New Title"
@@ -210,9 +213,7 @@ class TestUpdateExcessList:
         assert exc_info.value.status_code == 404
 
     def test_ignores_none_values(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user, title="Original")
+        _, _, el = _setup_list(db_session, title="Original")
 
         updated = update_excess_list(db_session, el.id, title=None, notes="Added")
         assert updated.title == "Original"
@@ -226,9 +227,7 @@ class TestUpdateExcessList:
 
 class TestDeleteExcessList:
     def test_hard_deletes(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
         list_id = el.id
 
         delete_excess_list(db_session, list_id)
@@ -250,9 +249,7 @@ class TestDeleteExcessList:
 
 class TestImportLineItems:
     def test_imports_valid_rows(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         rows = [
             {"part_number": "LM317T", "quantity": "100", "manufacturer": "TI", "asking_price": "0.50"},
@@ -275,9 +272,7 @@ class TestImportLineItems:
 
     def test_flexible_headers(self, db_session: Session):
         """Accepts mpn/qty/price/mfr/dc/cond aliases."""
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         rows = [
             {"mpn": "LM317T", "qty": "50", "mfr": "Texas Instruments", "price": "$1.25", "dc": "2024+", "cond": "New"},
@@ -296,9 +291,7 @@ class TestImportLineItems:
         assert float(item.asking_price) == 1.25
 
     def test_skips_blank_part_number(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         rows = [
             {"part_number": "", "quantity": "100"},
@@ -313,9 +306,7 @@ class TestImportLineItems:
         assert len(result["errors"]) == 2
 
     def test_skips_invalid_quantity(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         rows = [
             {"part_number": "LM317T", "quantity": "abc"},
@@ -330,9 +321,7 @@ class TestImportLineItems:
         assert result["skipped"] == 3
 
     def test_updates_total_counter(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         # First import
         import_line_items(db_session, el.id, [{"part_number": "A", "quantity": "1"}])
@@ -525,9 +514,7 @@ def _make_line_item(db: Session, excess_list: ExcessList, part_number: str = "LM
 
 class TestCreateBid:
     def test_creates_bid_with_required_fields(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         bid = create_bid(
@@ -547,10 +534,8 @@ class TestCreateBid:
         assert bid.created_by == user.id
 
     def test_creates_bid_with_all_fields(self, db_session: Session):
-        company = _make_company(db_session)
+        _, user, el = _setup_list(db_session)
         buyer_company = _make_company(db_session, name="Buyer Corp")
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
         item = _make_line_item(db_session, el)
 
         bid = create_bid(
@@ -572,9 +557,7 @@ class TestCreateBid:
         assert bid.notes == "Urgent order"
 
     def test_invalid_line_item_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
 
         with pytest.raises(HTTPException) as exc_info:
             create_bid(
@@ -588,9 +571,7 @@ class TestCreateBid:
         assert exc_info.value.status_code == 404
 
     def test_item_not_in_list_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el1 = _make_excess_list(db_session, company, user, title="List A")
+        company, user, el1 = _setup_list(db_session, title="List A")
         el2 = _make_excess_list(db_session, company, user, title="List B")
         item = _make_line_item(db_session, el1)
 
@@ -613,9 +594,7 @@ class TestCreateBid:
 
 class TestListBids:
     def test_returns_bids_sorted_by_price(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         create_bid(
@@ -634,18 +613,14 @@ class TestListBids:
         assert prices == [1.00, 2.00, 3.00]
 
     def test_empty_list_returns_empty(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         bids = list_bids(db_session, item.id, el.id)
         assert bids == []
 
     def test_invalid_item_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
 
         with pytest.raises(HTTPException) as exc_info:
             list_bids(db_session, 99999, el.id)
@@ -659,9 +634,7 @@ class TestListBids:
 
 class TestAcceptBid:
     def test_accepts_bid_and_rejects_others(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         bid1 = create_bid(
@@ -687,9 +660,7 @@ class TestAcceptBid:
         assert item.status == "awarded"
 
     def test_accepts_bid_preserves_non_pending(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         bid1 = create_bid(
@@ -709,9 +680,7 @@ class TestAcceptBid:
         assert bid2.status == "withdrawn"  # Should NOT be changed to rejected
 
     def test_invalid_bid_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, _, el = _setup_list(db_session)
         item = _make_line_item(db_session, el)
 
         with pytest.raises(HTTPException) as exc_info:
@@ -719,9 +688,7 @@ class TestAcceptBid:
         assert exc_info.value.status_code == 404
 
     def test_bid_wrong_item_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
+        _, user, el = _setup_list(db_session)
         item1 = _make_line_item(db_session, el, part_number="PART-A")
         item2 = _make_line_item(db_session, el, part_number="PART-B")
 

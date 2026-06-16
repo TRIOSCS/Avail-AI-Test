@@ -172,6 +172,38 @@ def _make_buy_plan_line(db: Session, plan: BuyPlan, req: Requisition) -> BuyPlan
     return line
 
 
+def _make_proactive_match(db: Session, offer: Offer, user: User, company_name: str):
+    from app.models import ProactiveMatch
+
+    co = Company(name=company_name, is_active=True, created_at=datetime.now(timezone.utc))
+    db.add(co)
+    db.flush()
+    site = CustomerSite(company_id=co.id, site_name="HQ")
+    db.add(site)
+    db.flush()
+
+    pm = ProactiveMatch(
+        offer_id=offer.id,
+        salesperson_id=user.id,
+        customer_site_id=site.id,
+        mpn="LM317T",
+        match_score=80,
+        status="new",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(pm)
+    db.commit()
+    db.refresh(pm)
+    return pm
+
+
+def _make_plan_with_quote(db: Session, user: User) -> tuple[Requisition, BuyPlan]:
+    req = _make_requisition(db, user)
+    quote = _make_quote(db, req, user)
+    plan = _make_buy_plan(db, req, quote)
+    return req, plan
+
+
 # ── Section 1: rfq_send ────────────────────────────────────────────────
 
 
@@ -492,9 +524,7 @@ class TestBuyPlanSubmit:
     """Tests for POST /v2/partials/buy-plans/{plan_id}/submit."""
 
     def test_missing_so_returns_400(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         resp = client.post(
             f"/v2/partials/buy-plans/{plan.id}/submit",
@@ -503,9 +533,7 @@ class TestBuyPlanSubmit:
         assert resp.status_code == 400
 
     def test_submit_success_calls_workflow(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         mock_plan = MagicMock()
         mock_plan.id = plan.id
@@ -526,9 +554,7 @@ class TestBuyPlanSubmit:
         assert resp.status_code == 200
 
     def test_submit_value_error_returns_400(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         with patch("app.services.buyplan_workflow.submit_buy_plan", side_effect=ValueError("Plan not in draft")):
             resp = client.post(
@@ -545,9 +571,7 @@ class TestBuyPlanVerifySo:
     """Tests for POST /v2/partials/buy-plans/{plan_id}/verify-so."""
 
     def test_verify_so_success(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         mock_plan = MagicMock()
         mock_plan.id = plan.id
@@ -567,9 +591,7 @@ class TestBuyPlanVerifySo:
         assert resp.status_code == 200
 
     def test_verify_so_value_error_returns_400(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         with patch("app.services.buyplan_workflow.verify_so", side_effect=ValueError("Invalid state")):
             resp = client.post(
@@ -579,9 +601,7 @@ class TestBuyPlanVerifySo:
         assert resp.status_code == 400
 
     def test_verify_so_reject_action(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        _req, plan = _make_plan_with_quote(db_session, test_user)
 
         mock_plan = MagicMock()
         mock_plan.id = plan.id
@@ -608,9 +628,7 @@ class TestBuyPlanVerifyPo:
     """Tests for POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po."""
 
     def test_verify_po_success(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
         mock_completed_plan = MagicMock()
@@ -632,9 +650,7 @@ class TestBuyPlanVerifyPo:
         assert resp.status_code == 200
 
     def test_verify_po_value_error_returns_400(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
         with patch("app.services.buyplan_workflow.verify_po", side_effect=ValueError("Line not found")):
@@ -652,9 +668,7 @@ class TestBuyPlanFlagIssue:
     """Tests for POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue."""
 
     def test_flag_issue_success(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
         with (
@@ -671,9 +685,7 @@ class TestBuyPlanFlagIssue:
         assert resp.status_code == 200
 
     def test_flag_issue_value_error_returns_400(self, client, db_session, test_user):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user)
-        plan = _make_buy_plan(db_session, req, quote)
+        req, plan = _make_plan_with_quote(db_session, test_user)
         line = _make_buy_plan_line(db_session, plan, req)
 
         with patch("app.services.buyplan_workflow.flag_line_issue", side_effect=ValueError("Line not found")):
@@ -704,29 +716,9 @@ class TestProactiveDraftForPrepare:
         assert "No valid matches found" in resp.text
 
     def test_ai_draft_success_returns_script_html(self, client, db_session, test_user):
-        from app.models import ProactiveMatch
-
         req = _make_requisition(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
-        co = Company(name="Proactive Corp", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ")
-        db_session.add(site)
-        db_session.flush()
-
-        pm = ProactiveMatch(
-            offer_id=offer.id,
-            salesperson_id=test_user.id,
-            customer_site_id=site.id,
-            mpn="LM317T",
-            match_score=80,
-            status="new",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(pm)
-        db_session.commit()
-        db_session.refresh(pm)
+        pm = _make_proactive_match(db_session, offer, test_user, "Proactive Corp")
 
         with patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock) as mock_draft:
             mock_draft.return_value = {
@@ -741,28 +733,9 @@ class TestProactiveDraftForPrepare:
         assert "Draft generated" in resp.text or "subject" in resp.text.lower() or "script" in resp.text.lower()
 
     def test_ai_draft_failure_returns_retry_html(self, client, db_session, test_user):
-        from app.models import ProactiveMatch
-
         req = _make_requisition(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
-        co = Company(name="Fallback Corp", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ")
-        db_session.add(site)
-        db_session.flush()
-
-        pm = ProactiveMatch(
-            offer_id=offer.id,
-            salesperson_id=test_user.id,
-            customer_site_id=site.id,
-            mpn="LM317T",
-            match_score=80,
-            status="new",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(pm)
-        db_session.commit()
+        pm = _make_proactive_match(db_session, offer, test_user, "Fallback Corp")
 
         with patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock) as mock_draft:
             mock_draft.side_effect = Exception("AI unavailable")
@@ -780,37 +753,19 @@ class TestProactiveDraftForPrepare:
 class TestProactiveSendOffer:
     """Tests for POST /v2/proactive/send."""
 
-    def test_no_match_ids_returns_400(self, client, db_session):
-        resp = client.post("/v2/proactive/send", data={"contact_ids": ["1"]})
-        assert resp.status_code == 400
-
-    def test_no_contact_ids_returns_400(self, client, db_session):
-        resp = client.post("/v2/proactive/send", data={"match_ids": ["1"]})
+    @pytest.mark.parametrize(
+        "data",
+        [{"contact_ids": ["1"]}, {"match_ids": ["1"]}],
+        ids=["no_match_ids", "no_contact_ids"],
+    )
+    def test_missing_ids_returns_400(self, client, db_session, data):
+        resp = client.post("/v2/proactive/send", data=data)
         assert resp.status_code == 400
 
     def test_send_success_returns_200(self, client, db_session, test_user):
-        from app.models import ProactiveMatch
-
         req = _make_requisition(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
-        co = Company(name="SendOffer Corp", is_active=True, created_at=datetime.now(timezone.utc))
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ")
-        db_session.add(site)
-        db_session.flush()
-
-        pm = ProactiveMatch(
-            offer_id=offer.id,
-            salesperson_id=test_user.id,
-            customer_site_id=site.id,
-            mpn="LM317T",
-            match_score=80,
-            status="new",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(pm)
-        db_session.commit()
+        pm = _make_proactive_match(db_session, offer, test_user, "SendOffer Corp")
 
         mock_result = {"line_items": [{"mpn": "LM317T"}], "recipient_emails": ["buyer@corp.com"]}
 
@@ -834,29 +789,25 @@ class TestProactiveSendOffer:
             )
         assert resp.status_code == 200
 
-    def test_send_value_error_returns_400(self, client, db_session, test_user):
+    @pytest.mark.parametrize(
+        ("side_effect", "expected_status"),
+        [
+            (ValueError("No valid contacts"), 400),
+            (Exception("Network error"), 500),
+        ],
+        ids=["value_error_returns_400", "exception_returns_500"],
+    )
+    def test_send_error(self, client, db_session, test_user, side_effect, expected_status):
         with (
             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
             patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock) as mock_send,
         ):
-            mock_send.side_effect = ValueError("No valid contacts")
+            mock_send.side_effect = side_effect
             resp = client.post(
                 "/v2/proactive/send",
                 data={"match_ids": ["1"], "contact_ids": ["1"]},
             )
-        assert resp.status_code == 400
-
-    def test_send_exception_returns_500(self, client, db_session, test_user):
-        with (
-            patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-            patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock) as mock_send,
-        ):
-            mock_send.side_effect = Exception("Network error")
-            resp = client.post(
-                "/v2/proactive/send",
-                data={"match_ids": ["1"], "contact_ids": ["1"]},
-            )
-        assert resp.status_code == 500
+        assert resp.status_code == expected_status
 
 
 # ── Section 13: bulk_archive ─────────────────────────────────────────

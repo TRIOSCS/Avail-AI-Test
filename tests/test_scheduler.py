@@ -86,26 +86,33 @@ def test_utc_none_returns_none():
 # ── configure_scheduler() ──────────────────────────────────────────────
 
 
-def test_configure_scheduler_registers_core_jobs():
-    """Core jobs (auto_archive, token_refresh, etc.) always registered."""
+@pytest.mark.parametrize(
+    "expected_present, expected_absent",
+    [
+        pytest.param(
+            ("auto_archive", "token_refresh", "inbox_scan", "batch_results"),
+            (),
+            id="core_jobs",
+        ),
+        pytest.param(
+            (),
+            ("contacts_sync", "proactive_matching", "deep_email_mining", "deep_enrichment"),
+            id="conditional_flags_off",
+        ),
+        pytest.param(("po_verification", "stock_autocomplete"), (), id="buyplan_jobs"),
+        pytest.param(("performance_tracking", "cache_cleanup"), (), id="performance_and_cache"),
+    ],
+)
+def test_configure_scheduler_default_settings_jobs(expected_present, expected_absent):
+    """With default settings: core/always-on jobs registered, optional jobs absent."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
     job_ids = {j.id for j in scheduler.get_jobs()}
-    for core_id in ("auto_archive", "token_refresh", "inbox_scan", "batch_results"):
-        assert core_id in job_ids, f"Missing core job: {core_id}"
-
-
-def test_configure_scheduler_conditional_flags_off():
-    """When conditional flags are off, optional jobs are not registered."""
-    with patch("app.config.settings", _mock_settings()):
-        configure_scheduler()
-
-    job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "contacts_sync" not in job_ids
-    assert "proactive_matching" not in job_ids
-    assert "deep_email_mining" not in job_ids
-    assert "deep_enrichment" not in job_ids
+    for job_id in expected_present:
+        assert job_id in job_ids, f"Missing job: {job_id}"
+    for job_id in expected_absent:
+        assert job_id not in job_ids, f"Unexpected job: {job_id}"
 
 
 def test_configure_scheduler_conditional_flags_on():
@@ -147,58 +154,27 @@ def test_configure_scheduler_ownership_sweep_enabled():
     assert "site_ownership_sweep" in job_ids
 
 
-def test_configure_scheduler_always_includes_buyplan_jobs():
-    """PO verification and stock auto-complete are always registered."""
-    with patch("app.config.settings", _mock_settings()):
-        configure_scheduler()
-
-    job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "po_verification" in job_ids
-    assert "stock_autocomplete" in job_ids
-
-
-def test_configure_scheduler_always_includes_performance_and_cache():
-    """Performance tracking and cache cleanup are always registered."""
-    with patch("app.config.settings", _mock_settings()):
-        configure_scheduler()
-
-    job_ids = {j.id for j in scheduler.get_jobs()}
-    assert "performance_tracking" in job_ids
-    assert "cache_cleanup" in job_ids
-
-
-def test_proactive_matching_configurable_interval():
-    """Proactive matching interval is configurable via proactive_scan_interval_hours."""
+@pytest.mark.parametrize(
+    "configured_hours, expected_hours",
+    [
+        pytest.param(6, 6, id="configurable_interval"),
+        pytest.param(0, 1, id="interval_minimum_1h"),  # clamped to at least 1 hour
+    ],
+)
+def test_proactive_matching_interval(configured_hours, expected_hours):
+    """Proactive matching interval is configurable, clamped to a 1-hour minimum."""
     with patch(
         "app.config.settings",
         _mock_settings(
             proactive_matching_enabled=True,
-            proactive_scan_interval_hours=6,
+            proactive_scan_interval_hours=configured_hours,
         ),
     ):
         configure_scheduler()
 
     job = scheduler.get_job("proactive_matching")
     assert job is not None
-    trigger = job.trigger
-    assert trigger.interval.total_seconds() == 6 * 3600
-
-
-def test_proactive_matching_interval_minimum_1h():
-    """Interval is clamped to at least 1 hour."""
-    with patch(
-        "app.config.settings",
-        _mock_settings(
-            proactive_matching_enabled=True,
-            proactive_scan_interval_hours=0,
-        ),
-    ):
-        configure_scheduler()
-
-    job = scheduler.get_job("proactive_matching")
-    assert job is not None
-    trigger = job.trigger
-    assert trigger.interval.total_seconds() == 1 * 3600
+    assert job.trigger.interval.total_seconds() == expected_hours * 3600
 
 
 def test_reset_connector_errors_registered():

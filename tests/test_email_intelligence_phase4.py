@@ -16,6 +16,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from tests.conftest import engine  # noqa: F401
 
+
+def _run(coro):
+    """Run an async coroutine to completion on the current event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _mock_graph_client(messages=None, side_effect=None):
+    """Build a GraphClient mock whose get_all_pages yields the given messages."""
+    mock_gc = MagicMock()
+    if side_effect is not None:
+        mock_gc.get_all_pages = AsyncMock(side_effect=side_effect)
+    else:
+        mock_gc.get_all_pages = AsyncMock(return_value=messages if messages is not None else [])
+    return mock_gc
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  4A: AI Brand/Commodity Detection
 # ═══════════════════════════════════════════════════════════════════════
@@ -45,9 +61,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             side_effect=individual_results,
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                detect_specialties_ai(["email text 1", "email text 2"])
-            )
+            result = _run(detect_specialties_ai(["email text 1", "email text 2"]))
 
         assert len(result) == 2
         assert result[0]["brands"] == ["Texas Instruments", "STMicro"]
@@ -71,7 +85,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             side_effect=individual_results,
         ):
-            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2", "text3"]))
+            result = _run(detect_specialties_ai(["text1", "text2", "text3"]))
 
         assert len(result) == 3
         assert result[0]["brands"] == ["NXP"]
@@ -87,7 +101,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             return_value={"brands": "not a list", "commodities": ["caps"], "sender_type": "unknown"},
         ):
-            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text"]))
+            result = _run(detect_specialties_ai(["text"]))
 
         assert result[0]["brands"] == []
         assert result[0]["commodities"] == ["caps"]
@@ -101,7 +115,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             return_value=None,
         ):
-            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2"]))
+            result = _run(detect_specialties_ai(["text1", "text2"]))
 
         assert result == [None, None]
 
@@ -138,16 +152,13 @@ class TestSummarizeThread:
             "thread_status": "negotiating",
         }
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=mock_messages)
+        mock_gc = _mock_graph_client(mock_messages)
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_summary),
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-sum-1", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-sum-1", db_session, test_user.id))
 
         assert result is not None
         assert result["thread_status"] == "negotiating"
@@ -179,9 +190,7 @@ class TestSummarizeThread:
 
         # Should NOT call Graph API or Claude
         with patch("app.utils.graph_client.GraphClient") as mock_gc_cls:
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-cached", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-cached", db_session, test_user.id))
             mock_gc_cls.assert_not_called()
 
         assert result == cached_summary
@@ -190,13 +199,10 @@ class TestSummarizeThread:
         """Returns None when thread has no messages."""
         from app.services.email_intelligence_service import summarize_thread
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[])
+        mock_gc = _mock_graph_client([])
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-empty", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-empty", db_session, test_user.id))
 
         assert result is None
 
@@ -204,13 +210,10 @@ class TestSummarizeThread:
         """Returns None on Graph API failure."""
         from app.services.email_intelligence_service import summarize_thread
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Graph error"))
+        mock_gc = _mock_graph_client(side_effect=Exception("Graph error"))
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-fail", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-fail", db_session, test_user.id))
 
         assert result is None
 
@@ -218,9 +221,8 @@ class TestSummarizeThread:
         """Returns None when Claude AI returns None."""
         from app.services.email_intelligence_service import summarize_thread
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(
-            return_value=[
+        mock_gc = _mock_graph_client(
+            [
                 {
                     "from": {"emailAddress": {"address": "v@t.com"}},
                     "subject": "Test",
@@ -234,9 +236,7 @@ class TestSummarizeThread:
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None),
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-ai-fail", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-ai-fail", db_session, test_user.id))
 
         assert result is None
 
@@ -260,9 +260,8 @@ class TestSummarizeThread:
         )
         db_session.commit()
 
-        mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(
-            return_value=[
+        mock_gc = _mock_graph_client(
+            [
                 {
                     "from": {"emailAddress": {"address": "v@t.com"}},
                     "subject": "Quote",
@@ -277,9 +276,7 @@ class TestSummarizeThread:
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_summary),
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                summarize_thread("fake-token", "conv-to-cache", db_session, test_user.id)
-            )
+            result = _run(summarize_thread("fake-token", "conv-to-cache", db_session, test_user.id))
 
         assert result == mock_summary
 

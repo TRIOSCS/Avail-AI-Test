@@ -20,12 +20,21 @@ from app.services.requisition_state import ALLOWED_TRANSITIONS, transition
 
 
 class TestTransition:
-    def test_allowed_transition(self, db_session, test_requisition, test_user):
-        test_requisition.status = "active"
+    @pytest.mark.parametrize(
+        ("from_status", "to_status"),
+        [
+            ("active", "sourcing"),
+            ("archived", "active"),
+            ("won", "active"),
+        ],
+        ids=["active_to_sourcing", "archived_to_active", "won_to_active"],
+    )
+    def test_allowed_transition(self, db_session, test_requisition, test_user, from_status, to_status):
+        test_requisition.status = from_status
         db_session.commit()
 
-        transition(test_requisition, "sourcing", test_user, db_session)
-        assert test_requisition.status == "sourcing"
+        transition(test_requisition, to_status, test_user, db_session)
+        assert test_requisition.status == to_status
 
     def test_allowed_transition_with_enum(self, db_session, test_requisition, test_user):
         test_requisition.status = "active"
@@ -70,20 +79,6 @@ class TestTransition:
         """Every enum value has an entry in ALLOWED_TRANSITIONS."""
         for status in RequisitionStatus:
             assert status.value in ALLOWED_TRANSITIONS
-
-    def test_archived_to_active(self, db_session, test_requisition, test_user):
-        test_requisition.status = "archived"
-        db_session.commit()
-
-        transition(test_requisition, "active", test_user, db_session)
-        assert test_requisition.status == "active"
-
-    def test_won_can_go_to_active(self, db_session, test_requisition, test_user):
-        test_requisition.status = "won"
-        db_session.commit()
-
-        transition(test_requisition, "active", test_user, db_session)
-        assert test_requisition.status == "active"
 
     def test_none_actor(self, db_session, test_requisition):
         """Transition with actor=None: ActivityLog creation may fail (NOT NULL FK), but
@@ -130,17 +125,19 @@ class TestTransition:
 class TestTransitionEdgeCases:
     """Boundary and illegal transition edge cases."""
 
-    def test_archived_to_won_fails(self, db_session, test_requisition, test_user):
-        test_requisition.status = "archived"
+    @pytest.mark.parametrize(
+        ("from_status", "to_status"),
+        [
+            ("archived", "won"),
+            ("lost", "sourcing"),
+        ],
+        ids=["archived_to_won_fails", "lost_to_sourcing_fails"],
+    )
+    def test_illegal_transition_fails(self, db_session, test_requisition, test_user, from_status, to_status):
+        test_requisition.status = from_status
         db_session.commit()
         with pytest.raises(ValueError, match="Invalid transition"):
-            transition(test_requisition, "won", test_user, db_session)
-
-    def test_lost_to_sourcing_fails(self, db_session, test_requisition, test_user):
-        test_requisition.status = "lost"
-        db_session.commit()
-        with pytest.raises(ValueError, match="Invalid transition"):
-            transition(test_requisition, "sourcing", test_user, db_session)
+            transition(test_requisition, to_status, test_user, db_session)
 
     def test_won_to_archived_to_active_roundtrip(self, db_session, test_requisition, test_user):
         test_requisition.status = "won"

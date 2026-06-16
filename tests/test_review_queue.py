@@ -9,66 +9,78 @@ Called by: pytest
 Depends on: app.evidence_tiers, app.models
 """
 
+import pytest
+
 from app.evidence_tiers import tier_for_parsed_offer
 
 
 class TestReviewQueueTierLogic:
     """Verify confidence → tier → status mapping for the review queue."""
 
-    def test_medium_confidence_creates_t4(self):
-        """0.5-0.8 confidence → T4 → pending_review (review queue)."""
-        assert tier_for_parsed_offer(0.6) == "T4"
-        assert tier_for_parsed_offer(0.5) == "T4"
-        assert tier_for_parsed_offer(0.79) == "T4"
+    @pytest.mark.parametrize(
+        "confidence,expected_tier",
+        [
+            # 0.5-0.8 confidence → T4 → pending_review (review queue)
+            (0.6, "T4"),
+            (0.5, "T4"),
+            (0.79, "T4"),
+            # >=0.8 confidence → T5 → auto-active
+            (0.8, "T5"),
+            (0.85, "T5"),
+            (1.0, "T5"),
+            # Unknown confidence → T4 (conservative, needs review)
+            (None, "T4"),
+        ],
+    )
+    def test_tier_for_parsed_offer(self, confidence, expected_tier):
+        assert tier_for_parsed_offer(confidence) == expected_tier
 
-    def test_high_confidence_creates_t5(self):
-        """>=0.8 confidence → T5 → auto-active."""
-        assert tier_for_parsed_offer(0.8) == "T5"
-        assert tier_for_parsed_offer(0.85) == "T5"
-        assert tier_for_parsed_offer(1.0) == "T5"
-
-    def test_none_confidence_t4(self):
-        """Unknown confidence → T4 (conservative, needs review)."""
-        assert tier_for_parsed_offer(None) == "T4"
-
-    def test_status_logic_medium_confidence(self):
-        """Medium confidence offers should get pending_review status."""
-        confidence = 0.65
+    @pytest.mark.parametrize(
+        "confidence,expected_status",
+        [
+            (0.65, "pending_review"),  # medium confidence → pending_review
+            (0.9, "active"),  # high confidence → active
+        ],
+    )
+    def test_status_logic(self, confidence, expected_status):
         status = "active" if confidence >= 0.8 else "pending_review"
-        assert status == "pending_review"
-
-    def test_status_logic_high_confidence(self):
-        """High confidence offers should get active status."""
-        confidence = 0.9
-        status = "active" if confidence >= 0.8 else "pending_review"
-        assert status == "active"
+        assert status == expected_status
 
 
 class TestReviewQueueModel:
     """Test that T4 offers can be created and queried in the DB."""
 
-    def test_create_t4_offer(self, db_session):
+    @staticmethod
+    def _make_t4_offer(db_session, *, email, name, mpn, parse_confidence):
+        """Seed a buyer, requisition, and a pending_review T4 offer; return the
+        offer."""
         from app.models import Offer, Requisition, User
 
-        user = User(email="t@t.com", name="T", role="buyer")
+        user = User(email=email, name=name, role="buyer")
         db_session.add(user)
         db_session.flush()
 
-        req = Requisition(name="Test", created_by=user.id)
+        req = Requisition(name=f"Req-{name}", created_by=user.id)
         db_session.add(req)
         db_session.flush()
 
         offer = Offer(
             requisition_id=req.id,
             vendor_name="Test Vendor",
-            mpn="MPN-001",
+            mpn=mpn,
             source="email_parse",
             status="pending_review",
             evidence_tier="T4",
-            parse_confidence=0.65,
+            parse_confidence=parse_confidence,
         )
         db_session.add(offer)
         db_session.commit()
+        return user, offer
+
+    def test_create_t4_offer(self, db_session):
+        from app.models import Offer
+
+        self._make_t4_offer(db_session, email="t@t.com", name="T", mpn="MPN-001", parse_confidence=0.65)
 
         # Query T4 pending_review offers (review queue query)
         queue = db_session.query(Offer).filter(Offer.evidence_tier == "T4", Offer.status == "pending_review").all()
@@ -78,27 +90,9 @@ class TestReviewQueueModel:
     def test_promote_t4_to_t5(self, db_session):
         from datetime import datetime, timezone
 
-        from app.models import Offer, Requisition, User
+        from app.models import Offer
 
-        user = User(email="t2@t.com", name="T2", role="buyer")
-        db_session.add(user)
-        db_session.flush()
-
-        req = Requisition(name="Test2", created_by=user.id)
-        db_session.add(req)
-        db_session.flush()
-
-        offer = Offer(
-            requisition_id=req.id,
-            vendor_name="Vendor",
-            mpn="MPN-002",
-            source="email_parse",
-            status="pending_review",
-            evidence_tier="T4",
-            parse_confidence=0.6,
-        )
-        db_session.add(offer)
-        db_session.commit()
+        user, offer = self._make_t4_offer(db_session, email="t2@t.com", name="T2", mpn="MPN-002", parse_confidence=0.6)
 
         # Simulate promote action
         offer.evidence_tier = "T5"
@@ -115,27 +109,9 @@ class TestReviewQueueModel:
         assert promoted.promoted_at is not None
 
     def test_reject_offer(self, db_session):
-        from app.models import Offer, Requisition, User
+        from app.models import Offer
 
-        user = User(email="t3@t.com", name="T3", role="buyer")
-        db_session.add(user)
-        db_session.flush()
-
-        req = Requisition(name="Test3", created_by=user.id)
-        db_session.add(req)
-        db_session.flush()
-
-        offer = Offer(
-            requisition_id=req.id,
-            vendor_name="Vendor",
-            mpn="MPN-003",
-            source="email_parse",
-            status="pending_review",
-            evidence_tier="T4",
-            parse_confidence=0.55,
-        )
-        db_session.add(offer)
-        db_session.commit()
+        _, offer = self._make_t4_offer(db_session, email="t3@t.com", name="T3", mpn="MPN-003", parse_confidence=0.55)
 
         offer.status = "rejected"
         db_session.commit()

@@ -9,40 +9,53 @@ Depends on: app/services/scoring_helpers.py, app/scoring.py
 
 from datetime import date, datetime, timezone
 
+import pytest
+
 from app.scoring import score_sighting_v2
 from app.services.scoring_helpers import month_range
 
 
 class TestMonthRange:
-    def test_normal_month(self):
-        """Normal month returns start/end of month."""
-        start, end = month_range(date(2026, 3, 15))
-        assert start == datetime(2026, 3, 1, tzinfo=timezone.utc)
-        assert end == datetime(2026, 4, 1, tzinfo=timezone.utc)
-
-    def test_december_rolls_to_january(self):
-        """December rolls over to January of next year."""
-        start, end = month_range(date(2026, 12, 25))
-        assert start == datetime(2026, 12, 1, tzinfo=timezone.utc)
-        assert end == datetime(2027, 1, 1, tzinfo=timezone.utc)
-
-    def test_january(self):
-        """January returns Jan 1 to Feb 1."""
-        start, end = month_range(date(2026, 1, 10))
-        assert start == datetime(2026, 1, 1, tzinfo=timezone.utc)
-        assert end == datetime(2026, 2, 1, tzinfo=timezone.utc)
-
-    def test_february(self):
-        """February returns Feb 1 to Mar 1."""
-        start, end = month_range(date(2026, 2, 28))
-        assert start == datetime(2026, 2, 1, tzinfo=timezone.utc)
-        assert end == datetime(2026, 3, 1, tzinfo=timezone.utc)
-
-    def test_first_day_of_month(self):
-        """First day of month should still work."""
-        start, end = month_range(date(2026, 6, 1))
-        assert start == datetime(2026, 6, 1, tzinfo=timezone.utc)
-        assert end == datetime(2026, 7, 1, tzinfo=timezone.utc)
+    @pytest.mark.parametrize(
+        ("input_date", "expected_start", "expected_end"),
+        [
+            pytest.param(
+                date(2026, 3, 15),
+                datetime(2026, 3, 1, tzinfo=timezone.utc),
+                datetime(2026, 4, 1, tzinfo=timezone.utc),
+                id="normal_month",
+            ),
+            pytest.param(
+                date(2026, 12, 25),
+                datetime(2026, 12, 1, tzinfo=timezone.utc),
+                datetime(2027, 1, 1, tzinfo=timezone.utc),
+                id="december_rolls_to_january",
+            ),
+            pytest.param(
+                date(2026, 1, 10),
+                datetime(2026, 1, 1, tzinfo=timezone.utc),
+                datetime(2026, 2, 1, tzinfo=timezone.utc),
+                id="january",
+            ),
+            pytest.param(
+                date(2026, 2, 28),
+                datetime(2026, 2, 1, tzinfo=timezone.utc),
+                datetime(2026, 3, 1, tzinfo=timezone.utc),
+                id="february",
+            ),
+            pytest.param(
+                date(2026, 6, 1),
+                datetime(2026, 6, 1, tzinfo=timezone.utc),
+                datetime(2026, 7, 1, tzinfo=timezone.utc),
+                id="first_day_of_month",
+            ),
+        ],
+    )
+    def test_month_range(self, input_date, expected_start, expected_end):
+        """month_range returns start/end of the month for various dates."""
+        start, end = month_range(input_date)
+        assert start == expected_start
+        assert end == expected_end
 
     def test_returns_utc_aware(self):
         """Both datetimes are UTC-aware."""
