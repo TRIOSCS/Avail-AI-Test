@@ -107,6 +107,12 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
                     "category": (r.get("category") or r.get("description") or "").strip()[:200] or None,
                     "source": config["name"],
                     "confidence": config["confidence"],
+                    # Harvest fields — previously discarded (see connector-desc-harvest spec).
+                    "description": (r.get("description") or "").strip() or None,
+                    "package_type": (r.get("package_type") or "").strip() or None,
+                    "pin_count": r.get("pin_count"),
+                    "rohs_status": (r.get("rohs_status") or "").strip() or None,
+                    "datasheet_url": (r.get("datasheet_url") or "").strip() or None,
                 }
         return None
     except asyncio.TimeoutError:
