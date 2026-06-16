@@ -15,6 +15,7 @@ Depends on: app/utils/phone_utils.py, app/services/activity_service.py
 
 import time
 from collections import defaultdict
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
@@ -266,16 +267,9 @@ def get_account_timeline_endpoint(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    from datetime import datetime as dt
-
     from ..services.activity_service import get_account_timeline
 
-    try:
-        df = dt.fromisoformat(date_from) if date_from else None
-        dto = dt.fromisoformat(date_to) if date_to else None
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid date format — expected ISO 8601")
-
+    df, dto = _parse_date_range(date_from, date_to)
     items, total = get_account_timeline(
         db,
         company_id,
@@ -287,12 +281,7 @@ def get_account_timeline_endpoint(
         limit=limit,
         offset=offset,
     )
-    return {
-        "items": [_timeline_item(a) for a in items],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+    return _timeline_response(items, total, limit, offset)
 
 
 @router.get("/contact/{site_contact_id}", response_model=ActivityTimelineResponse)
@@ -309,21 +298,13 @@ def get_contact_timeline_endpoint(
     db: Session = Depends(get_db),
 ):
     """Get paginated activity timeline for a site contact."""
-    from ..models import SiteContact
     from ..services.activity_service import get_contact_timeline
 
     contact = db.get(SiteContact, site_contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
 
-    from datetime import datetime as dt
-
-    try:
-        df = dt.fromisoformat(date_from) if date_from else None
-        dto = dt.fromisoformat(date_to) if date_to else None
-    except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid date format — expected ISO 8601")
-
+    df, dto = _parse_date_range(date_from, date_to)
     items, total = get_contact_timeline(
         db,
         site_contact_id,
@@ -335,6 +316,21 @@ def get_contact_timeline_endpoint(
         limit=limit,
         offset=offset,
     )
+    return _timeline_response(items, total, limit, offset)
+
+
+def _parse_date_range(date_from: str | None, date_to: str | None) -> tuple[datetime | None, datetime | None]:
+    """Parse ISO 8601 date_from/date_to query params, or raise HTTP 400."""
+    try:
+        df = datetime.fromisoformat(date_from) if date_from else None
+        dto = datetime.fromisoformat(date_to) if date_to else None
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid date format — expected ISO 8601")
+    return df, dto
+
+
+def _timeline_response(items: list[ActivityLog], total: int, limit: int, offset: int) -> dict:
+    """Build the paginated timeline response payload."""
     return {
         "items": [_timeline_item(a) for a in items],
         "total": total,

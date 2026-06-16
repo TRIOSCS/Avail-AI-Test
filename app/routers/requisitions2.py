@@ -347,21 +347,21 @@ async def row_action(
 
     msg = "Action completed"
 
-    if action_name == RowActionName.archive:
+    # State transitions differ only by target state + message verb.
+    transition_actions = {
+        RowActionName.archive: ("archived", f"'{req.name}' archived"),
+        RowActionName.activate: ("active", f"'{req.name}' activated"),
+        RowActionName.won: ("won", f"'{req.name}' marked won"),
+        RowActionName.lost: ("lost", f"'{req.name}' marked lost"),
+    }
+
+    if action_name in transition_actions:
         from ..services.requisition_state import transition
 
+        target_state, success_msg = transition_actions[action_name]
         try:
-            transition(req, "archived", user, db)
-            msg = f"'{req.name}' archived"
-        except ValueError as e:
-            msg = str(e)
-
-    elif action_name == RowActionName.activate:
-        from ..services.requisition_state import transition
-
-        try:
-            transition(req, "active", user, db)
-            msg = f"'{req.name}' activated"
+            transition(req, target_state, user, db)
+            msg = success_msg
         except ValueError as e:
             msg = str(e)
 
@@ -380,24 +380,6 @@ async def row_action(
         try:
             unclaim_requisition(req, db, actor=user)
             msg = f"Unclaimed '{req.name}'"
-        except ValueError as e:
-            msg = str(e)
-
-    elif action_name == RowActionName.won:
-        from ..services.requisition_state import transition
-
-        try:
-            transition(req, "won", user, db)
-            msg = f"'{req.name}' marked won"
-        except ValueError as e:
-            msg = str(e)
-
-    elif action_name == RowActionName.lost:
-        from ..services.requisition_state import transition
-
-        try:
-            transition(req, "lost", user, db)
-            msg = f"'{req.name}' marked lost"
         except ValueError as e:
             msg = str(e)
 
@@ -451,20 +433,17 @@ async def bulk_action(
     count = 0
     errors = []
 
+    bulk_target_state = {
+        BulkActionName.archive: "archived",
+        BulkActionName.activate: "active",
+    }.get(action_name)
+
     for req in reqs:
-        if action_name == BulkActionName.archive:
+        if bulk_target_state is not None:
             from ..services.requisition_state import transition
 
             try:
-                transition(req, "archived", user, db)
-                count += 1
-            except ValueError as e:
-                errors.append(f"REQ-{req.id}: {e}")
-        elif action_name == BulkActionName.activate:
-            from ..services.requisition_state import transition
-
-            try:
-                transition(req, "active", user, db)
+                transition(req, bulk_target_state, user, db)
                 count += 1
             except ValueError as e:
                 errors.append(f"REQ-{req.id}: {e}")

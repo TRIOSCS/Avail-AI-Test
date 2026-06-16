@@ -67,6 +67,27 @@ def _stamp_manual_provenance(card: MaterialCard, fields: list[str]) -> None:
     card.enrichment_provenance = prov
 
 
+def _actor_email(user: User) -> str:
+    """Audit/merge actor label — the user's email, or ``"admin"`` if it's unset."""
+    return user.email if hasattr(user, "email") else "admin"
+
+
+def _backfill_manufacturer(card: MaterialCard, db: Session) -> None:
+    """Fill a card's missing manufacturer from its MPN prefix, committing on a hit.
+
+    Shared by the two single-card read endpoints (by-id and by-mpn) so a card surfaced
+    without a manufacturer gets one inferred lazily on first view.
+    """
+    if card.manufacturer:
+        return
+    inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
+    if inferred:
+        card.manufacturer = inferred
+        db.add(card)
+        db.commit()
+        invalidate_prefix("material_list")
+
+
 def render_add_modal(
     request: Request, *, errors: dict | None = None, values: dict | None = None, status_code: int = 200
 ):
@@ -135,14 +156,14 @@ async def add_material(
             condition = MaterialCondition(condition).value
         except ValueError:
             errors["condition"] = f'"{condition}" is not a valid condition.'
+    values = {
+        "mpn": mpn,
+        "manufacturer": manufacturer,
+        "description": description,
+        "category": category,
+        "condition": condition,
+    }
     if errors:
-        values = {
-            "mpn": mpn,
-            "manufacturer": manufacturer,
-            "description": description,
-            "category": category,
-            "condition": condition,
-        }
         return render_add_modal(request, errors=errors, values=values, status_code=422)
 
     norm = normalize_mpn_key(mpn)
@@ -157,18 +178,7 @@ async def add_material(
         # punctuation-only "MPN" like "---". Re-render the modal like every other 422;
         # a raw HTTPException body would be swapped into #modal-content as JSON text
         # (htmx_app.js force-allows 422 swaps targeted there).
-        return render_add_modal(
-            request,
-            errors={"mpn": "Enter a valid MPN."},
-            values={
-                "mpn": mpn,
-                "manufacturer": manufacturer,
-                "description": description,
-                "category": category,
-                "condition": condition,
-            },
-            status_code=422,
-        )
+        return render_add_modal(request, errors={"mpn": "Enter a valid MPN."}, values=values, status_code=422)
 
     # Manual/100 writes — blank = blank (never default, suggest, or copy values).
     written: list[str] = []
@@ -339,13 +349,7 @@ async def get_material(card_id: int, user: User = Depends(require_user), db: Ses
     card = db.get(MaterialCard, card_id)
     if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
-    if not card.manufacturer:
-        inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
-        if inferred:
-            card.manufacturer = inferred
-            db.add(card)
-            db.commit()
-            invalidate_prefix("material_list")
+    _backfill_manufacturer(card, db)
     return material_card_to_dict(card, db)
 
 
@@ -381,13 +385,7 @@ async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: 
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
-    if not card.manufacturer:
-        inferred = _infer_manufacturer_from_prefix(db, card.normalized_mpn)
-        if inferred:
-            card.manufacturer = inferred
-            db.add(card)
-            db.commit()
-            invalidate_prefix("material_list")
+    _backfill_manufacturer(card, db)
     return material_card_to_dict(card, db)
 
 
@@ -583,7 +581,7 @@ async def delete_material(card_id: int, user: User = Depends(require_admin), db:
         material_card_id=card.id,
         action="soft_deleted",
         normalized_mpn=card.normalized_mpn,
-        created_by=user.email if hasattr(user, "email") else "admin",
+        created_by=_actor_email(user),
     )
     db.commit()
     invalidate_prefix("material_list")
@@ -606,7 +604,7 @@ async def restore_material(card_id: int, user: User = Depends(require_admin), db
         material_card_id=card.id,
         action="restored",
         normalized_mpn=card.normalized_mpn,
-        created_by=user.email if hasattr(user, "email") else "admin",
+        created_by=_actor_email(user),
     )
     db.commit()
     invalidate_prefix("material_list")
@@ -628,9 +626,7 @@ async def merge_material_cards(
         raise HTTPException(400, "source_card_id and target_card_id are required")
 
     try:
-        result = _merge_material_cards_service(
-            db, source_id, target_id, user.email if hasattr(user, "email") else "admin"
-        )
+        result = _merge_material_cards_service(db, source_id, target_id, _actor_email(user))
     except ValueError as e:
         raise HTTPException(400 if "itself" in str(e) else 404, str(e))
 

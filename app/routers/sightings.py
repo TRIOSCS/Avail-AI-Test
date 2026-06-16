@@ -225,6 +225,48 @@ def _partition_by_unavailability(vendor_names: list[str], excluded_norms: set[st
     return unavailable, sendable
 
 
+def _mpn_link_map(db: Session, requirements) -> dict[str, int]:
+    """Build a display-MPN → MaterialCard.id map for the given requirements.
+
+    Collects each requirement's primary_mpn plus substitute MPNs (string or dict form),
+    normalizes them, and resolves live (non-deleted) MaterialCards in one query. Shared
+    by sightings_list (table) and sightings_detail (header). Empty input → empty map.
+    """
+    from ..utils.normalization import normalize_mpn_key
+
+    all_mpns: set[str] = set()
+    for r in requirements:
+        if r.primary_mpn:
+            all_mpns.add(r.primary_mpn.upper())
+        for sub in r.substitutes or []:
+            mpn = sub.get("mpn") if isinstance(sub, dict) else sub
+            if mpn:
+                all_mpns.add(str(mpn).upper())
+    if not all_mpns:
+        return {}
+
+    norm_to_display: dict[str, str] = {}
+    for mpn in all_mpns:
+        n = normalize_mpn_key(mpn)
+        if n:
+            norm_to_display[n] = mpn
+
+    cards = (
+        db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+        .filter(
+            MaterialCard.normalized_mpn.in_(list(norm_to_display.keys())),
+            MaterialCard.deleted_at.is_(None),
+        )
+        .all()
+    )
+    link_map: dict[str, int] = {}
+    for card_id, norm in cards:
+        display = norm_to_display.get(norm)
+        if display:
+            link_map[display] = card_id
+    return link_map
+
+
 @router.get("/v2/partials/sightings/workspace", response_class=HTMLResponse)
 async def sightings_workspace(
     request: Request,
@@ -343,8 +385,6 @@ async def sightings_list(
         coverage_map = {c.requirement_id: c.total_qty or 0 for c in coverage_rows}
 
     # ── Dashboard Strip Counters (Phase 2) ──────────────────────────
-    from datetime import date
-
     deadline_48h = date.today() + timedelta(days=2)
 
     # Active requirement IDs for dashboard (not just current page)
@@ -426,36 +466,7 @@ async def sightings_list(
                 heatmap_req_ids.add(r.id)
 
     # ── MPN → MaterialCard link map ─────────────────────────────
-    link_map: dict[str, int] = {}
-    if requirements:
-        from ..utils.normalization import normalize_mpn_key
-
-        all_mpns: set[str] = set()
-        for r in requirements:
-            if r.primary_mpn:
-                all_mpns.add(r.primary_mpn.upper())
-            for sub in r.substitutes or []:
-                mpn = sub.get("mpn") if isinstance(sub, dict) else sub
-                if mpn:
-                    all_mpns.add(str(mpn).upper())
-        if all_mpns:
-            norm_to_display: dict[str, str] = {}
-            for mpn in all_mpns:
-                n = normalize_mpn_key(mpn)
-                if n:
-                    norm_to_display[n] = mpn
-            cards = (
-                db.query(MaterialCard.id, MaterialCard.normalized_mpn)
-                .filter(
-                    MaterialCard.normalized_mpn.in_(list(norm_to_display.keys())),
-                    MaterialCard.deleted_at.is_(None),
-                )
-                .all()
-            )
-            for card_id, norm in cards:
-                display = norm_to_display.get(norm)
-                if display:
-                    link_map[display] = card_id
+    link_map = _mpn_link_map(db, requirements) if requirements else {}
 
     groups = None
     if filters.group_by in ("brand", "manufacturer"):
@@ -647,34 +658,7 @@ async def sightings_detail(
         material_card = db.get(MaterialCard, requirement.material_card_id)
 
     # ── MPN → MaterialCard link map for detail header ────────────
-    from ..utils.normalization import normalize_mpn_key as _norm_key
-
-    detail_link_map: dict[str, int] = {}
-    detail_mpns: set[str] = set()
-    if requirement.primary_mpn:
-        detail_mpns.add(requirement.primary_mpn.upper())
-    for sub in requirement.substitutes or []:
-        mpn = sub.get("mpn") if isinstance(sub, dict) else sub
-        if mpn:
-            detail_mpns.add(str(mpn).upper())
-    if detail_mpns:
-        norm_to_display: dict[str, str] = {}
-        for mpn in detail_mpns:
-            n = _norm_key(mpn)
-            if n:
-                norm_to_display[n] = mpn
-        detail_cards = (
-            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
-            .filter(
-                MaterialCard.normalized_mpn.in_(list(norm_to_display.keys())),
-                MaterialCard.deleted_at.is_(None),
-            )
-            .all()
-        )
-        for card_id, norm in detail_cards:
-            display = norm_to_display.get(norm)
-            if display:
-                detail_link_map[display] = card_id
+    detail_link_map = _mpn_link_map(db, [requirement])
 
     # ── Cross-Requirement Vendor Overlap (Phase 4.7) ────────────
     overlap_counts: dict[str, int] = dict(
@@ -877,16 +861,11 @@ async def sightings_batch_refresh(
     for rid in requirement_ids:
         await _publish_if_user_source(source, user.id, int(rid))
 
-    parts = []
     total = success + failed
-    parts.append(f"Searched {success}/{total} requirements.")
+    msg = f"Searched {success}/{total} requirements."
     if failed:
-        parts.append(f"{failed} failed.")
-    msg = " ".join(parts)
-    if failed:
-        level = "warning"
-    else:
-        level = "success"
+        msg += f" {failed} failed."
+    level = "warning" if failed else "success"
     if _toast_suppressed_for_sse(source):
         return HTMLResponse("")
     return _oob_toast(msg, level)

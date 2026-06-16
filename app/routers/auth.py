@@ -34,6 +34,7 @@ from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
 from ..models import User
+from ..rate_limit import limiter
 
 router = APIRouter()
 
@@ -44,8 +45,6 @@ SCOPES = GRAPH_SCOPES
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Redirect root to the HTMX frontend."""
-    from fastapi.responses import RedirectResponse
-
     return RedirectResponse(url="/v2/requisitions", status_code=302)
 
 
@@ -64,9 +63,6 @@ async def login(request: Request):
         }
     )
     return RedirectResponse(f"{AZURE_AUTH}/authorize?{params}")
-
-
-from ..rate_limit import limiter
 
 
 @router.get("/auth/callback")

@@ -36,6 +36,7 @@ async def clone_requisition(req_id: int, user: User = Depends(require_user), db:
     )
     db.add(new_req)
     db.flush()
+    cloned_pairs = []  # (old_requirement, new_requirement) for offer remapping after flush
     for r in req.requirements:
         cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
         # Dedup substitutes by canonical key
@@ -62,12 +63,13 @@ async def clone_requisition(req_id: int, user: User = Depends(require_user), db:
             notes=r.notes,
         )
         db.add(new_r)
+        cloned_pairs.append((r, new_r))
     db.flush()
-    # Map old requirement IDs → new for offer cloning (batch query)
-    new_reqs = db.query(Requirement).filter(Requirement.requisition_id == new_req.id).all()
-    mpn_to_new_id = {r.primary_mpn: r.id for r in new_reqs}
+    # Map old requirement IDs → new for offer cloning. Keyed on the new (cloned) MPN so
+    # that later requirements sharing an MPN win, matching the prior re-query behavior.
+    mpn_to_new_id = {new_r.primary_mpn: new_r.id for _, new_r in cloned_pairs}
     req_map = {
-        old_r.id: mpn_to_new_id[old_r.primary_mpn] for old_r in req.requirements if old_r.primary_mpn in mpn_to_new_id
+        old_r.id: mpn_to_new_id[old_r.primary_mpn] for old_r, _ in cloned_pairs if old_r.primary_mpn in mpn_to_new_id
     }
     for o in req.offers:
         if o.status in ("active", "selected"):

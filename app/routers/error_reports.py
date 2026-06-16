@@ -175,6 +175,7 @@ async def submit_trouble_ticket(
 ):
     """Handle submission from trouble ticket form — accepts JSON or form data."""
     content_type = request.headers.get("content-type", "")
+    screenshot_b64 = ua = viewport = error_log = network_log_raw = None
 
     if "application/json" in content_type:
         try:
@@ -196,11 +197,6 @@ async def submit_trouble_ticket(
         form = await request.form()
         description = (form.get("message") or "").strip()
         page_url = form.get("current_url")
-        screenshot_b64 = None
-        ua = None
-        viewport = None
-        error_log = None
-        network_log_raw = None
 
     if not description:
         return HTMLResponse(

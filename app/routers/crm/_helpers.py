@@ -13,10 +13,19 @@ from ...services.crm_service import next_quote_number  # noqa: F401
 _PRICED_STATUSES = ["sent", "won", "lost"]
 
 
+def _iso(dt) -> str | None:
+    """Return a datetime as an ISO string, or None if unset."""
+    return dt.isoformat() if dt else None
+
+
+def _float(v) -> float | None:
+    """Return a numeric value as a float, or None if falsy."""
+    return float(v) if v else None
+
+
 def _quote_date_iso(q: Quote) -> str | None:
     """Return the best available date for a quote as an ISO string."""
-    dt = q.sent_at or q.created_at
-    return dt.isoformat() if dt else None
+    return _iso(q.sent_at or q.created_at)
 
 
 def record_changes(
@@ -133,23 +142,23 @@ def quote_to_dict(q: Quote, db=None) -> dict:
         "quote_number": q.quote_number,
         "revision": q.revision,
         "line_items": enriched_items,
-        "subtotal": float(q.subtotal) if q.subtotal else None,
-        "total_cost": float(q.total_cost) if q.total_cost else None,
-        "total_margin_pct": float(q.total_margin_pct) if q.total_margin_pct else None,
+        "subtotal": _float(q.subtotal),
+        "total_cost": _float(q.total_cost),
+        "total_margin_pct": _float(q.total_margin_pct),
         "payment_terms": q.payment_terms,
         "shipping_terms": q.shipping_terms,
         "validity_days": q.validity_days,
         "notes": q.notes,
         "status": q.status,
-        "sent_at": q.sent_at.isoformat() if q.sent_at else None,
+        "sent_at": _iso(q.sent_at),
         "result": q.result,
         "result_reason": q.result_reason,
         "result_notes": q.result_notes,
-        "result_at": q.result_at.isoformat() if q.result_at else None,
-        "won_revenue": float(q.won_revenue) if q.won_revenue else None,
+        "result_at": _iso(q.result_at),
+        "won_revenue": _float(q.won_revenue),
         "created_by": q.created_by.name if q.created_by else None,
-        "created_at": q.created_at.isoformat() if q.created_at else None,
-        "updated_at": q.updated_at.isoformat() if q.updated_at else None,
+        "created_at": _iso(q.created_at),
+        "updated_at": _iso(q.updated_at),
         "is_expired": is_expired,
         "days_until_expiry": days_until_expiry,
     }
@@ -158,7 +167,6 @@ def quote_to_dict(q: Quote, db=None) -> dict:
 def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user: User) -> str:
     """Build a professional HTML quote email with Trio branding."""
     import html as _html
-    from datetime import timedelta
 
     _esc = _html.escape
 

@@ -21,6 +21,45 @@ from ...utils.search_builder import SearchBuilder
 
 router = APIRouter()
 
+_COMPANY_SUFFIXES = re.compile(
+    r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
+    r"s\.?r\.?l\.?|pty\.?|b\.?v\.?|n\.?v\.?|a\.?s\.?|oy|ab|limited|"
+    r"corporation|incorporated|company)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _normalize_company_name(n: str) -> str:
+    """Normalize a company name for duplicate comparison.
+
+    Lowercases, replaces punctuation with spaces, strips legal suffixes (Inc, LLC, Ltd,
+    Corp, etc.), and collapses whitespace.
+    """
+    n = n.strip().lower()
+    n = re.sub(r"[^\w\s]", " ", n)  # punctuation -> space
+    n = _COMPANY_SUFFIXES.sub("", n).strip()
+    return re.sub(r"\s+", " ", n)
+
+
+def _find_company_duplicates(clean: str, db: Session) -> list[dict]:
+    """Return up to 5 active companies whose normalized name matches `clean`."""
+    companies = db.query(Company.id, Company.name).filter(Company.is_active.is_(True)).limit(2000).all()
+    matches = []
+    for c in companies:
+        cn = _normalize_company_name(c.name)
+        if not cn:
+            continue
+        # Exact normalized match
+        if cn == clean:
+            matches.append({"id": c.id, "name": c.name, "match": "exact"})
+        # Containment (one is substring of the other)
+        elif cn in clean or clean in cn:
+            matches.append({"id": c.id, "name": c.name, "match": "similar"})
+        # Prefix match (first 6+ chars match)
+        elif len(clean) >= 6 and len(cn) >= 6 and cn[:6] == clean[:6]:
+            matches.append({"id": c.id, "name": c.name, "match": "similar"})
+    return matches[:5]
+
 
 def _load_company_tags(company_id: int, db: Session) -> list[dict]:
     """Load visible entity tags for a company."""
@@ -244,41 +283,12 @@ async def check_company_duplicate(
     Normalizes to lowercase, strips suffixes (Inc, LLC, Ltd, Corp, etc.), and compares
     for matches.
     """
-    _suffixes = re.compile(
-        r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
-        r"s\.?r\.?l\.?|pty\.?|b\.?v\.?|n\.?v\.?|a\.?s\.?|oy|ab|limited|"
-        r"corporation|incorporated|company)\s*$",
-        re.IGNORECASE,
-    )
-
-    def _normalize(n: str) -> str:
-        n = n.strip().lower()
-        n = re.sub(r"[^\w\s]", " ", n)  # punctuation -> space
-        n = _suffixes.sub("", n).strip()
-        n = re.sub(r"\s+", " ", n)
-        return n
-
-    clean = _normalize(name)
+    clean = _normalize_company_name(name)
     if not clean:
         return {"matches": []}
 
     # Pull all company names (cached at 500 limit, same as list_companies)
-    companies = db.query(Company.id, Company.name).filter(Company.is_active.is_(True)).limit(2000).all()
-    matches = []
-    for c in companies:
-        cn = _normalize(c.name)
-        if not cn:
-            continue
-        # Exact normalized match
-        if cn == clean:
-            matches.append({"id": c.id, "name": c.name, "match": "exact"})
-        # Containment (one is substring of the other)
-        elif cn in clean or clean in cn:
-            matches.append({"id": c.id, "name": c.name, "match": "similar"})
-        # Prefix match (first 6+ chars match)
-        elif len(clean) >= 6 and len(cn) >= 6 and cn[:6] == clean[:6]:
-            matches.append({"id": c.id, "name": c.name, "match": "similar"})
-    return {"matches": matches[:5]}
+    return {"matches": _find_company_duplicates(clean, db)}
 
 
 @router.get("/api/companies/{company_id}")
@@ -417,37 +427,13 @@ async def create_company(
 
     # Duplicate check (unless force=True)
     if not force:
-        _suffixes = re.compile(
-            r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
-            r"s\.?r\.?l\.?|pty\.?|b\.?v\.?|n\.?v\.?|a\.?s\.?|oy|ab|limited|"
-            r"corporation|incorporated|company)\s*$",
-            re.IGNORECASE,
-        )
-
-        def _norm(n: str) -> str:
-            n = n.strip().lower()
-            n = re.sub(r"[^\w\s]", " ", n)
-            n = _suffixes.sub("", n).strip()
-            return re.sub(r"\s+", " ", n)
-
-        query_clean = _norm(clean_name)
+        query_clean = _normalize_company_name(clean_name)
         if query_clean:
-            companies = db.query(Company.id, Company.name).filter(Company.is_active.is_(True)).limit(2000).all()
-            duplicates = []
-            for c in companies:
-                cn = _norm(c.name)
-                if not cn:
-                    continue
-                if cn == query_clean:
-                    duplicates.append({"id": c.id, "name": c.name, "match": "exact"})
-                elif cn in query_clean or query_clean in cn:  # pragma: no cover
-                    duplicates.append({"id": c.id, "name": c.name, "match": "similar"})
-                elif len(query_clean) >= 6 and len(cn) >= 6 and cn[:6] == query_clean[:6]:  # pragma: no cover
-                    duplicates.append({"id": c.id, "name": c.name, "match": "similar"})
+            duplicates = _find_company_duplicates(query_clean, db)
             if duplicates:
                 return JSONResponse(
                     status_code=409,
-                    content={"duplicates": duplicates[:5]},
+                    content={"duplicates": duplicates},
                 )
     # Extract domain from website if no explicit domain
     if not clean_domain and payload.website:

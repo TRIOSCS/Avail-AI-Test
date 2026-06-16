@@ -119,18 +119,16 @@ def _get_connector_for_source(name: str, db: Session = None):
     if name == "email_mining" and settings.email_mining_enabled:
         return _EmailMiningTestConnector()
 
-    if name == "anthropic_ai":
-        return _AnthropicTestConnector()
-    if name == "teams_notifications":
-        return _TeamsTestConnector()
-    if name == "apollo_enrichment":
-        return _ApolloTestConnector()
-    if name == "lusha_enrichment":
-        return _LushaTestConnector()
-    if name == "explorium_enrichment":
-        return _ExploriumTestConnector()
-    if name == "azure_oauth":
-        return _AzureOAuthTestConnector()
+    test_connector = {
+        "anthropic_ai": _AnthropicTestConnector,
+        "teams_notifications": _TeamsTestConnector,
+        "apollo_enrichment": _ApolloTestConnector,
+        "lusha_enrichment": _LushaTestConnector,
+        "explorium_enrichment": _ExploriumTestConnector,
+        "azure_oauth": _AzureOAuthTestConnector,
+    }.get(name)
+    if test_connector:
+        return test_connector()
 
     return None
 
@@ -282,6 +280,18 @@ class _AzureOAuthTestConnector:
         return [{"vendor_name": "Azure OAuth", "mpn_matched": "Tenant verified", "status": "ok"}]
 
 
+async def _parse_mining_options(request: Request) -> MiningOptions:
+    """Parse MiningOptions from a JSON request body, falling back to defaults."""
+    try:
+        if request.headers.get("content-type", "").startswith("application/json"):
+            body = await request.body()
+            if body and body.strip():
+                return MiningOptions.model_validate_json(body)
+    except (ValueError, TypeError):
+        logger.warning("Mining options parse failed, using defaults", exc_info=True)
+    return MiningOptions()
+
+
 def _create_sightings_from_attachment(
     db: Session,
     vr: VendorResponse,
@@ -356,13 +366,11 @@ def _create_sightings_from_attachment(
 
         mat_card = resolve_material_card(mpn, db)
 
-        from ..vendor_utils import normalize_vendor_name as _nvn
-
         sighting = Sighting(
             requirement_id=matched_req.id,
             material_card_id=mat_card.id if mat_card else None,
             vendor_name=vr.vendor_name or "",
-            vendor_name_normalized=_nvn(vr.vendor_name or ""),
+            vendor_name_normalized=normalize_vendor_name(vr.vendor_name or ""),
             vendor_email=vr.vendor_email,
             mpn_matched=normalize_mpn(mpn) or mpn,
             manufacturer=row.get("manufacturer", ""),
@@ -475,7 +483,7 @@ async def test_api_source(
     results = []
     error = None
 
-    has_env_vars = bool(src.env_vars and len(src.env_vars))
+    has_env_vars = bool(src.env_vars)
 
     try:
         connector = _get_connector_for_source(src.name, db)
@@ -499,10 +507,17 @@ async def test_api_source(
 
     db.commit()
 
+    if results:
+        status = "ok"
+    elif not error:
+        status = "no_results"
+    else:
+        status = "error"
+
     return {
         "source": src.display_name,
         "test_mpn": test_mpn,
-        "status": "ok" if results else "no_results" if not error else "error",
+        "status": status,
         "results_count": len(results),
         "elapsed_ms": elapsed_ms,
         "error": error,
@@ -625,14 +640,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
     """Run email intelligence scan — mines inbox for vendor contacts and offers."""
     token = await require_fresh_token(request, db)
 
-    opts = MiningOptions()
-    try:
-        if request.headers.get("content-type", "").startswith("application/json"):
-            body = await request.body()
-            if body and body.strip():
-                opts = MiningOptions.model_validate_json(body)
-    except (ValueError, TypeError):
-        logger.warning("Mining options parse failed, using defaults", exc_info=True)
+    opts = await _parse_mining_options(request)
     lookback_days = opts.lookback_days
 
     from ..connectors.email_mining import EmailMiner
@@ -712,14 +720,7 @@ async def email_mining_scan_outbound(
     from ..scheduler import get_valid_token
 
     token = await get_valid_token(user, db) or user.access_token
-    opts = MiningOptions()
-    try:
-        if request.headers.get("content-type", "").startswith("application/json"):
-            raw = await request.body()
-            if raw and raw.strip():
-                opts = MiningOptions.model_validate_json(raw)
-    except (ValueError, TypeError):
-        logger.warning("Mining options parse failed, using defaults", exc_info=True)
+    opts = await _parse_mining_options(request)
     lookback = opts.lookback_days
 
     miner = EmailMiner(token, db=db, user_id=user.id)

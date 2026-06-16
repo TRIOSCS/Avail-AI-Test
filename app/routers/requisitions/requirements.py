@@ -85,6 +85,19 @@ def _dedupe_substitutes(subs: list[str], primary_mpn: str) -> list[dict]:
     return deduped
 
 
+def _substitute_keys(requirement: Requirement) -> list[str]:
+    """Return normalized MPN keys for a requirement's substitutes (string or dict
+    form)."""
+    keys = []
+    for sub in requirement.substitutes or []:
+        sub_str = (sub if isinstance(sub, str) else "").strip()
+        if sub_str:
+            sub_key = normalize_mpn_key(sub_str)
+            if sub_key:
+                keys.append(sub_key)
+    return keys
+
+
 def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> None:
     """Annotate each lead with buyer outcome for quick triage progress.
 
@@ -740,15 +753,9 @@ async def get_saved_sightings(
     req_sub_keys: dict[int, list[str]] = {}
     for r in req.requirements:
         primary_card_ids[r.id] = r.material_card_id
-        sub_keys = []
-        for sub in r.substitutes or []:
-            sub_str = (sub if isinstance(sub, str) else "").strip()
-            if sub_str:
-                sub_key = normalize_mpn_key(sub_str)
-                if sub_key:
-                    sub_keys.append(sub_key)
-                    all_sub_keys.add(sub_key)
+        sub_keys = _substitute_keys(r)
         req_sub_keys[r.id] = sub_keys
+        all_sub_keys.update(sub_keys)
 
     sub_card_lookup: dict[str, int] = {}
     if all_sub_keys:
@@ -1139,13 +1146,7 @@ async def list_requirement_sightings(
     card_ids: set[int] = set()
     if req_item.material_card_id:
         card_ids.add(req_item.material_card_id)
-    sub_keys = []
-    for sub in req_item.substitutes or []:
-        sub_str = (sub if isinstance(sub, str) else "").strip()
-        if sub_str:
-            sub_key = normalize_mpn_key(sub_str)
-            if sub_key:
-                sub_keys.append(sub_key)
+    sub_keys = _substitute_keys(req_item)
     if sub_keys:
         sub_rows = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(sub_keys)).all()
         card_ids |= {row[0] for row in sub_rows}
@@ -1236,16 +1237,10 @@ async def list_requirement_offers(
     if req_item.material_card_id:
         card_ids.add(req_item.material_card_id)
     # Also check substitute material cards
-    from ...utils.normalization import normalize_mpn_key
-
-    for sub in req_item.substitutes or []:
-        sub_str = (sub if isinstance(sub, str) else "").strip()
-        if sub_str:
-            sub_key = normalize_mpn_key(sub_str)
-            if sub_key:
-                mc = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn == sub_key).first()
-                if mc:
-                    card_ids.add(mc[0])
+    sub_keys = _substitute_keys(req_item)
+    if sub_keys:
+        sub_rows = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(sub_keys)).all()
+        card_ids |= {row[0] for row in sub_rows}
 
     if card_ids:
         hist_offers = (

@@ -15,6 +15,22 @@ from ...services.credential_service import get_credential_cached
 router = APIRouter()
 
 
+def _normalize_domain(value: str) -> str:
+    """Strip scheme, www, and any path from a domain/website string."""
+    return value.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+
+def _require_enrichment_provider() -> None:
+    """Raise 503 unless at least one enrichment provider credential is configured."""
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
+        "anthropic_ai", "ANTHROPIC_API_KEY"
+    ):
+        raise HTTPException(
+            503,
+            "No enrichment providers configured — set EXPLORIUM_API_KEY or ANTHROPIC_API_KEY in .env",
+        )
+
+
 # ── Enrichment (shared for vendors + customers) ─────────────────────────
 
 
@@ -26,13 +42,7 @@ async def enrich_company(
     db: Session = Depends(get_db),
 ):
     """Enrich a customer company with external data."""
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
-        "anthropic_ai", "ANTHROPIC_API_KEY"
-    ):
-        raise HTTPException(
-            503,
-            "No enrichment providers configured — set EXPLORIUM_API_KEY or ANTHROPIC_API_KEY in .env",
-        )
+    _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 
     company = db.get(Company, company_id)
@@ -40,7 +50,7 @@ async def enrich_company(
         raise HTTPException(404, "Company not found")
     domain = company.domain or company.website or ""
     if domain:
-        domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+        domain = _normalize_domain(domain)
     if payload.domain:
         domain = payload.domain
     if not domain:
@@ -73,13 +83,7 @@ async def enrich_vendor_card(
     db: Session = Depends(get_db),
 ):
     """Enrich a vendor card with external data."""
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
-        "anthropic_ai", "ANTHROPIC_API_KEY"
-    ):
-        raise HTTPException(
-            503,
-            "No enrichment providers configured — set EXPLORIUM_API_KEY or ANTHROPIC_API_KEY in .env",
-        )
+    _require_enrichment_provider()
     from ...enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
     card = db.get(VendorCard, card_id)
@@ -87,7 +91,7 @@ async def enrich_vendor_card(
         raise HTTPException(404, "Vendor card not found")
     domain = card.domain or card.website or ""
     if domain:
-        domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+        domain = _normalize_domain(domain)
     if payload.domain:
         domain = payload.domain
     if not domain:
@@ -107,18 +111,12 @@ async def get_suggested_contacts(
     db: Session = Depends(get_db),
 ):
     """Find suggested contacts at a company from enrichment providers."""
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
-        "anthropic_ai", "ANTHROPIC_API_KEY"
-    ):
-        raise HTTPException(
-            503,
-            "No enrichment providers configured — set EXPLORIUM_API_KEY or ANTHROPIC_API_KEY in .env",
-        )
+    _require_enrichment_provider()
     from ...enrichment_service import find_suggested_contacts
 
     if not domain:
         raise HTTPException(400, "domain parameter is required")
-    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+    domain = _normalize_domain(domain)
     contacts = await find_suggested_contacts(domain, name, title)
     return {"domain": domain, "contacts": contacts, "count": len(contacts)}
 
