@@ -111,6 +111,28 @@ FRU_DESC_CONFIDENCE = 0.88
 FRU_MAKER_CONFIDENCE = 0.9
 
 
+def _tally_schema_drop(
+    commodity: str,
+    spec_key: str,
+    value: object,
+    schema,
+    dropped_no_schema: Counter,
+    dropped_out_of_enum: Counter,
+) -> None:
+    """Tally a crosswalk spec value that record_spec will silently drop (DEBUG-only
+    there).
+
+    Mirrors record_spec's own schema/enum gate so the discard is surfaced as an
+    aggregate WARNING after the batch (see the module docstring). Pure observability —
+    no DB write, no effect on what record_spec persists. Shared by both write channels
+    so the decode-side and desc-side tallies cannot drift.
+    """
+    if schema is None:
+        dropped_no_schema[f"{commodity}.{spec_key}"] += 1
+    elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
+        dropped_out_of_enum[f"{commodity}.{spec_key}={value}"] += 1
+
+
 def agree_vendor(results: "list[DecodeResult]") -> str | None:
     """Return the single vendor every decode agrees on, else ``None`` (pure, no DB).
 
@@ -372,11 +394,14 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                     if cache is None:
                         cache = schema_caches[commodity] = load_schema_cache(db, commodity)
                     for spec_key, value in agreed.items():
-                        schema = cache.get((commodity, spec_key))
-                        if schema is None:
-                            dropped_no_schema[f"{commodity}.{spec_key}"] += 1
-                        elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
-                            dropped_out_of_enum[f"{commodity}.{spec_key}={value}"] += 1
+                        _tally_schema_drop(
+                            commodity,
+                            spec_key,
+                            value,
+                            cache.get((commodity, spec_key)),
+                            dropped_no_schema,
+                            dropped_out_of_enum,
+                        )
                     card_written = 0
                     did_set_maker = False
                     # SAVEPOINT 1 — decode channel: record_spec flushes, so a DB-level
@@ -501,11 +526,14 @@ def crosswalk_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, in
                 # decode writes or category fill with it.
                 with db.begin_nested():
                     for spec_key, value in d_agreed.items():
-                        schema = d_cache.get((desc_cat, spec_key))
-                        if schema is None:
-                            dropped_no_schema[f"{desc_cat}.{spec_key}"] += 1
-                        elif schema.data_type == "enum" and schema.enum_values and str(value) not in schema.enum_values:
-                            dropped_out_of_enum[f"{desc_cat}.{spec_key}={value}"] += 1
+                        _tally_schema_drop(
+                            desc_cat,
+                            spec_key,
+                            value,
+                            d_cache.get((desc_cat, spec_key)),
+                            dropped_no_schema,
+                            dropped_out_of_enum,
+                        )
                         # Same no-pre-gate rule: the ladder rejects any write
                         # losing to a desc_parse 83 / mpn_decode 85 / vendor
                         # 90 prior (fru_desc_parse is tier 82).

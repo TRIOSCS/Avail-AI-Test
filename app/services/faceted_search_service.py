@@ -39,6 +39,12 @@ INTERNAL_FILTER_VALUES = ("all", *_INTERNAL_MODE_PREDICATES)  # "all" = no-op se
 SEARCHED_WITHIN_DAYS = {"7d": 7, "30d": 30, "90d": 90}
 SEARCHED_WITHIN_VALUES = ("any", *SEARCHED_WITHIN_DAYS)  # "any" = no-op sentinel
 
+# Canonical category match expression — lower(trim(category)). Shared so every
+# count/list/scope path keys cards by the same normalized form and PG can serve the
+# GROUP BY / equality from ix_mc_cat_order_live (098_materials_perf_idx) instead of
+# heap-fetching the raw column.
+_CATEGORY_NORM = func.lower(func.trim(MaterialCard.category))
+
 
 def has_crosses_predicate():
     """The single "Has alternates" predicate — share it across every count/list path.
@@ -86,38 +92,26 @@ def _apply_facet_filters(
         id_column = MaterialSpecFacet.material_card_id
 
     for key, values in filters.items():
+        # Each branch narrows to the cards whose facet row for one spec_key satisfies a
+        # value predicate. They share the same EXISTS-via-IN subquery shape — only the
+        # spec_key derivation and the value predicate differ.
         if key.endswith("_min"):
-            spec_key = key[:-4]
-            query = query.filter(
-                id_column.in_(
-                    db.query(MaterialSpecFacet.material_card_id).filter(
-                        MaterialSpecFacet.category == commodity,
-                        MaterialSpecFacet.spec_key == spec_key,
-                        MaterialSpecFacet.value_numeric >= values,
-                    )
-                )
-            )
+            spec_key, value_predicate = key[:-4], MaterialSpecFacet.value_numeric >= values
         elif key.endswith("_max"):
-            spec_key = key[:-4]
-            query = query.filter(
-                id_column.in_(
-                    db.query(MaterialSpecFacet.material_card_id).filter(
-                        MaterialSpecFacet.category == commodity,
-                        MaterialSpecFacet.spec_key == spec_key,
-                        MaterialSpecFacet.value_numeric <= values,
-                    )
-                )
-            )
+            spec_key, value_predicate = key[:-4], MaterialSpecFacet.value_numeric <= values
         elif isinstance(values, list) and values:
-            query = query.filter(
-                id_column.in_(
-                    db.query(MaterialSpecFacet.material_card_id).filter(
-                        MaterialSpecFacet.category == commodity,
-                        MaterialSpecFacet.spec_key == key,
-                        MaterialSpecFacet.value_text.in_(values),
-                    )
+            spec_key, value_predicate = key, MaterialSpecFacet.value_text.in_(values)
+        else:
+            continue
+        query = query.filter(
+            id_column.in_(
+                db.query(MaterialSpecFacet.material_card_id).filter(
+                    MaterialSpecFacet.category == commodity,
+                    MaterialSpecFacet.spec_key == spec_key,
+                    value_predicate,
                 )
             )
+        )
     return query
 
 
@@ -131,7 +125,7 @@ def get_commodity_counts(db: Session) -> dict[str, int]:
     semantics: lower(trim(x)) IS NOT NULL iff x IS NOT NULL (both functions are
     strict), and id is the non-null PK so count(id) == count(*).
     """
-    cat_expr = func.lower(func.trim(MaterialCard.category))
+    cat_expr = _CATEGORY_NORM
     rows = (
         db.query(cat_expr, func.count())
         .filter(MaterialCard.deleted_at.is_(None), cat_expr.isnot(None))
@@ -240,7 +234,7 @@ def get_manufacturer_options(
             column != "",
         )
         if commodity:
-            q = q.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+            q = q.filter(_CATEGORY_NORM == commodity.lower().strip())
         return q
 
     union = _branch(MaterialCard.brand).union_all(_branch(MaterialCard.manufacturer)).subquery()
@@ -350,7 +344,7 @@ def _apply_card_filters(
     query = query.filter(MaterialCard.deleted_at.is_(None))
 
     if commodity:
-        query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+        query = query.filter(_CATEGORY_NORM == commodity.lower().strip())
 
     ts_query = None
     if q:
@@ -664,7 +658,7 @@ def get_commodity_spec_coverage(db: Session, commodity: str) -> SpecCoverage:
     commodity = commodity.lower().strip()
     commodity_cards = db.query(MaterialCard.id).filter(
         MaterialCard.deleted_at.is_(None),
-        func.lower(func.trim(MaterialCard.category)) == commodity,
+        _CATEGORY_NORM == commodity,
     )
     total = db.query(func.count()).select_from(commodity_cards.subquery()).scalar() or 0
     with_specs = (

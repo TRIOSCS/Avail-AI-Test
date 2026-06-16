@@ -39,6 +39,7 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot
+from .scoring_helpers import month_range
 
 # ── Bonus thresholds ─────────────────────────────────────────────────
 BONUS_1ST = 500.0
@@ -64,6 +65,13 @@ def _tier(value, thresholds):
     return 0
 
 
+def _as_utc(dt):
+    """Treat a naive datetime as UTC; pass tz-aware datetimes through unchanged."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  BUYER AVAIL SCORE
 # ══════════════════════════════════════════════════════════════════════
@@ -74,8 +82,6 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     Returns dict with b1–b5, o1–o5 scores, labels, raw values, and totals.
     """
-    from app.services.scoring_helpers import month_range
-
     start_dt, end_dt = month_range(month)
 
     # ── Fetch user's reqs for the month ──
@@ -309,12 +315,7 @@ def _buyer_b1_speed_to_source(db, req_ids, user_reqs):
     for req in user_reqs:
         first_at = fc_map.get(req.id)
         if first_at and req.created_at:
-            req_created = req.created_at
-            if req_created.tzinfo is None:
-                req_created = req_created.replace(tzinfo=timezone.utc)
-            if first_at.tzinfo is None:
-                first_at = first_at.replace(tzinfo=timezone.utc)
-            hours = (first_at - req_created).total_seconds() / 3600
+            hours = (_as_utc(first_at) - _as_utc(req.created_at)).total_seconds() / 3600
             if hours >= 0:
                 total_hours += hours
                 counted += 1
@@ -324,7 +325,7 @@ def _buyer_b1_speed_to_source(db, req_ids, user_reqs):
 
     avg_hours = total_hours / counted
     # Lower is better
-    score = _tier(1, [])  # default 0
+    score = 0
     if avg_hours < 4:
         score = 10
     elif avg_hours < 8:
@@ -418,10 +419,7 @@ def _buyer_b4_pipeline_hygiene(db, req_ids, user_reqs):
     for req in user_reqs:
         if not req.created_at:
             continue
-        req_created = req.created_at
-        if req_created.tzinfo is None:
-            req_created = req_created.replace(tzinfo=timezone.utc)
-        deadline = req_created + timedelta(days=5)
+        deadline = _as_utc(req.created_at) + timedelta(days=5)
 
         has_offer = (
             db.query(Offer.id)
@@ -446,8 +444,6 @@ def _buyer_b4_pipeline_hygiene(db, req_ids, user_reqs):
 
 def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     """Compute all 10 sales metrics for a given month."""
-    from app.services.scoring_helpers import month_range
-
     start_dt, end_dt = month_range(month)
     # Calls + emails, direction-agnostic: the prior tuple held both call
     # directions, so call_logged (canonical, any direction) preserves intent.
@@ -726,9 +722,7 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
     for q in sent_quotes:
         if not q.sent_at:  # pragma: no cover
             continue
-        sent_at = q.sent_at
-        if sent_at.tzinfo is None:
-            sent_at = sent_at.replace(tzinfo=timezone.utc)
+        sent_at = _as_utc(q.sent_at)
         followup_deadline = sent_at + timedelta(days=5)
 
         # Look for outbound activity on the same company after quote was sent

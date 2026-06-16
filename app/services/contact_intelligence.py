@@ -28,14 +28,11 @@ if TYPE_CHECKING:
 # ── Name splitting ──────────────────────────────────────────────────
 
 
-# Common surname prefixes that should stay with the last name
-_NAME_PREFIXES = {"de", "del", "van", "von", "di", "da", "la", "le", "el", "al", "bin", "ibn"}
-
-
 def split_name(full_name: str | None) -> tuple[str | None, str | None]:
     """Split a full name into (first_name, last_name).
 
-    Handles prefixes (de, van, etc.) and single-word names.
+    Keeps surname prefixes (de, van, etc.) with the last name; handles single-word
+    names.
     """
     if not full_name or not full_name.strip():
         return (None, None)
@@ -44,15 +41,9 @@ def split_name(full_name: str | None) -> tuple[str | None, str | None]:
     if len(parts) == 1:
         return (parts[0], None)
 
-    # Check for surname prefixes: "John van der Berg" → ("John", "van der Berg")
-    first = parts[0]
-    rest = parts[1:]
-
-    # If second word is a prefix, everything after first is last name
-    if rest and rest[0].lower() in _NAME_PREFIXES:
-        return (first, " ".join(rest))
-
-    return (first, " ".join(rest))
+    # First word is the first name; everything after is the last name. This keeps
+    # surname prefixes attached: "John van der Berg" → ("John", "van der Berg").
+    return (parts[0], " ".join(parts[1:]))
 
 
 # ── Contact auto-discovery ──────────────────────────────────────────
@@ -213,6 +204,26 @@ def _run_sync_or_return_empty(async_fn, *args):
         return {}
 
 
+def _run_coro_blocking(coro, *, timeout: float):
+    """Run an async coroutine to completion from sync code, blocking for the result.
+
+    When a loop is already running (scheduler/async context), `asyncio.run` would
+    raise, so the coroutine is executed in a worker thread instead.
+    """
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor() as pool:
+        future = pool.submit(asyncio.run, coro)
+        return future.result(timeout=timeout)
+
+
 # ── Pipeline event logging ──────────────────────────────────────────
 
 
@@ -314,11 +325,7 @@ def compute_contact_relationship_score(
 
     # Recency: 0-7d = 100, decays linearly to 0 at 365d
     if last_interaction_at:
-        lia = (
-            last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc)
-            if last_interaction_at
-            else last_interaction_at
-        )
+        lia = last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc)
         days_since = max((now - lia).total_seconds() / 86400, 0)
         if days_since <= RECENCY_IDEAL_DAYS:
             recency = 100.0
@@ -633,8 +640,6 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
 
 def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int) -> list[dict]:
     """Enrich nudge messages with AI suggestions via Claude Haiku."""
-    import asyncio
-
     from app.utils.claude_client import claude_json
 
     for nudge in nudges[:5]:  # Limit to 5 to avoid excessive API calls
@@ -647,30 +652,15 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
             f'Return JSON: {{"message": "<1-2 sentence suggestion>"}}'
         )
         try:
-            try:
-                asyncio.get_running_loop()
-                import concurrent.futures
-
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(
-                        asyncio.run,
-                        claude_json(
-                            prompt,
-                            system="You are a B2B relationship advisor. Return ONLY valid JSON.",
-                            model_tier="fast",
-                            timeout=10,
-                        ),
-                    )
-                    result = future.result(timeout=15)
-            except RuntimeError:
-                result = asyncio.run(
-                    claude_json(
-                        prompt,
-                        system="You are a B2B relationship advisor. Return ONLY valid JSON.",
-                        model_tier="fast",
-                        timeout=10,
-                    )
-                )
+            result = _run_coro_blocking(
+                claude_json(
+                    prompt,
+                    system="You are a B2B relationship advisor. Return ONLY valid JSON.",
+                    model_tier="fast",
+                    timeout=10,
+                ),
+                timeout=15,
+            )
             if result and isinstance(result, dict) and result.get("message"):
                 nudge["message"] = result["message"]
         except Exception as e:
@@ -711,33 +701,18 @@ def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) 
     )
 
     try:
-        import asyncio
-
         from app.utils.claude_client import claude_text
 
         prompt = (
             f"Write a 2-3 sentence relationship summary for this vendor contact:\n\n{context}\n\n"
             f"Focus on the health of the relationship and any recommended actions."
         )
-        try:
-            asyncio.get_running_loop()
-            # Already in async context — run in thread pool
-            import concurrent.futures
-
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(
-                    asyncio.run,
-                    claude_text(
-                        prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15
-                    ),
-                )
-                result = future.result(timeout=20)
-        except RuntimeError:
-            result = asyncio.run(
-                claude_text(
-                    prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15
-                )
-            )
+        result = _run_coro_blocking(
+            claude_text(
+                prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15
+            ),
+            timeout=20,
+        )
         if result:
             return result
     except Exception as e:

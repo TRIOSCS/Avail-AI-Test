@@ -23,6 +23,29 @@ from app.models import (
 from app.utils.sql_helpers import escape_like
 
 
+def _vendor_results_from_rows(rows, db: Session, manufacturer: str | None, level: int) -> list[dict]:
+    """Build affinity-match dicts from (vendor_name_normalized, vendor_name, mpn_count)
+    rows.
+
+    Shared by L1 and L3, which produce identical result shapes apart from the level.
+    """
+    results = []
+    for row in rows:
+        vendor_norm = row.vendor_name_normalized or row.vendor_name.lower()
+        vc = db.query(VendorCard).filter(VendorCard.normalized_name == vendor_norm).first()
+        results.append(
+            {
+                "vendor_name": row.vendor_name,
+                "vendor_id": vc.id if vc else None,
+                "mpn_count": row.mpn_count,
+                "manufacturer": manufacturer,
+                "level": level,
+                "confidence": 0.0,
+            }
+        )
+    return results
+
+
 def find_affinity_vendors_l1(mpn: str, db: Session) -> list[dict]:
     """Find vendors who supply other MPNs from the same manufacturer as the target
     MPN."""
@@ -56,20 +79,7 @@ def find_affinity_vendors_l1(mpn: str, db: Session) -> list[dict]:
         .all()
     )
 
-    results = []
-    for row in rows:
-        vendor_norm = row.vendor_name_normalized or row.vendor_name.lower()
-        vc = db.query(VendorCard).filter(VendorCard.normalized_name == vendor_norm).first()
-        results.append(
-            {
-                "vendor_name": row.vendor_name,
-                "vendor_id": vc.id if vc else None,
-                "mpn_count": row.mpn_count,
-                "manufacturer": manufacturer,
-                "level": 1,
-                "confidence": 0.0,
-            }
-        )
+    results = _vendor_results_from_rows(rows, db, manufacturer, level=1)
 
     logger.info("L1: found {} vendors for manufacturer={} (MPN={})", len(results), manufacturer, mpn)
     return results
@@ -182,20 +192,7 @@ def find_affinity_vendors_l3(mpn: str, manufacturer: str | None, db: Session) ->
         .all()
     )
 
-    results = []
-    for row in rows:
-        vendor_norm = row.vendor_name_normalized or row.vendor_name.lower()
-        vc = db.query(VendorCard).filter(VendorCard.normalized_name == vendor_norm).first()
-        results.append(
-            {
-                "vendor_name": row.vendor_name,
-                "vendor_id": vc.id if vc else None,
-                "mpn_count": row.mpn_count,
-                "manufacturer": manufacturer,
-                "level": 3,
-                "confidence": 0.0,
-            }
-        )
+    results = _vendor_results_from_rows(rows, db, manufacturer, level=3)
 
     logger.info("L3: found {} vendors for category={} (MPN={})", len(results), category, mpn)
     return results

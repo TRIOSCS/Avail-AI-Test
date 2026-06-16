@@ -135,10 +135,8 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     card_offer_ids: dict[int, set[int]] = {}
     # Map normalized_name → set of offer_ids (for vendors matched by name)
     name_offer_ids: dict[str, set[int]] = {}
-    all_offer_ids: set[int] = set()
 
     for oid, vcid, vname in offer_rows:
-        all_offer_ids.add(oid)
         if vcid:
             card_offer_ids.setdefault(vcid, set()).add(oid)
         if vname:

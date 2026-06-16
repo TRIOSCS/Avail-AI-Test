@@ -379,11 +379,7 @@ async def run_explorium_discovery_batch(
                     discovery_source="explorium",
                     enrichment_data={
                         "explorium": r.get("enrichment_raw", {}),
-                        "signals": {
-                            "intent": r.get("intent", {}),
-                            "events": r.get("events", []),
-                            "hiring": r.get("hiring", {}),
-                        },
+                        "signals": signals,
                     },
                 )
                 prospects.append(prospect)

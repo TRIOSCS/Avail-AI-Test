@@ -27,6 +27,17 @@ from app.services.tagging import (
 )
 
 
+def _untagged_card_filter(db: Session):
+    """SQL filter selecting MaterialCards with no MaterialTag records at all."""
+    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
+    return ~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id))
+
+
+def _count_untagged_cards(db: Session) -> int:
+    """Count MaterialCards that carry no MaterialTag records."""
+    return db.query(func.count(MaterialCard.id)).filter(_untagged_card_filter(db)).scalar() or 0
+
+
 def seed_from_existing_manufacturers(db: Session) -> dict:
     """Harvest MaterialCards with manufacturer already populated.
 
@@ -104,12 +115,7 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
     Returns: {total_processed, total_matched, total_unmatched, new_brands_discovered}
     """
     # Cards with NO MaterialTag records at all
-    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
-    total_untagged = (
-        db.query(func.count(MaterialCard.id))
-        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
-        .scalar()
-    )
+    total_untagged = _count_untagged_cards(db)
 
     if not total_untagged:
         logger.info("No untagged cards — prefix backfill skipped")
@@ -128,7 +134,7 @@ def run_prefix_backfill(db: Session, batch_size: int = 1000) -> dict:
         batch = (
             db.query(MaterialCard)
             .filter(
-                ~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)),
+                _untagged_card_filter(db),
                 MaterialCard.id > last_id,
             )
             .order_by(MaterialCard.id)
@@ -207,12 +213,7 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
 
     Called by: app.routers.tagging_admin, app.scheduler
     """
-    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
-    total_untagged = (
-        db.query(func.count(MaterialCard.id))
-        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
-        .scalar()
-    )
+    total_untagged = _count_untagged_cards(db)
 
     if not total_untagged:
         logger.info("Sighting mining: no untagged cards")
@@ -229,7 +230,7 @@ def backfill_manufacturer_from_sightings(db: Session, batch_size: int = 500) -> 
         cards = (
             db.query(MaterialCard)
             .filter(
-                ~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)),
+                _untagged_card_filter(db),
                 MaterialCard.id > last_id,
             )
             .order_by(MaterialCard.id)
@@ -376,12 +377,7 @@ def analyze_untagged_prefixes(db: Session, top_n: int = 100) -> list[dict]:
     """
     from app.services.prefix_lookup import PREFIX_TABLE
 
-    tagged_ids = db.query(MaterialTag.material_card_id).distinct().subquery()
-    untagged = (
-        db.query(MaterialCard.normalized_mpn)
-        .filter(~MaterialCard.id.in_(db.query(tagged_ids.c.material_card_id)))
-        .all()
-    )
+    untagged = db.query(MaterialCard.normalized_mpn).filter(_untagged_card_filter(db)).all()
 
     if not untagged:
         return []

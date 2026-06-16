@@ -171,6 +171,11 @@ def price_trend_for_card(db: Session, card_id: int) -> PriceTrend | None:
 # ── Resolution + assembly ──
 
 
+def _count(db: Session, model: type, *conditions) -> int:
+    """COUNT(model.id) over the given filter conditions, coalescing NULL → 0."""
+    return db.query(func.count(model.id)).filter(*conditions).scalar() or 0
+
+
 def _resolve_card(db: Session, normalized_key: str) -> MaterialCard | None:
     if not normalized_key:
         return None
@@ -188,7 +193,7 @@ def get_part_history(db: Session, normalized_key: str) -> PartHistory:
         return PartHistory(found=False)
 
     offers = offers_for_card(db, card.id)
-    offers_count = db.query(func.count(Offer.id)).filter(Offer.material_card_id == card.id).scalar() or 0
+    offers_count = _count(db, Offer, Offer.material_card_id == card.id)
     buyers = buyers_for_card(db, card.id)
 
     # "Confirmed / Won" = three independent kinds of evidence the part actually moved:
@@ -196,27 +201,17 @@ def get_part_history(db: Session, normalized_key: str) -> PartHistory:
     # WON requisitions, and customer-purchase rows. The total is their sum.
     won_offers = won_offers_for_card(db, card.id)
     customer_purchases = customer_purchases_for_card(db, card.id)
-    won_offer_count = (
-        db.query(func.count(Offer.id))
-        .filter(Offer.material_card_id == card.id, Offer.status.in_(_WON_OFFER_STATUSES))
-        .scalar()
-    ) or 0
-    won_req_count = (
-        db.query(func.count(Requirement.id))
-        .filter(Requirement.material_card_id == card.id, Requirement.sourcing_status == SourcingStatus.WON)
-        .scalar()
-    ) or 0
-    customer_count = (
-        db.query(func.count(CustomerPartHistory.id)).filter(CustomerPartHistory.material_card_id == card.id).scalar()
-    ) or 0
+    won_offer_count = _count(db, Offer, Offer.material_card_id == card.id, Offer.status.in_(_WON_OFFER_STATUSES))
+    won_req_count = _count(
+        db, Requirement, Requirement.material_card_id == card.id, Requirement.sourcing_status == SourcingStatus.WON
+    )
+    customer_count = _count(db, CustomerPartHistory, CustomerPartHistory.material_card_id == card.id)
     confirmed_count = won_offer_count + won_req_count + customer_count
 
     sightings = sightings_for_card(db, card.id)
-    sightings_count = db.query(func.count(Sighting.id)).filter(Sighting.material_card_id == card.id).scalar() or 0
+    sightings_count = _count(db, Sighting, Sighting.material_card_id == card.id)
     requirements = requirements_for_card(db, card.id)
-    requirements_count = (
-        db.query(func.count(Requirement.id)).filter(Requirement.material_card_id == card.id).scalar() or 0
-    )
+    requirements_count = _count(db, Requirement, Requirement.material_card_id == card.id)
     price_trend = price_trend_for_card(db, card.id)
 
     return PartHistory(
