@@ -111,13 +111,8 @@ class OEMSecretsConnector(BaseConnector):
             prices_obj = item.get("prices")
             if isinstance(prices_obj, dict):
                 # Pick USD prices, fall back to first available currency
-                price_list = prices_obj.get("USD", [])
-                if not price_list:
-                    for _cur, plist in prices_obj.items():
-                        if plist:
-                            price_list = plist
-                            break
-                if price_list and isinstance(price_list, list) and len(price_list) > 0:
+                price_list = prices_obj.get("USD") or next((plist for plist in prices_obj.values() if plist), [])
+                if isinstance(price_list, list) and price_list:
                     # Use the lowest unit break price (first entry)
                     price = price_list[0].get("unit_price")
             if price is None:

@@ -46,6 +46,55 @@ OFFER_PATTERNS = [
 # Part number pattern — uppercase alphanumeric with dashes/slashes, 4+ chars
 MPN_PATTERN = re.compile(r"\b([A-Z0-9][A-Z0-9\-/\.#]{3,30}[A-Z0-9])\b")
 
+# Uppercase tokens that look like part numbers but are HTML/email boilerplate.
+MPN_FALSE_POSITIVES = {
+    "HTTP",
+    "HTTPS",
+    "HTML",
+    "HREF",
+    "FONT",
+    "SIZE",
+    "COLOR",
+    "TABLE",
+    "STYLE",
+    "CLASS",
+    "WIDTH",
+    "HEIGHT",
+    "ALIGN",
+    "BORDER",
+    "CELLPADDING",
+    "CELLSPACING",
+    "COLSPAN",
+    "ROWSPAN",
+    "VALIGN",
+    "BGCOLOR",
+    "IMAGE",
+    "ARIAL",
+    "VERDANA",
+    "HELVETICA",
+    "SERIF",
+    "SANS",
+    "SPAN",
+    "MAILTO",
+    "SUBJECT",
+    "FROM",
+    "BEST",
+    "REGARDS",
+    "THANK",
+    "THANKS",
+    "PLEASE",
+    "HELLO",
+    "DEAR",
+    "SINCERELY",
+    "KIND",
+    "OFFER",
+    "QUOTE",
+    "PRICE",
+    "STOCK",
+    "AVAILABLE",
+    "QUANTITY",
+}
+
 # Email signature extraction patterns
 PHONE_PATTERN = re.compile(
     r"(?:(?:phone|tel|cell|mobile|fax|ph|direct|office)[\s:.\-]*)?"
@@ -127,13 +176,13 @@ class EmailMiner:
 
     # ── H8: Delta Query helpers ──────────────────────────────────────
 
-    def _get_delta_token(self, folder: str) -> str | None:
-        """Retrieve stored delta token for incremental sync (H8)."""
+    def _get_sync_state(self, folder: str):
+        """Fetch the SyncState row for this user/folder, or None (H8)."""
         if not self.db or not self.user_id:
             return None
         from app.models import SyncState
 
-        sync = (
+        return (
             self.db.query(SyncState)
             .filter(
                 SyncState.user_id == self.user_id,
@@ -141,6 +190,10 @@ class EmailMiner:
             )
             .first()
         )
+
+    def _get_delta_token(self, folder: str) -> str | None:
+        """Retrieve stored delta token for incremental sync (H8)."""
+        sync = self._get_sync_state(folder)
         return sync.delta_token if sync else None
 
     def _save_delta_token(self, folder: str, token: str):
@@ -149,14 +202,7 @@ class EmailMiner:
             return
         from app.models import SyncState
 
-        sync = (
-            self.db.query(SyncState)
-            .filter(
-                SyncState.user_id == self.user_id,
-                SyncState.folder == folder,
-            )
-            .first()
-        )
+        sync = self._get_sync_state(folder)
         if sync:
             sync.delta_token = token
             sync.last_sync_at = datetime.now(timezone.utc)
@@ -173,18 +219,7 @@ class EmailMiner:
 
     def _clear_delta_token(self, folder: str):
         """Discard a stale delta token so the next scan does a full re-sync."""
-        if not self.db or not self.user_id:
-            return
-        from app.models import SyncState
-
-        sync = (
-            self.db.query(SyncState)
-            .filter(
-                SyncState.user_id == self.user_id,
-                SyncState.folder == folder,
-            )
-            .first()
-        )
+        sync = self._get_sync_state(folder)
         if sync:
             sync.delta_token = None
             self.db.flush()
@@ -296,13 +331,14 @@ class EmailMiner:
             c["message_count"] += 1
 
             received = msg.get("receivedDateTime")
+            received_dt = None
             if received:
                 try:
-                    dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
-                    if not c["last_contact"] or dt > c["last_contact"]:
-                        c["last_contact"] = dt
+                    received_dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
                 except Exception:
                     logger.debug("Failed to parse receivedDateTime", exc_info=True)
+            if received_dt and (not c["last_contact"] or received_dt > c["last_contact"]):
+                c["last_contact"] = received_dt
 
             # Check if this is an offer email (regex pre-filter)
             regex_matches = self._count_offer_matches(subject, body)
@@ -326,13 +362,6 @@ class EmailMiner:
                     from app.services.email_intelligence_service import (
                         process_email_intelligence,
                     )
-
-                    received_dt = None
-                    if received:
-                        try:
-                            received_dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
-                        except Exception:
-                            logger.debug("Failed to parse receivedDateTime for classification", exc_info=True)
 
                     await process_email_intelligence(
                         self.db,
@@ -619,58 +648,9 @@ class EmailMiner:
         """Extract likely electronic component part numbers from text."""
         candidates = MPN_PATTERN.findall(text.upper())
 
-        false_positives = {
-            "HTTP",
-            "HTTPS",
-            "HTML",
-            "HREF",
-            "FONT",
-            "SIZE",
-            "COLOR",
-            "TABLE",
-            "STYLE",
-            "CLASS",
-            "WIDTH",
-            "HEIGHT",
-            "ALIGN",
-            "BORDER",
-            "CELLPADDING",
-            "CELLSPACING",
-            "COLSPAN",
-            "ROWSPAN",
-            "VALIGN",
-            "BGCOLOR",
-            "IMAGE",
-            "ARIAL",
-            "VERDANA",
-            "HELVETICA",
-            "SERIF",
-            "SANS",
-            "SPAN",
-            "MAILTO",
-            "SUBJECT",
-            "FROM",
-            "BEST",
-            "REGARDS",
-            "THANK",
-            "THANKS",
-            "PLEASE",
-            "HELLO",
-            "DEAR",
-            "SINCERELY",
-            "KIND",
-            "REGARDS",
-            "OFFER",
-            "QUOTE",
-            "PRICE",
-            "STOCK",
-            "AVAILABLE",
-            "QUANTITY",
-        }
-
         valid = set()
         for c in candidates:
-            if c in false_positives:
+            if c in MPN_FALSE_POSITIVES:
                 continue
             if len(c) < 4:
                 continue

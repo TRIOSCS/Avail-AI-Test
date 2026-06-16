@@ -184,6 +184,17 @@ def _parse_retry_after(response: httpx.Response) -> float:
     return 5.0 + random.uniform(0, 2)
 
 
+def _round_price(price) -> float | None:
+    """Coerce a raw price to a float rounded to 4 dp, or None when not numeric."""
+    value = safe_float(price)
+    return round(value, 4) if value is not None else None
+
+
+def _octopart_search_url(pn: str) -> str:
+    """Octopart search-page URL for a part number (fallback when no direct URL)."""
+    return f"https://octopart.com/search?q={quote_plus(pn)}"
+
+
 class NexarConnector(BaseConnector):
     """Nexar/Octopart API — full seller data via GraphQL or REST v4."""
 
@@ -272,20 +283,9 @@ class NexarConnector(BaseConnector):
     async def _run_query(self, query: str, part_number: str) -> dict:
         from ..http_client import http
 
-        token = await self._get_token()
-        r = await http.post(
-            self.API_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            },
-            json={"query": query, "variables": {"mpn": part_number}},
-            timeout=self.timeout,
-        )
-        if r.status_code == 401:
-            self._token = None
+        async def post() -> httpx.Response:
             token = await self._get_token()
-            r = await http.post(
+            return await http.post(
                 self.API_URL,
                 headers={
                     "Authorization": f"Bearer {token}",
@@ -294,6 +294,11 @@ class NexarConnector(BaseConnector):
                 json={"query": query, "variables": {"mpn": part_number}},
                 timeout=self.timeout,
             )
+
+        r = await post()
+        if r.status_code == 401:
+            self._token = None  # force a fresh token, then retry once
+            r = await post()
         r.raise_for_status()
         return r.json()
 
@@ -339,7 +344,7 @@ class NexarConnector(BaseConnector):
         """Parse Octopart REST v4 /parts/search response (v3-style JSON)."""
         results = []
         seen = set()
-        search_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+        search_url = _octopart_search_url(pn)
 
         for hit in data.get("results", []):
             item = hit.get("item") or hit  # v4 nests under "item"
@@ -383,7 +388,7 @@ class NexarConnector(BaseConnector):
                             "manufacturer": mfr,
                             "mpn_matched": mpn,
                             "qty_available": safe_int(qty),
-                            "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
+                            "unit_price": _round_price(price),
                             "currency": currency,
                             "source_type": "octopart",
                             "is_authorized": auth,
@@ -442,7 +447,7 @@ class NexarConnector(BaseConnector):
     def _parse_full(self, results_data: list, pn: str) -> list[dict]:
         results = []
         seen = set()
-        octopart_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+        octopart_url = _octopart_search_url(pn)
 
         for hit in results_data:
             part = hit.get("part") or {}
@@ -526,7 +531,7 @@ class NexarConnector(BaseConnector):
                             "manufacturer": mfr,
                             "mpn_matched": mpn,
                             "qty_available": safe_int(qty),
-                            "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
+                            "unit_price": _round_price(price),
                             "currency": currency,
                             "source_type": "octopart",
                             "is_authorized": auth,
@@ -545,14 +550,13 @@ class NexarConnector(BaseConnector):
     def _parse_aggregate(self, results_data: list, pn: str) -> list[dict]:
         """Parse Nexar aggregate results (totalAvail + medianPrice + direct URLs)."""
         results = []
-        search_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+        search_url = _octopart_search_url(pn)
 
         for hit in results_data:
             part = hit.get("part") or {}
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
             total_avail = part.get("totalAvail")
-            _ = part.get("avgAvail")
             median_price = part.get("medianPrice1000") or {}
             price = median_price.get("price")
             currency = median_price.get("currency", "USD")
@@ -572,7 +576,7 @@ class NexarConnector(BaseConnector):
                     "manufacturer": mfr,
                     "mpn_matched": mpn,
                     "qty_available": safe_int(total_avail),
-                    "unit_price": round(safe_float(price), 4) if safe_float(price) is not None else None,
+                    "unit_price": _round_price(price),
                     "currency": currency,
                     "source_type": "octopart",
                     "is_authorized": True,
