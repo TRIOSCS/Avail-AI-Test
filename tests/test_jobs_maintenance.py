@@ -110,35 +110,22 @@ def test_reset_connector_errors_exception(scheduler_db):
 # ── _job_auto_attribute_activities() ──────────────────────────────────
 
 
-def test_auto_attribute_activities_success(scheduler_db):
-    """_job_auto_attribute_activities happy path with matches."""
-    mock_attribution = MagicMock(
-        return_value={
-            "rule_matched": 5,
-            "ai_matched": 3,
-            "auto_dismissed": 1,
-        }
-    )
+@pytest.mark.parametrize(
+    "report",
+    [
+        pytest.param({"rule_matched": 5, "ai_matched": 3, "auto_dismissed": 1}, id="with_matches"),
+        pytest.param({"rule_matched": 0, "ai_matched": 0, "auto_dismissed": 0}, id="no_matches"),
+    ],
+)
+def test_auto_attribute_activities_success(scheduler_db, report):
+    """_job_auto_attribute_activities runs the service and exercises both the match and
+    no-match logging branches."""
+    mock_attribution = MagicMock(return_value=report)
     with patch("app.services.auto_attribution_service.run_auto_attribution", mock_attribution):
         from app.jobs.maintenance_jobs import _job_auto_attribute_activities
 
         asyncio.run(_job_auto_attribute_activities())
     mock_attribution.assert_called_once()
-
-
-def test_auto_attribute_activities_no_matches(scheduler_db):
-    """_job_auto_attribute_activities no matches."""
-    mock_attribution = MagicMock(
-        return_value={
-            "rule_matched": 0,
-            "ai_matched": 0,
-            "auto_dismissed": 0,
-        }
-    )
-    with patch("app.services.auto_attribution_service.run_auto_attribution", mock_attribution):
-        from app.jobs.maintenance_jobs import _job_auto_attribute_activities
-
-        asyncio.run(_job_auto_attribute_activities())
 
 
 def test_auto_attribute_activities_error(scheduler_db):
@@ -154,33 +141,22 @@ def test_auto_attribute_activities_error(scheduler_db):
 # ── _job_auto_dedup() ─────────────────────────────────────────────────
 
 
-def test_auto_dedup_success(scheduler_db):
-    """_job_auto_dedup happy path with merges."""
-    mock_dedup = MagicMock(
-        return_value={
-            "vendors_merged": 2,
-            "companies_merged": 1,
-        }
-    )
+@pytest.mark.parametrize(
+    "report",
+    [
+        pytest.param({"vendors_merged": 2, "companies_merged": 1}, id="with_merges"),
+        pytest.param({"vendors_merged": 0, "companies_merged": 0}, id="no_merges"),
+    ],
+)
+def test_auto_dedup_success(scheduler_db, report):
+    """_job_auto_dedup runs the service and exercises both the merge and no-merge
+    logging branches."""
+    mock_dedup = MagicMock(return_value=report)
     with patch("app.services.auto_dedup_service.run_auto_dedup", mock_dedup):
         from app.jobs.maintenance_jobs import _job_auto_dedup
 
         asyncio.run(_job_auto_dedup())
     mock_dedup.assert_called_once()
-
-
-def test_auto_dedup_no_merges(scheduler_db):
-    """_job_auto_dedup no merges."""
-    mock_dedup = MagicMock(
-        return_value={
-            "vendors_merged": 0,
-            "companies_merged": 0,
-        }
-    )
-    with patch("app.services.auto_dedup_service.run_auto_dedup", mock_dedup):
-        from app.jobs.maintenance_jobs import _job_auto_dedup
-
-        asyncio.run(_job_auto_dedup())
 
 
 def test_auto_dedup_error(scheduler_db):

@@ -235,31 +235,38 @@ class TestSourcingStatusTransitions:
         assert validate_transition("requirement", "open", "open") is True
 
 
+def _make_offer(db_session, *, mpn, status):
+    """Create a Requisition + Requirement + Offer with the given MPN and offer
+    status."""
+    from app.models.offers import Offer
+    from app.models.sourcing import Requirement, Requisition
+
+    req = Requisition(name="Test Req", customer_name="Test", status="active")
+    db_session.add(req)
+    db_session.flush()
+    reqmt = Requirement(requisition_id=req.id, primary_mpn=mpn)
+    db_session.add(reqmt)
+    db_session.flush()
+    offer = Offer(
+        requirement_id=reqmt.id,
+        requisition_id=req.id,
+        vendor_name="V",
+        mpn=mpn,
+        status=status,
+        unit_price=1.0,
+        source="manual",
+    )
+    db_session.add(offer)
+    db_session.commit()
+    return offer
+
+
 class TestStatusMachineValidation:
     """Status machine prevents invalid offer/quote transitions."""
 
     def test_offer_sold_cannot_go_active(self, client, db_session):
         """Once sold, offer cannot go back to active."""
-        from app.models.offers import Offer
-        from app.models.sourcing import Requirement, Requisition
-
-        req = Requisition(name="Test Req", customer_name="Test", status="active")
-        db_session.add(req)
-        db_session.flush()
-        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-001")
-        db_session.add(reqmt)
-        db_session.flush()
-        offer = Offer(
-            requirement_id=reqmt.id,
-            requisition_id=req.id,
-            vendor_name="V",
-            mpn="TEST-001",
-            status="sold",
-            unit_price=1.0,
-            source="manual",
-        )
-        db_session.add(offer)
-        db_session.commit()
+        offer = _make_offer(db_session, mpn="TEST-001", status="sold")
 
         # Try to approve (→ active) a sold offer via generic update
         resp = client.put(
@@ -270,26 +277,7 @@ class TestStatusMachineValidation:
 
     def test_offer_rejected_is_terminal(self, client, db_session):
         """Rejected offers cannot transition to any other status."""
-        from app.models.offers import Offer
-        from app.models.sourcing import Requirement, Requisition
-
-        req = Requisition(name="Test Req", customer_name="Test", status="active")
-        db_session.add(req)
-        db_session.flush()
-        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-002")
-        db_session.add(reqmt)
-        db_session.flush()
-        offer = Offer(
-            requirement_id=reqmt.id,
-            requisition_id=req.id,
-            vendor_name="V",
-            mpn="TEST-002",
-            status="rejected",
-            unit_price=1.0,
-            source="manual",
-        )
-        db_session.add(offer)
-        db_session.commit()
+        offer = _make_offer(db_session, mpn="TEST-002", status="rejected")
 
         resp = client.put(
             f"/api/offers/{offer.id}",
@@ -299,26 +287,7 @@ class TestStatusMachineValidation:
 
     def test_valid_offer_transition_succeeds(self, client, db_session):
         """pending_review → active is a valid transition."""
-        from app.models.offers import Offer
-        from app.models.sourcing import Requirement, Requisition
-
-        req = Requisition(name="Test Req", customer_name="Test", status="active")
-        db_session.add(req)
-        db_session.flush()
-        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-003")
-        db_session.add(reqmt)
-        db_session.flush()
-        offer = Offer(
-            requirement_id=reqmt.id,
-            requisition_id=req.id,
-            vendor_name="V",
-            mpn="TEST-003",
-            status="pending_review",
-            unit_price=1.0,
-            source="manual",
-        )
-        db_session.add(offer)
-        db_session.commit()
+        offer = _make_offer(db_session, mpn="TEST-003", status="pending_review")
 
         resp = client.put(f"/api/offers/{offer.id}/approve")
         assert resp.status_code == 200

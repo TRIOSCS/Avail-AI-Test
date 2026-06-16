@@ -74,6 +74,16 @@ def test_select_system_prompt_by_entity():
     assert "relationship" in svc._system_prompt(DigestEntityType.COMPANY).lower()
 
 
+class _LockHeldRedis:
+    """Stub Redis whose lock is always held by someone else (SET NX fails)."""
+
+    def set(self, *a, **k):
+        return False
+
+    def delete(self, *a, **k):
+        return None
+
+
 def _mk_activity(db, **kw):
     from datetime import datetime, timezone
 
@@ -198,14 +208,7 @@ async def test_lock_miss_without_existing_returns_generating(db_session, monkeyp
 
     monkeypatch.setattr("app.utils.claude_client.claude_structured", fake_cs)
 
-    class FakeRedis:
-        def set(self, *a, **k):
-            return False  # lock already held by someone else
-
-        def delete(self, *a, **k):
-            return None
-
-    monkeypatch.setattr(svc, "_get_redis", lambda: FakeRedis())
+    monkeypatch.setattr(svc, "_get_redis", lambda: _LockHeldRedis())
 
     _mk_activity(db_session, requisition_id=5)
     _mk_activity(db_session, requisition_id=5)
@@ -292,14 +295,7 @@ async def test_lock_miss_with_existing_serves_stale(db_session, monkeypatch):
     db_session.commit()
     _mk_activity(db_session, requisition_id=22)
 
-    class BusyRedis:
-        def set(self, *a, **k):
-            return False
-
-        def delete(self, *a, **k):
-            return None
-
-    monkeypatch.setattr(svc, "_get_redis", lambda: BusyRedis())
+    monkeypatch.setattr(svc, "_get_redis", lambda: _LockHeldRedis())
 
     out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 22, db_session)
     assert out["state"] == "ready"

@@ -11,7 +11,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import BuyerLeaderboardSnapshot, BuyPlan, Offer, StockListHash, User
+from app.models import BuyerLeaderboardSnapshot, Offer, StockListHash, User
 from app.services.buyer_leaderboard import (
     PTS_LOGGED,
     PTS_STOCK_LIST,
@@ -64,17 +64,6 @@ def _make_offer(db: Session, user: User, created_at: datetime) -> Offer:
     db.add(o)
     db.flush()
     return o
-
-
-def _make_buy_plan(db: Session, status: str = "draft") -> BuyPlan:
-    bp = BuyPlan(
-        name="BP-TEST",
-        status=status,
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(bp)
-    db.flush()
-    return bp
 
 
 def _make_stock_hash(db: Session, user: User, first_seen_at: datetime) -> StockListHash:

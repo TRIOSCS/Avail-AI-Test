@@ -246,37 +246,32 @@ class TestApproveBuyPlanRoleCheck:
 
 
 class TestShouldAutoApprove:
-    def test_low_cost_no_flags_auto_approves(self, db_session):
+    @pytest.mark.parametrize(
+        ("total_cost", "ai_flags", "expected"),
+        [
+            pytest.param(100.0, [], True, id="low_cost_no_flags_auto_approves"),
+            pytest.param(10000.0, [], False, id="high_cost_does_not_auto_approve"),
+            pytest.param(
+                100.0,
+                [{"type": "stale_offer", "severity": "critical", "message": "test"}],
+                False,
+                id="critical_flags_prevent_auto_approve",
+            ),
+            pytest.param(
+                100.0,
+                [{"type": "low_margin", "severity": "warning", "message": "test"}],
+                True,
+                id="warning_flags_allow_auto_approve",
+            ),
+        ],
+    )
+    def test_auto_approve_decision(self, db_session, total_cost, ai_flags, expected):
         plan, _ = _make_plan_with_lines(
             db_session,
-            total_cost=100.0,
-            ai_flags=[],
+            total_cost=total_cost,
+            ai_flags=ai_flags,
         )
-        assert _should_auto_approve(plan) is True
-
-    def test_high_cost_does_not_auto_approve(self, db_session):
-        plan, _ = _make_plan_with_lines(
-            db_session,
-            total_cost=10000.0,
-            ai_flags=[],
-        )
-        assert _should_auto_approve(plan) is False
-
-    def test_critical_flags_prevent_auto_approve(self, db_session):
-        plan, _ = _make_plan_with_lines(
-            db_session,
-            total_cost=100.0,
-            ai_flags=[{"type": "stale_offer", "severity": "critical", "message": "test"}],
-        )
-        assert _should_auto_approve(plan) is False
-
-    def test_warning_flags_allow_auto_approve(self, db_session):
-        plan, _ = _make_plan_with_lines(
-            db_session,
-            total_cost=100.0,
-            ai_flags=[{"type": "low_margin", "severity": "warning", "message": "test"}],
-        )
-        assert _should_auto_approve(plan) is True
+        assert _should_auto_approve(plan) is expected
 
     def test_submit_and_resubmit_use_same_logic(self, db_session):
         """Verify submit and resubmit produce same auto-approve decision."""

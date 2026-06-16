@@ -303,19 +303,27 @@ class TestFindAffinityVendorsL3:
 
 
 class TestClassifyMpn:
-    def test_successful_classification(self):
+    @pytest.mark.parametrize(
+        ("mpn", "manufacturer", "category"),
+        [
+            ("LM317T", "Texas Instruments", "Voltage Regulator"),
+            ("RC0402", None, "Resistor"),
+        ],
+        ids=["with_manufacturer_hint", "no_manufacturer_hint"],
+    )
+    def test_successful_classification(self, mpn, manufacturer, category):
         from app.services.vendor_affinity_service import _classify_mpn
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Voltage Regulator")])
+        mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text=category)])
 
         mock_anthropic_mod = MagicMock()
         mock_anthropic_mod.Anthropic.return_value = mock_client
 
         with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            result = _classify_mpn("LM317T", "Texas Instruments", "sk-fake")
+            result = _classify_mpn(mpn, manufacturer, "sk-fake")
 
-        assert result == "Voltage Regulator"
+        assert result == category
 
     def test_returns_none_on_exception(self):
         from app.services.vendor_affinity_service import _classify_mpn
@@ -327,20 +335,6 @@ class TestClassifyMpn:
             result = _classify_mpn("LM317T", None, "sk-fake")
 
         assert result is None
-
-    def test_no_manufacturer_hint(self):
-        from app.services.vendor_affinity_service import _classify_mpn
-
-        mock_client = MagicMock()
-        mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Resistor")])
-
-        mock_anthropic_mod = MagicMock()
-        mock_anthropic_mod.Anthropic.return_value = mock_client
-
-        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
-            result = _classify_mpn("RC0402", None, "sk-fake")
-
-        assert result == "Resistor"
 
 
 class TestScoreAffinityMatches:

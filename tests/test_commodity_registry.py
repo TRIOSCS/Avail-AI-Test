@@ -4,6 +4,7 @@ Covers: app/services/commodity_registry.py
 Depends on: conftest.py, faceted search models
 """
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema
@@ -28,10 +29,17 @@ def test_get_all_commodities_returns_flat_list():
     assert len(commodities) >= 40
 
 
-def test_get_parent_group_returns_group_name():
-    assert get_parent_group("capacitors") == "Passives"
-    assert get_parent_group("network_cards") == "IT / Server Hardware"
-    assert get_parent_group("cpu") == "Processors & Programmable"
+@pytest.mark.parametrize(
+    ("commodity", "expected_group"),
+    [
+        ("capacitors", "Passives"),
+        ("network_cards", "IT / Server Hardware"),
+        ("cpu", "Processors & Programmable"),
+        ("not_a_real_commodity", "Misc"),
+    ],
+)
+def test_get_parent_group_returns_group_name(commodity, expected_group):
+    assert get_parent_group(commodity) == expected_group
 
 
 def test_trio_taxonomy_additions_have_parents_and_display_names():
@@ -44,11 +52,6 @@ def test_trio_taxonomy_additions_have_parents_and_display_names():
     assert get_display_name("tape_drives") == "Tape Drives"
     assert get_display_name("ics_other") == "ICs (General)"
     assert get_display_name("oem_assemblies") == "OEM Assemblies"
-
-
-def test_get_parent_group_unknown_returns_misc():
-    group = get_parent_group("not_a_real_commodity")
-    assert group == "Misc"
 
 
 def test_seed_commodity_schemas_inserts_rows(db_session: Session):
@@ -68,7 +71,5 @@ def test_seed_commodity_schemas_is_idempotent(db_session: Session):
 
 def test_expanded_seeds_have_minimum_specs():
     """Every commodity should have at least 4 specs after expansion."""
-    from app.services.commodity_registry import COMMODITY_SPEC_SEEDS
-
     for commodity, specs in COMMODITY_SPEC_SEEDS.items():
         assert len(specs) >= 4, f"{commodity} has only {len(specs)} specs, expected >= 4"

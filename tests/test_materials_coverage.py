@@ -22,10 +22,40 @@ import os
 os.environ["TESTING"] = "1"
 
 import io
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
+
 from app.models import MaterialCard, Offer, VendorCard
+
+
+@contextmanager
+def admin_client(db_session, admin_user):
+    """Yield a TestClient with db + admin auth dependency overrides applied.
+
+    Restores the original overrides on exit. Used by the admin-only endpoints
+    (delete/restore/merge/backfill) which all need the same override scaffolding.
+    """
+    from app.database import get_db
+    from app.dependencies import require_admin, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = lambda: admin_user
+    app.dependency_overrides[require_admin] = lambda: admin_user
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+        app.dependency_overrides.pop(require_admin, None)
 
 
 class TestListMaterialsShortQuery:
@@ -268,12 +298,6 @@ class TestDeleteMaterialAlreadyDeleted:
 
     def test_delete_already_deleted_returns_400(self, client, db_session, admin_user):
         """DELETE on already-deleted card returns 400."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
         mc = MaterialCard(
             normalized_mpn="alreadydel001",
             display_mpn="ALREADYDEL001",
@@ -285,20 +309,8 @@ class TestDeleteMaterialAlreadyDeleted:
         db_session.add(mc)
         db_session.commit()
 
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.delete(f"/api/materials/{mc.id}")
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.delete(f"/api/materials/{mc.id}")
 
         assert resp.status_code == 400
 
@@ -308,12 +320,6 @@ class TestRestoreMaterial:
 
     def test_restore_deleted_card(self, client, db_session, admin_user):
         """POST /api/materials/{id}/restore restores a soft-deleted card."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
         mc = MaterialCard(
             normalized_mpn="restore001",
             display_mpn="RESTORE001",
@@ -325,20 +331,8 @@ class TestRestoreMaterial:
         db_session.add(mc)
         db_session.commit()
 
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post(f"/api/materials/{mc.id}/restore")
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post(f"/api/materials/{mc.id}/restore")
 
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -347,12 +341,6 @@ class TestRestoreMaterial:
 
     def test_restore_not_deleted_returns_400(self, client, db_session, admin_user):
         """POST /api/materials/{id}/restore on non-deleted card returns 400."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
         mc = MaterialCard(
             normalized_mpn="restore002",
             display_mpn="RESTORE002",
@@ -363,45 +351,15 @@ class TestRestoreMaterial:
         db_session.add(mc)
         db_session.commit()
 
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post(f"/api/materials/{mc.id}/restore")
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post(f"/api/materials/{mc.id}/restore")
 
         assert resp.status_code == 400
 
     def test_restore_not_found_returns_404(self, client, db_session, admin_user):
         """POST /api/materials/99999/restore returns 404."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post("/api/materials/99999/restore")
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post("/api/materials/99999/restore")
 
         assert resp.status_code == 404
 
@@ -409,108 +367,32 @@ class TestRestoreMaterial:
 class TestMergeMaterial:
     """Merge endpoint (lines 355-369)."""
 
-    def test_merge_missing_source_returns_400(self, client, db_session, admin_user):
-        """POST /api/materials/merge with missing source_card_id returns 400."""
-        from fastapi.testclient import TestClient
+    @pytest.mark.parametrize(
+        ("body", "expected_status"),
+        [
+            ({"target_card_id": 1}, 400),  # missing source_card_id
+            ({"source_card_id": 1}, 400),  # missing target_card_id
+            ({"source_card_id": 99998, "target_card_id": 99999}, 404),  # nonexistent IDs
+        ],
+        ids=["missing_source", "missing_target", "not_found"],
+    )
+    def test_merge_invalid_request(self, client, db_session, admin_user, body, expected_status):
+        """POST /api/materials/merge rejects missing IDs (400) and nonexistent IDs
+        (404)."""
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post("/api/materials/merge", json=body)
 
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post("/api/materials/merge", json={"target_card_id": 1})
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
-
-        assert resp.status_code == 400
-
-    def test_merge_missing_target_returns_400(self, client, db_session, admin_user):
-        """POST /api/materials/merge with missing target_card_id returns 400."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post("/api/materials/merge", json={"source_card_id": 1})
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
-
-        assert resp.status_code == 400
+        assert resp.status_code == expected_status
 
     def test_merge_same_card_returns_400(self, client, db_session, admin_user, test_material_card):
         """POST /api/materials/merge with source==target returns 400."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post(
-                    "/api/materials/merge",
-                    json={"source_card_id": test_material_card.id, "target_card_id": test_material_card.id},
-                )
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post(
+                "/api/materials/merge",
+                json={"source_card_id": test_material_card.id, "target_card_id": test_material_card.id},
+            )
 
         assert resp.status_code == 400
-
-    def test_merge_not_found_returns_404(self, client, db_session, admin_user):
-        """POST /api/materials/merge with nonexistent IDs returns 404."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post("/api/materials/merge", json={"source_card_id": 99998, "target_card_id": 99999})
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
-
-        assert resp.status_code == 404
 
 
 class TestBackfillManufacturers:
@@ -518,26 +400,8 @@ class TestBackfillManufacturers:
 
     def test_backfill_manufacturers_returns_count(self, client, db_session, admin_user):
         """POST /materials/backfill-manufacturers returns enriched_records count."""
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post("/materials/backfill-manufacturers")
-        finally:
-            app.dependency_overrides.pop(get_db, None)
-            app.dependency_overrides.pop(require_user, None)
-            app.dependency_overrides.pop(require_admin, None)
+        with admin_client(db_session, admin_user) as c:
+            resp = c.post("/materials/backfill-manufacturers")
 
         assert resp.status_code == 200
         assert "enriched_records" in resp.json()

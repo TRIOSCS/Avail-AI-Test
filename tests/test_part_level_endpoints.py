@@ -12,14 +12,22 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+# ── Helpers ─────────────────────────────────────────────────────────
+
+
+def _first_requirement(db_session, requisition):
+    """Return the first Requirement row for the given requisition."""
+    from app.models import Requirement
+
+    return db_session.query(Requirement).filter(Requirement.requisition_id == requisition.id).first()
+
+
 # ── Part-level Offers ───────────────────────────────────────────────
 
 
 def test_list_requirement_offers_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/offers returns empty list when no offers exist."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.get(f"/api/requirements/{req.id}/offers")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -27,9 +35,9 @@ def test_list_requirement_offers_empty(client, test_requisition, db_session):
 
 def test_list_requirement_offers_with_data(client, test_requisition, db_session):
     """GET /api/requirements/{id}/offers returns offers for this requirement."""
-    from app.models import Offer, Requirement
+    from app.models import Offer
 
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -56,9 +64,9 @@ def test_list_requirement_offers_with_data(client, test_requisition, db_session)
 def test_list_requirement_offers_includes_extended_fields(client, test_requisition, db_session):
     """GET /api/requirements/{id}/offers returns country_of_origin, firmware, source,
     entered_by."""
-    from app.models import Offer, Requirement
+    from app.models import Offer
 
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -98,9 +106,7 @@ def test_list_requirement_offers_404(client):
 
 def test_list_requirement_sightings_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/sightings returns empty list when none exist."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.get(f"/api/requirements/{req.id}/sightings")
     assert resp.status_code == 200
     data = resp.json()
@@ -110,9 +116,9 @@ def test_list_requirement_sightings_empty(client, test_requisition, db_session):
 
 def test_list_requirement_sightings_with_data(client, test_requisition, db_session):
     """GET /api/requirements/{id}/sightings returns sightings for this requirement."""
-    from app.models import Requirement, Sighting
+    from app.models import Sighting
 
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     sighting = Sighting(
         requirement_id=req.id,
         vendor_name="Arrow",
@@ -142,9 +148,7 @@ def test_list_requirement_sightings_with_data(client, test_requisition, db_sessi
 
 def test_list_requirement_notes_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/notes returns empty when no notes."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     req.notes = None
     db_session.commit()
 
@@ -157,9 +161,7 @@ def test_list_requirement_notes_empty(client, test_requisition, db_session):
 
 def test_add_requirement_note(client, test_requisition, db_session):
     """POST /api/requirements/{id}/notes appends to requirement notes."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     req.notes = None
     db_session.commit()
 
@@ -177,18 +179,16 @@ def test_add_requirement_note(client, test_requisition, db_session):
 
 def test_add_requirement_note_empty_text(client, test_requisition, db_session):
     """POST /api/requirements/{id}/notes rejects empty text."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.post(f"/api/requirements/{req.id}/notes", json={"text": ""})
     assert resp.status_code == 422
 
 
 def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_session):
     """GET /api/requirements/{id}/notes includes offer notes."""
-    from app.models import Offer, Requirement
+    from app.models import Offer
 
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     offer = Offer(
         requisition_id=test_requisition.id,
         requirement_id=req.id,
@@ -214,9 +214,7 @@ def test_list_requirement_notes_with_offer_notes(client, test_requisition, db_se
 
 def test_list_requirement_tasks_empty(client, test_requisition, db_session):
     """GET /api/requirements/{id}/tasks returns empty when no tasks."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.get(f"/api/requirements/{req.id}/tasks")
     assert resp.status_code == 200
     assert resp.json() == []
@@ -224,9 +222,7 @@ def test_list_requirement_tasks_empty(client, test_requisition, db_session):
 
 def test_create_requirement_task(client, test_requisition, db_session):
     """POST /api/requirements/{id}/tasks creates a task linked to the requirement."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": "Follow up on pricing"})
     assert resp.status_code == 200
     data = resp.json()
@@ -243,9 +239,7 @@ def test_create_requirement_task(client, test_requisition, db_session):
 
 def test_create_requirement_task_empty_title(client, test_requisition, db_session):
     """POST /api/requirements/{id}/tasks rejects empty title."""
-    from app.models import Requirement
-
-    req = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
+    req = _first_requirement(db_session, test_requisition)
     resp = client.post(f"/api/requirements/{req.id}/tasks", json={"title": ""})
     assert resp.status_code == 422
 

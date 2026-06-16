@@ -7,6 +7,8 @@ Depends on: conftest.py, nc_worker modules
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import NcSearchQueue, Requirement
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.mpn_normalizer import strip_packaging_suffixes as normalize_mpn
@@ -45,70 +47,29 @@ def test_config_from_env():
 # ── MPN Normalizer Tests ────────────────────────────────────────────
 
 
-def test_normalize_uppercase_and_strip():
-    """Uppercase and strip whitespace."""
-    assert normalize_mpn("  p5040nsn72qc  ") == "P5040NSN72QC"
-
-
-def test_normalize_no_change_package_code():
-    """DR is a package code (SOIC), not a suffix — should NOT be stripped."""
-    assert normalize_mpn("LM358DR") == "LM358DR"
-
-
-def test_normalize_strip_tape_reel_dash():
-    """-TR (tape and reel) is stripped."""
-    assert normalize_mpn("STM32F103C8T6-TR") == "STM32F103C8T6"
-
-
-def test_normalize_strip_tape_reel_slash():
-    """/TR (tape and reel) is stripped."""
-    assert normalize_mpn("AD8232ACPZ/TR") == "AD8232ACPZ"
-
-
-def test_normalize_strip_cut_tape():
-    """/CT (cut tape) is stripped."""
-    assert normalize_mpn("SN74HC595N/CT") == "SN74HC595N"
-
-
-def test_normalize_strip_no_datasheet():
-    """-ND (no datasheet, DigiKey) is stripped."""
-    assert normalize_mpn("LM7805CT-ND") == "LM7805CT"
-
-
-def test_normalize_strip_digikey_reel():
-    """-DKR (DigiKey reel) is stripped."""
-    assert normalize_mpn("RC0805FR-071KL-DKR") == "RC0805FR-071KL"
-
-
-def test_normalize_strip_lead_free():
-    """#PBF (lead-free) is stripped."""
-    assert normalize_mpn("IRF540N#PBF") == "IRF540N"
-
-
-def test_normalize_strip_nopb():
-    """/NOPB (no lead, TI) is stripped."""
-    assert normalize_mpn("LM317T/NOPB") == "LM317T"
-
-
-def test_normalize_strip_reel_suffix():
-    """-RL (reel packaging) is stripped. The base part is the same component."""
-    assert normalize_mpn("ADP3338AKCZ-3.3-RL") == "ADP3338AKCZ-3.3"
-
-
-def test_normalize_strip_internal_whitespace():
-    """Internal whitespace is removed."""
-    assert normalize_mpn("STM 32F 103") == "STM32F103"
-
-
-def test_normalize_empty():
-    """Empty and None return empty string."""
-    assert normalize_mpn("") == ""
-    assert normalize_mpn("   ") == ""
-
-
-def test_normalize_pbf_dash():
-    """-PBF (lead-free, dash form) is stripped."""
-    assert normalize_mpn("LT1963EST-3.3-PBF") == "LT1963EST-3.3"
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        pytest.param("  p5040nsn72qc  ", "P5040NSN72QC", id="uppercase_and_strip"),
+        pytest.param("LM358DR", "LM358DR", id="no_change_package_code"),
+        pytest.param("STM32F103C8T6-TR", "STM32F103C8T6", id="strip_tape_reel_dash"),
+        pytest.param("AD8232ACPZ/TR", "AD8232ACPZ", id="strip_tape_reel_slash"),
+        pytest.param("SN74HC595N/CT", "SN74HC595N", id="strip_cut_tape"),
+        pytest.param("LM7805CT-ND", "LM7805CT", id="strip_no_datasheet"),
+        pytest.param("RC0805FR-071KL-DKR", "RC0805FR-071KL", id="strip_digikey_reel"),
+        pytest.param("IRF540N#PBF", "IRF540N", id="strip_lead_free"),
+        pytest.param("LM317T/NOPB", "LM317T", id="strip_nopb"),
+        pytest.param("ADP3338AKCZ-3.3-RL", "ADP3338AKCZ-3.3", id="strip_reel_suffix"),
+        pytest.param("STM 32F 103", "STM32F103", id="strip_internal_whitespace"),
+        pytest.param("", "", id="empty"),
+        pytest.param("   ", "", id="whitespace_only"),
+        pytest.param("LT1963EST-3.3-PBF", "LT1963EST-3.3", id="pbf_dash"),
+    ],
+)
+def test_normalize_mpn(raw, expected):
+    """strip_packaging_suffixes uppercases, strips noise/whitespace, and drops packaging
+    suffixes while preserving real package codes and base parts."""
+    assert normalize_mpn(raw) == expected
 
 
 # ── Queue Manager Tests ─────────────────────────────────────────────

@@ -32,45 +32,44 @@ from app.services.requirement_status import (
 )
 
 
+def _first_requirement(test_requisition, db_session, sourcing_status):
+    """Return the requisition's first requirement with its sourcing_status set +
+    committed."""
+    req_item = test_requisition.requirements[0]
+    req_item.sourcing_status = sourcing_status
+    db_session.commit()
+    return req_item
+
+
 class TestTransitionRequirement:
     def test_open_to_sourcing(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "open")
 
         changed = transition_requirement(req_item, "sourcing", db_session, actor=test_user)
         assert changed is True
         assert req_item.sourcing_status == "sourcing"
 
     def test_with_enum(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "open")
 
         changed = transition_requirement(req_item, RequirementSourcingStatus.OFFERED, db_session, actor=test_user)
         assert changed is True
         assert req_item.sourcing_status == "offered"
 
     def test_illegal_transition_raises(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "won"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "won")
 
         with pytest.raises(ValueError, match="Invalid requirement transition"):
             transition_requirement(req_item, "open", db_session, actor=test_user)
 
     def test_noop_when_same_status(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "sourcing"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "sourcing")
 
         changed = transition_requirement(req_item, "sourcing", db_session, actor=test_user)
         assert changed is False
 
     def test_creates_activity_log(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "open")
 
         transition_requirement(req_item, "sourcing", db_session, actor=test_user)
         db_session.flush()
@@ -88,9 +87,7 @@ class TestTransitionRequirement:
         assert "open → sourcing" in logs[0].subject
 
     def test_none_status_defaults_to_open(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = None
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, None)
 
         transition_requirement(req_item, "sourcing", db_session, actor=test_user)
         assert req_item.sourcing_status == "sourcing"
@@ -102,54 +99,31 @@ class TestTransitionRequirement:
 
 class TestOnRfqSent:
     def test_marks_parts_as_sourcing(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "open")
 
         changed = on_rfq_sent([req_item.id], db_session, actor=test_user)
         assert changed == 1
         assert req_item.sourcing_status == "sourcing"
 
-    def test_skips_already_sourcing(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "sourcing"
-        db_session.commit()
-
-        changed = on_rfq_sent([req_item.id], db_session, actor=test_user)
-        assert changed == 0
-
-    def test_skips_offered(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "offered"
-        db_session.commit()
+    @pytest.mark.parametrize("initial_status", ["sourcing", "offered"])
+    def test_skips_non_open(self, db_session, test_requisition, test_user, initial_status):
+        req_item = _first_requirement(test_requisition, db_session, initial_status)
 
         changed = on_rfq_sent([req_item.id], db_session, actor=test_user)
         assert changed == 0
 
 
 class TestOnOfferCreated:
-    def test_open_to_offered(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
-
-        changed = on_offer_created(req_item, db_session, actor=test_user)
-        assert changed is True
-        assert req_item.sourcing_status == "offered"
-
-    def test_sourcing_to_offered(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "sourcing"
-        db_session.commit()
+    @pytest.mark.parametrize("initial_status", ["open", "sourcing"])
+    def test_advances_to_offered(self, db_session, test_requisition, test_user, initial_status):
+        req_item = _first_requirement(test_requisition, db_session, initial_status)
 
         changed = on_offer_created(req_item, db_session, actor=test_user)
         assert changed is True
         assert req_item.sourcing_status == "offered"
 
     def test_does_not_demote_from_quoted(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "quoted"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "quoted")
 
         changed = on_offer_created(req_item, db_session, actor=test_user)
         assert changed is False
@@ -158,18 +132,14 @@ class TestOnOfferCreated:
 
 class TestOnQuoteBuilt:
     def test_marks_offered_as_quoted(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "offered"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "offered")
 
         changed = on_quote_built([req_item.id], db_session, actor=test_user)
         assert changed == 1
         assert req_item.sourcing_status == "quoted"
 
     def test_skips_already_won(self, db_session, test_requisition, test_user):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "won"
-        db_session.commit()
+        req_item = _first_requirement(test_requisition, db_session, "won")
 
         changed = on_quote_built([req_item.id], db_session, actor=test_user)
         assert changed == 0

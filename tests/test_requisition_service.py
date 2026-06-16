@@ -84,27 +84,21 @@ class TestParsePositiveInt:
     def test_valid_string(self):
         assert parse_positive_int("42") == 42
 
-    def test_zero_raises_400(self):
+    @pytest.mark.parametrize(
+        ("value", "field_name", "expected_detail"),
+        [
+            pytest.param(0, "qty", "qty", id="zero"),
+            pytest.param(-1, "value", None, id="negative"),
+            pytest.param("abc", "target_qty", "target_qty", id="non_numeric"),
+            pytest.param(None, "value", None, id="none"),
+        ],
+    )
+    def test_raises_400(self, value, field_name, expected_detail):
         with pytest.raises(HTTPException) as exc_info:
-            parse_positive_int(0, field_name="qty")
+            parse_positive_int(value, field_name=field_name)  # type: ignore[arg-type]
         assert exc_info.value.status_code == 400
-        assert "qty" in exc_info.value.detail
-
-    def test_negative_raises_400(self):
-        with pytest.raises(HTTPException) as exc_info:
-            parse_positive_int(-1)
-        assert exc_info.value.status_code == 400
-
-    def test_non_numeric_raises_400(self):
-        with pytest.raises(HTTPException) as exc_info:
-            parse_positive_int("abc", field_name="target_qty")
-        assert exc_info.value.status_code == 400
-        assert "target_qty" in exc_info.value.detail
-
-    def test_none_raises_400(self):
-        with pytest.raises(HTTPException) as exc_info:
-            parse_positive_int(None)  # type: ignore[arg-type]
-        assert exc_info.value.status_code == 400
+        if expected_detail is not None:
+            assert expected_detail in exc_info.value.detail
 
 
 # ---------------------------------------------------------------------------

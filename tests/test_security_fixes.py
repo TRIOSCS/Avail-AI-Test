@@ -42,25 +42,19 @@ class TestRetryAfterCap:
         resp.headers = {"Retry-After": retry_after}
         return resp
 
-    def test_normal_value_passes_through(self):
-        resp = self._make_response("10")
-        assert _parse_retry_after(resp) == 10.0
-
-    def test_minimum_floor_of_1_second(self):
-        resp = self._make_response("0.1")
-        assert _parse_retry_after(resp) == 1.0
-
-    def test_extreme_value_capped_at_300(self):
-        resp = self._make_response("999999")
-        assert _parse_retry_after(resp) == 300.0
-
-    def test_moderate_value_capped_at_300(self):
-        resp = self._make_response("600")
-        assert _parse_retry_after(resp) == 300.0
-
-    def test_300_exactly_passes(self):
-        resp = self._make_response("300")
-        assert _parse_retry_after(resp) == 300.0
+    @pytest.mark.parametrize(
+        ("retry_after", "expected"),
+        [
+            ("10", 10.0),  # normal value passes through
+            ("0.1", 1.0),  # minimum floor of 1 second
+            ("999999", 300.0),  # extreme value capped at 300
+            ("600", 300.0),  # moderate value capped at 300
+            ("300", 300.0),  # 300 exactly passes
+        ],
+    )
+    def test_value_clamped(self, retry_after: str, expected: float):
+        resp = self._make_response(retry_after)
+        assert _parse_retry_after(resp) == expected
 
     def test_missing_header_uses_default(self):
         resp = MagicMock(spec=httpx.Response)

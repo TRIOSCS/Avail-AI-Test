@@ -250,33 +250,19 @@ class TestAccountSummaryService:
         result = _run(generate_account_summary(co.id, db_session))
         assert result == {}
 
+    @pytest.mark.parametrize(
+        "claude_return",
+        [
+            pytest.param(None, id="none"),
+            pytest.param("not a dict", id="non_dict"),
+            pytest.param({}, id="empty_dict"),
+        ],
+    )
     @patch(_DT_PATCH, _FakeDatetime)
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_claude_json_returns_none(self, mock_claude, db_session):
-        """claude_json returns None -> returns {}."""
-        mock_claude.return_value = None
-        co = _make_company(db_session)
-        db_session.commit()
-
-        result = _run(generate_account_summary(co.id, db_session))
-        assert result == {}
-
-    @patch(_DT_PATCH, _FakeDatetime)
-    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_claude_json_returns_non_dict(self, mock_claude, db_session):
-        """claude_json returns string -> returns {}."""
-        mock_claude.return_value = "not a dict"
-        co = _make_company(db_session)
-        db_session.commit()
-
-        result = _run(generate_account_summary(co.id, db_session))
-        assert result == {}
-
-    @patch(_DT_PATCH, _FakeDatetime)
-    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_claude_json_returns_empty_dict(self, mock_claude, db_session):
-        """claude_json returns {} (falsy) -> 'not result' is True -> returns {}."""
-        mock_claude.return_value = {}
+    def test_claude_json_returns_falsy_or_non_dict(self, mock_claude, db_session, claude_return):
+        """claude_json returns None/non-dict/empty-dict -> returns {}."""
+        mock_claude.return_value = claude_return
         co = _make_company(db_session)
         db_session.commit()
 

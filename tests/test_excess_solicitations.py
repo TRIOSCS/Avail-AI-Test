@@ -56,18 +56,6 @@ def excess_list_with_items(db_session: Session, test_user: User, test_company: C
     return el, items
 
 
-def _mock_graph_client():
-    """Build a mock GraphClient with post_json and get_json."""
-    gc = AsyncMock()
-    # sendMail returns None (202 No Content)
-    gc.post_json = AsyncMock(return_value=None)
-    # Sent items lookup returns a matching message
-    gc.get_json = AsyncMock(
-        return_value={"value": [{"id": "graph-msg-abc123", "conversationId": "conv-xyz", "subject": "placeholder"}]}
-    )
-    return gc
-
-
 class TestSendValidation:
     """Validation: empty line_item_ids returns 422."""
 

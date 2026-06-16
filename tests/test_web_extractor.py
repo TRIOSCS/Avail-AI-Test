@@ -40,23 +40,22 @@ async def test_all_gates_pass(mock_cj):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "override",
+    [
+        pytest.param({"source_urls": ["https://www.ebay.com/itm/1"]}, id="untrusted_domain"),
+        pytest.param({"exact_mpn_found": "LM317MT"}, id="mpn_mismatch"),
+        pytest.param({"confidence": 0.80}, id="low_confidence"),
+        # Gate 4 (anti-hallucination quality floor): a too-short description.
+        pytest.param({"description": "reg"}, id="short_description"),
+        # Gate 4: a missing manufacturer (never accept web data without a maker).
+        pytest.param({"manufacturer": ""}, id="missing_manufacturer"),
+    ],
+)
 @patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
-async def test_untrusted_domain_rejected(mock_cj):
-    mock_cj.return_value = {**_GOOD, "source_urls": ["https://www.ebay.com/itm/1"]}
-    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
-
-
-@pytest.mark.asyncio
-@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
-async def test_mpn_mismatch_rejected(mock_cj):
-    mock_cj.return_value = {**_GOOD, "exact_mpn_found": "LM317MT"}
-    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
-
-
-@pytest.mark.asyncio
-@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
-async def test_low_confidence_rejected(mock_cj):
-    mock_cj.return_value = {**_GOOD, "confidence": 0.80}
+async def test_gate_rejects(mock_cj, override):
+    """Each trust gate rejects a single bad field → status 'failed'."""
+    mock_cj.return_value = {**_GOOD, **override}
     assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
 
 
@@ -79,22 +78,6 @@ async def test_claude_backend_error_propagates(mock_cj):
     mock_cj.side_effect = ClaudeRateLimitError("429")
     with pytest.raises(ClaudeError):
         await extract_part_from_web("LM317T", "lm317t")
-
-
-@pytest.mark.asyncio
-@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
-async def test_short_description_rejected(mock_cj):
-    """Gate 4 (anti-hallucination quality floor): a too-short description → failed."""
-    mock_cj.return_value = {**_GOOD, "description": "reg"}
-    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
-
-
-@pytest.mark.asyncio
-@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
-async def test_missing_manufacturer_rejected(mock_cj):
-    """Gate 4: a missing manufacturer → failed (we never accept web data without a maker)."""
-    mock_cj.return_value = {**_GOOD, "manufacturer": ""}
-    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
 
 
 def test_prompt_constrains_category_to_canonical_vocabulary():

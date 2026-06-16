@@ -28,23 +28,22 @@ class TestDaysSinceActivity:
         result = _days_since_activity(test_company, datetime.now(timezone.utc))
         assert result is None
 
-    def test_returns_days_since_last_activity(self, db_session: Session, test_company: Company):
-        """Correct day count when last_activity_at is set."""
+    @pytest.mark.parametrize(
+        ("days", "naive"),
+        [
+            pytest.param(10, False, id="aware_datetime"),
+            pytest.param(5, True, id="naive_datetime_gets_utc"),
+        ],
+    )
+    def test_returns_days_since_last_activity(self, db_session: Session, test_company: Company, days: int, naive: bool):
+        """Correct day count; naive datetimes get UTC timezone applied."""
         from app.services.ownership_service import _days_since_activity
 
         now = datetime.now(timezone.utc)
-        test_company.last_activity_at = now - timedelta(days=10)
+        last_activity = now - timedelta(days=days)
+        test_company.last_activity_at = last_activity.replace(tzinfo=None) if naive else last_activity
         result = _days_since_activity(test_company, now)
-        assert result == 10
-
-    def test_handles_naive_datetime(self, db_session: Session, test_company: Company):
-        """Naive datetimes get UTC timezone applied."""
-        from app.services.ownership_service import _days_since_activity
-
-        now = datetime.now(timezone.utc)
-        test_company.last_activity_at = (now - timedelta(days=5)).replace(tzinfo=None)
-        result = _days_since_activity(test_company, now)
-        assert result == 5
+        assert result == days
 
 
 class TestClearOwnership:
@@ -107,23 +106,22 @@ class TestSiteDaysSinceActivity:
         result = _site_days_since_activity(test_customer_site, datetime.now(timezone.utc))
         assert result is None
 
-    def test_returns_correct_days(self, db_session: Session, test_customer_site: CustomerSite):
-        """Correct day count."""
+    @pytest.mark.parametrize(
+        ("days", "naive"),
+        [
+            pytest.param(15, False, id="aware_datetime"),
+            pytest.param(7, True, id="naive_datetime_gets_utc"),
+        ],
+    )
+    def test_returns_correct_days(self, db_session: Session, test_customer_site: CustomerSite, days: int, naive: bool):
+        """Correct day count; naive datetimes get UTC timezone applied."""
         from app.services.ownership_service import _site_days_since_activity
 
         now = datetime.now(timezone.utc)
-        test_customer_site.last_activity_at = now - timedelta(days=15)
+        last_activity = now - timedelta(days=days)
+        test_customer_site.last_activity_at = last_activity.replace(tzinfo=None) if naive else last_activity
         result = _site_days_since_activity(test_customer_site, now)
-        assert result == 15
-
-    def test_handles_naive_datetime(self, db_session: Session, test_customer_site: CustomerSite):
-        """Naive datetimes get UTC timezone applied."""
-        from app.services.ownership_service import _site_days_since_activity
-
-        now = datetime.now(timezone.utc)
-        test_customer_site.last_activity_at = (now - timedelta(days=7)).replace(tzinfo=None)
-        result = _site_days_since_activity(test_customer_site, now)
-        assert result == 7
+        assert result == days
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -529,12 +527,26 @@ class TestGetOpenPoolAccounts:
 class TestGetMyAccounts:
     """Tests for get_my_accounts()."""
 
-    def test_returns_owned_accounts_with_status(self, db_session: Session, test_company: Company, sales_user: User):
-        """Returns accounts owned by user with health status."""
+    @pytest.mark.parametrize(
+        ("days_inactive", "expected_status"),
+        [
+            pytest.param(5, "green", id="recent_green"),
+            pytest.param(25, "yellow", id="warning_zone_yellow"),
+            pytest.param(35, "red", id="past_limit_red"),
+            pytest.param(None, "no_activity", id="no_activity"),
+        ],
+    )
+    def test_returns_owned_accounts_with_status(
+        self, db_session: Session, test_company: Company, sales_user: User, days_inactive, expected_status: str
+    ):
+        """Returns accounts owned by user with the correct health status."""
         from app.services.ownership_service import get_my_accounts
 
         test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        if days_inactive is None:
+            test_company.last_activity_at = None
+        else:
+            test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=days_inactive)
         test_company.is_active = True
         db_session.commit()
 
@@ -544,55 +556,7 @@ class TestGetMyAccounts:
             result = get_my_accounts(sales_user.id, db_session)
 
         assert len(result) == 1
-        assert result[0]["status"] == "green"
-
-    def test_yellow_status_in_warning_zone(self, db_session: Session, test_company: Company, sales_user: User):
-        """Account in warning zone shows yellow status."""
-        from app.services.ownership_service import get_my_accounts
-
-        test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=25)
-        test_company.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
-            result = get_my_accounts(sales_user.id, db_session)
-
-        assert result[0]["status"] == "yellow"
-
-    def test_red_status_past_limit(self, db_session: Session, test_company: Company, sales_user: User):
-        """Account past inactivity limit shows red status."""
-        from app.services.ownership_service import get_my_accounts
-
-        test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = datetime.now(timezone.utc) - timedelta(days=35)
-        test_company.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
-            result = get_my_accounts(sales_user.id, db_session)
-
-        assert result[0]["status"] == "red"
-
-    def test_no_activity_status(self, db_session: Session, test_company: Company, sales_user: User):
-        """Account with no activity shows no_activity status."""
-        from app.services.ownership_service import get_my_accounts
-
-        test_company.account_owner_id = sales_user.id
-        test_company.last_activity_at = None
-        test_company.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            mock_settings.strategic_inactivity_days = 90
-            result = get_my_accounts(sales_user.id, db_session)
-
-        assert result[0]["status"] == "no_activity"
+        assert result[0]["status"] == expected_status
 
     def test_excludes_other_users_accounts(
         self, db_session: Session, test_company: Company, sales_user: User, test_user: User
@@ -836,14 +800,32 @@ class TestGetOpenPoolSites:
 class TestGetMySites:
     """Tests for get_my_sites()."""
 
+    @pytest.mark.parametrize(
+        ("days_inactive", "expected_status"),
+        [
+            pytest.param(5, "green", id="recent_green"),
+            pytest.param(25, "yellow", id="warning_zone_yellow"),
+            pytest.param(35, "red", id="past_limit_red"),
+            pytest.param(None, "no_activity", id="no_activity"),
+        ],
+    )
     def test_returns_owned_sites_with_status(
-        self, db_session: Session, test_customer_site: CustomerSite, sales_user: User, test_company: Company
+        self,
+        db_session: Session,
+        test_customer_site: CustomerSite,
+        sales_user: User,
+        test_company: Company,
+        days_inactive,
+        expected_status: str,
     ):
-        """Returns sites owned by user with health status."""
+        """Returns sites owned by user with the correct health status."""
         from app.services.ownership_service import get_my_sites
 
         test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=5)
+        if days_inactive is None:
+            test_customer_site.last_activity_at = None
+        else:
+            test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=days_inactive)
         test_customer_site.is_active = True
         db_session.commit()
 
@@ -852,53 +834,8 @@ class TestGetMySites:
             result = get_my_sites(sales_user.id, db_session)
 
         assert len(result) == 1
-        assert result[0]["status"] == "green"
+        assert result[0]["status"] == expected_status
         assert result[0]["company_name"] == test_company.name
-
-    def test_yellow_status(self, db_session: Session, test_customer_site: CustomerSite, sales_user: User):
-        """Site in warning zone shows yellow."""
-        from app.services.ownership_service import get_my_sites
-
-        test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=25)
-        test_customer_site.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            result = get_my_sites(sales_user.id, db_session)
-
-        assert result[0]["status"] == "yellow"
-
-    def test_red_status(self, db_session: Session, test_customer_site: CustomerSite, sales_user: User):
-        """Site past limit shows red."""
-        from app.services.ownership_service import get_my_sites
-
-        test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = datetime.now(timezone.utc) - timedelta(days=35)
-        test_customer_site.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            result = get_my_sites(sales_user.id, db_session)
-
-        assert result[0]["status"] == "red"
-
-    def test_no_activity_status(self, db_session: Session, test_customer_site: CustomerSite, sales_user: User):
-        """Site with no activity shows no_activity."""
-        from app.services.ownership_service import get_my_sites
-
-        test_customer_site.owner_id = sales_user.id
-        test_customer_site.last_activity_at = None
-        test_customer_site.is_active = True
-        db_session.commit()
-
-        with patch("app.services.ownership_service.settings") as mock_settings:
-            mock_settings.customer_inactivity_days = 30
-            result = get_my_sites(sales_user.id, db_session)
-
-        assert result[0]["status"] == "no_activity"
 
 
 class TestGetSitesAtRisk:

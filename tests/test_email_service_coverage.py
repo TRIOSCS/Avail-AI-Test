@@ -139,28 +139,24 @@ class TestHandleExcessBidReplyEmptyBody:
 
 class TestHandleExcessBidReplyNoneResult:
     @pytest.mark.asyncio
-    async def test_none_result_leaves_solicitation_unchanged(self, db_session: Session, test_user: User):
-        """claude_structured returning None leaves solicitation status unchanged (lines
-        958-959)."""
+    @pytest.mark.parametrize(
+        ("content", "parse_result"),
+        [
+            pytest.param("I have some parts, please advise.", None, id="none_result"),
+            pytest.param("We may be interested.", {}, id="empty_dict_falsy"),
+        ],
+    )
+    async def test_falsy_result_leaves_solicitation_unchanged(
+        self, content: str, parse_result, db_session: Session, test_user: User
+    ):
+        """claude_structured returning None or {} (falsy) leaves solicitation status
+        unchanged (lines 958-959)."""
         sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": "I have some parts, please advise."}}
+        msg = {"body": {"content": content}}
 
         # claude_structured is imported lazily from app.utils.claude_client inside the function
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = None
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
-
-    @pytest.mark.asyncio
-    async def test_empty_dict_result_treated_as_falsy(self, db_session: Session, test_user: User):
-        """claude_structured returning {} (falsy dict) leaves solicitation unchanged."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": "We may be interested."}}
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = {}
+            mock_claude.return_value = parse_result
             await _handle_excess_bid_reply(msg, sol.id, db_session)
 
         db_session.refresh(sol)
@@ -172,27 +168,29 @@ class TestHandleExcessBidReplyNoneResult:
 
 class TestHandleExcessBidReplyIncomplete:
     @pytest.mark.asyncio
-    async def test_missing_unit_price_skips_bid_creation(self, db_session: Session, test_user: User):
-        """Parse result with unit_price=None returns early without creating bid (lines
-        971-972)."""
+    @pytest.mark.parametrize(
+        ("content", "result"),
+        [
+            pytest.param(
+                "We can supply 200 units.",
+                {"unit_price": None, "quantity_wanted": 200, "lead_time_days": 5, "notes": None},
+                id="missing_unit_price",
+            ),
+            pytest.param(
+                "Our unit price is $0.50.",
+                {"unit_price": 0.50, "quantity_wanted": None, "lead_time_days": None, "notes": None},
+                id="missing_quantity",
+            ),
+        ],
+    )
+    async def test_incomplete_parse_skips_bid_creation(
+        self, content: str, result: dict, db_session: Session, test_user: User
+    ):
+        """Parse result missing unit_price or quantity returns early without creating
+        bid (lines 971-972)."""
         sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": "We can supply 200 units."}}
+        msg = {"body": {"content": content}}
 
-        result = {"unit_price": None, "quantity_wanted": 200, "lead_time_days": 5, "notes": None}
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = result
-            await _handle_excess_bid_reply(msg, sol.id, db_session)
-
-        db_session.refresh(sol)
-        assert sol.status == "sent"
-
-    @pytest.mark.asyncio
-    async def test_missing_quantity_skips_bid_creation(self, db_session: Session, test_user: User):
-        """Parse result with quantity_wanted=None returns early without creating bid."""
-        sol = _make_excess_solicitation(db_session, test_user)
-        msg = {"body": {"content": "Our unit price is $0.50."}}
-
-        result = {"unit_price": 0.50, "quantity_wanted": None, "lead_time_days": None, "notes": None}
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
             mock_claude.return_value = result
             await _handle_excess_bid_reply(msg, sol.id, db_session)

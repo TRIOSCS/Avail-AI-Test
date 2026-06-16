@@ -1,6 +1,7 @@
 """Badge rendering for oem_sourced + not_catalogued in the materials list partial, and
 the dual-brand result-row cell ("IBM · Seagate Technology")."""
 
+import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
@@ -40,16 +41,21 @@ def _render(status, provenance=None, *, brand=None, manufacturer="Lenovo", show_
     return tmpl.render(materials=[card], lc_colors={}, total=1, limit=50, offset=0)
 
 
-def test_oem_sourced_badge_renders():
-    html = _render(
-        "oem_sourced", {"source_urls": ["https://support.lenovo.com/x"], "source_domains": ["support.lenovo.com"]}
-    )
-    assert "OEM-SOURCED" in html
-
-
-def test_not_catalogued_badge_renders():
-    html = _render("not_catalogued")
-    assert "NOT CATALOGUED" in html
+@pytest.mark.parametrize(
+    ("status", "provenance", "expected"),
+    [
+        pytest.param(
+            "oem_sourced",
+            {"source_urls": ["https://support.lenovo.com/x"], "source_domains": ["support.lenovo.com"]},
+            "OEM-SOURCED",
+            id="oem_sourced",
+        ),
+        pytest.param("not_catalogued", None, "NOT CATALOGUED", id="not_catalogued"),
+    ],
+)
+def test_status_badge_renders(status, provenance, expected):
+    html = _render(status, provenance)
+    assert expected in html
 
 
 # --- Dual-brand cell: brand (OEM label) · manufacturer (actual maker) ---

@@ -103,84 +103,97 @@ class TestSourcengineParseEdgeCases:
 
         return SourcengineConnector(api_key="test-key")
 
-    def test_non_list_offers_returns_empty(self):
-        """When offers field is not a list → treat as empty."""
-        connector = self._make_connector()
-        data = {"offers": "not-a-list"}
-        result = connector._parse(data, "LM317T")
-        assert result == []
-
-    def test_non_dict_offer_items_skipped(self):
-        """Non-dict items in offers list are skipped."""
-        connector = self._make_connector()
-        data = {
-            "offers": [
-                "string-not-dict",
-                42,
-                None,
+    @pytest.mark.parametrize(
+        ("data", "expected_vendor_name"),
+        [
+            pytest.param({"offers": "not-a-list"}, None, id="non_list_offers_returns_empty"),
+            pytest.param(
                 {
-                    "supplier": {"name": "Arrow"},
-                    "mpn": "LM317T",
-                    "quantity": 500,
-                    "unit_price": 0.80,
+                    "offers": [
+                        "string-not-dict",
+                        42,
+                        None,
+                        {
+                            "supplier": {"name": "Arrow"},
+                            "mpn": "LM317T",
+                            "quantity": 500,
+                            "unit_price": 0.80,
+                        },
+                    ]
                 },
-            ]
-        }
-        result = connector._parse(data, "LM317T")
-        assert len(result) == 1
-        assert result[0]["vendor_name"] == "Arrow"
-
-    def test_supplier_as_string_not_dict(self):
-        """Supplier field is a string → use str() directly."""
-        connector = self._make_connector()
-        data = {
-            "offers": [
+                "Arrow",
+                id="non_dict_offer_items_skipped",
+            ),
+            pytest.param(
                 {
-                    "supplier": "Mouser Electronics",
-                    "mpn": "LM317T",
-                    "quantity": 200,
-                    "unit_price": 0.90,
-                }
-            ]
-        }
-        result = connector._parse(data, "LM317T")
-        assert len(result) == 1
-        assert result[0]["vendor_name"] == "Mouser Electronics"
-
-    def test_empty_supplier_name_skipped(self):
-        """Offer with no resolvable supplier name → skipped."""
-        connector = self._make_connector()
-        data = {
-            "offers": [
+                    "offers": [
+                        {
+                            "supplier": "Mouser Electronics",
+                            "mpn": "LM317T",
+                            "quantity": 200,
+                            "unit_price": 0.90,
+                        }
+                    ]
+                },
+                "Mouser Electronics",
+                id="supplier_as_string_not_dict",
+            ),
+            pytest.param(
                 {
-                    "supplier": {},  # dict but name is empty
-                    "mpn": "LM317T",
-                    "quantity": 100,
-                    "unit_price": 1.00,
-                    # No supplier_name or company fallbacks
-                }
-            ]
-        }
-        result = connector._parse(data, "LM317T")
-        assert result == []
-
-    def test_supplier_name_from_fallback_fields(self):
-        """No supplier dict name → falls back to supplier_name or company."""
-        connector = self._make_connector()
-        data = {
-            "offers": [
+                    "offers": [
+                        {
+                            "supplier": {},  # dict but name is empty
+                            "mpn": "LM317T",
+                            "quantity": 100,
+                            "unit_price": 1.00,
+                            # No supplier_name or company fallbacks
+                        }
+                    ]
+                },
+                None,
+                id="empty_supplier_name_skipped",
+            ),
+            pytest.param(
                 {
-                    "supplier": {},
-                    "supplier_name": "DigiKey",
-                    "mpn": "LM317T",
-                    "quantity": 300,
-                    "unit_price": 0.65,
-                }
-            ]
-        }
+                    "offers": [
+                        {
+                            "supplier": {},
+                            "supplier_name": "DigiKey",
+                            "mpn": "LM317T",
+                            "quantity": 300,
+                            "unit_price": 0.65,
+                        }
+                    ]
+                },
+                "DigiKey",
+                id="supplier_name_from_fallback_fields",
+            ),
+            pytest.param(
+                {
+                    "results": [
+                        {
+                            "supplier": {"name": "Nexar"},
+                            "mpn": "LM317T",
+                            "quantity": 1000,
+                            "unit_price": 0.55,
+                        }
+                    ]
+                },
+                "Nexar",
+                id="results_key_fallback",
+            ),
+        ],
+    )
+    def test_parse_supplier_name_resolution(self, data, expected_vendor_name):
+        """_parse resolves (or rejects) the vendor name across supplier
+        shapes/fallbacks."""
+        connector = self._make_connector()
         result = connector._parse(data, "LM317T")
-        assert len(result) == 1
-        assert result[0]["vendor_name"] == "DigiKey"
+        if expected_vendor_name is None:
+            assert result == []
+        else:
+            assert len(result) == 1
+            assert result[0]["vendor_name"] == expected_vendor_name
 
     def test_deduplication_by_vendor_mpn_sku(self):
         """Duplicate vendor+mpn+sku combinations are deduplicated."""
@@ -205,23 +218,6 @@ class TestSourcengineParseEdgeCases:
         }
         result = connector._parse(data, "LM317T")
         assert len(result) == 1
-
-    def test_results_key_fallback(self):
-        """Uses 'results' key when 'offers' is absent."""
-        connector = self._make_connector()
-        data = {
-            "results": [
-                {
-                    "supplier": {"name": "Nexar"},
-                    "mpn": "LM317T",
-                    "quantity": 1000,
-                    "unit_price": 0.55,
-                }
-            ]
-        }
-        result = connector._parse(data, "LM317T")
-        assert len(result) == 1
-        assert result[0]["vendor_name"] == "Nexar"
 
     def test_manufacturer_as_dict(self):
         """Manufacturer field as dict → extracts name key."""

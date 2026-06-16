@@ -28,26 +28,21 @@ def test_requisition_for_mfr(db_session: Session, test_user: User) -> Requisitio
     return req
 
 
-def test_add_requirement_rejects_empty_manufacturer(client, test_requisition_for_mfr):
-    """Creating a requirement without manufacturer should fail with 422."""
+@pytest.mark.parametrize(
+    "manufacturer",
+    [
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+    ],
+)
+def test_add_requirement_rejects_invalid_manufacturer(client, test_requisition_for_mfr, manufacturer):
+    """Creating a requirement with an empty/whitespace manufacturer should fail with
+    422."""
     resp = client.post(
         f"/v2/partials/requisitions/{test_requisition_for_mfr.id}/requirements",
         data={
             "primary_mpn": "LM317T",
-            "manufacturer": "",
-            "target_qty": "100",
-        },
-    )
-    assert resp.status_code == 422 or "manufacturer" in resp.text.lower()
-
-
-def test_add_requirement_rejects_whitespace_manufacturer(client, test_requisition_for_mfr):
-    """Whitespace-only manufacturer should be rejected with 422."""
-    resp = client.post(
-        f"/v2/partials/requisitions/{test_requisition_for_mfr.id}/requirements",
-        data={
-            "primary_mpn": "LM317T",
-            "manufacturer": "   ",
+            "manufacturer": manufacturer,
             "target_qty": "100",
         },
     )

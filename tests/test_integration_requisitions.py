@@ -12,6 +12,18 @@ import pytest
 pytestmark = pytest.mark.slow
 
 
+def _create_req(client, **fields) -> int:
+    """POST a requisition and return its id."""
+    resp = client.post("/api/requisitions", json=fields)
+    assert resp.status_code == 200
+    return resp.json()["id"]
+
+
+def _add_requirements(client, req_id: int, items) -> dict:
+    """POST requirements to a requisition and return the parsed JSON response."""
+    return client.post(f"/api/requisitions/{req_id}/requirements", json=items).json()
+
+
 # -- Requisition CRUD -----------------------------------------------------
 
 
@@ -45,13 +57,7 @@ def test_list_requisitions_empty(client):
 
 
 def test_list_requisitions_after_create(client):
-    client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-LIST-001",
-            "customer_name": "ListCo",
-        },
-    )
+    _create_req(client, name="REQ-LIST-001", customer_name="ListCo")
     resp = client.get("/api/requisitions")
     assert resp.status_code == 200
     names = [r["name"] for r in resp.json()["requisitions"]]
@@ -59,20 +65,8 @@ def test_list_requisitions_after_create(client):
 
 
 def test_list_requisitions_search_filter(client):
-    client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-ALPHA",
-            "customer_name": "Alpha Inc",
-        },
-    )
-    client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-BETA",
-            "customer_name": "Beta LLC",
-        },
-    )
+    _create_req(client, name="REQ-ALPHA", customer_name="Alpha Inc")
+    _create_req(client, name="REQ-BETA", customer_name="Beta LLC")
     resp = client.get("/api/requisitions?q=ALPHA")
     assert resp.status_code == 200
     names = [r["name"] for r in resp.json()["requisitions"]]
@@ -80,14 +74,7 @@ def test_list_requisitions_search_filter(client):
 
 
 def test_archive_requisition(client):
-    create = client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-ARCH",
-            "customer_name": "ArchCo",
-        },
-    )
-    req_id = create.json()["id"]
+    req_id = _create_req(client, name="REQ-ARCH", customer_name="ArchCo")
     resp = client.put(f"/api/requisitions/{req_id}/archive")
     assert resp.status_code == 200
     assert resp.json()["status"] == "archived"
@@ -105,8 +92,7 @@ def test_archive_nonexistent(client):
 
 
 def test_add_requirement(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-ITEMS"})
-    req_id = create.json()["id"]
+    req_id = _create_req(client, name="REQ-ITEMS")
     # Endpoint expects a list or single dict (not {"items": [...]})
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
@@ -119,8 +105,7 @@ def test_add_requirement(client):
 
 
 def test_add_multiple_requirements(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-MULTI"})
-    req_id = create.json()["id"]
+    req_id = _create_req(client, name="REQ-MULTI")
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
@@ -134,8 +119,7 @@ def test_add_multiple_requirements(client):
 
 
 def test_add_requirement_skips_blank_mpn(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-BLANK"})
-    req_id = create.json()["id"]
+    req_id = _create_req(client, name="REQ-BLANK")
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
@@ -149,13 +133,11 @@ def test_add_requirement_skips_blank_mpn(client):
 
 
 def test_list_requirements(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-LISTREQ"})
-    req_id = create.json()["id"]
-    client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "AD8045", "manufacturer": "ADI", "target_qty": 50},
-        ],
+    req_id = _create_req(client, name="REQ-LISTREQ")
+    _add_requirements(
+        client,
+        req_id,
+        [{"primary_mpn": "AD8045", "manufacturer": "ADI", "target_qty": 50}],
     )
     resp = client.get(f"/api/requisitions/{req_id}/requirements")
     assert resp.status_code == 200
@@ -165,14 +147,12 @@ def test_list_requirements(client):
 
 
 def test_delete_requirement(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-DEL"})
-    req_id = create.json()["id"]
-    items = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "TMP123", "manufacturer": "TI", "target_qty": 10},
-        ],
-    ).json()
+    req_id = _create_req(client, name="REQ-DEL")
+    items = _add_requirements(
+        client,
+        req_id,
+        [{"primary_mpn": "TMP123", "manufacturer": "TI", "target_qty": 10}],
+    )
     item_id = items["created"][0]["id"]
 
     resp = client.delete(f"/api/requirements/{item_id}")
@@ -183,14 +163,12 @@ def test_delete_requirement(client):
 
 
 def test_update_requirement(client):
-    create = client.post("/api/requisitions", json={"name": "REQ-UPD"})
-    req_id = create.json()["id"]
-    items = client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json=[
-            {"primary_mpn": "OLD-MPN", "manufacturer": "TI", "target_qty": 10},
-        ],
-    ).json()
+    req_id = _create_req(client, name="REQ-UPD")
+    items = _add_requirements(
+        client,
+        req_id,
+        [{"primary_mpn": "OLD-MPN", "manufacturer": "TI", "target_qty": 10}],
+    )
     item_id = items["created"][0]["id"]
 
     resp = client.put(
@@ -215,14 +193,7 @@ def test_update_requirement(client):
 
 def test_get_saved_sightings_empty(client):
     """Req with no sightings returns empty dict."""
-    resp = client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-SIGHT-EMPTY",
-            "customer_name": "Test",
-        },
-    )
-    req_id = resp.json()["id"]
+    req_id = _create_req(client, name="REQ-SIGHT-EMPTY", customer_name="Test")
     resp = client.get(f"/api/requisitions/{req_id}/sightings")
     assert resp.status_code == 200
     assert resp.json() == {}
@@ -232,21 +203,8 @@ def test_get_saved_sightings_returns_data(client, db_session):
     """Sightings saved in DB are returned grouped by requirement."""
     from app.models import Sighting
 
-    resp = client.post(
-        "/api/requisitions",
-        json={
-            "name": "REQ-SIGHT-DATA",
-            "customer_name": "SightCo",
-        },
-    )
-    req_id = resp.json()["id"]
-    client.post(
-        f"/api/requisitions/{req_id}/requirements",
-        json={
-            "primary_mpn": "LM358N",
-            "manufacturer": "TI",
-        },
-    )
+    req_id = _create_req(client, name="REQ-SIGHT-DATA", customer_name="SightCo")
+    _add_requirements(client, req_id, {"primary_mpn": "LM358N", "manufacturer": "TI"})
     # Get the requirement ID from the list endpoint
     reqs = client.get(f"/api/requisitions/{req_id}/requirements").json()
     item_id = reqs[0]["id"]

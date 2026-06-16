@@ -7,6 +7,8 @@ Called by: pytest
 Depends on: app/services/activity_service.py, app/constants.py, conftest.py
 """
 
+import pytest
+
 from app.constants import ActivityType
 from app.models import ActivityLog
 
@@ -157,23 +159,42 @@ def test_add_offer_htmx_logs_offer_created(client, db_session, test_requisition)
     assert len(rows) == before + 1
 
 
-def test_reject_offer_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """PUT /api/offers/{id}/reject writes one offer_status_changed activity row."""
-    test_offer.status = "pending_review"
+@pytest.mark.parametrize(
+    ("method", "url", "data", "initial_status"),
+    [
+        pytest.param("put", "/api/offers/{offer}/reject", None, "pending_review", id="api_reject"),
+        pytest.param("patch", "/api/offers/{offer}/mark-sold", None, "active", id="api_mark_sold"),
+        pytest.param("post", "/api/offers/{offer}/reject", None, "pending_review", id="api_reject_t4_review"),
+        pytest.param(
+            "post",
+            "/v2/partials/requisitions/{req}/offers/{offer}/review",
+            {"action": "reject"},
+            "pending_review",
+            id="htmx_review_reject",
+        ),
+        pytest.param(
+            "post",
+            "/v2/partials/requisitions/{req}/offers/{offer}/mark-sold",
+            None,
+            "active",
+            id="htmx_mark_sold",
+        ),
+        pytest.param("post", "/v2/partials/offers/{offer}/promote", None, "pending_review", id="htmx_promote"),
+        pytest.param("post", "/v2/partials/offers/{offer}/reject", None, "pending_review", id="htmx_reject"),
+    ],
+)
+def test_status_change_route_logs_status_changed(
+    client, db_session, test_requisition, test_offer, method, url, data, initial_status
+):
+    """Each offer status-change route writes exactly one offer_status_changed activity
+    row."""
+    test_offer.status = initial_status
     db_session.commit()
     before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.put(f"/api/offers/{test_offer.id}/reject")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-
-
-def test_mark_offer_sold_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """PATCH /api/offers/{id}/mark-sold writes one offer_status_changed activity row."""
-    test_offer.status = "active"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.patch(f"/api/offers/{test_offer.id}/mark-sold")
+    resp = getattr(client, method)(
+        url.format(req=test_requisition.id, offer=test_offer.id),
+        data=data,
+    )
     assert resp.status_code == 200, resp.text
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) == before + 1
@@ -191,67 +212,6 @@ def test_promote_offer_logs_status_changed(client, db_session, test_requisition,
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) == before + 1
     assert rows[0].details["old_status"] != rows[0].details["new_status"]
-
-
-def test_reject_offer_t4_review_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """POST /api/offers/{id}/reject (T4 review) writes one offer_status_changed activity
-    row."""
-    test_offer.status = "pending_review"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(f"/api/offers/{test_offer.id}/reject")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-
-
-def test_review_offer_htmx_reject_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """The HTMX review handler with action=reject logs one offer_status_changed row."""
-    test_offer.status = "pending_review"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(
-        f"/v2/partials/requisitions/{test_requisition.id}/offers/{test_offer.id}/review",
-        data={"action": "reject"},
-    )
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-
-
-def test_mark_offer_sold_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """The mark-sold HTMX handler logs one offer_status_changed row."""
-    test_offer.status = "active"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(
-        f"/v2/partials/requisitions/{test_requisition.id}/offers/{test_offer.id}/mark-sold",
-    )
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-
-
-def test_promote_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """The promote-offer HTMX handler logs one offer_status_changed row."""
-    test_offer.status = "pending_review"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(f"/v2/partials/offers/{test_offer.id}/promote")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
-
-
-def test_reject_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
-    """The reject-offer HTMX handler logs one offer_status_changed row."""
-    test_offer.status = "pending_review"
-    db_session.commit()
-    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
-    resp = client.post(f"/v2/partials/offers/{test_offer.id}/reject")
-    assert resp.status_code == 200, resp.text
-    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
-    assert len(rows) == before + 1
 
 
 def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):

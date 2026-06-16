@@ -4,6 +4,8 @@ Called by: pytest
 Depends on: app.utils.sanitize
 """
 
+import pytest
+
 from app.utils.sanitize import sanitize_dict, sanitize_text
 
 
@@ -18,23 +20,22 @@ class TestSanitizeText:
         assert sanitize_text(3.14) == 3.14
         assert sanitize_text(True) is True
 
-    def test_plain_text_entities_escaped(self):
-        # Plain text without special chars is unchanged
-        assert sanitize_text("hello world") == "hello world"
-
-    def test_ampersand_escaped(self):
-        assert sanitize_text("a & b") == "a &amp; b"
-
-    def test_angle_brackets_in_tag_like_pattern_stripped(self):
-        result = sanitize_text("1 < 2 > 0")
-        assert result == "1  0"
-
-    def test_lone_angle_brackets_escaped(self):
-        assert sanitize_text("a < b") == "a &lt; b"
-
-    def test_quotes_escaped(self):
-        assert sanitize_text('say "hello"') == "say &quot;hello&quot;"
-        assert sanitize_text("it's") == "it&#x27;s"
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param("hello world", "hello world", id="plain_text"),
+            pytest.param("a & b", "a &amp; b", id="ampersand"),
+            pytest.param("1 < 2 > 0", "1  0", id="tag_like_angle_brackets_stripped"),
+            pytest.param("a < b", "a &lt; b", id="lone_angle_bracket"),
+            pytest.param('say "hello"', "say &quot;hello&quot;", id="double_quotes"),
+            pytest.param("it's", "it&#x27;s", id="single_quote"),
+            pytest.param("", "", id="empty_string"),
+            pytest.param("   ", "   ", id="whitespace_only"),
+            pytest.param("12345", "12345", id="numeric_string"),
+        ],
+    )
+    def test_text_escaping(self, value, expected):
+        assert sanitize_text(value) == expected
 
     def test_script_tag_stripped(self):
         result = sanitize_text("<script>alert(1)</script>")
@@ -57,44 +58,38 @@ class TestSanitizeText:
         assert "<span>" not in result
         assert "text" in result
 
-    def test_javascript_uri_neutralized(self):
-        result = sanitize_text("javascript:alert(1)")
-        assert "javascript:" not in result
-        assert "_blocked_:" in result
-
-    def test_javascript_uri_case_insensitive(self):
-        result = sanitize_text("JavaScript:void(0)")
-        assert "_blocked_:" in result
-
-    def test_javascript_uri_with_spaces(self):
-        result = sanitize_text("javascript :alert(1)")
+    @pytest.mark.parametrize(
+        ("value", "absent"),
+        [
+            pytest.param("javascript:alert(1)", "javascript:", id="javascript_uri"),
+            pytest.param("JavaScript:void(0)", None, id="javascript_uri_case_insensitive"),
+            pytest.param("javascript :alert(1)", None, id="javascript_uri_with_spaces"),
+            pytest.param("DATA:image/png;base64,abc", None, id="data_uri_case_insensitive"),
+        ],
+    )
+    def test_uri_scheme_neutralized(self, value, absent):
+        result = sanitize_text(value)
+        if absent is not None:
+            assert absent not in result
         assert "_blocked_:" in result
 
     def test_data_uri_neutralized(self):
         result = sanitize_text("data:text/html,<h1>XSS</h1>")
         assert "data:" not in result.lower() or "_blocked_:" in result
 
-    def test_data_uri_case_insensitive(self):
-        result = sanitize_text("DATA:image/png;base64,abc")
-        assert "_blocked_:" in result
-
-    def test_onclick_neutralized(self):
-        result = sanitize_text("onclick=alert(1)")
-        assert "onclick=" not in result
-        assert "_blocked_=" in result
-
-    def test_onmouseover_neutralized(self):
-        result = sanitize_text("onmouseover=doStuff()")
-        assert "onmouseover=" not in result
-        assert "_blocked_=" in result
-
-    def test_onerror_neutralized(self):
-        result = sanitize_text("onerror=hack()")
-        assert "onerror=" not in result
-        assert "_blocked_=" in result
-
-    def test_event_handler_case_insensitive(self):
-        result = sanitize_text("ONCLICK=bad()")
+    @pytest.mark.parametrize(
+        ("value", "absent"),
+        [
+            pytest.param("onclick=alert(1)", "onclick=", id="onclick"),
+            pytest.param("onmouseover=doStuff()", "onmouseover=", id="onmouseover"),
+            pytest.param("onerror=hack()", "onerror=", id="onerror"),
+            pytest.param("ONCLICK=bad()", None, id="event_handler_case_insensitive"),
+        ],
+    )
+    def test_event_handler_neutralized(self, value, absent):
+        result = sanitize_text(value)
+        if absent is not None:
+            assert absent not in result
         assert "_blocked_=" in result
 
     def test_mixed_attack_tag_plus_event_plus_uri(self):
@@ -103,15 +98,6 @@ class TestSanitizeText:
         assert "<a" not in result
         assert "javascript:" not in result
         assert "onclick=" not in result
-
-    def test_empty_string(self):
-        assert sanitize_text("") == ""
-
-    def test_whitespace_only(self):
-        assert sanitize_text("   ") == "   "
-
-    def test_numeric_string_unchanged(self):
-        assert sanitize_text("12345") == "12345"
 
 
 class TestSanitizeDict:

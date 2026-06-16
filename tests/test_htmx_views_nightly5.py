@@ -16,6 +16,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -531,25 +532,17 @@ class TestAddOfferstoDraftQuote:
 
 
 class TestEmailReply:
-    def test_missing_to_returns_400(self, client: TestClient):
-        """Missing 'to' field → 400."""
-        resp = client.post(
-            "/v2/partials/emails/reply",
-            data={"body": "Hello there", "subject": "Test"},
-        )
-        assert resp.status_code == 400
-
-    def test_missing_body_returns_400(self, client: TestClient):
-        """Missing 'body' field → 400."""
-        resp = client.post(
-            "/v2/partials/emails/reply",
-            data={"to": "vendor@example.com", "subject": "Test"},
-        )
-        assert resp.status_code == 400
-
-    def test_both_missing_returns_400(self, client: TestClient):
-        """Both 'to' and 'body' missing → 400."""
-        resp = client.post("/v2/partials/emails/reply", data={"subject": "Test"})
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"body": "Hello there", "subject": "Test"}, id="missing_to"),
+            pytest.param({"to": "vendor@example.com", "subject": "Test"}, id="missing_body"),
+            pytest.param({"subject": "Test"}, id="both_missing"),
+        ],
+    )
+    def test_missing_required_field_returns_400(self, client: TestClient, data: dict):
+        """Missing 'to' and/or 'body' → 400."""
+        resp = client.post("/v2/partials/emails/reply", data=data)
         assert resp.status_code == 400
 
     def test_graph_api_connection_error_returns_200_with_error(self, client: TestClient):
@@ -645,35 +638,21 @@ class TestReviewResponse:
         )
         assert resp.status_code == 400
 
-    def test_valid_reviewed_status(
+    @pytest.mark.parametrize("status", ["reviewed", "rejected"])
+    def test_valid_status_returns_200(
         self,
         client: TestClient,
         db_session: Session,
         test_requisition: Requisition,
+        status: str,
     ):
-        """Valid 'reviewed' status → 200 and response card template."""
+        """Valid 'reviewed'/'rejected' status → 200 and response card template."""
         vr = _vendor_response(db_session, test_requisition)
         db_session.commit()
 
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/responses/{vr.id}/review",
-            data={"status": "reviewed"},
-        )
-        assert resp.status_code == 200
-
-    def test_valid_rejected_status(
-        self,
-        client: TestClient,
-        db_session: Session,
-        test_requisition: Requisition,
-    ):
-        """Valid 'rejected' status → 200."""
-        vr = _vendor_response(db_session, test_requisition)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/responses/{vr.id}/review",
-            data={"status": "rejected"},
+            data={"status": status},
         )
         assert resp.status_code == 200
 

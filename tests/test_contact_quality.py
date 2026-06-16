@@ -7,6 +7,7 @@ Depends on: conftest fixtures (db_session, test_company, test_customer_site)
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.crm import Company, SiteContact
@@ -25,64 +26,49 @@ from app.services.contact_quality import (
 class TestValidateContact:
     """Tests for contact dict validation."""
 
-    def test_valid_contact(self):
-        contact = {"full_name": "Jane Doe", "email": "jane@example.com", "phone": "+1-555-1234"}
+    @pytest.mark.parametrize(
+        ("contact", "expect_empty_issues"),
+        [
+            ({"full_name": "Jane Doe", "email": "jane@example.com", "phone": "+1-555-1234"}, True),
+            ({"full_name": "Jane Doe", "email": "jane@example.com", "phone": ""}, True),
+            ({"full_name": "Jane Doe", "email": "jane@example.com"}, False),
+            ({"full_name": "Jo", "email": "jo@a.co"}, False),
+        ],
+        ids=["valid_contact", "phone_empty_is_ok", "phone_absent_is_ok", "valid_minimal_name"],
+    )
+    def test_valid_contacts(self, contact, expect_empty_issues):
         is_valid, issues = validate_contact(contact)
         assert is_valid is True
-        assert issues == []
+        if expect_empty_issues:
+            assert issues == []
 
-    def test_missing_name(self):
-        contact = {"full_name": "", "email": "jane@example.com"}
+    @pytest.mark.parametrize(
+        ("contact", "expected_issue"),
+        [
+            ({"full_name": "", "email": "jane@example.com"}, "missing_name"),
+            ({"full_name": "J", "email": "jane@example.com"}, "missing_name"),
+            ({"email": "jane@example.com"}, "missing_name"),
+            ({"full_name": "  ", "email": "jane@example.com"}, "missing_name"),
+            ({"full_name": "Jane Doe", "email": ""}, "missing_email"),
+            ({"full_name": "Jane Doe"}, "missing_email"),
+            ({"full_name": "Jane Doe", "email": "not-an-email"}, "invalid_email_format"),
+            ({"full_name": "Jane Doe", "email": "jane@example.com", "phone": "123"}, "phone_too_short"),
+        ],
+        ids=[
+            "missing_name",
+            "name_too_short",
+            "name_none",
+            "whitespace_name_stripped",
+            "missing_email",
+            "email_none",
+            "invalid_email_format",
+            "phone_too_short",
+        ],
+    )
+    def test_invalid_contacts(self, contact, expected_issue):
         is_valid, issues = validate_contact(contact)
         assert is_valid is False
-        assert "missing_name" in issues
-
-    def test_name_too_short(self):
-        contact = {"full_name": "J", "email": "jane@example.com"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "missing_name" in issues
-
-    def test_name_none(self):
-        contact = {"email": "jane@example.com"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "missing_name" in issues
-
-    def test_missing_email(self):
-        contact = {"full_name": "Jane Doe", "email": ""}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "missing_email" in issues
-
-    def test_email_none(self):
-        contact = {"full_name": "Jane Doe"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "missing_email" in issues
-
-    def test_invalid_email_format(self):
-        contact = {"full_name": "Jane Doe", "email": "not-an-email"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "invalid_email_format" in issues
-
-    def test_phone_too_short(self):
-        contact = {"full_name": "Jane Doe", "email": "jane@example.com", "phone": "123"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "phone_too_short" in issues
-
-    def test_phone_empty_is_ok(self):
-        contact = {"full_name": "Jane Doe", "email": "jane@example.com", "phone": ""}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is True
-        assert issues == []
-
-    def test_phone_absent_is_ok(self):
-        contact = {"full_name": "Jane Doe", "email": "jane@example.com"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is True
+        assert expected_issue in issues
 
     def test_multiple_issues(self):
         contact = {"full_name": "", "email": "bad", "phone": "12"}
@@ -92,17 +78,6 @@ class TestValidateContact:
         assert "missing_name" in issues
         assert "invalid_email_format" in issues
         assert "phone_too_short" in issues
-
-    def test_whitespace_name_stripped(self):
-        contact = {"full_name": "  ", "email": "jane@example.com"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is False
-        assert "missing_name" in issues
-
-    def test_valid_minimal_name(self):
-        contact = {"full_name": "Jo", "email": "jo@a.co"}
-        is_valid, issues = validate_contact(contact)
-        assert is_valid is True
 
 
 # ── dedup_contacts ──────────────────────────────────────────────────
@@ -176,8 +151,6 @@ class TestDedupContacts:
 
         Skipped: UNIQUE constraint on (customer_site_id, email) prevents duplicate creation.
         """
-        import pytest
-
         pytest.skip("UNIQUE constraint on (customer_site_id, email) prevents duplicate creation")
 
     def test_contacts_with_no_email_skipped(self, db_session: Session, test_customer_site):
@@ -204,8 +177,6 @@ class TestDedupContacts:
 
         Skipped: UNIQUE constraint on (customer_site_id, email) prevents duplicate creation.
         """
-        import pytest
-
         pytest.skip("UNIQUE constraint on (customer_site_id, email) prevents duplicate creation")
 
     def test_empty_site(self, db_session: Session, test_customer_site):
@@ -219,74 +190,36 @@ class TestDedupContacts:
 class TestScoreContactCompleteness:
     """Tests for the 0-100 completeness scorer."""
 
-    def test_fully_complete_contact(self, db_session: Session, test_customer_site):
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Alice Smith",
-            email="alice@example.com",
-            email_verified=True,
-            phone="+1-555-0001",
-            phone_verified=True,
-            title="VP Purchasing",
-            linkedin_url="https://linkedin.com/in/alice",
-        )
+    @pytest.mark.parametrize(
+        ("fields", "expected"),
+        [
+            # 25 email + 20 name + 15 phone + 5 phone_verified + 15 title + 10 linkedin + 10 email_verified = 100
+            (
+                {
+                    "full_name": "Alice Smith",
+                    "email": "alice@example.com",
+                    "email_verified": True,
+                    "phone": "+1-555-0001",
+                    "phone_verified": True,
+                    "title": "VP Purchasing",
+                    "linkedin_url": "https://linkedin.com/in/alice",
+                },
+                100,
+            ),
+            ({"full_name": "Unknown", "email": None}, 0),
+            ({"full_name": "Unknown", "email": "x@y.com"}, 25),  # email only
+            ({"full_name": "Alice", "email": "alice@test.com"}, 45),  # 25 + 20
+            # 25 email + 20 name + 15 phone = 60
+            ({"full_name": "Alice", "email": "a@b.com", "phone": "+1-555", "phone_verified": False}, 60),
+        ],
+        ids=["fully_complete", "empty", "email_only", "name_and_email", "phone_without_verified"],
+    )
+    def test_score(self, db_session: Session, test_customer_site, fields, expected):
+        c = SiteContact(customer_site_id=test_customer_site.id, **fields)
         db_session.add(c)
         db_session.flush()
 
-        score = score_contact_completeness(c)
-        # 25 email + 20 name + 15 phone + 5 phone_verified + 15 title + 10 linkedin + 10 email_verified = 100
-        assert score == 100
-
-    def test_empty_contact(self, db_session: Session, test_customer_site):
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Unknown",
-            email=None,
-        )
-        db_session.add(c)
-        db_session.flush()
-
-        score = score_contact_completeness(c)
-        assert score == 0
-
-    def test_email_only(self, db_session: Session, test_customer_site):
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Unknown",
-            email="x@y.com",
-        )
-        db_session.add(c)
-        db_session.flush()
-
-        score = score_contact_completeness(c)
-        assert score == 25  # email only
-
-    def test_name_and_email(self, db_session: Session, test_customer_site):
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Alice",
-            email="alice@test.com",
-        )
-        db_session.add(c)
-        db_session.flush()
-
-        score = score_contact_completeness(c)
-        assert score == 45  # 25 + 20
-
-    def test_phone_without_verified(self, db_session: Session, test_customer_site):
-        c = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Alice",
-            email="a@b.com",
-            phone="+1-555",
-            phone_verified=False,
-        )
-        db_session.add(c)
-        db_session.flush()
-
-        score = score_contact_completeness(c)
-        # 25 email + 20 name + 15 phone = 60
-        assert score == 60
+        assert score_contact_completeness(c) == expected
 
     def test_score_capped_at_100(self, db_session: Session, test_customer_site):
         """Ensure score never exceeds 100 even with all fields."""

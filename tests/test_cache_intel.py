@@ -10,6 +10,8 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 import app.cache.intel_cache as cache_mod
 from app.cache.intel_cache import (
     _get_redis,
@@ -17,6 +19,23 @@ from app.cache.intel_cache import (
     get_cached,
     set_cached,
 )
+
+
+def _make_ctx_db() -> MagicMock:
+    """Build a mock DB session usable as a context manager (``with SessionLocal() as
+    db``)."""
+    mock_db = MagicMock()
+    mock_db.__enter__ = MagicMock(return_value=mock_db)
+    mock_db.__exit__ = MagicMock(return_value=False)
+    return mock_db
+
+
+def _rowcount_result(rowcount: int) -> MagicMock:
+    """Build a mock execute() result reporting the given rowcount."""
+    result = MagicMock()
+    result.rowcount = rowcount
+    return result
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _get_redis — TESTING=1 returns None
@@ -74,9 +93,7 @@ class TestGetCachedRedis:
         mock_get_redis.return_value = mock_redis
 
         # PG also returns None (miss)
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db = _make_ctx_db()
         mock_db.execute.return_value.fetchone.return_value = None
         mock_session_local.return_value = mock_db
 
@@ -88,9 +105,7 @@ class TestGetCachedPostgres:
     @patch("app.cache.intel_cache.SessionLocal")
     @patch("app.cache.intel_cache._get_redis", return_value=None)
     def test_pg_hit(self, mock_redis, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db = _make_ctx_db()
         mock_db.execute.return_value.fetchone.return_value = ({"intel": "data"},)
         mock_session_local.return_value = mock_db
 
@@ -100,9 +115,7 @@ class TestGetCachedPostgres:
     @patch("app.cache.intel_cache.SessionLocal")
     @patch("app.cache.intel_cache._get_redis", return_value=None)
     def test_pg_miss(self, mock_redis, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db = _make_ctx_db()
         mock_db.execute.return_value.fetchone.return_value = None
         mock_session_local.return_value = mock_db
 
@@ -144,9 +157,7 @@ class TestSetCached:
         mock_redis.setex.side_effect = Exception("Redis write failed")
         mock_get_redis.return_value = mock_redis
 
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db = _make_ctx_db()
         mock_session_local.return_value = mock_db
 
         set_cached("company:acme", {"intel": "data"}, ttl_days=7)
@@ -157,9 +168,7 @@ class TestSetCached:
     @patch("app.cache.intel_cache.SessionLocal")
     @patch("app.cache.intel_cache._get_redis", return_value=None)
     def test_pg_write_when_no_redis(self, mock_redis, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
+        mock_db = _make_ctx_db()
         mock_session_local.return_value = mock_db
 
         set_cached("company:test", {"data": True})
@@ -182,57 +191,34 @@ class TestSetCached:
 
 
 class TestCleanupExpired:
+    @pytest.mark.parametrize(
+        ("batch_rowcounts", "expected_count"),
+        [
+            pytest.param([500, 0], 500, id="single_batch_then_done"),
+            pytest.param([1000, 200], 1200, id="full_batch_then_partial"),
+        ],
+    )
     @patch("app.cache.intel_cache.SessionLocal")
-    def test_deletes_expired_batched(self, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        # First batch deletes 500, second batch deletes 0 → done
-        result1 = MagicMock()
-        result1.rowcount = 500
-        result2 = MagicMock()
-        result2.rowcount = 0
-        mock_db.execute.side_effect = [result1, result2]
+    def test_deletes_expired_batched(self, mock_session_local, batch_rowcounts, expected_count):
+        mock_db = _make_ctx_db()
+        mock_db.execute.side_effect = [_rowcount_result(n) for n in batch_rowcounts]
         mock_session_local.return_value = mock_db
 
-        count = cleanup_expired()
-        assert count == 500
+        assert cleanup_expired() == expected_count
 
     @patch("app.cache.intel_cache.SessionLocal")
     def test_no_expired_returns_zero(self, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        result = MagicMock()
-        result.rowcount = 0
-        mock_db.execute.return_value = result
+        mock_db = _make_ctx_db()
+        mock_db.execute.return_value = _rowcount_result(0)
         mock_session_local.return_value = mock_db
 
-        count = cleanup_expired()
-        assert count == 0
+        assert cleanup_expired() == 0
 
     @patch("app.cache.intel_cache.SessionLocal")
     def test_db_error_returns_zero(self, mock_session_local):
         mock_session_local.side_effect = Exception("DB error")
 
-        count = cleanup_expired()
-        assert count == 0
-
-    @patch("app.cache.intel_cache.SessionLocal")
-    def test_multiple_batches(self, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        # 1000 (full batch) → 200 (partial) → done
-        r1 = MagicMock()
-        r1.rowcount = 1000
-        r2 = MagicMock()
-        r2.rowcount = 200
-        mock_db.execute.side_effect = [r1, r2]
-        mock_session_local.return_value = mock_db
-
-        count = cleanup_expired()
-        assert count == 1200
+        assert cleanup_expired() == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -1358,14 +1358,6 @@ class TestAutoCompleteViaPOVerify:
 # ── Coverage Gap Tests ──────────────────────────────────────────────
 
 
-def _make_ops_member_v2(db, user):
-    """Create a VerificationGroupMember for ops verification tests."""
-    vgm = VerificationGroupMember(user_id=user.id, is_active=True)
-    db.add(vgm)
-    db.flush()
-    return vgm
-
-
 class TestBuyPlanCoverageGaps:
     """Cover specific uncovered lines in buy_plan_service."""
 
@@ -1399,7 +1391,7 @@ class TestBuyPlanCoverageGaps:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         plan.so_status = SOVerificationStatus.PENDING.value
-        _make_ops_member_v2(db_session, admin_user)
+        _make_ops_member(db_session, admin_user)
         db_session.flush()
 
         with pytest.raises(ValueError, match="Invalid SO verification"):
@@ -1438,7 +1430,7 @@ class TestBuyPlanCoverageGaps:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.AWAITING_PO.value
-        _make_ops_member_v2(db_session, admin_user)
+        _make_ops_member(db_session, admin_user)
         db_session.flush()
 
         with pytest.raises(ValueError, match="pending verification"):
@@ -1449,7 +1441,7 @@ class TestBuyPlanCoverageGaps:
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.ACTIVE.value
         line.status = BuyPlanLineStatus.PENDING_VERIFY.value
-        _make_ops_member_v2(db_session, admin_user)
+        _make_ops_member(db_session, admin_user)
         db_session.flush()
 
         with pytest.raises(ValueError, match="Invalid PO verification"):
@@ -1709,61 +1701,26 @@ class TestCoverageGaps2:
         score = score_offer(offer, req, vendor)
         assert score > 0
 
-    def test_score_lead_time_7_days(self, db_session, test_requisition):
-        """Line 115-116: lead_time 7 days gets 85."""
+    @pytest.mark.parametrize(
+        ("lead_time", "vendor_name"),
+        [
+            ("7 days", "Lead7"),  # lines 115-116: 7 days gets 85
+            ("14 days", "Lead14"),  # lines 117-118: 14 days gets 70
+            ("30 days", "Lead30"),  # lines 119-120: 30 days gets 50
+            ("60 days", "Lead60"),  # lines 121-122: 60 days gets max(30, 100-60)=40
+        ],
+        ids=["7_days", "14_days", "30_days", "60_days"],
+    )
+    def test_score_lead_time(self, db_session, test_requisition, lead_time, vendor_name):
+        """Lines 115-122: lead-time tiers all yield a positive score."""
         req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         offer = _make_offer(
             db_session,
             test_requisition.id,
             req.id,
             unit_price=0.50,
-            lead_time="7 days",
-            vendor_name="Lead7",
-        )
-        db_session.flush()
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_score_lead_time_14_days(self, db_session, test_requisition):
-        """Lines 117-118: lead_time 14 days gets 70."""
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        offer = _make_offer(
-            db_session,
-            test_requisition.id,
-            req.id,
-            unit_price=0.50,
-            lead_time="14 days",
-            vendor_name="Lead14",
-        )
-        db_session.flush()
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_score_lead_time_30_days(self, db_session, test_requisition):
-        """Lines 119-120: lead_time 30 days gets 50."""
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        offer = _make_offer(
-            db_session,
-            test_requisition.id,
-            req.id,
-            unit_price=0.50,
-            lead_time="30 days",
-            vendor_name="Lead30",
-        )
-        db_session.flush()
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_score_lead_time_60_days(self, db_session, test_requisition):
-        """Lines 121-122: lead_time 60 days gets max(30, 100-60)=40."""
-        req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        offer = _make_offer(
-            db_session,
-            test_requisition.id,
-            req.id,
-            unit_price=0.50,
-            lead_time="60 days",
-            vendor_name="Lead60",
+            lead_time=lead_time,
+            vendor_name=vendor_name,
         )
         db_session.flush()
         score = score_offer(offer, req, None)

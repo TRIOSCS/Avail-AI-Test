@@ -85,29 +85,38 @@ from app.schemas.ai import (
 
 
 class TestDraftOfferItemValidators:
-    def test_condition_none_passes(self):
-        d = DraftOfferItem(condition=None)
-        assert d.condition is None
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (None, None),
+            ("Factory New", "new"),
+        ],
+        ids=["none_passes", "normalized"],
+    )
+    def test_condition(self, value, expected):
+        assert DraftOfferItem(condition=value).condition == expected
 
-    def test_condition_normalized(self):
-        d = DraftOfferItem(condition="Factory New")
-        assert d.condition == "new"
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (None, None),
+            ("Tape & Reel", "reel"),
+        ],
+        ids=["none_passes", "normalized"],
+    )
+    def test_packaging(self, value, expected):
+        assert DraftOfferItem(packaging=value).packaging == expected
 
-    def test_packaging_none_passes(self):
-        d = DraftOfferItem(packaging=None)
-        assert d.packaging is None
-
-    def test_packaging_normalized(self):
-        d = DraftOfferItem(packaging="Tape & Reel")
-        assert d.packaging == "reel"
-
-    def test_mpn_empty_passes(self):
-        d = DraftOfferItem(mpn="")
-        assert d.mpn == ""
-
-    def test_mpn_normalized(self):
-        d = DraftOfferItem(mpn="lm317t")
-        assert d.mpn == "LM317T"
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("", ""),
+            ("lm317t", "LM317T"),
+        ],
+        ids=["empty_passes", "normalized"],
+    )
+    def test_mpn(self, value, expected):
+        assert DraftOfferItem(mpn=value).mpn == expected
 
 
 class TestParseEmailRequest:
