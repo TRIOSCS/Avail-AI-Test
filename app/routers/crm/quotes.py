@@ -29,6 +29,45 @@ from ._helpers import (
 router = APIRouter()
 
 
+def _quote_load_options():
+    """Eager-load options for serializing a Quote (customer site, company, site
+    contacts, creator)."""
+    return (
+        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+        joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
+        joinedload(Quote.created_by),
+    )
+
+
+def _compute_quote_totals(line_items: list[dict]) -> tuple[float, float, float]:
+    """Compute (subtotal, total_cost, total_margin_pct) from quote line items."""
+    total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in line_items)
+    total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in line_items)
+    margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
+    return total_sell, total_cost, margin_pct
+
+
+def _build_revision(old: Quote, user: User) -> Quote:
+    """Mark ``old`` as revised and return a fresh Quote carrying its line items and
+    terms forward at the next revision number."""
+    require_valid_transition("quote", old.status, QuoteStatus.REVISED)
+    old.status = QuoteStatus.REVISED
+    base_number = old.quote_number
+    old.quote_number = f"{base_number}-R{old.revision}"
+    return Quote(
+        requisition_id=old.requisition_id,
+        customer_site_id=old.customer_site_id,
+        quote_number=base_number,
+        revision=old.revision + 1,
+        line_items=old.line_items,
+        payment_terms=old.payment_terms,
+        shipping_terms=old.shipping_terms,
+        validity_days=old.validity_days,
+        notes=old.notes,
+        created_by_id=user.id,
+    )
+
+
 # ── Quotes ───────────────────────────────────────────────────────────────
 
 
@@ -43,11 +82,7 @@ async def get_quote(req_id: int, user: User = Depends(require_user), db: Session
         raise HTTPException(404, "Requisition not found")
     quote = (
         db.query(Quote)
-        .options(
-            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
-            joinedload(Quote.created_by),
-        )
+        .options(*_quote_load_options())
         .filter(Quote.requisition_id == req_id)
         .order_by(Quote.revision.desc())
         .first()
@@ -97,11 +132,7 @@ async def list_quotes(req_id: int, user: User = Depends(require_user), db: Sessi
         raise HTTPException(404, "Requisition not found")
     quotes = (
         db.query(Quote)
-        .options(
-            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
-            joinedload(Quote.created_by),
-        )
+        .options(*_quote_load_options())
         .filter(Quote.requisition_id == req_id)
         .order_by(Quote.revision.desc())
         .all()
@@ -181,8 +212,7 @@ async def create_quote(
                 )
 
     site = db.get(CustomerSite, req.customer_site_id)
-    total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in line_items)
-    total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in line_items)
+    total_sell, total_cost, margin_pct = _compute_quote_totals(line_items)
     from sqlalchemy.exc import IntegrityError
 
     old_status = req.status
@@ -194,7 +224,7 @@ async def create_quote(
             line_items=line_items,
             subtotal=total_sell,
             total_cost=total_cost,
-            total_margin_pct=(round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0),
+            total_margin_pct=margin_pct,
             payment_terms=site.payment_terms if site else None,
             shipping_terms=site.shipping_terms if site else None,
             created_by_id=user.id,
@@ -281,25 +311,12 @@ async def update_quote(
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
         quote.line_items = updates.pop("line_items")
-        total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
-        total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
-        quote.subtotal = total_sell
-        quote.total_cost = total_cost
-        quote.total_margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
+        quote.subtotal, quote.total_cost, quote.total_margin_pct = _compute_quote_totals(quote.line_items or [])
     for field, value in updates.items():
         setattr(quote, field, value)
     db.commit()
     # Eager-load relations for serialization
-    quote = (
-        db.query(Quote)
-        .options(
-            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
-            joinedload(Quote.created_by),
-        )
-        .filter(Quote.id == quote.id)
-        .first()
-    )
+    quote = db.query(Quote).options(*_quote_load_options()).filter(Quote.id == quote.id).first()
     return quote_to_dict(quote, db)
 
 
@@ -496,22 +513,7 @@ async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Se
     old = get_quote_for_user(db, user, quote_id)
     if not old:
         raise HTTPException(404, "Quote not found")
-    require_valid_transition("quote", old.status, QuoteStatus.REVISED)
-    old.status = QuoteStatus.REVISED
-    old_number = old.quote_number
-    old.quote_number = f"{old_number}-R{old.revision}"
-    new_quote = Quote(
-        requisition_id=old.requisition_id,
-        customer_site_id=old.customer_site_id,
-        quote_number=old_number,
-        revision=old.revision + 1,
-        line_items=old.line_items,
-        payment_terms=old.payment_terms,
-        shipping_terms=old.shipping_terms,
-        validity_days=old.validity_days,
-        notes=old.notes,
-        created_by_id=user.id,
-    )
+    new_quote = _build_revision(old, user)
     db.add(new_quote)
     db.commit()
     return quote_to_dict(new_quote, db)
@@ -533,22 +535,7 @@ async def reopen_quote(
     if req:
         req.status = RequisitionStatus.REOPENED
     if payload.revise:
-        require_valid_transition("quote", quote.status, QuoteStatus.REVISED)
-        quote.status = QuoteStatus.REVISED
-        old_number = quote.quote_number
-        quote.quote_number = f"{old_number}-R{quote.revision}"
-        new_quote = Quote(
-            requisition_id=quote.requisition_id,
-            customer_site_id=quote.customer_site_id,
-            quote_number=old_number,
-            revision=quote.revision + 1,
-            line_items=quote.line_items,
-            payment_terms=quote.payment_terms,
-            shipping_terms=quote.shipping_terms,
-            validity_days=quote.validity_days,
-            notes=quote.notes,
-            created_by_id=user.id,
-        )
+        new_quote = _build_revision(quote, user)
         db.add(new_quote)
         db.commit()
         return quote_to_dict(new_quote, db)

@@ -186,6 +186,12 @@ async def re_resolve(
     spec_code = row.spec_code
     oem = row.oem
 
+    def unresolved(error: bool) -> HTMLResponse:
+        return template_response(
+            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
+            {"request": request, "spec_code": spec_code, "error": error},
+        )
+
     resolver = SpecCodeResolver(db)
     try:
         # Force a fresh attempt (don't reuse the row we're trying to replace). No
@@ -197,18 +203,12 @@ async def re_resolve(
             "spec_codes: re-resolve failed for pending_id={}",
             pending_id,
         )
-        return template_response(
-            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
-            {"request": request, "spec_code": spec_code, "error": True},
-        )
+        return unresolved(error=True)
 
     if result.status == "unresolved":
         # Fresh attempt found nothing — leave the original pending row intact. No
         # overwrite, no data loss; the admin can still reject to blacklist it.
-        return template_response(
-            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
-            {"request": request, "spec_code": spec_code, "error": False},
-        )
+        return unresolved(error=False)
 
     # Fresh resolution succeeded — atomically swap the old row for the new one. The
     # LLM call is already done, so this transaction is short.
@@ -225,9 +225,6 @@ async def re_resolve(
             "spec_codes: re-resolve swap failed for pending_id={}",
             pending_id,
         )
-        return template_response(
-            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
-            {"request": request, "spec_code": spec_code, "error": True},
-        )
+        return unresolved(error=True)
 
     return HTMLResponse("", status_code=200)

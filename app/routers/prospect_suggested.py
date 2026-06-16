@@ -24,6 +24,7 @@ from ..services.prospect_claim import (
     trigger_deep_enrichment_bg,
 )
 from ..services.prospect_priority import build_priority_snapshot
+from ..services.prospect_scoring import classify_readiness
 from ..utils.async_helpers import safe_background_task
 from ..utils.sql_helpers import escape_like
 
@@ -426,13 +427,7 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
     similar = p.similar_customers or []
     priority = build_priority_snapshot(p)
 
-    # Readiness tier
-    if p.readiness_score >= 70:
-        readiness_tier = "call_now"
-    elif p.readiness_score >= 40:
-        readiness_tier = "nurture"
-    else:
-        readiness_tier = "monitor"
+    readiness_tier = classify_readiness(p.readiness_score or 0)
 
     # Signal summary for card display
     signal_tags = []

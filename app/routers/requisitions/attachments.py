@@ -26,6 +26,47 @@ from ...models import (
 
 router = APIRouter(tags=["requisitions"])
 
+MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024  # 10 MB
+
+
+def _serialize_attachment(a) -> dict:
+    """Full JSON shape for an attachment list entry."""
+    return {
+        "id": a.id,
+        "file_name": a.file_name,
+        "onedrive_url": a.onedrive_url,
+        "content_type": a.content_type,
+        "size_bytes": a.size_bytes,
+        "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
+        "created_at": a.created_at.isoformat() if a.created_at else None,
+    }
+
+
+def _attachment_created_response(att) -> dict:
+    """Compact JSON shape returned after creating/linking an attachment."""
+    return {
+        "id": att.id,
+        "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+async def _delete_onedrive_item(item_id: str, token: str) -> None:
+    """Best-effort DELETE of a OneDrive item; raises HTTPException only on auth
+    errors."""
+    from ...http_client import http
+
+    resp = await http.delete(
+        f"https://graph.microsoft.com/v1.0/me/drive/items/{item_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=15,
+    )
+    if resp.status_code == 401:
+        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+    if resp.status_code == 403:
+        raise HTTPException(403, "Access denied to OneDrive item")
+
 
 @router.get("/api/requisitions/{req_id}/attachments")
 async def list_requisition_attachments(
@@ -37,18 +78,7 @@ async def list_requisition_attachments(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    return [
-        {
-            "id": a.id,
-            "file_name": a.file_name,
-            "onedrive_url": a.onedrive_url,
-            "content_type": a.content_type,
-            "size_bytes": a.size_bytes,
-            "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in req.attachments
-    ]
+    return [_serialize_attachment(a) for a in req.attachments]
 
 
 @router.post("/api/requisitions/{req_id}/attachments")
@@ -63,7 +93,7 @@ async def upload_requisition_attachment(
     if not req:
         raise HTTPException(404, "Requisition not found")
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
+    if len(content) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(400, "File too large (max 10 MB)")
     from ...scheduler import get_valid_token
 
@@ -102,12 +132,7 @@ async def upload_requisition_attachment(
     )
     db.add(att)
     db.commit()
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
+    return _attachment_created_response(att)
 
 
 @router.post("/api/requisitions/{req_id}/attachments/onedrive")
@@ -152,12 +177,7 @@ async def attach_requisition_from_onedrive(
     )
     db.add(att)
     db.commit()
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
+    return _attachment_created_response(att)
 
 
 @router.delete("/api/requisition-attachments/{att_id}")
@@ -177,17 +197,7 @@ async def delete_requisition_attachment(
         if not token:
             raise HTTPException(401, "Microsoft token expired — please re-authenticate")
         try:
-            from ...http_client import http
-
-            resp = await http.delete(
-                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            if resp.status_code == 401:
-                raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-            if resp.status_code == 403:
-                raise HTTPException(403, "Access denied to OneDrive item")
+            await _delete_onedrive_item(att.onedrive_item_id, token)
         except HTTPException:
             raise
         except (ConnectionError, TimeoutError, OSError) as e:
@@ -213,18 +223,7 @@ async def list_requirement_attachments(
     parent_req = get_req_for_user(db, user, requirement.requisition_id)
     if not parent_req:
         raise HTTPException(403, "Not authorized")
-    return [
-        {
-            "id": a.id,
-            "file_name": a.file_name,
-            "onedrive_url": a.onedrive_url,
-            "content_type": a.content_type,
-            "size_bytes": a.size_bytes,
-            "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
-            "created_at": a.created_at.isoformat() if a.created_at else None,
-        }
-        for a in requirement.attachments
-    ]
+    return [_serialize_attachment(a) for a in requirement.attachments]
 
 
 @router.post("/api/requirements/{req_id}/attachments")
@@ -242,7 +241,7 @@ async def upload_requirement_attachment(
     if not parent_req:
         raise HTTPException(403, "Not authorized")
     content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
+    if len(content) > MAX_ATTACHMENT_BYTES:
         raise HTTPException(400, "File too large (max 10 MB)")
     from ...scheduler import get_valid_token
 
@@ -283,12 +282,7 @@ async def upload_requirement_attachment(
     )
     db.add(att)
     db.commit()
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
+    return _attachment_created_response(att)
 
 
 @router.delete("/api/requirement-attachments/{att_id}")
@@ -308,17 +302,7 @@ async def delete_requirement_attachment(
         if not token:
             raise HTTPException(401, "Microsoft token expired — please re-authenticate")
         try:
-            from ...http_client import http
-
-            resp = await http.delete(
-                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                headers={"Authorization": f"Bearer {token}"},
-                timeout=15,
-            )
-            if resp.status_code == 401:
-                raise HTTPException(401, "Microsoft token expired — please re-authenticate")
-            if resp.status_code == 403:
-                raise HTTPException(403, "Access denied to OneDrive item")
+            await _delete_onedrive_item(att.onedrive_item_id, token)
         except HTTPException:
             raise
         except (ConnectionError, TimeoutError, OSError) as e:

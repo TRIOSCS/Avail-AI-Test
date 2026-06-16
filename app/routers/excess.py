@@ -57,13 +57,29 @@ from ..services.excess_service import (
 )
 from ..template_env import template_response
 from ..utils.claude_client import claude_text
-from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
+from ..utils.claude_errors import ClaudeError
 from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["excess"])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
+
+
+def _file_extension(filename: str) -> str:
+    """Return the lowercase extension (with dot) of a filename, or '' if none."""
+    if "." not in filename:
+        return ""
+    return "." + filename.rsplit(".", 1)[-1].lower()
+
+
+def _get_line_item_or_404(db: Session, list_id: int, item_id: int) -> ExcessLineItem:
+    """Fetch a line item, verifying it belongs to the given list (404 otherwise)."""
+    get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, item_id)
+    if not item or item.excess_list_id != list_id:
+        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    return item
 
 
 # ── HTMX Partials ────────────────────────────────────────────────────
@@ -164,7 +180,7 @@ async def partial_import_preview(
     """Parse uploaded file and render an import preview partial for HTMX."""
     get_excess_list(db, list_id)
     filename = file.filename or ""
-    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ext = _file_extension(filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'")
     content = await file.read()
@@ -272,9 +288,7 @@ async def api_import_file(
 ):
     """Upload a CSV/TSV/Excel file to bulk-import line items."""
     filename = file.filename or ""
-    ext = ""
-    if "." in filename:
-        ext = "." + filename.rsplit(".", 1)[-1].lower()
+    ext = _file_extension(filename)
 
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
@@ -304,7 +318,7 @@ async def api_preview_import(
     """Upload a file and return a validation preview (no DB writes)."""
     get_excess_list(db, list_id)
     filename = file.filename or ""
-    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    ext = _file_extension(filename)
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, f"Unsupported file type '{ext}'")
     content = await file.read()
@@ -469,11 +483,7 @@ async def api_update_bid(
         bid = accept_bid(db, bid_id, item_id, list_id)
         return BidResponse.model_validate(bid)
 
-    # Verify ownership chain
-    get_excess_list(db, list_id)
-    item = db.get(ExcessLineItem, item_id)
-    if not item or item.excess_list_id != list_id:
-        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    _get_line_item_or_404(db, list_id, item_id)
 
     bid = db.get(Bid, bid_id)
     if not bid or bid.excess_line_item_id != item_id:
@@ -588,10 +598,7 @@ async def partial_bid_form(
     db: Session = Depends(get_db),
 ):
     """Render the bid recording form modal."""
-    get_excess_list(db, list_id)
-    item = db.get(ExcessLineItem, item_id)
-    if not item or item.excess_list_id != list_id:
-        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    item = _get_line_item_or_404(db, list_id, item_id)
     companies = db.query(Company).order_by(Company.name).all()
     return template_response(
         "htmx/partials/excess/bid_form.html",
@@ -614,10 +621,7 @@ async def partial_bid_list(
     db: Session = Depends(get_db),
 ):
     """Render the bid list modal for a line item."""
-    get_excess_list(db, list_id)
-    item = db.get(ExcessLineItem, item_id)
-    if not item or item.excess_list_id != list_id:
-        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    item = _get_line_item_or_404(db, list_id, item_id)
     bids = list_bids(db, item_id, list_id)
     companies = db.query(Company).order_by(Company.name).all()
     return template_response(
@@ -726,8 +730,6 @@ async def api_polish_email(
             system="You are a professional email editor. Return only the polished email text.",
             max_tokens=1024,
         )
-    except ClaudeUnavailableError:
-        return PolishEmailResponse(text=payload.text)
     except ClaudeError:
         return PolishEmailResponse(text=payload.text)
     return PolishEmailResponse(text=polished.strip() if polished else payload.text)

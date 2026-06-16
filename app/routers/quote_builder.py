@@ -20,6 +20,33 @@ from ..schemas.quote_builder import QuoteBuilderSaveRequest
 router = APIRouter(tags=["quote-builder"])
 
 
+def _parse_req_ids(requisition_ids: str) -> list[int]:
+    """Parse a comma-separated requisition-id string into ints.
+
+    Raises HTTP 400 on a malformed value or an empty selection.
+    """
+    try:
+        ids = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "Invalid requisition IDs")
+    if not ids:
+        raise HTTPException(400, "No requisitions selected")
+    return ids
+
+
+def _customer_name_for_site(db: Session, customer_site_id: int | None) -> str:
+    """Resolve the customer company name for a requisition's customer site ("" if
+    none)."""
+    if not customer_site_id:
+        return ""
+    from ..models import CustomerSite
+
+    site = db.get(CustomerSite, customer_site_id)
+    if site and site.company:
+        return site.company.name or ""
+    return ""
+
+
 @router.get("/v2/partials/quote-builder/{req_id}")
 async def quote_builder_modal(
     req_id: int,
@@ -40,15 +67,6 @@ async def quote_builder_modal(
     if not req:
         raise HTTPException(404, "Requisition not found")
 
-    customer_name = ""
-    has_customer_site = bool(req.customer_site_id)
-    if has_customer_site:
-        from ..models import CustomerSite
-
-        site = db.get(CustomerSite, req.customer_site_id)
-        if site and site.company:
-            customer_name = site.company.name or ""
-
     from ..template_env import template_response
 
     return template_response(
@@ -56,8 +74,8 @@ async def quote_builder_modal(
         {
             "request": request,
             "req": req,
-            "customer_name": customer_name,
-            "has_customer_site": has_customer_site,
+            "customer_name": _customer_name_for_site(db, req.customer_site_id),
+            "has_customer_site": bool(req.customer_site_id),
             "requirement_ids": requirement_ids or "",
         },
     )
@@ -77,26 +95,12 @@ async def quote_builder_modal_multi(
     """
     from ..dependencies import get_req_for_user
 
-    try:
-        req_id_list = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(400, "Invalid requisition IDs")
-    if not req_id_list:
-        raise HTTPException(400, "No requisitions selected")
+    req_id_list = _parse_req_ids(requisition_ids)
 
     # Use the first requisition as primary
     primary_req = get_req_for_user(db, user, req_id_list[0])
     if not primary_req:
         raise HTTPException(404, "Requisition not found")
-
-    customer_name = ""
-    has_customer_site = bool(primary_req.customer_site_id)
-    if has_customer_site:
-        from ..models import CustomerSite
-
-        site = db.get(CustomerSite, primary_req.customer_site_id)
-        if site and site.company:
-            customer_name = site.company.name or ""
 
     from ..template_env import template_response
 
@@ -105,8 +109,8 @@ async def quote_builder_modal_multi(
         {
             "request": request,
             "req": primary_req,
-            "customer_name": customer_name,
-            "has_customer_site": has_customer_site,
+            "customer_name": _customer_name_for_site(db, primary_req.customer_site_id),
+            "has_customer_site": bool(primary_req.customer_site_id),
             "requirement_ids": "",
             "multi_req_ids": requisition_ids,
         },
@@ -123,12 +127,7 @@ async def quote_builder_data_multi(
     from ..dependencies import get_req_for_user
     from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
 
-    try:
-        req_id_list = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(400, "Invalid requisition IDs")
-    if not req_id_list:
-        raise HTTPException(400, "No requisitions selected")
+    req_id_list = _parse_req_ids(requisition_ids)
 
     all_lines = []
     for rid in req_id_list:
@@ -249,8 +248,6 @@ async def quote_builder_export_pdf(
 ):
     """Stream a PDF export of a saved quote (reuses existing PDF generator)."""
     import asyncio
-
-    from fastapi.responses import Response
 
     from ..models import Quote
 

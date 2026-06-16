@@ -39,6 +39,31 @@ from ..vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["vendors"])
 
 
+def _lookup_response(card, vendor_name, source, tier, **extra):
+    """Build the standard vendor-contact lookup payload from a card."""
+    return {
+        "vendor_name": vendor_name,
+        "emails": card.emails or [],
+        "phones": card.phones or [],
+        "website": card.website,
+        "card_id": card.id,
+        "source": source,
+        "tier": tier,
+        **extra,
+    }
+
+
+def _coalesce_contact_list(values, single):
+    """Normalize an AI-returned list field, prepending an optional single value."""
+    if isinstance(values, str):
+        values = [values]
+    else:
+        values = list(values or [])
+    if single and single not in values:
+        values.insert(0, single)
+    return values
+
+
 # -- 3-Tier Vendor Contact Lookup ---------------------------------------------
 
 
@@ -64,15 +89,7 @@ async def lookup_vendor_contact(
 
     # TIER 1: Cache check (free, instant)
     if card.emails:
-        return {
-            "vendor_name": card.display_name,
-            "emails": card.emails or [],
-            "phones": card.phones or [],
-            "website": card.website,
-            "card_id": card.id,
-            "source": "cached",
-            "tier": 1,
-        }
+        return _lookup_response(card, card.display_name, "cached", 1)
 
     # TIER 2: Website scrape (free, ~1-2 sec)
     if card.website:
@@ -83,30 +100,13 @@ async def lookup_vendor_contact(
                 merge_contact_into_card(card, scraped["emails"], scraped["phones"], source="website_scrape")
                 db.commit()
                 if card.emails:
-                    return {
-                        "vendor_name": card.display_name,
-                        "emails": card.emails or [],
-                        "phones": card.phones or [],
-                        "website": card.website,
-                        "card_id": card.id,
-                        "source": "website_scrape",
-                        "tier": 2,
-                    }
+                    return _lookup_response(card, card.display_name, "website_scrape", 2)
         except Exception as e:
             logger.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
 
     # TIER 3: AI lookup (expensive, last resort)
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return {
-            "vendor_name": vendor_name,
-            "emails": card.emails or [],
-            "phones": card.phones or [],
-            "website": card.website,
-            "card_id": card.id,
-            "source": None,
-            "tier": 0,
-            "error": "No API key configured",
-        }
+        return _lookup_response(card, vendor_name, None, 0, error="No API key configured")
 
     logger.info(f"Tier 3: AI lookup for {vendor_name}")
     try:
@@ -141,49 +141,18 @@ async def lookup_vendor_contact(
         if not info or not isinstance(info, dict):
             info = {}
 
-        ai_emails = info.get("emails") or []
-        if isinstance(ai_emails, str):
-            ai_emails = [ai_emails]
-        single_email = info.get("email")
-        if single_email and single_email not in ai_emails:
-            ai_emails.insert(0, single_email)
-        ai_emails = clean_emails(ai_emails)
-
-        ai_phones = info.get("phones") or []
-        if isinstance(ai_phones, str):
-            ai_phones = [ai_phones]
-        single_phone = info.get("phone")
-        if single_phone and single_phone not in ai_phones:
-            ai_phones.insert(0, single_phone)
-        ai_phones = clean_phones(ai_phones)
-
+        ai_emails = clean_emails(_coalesce_contact_list(info.get("emails"), info.get("email")))
+        ai_phones = clean_phones(_coalesce_contact_list(info.get("phones"), info.get("phone")))
         website = info.get("website")
 
         merge_contact_into_card(card, ai_emails, ai_phones, website, source="ai_lookup")
         db.commit()
 
-        return {
-            "vendor_name": card.display_name,
-            "emails": card.emails or [],
-            "phones": card.phones or [],
-            "website": card.website,
-            "card_id": card.id,
-            "source": "ai_lookup",
-            "tier": 3,
-        }
+        return _lookup_response(card, card.display_name, "ai_lookup", 3)
 
     except Exception as e:
         logger.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
-        return {
-            "vendor_name": vendor_name,
-            "emails": card.emails or [],
-            "phones": card.phones or [],
-            "website": card.website,
-            "card_id": card.id,
-            "source": None,
-            "tier": 0,
-            "error": str(e)[:200],
-        }
+        return _lookup_response(card, vendor_name, None, 0, error=str(e)[:200])
 
 
 # -- Structured Vendor Contact CRUD -------------------------------------------

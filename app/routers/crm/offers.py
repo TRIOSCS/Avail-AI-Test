@@ -51,6 +51,23 @@ ALLOWED_OFFER_EXTENSIONS = {
 }
 
 
+def _log_offer_status_change(db: Session, offer: Offer, old_status, user: User) -> None:
+    """Emit the standard OFFER_STATUS_CHANGED activity log for an offer transition."""
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
+
 # ── Offers ───────────────────────────────────────────────────────────────
 
 
@@ -129,8 +146,6 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
-        if key not in groups:
-            groups[key] = []
         atts = [
             {
                 "id": a.id,
@@ -141,7 +156,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             }
             for a in (o.attachments or [])
         ]
-        groups[key].append(
+        groups.setdefault(key, []).append(
             {
                 "id": o.id,
                 "requirement_id": o.requirement_id,
@@ -221,10 +236,8 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         for ho in hist_query:  # pragma: no cover
             for r in req.requirements:
                 if ho.material_card_id in req_card_map.get(r.id, set()):
-                    if r.id not in hist_by_req:
-                        hist_by_req[r.id] = []
                     is_sub = ho.material_card_id != primary_card_ids.get(r.id)
-                    hist_by_req[r.id].append(
+                    hist_by_req.setdefault(r.id, []).append(
                         {
                             "id": ho.id,
                             "vendor_name": ho.vendor_name,
@@ -344,7 +357,6 @@ async def create_offer(
             _enrich_new_card = (card.id, domain, card.display_name)
     # Resolve material card for this MPN
     from ...search_service import resolve_material_card
-    from ...utils.normalization import normalize_mpn_key
 
     mat_card = resolve_material_card(payload.mpn, db)
 
@@ -650,19 +662,7 @@ async def approve_offer(
     # Offer hook: user approval of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
     maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
+    _log_offer_status_change(db, offer, old_status, user)
     db.commit()
     return {"ok": True, "status": "active"}
 
@@ -688,19 +688,7 @@ async def reject_offer(
     if reason:
         offer.notes = f"{offer.notes or ''}\n[Rejected: {reason}]".strip()
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "rejected"}, ["status"])
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
+    _log_offer_status_change(db, offer, old_status, user)
     db.commit()
     return {"ok": True, "status": "rejected"}
 
@@ -728,19 +716,7 @@ async def mark_offer_sold(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "sold"}, ["status"])
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
+    _log_offer_status_change(db, offer, old_status, user)
     db.commit()
     return {"ok": True, "status": "sold"}
 
@@ -891,9 +867,6 @@ async def delete_offer_attachment(
         raise HTTPException(404, "Attachment not found")
     # Delete from OneDrive if we have the item ID
     if att.onedrive_item_id and user.access_token:
-        from ...utils.graph_client import GraphClient
-
-        GraphClient(user.access_token)
         try:
             from ...http_client import http
 
@@ -920,22 +893,14 @@ async def browse_onedrive(
     from ...utils.graph_client import GraphClient
 
     gc = GraphClient(user.access_token)
-    if path:
-        data = await gc.get_json(
-            f"/me/drive/root:/{path}:/children",
-            params={
-                "$top": "50",
-                "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime",
-            },
-        )
-    else:
-        data = await gc.get_json(
-            "/me/drive/root/children",
-            params={
-                "$top": "50",
-                "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime",
-            },
-        )
+    endpoint = f"/me/drive/root:/{path}:/children" if path else "/me/drive/root/children"
+    data = await gc.get_json(
+        endpoint,
+        params={
+            "$top": "50",
+            "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime",
+        },
+    )
     if "error" in data:
         raise HTTPException(502, "Failed to browse OneDrive")
     items = data.get("value", [])
@@ -1051,19 +1016,7 @@ async def promote_offer(
     # Offer hook: user promotion of a pending offer is user-initiated proof of
     # availability — release the vendor's matching active unavailability records.
     maybe_release_on_offer(db, offer.requirement_id, offer.vendor_name, user)
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
+    _log_offer_status_change(db, offer, old_status, user)
     db.commit()
 
     logger.info(f"Offer {offer_id} promoted T4→T5 by user {user.id}")
@@ -1084,7 +1037,7 @@ async def reject_offer_t4_review(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status not in ("pending_review",):
+    if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
@@ -1092,19 +1045,7 @@ async def reject_offer_t4_review(
     offer.status = OfferStatus.REJECTED
     offer.updated_by_id = user.id
     offer.updated_at = datetime.now(timezone.utc)
-    log_activity(
-        db,
-        activity_type=ActivityType.OFFER_STATUS_CHANGED,
-        requisition_id=offer.requisition_id,
-        user_id=user.id,
-        vendor_card_id=offer.vendor_card_id,
-        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
-        details={
-            "offer_id": offer.id,
-            "old_status": str(old_status),
-            "new_status": str(offer.status),
-        },
-    )
+    _log_offer_status_change(db, offer, old_status, user)
     db.commit()
 
     logger.info(f"Offer {offer_id} rejected by user {user.id}")

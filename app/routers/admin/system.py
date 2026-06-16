@@ -30,6 +30,11 @@ from ...services.admin_service import get_all_config, get_system_health, set_con
 router = APIRouter(tags=["admin"])
 
 
+def _iso(dt):
+    """Return a datetime as an ISO string, or None if unset."""
+    return dt.isoformat() if dt else None
+
+
 # -- Schemas ---------------------------------------------------------------
 
 
@@ -111,9 +116,9 @@ def api_connector_health(
                 "avg_response_ms": src.avg_response_ms or 0,
                 "total_searches": total,
                 "total_results": total_results,
-                "last_success": src.last_success.isoformat() if src.last_success else None,
+                "last_success": _iso(src.last_success),
                 "last_error": src.last_error,
-                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+                "last_error_at": _iso(src.last_error_at),
                 "error_count_24h": errors_24h,
             }
         )
@@ -160,17 +165,17 @@ def api_health_dashboard(
                 "source_type": src.source_type,
                 "status": src.status,
                 "is_active": src.is_active,
-                "last_success": src.last_success.isoformat() if src.last_success else None,
+                "last_success": _iso(src.last_success),
                 "last_error": src.last_error,
-                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+                "last_error_at": _iso(src.last_error_at),
                 "error_count_24h": src.error_count_24h or 0,
                 "avg_response_ms": src.avg_response_ms or 0,
                 "total_searches": src.total_searches or 0,
                 "monthly_quota": quota,
                 "calls_this_month": calls,
                 "usage_pct": usage_pct,
-                "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
-                "last_deep_test_at": src.last_deep_test_at.isoformat() if src.last_deep_test_at else None,
+                "last_ping_at": _iso(src.last_ping_at),
+                "last_deep_test_at": _iso(src.last_deep_test_at),
                 "recent_checks": checks["total"],
                 "recent_failures": checks["failures"],
             }
@@ -250,10 +255,9 @@ def api_set_credentials(
         value = (value or "").strip()
         if value:
             creds[var_name] = encrypt_value(value)
-            updated.append(var_name)
         else:
             creds.pop(var_name, None)
-            updated.append(var_name)
+        updated.append(var_name)
     src.credentials = creds
     db.commit()
     logger.info(f"Credentials updated for {src.name} by {user.email}: {updated}")
@@ -349,7 +353,7 @@ def api_material_audit(
                 "new_card_id": e.new_card_id,
                 "normalized_mpn": e.normalized_mpn,
                 "details": e.details,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_at": _iso(e.created_at),
                 "created_by": e.created_by,
             }
             for e in entries

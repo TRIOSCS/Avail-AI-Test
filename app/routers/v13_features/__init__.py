@@ -1,18 +1,15 @@
 """v13_features — v1.3.0 Feature Routes (package)
 
-Graph webhooks, activity logging, sales dashboard (account ownership & open pool),
-and prospecting pool (site-level ownership).
+Graph webhooks and activity logging.
 
-Re-exports a single `router` that merges activity, sales, and prospecting sub-routers.
+Re-exports a single `router` from the activity sub-router.
 
 Called by: main.py (router mount)
-Depends on: activity, sales, prospecting sub-modules
+Depends on: activity sub-module
 """
 
 from fastapi import APIRouter
-from sqlalchemy.orm import Session  # noqa: F401 — test patches app.routers.v13_features.Session
 
-from ...config import settings  # noqa: F401 — test patches app.routers.v13_features.settings
 from .activity import _activity_to_dict  # noqa: F401 — tests import this
 from .activity import router as _activity_router
 

@@ -47,8 +47,7 @@ async def refresh_proactive_matches(
     """Trigger a proactive matching scan."""
     from ..services.proactive_matching import run_proactive_scan
 
-    result = run_proactive_scan(db)
-    return result
+    return run_proactive_scan(db)
 
 
 @router.get("/api/proactive/count")
@@ -278,8 +277,7 @@ async def convert_to_win(
     try:
         from ..services.proactive_service import convert_proactive_to_win
 
-        result = convert_proactive_to_win(db, offer_id, user)
-        return result
+        return convert_proactive_to_win(db, offer_id, user)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -297,11 +295,8 @@ async def proactive_scorecard(
     from ..dependencies import is_admin as _is_admin
     from ..services.proactive_service import get_scorecard
 
-    is_admin = _is_admin(user)
-    if salesperson_id and not is_admin:
+    if not _is_admin(user):
         salesperson_id = user.id  # Non-admin can only see own
-    if not is_admin and not salesperson_id:
-        salesperson_id = user.id
 
     @cached_endpoint(prefix="proactive_scorecard", ttl_hours=1, key_params=["salesperson_id"])
     def _fetch(salesperson_id, db):

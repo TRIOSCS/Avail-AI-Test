@@ -89,7 +89,6 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
 
     from sqlalchemy import func
 
-    # Single combined query for rfq count, offer count, and last contact date
     safe_vendor = escape_like(vendor_name)
     total_rfqs = (
         db.query(func.count(Contact.id))
@@ -100,7 +99,6 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
         .scalar()
     ) or 0
 
-    # Combine offer count + last contact into parallel-style queries
     total_offers = (db.query(func.count(Offer.id)).filter(Offer.vendor_name.ilike(f"%{safe_vendor}%")).scalar()) or 0
 
     last_contact_date = (
@@ -114,6 +112,15 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
         "avg_response_hours": card.response_velocity_hours,
         "engagement_score": card.engagement_score,
     }
+
+
+def _rfq_context_for_requisition(db: Session, user: User, requisition_id: int) -> list[dict]:
+    """Build {mpn, qty} RFQ context for a requisition, or 404 if not visible to user."""
+    req = get_req_for_user(db, user, requisition_id, options=[])
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
+    return [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
 
 
 # ── Feature 1: Contact Enrichment ────────────────────────────────────────
@@ -157,10 +164,6 @@ async def ai_find_contacts(
             vendor_card_id = card.id
 
     if not company_name:
-        # No company resolved from entity_type/entity_id — will fail below
-        pass
-
-    if not company_name:
         raise HTTPException(400, "company_name or entity_id required")
 
     from app.services.ai_service import enrich_contacts_websearch
@@ -180,7 +183,7 @@ async def ai_find_contacts(
     for c in merged:
         for field, max_len in _MAX_LEN.items():
             val = c.get(field)
-            if val and isinstance(val, str) and len(val) > max_len:
+            if isinstance(val, str) and len(val) > max_len:
                 c[field] = val[:max_len]
 
     saved_ids = []
@@ -451,7 +454,6 @@ async def ai_generate_description_for_requirement(
     db: Session = Depends(get_db),
 ):
     """Generate and save a verified description for an existing requirement."""
-    from ..models import Requirement
     from ..services.description_service import generate_verified_description
 
     req = db.get(Requirement, requirement_id)
@@ -672,11 +674,7 @@ async def ai_intake_parse(
 
     rfq_context = None
     if requisition_id:
-        req = get_req_for_user(db, user, requisition_id, options=[])
-        if not req:
-            raise HTTPException(404, "Requisition not found")
-        reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
-        rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
+        rfq_context = _rfq_context_for_requisition(db, user, requisition_id)
 
     from app.services.ai_intake_parser import parse_freeform_intake
 
@@ -722,11 +720,7 @@ async def ai_parse_freeform_offer(
 
     rfq_context = None
     if payload.requisition_id:
-        req = get_req_for_user(db, user, payload.requisition_id, options=[])
-        if not req:
-            raise HTTPException(404, "Requisition not found")
-        reqs = db.query(Requirement).filter(Requirement.requisition_id == payload.requisition_id).all()
-        rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
+        rfq_context = _rfq_context_for_requisition(db, user, payload.requisition_id)
 
     from app.services.freeform_parser_service import parse_freeform_offer
 

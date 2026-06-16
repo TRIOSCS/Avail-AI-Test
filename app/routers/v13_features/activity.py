@@ -550,7 +550,6 @@ async def vendor_activity_status(
 @router.get("/api/companies/{company_id}/activity-status")
 async def company_activity_status(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get activity health status for a company (for dashboard indicators)."""
-    from app.config import settings as cfg
     from app.services.activity_service import days_since_last_activity
 
     company = db.get(Company, company_id)
@@ -558,11 +557,11 @@ async def company_activity_status(company_id: int, user: User = Depends(require_
         raise HTTPException(404, "Company not found")
 
     days = days_since_last_activity(company_id, db)
-    inactivity_limit = cfg.strategic_inactivity_days if company.is_strategic else cfg.customer_inactivity_days
+    inactivity_limit = settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
 
     if days is None:
         status = "no_activity"
-    elif days <= cfg.customer_warning_days:
+    elif days <= settings.customer_warning_days:
         status = "green"
     elif days <= inactivity_limit:
         status = "yellow"

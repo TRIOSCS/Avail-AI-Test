@@ -167,58 +167,56 @@ async def list_vendors(
         cards = query.limit(limit).offset(offset).all()
         if not cards:
             return {"vendors": [], "total": 0, "limit": limit, "offset": offset}
-        # Batch fetch review stats -- single query instead of N+1
+        # card_ids is non-empty here -- the empty-cards case returned above.
         card_ids = [c.id for c in cards]
+        # Batch fetch review stats -- single query instead of N+1
         review_stats = {}
-        if card_ids:
-            for cid, avg, cnt in (
-                db.query(
-                    VendorReview.vendor_card_id,
-                    sqlfunc.avg(VendorReview.rating),
-                    sqlfunc.count(VendorReview.id),
-                )
-                .filter(VendorReview.vendor_card_id.in_(card_ids))
-                .group_by(VendorReview.vendor_card_id)
-                .all()
-            ):
-                review_stats[cid] = (avg, cnt)
+        for cid, avg, cnt in (
+            db.query(
+                VendorReview.vendor_card_id,
+                sqlfunc.avg(VendorReview.rating),
+                sqlfunc.count(VendorReview.id),
+            )
+            .filter(VendorReview.vendor_card_id.in_(card_ids))
+            .group_by(VendorReview.vendor_card_id)
+            .all()
+        ):
+            review_stats[cid] = (avg, cnt)
         # Batch fetch strategic claim info -- single query instead of N+1
         claim_map = {}
-        if card_ids:
-            for sv in (
-                db.query(StrategicVendor)
-                .filter(
-                    StrategicVendor.vendor_card_id.in_(card_ids),
-                    StrategicVendor.released_at.is_(None),
-                )
-                .all()
-            ):
-                owner_name = sv.user.name if sv.user else None
-                claim_map[sv.vendor_card_id] = {
-                    "claimed_by_user_id": sv.user_id,
-                    "claimed_by_name": owner_name,
-                }
+        for sv in (
+            db.query(StrategicVendor)
+            .filter(
+                StrategicVendor.vendor_card_id.in_(card_ids),
+                StrategicVendor.released_at.is_(None),
+            )
+            .all()
+        ):
+            owner_name = sv.user.name if sv.user else None
+            claim_map[sv.vendor_card_id] = {
+                "claimed_by_user_id": sv.user_id,
+                "claimed_by_name": owner_name,
+            }
 
         # Batch fetch top contact per vendor -- single query, dedup in Python
         top_contact_map = {}
-        if card_ids:
-            contacts = (
-                db.query(VendorContact)
-                .filter(VendorContact.vendor_card_id.in_(card_ids))
-                .order_by(
-                    VendorContact.relationship_score.desc().nullslast(),
-                    VendorContact.interaction_count.desc().nullslast(),
-                    VendorContact.last_seen_at.desc().nullslast(),
-                )
-                .all()
+        contacts = (
+            db.query(VendorContact)
+            .filter(VendorContact.vendor_card_id.in_(card_ids))
+            .order_by(
+                VendorContact.relationship_score.desc().nullslast(),
+                VendorContact.interaction_count.desc().nullslast(),
+                VendorContact.last_seen_at.desc().nullslast(),
             )
-            for vc in contacts:
-                if vc.vendor_card_id not in top_contact_map:
-                    top_contact_map[vc.vendor_card_id] = {
-                        "name": vc.full_name,
-                        "email": vc.email,
-                        "phone": vc.phone,
-                    }
+            .all()
+        )
+        for vc in contacts:
+            if vc.vendor_card_id not in top_contact_map:
+                top_contact_map[vc.vendor_card_id] = {
+                    "name": vc.full_name,
+                    "email": vc.email,
+                    "phone": vc.phone,
+                }
 
         results = []
         for c in cards:

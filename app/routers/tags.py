@@ -16,6 +16,11 @@ from app.utils.sql_helpers import escape_like
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
 
+def _tag_response(tag: Tag) -> TagResponse:
+    """Build a TagResponse from a Tag ORM row."""
+    return TagResponse(id=tag.id, name=tag.name, tag_type=tag.tag_type, parent_id=tag.parent_id)
+
+
 @router.get("/")
 async def list_tags(
     tag_type: str | None = Query(None, description="Filter by 'brand' or 'commodity'"),
@@ -36,9 +41,7 @@ async def list_tags(
     tags = query.order_by(Tag.name).offset(offset).limit(limit).all()
 
     return {
-        "items": [
-            TagResponse(id=t.id, name=t.name, tag_type=t.tag_type, parent_id=t.parent_id).model_dump() for t in tags
-        ],
+        "items": [_tag_response(t).model_dump() for t in tags],
         "total": total,
         "limit": limit,
         "offset": offset,
@@ -65,7 +68,7 @@ async def get_tag_entities(
     return {
         "items": [
             EntityTagResponse(
-                tag=TagResponse(id=et.tag.id, name=et.tag.name, tag_type=et.tag.tag_type, parent_id=et.tag.parent_id),
+                tag=_tag_response(et.tag),
                 interaction_count=et.interaction_count,
                 total_entity_interactions=et.total_entity_interactions,
                 is_visible=et.is_visible,
@@ -103,7 +106,7 @@ async def get_entity_tags(
 
     return [
         EntityTagResponse(
-            tag=TagResponse(id=et.tag.id, name=et.tag.name, tag_type=et.tag.tag_type, parent_id=et.tag.parent_id),
+            tag=_tag_response(et.tag),
             interaction_count=et.interaction_count,
             total_entity_interactions=et.total_entity_interactions,
             is_visible=et.is_visible,
@@ -129,7 +132,7 @@ async def get_material_card_tags(
 
     return [
         MaterialTagResponse(
-            tag=TagResponse(id=mt.tag.id, name=mt.tag.name, tag_type=mt.tag.tag_type, parent_id=mt.tag.parent_id),
+            tag=_tag_response(mt.tag),
             confidence=mt.confidence,
             source=mt.source,
             classified_at=mt.classified_at,
