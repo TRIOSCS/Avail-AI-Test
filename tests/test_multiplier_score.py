@@ -62,6 +62,16 @@ def _make_user(db, name, role, email_prefix):
     return u
 
 
+def _make_company_site(db, owner_id, company_name, site_name):
+    co = Company(name=company_name, is_active=True)
+    db.add(co)
+    db.flush()
+    site = CustomerSite(company_id=co.id, site_name=site_name, owner_id=owner_id)
+    db.add(site)
+    db.flush()
+    return site
+
+
 def _make_req(db, user_id, created_at=None):
     r = Requisition(
         name=f"REQ-{user_id}-{id(created_at)}",
@@ -190,12 +200,7 @@ class TestBuyerMultiplierNonStacking:
         Non-stacking.
         """
         buyer = _make_user(db_session, "Quoted Buyer", "buyer", "quoted")
-        co = Company(name="QCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="QSite", owner_id=buyer.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, buyer.id, "QCo", "QSite")
 
         req = _make_req(db_session, buyer.id)
         o1 = _make_offer(db_session, req.id, buyer.id)
@@ -216,12 +221,7 @@ class TestBuyerMultiplierNonStacking:
     def test_non_stacking_full_pipeline(self, db_session):
         """Example from plan: 50 offers, 20 quoted, 8 BP, 3 PO confirmed."""
         buyer = _make_user(db_session, "Full Pipeline", "buyer", "fullpipe")
-        co = Company(name="FPCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="FPSite", owner_id=buyer.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, buyer.id, "FPCo", "FPSite")
 
         req = _make_req(db_session, buyer.id)
         offers = [_make_offer(db_session, req.id, buyer.id) for _ in range(50)]
@@ -295,12 +295,7 @@ class TestBuyerMultiplierNonStacking:
     def test_grace_period_offers(self, db_session):
         """Offers from last 7 days of prev month count if they advanced."""
         buyer = _make_user(db_session, "Grace Buyer", "buyer", "grace")
-        co = Company(name="GCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="GSite", owner_id=buyer.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, buyer.id, "GCo", "GSite")
 
         req = _make_req(db_session, buyer.id)
         # Offer from Jan 28 (within 7-day grace window)
@@ -336,12 +331,7 @@ class TestSalesMultiplier:
     def test_quotes_sent_only(self, db_session):
         """Quotes sent but not won earn 2 pts each."""
         sales = _make_user(db_session, "Sent Sales", "sales", "sentsales")
-        co = Company(name="SCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="SSite", owner_id=sales.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, sales.id, "SCo", "SSite")
 
         for i in range(5):
             req = _make_req(db_session, sales.id)
@@ -359,12 +349,7 @@ class TestSalesMultiplier:
         Non-stacking.
         """
         sales = _make_user(db_session, "Won Sales", "sales", "wonsales")
-        co = Company(name="WCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="WSite", owner_id=sales.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, sales.id, "WCo", "WSite")
 
         # 5 quotes sent, 2 won
         for i in range(3):
@@ -387,12 +372,7 @@ class TestSalesMultiplier:
     def test_proactive_non_stacking(self, db_session):
         """Converted proactive offers earn 4 pts (not 1+4=5)."""
         sales = _make_user(db_session, "Proactive Sales", "sales", "proactivemult")
-        co = Company(name="PCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="PSite", owner_id=sales.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, sales.id, "PCo", "PSite")
 
         # 5 proactive offers, 2 converted
         for i in range(5):
@@ -795,12 +775,7 @@ class TestEdgeCases:
     def test_offer_in_multiple_quotes_highest_tier_wins(self, db_session):
         """Same offer in multiple quotes → still only counts once at highest tier."""
         buyer = _make_user(db_session, "MultiQ Buyer", "buyer", "multiq")
-        co = Company(name="MQCo", is_active=True)
-        db_session.add(co)
-        db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="MQSite", owner_id=buyer.id)
-        db_session.add(site)
-        db_session.flush()
+        site = _make_company_site(db_session, buyer.id, "MQCo", "MQSite")
 
         req = _make_req(db_session, buyer.id)
         offer = _make_offer(db_session, req.id, buyer.id)
@@ -847,26 +822,21 @@ class TestMultiplierCoverageGaps:
         result = compute_buyer_multiplier(db_session, buyer.id, dec_month)
         assert result["total_points"] == 0
 
-    def test_compute_all_buyer_exception(self, db_session):
-        """Lines 369-370: exception in buyer multiplier is caught."""
-        buyer = _make_user(db_session, "Err Buyer", "buyer", "err-mult-b")
+    @pytest.mark.parametrize(
+        ("name", "role", "prefix", "patch_target", "message"),
+        [
+            ("Err Buyer", "buyer", "err-mult-b", "compute_buyer_multiplier", "buyer exploded"),
+            ("Err Sales", "sales", "err-mult-s", "compute_sales_multiplier", "sales exploded"),
+        ],
+        ids=["buyer", "sales"],
+    )
+    def test_compute_all_multiplier_exception_caught(self, db_session, name, role, prefix, patch_target, message):
+        """Exception in a per-role multiplier is caught (buyer lines 369-370, sales
+        374-379)."""
+        _make_user(db_session, name, role, prefix)
         db_session.commit()
 
-        with patch(
-            "app.services.multiplier_score_service.compute_buyer_multiplier", side_effect=RuntimeError("buyer exploded")
-        ):
-            result = compute_all_multiplier_scores(db_session, MONTH)
-
-        assert isinstance(result, dict)
-
-    def test_compute_all_sales_exception(self, db_session):
-        """Lines 374-379: exception in sales multiplier is caught."""
-        sales = _make_user(db_session, "Err Sales", "sales", "err-mult-s")
-        db_session.commit()
-
-        with patch(
-            "app.services.multiplier_score_service.compute_sales_multiplier", side_effect=RuntimeError("sales exploded")
-        ):
+        with patch(f"app.services.multiplier_score_service.{patch_target}", side_effect=RuntimeError(message)):
             result = compute_all_multiplier_scores(db_session, MONTH)
 
         assert isinstance(result, dict)

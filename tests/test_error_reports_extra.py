@@ -56,18 +56,15 @@ class TestSubmitTroubleTicketJson:
         assert resp.status_code == 200
         assert "Report submitted" in resp.text or "submitted" in resp.text.lower()
 
-    def test_submit_json_empty_description(self, client: TestClient):
+    @pytest.mark.parametrize(
+        "description",
+        ["", "X" * 5001],
+        ids=["empty", "too_long"],
+    )
+    def test_submit_json_invalid_description(self, client: TestClient, description: str):
         resp = client.post(
             "/api/trouble-tickets/submit",
-            json={"description": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 422
-
-    def test_submit_json_too_long_description(self, client: TestClient):
-        resp = client.post(
-            "/api/trouble-tickets/submit",
-            json={"description": "X" * 5001},
+            json={"description": description},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 422
@@ -199,17 +196,18 @@ class TestPatchTicket:
 
 
 class TestCreateErrorReport:
-    def test_create_error_report(self, client: TestClient):
+    @pytest.mark.parametrize(
+        "endpoint, message",
+        [
+            ("/api/error-reports", "Error occurred"),
+            ("/api/trouble-tickets", "Issue found"),
+        ],
+        ids=["error_report", "trouble_ticket_alias"],
+    )
+    def test_create_error_report(self, client: TestClient, endpoint: str, message: str):
         resp = client.post(
-            "/api/error-reports",
-            json={"message": "Error occurred", "current_url": "/v2/test"},
-        )
-        assert resp.status_code in (200, 201)
-
-    def test_create_trouble_ticket_alias(self, client: TestClient):
-        resp = client.post(
-            "/api/trouble-tickets",
-            json={"message": "Issue found", "current_url": "/v2/test"},
+            endpoint,
+            json={"message": message, "current_url": "/v2/test"},
         )
         assert resp.status_code in (200, 201)
 

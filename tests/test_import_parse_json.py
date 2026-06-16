@@ -8,6 +8,15 @@ Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
 
+def _patch_parse(monkeypatch, result):
+    """Patch parse_freeform_rfq to return ``result`` (its async return value)."""
+
+    async def mock_parse(text):
+        return result
+
+    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+
+
 def test_import_parse_json_format(client, db_session, monkeypatch):
     """Import-parse with format=json returns JSON with requirements list."""
     mock_result = {
@@ -23,11 +32,7 @@ def test_import_parse_json_format(client, db_session, monkeypatch):
             }
         ],
     }
-
-    async def mock_parse(text):
-        return mock_result
-
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    _patch_parse(monkeypatch, mock_result)
 
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",
@@ -48,11 +53,7 @@ def test_import_parse_json_inferred_fields(client, db_session, monkeypatch):
         "customer_name": "AI Customer",
         "requirements": [{"primary_mpn": "STM32F4", "target_qty": 10}],
     }
-
-    async def mock_parse(text):
-        return mock_result
-
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    _patch_parse(monkeypatch, mock_result)
 
     # Pass a placeholder name so route accepts it; AI name will be used since user name is a space
     resp = client.post(
@@ -83,11 +84,7 @@ def test_import_parse_html_format_unchanged(client, db_session, monkeypatch):
         "customer_name": "",
         "requirements": [{"primary_mpn": "LM358DR", "target_qty": 100}],
     }
-
-    async def mock_parse(text):
-        return mock_result
-
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse)
+    _patch_parse(monkeypatch, mock_result)
 
     resp = client.post(
         "/v2/partials/requisitions/import-parse",
@@ -101,11 +98,7 @@ def test_import_parse_html_format_unchanged(client, db_session, monkeypatch):
 
 def test_import_parse_json_parse_failure(client, db_session, monkeypatch):
     """If AI returns None, JSON mode returns empty requirements list."""
-
-    async def mock_parse_fail(text):
-        return None
-
-    monkeypatch.setattr("app.routers.htmx_views.parse_freeform_rfq", mock_parse_fail)
+    _patch_parse(monkeypatch, None)
 
     resp = client.post(
         "/v2/partials/requisitions/import-parse?format=json",

@@ -50,6 +50,8 @@ import os
 import random
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # Circuit breaker tests (using ICS version — will become base after refactor)
@@ -129,29 +131,31 @@ class TestNCCircuitBreaker:
 
         return CircuitBreaker()
 
-    def test_healthy_response(self):
+    @pytest.mark.parametrize(
+        ("status_code", "html", "url", "expected_result", "expected_open"),
+        [
+            (200, "<html>normal content</html>", "https://www.netcomponents.com/search", "HEALTHY", False),
+            # Session expired is not a trip
+            (302, "", "https://www.netcomponents.com/account/login", "SESSION_EXPIRED", False),
+            (429, "", "https://www.netcomponents.com/search", "RATE_LIMITED", True),
+            (403, "", "https://www.netcomponents.com/search", "ACCESS_DENIED", True),
+            (200, "too many requests please wait", "https://www.netcomponents.com/search", "RATE_LIMITED", True),
+            (200, "access denied by policy", "https://www.netcomponents.com/search", "ACCESS_DENIED", True),
+        ],
+        ids=[
+            "healthy_response",
+            "session_expired_on_login_redirect",
+            "rate_limited_429",
+            "access_denied_403",
+            "rate_limit_in_content",
+            "access_denied_in_content",
+        ],
+    )
+    def test_check_response_health_single_call(self, status_code, html, url, expected_result, expected_open):
         cb = self._make_breaker()
-        result = cb.check_response_health(200, "<html>normal content</html>", "https://www.netcomponents.com/search")
-        assert result == "HEALTHY"
-        assert not cb.is_open
-
-    def test_session_expired_on_login_redirect(self):
-        cb = self._make_breaker()
-        result = cb.check_response_health(302, "", "https://www.netcomponents.com/account/login")
-        assert result == "SESSION_EXPIRED"
-        assert not cb.is_open  # Session expired is not a trip
-
-    def test_rate_limited_429(self):
-        cb = self._make_breaker()
-        result = cb.check_response_health(429, "", "https://www.netcomponents.com/search")
-        assert result == "RATE_LIMITED"
-        assert cb.is_open
-
-    def test_access_denied_403(self):
-        cb = self._make_breaker()
-        result = cb.check_response_health(403, "", "https://www.netcomponents.com/search")
-        assert result == "ACCESS_DENIED"
-        assert cb.is_open
+        result = cb.check_response_health(status_code, html, url)
+        assert result == expected_result
+        assert cb.is_open is expected_open
 
     def test_server_error_trips_after_3(self):
         cb = self._make_breaker()
@@ -168,18 +172,6 @@ class TestNCCircuitBreaker:
         assert result == "CAPTCHA_WARNING"
         assert not cb.is_open
         cb.check_response_health(200, "recaptcha widget loaded", "https://www.netcomponents.com/search")
-        assert cb.is_open
-
-    def test_rate_limit_in_content(self):
-        cb = self._make_breaker()
-        result = cb.check_response_health(200, "too many requests please wait", "https://www.netcomponents.com/search")
-        assert result == "RATE_LIMITED"
-        assert cb.is_open
-
-    def test_access_denied_in_content(self):
-        cb = self._make_breaker()
-        result = cb.check_response_health(200, "access denied by policy", "https://www.netcomponents.com/search")
-        assert result == "ACCESS_DENIED"
         assert cb.is_open
 
     def test_healthy_resets_failure_counter(self):
@@ -201,67 +193,58 @@ class TestMPNNormalizer:
 
         return strip_packaging_suffixes(mpn)
 
-    def test_empty_string(self):
-        assert self._normalize("") == ""
-
-    def test_none_input(self):
-        assert self._normalize(None) == ""
-
-    def test_uppercase(self):
-        assert self._normalize("abc123") == "ABC123"
-
-    def test_strip_whitespace(self):
-        assert self._normalize("  ABC 123  ") == "ABC123"
-
-    def test_strip_internal_whitespace(self):
-        assert self._normalize("ABC 123 DEF") == "ABC123DEF"
-
-    def test_strip_tape_reel_slash(self):
-        assert self._normalize("LM358/TR") == "LM358"
-
-    def test_strip_tape_reel_dash(self):
-        assert self._normalize("LM358-TR") == "LM358"
-
-    def test_strip_cut_tape_slash(self):
-        assert self._normalize("SN74HC595/CT") == "SN74HC595"
-
-    def test_strip_cut_tape_dash(self):
-        assert self._normalize("SN74HC595-CT") == "SN74HC595"
-
-    def test_strip_nd_suffix(self):
-        assert self._normalize("LM358-ND") == "LM358"
-
-    def test_strip_dkr_suffix(self):
-        assert self._normalize("LM358-DKR") == "LM358"
-
-    def test_strip_pbf_hash(self):
-        assert self._normalize("IRF540N#PBF") == "IRF540N"
-
-    def test_strip_pbf_dash(self):
-        assert self._normalize("IRF540N-PBF") == "IRF540N"
-
-    def test_strip_nopb_slash(self):
-        assert self._normalize("TPS54331/NOPB") == "TPS54331"
-
-    def test_strip_nopb_dash(self):
-        assert self._normalize("TPS54331-NOPB") == "TPS54331"
-
-    def test_strip_reel_suffix(self):
-        assert self._normalize("ADP3338AKCZ-3.3-RL") == "ADP3338AKCZ-3.3"
-
-    def test_strip_reel_with_number(self):
-        assert self._normalize("ADP3338AKCZ-3.3-RL7") == "ADP3338AKCZ-3.3"
-
-    def test_preserve_meaningful_suffix(self):
-        # -R is not stripped (it's a package code, not packaging)
-        assert self._normalize("STM32F103C8T6") == "STM32F103C8T6"
-
-    def test_case_insensitive_suffix_strip(self):
-        assert self._normalize("lm358/tr") == "LM358"
-        assert self._normalize("lm358-nopb") == "LM358"
-
-    def test_combined_whitespace_and_suffix(self):
-        assert self._normalize("  LM 358 /TR  ") == "LM358"
+    @pytest.mark.parametrize(
+        ("mpn", "expected"),
+        [
+            ("", ""),
+            (None, ""),
+            ("abc123", "ABC123"),
+            ("  ABC 123  ", "ABC123"),
+            ("ABC 123 DEF", "ABC123DEF"),
+            ("LM358/TR", "LM358"),
+            ("LM358-TR", "LM358"),
+            ("SN74HC595/CT", "SN74HC595"),
+            ("SN74HC595-CT", "SN74HC595"),
+            ("LM358-ND", "LM358"),
+            ("LM358-DKR", "LM358"),
+            ("IRF540N#PBF", "IRF540N"),
+            ("IRF540N-PBF", "IRF540N"),
+            ("TPS54331/NOPB", "TPS54331"),
+            ("TPS54331-NOPB", "TPS54331"),
+            ("ADP3338AKCZ-3.3-RL", "ADP3338AKCZ-3.3"),
+            ("ADP3338AKCZ-3.3-RL7", "ADP3338AKCZ-3.3"),
+            # -R is not stripped (it's a package code, not packaging)
+            ("STM32F103C8T6", "STM32F103C8T6"),
+            ("lm358/tr", "LM358"),
+            ("lm358-nopb", "LM358"),
+            ("  LM 358 /TR  ", "LM358"),
+        ],
+        ids=[
+            "empty_string",
+            "none_input",
+            "uppercase",
+            "strip_whitespace",
+            "strip_internal_whitespace",
+            "strip_tape_reel_slash",
+            "strip_tape_reel_dash",
+            "strip_cut_tape_slash",
+            "strip_cut_tape_dash",
+            "strip_nd_suffix",
+            "strip_dkr_suffix",
+            "strip_pbf_hash",
+            "strip_pbf_dash",
+            "strip_nopb_slash",
+            "strip_nopb_dash",
+            "strip_reel_suffix",
+            "strip_reel_with_number",
+            "preserve_meaningful_suffix",
+            "case_insensitive_suffix_strip_slash",
+            "case_insensitive_suffix_strip_nopb",
+            "combined_whitespace_and_suffix",
+        ],
+    )
+    def test_strip_packaging_suffixes(self, mpn, expected):
+        assert self._normalize(mpn) == expected
 
 
 # ---------------------------------------------------------------------------

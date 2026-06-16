@@ -6,6 +6,7 @@ Depends on: app.routers.crm.views, app.connectors.apollo, app.services.presence_
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 from tests.conftest import engine  # noqa: F401
@@ -136,29 +137,20 @@ class TestPresenceService:
         # Only one API call despite two get_presence calls
         assert mock_gc.get_json.call_count == 1
 
-    def test_presence_color_available(self):
-        """Available status returns emerald color."""
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [
+            ("Available", "bg-emerald-400"),
+            ("Away", "bg-amber-400"),
+            ("Busy", "bg-rose-400"),
+            (None, "bg-gray-300"),
+        ],
+    )
+    def test_presence_color(self, status, expected):
+        """presence_color maps each availability status to its badge color."""
         from app.services.presence_service import presence_color
 
-        assert presence_color("Available") == "bg-emerald-400"
-
-    def test_presence_color_away(self):
-        """Away status returns amber color."""
-        from app.services.presence_service import presence_color
-
-        assert presence_color("Away") == "bg-amber-400"
-
-    def test_presence_color_busy(self):
-        """Busy status returns rose color."""
-        from app.services.presence_service import presence_color
-
-        assert presence_color("Busy") == "bg-rose-400"
-
-    def test_presence_color_none(self):
-        """None status returns gray color."""
-        from app.services.presence_service import presence_color
-
-        assert presence_color(None) == "bg-gray-300"
+        assert presence_color(status) == expected
 
 
 class TestPerformanceMetricsEndpoint:

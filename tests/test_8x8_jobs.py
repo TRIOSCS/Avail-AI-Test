@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.jobs.eight_by_eight_jobs import register_eight_by_eight_jobs
 from app.services.eight_by_eight_service import normalize_cdr
 
@@ -117,15 +119,18 @@ class TestCdrProcessingLogic:
         assert norm["is_missed"] is True
         assert norm["duration_seconds"] == 0
 
-    def test_outgoing_direction_maps_to_outbound(self):
-        norm = normalize_cdr(SAMPLE_CDR_OUTGOING)
+    @pytest.mark.parametrize(
+        "cdr, expected",
+        [
+            (SAMPLE_CDR_OUTGOING, "outbound"),
+            (SAMPLE_CDR_INCOMING, "inbound"),
+        ],
+        ids=["outgoing_maps_to_outbound", "incoming_maps_to_inbound"],
+    )
+    def test_direction_mapping(self, cdr, expected):
+        norm = normalize_cdr(cdr)
         direction = "outbound" if norm["direction"] == "Outgoing" else "inbound"
-        assert direction == "outbound"
-
-    def test_incoming_direction_maps_to_inbound(self):
-        norm = normalize_cdr(SAMPLE_CDR_INCOMING)
-        direction = "outbound" if norm["direction"] == "Outgoing" else "inbound"
-        assert direction == "inbound"
+        assert direction == expected
 
 
 class TestProcessCdrsIntegration:

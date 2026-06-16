@@ -21,6 +21,7 @@ Depends on: app/services/contact_intelligence.py, app/routers/vendors.py
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, VendorCard, VendorContact
@@ -179,22 +180,11 @@ class TestProcessInboundEmailContact:
             )
         assert vc is None
 
-    def test_invalid_email_returns_none(self, db_session, test_user):
+    @pytest.mark.parametrize("sender_email", ["not-an-email", ""], ids=["invalid", "empty"])
+    def test_bad_email_returns_none(self, db_session, test_user, sender_email):
         vc = process_inbound_email_contact(
             db_session,
-            sender_email="not-an-email",
-            sender_name="X",
-            body="",
-            subject="",
-            received_at=None,
-            user_id=test_user.id,
-        )
-        assert vc is None
-
-    def test_empty_email_returns_none(self, db_session, test_user):
-        vc = process_inbound_email_contact(
-            db_session,
-            sender_email="",
+            sender_email=sender_email,
             sender_name="X",
             body="",
             subject="",
@@ -626,20 +616,20 @@ class TestContactEndpoints:
 
 
 class TestSplitNameWithPrefix:
-    def test_name_with_prefix(self):
-        """Line 49: name with surname prefix like 'van' returns prefix as part of last name."""
+    @pytest.mark.parametrize(
+        ("name", "expected_first", "expected_last"),
+        [
+            pytest.param("John van Berg", "John", "van Berg", id="van"),
+            pytest.param("Maria de Silva", "Maria", "de Silva", id="de"),
+        ],
+    )
+    def test_name_with_prefix(self, name, expected_first, expected_last):
+        """Line 49: surname prefix like 'van'/'de' stays part of the last name."""
         from app.services.contact_intelligence import split_name
 
-        first, last = split_name("John van Berg")
-        assert first == "John"
-        assert last == "van Berg"
-
-    def test_name_with_de_prefix(self):
-        from app.services.contact_intelligence import split_name
-
-        first, last = split_name("Maria de Silva")
-        assert first == "Maria"
-        assert last == "de Silva"
+        first, last = split_name(name)
+        assert first == expected_first
+        assert last == expected_last
 
 
 class TestRunSyncHelper:
@@ -966,24 +956,26 @@ class TestContactRelationshipScoreEdgeCases:
 
 
 class TestComputeTrendCooling:
-    def test_cooling_trend(self):
-        """Lines 384-385: interactions_30d < 0.5 * older_rate -> cooling."""
+    @pytest.mark.parametrize(
+        ("interactions_30d", "interactions_60d", "interactions_90d", "expected"),
+        [
+            # 90d has 20, 30d has 1 -> older_rate = (20-1)/2 = 9.5, 1 < 0.5*9.5=4.75 -> cooling
+            pytest.param(1, 10, 20, "cooling", id="cooling"),
+            # 90d=12, 30d=5 -> older_rate=(12-5)/2=3.5
+            # 5 > 1.5*3.5=5.25? No. 5 < 0.5*3.5=1.75? No. -> stable
+            pytest.param(5, 8, 12, "stable", id="stable"),
+        ],
+    )
+    def test_trend(self, interactions_30d, interactions_60d, interactions_90d, expected):
+        """Lines 384-387: interactions_30d vs older_rate decides cooling/stable."""
         from app.services.contact_intelligence import _compute_trend
 
-        # 90d has 20, 30d has 1 -> older_rate = (20-1)/2 = 9.5, 1 < 0.5*9.5=4.75 -> cooling
-        result = _compute_trend(interactions_30d=1, interactions_60d=10, interactions_90d=20)
-        assert result == "cooling"
-
-    def test_stable_trend(self):
-        """Line 387: not warming, not cooling -> stable."""
-        from app.services.contact_intelligence import _compute_trend
-
-        # 90d has 10, 30d has 5 -> older_rate = (10-5)/2 = 2.5
-        # 5 > 1.5*2.5=3.75? yes -> warming actually. Let me adjust.
-        # 90d=12, 30d=5 -> older_rate=(12-5)/2=3.5
-        # 5 > 1.5*3.5=5.25? No. 5 < 0.5*3.5=1.75? No. -> stable
-        result = _compute_trend(interactions_30d=5, interactions_60d=8, interactions_90d=12)
-        assert result == "stable"
+        result = _compute_trend(
+            interactions_30d=interactions_30d,
+            interactions_60d=interactions_60d,
+            interactions_90d=interactions_90d,
+        )
+        assert result == expected
 
 
 # ── compute_all_contact_scores batch flush errors (lines 497-504, 510-513, 517-519) ──

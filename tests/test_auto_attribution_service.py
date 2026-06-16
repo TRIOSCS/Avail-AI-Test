@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, User, VendorCard
@@ -439,22 +440,19 @@ class TestCallClaudeForMatching:
         assert result[1]["entity_id"] == 10
         assert result[1]["confidence"] == 0.95
 
-    def test_returns_empty_on_none(self):
-        """Should return empty dict when Claude returns None."""
+    @pytest.mark.parametrize(
+        "claude_response",
+        [
+            pytest.param(None, id="none"),
+            pytest.param({"other": "data"}, id="missing_matches_key"),
+            pytest.param({"matches": []}, id="empty_matches_list"),
+        ],
+    )
+    def test_returns_empty(self, claude_response):
+        """Should return empty dict when Claude returns no usable matches."""
         from app.services.auto_attribution_service import _call_claude_for_matching
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
-            )
-
-        assert result == {}
-
-    def test_returns_empty_on_missing_matches_key(self):
-        """Should return empty dict when response has no 'matches' key."""
-        from app.services.auto_attribution_service import _call_claude_for_matching
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"other": "data"}):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=claude_response):
             result = asyncio.get_event_loop().run_until_complete(
                 _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
             )
@@ -483,14 +481,3 @@ class TestCallClaudeForMatching:
         assert len(result) == 2
         assert result[1]["entity_type"] == "company"
         assert result[2]["entity_type"] == "vendor"
-
-    def test_empty_matches_list(self):
-        """Should return empty dict when Claude returns empty matches."""
-        from app.services.auto_attribution_service import _call_claude_for_matching
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"matches": []}):
-            result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
-            )
-
-        assert result == {}

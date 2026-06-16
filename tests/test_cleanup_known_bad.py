@@ -41,6 +41,26 @@ def _card(db: Session, mpn: str, **kw) -> MaterialCard:
     return card
 
 
+def _facet(
+    db: Session,
+    card_id: int,
+    *,
+    value: float,
+    source: str,
+    category: str = "hdd",
+    spec_key: str = "capacity_gb",
+) -> MaterialSpecFacet:
+    facet = MaterialSpecFacet(
+        material_card_id=card_id,
+        category=category,
+        spec_key=spec_key,
+        value_numeric=value,
+        source=source,
+    )
+    db.add(facet)
+    return facet
+
+
 def _audits(db: Session, action: str) -> list[MaterialCardAudit]:
     return db.query(MaterialCardAudit).filter_by(action=action).all()
 
@@ -53,26 +73,10 @@ class TestDeleteKnownBadFacets:
         # Card with the FRU-matrix capacity misdecode (373,455 GB) matched by key+value+source.
         fru = _card(db, "FRU-BAD", category="hdd")
         fru.specs_structured = {"capacity_gb": {"value": 373455.0, "source": "fru_matrix_decode"}}
-        db.add(
-            MaterialSpecFacet(
-                material_card_id=fru.id,
-                category="hdd",
-                spec_key="capacity_gb",
-                value_numeric=373455.0,
-                source="fru_matrix_decode",
-            )
-        )
+        _facet(db, fru.id, value=373455.0, source="fru_matrix_decode")
         # The hdd capacity outlier (973,452 GB) matched by key+value+category.
         hdd = _card(db, "HDD-BAD", category="hdd")
-        db.add(
-            MaterialSpecFacet(
-                material_card_id=hdd.id,
-                category="hdd",
-                spec_key="capacity_gb",
-                value_numeric=973452.0,
-                source="mpn_decode",
-            )
-        )
+        _facet(db, hdd.id, value=973452.0, source="mpn_decode")
         db.flush()
         return fru, hdd
 
@@ -103,15 +107,7 @@ class TestDeleteKnownBadFacets:
         # A JSONB mirror owned by a DIFFERENT source must not be dropped with the facet.
         fru = _card(db_session, "FRU-DRIFT", category="hdd")
         fru.specs_structured = {"capacity_gb": {"value": 373455.0, "source": "manual"}}
-        db_session.add(
-            MaterialSpecFacet(
-                material_card_id=fru.id,
-                category="hdd",
-                spec_key="capacity_gb",
-                value_numeric=373455.0,
-                source="fru_matrix_decode",
-            )
-        )
+        _facet(db_session, fru.id, value=373455.0, source="fru_matrix_decode")
         db_session.flush()
 
         result = delete_known_bad_facets(db_session, apply=True)
@@ -122,15 +118,7 @@ class TestDeleteKnownBadFacets:
 
     def test_correct_capacity_untouched(self, db_session: Session):
         ok = _card(db_session, "OK-CARD", category="hdd")
-        db_session.add(
-            MaterialSpecFacet(
-                material_card_id=ok.id,
-                category="hdd",
-                spec_key="capacity_gb",
-                value_numeric=4000.0,
-                source="mpn_decode",
-            )
-        )
+        _facet(db_session, ok.id, value=4000.0, source="mpn_decode")
         db_session.flush()
 
         result = delete_known_bad_facets(db_session, apply=True)
@@ -180,15 +168,7 @@ class TestCleanupJunkCategories:
         db_session.flush()
         force_card_category(db_session, card, "Internal Hard Drives")  # alias → hdd
         # Stale facet keyed to the old category cell must be purged.
-        db_session.add(
-            MaterialSpecFacet(
-                material_card_id=card.id,
-                category="Internal Hard Drives",
-                spec_key="capacity_gb",
-                value_numeric=4000.0,
-                source="digikey_api",
-            )
-        )
+        _facet(db_session, card.id, category="Internal Hard Drives", value=4000.0, source="digikey_api")
         db_session.flush()
 
         result = cleanup_junk_categories(db_session, apply=True)
@@ -255,15 +235,7 @@ class TestStampLegacyManufacturerProvenance:
 class TestRun:
     def _seed_all(self, db: Session) -> None:
         bad = _card(db, "RUN-FACET", category="hdd")
-        db.add(
-            MaterialSpecFacet(
-                material_card_id=bad.id,
-                category="hdd",
-                spec_key="capacity_gb",
-                value_numeric=973452.0,
-                source="mpn_decode",
-            )
-        )
+        _facet(db, bad.id, value=973452.0, source="mpn_decode")
         alias = _card(db, "RUN-ALIAS")
         force_card_category(db, alias, "Hard Drives")
         _card(db, "RUN-MFR", manufacturer="Samsung")

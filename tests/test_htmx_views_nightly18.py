@@ -19,6 +19,7 @@ os.environ["TESTING"] = "1"
 
 import uuid
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -115,13 +116,9 @@ class TestCreateCompany:
 
 
 class TestCompanyTypeahead:
-    def test_typeahead_empty(self, client: TestClient):
-        resp = client.get("/v2/partials/customers/typeahead?q=")
-        assert resp.status_code == 200
-        assert resp.content == b""
-
-    def test_typeahead_short_query(self, client: TestClient):
-        resp = client.get("/v2/partials/customers/typeahead?q=a")
+    @pytest.mark.parametrize("q", [pytest.param("", id="empty"), pytest.param("a", id="short_query")])
+    def test_typeahead_no_results(self, client: TestClient, q: str):
+        resp = client.get(f"/v2/partials/customers/typeahead?q={q}")
         assert resp.status_code == 200
         assert resp.content == b""
 
@@ -135,13 +132,12 @@ class TestCompanyTypeahead:
 
 
 class TestCheckCompanyDuplicate:
-    def test_check_empty_name(self, client: TestClient):
-        resp = client.get("/v2/partials/customers/check-duplicate?name=")
-        assert resp.status_code == 200
-        assert resp.content == b""
-
-    def test_check_no_duplicate(self, client: TestClient):
-        resp = client.get("/v2/partials/customers/check-duplicate?name=NonexistentXYZ999")
+    @pytest.mark.parametrize(
+        "name",
+        [pytest.param("", id="empty_name"), pytest.param("NonexistentXYZ999", id="no_duplicate")],
+    )
+    def test_check_no_match(self, client: TestClient, name: str):
+        resp = client.get(f"/v2/partials/customers/check-duplicate?name={name}")
         assert resp.status_code == 200
         assert resp.content == b""
 
@@ -169,20 +165,9 @@ class TestCompanyDetailPartial:
 
 
 class TestCompanyTab:
-    def test_tab_sites(self, client: TestClient, test_company: Company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/sites")
-        assert resp.status_code == 200
-
-    def test_tab_contacts(self, client: TestClient, test_company: Company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/contacts")
-        assert resp.status_code == 200
-
-    def test_tab_requisitions(self, client: TestClient, test_company: Company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/requisitions")
-        assert resp.status_code == 200
-
-    def test_tab_activity(self, client: TestClient, test_company: Company):
-        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/activity")
+    @pytest.mark.parametrize("tab", ["sites", "contacts", "requisitions", "activity"])
+    def test_tab_valid(self, client: TestClient, test_company: Company, tab: str):
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/tab/{tab}")
         assert resp.status_code == 200
 
     def test_tab_invalid(self, client: TestClient, test_company: Company):

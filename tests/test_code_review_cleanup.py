@@ -25,34 +25,22 @@ def _make_settings(flag: str, admin_emails: list[str] | None = None):
     )
 
 
-def test_ai_enabled_mike_only_empty_admin_emails_denies():
-    """mike_only mode with empty admin_emails should deny all users (fail closed)."""
+@pytest.mark.parametrize(
+    ("admin_emails", "expected"),
+    [
+        pytest.param([], False, id="empty_admin_emails_denies"),
+        pytest.param(None, False, id="none_admin_emails_denies"),
+        pytest.param(["mike@trioscs.com"], True, id="with_admin_emails_allows"),
+    ],
+)
+def test_ai_enabled_mike_only(admin_emails, expected):
+    """mike_only mode: deny when admin_emails is empty/None (fail closed), allow listed users."""
     user = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike", role="admin")
-    mock_settings = _make_settings("mike_only", admin_emails=[])
+    mock_settings = _make_settings("mike_only", admin_emails=admin_emails)
     with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
 
-        assert _ai_enabled(user) is False
-
-
-def test_ai_enabled_mike_only_none_admin_emails_denies():
-    """mike_only mode with None admin_emails should deny all users (fail closed)."""
-    user = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike", role="admin")
-    mock_settings = _make_settings("mike_only", admin_emails=None)
-    with patch("app.routers.ai.settings", mock_settings):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(user) is False
-
-
-def test_ai_enabled_mike_only_with_admin_emails_allows():
-    """mike_only mode with populated admin_emails should allow listed users."""
-    user = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike", role="admin")
-    mock_settings = _make_settings("mike_only", admin_emails=["mike@trioscs.com"])
-    with patch("app.routers.ai.settings", mock_settings):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(user) is True
+        assert _ai_enabled(user) is expected
 
 
 # ---------------------------------------------------------------------------

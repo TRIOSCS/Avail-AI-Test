@@ -95,6 +95,50 @@ def _ok_stat(source: str = "mouser") -> dict:
     return {"source": source, "results": 1, "ms": 10, "error": None, "status": "ok"}
 
 
+# The single AVL row the resolver proposes across the resolver-fires tests.
+_AVL_ROW = {"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}
+
+
+async def _fake_resolve_pending(self, spec_code, oem="IBM"):
+    """Resolver stub: returns ``pending`` with the shared AVL + citations."""
+    return ResolverResult(
+        status="pending",
+        avl=[dict(_AVL_ROW)],
+        confidence=0.8,
+        citations=[{"url": "https://example.com", "snippet": "..."}],
+        source="llm",
+    )
+
+
+async def _fake_resolve_approved(self, spec_code, oem="IBM"):
+    """Resolver stub: returns ``approved`` with the shared AVL from the table tier."""
+    return ResolverResult(
+        status="approved",
+        avl=[dict(_AVL_ROW)],
+        confidence=1.0,
+        source="table",
+    )
+
+
+def _seed_pending_row(db_session) -> int:
+    """Pre-seed an IBM/SPREJ pending row so resolve() returns "pending" without an LLM
+    call.
+
+    Returns the row id.
+    """
+    pending = OemSpecCodePending(
+        oem="IBM",
+        spec_code="SPREJ",
+        proposed_avl=[dict(_AVL_ROW)],
+        llm_confidence=0.8,
+        citations=[],
+        used_in_requirement_ids=[],
+    )
+    db_session.add(pending)
+    db_session.commit()
+    return pending.id
+
+
 async def test_known_mpn_does_not_trigger_resolver(db_session, enable_flag, known_mpn_requirement, monkeypatch):
     """Sync fanout returns ≥1 sighting → resolver never runs."""
 
@@ -140,26 +184,10 @@ async def test_zero_hit_triggers_resolver_and_re_fanout(db_session, enable_flag,
             [_ok_stat("oemsecrets")],
         )
 
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(
-            status="pending",
-            avl=[
-                {
-                    "mpn": "GRM188R71H103KA01D",
-                    "manufacturer": "Murata",
-                    "rank": 1,
-                    "notes": None,
-                }
-            ],
-            confidence=0.8,
-            citations=[{"url": "https://example.com", "snippet": "..."}],
-            source="llm",
-        )
-
     monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        _fake_resolve_pending,
     )
 
     req_id = spec_code_requirement.id
@@ -199,26 +227,7 @@ async def test_resolver_pending_records_requirement_id(db_session, enable_flag, 
     """When the resolver returns ``pending``, the req_id is appended to the pending
     row's ``used_in_requirement_ids``."""
     req_id = spec_code_requirement.id
-
-    # Pre-seed a pending row so resolve() returns "pending" without an LLM call.
-    pending = OemSpecCodePending(
-        oem="IBM",
-        spec_code="SPREJ",
-        proposed_avl=[
-            {
-                "mpn": "GRM188R71H103KA01D",
-                "manufacturer": "Murata",
-                "rank": 1,
-                "notes": None,
-            }
-        ],
-        llm_confidence=0.8,
-        citations=[],
-        used_in_requirement_ids=[],
-    )
-    db_session.add(pending)
-    db_session.commit()
-    pending_id = pending.id
+    pending_id = _seed_pending_row(db_session)
 
     async def fake_fetch_fresh(mpns, db):
         # Primary returns zero; AVL also returns zero (we only care about
@@ -246,19 +255,7 @@ async def test_used_in_requirement_ids_is_idempotent_on_double_search(
     Guards the lost-update / read-modify-write fix on the JSONB column.
     """
     req_id = spec_code_requirement.id
-
-    # Pre-seed a pending row so resolve() returns "pending" without an LLM call.
-    pending = OemSpecCodePending(
-        oem="IBM",
-        spec_code="SPREJ",
-        proposed_avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
-        llm_confidence=0.8,
-        citations=[],
-        used_in_requirement_ids=[],
-    )
-    db_session.add(pending)
-    db_session.commit()
-    pending_id = pending.id
+    pending_id = _seed_pending_row(db_session)
 
     async def fake_fetch_fresh(mpns, db):
         return ([], [_ok_stat("mouser")])
@@ -288,18 +285,9 @@ async def test_avl_cooldown_skips_fetch_within_window(db_session, enable_flag, s
         return ([], [_ok_stat("mouser")])
 
     monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
-
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(
-            status="approved",
-            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
-            confidence=1.0,
-            source="table",
-        )
-
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        _fake_resolve_approved,
     )
 
     # Force the cooldown partition to claim the AVL MPN is cached (not stale).
@@ -334,19 +322,10 @@ async def test_avl_refanout_stamps_material_card_so_cooldown_engages(
         # Both the primary and the AVL fanout return zero hits.
         return ([], [_ok_stat("oemsecrets")])
 
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(
-            status="pending",
-            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
-            confidence=0.8,
-            citations=[{"url": "https://example.com", "snippet": "..."}],
-            source="llm",
-        )
-
     monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        _fake_resolve_pending,
     )
 
     await search_service.search_requirement(spec_code_requirement, db_session)
@@ -372,18 +351,9 @@ async def test_avl_fetch_fresh_exception_logged_and_continues(
         raise RuntimeError("AVL fanout boom")
 
     monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
-
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(
-            status="approved",
-            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
-            confidence=1.0,
-            source="table",
-        )
-
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        _fake_resolve_approved,
     )
 
     enqueue_calls: list[tuple[str, str | None]] = []
@@ -424,18 +394,9 @@ async def test_avl_connector_crash_keeps_workers_and_does_not_abort_session(
         raise RuntimeError("AVL connectors down")
 
     monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
-
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(
-            status="approved",
-            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
-            confidence=1.0,
-            source="table",
-        )
-
     monkeypatch.setattr(
         "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        _fake_resolve_approved,
     )
 
     enqueued: list[str] = []

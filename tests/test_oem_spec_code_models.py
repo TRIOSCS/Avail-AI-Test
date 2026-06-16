@@ -197,7 +197,15 @@ def test_resolver_llm_response_rejects_invalid_confidence():
         ResolverLlmResponse.model_validate({"avl": [], "confidence": 1.5, "citations": [], "reasoning": ""})
 
 
-def test_citation_rejects_javascript_scheme():
+@pytest.mark.parametrize(
+    "bad_url",
+    [
+        pytest.param("javascript:alert(1)", id="javascript_scheme"),
+        pytest.param("data:text/html,<script>alert(1)</script>", id="data_scheme"),
+        pytest.param("  javascript:alert(1)", id="leading_whitespace_scheme"),
+    ],
+)
+def test_citation_rejects_dangerous_scheme(bad_url):
     from pydantic import ValidationError
 
     from app.schemas.spec_codes import ResolverLlmResponse
@@ -207,7 +215,7 @@ def test_citation_rejects_javascript_scheme():
             {
                 "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
                 "confidence": 0.9,
-                "citations": [{"url": "javascript:alert(1)", "snippet": "evil"}],
+                "citations": [{"url": bad_url, "snippet": "evil"}],
                 "reasoning": "test",
             }
         )
@@ -227,27 +235,6 @@ def test_citation_accepts_https_scheme():
     assert len(result.citations) == 1
     assert result.citations[0].url == "https://example.com"
     assert result.citations[0].snippet == "ok"
-
-
-def test_citation_rejects_data_scheme():
-    from pydantic import ValidationError
-
-    from app.schemas.spec_codes import ResolverLlmResponse
-
-    with pytest.raises(ValidationError):
-        ResolverLlmResponse.model_validate(
-            {
-                "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
-                "confidence": 0.9,
-                "citations": [
-                    {
-                        "url": "data:text/html,<script>alert(1)</script>",
-                        "snippet": "",
-                    }
-                ],
-                "reasoning": "test",
-            }
-        )
 
 
 def test_oem_spec_code_normalizes_oem_and_spec_code_case(db_session):
@@ -398,21 +385,3 @@ def test_pending_citations_with_http_scheme_accepted():
         citations=[{"url": "https://example.com", "snippet": "ok"}],
     )
     assert row.citations[0]["url"] == "https://example.com"
-
-
-def test_citation_schema_rejects_leading_whitespace_scheme():
-    """Schema-layer Citation must also reject leading-whitespace scheme tricks via the
-    structural urlparse check (Task 4.3)."""
-    from pydantic import ValidationError
-
-    from app.schemas.spec_codes import ResolverLlmResponse
-
-    with pytest.raises(ValidationError):
-        ResolverLlmResponse.model_validate(
-            {
-                "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
-                "confidence": 0.9,
-                "citations": [{"url": "  javascript:alert(1)", "snippet": "evil"}],
-                "reasoning": "test",
-            }
-        )

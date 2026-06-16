@@ -12,6 +12,8 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.models import EmailSignatureExtract
 from app.services.signature_parser import (
     _extract_signature_block,
@@ -28,66 +30,49 @@ from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is use
 class TestExtractSignatureBlock:
     """Tests for _extract_signature_block (lines 87-108)."""
 
-    def test_empty_body_returns_empty(self):
-        assert _extract_signature_block("") == ""
+    @pytest.mark.parametrize(
+        "body",
+        ["", None, "   "],
+        ids=["empty", "none", "whitespace"],
+    )
+    def test_blank_body_returns_empty(self, body):
+        assert _extract_signature_block(body) == ""
 
-    def test_none_body_returns_empty(self):
-        assert _extract_signature_block(None) == ""
-
-    def test_whitespace_only_returns_empty(self):
-        assert _extract_signature_block("   ") == ""
-
-    def test_delimiter_dash(self):
-        body = "Hello,\nPlease see attached.\n--\nJohn Doe\nSales Manager"
+    @pytest.mark.parametrize(
+        "body, expected",
+        [
+            ("Hello,\nPlease see attached.\n--\nJohn Doe\nSales Manager", ["John Doe", "Sales Manager"]),
+            ("I will send the quote shortly.\nThanks,\nJane Smith\nDirector", ["Thanks", "Jane Smith"]),
+            ("See the pricing below.\nRegards,\nBob Jones\nVP Sales", ["Bob Jones"]),
+            ("Let me know if you need anything.\nBest,\nAlice\nEngineer", ["Alice"]),
+            ("We look forward to working with you.\nSincerely,\nTom\nCEO", ["Tom"]),
+            ("Talk soon.\nCheers,\nMike", ["Mike"]),
+            ("Please confirm.\nWarm regards,\nSarah", ["Sarah"]),
+            ("Attached is the PO.\nKind regards,\nDave", ["Dave"]),
+            ("Let me know.\nBest regards,\nEve", ["Eve"]),
+            ("Got it.\nSent from my iPhone\nJohn", ["Sent from"]),
+            ("Please review.\n___\nContact Info\nPhone: 555-1234", ["Contact Info"]),
+            ("Thanks for reaching out.\n——\nJohn Doe\nSales", ["John Doe"]),
+        ],
+        ids=[
+            "dash",
+            "thanks",
+            "regards",
+            "best",
+            "sincerely",
+            "cheers",
+            "warm_regards",
+            "kind_regards",
+            "best_regards",
+            "sent_from",
+            "underscore",
+            "em_dash",
+        ],
+    )
+    def test_delimiter(self, body, expected):
         result = _extract_signature_block(body)
-        assert "John Doe" in result
-        assert "Sales Manager" in result
-
-    def test_delimiter_thanks(self):
-        body = "I will send the quote shortly.\nThanks,\nJane Smith\nDirector"
-        result = _extract_signature_block(body)
-        assert "Thanks" in result
-        assert "Jane Smith" in result
-
-    def test_delimiter_regards(self):
-        body = "See the pricing below.\nRegards,\nBob Jones\nVP Sales"
-        result = _extract_signature_block(body)
-        assert "Bob Jones" in result
-
-    def test_delimiter_best(self):
-        body = "Let me know if you need anything.\nBest,\nAlice\nEngineer"
-        result = _extract_signature_block(body)
-        assert "Alice" in result
-
-    def test_delimiter_sincerely(self):
-        body = "We look forward to working with you.\nSincerely,\nTom\nCEO"
-        result = _extract_signature_block(body)
-        assert "Tom" in result
-
-    def test_delimiter_cheers(self):
-        body = "Talk soon.\nCheers,\nMike"
-        result = _extract_signature_block(body)
-        assert "Mike" in result
-
-    def test_delimiter_warm_regards(self):
-        body = "Please confirm.\nWarm regards,\nSarah"
-        result = _extract_signature_block(body)
-        assert "Sarah" in result
-
-    def test_delimiter_kind_regards(self):
-        body = "Attached is the PO.\nKind regards,\nDave"
-        result = _extract_signature_block(body)
-        assert "Dave" in result
-
-    def test_delimiter_best_regards(self):
-        body = "Let me know.\nBest regards,\nEve"
-        result = _extract_signature_block(body)
-        assert "Eve" in result
-
-    def test_delimiter_sent_from(self):
-        body = "Got it.\nSent from my iPhone\nJohn"
-        result = _extract_signature_block(body)
-        assert "Sent from" in result
+        for fragment in expected:
+            assert fragment in result
 
     def test_no_delimiter_uses_last_15_lines(self):
         lines = [f"Line {i}" for i in range(30)]
@@ -102,16 +87,6 @@ class TestExtractSignatureBlock:
         result = _extract_signature_block(body)
         assert "John Doe" in result
         assert "john@example.com" in result
-
-    def test_underscore_delimiter(self):
-        body = "Please review.\n___\nContact Info\nPhone: 555-1234"
-        result = _extract_signature_block(body)
-        assert "Contact Info" in result
-
-    def test_em_dash_delimiter(self):
-        body = "Thanks for reaching out.\n\u2014\u2014\nJohn Doe\nSales"
-        result = _extract_signature_block(body)
-        assert "John Doe" in result
 
 
 # ── parse_signature_regex tests ────────────────────────────────────────
@@ -147,38 +122,30 @@ class TestParseSignatureRegex:
         assert result["website"] is not None
         assert result["confidence"] >= 0.7
 
-    def test_phone_with_label(self):
-        body = "--\nJohn Doe\nTel: +1-555-123-4567"
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "--\nJohn Doe\nTel: +1-555-123-4567",
+            "--\nJohn\nOffice: 555-111-2222",
+            "--\nJohn\nDirect: 555-111-2222",
+            # Cell/Mobile labels are part of the regex match; the pre-match label check
+            # only triggers when redundant label text precedes the match. Both labeled
+            # phones get captured and the first goes to result["phone"].
+            "--\nJohn Doe\nCell: 555-111-2222\nMobile: 555-222-3333",
+            # 'Cell:' at line start means the label is inside the match, not before it,
+            # so phone is used instead of the labeled-phones list.
+            "--\nJohn Doe\nCell: 555-111-2222",
+        ],
+        ids=[
+            "tel_label",
+            "office_label",
+            "direct_label",
+            "cell_and_mobile_labels",
+            "cell_label_at_line_start",
+        ],
+    )
+    def test_labeled_phone_extracted(self, body):
         result = parse_signature_regex(body)
-        assert result["phone"] is not None
-
-    def test_office_phone_label(self):
-        body = "--\nJohn\nOffice: 555-111-2222"
-        result = parse_signature_regex(body)
-        assert result["phone"] is not None
-
-    def test_direct_phone_label(self):
-        body = "--\nJohn\nDirect: 555-111-2222"
-        result = parse_signature_regex(body)
-        assert result["phone"] is not None
-
-    def test_labeled_phone_goes_to_phone_list(self):
-        """Phone labels like Cell/Mobile are part of the regex match, so the pre-match
-        label check only triggers when redundant label text precedes the match.
-
-        Standard labeled phones go into the phones list.
-        """
-        body = "--\nJohn Doe\nCell: 555-111-2222\nMobile: 555-222-3333"
-        result = parse_signature_regex(body)
-        # Both get captured as labeled phones; first goes to result["phone"]
-        assert result["phone"] is not None
-
-    def test_labeled_phone_without_prefix_text_goes_to_phone(self):
-        """When 'Cell:' starts the line, the label prefix is inside the regex match, so
-        no text before match contains 'cell' -- phone is used instead."""
-        body = "--\nJohn Doe\nCell: 555-111-2222"
-        result = parse_signature_regex(body)
-        # Cell: at line start means label is in the match, not before it
         assert result["phone"] is not None
 
     def test_bare_phone_fallback(self):
@@ -191,13 +158,15 @@ class TestParseSignatureRegex:
         result = parse_signature_regex(body)
         assert result["email"] == "john@example.com"
 
-    def test_linkedin_extraction(self):
-        body = "--\nJohn Doe\nlinkedin.com/in/johndoe"
-        result = parse_signature_regex(body)
-        assert result["linkedin_url"] == "https://linkedin.com/in/johndoe"
-
-    def test_linkedin_with_https(self):
-        body = "--\nJohn Doe\nhttps://linkedin.com/in/johndoe"
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "--\nJohn Doe\nlinkedin.com/in/johndoe",
+            "--\nJohn Doe\nhttps://linkedin.com/in/johndoe",
+        ],
+        ids=["bare", "with_https"],
+    )
+    def test_linkedin_extraction(self, body):
         result = parse_signature_regex(body)
         assert result["linkedin_url"] == "https://linkedin.com/in/johndoe"
 
@@ -229,23 +198,17 @@ class TestParseSignatureRegex:
         result = parse_signature_regex(body)
         assert result["company_name"] is not None
 
-    def test_skips_email_line_for_name(self):
-        body = "--\njohn@example.com\nJohn Doe\nManager"
-        result = parse_signature_regex(body)
-        assert result["full_name"] == "John Doe"
-
-    def test_skips_phone_line_for_name(self):
-        body = "--\nPhone: 555-111-2222\nJohn Doe"
-        result = parse_signature_regex(body)
-        assert result["full_name"] == "John Doe"
-
-    def test_skips_url_line_for_name(self):
-        body = "--\nhttps://example.com\nJohn Doe"
-        result = parse_signature_regex(body)
-        assert result["full_name"] == "John Doe"
-
-    def test_skips_sent_from_line(self):
-        body = "Sent from my iPhone\nJohn Doe\nManager"
+    @pytest.mark.parametrize(
+        "body",
+        [
+            "--\njohn@example.com\nJohn Doe\nManager",
+            "--\nPhone: 555-111-2222\nJohn Doe",
+            "--\nhttps://example.com\nJohn Doe",
+            "Sent from my iPhone\nJohn Doe\nManager",
+        ],
+        ids=["email_line", "phone_line", "url_line", "sent_from_line"],
+    )
+    def test_skips_non_name_line_for_name(self, body):
         result = parse_signature_regex(body)
         assert result["full_name"] == "John Doe"
 
@@ -334,23 +297,19 @@ class TestParseSignatureAI:
         assert result["email"] == "john@acme.com"
         assert result["confidence"] > 0.5
 
+    @pytest.mark.parametrize(
+        "return_value, side_effect",
+        [
+            (None, None),
+            ("not a dict", None),
+            (None, Exception("API timeout")),
+        ],
+        ids=["returns_none", "returns_non_dict", "raises"],
+    )
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_ai_returns_none(self, mock_claude):
-        mock_claude.return_value = None
-        body = "--\nJohn Doe"
-        result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body))
-        assert result["confidence"] == 0.0
-
-    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_ai_returns_non_dict(self, mock_claude):
-        mock_claude.return_value = "not a dict"
-        body = "--\nJohn Doe"
-        result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body))
-        assert result["confidence"] == 0.0
-
-    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_ai_exception_returns_zero_confidence(self, mock_claude):
-        mock_claude.side_effect = Exception("API timeout")
+    def test_ai_bad_response_returns_zero_confidence(self, mock_claude, return_value, side_effect):
+        mock_claude.return_value = return_value
+        mock_claude.side_effect = side_effect
         body = "--\nJohn Doe"
         result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body))
         assert result["confidence"] == 0.0
@@ -372,19 +331,20 @@ class TestParseSignatureAI:
         # 9 fields (8 from AI + email) * 0.08 + 0.5 = 1.22 -> capped at 0.95
         assert result["confidence"] == 0.95
 
+    @pytest.mark.parametrize(
+        "sender_email, expected_email",
+        [
+            ("john@example.com", "john@example.com"),
+            ("", None),
+        ],
+        ids=["with_sender_email", "no_sender_email"],
+    )
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_ai_uses_sender_email_in_result(self, mock_claude):
+    def test_ai_sender_email_in_result(self, mock_claude, sender_email, expected_email):
         mock_claude.return_value = {"full_name": "John"}
         body = "--\nJohn"
-        result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body, sender_email="john@example.com"))
-        assert result["email"] == "john@example.com"
-
-    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
-    def test_ai_no_sender_email(self, mock_claude):
-        mock_claude.return_value = {"full_name": "John"}
-        body = "--\nJohn"
-        result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body))
-        assert result["email"] is None
+        result = asyncio.get_event_loop().run_until_complete(parse_signature_ai(body, sender_email=sender_email))
+        assert result["email"] == expected_email
 
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     def test_ai_truncates_long_body(self, mock_claude):
@@ -435,16 +395,18 @@ class TestExtractSignature:
         mock_ai.assert_called_once()
         assert result["extraction_method"] == "claude_ai"
 
+    @pytest.mark.parametrize(
+        "return_value, side_effect",
+        [
+            ({"confidence": 0.1}, None),
+            (None, Exception("Claude down")),
+        ],
+        ids=["ai_lower_confidence", "ai_exception"],
+    )
     @patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock)
-    def test_ai_lower_confidence_keeps_regex(self, mock_ai):
-        mock_ai.return_value = {"confidence": 0.1}
-        body = "--\nJohn Doe\nManager"
-        result = asyncio.get_event_loop().run_until_complete(extract_signature(body))
-        assert result["extraction_method"] == "regex"
-
-    @patch("app.services.signature_parser.parse_signature_ai", new_callable=AsyncMock)
-    def test_ai_exception_falls_back_to_regex(self, mock_ai):
-        mock_ai.side_effect = Exception("Claude down")
+    def test_keeps_regex_when_ai_does_not_win(self, mock_ai, return_value, side_effect):
+        mock_ai.return_value = return_value
+        mock_ai.side_effect = side_effect
         body = "--\nJohn Doe\nManager"
         result = asyncio.get_event_loop().run_until_complete(extract_signature(body))
         assert result["extraction_method"] == "regex"

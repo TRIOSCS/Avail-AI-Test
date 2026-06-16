@@ -116,27 +116,30 @@ class TestRoundTrip:
 
     _run = staticmethod(run_ops)
 
+    # The seven columns 096 adds, grouped by table.
+    _FACET_COLUMNS = {"source", "confidence", "tier"}
+    _CARD_COLUMNS = {"category_source", "category_confidence", "category_tier", "category_updated_at"}
+
     def _columns(self, engine, table):
         return {c["name"] for c in inspect(engine).get_columns(table)}
+
+    def _assert_columns_present(self, engine):
+        assert self._FACET_COLUMNS <= self._columns(engine, "material_spec_facets")
+        assert self._CARD_COLUMNS <= self._columns(engine, "material_cards")
 
     def test_upgrade_adds_seven_columns(self):
         engine = self._engine()
         self._run(engine, _mod.upgrade)
 
-        assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
-        assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(
-            engine, "material_cards"
-        )
+        self._assert_columns_present(engine)
 
     def test_downgrade_drops_seven_columns(self):
         engine = self._engine()
         self._run(engine, _mod.upgrade)
         self._run(engine, _mod.downgrade)
 
-        assert self._columns(engine, "material_spec_facets").isdisjoint({"source", "confidence", "tier"})
-        assert self._columns(engine, "material_cards").isdisjoint(
-            {"category_source", "category_confidence", "category_tier", "category_updated_at"}
-        )
+        assert self._columns(engine, "material_spec_facets").isdisjoint(self._FACET_COLUMNS)
+        assert self._columns(engine, "material_cards").isdisjoint(self._CARD_COLUMNS)
 
     def test_upgrade_downgrade_upgrade_round_trips(self):
         engine = self._engine()
@@ -144,7 +147,4 @@ class TestRoundTrip:
         self._run(engine, _mod.downgrade)
         self._run(engine, _mod.upgrade)
 
-        assert {"source", "confidence", "tier"} <= self._columns(engine, "material_spec_facets")
-        assert {"category_source", "category_confidence", "category_tier", "category_updated_at"} <= self._columns(
-            engine, "material_cards"
-        )
+        self._assert_columns_present(engine)

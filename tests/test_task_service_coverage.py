@@ -517,6 +517,12 @@ class TestComputeSimplePriority:
         assert score > 0.3
 
 
+def _make_stale(task: RequisitionTask) -> None:
+    """Mark a task as stale: created days ago and still open."""
+    task.created_at = datetime.now(timezone.utc) - timedelta(days=5)
+    task.status = TaskStatus.TODO
+
+
 class TestApplySimpleScoring:
     def test_applies_to_all_tasks(self, db_session: Session, requisition: Requisition):
         t1 = task_service.create_task(db_session, requisition_id=requisition.id, title="T1", source="system")
@@ -527,27 +533,21 @@ class TestApplySimpleScoring:
         assert t1.ai_priority_score is not None
         assert t2.ai_priority_score is not None
 
-    def test_overdue_sets_risk_flag(self, db_session: Session, requisition: Requisition):
+    @pytest.mark.parametrize(
+        "mutate, expected_flag",
+        [
+            (lambda t: setattr(t, "due_at", datetime.now(timezone.utc) - timedelta(hours=1)), "Overdue"),
+            (lambda t: setattr(t, "due_at", datetime.now(timezone.utc) + timedelta(hours=6)), "Due today"),
+            (_make_stale, "No activity in 3+ days"),
+        ],
+        ids=["overdue", "due_today", "stale"],
+    )
+    def test_risk_flag(self, db_session: Session, requisition: Requisition, mutate, expected_flag):
         task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
-        task.due_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        mutate(task)
         db_session.commit()
         task_service.apply_simple_scoring(db_session, [task])
-        assert task.ai_risk_flag == "Overdue"
-
-    def test_due_today_risk_flag(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
-        task.due_at = datetime.now(timezone.utc) + timedelta(hours=6)
-        db_session.commit()
-        task_service.apply_simple_scoring(db_session, [task])
-        assert task.ai_risk_flag == "Due today"
-
-    def test_stale_task_risk_flag(self, db_session: Session, requisition: Requisition):
-        task = task_service.create_task(db_session, requisition_id=requisition.id, title="T", source="system")
-        task.created_at = datetime.now(timezone.utc) - timedelta(days=5)
-        task.status = TaskStatus.TODO
-        db_session.commit()
-        task_service.apply_simple_scoring(db_session, [task])
-        assert task.ai_risk_flag == "No activity in 3+ days"
+        assert task.ai_risk_flag == expected_flag
 
 
 def _make_mock_task(requisition_id: int, user_id: int | None = None) -> MagicMock:
@@ -578,47 +578,43 @@ def _make_mock_task(requisition_id: int, user_id: int | None = None) -> MagicMoc
     return t
 
 
+def _returns(value):
+    """Build an async claude_json stub that returns ``value``."""
+
+    async def _stub(*a, **kw):
+        return value
+
+    return _stub
+
+
+def _raises(exc):
+    """Build an async claude_json stub that raises ``exc``."""
+
+    async def _stub(*a, **kw):
+        raise exc
+
+    return _stub
+
+
 class TestScoreTasksWithAI:
     async def test_score_tasks_empty(self, db_session: Session):
         # Should return immediately without error
         await task_service.score_tasks_with_ai(db_session, [])
 
-    async def test_score_tasks_with_ai_success(self, db_session: Session, requisition: Requisition):
+    @pytest.mark.parametrize(
+        "claude_json, with_due_date",
+        [
+            (_returns([{"priority_score": 0.8, "risk_flag": "Test risk"}]), False),
+            (_raises(RuntimeError("API down")), False),
+            (_returns({"error": "unexpected"}), False),
+            (_returns([{"priority_score": 0.9, "risk_flag": None}]), True),
+        ],
+        ids=["success", "exception", "non_list_response", "with_due_date"],
+    )
+    async def test_score_tasks(self, db_session: Session, requisition: Requisition, claude_json, with_due_date):
+        # Each case must run to completion without raising (exceptions are caught internally).
         mock_task = _make_mock_task(requisition.id)
-        mock_result = [{"priority_score": 0.8, "risk_flag": "Test risk"}]
-
-        async def _mock_claude_json(*a, **kw):
-            return mock_result
-
-        with patch("app.utils.claude_client.claude_json", new=_mock_claude_json):
-            await task_service.score_tasks_with_ai(db_session, [mock_task])
-
-    async def test_score_tasks_handles_exception(self, db_session: Session, requisition: Requisition):
-        mock_task = _make_mock_task(requisition.id)
-
-        async def _fail(*a, **kw):
-            raise RuntimeError("API down")
-
-        with patch("app.utils.claude_client.claude_json", new=_fail):
-            # Should not raise — exception is caught internally
-            await task_service.score_tasks_with_ai(db_session, [mock_task])
-
-    async def test_score_tasks_non_list_response(self, db_session: Session, requisition: Requisition):
-        mock_task = _make_mock_task(requisition.id)
-
-        async def _bad(*a, **kw):
-            return {"error": "unexpected"}
-
-        with patch("app.utils.claude_client.claude_json", new=_bad):
-            await task_service.score_tasks_with_ai(db_session, [mock_task])
-
-    async def test_score_tasks_with_due_date(self, db_session: Session, requisition: Requisition):
-        mock_task = _make_mock_task(requisition.id)
-        mock_task.due_at = datetime.now(timezone.utc) + timedelta(days=2)
-        mock_result = [{"priority_score": 0.9, "risk_flag": None}]
-
-        async def _mock_claude_json(*a, **kw):
-            return mock_result
-
-        with patch("app.utils.claude_client.claude_json", new=_mock_claude_json):
+        if with_due_date:
+            mock_task.due_at = datetime.now(timezone.utc) + timedelta(days=2)
+        with patch("app.utils.claude_client.claude_json", new=claude_json):
             await task_service.score_tasks_with_ai(db_session, [mock_task])

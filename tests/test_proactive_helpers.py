@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import Company, User
 from app.models.crm import CustomerSite
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
@@ -115,14 +117,17 @@ def test_build_batch_throttle_set(db_session):
     assert site.id in result
 
 
-def test_build_batch_dno_set_empty(db_session):
-    result = build_batch_dno_set(db_session, "LM358N", set())
-    assert result == set()
-
-
-def test_build_batch_throttle_set_empty(db_session):
-    result = build_batch_throttle_set(db_session, "LM358N", set())
-    assert result == set()
+@pytest.mark.parametrize(
+    "build_fn, mpn",
+    [
+        (build_batch_dno_set, "LM358N"),
+        (build_batch_throttle_set, "LM358N"),
+        (build_batch_throttle_set, "ANY-MPN"),
+    ],
+    ids=["dno_empty", "throttle_empty", "throttle_empty_any_mpn"],
+)
+def test_build_batch_set_empty(db_session, build_fn, mpn):
+    assert build_fn(db_session, mpn, set()) == set()
 
 
 # ── Helper edge cases ─────────────────────────────────────────────────────
@@ -163,7 +168,3 @@ class TestHelperEdgeCases:
         db_session.flush()
         result = build_batch_dno_set(db_session, "DUP-MPN", {company.id, company.id})
         assert company.id in result
-
-    def test_batch_throttle_empty_returns_empty(self, db_session):
-        result = build_batch_throttle_set(db_session, "ANY-MPN", set())
-        assert result == set()

@@ -22,7 +22,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -176,8 +176,6 @@ class TestRowAction:
     def test_clone_action(self, client: TestClient, active_req: Requisition):
         """Lines 394-397: clone action calls clone_requisition."""
         with patch("app.services.requisition_service.clone_requisition") as mock_clone:
-            from unittest.mock import MagicMock
-
             cloned = MagicMock()
             cloned.id = 999
             cloned.name = "Clone of REQ2-COV-001"

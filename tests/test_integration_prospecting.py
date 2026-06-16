@@ -333,18 +333,17 @@ class TestConcurrentClaims:
         with pytest.raises(ValueError, match="Already claimed"):
             claim_prospect(p.id, user2.id, db_session)
 
-    def test_cannot_claim_dismissed(self, db_session):
-        """Cannot claim a dismissed prospect."""
+    @pytest.mark.parametrize(
+        "status, name, domain",
+        [
+            pytest.param("dismissed", "Gone Corp", "gonecorp.com", id="dismissed"),
+            pytest.param("expired", "Old Corp", "oldcorp.com", id="expired"),
+        ],
+    )
+    def test_cannot_claim_inactive(self, db_session, status, name, domain):
+        """Cannot claim a dismissed or expired prospect."""
         user = _make_user(db_session)
-        p = _make_prospect(db_session, name="Gone Corp", domain="gonecorp.com", status="dismissed")
-
-        with pytest.raises(ValueError, match="Cannot claim"):
-            claim_prospect(p.id, user.id, db_session)
-
-    def test_cannot_claim_expired(self, db_session):
-        """Cannot claim an expired prospect."""
-        user = _make_user(db_session)
-        p = _make_prospect(db_session, name="Old Corp", domain="oldcorp.com", status="expired")
+        p = _make_prospect(db_session, name=name, domain=domain, status=status)
 
         with pytest.raises(ValueError, match="Cannot claim"):
             claim_prospect(p.id, user.id, db_session)

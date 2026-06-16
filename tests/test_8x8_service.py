@@ -16,6 +16,9 @@ FAKE_SETTINGS = SimpleNamespace(
     eight_by_eight_timezone="America/Los_Angeles",
 )
 
+SINCE = datetime(2026, 3, 1, tzinfo=timezone.utc)
+UNTIL = datetime(2026, 3, 2, tzinfo=timezone.utc)
+
 
 def _mock_async_client(*, get=None, post=None):
     """Build a patch target replacing httpx.AsyncClient.
@@ -81,10 +84,8 @@ class TestGetCdrs:
         mock_resp.text = "Internal Server Error"
         factory = _mock_async_client(get=mock_resp)
 
-        since = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        until = datetime(2026, 3, 2, tzinfo=timezone.utc)
         with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
+            result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert result == []
 
     async def test_returns_records_from_data_key(self):
@@ -99,10 +100,8 @@ class TestGetCdrs:
         }
         factory = _mock_async_client(get=mock_resp)
 
-        since = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        until = datetime(2026, 3, 2, tzinfo=timezone.utc)
         with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
+            result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert len(result) == 2
 
     async def test_paginates_via_scroll_id(self):
@@ -120,10 +119,8 @@ class TestGetCdrs:
         }
         factory = _mock_async_client(get=[page1, page2])
 
-        since = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        until = datetime(2026, 3, 2, tzinfo=timezone.utc)
         with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
-            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
+            result = await get_cdrs("token", FAKE_SETTINGS, SINCE, UNTIL)
         assert len(result) == 3
         assert factory._client.get.await_count == 2
 

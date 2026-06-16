@@ -262,37 +262,23 @@ class TestScoreRequirement:
 
 
 class TestColor:
-    def test_zero_is_red(self):
-        assert _color(0) == "red"
-
-    def test_below_25_is_red(self):
-        assert _color(24.9) == "red"
-
-    def test_exactly_25_is_yellow(self):
-        assert _color(25) == "yellow"
-
-    def test_mid_range_is_yellow(self):
-        assert _color(40) == "yellow"
-        assert _color(59.9) == "yellow"
-
-    def test_exactly_60_is_green(self):
-        assert _color(60) == "green"
-
-    def test_high_score_is_green(self):
-        assert _color(80) == "green"
-        assert _color(100) == "green"
-
-    def test_boundary_24_is_red(self):
-        assert _color(24) == "red"
-
-    def test_boundary_25_is_yellow(self):
-        assert _color(25) == "yellow"
-
-    def test_boundary_59_is_yellow(self):
-        assert _color(59) == "yellow"
-
-    def test_boundary_60_is_green(self):
-        assert _color(60) == "green"
+    @pytest.mark.parametrize(
+        "score, expected",
+        [
+            pytest.param(0, "red", id="zero_is_red"),
+            pytest.param(24.9, "red", id="below_25_is_red"),
+            pytest.param(24, "red", id="boundary_24_is_red"),
+            pytest.param(25, "yellow", id="exactly_25_is_yellow"),
+            pytest.param(40, "yellow", id="mid_range_40_is_yellow"),
+            pytest.param(59, "yellow", id="boundary_59_is_yellow"),
+            pytest.param(59.9, "yellow", id="just_below_60_is_yellow"),
+            pytest.param(60, "green", id="exactly_60_is_green"),
+            pytest.param(80, "green", id="high_score_80_is_green"),
+            pytest.param(100, "green", id="high_score_100_is_green"),
+        ],
+    )
+    def test_color_band(self, score, expected):
+        assert _color(score) == expected
 
 
 # ── 4. _signal_level() ──────────────────────────────────────────────
@@ -665,19 +651,39 @@ class TestComputeRequisitionScoreFast:
 # ── 8. compute_requisition_scores() — DB integration ────────────────
 
 
+def _make_requisition(db_session: Session, user: User, name: str) -> Requisition:
+    """Create and flush a minimal active Requisition for the given user."""
+    req = Requisition(
+        name=name,
+        customer_name="Test",
+        status="active",
+        created_by=user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+    return req
+
+
+def _make_requirement(db_session: Session, req: Requisition, mpn, qty: int = 100) -> Requirement:
+    """Create and flush a Requirement under the given Requisition."""
+    item = Requirement(
+        requisition_id=req.id,
+        primary_mpn=mpn,
+        target_qty=qty,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    db_session.flush()
+    return item
+
+
 class TestComputeRequisitionScores:
     """Tests for compute_requisition_scores using in-memory SQLite."""
 
     def test_no_requirements_returns_empty(self, db_session: Session, test_user: User):
         """Requisition with no requirements returns 0 score and empty list."""
-        req = Requisition(
-            name="EMPTY-REQ",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        req = _make_requisition(db_session, test_user, "EMPTY-REQ")
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -694,23 +700,8 @@ class TestComputeRequisitionScores:
 
     def test_single_requirement_no_activity(self, db_session: Session, test_user: User):
         """Requirement with zero activity should get a low (red) score."""
-        req = Requisition(
-            name="REQ-NOACTIVITY",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="ABC123",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
+        req = _make_requisition(db_session, test_user, "REQ-NOACTIVITY")
+        _make_requirement(db_session, req, "ABC123")
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -722,24 +713,8 @@ class TestComputeRequisitionScores:
 
     def test_requirement_with_sightings(self, db_session: Session, test_user: User):
         """Sightings should increase the per-requirement score."""
-        req = Requisition(
-            name="REQ-SIGHTINGS",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="DEF456",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-SIGHTINGS")
+        item = _make_requirement(db_session, req, "DEF456")
 
         # Add sightings
         for i in range(5):
@@ -763,24 +738,8 @@ class TestComputeRequisitionScores:
     def test_full_activity_produces_higher_score(self, db_session: Session, test_user: User):
         """Full activity (sightings, offers, RFQs, replies, calls, emails) should
         produce a significantly higher score than no activity."""
-        req = Requisition(
-            name="REQ-FULL",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="FULL-MPN",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-FULL")
+        item = _make_requirement(db_session, req, "FULL-MPN")
 
         # Sightings
         for i in range(5):
@@ -871,25 +830,10 @@ class TestComputeRequisitionScores:
 
     def test_multiple_requirements_averaged(self, db_session: Session, test_user: User):
         """Score of multiple requirements should be the average."""
-        req = Requisition(
-            name="REQ-MULTI",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-MULTI")
 
         # Requirement 1: some sightings
-        item1 = Requirement(
-            requisition_id=req.id,
-            primary_mpn="MPN-A",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item1)
-        db_session.flush()
+        item1 = _make_requirement(db_session, req, "MPN-A")
 
         for i in range(5):
             db_session.add(
@@ -904,13 +848,7 @@ class TestComputeRequisitionScores:
             )
 
         # Requirement 2: no sightings
-        item2 = Requirement(
-            requisition_id=req.id,
-            primary_mpn="MPN-B",
-            target_qty=200,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item2)
+        _make_requirement(db_session, req, "MPN-B", qty=200)
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -922,23 +860,8 @@ class TestComputeRequisitionScores:
 
     def test_result_structure(self, db_session: Session, test_user: User):
         """Verify the structure of the returned dict."""
-        req = Requisition(
-            name="REQ-STRUCT",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="STRUCT-MPN",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
+        req = _make_requisition(db_session, test_user, "REQ-STRUCT")
+        _make_requirement(db_session, req, "STRUCT-MPN")
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -967,23 +890,8 @@ class TestComputeRequisitionScores:
 
     def test_null_primary_mpn(self, db_session: Session, test_user: User):
         """Requirement with null primary_mpn should return empty string."""
-        req = Requisition(
-            name="REQ-NULL-MPN",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn=None,
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
+        req = _make_requisition(db_session, test_user, "REQ-NULL-MPN")
+        _make_requirement(db_session, req, None)
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -991,23 +899,8 @@ class TestComputeRequisitionScores:
 
     def test_color_consistency(self, db_session: Session, test_user: User):
         """Requisition color should match _color() applied to the average score."""
-        req = Requisition(
-            name="REQ-COLOR",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="COLOR-MPN",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
+        req = _make_requisition(db_session, test_user, "REQ-COLOR")
+        _make_requirement(db_session, req, "COLOR-MPN")
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -1015,24 +908,8 @@ class TestComputeRequisitionScores:
 
     def test_only_counts_sent_contacts_as_rfqs(self, db_session: Session, test_user: User):
         """Only contacts with status='sent' should count as RFQs."""
-        req = Requisition(
-            name="REQ-RFQFILTER",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="RFQ-MPN",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-RFQFILTER")
+        _make_requirement(db_session, req, "RFQ-MPN")
 
         # One sent RFQ
         db_session.add(
@@ -1065,24 +942,8 @@ class TestComputeRequisitionScores:
 
     def test_phone_vs_email_channel_filtering(self, db_session: Session, test_user: User):
         """Only channel='phone' counts for calls, channel='email' for emails."""
-        req = Requisition(
-            name="REQ-CHANNELS",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="CHAN-MPN",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-CHANNELS")
+        _make_requirement(db_session, req, "CHAN-MPN")
 
         # 2 phone calls
         for i in range(2):
@@ -1131,30 +992,9 @@ class TestComputeRequisitionScores:
 
     def test_offers_per_requirement(self, db_session: Session, test_user: User):
         """Offers are counted per-requirement, not shared."""
-        req = Requisition(
-            name="REQ-OFFERS",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item1 = Requirement(
-            requisition_id=req.id,
-            primary_mpn="OFFER-A",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        item2 = Requirement(
-            requisition_id=req.id,
-            primary_mpn="OFFER-B",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add_all([item1, item2])
-        db_session.flush()
+        req = _make_requisition(db_session, test_user, "REQ-OFFERS")
+        item1 = _make_requirement(db_session, req, "OFFER-A")
+        _make_requirement(db_session, req, "OFFER-B")
 
         # 3 offers for item1, 0 for item2
         for i in range(3):

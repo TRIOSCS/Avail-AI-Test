@@ -4,6 +4,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import pytest
+
 from app.utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -21,199 +23,158 @@ from app.vendor_utils import normalize_vendor_name
 
 
 class TestNormalizePhone:
-    def test_us_10_digit(self):
-        assert normalize_phone_e164("(555) 123-4567") == "+15551234567"
-
-    def test_us_11_digit_with_1(self):
-        assert normalize_phone_e164("1-800-555-0100") == "+18005550100"
-
-    def test_international_with_plus(self):
-        assert normalize_phone_e164("+44 20 7946 0958") == "+442079460958"
-
-    def test_strips_extension(self):
-        assert normalize_phone_e164("555-123-4567 ext. 123") == "+15551234567"
-
-    def test_too_short(self):
-        assert normalize_phone_e164("12345") is None
-
-    def test_none(self):
-        assert normalize_phone_e164(None) is None
-
-    def test_empty(self):
-        assert normalize_phone_e164("") is None
-
-    def test_ext_only(self):
-        assert normalize_phone_e164("ext 123") is None
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("(555) 123-4567", "+15551234567", id="us_10_digit"),
+            pytest.param("1-800-555-0100", "+18005550100", id="us_11_digit_with_1"),
+            pytest.param("+44 20 7946 0958", "+442079460958", id="international_with_plus"),
+            pytest.param("555-123-4567 ext. 123", "+15551234567", id="strips_extension"),
+            pytest.param("12345", None, id="too_short"),
+            pytest.param(None, None, id="none"),
+            pytest.param("", None, id="empty"),
+            pytest.param("ext 123", None, id="ext_only"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_phone_e164(raw) == expected
 
 
 # ── Country normalization ────────────────────────────────────────────
 
 
 class TestNormalizeCountry:
-    def test_full_name(self):
-        assert normalize_country("United States") == "US"
-
-    def test_usa(self):
-        assert normalize_country("USA") == "US"
-
-    def test_already_code(self):
-        assert normalize_country("DE") == "DE"
-
-    def test_lowercase_code(self):
-        assert normalize_country("gb") == "GB"
-
-    def test_full_name_other(self):
-        assert normalize_country("Deutschland") == "DE"
-
-    def test_none(self):
-        assert normalize_country(None) is None
-
-    def test_empty(self):
-        assert normalize_country("") is None
-
-    def test_unknown_passthrough(self):
-        assert normalize_country("Wakanda") == "Wakanda"
-
-    def test_japan(self):
-        assert normalize_country("Japan") == "JP"
-
-    def test_hong_kong(self):
-        assert normalize_country("Hong Kong") == "HK"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("United States", "US", id="full_name"),
+            pytest.param("USA", "US", id="usa"),
+            pytest.param("DE", "DE", id="already_code"),
+            pytest.param("gb", "GB", id="lowercase_code"),
+            pytest.param("Deutschland", "DE", id="full_name_other"),
+            pytest.param(None, None, id="none"),
+            pytest.param("", None, id="empty"),
+            pytest.param("Wakanda", "Wakanda", id="unknown_passthrough"),
+            pytest.param("Japan", "JP", id="japan"),
+            pytest.param("Hong Kong", "HK", id="hong_kong"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_country(raw) == expected
 
 
 # ── US State normalization ───────────────────────────────────────────
 
 
 class TestNormalizeUSState:
-    def test_full_name(self):
-        assert normalize_us_state("California") == "CA"
-
-    def test_already_code(self):
-        assert normalize_us_state("TX") == "TX"
-
-    def test_lowercase(self):
-        assert normalize_us_state("new york") == "NY"
-
-    def test_none(self):
-        assert normalize_us_state(None) is None
-
-    def test_dc(self):
-        assert normalize_us_state("District of Columbia") == "DC"
-
-    def test_unknown_passthrough(self):
-        assert normalize_us_state("Ontario") == "Ontario"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("California", "CA", id="full_name"),
+            pytest.param("TX", "TX", id="already_code"),
+            pytest.param("new york", "NY", id="lowercase"),
+            pytest.param(None, None, id="none"),
+            pytest.param("District of Columbia", "DC", id="dc"),
+            pytest.param("Ontario", "Ontario", id="unknown_passthrough"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_us_state(raw) == expected
 
 
 # ── Encoding fix ─────────────────────────────────────────────────────
 
 
 class TestFixEncoding:
-    def test_intl(self):
-        assert fix_encoding("int?l") == "Int'l"
-
-    def test_clean_text(self):
-        assert fix_encoding("Normal Text") == "Normal Text"
-
-    def test_none(self):
-        assert fix_encoding(None) is None
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("int?l", "Int'l", id="intl"),
+            pytest.param("Normal Text", "Normal Text", id="clean_text"),
+            pytest.param(None, None, id="none"),
+        ],
+    )
+    def test_fix(self, raw, expected):
+        assert fix_encoding(raw) == expected
 
 
 # ── Vendor name normalization (improved suffixes) ────────────────────
 
 
 class TestVendorNameNormalization:
-    def test_basic(self):
-        assert normalize_vendor_name("Mouser Electronics, Inc.") == "mouser electronics"
-
-    def test_european_sas(self):
-        result = normalize_vendor_name("CompanyName S.A.S.")
-        assert result == "companyname"
-
-    def test_european_srl(self):
-        result = normalize_vendor_name("CompanyName S.r.l.")
-        assert result == "companyname"
-
-    def test_european_spa(self):
-        result = normalize_vendor_name("CompanyName S.p.A.")
-        assert result == "companyname"
-
-    def test_european_kk(self):
-        result = normalize_vendor_name("CompanyName K.K.")
-        assert result == "companyname"
-
-    def test_european_as(self):
-        result = normalize_vendor_name("CompanyName A.S.")
-        assert result == "companyname"
-
-    def test_polish_sp(self):
-        result = normalize_vendor_name("4HFIX Sp.z o.o.")
-        assert result == "4hfix"
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("Mouser Electronics, Inc.", "mouser electronics", id="basic"),
+            pytest.param("CompanyName S.A.S.", "companyname", id="european_sas"),
+            pytest.param("CompanyName S.r.l.", "companyname", id="european_srl"),
+            pytest.param("CompanyName S.p.A.", "companyname", id="european_spa"),
+            pytest.param("CompanyName K.K.", "companyname", id="european_kk"),
+            pytest.param("CompanyName A.S.", "companyname", id="european_as"),
+            pytest.param("4HFIX Sp.z o.o.", "4hfix", id="polish_sp"),
+            pytest.param("The Phoenix Company LLC", "phoenix", id="leading_the"),
+            pytest.param("", "", id="empty"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_vendor_name(raw) == expected
 
     def test_no_fragment_strip(self):
         # "co" should NOT be stripped from "technologyco" (word boundary issue)
         result = normalize_vendor_name("TechnologyCo")
         assert "technologyco" in result
 
-    def test_leading_the(self):
-        result = normalize_vendor_name("The Phoenix Company LLC")
-        assert result == "phoenix"
-
-    def test_empty(self):
-        assert normalize_vendor_name("") == ""
-
 
 # ── MPN normalization ────────────────────────────────────────────────
 
 
 class TestNormalizeMPN:
-    def test_uppercase(self):
-        assert normalize_mpn("lm317t") == "LM317T"
-
-    def test_strip_whitespace(self):
-        assert normalize_mpn("  LM 317T  ") == "LM317T"
-
-    def test_strip_quotes(self):
-        assert normalize_mpn("'LM317T'") == "LM317T"
-
-    def test_too_short(self):
-        assert normalize_mpn("AB") is None
-
-    def test_none(self):
-        assert normalize_mpn(None) is None
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("lm317t", "LM317T", id="uppercase"),
+            pytest.param("  LM 317T  ", "LM317T", id="strip_whitespace"),
+            pytest.param("'LM317T'", "LM317T", id="strip_quotes"),
+            pytest.param("AB", None, id="too_short"),
+            pytest.param(None, None, id="none"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_mpn(raw) == expected
 
 
 # ── Condition normalization ──────────────────────────────────────────
 
 
 class TestNormalizeCondition:
-    def test_factory_new(self):
-        assert normalize_condition("Factory New") == "new"
-
-    def test_refurbished(self):
-        assert normalize_condition("Refurbished") == "refurb"
-
-    def test_surplus(self):
-        assert normalize_condition("Surplus") == "used"
-
-    def test_none(self):
-        assert normalize_condition(None) is None
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("Factory New", "new", id="factory_new"),
+            pytest.param("Refurbished", "refurb", id="refurbished"),
+            pytest.param("Surplus", "used", id="surplus"),
+            pytest.param(None, None, id="none"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_condition(raw) == expected
 
 
 # ── Packaging normalization ──────────────────────────────────────────
 
 
 class TestNormalizePackaging:
-    def test_tape_and_reel(self):
-        assert normalize_packaging("Tape and Reel") == "reel"
-
-    def test_tray(self):
-        assert normalize_packaging("Tray") == "tray"
-
-    def test_cut_tape(self):
-        assert normalize_packaging("Cut Tape") == "cut_tape"
-
-    def test_none(self):
-        assert normalize_packaging(None) is None
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            pytest.param("Tape and Reel", "reel", id="tape_and_reel"),
+            pytest.param("Tray", "tray", id="tray"),
+            pytest.param("Cut Tape", "cut_tape", id="cut_tape"),
+            pytest.param(None, None, id="none"),
+        ],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_packaging(raw) == expected
 
 
 # ── Schema validators (write-path hooks) ─────────────────────────────

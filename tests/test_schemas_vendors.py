@@ -54,13 +54,16 @@ class TestVendorReviewCreate:
         r = VendorReviewCreate()
         assert r.rating == 3 and r.comment == ""
 
-    def test_clamps_high_rating(self):
-        r = VendorReviewCreate(rating=99)
-        assert r.rating == 5
-
-    def test_clamps_low_rating(self):
-        r = VendorReviewCreate(rating=-5)
-        assert r.rating == 1
+    @pytest.mark.parametrize(
+        ("rating", "expected"),
+        [
+            pytest.param(99, 5, id="clamps_high_rating"),
+            pytest.param(-5, 1, id="clamps_low_rating"),
+        ],
+    )
+    def test_clamps_rating(self, rating, expected):
+        r = VendorReviewCreate(rating=rating)
+        assert r.rating == expected
 
     def test_truncates_long_comment(self):
         r = VendorReviewCreate(comment="x" * 600)

@@ -213,18 +213,11 @@ class TestPlanContext:
 
 
 class TestLinesHtml:
-    def test_empty_lines(self):
+    @pytest.mark.parametrize("lines", [[], None], ids=["empty_lines", "none_lines"])
+    def test_no_lines(self, lines):
         from app.services.buyplan_notifications import _lines_html
 
-        plan = MagicMock(lines=[])
-        rows, total = _lines_html(plan)
-        assert rows == ""
-        assert total == 0.0
-
-    def test_none_lines(self):
-        from app.services.buyplan_notifications import _lines_html
-
-        plan = MagicMock(lines=None)
+        plan = MagicMock(lines=lines)
         rows, total = _lines_html(plan)
         assert rows == ""
         assert total == 0.0

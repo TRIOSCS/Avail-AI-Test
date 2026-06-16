@@ -33,58 +33,39 @@ from app.models.quotes import QuoteLine
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
+def _quote(
+    db: Session,
+    req: Requisition,
+    site: CustomerSite,
+    user: User,
+    *,
+    status: str,
+    prefix: str,
+    **kw,
+) -> Quote:
+    defaults = dict(
+        requisition_id=req.id,
+        customer_site_id=site.id,
+        quote_number=f"{prefix}-{uuid.uuid4().hex[:8]}",
+        status=status,
+        line_items=[],
+        created_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    defaults.update(kw)
+    q = Quote(**defaults)
+    db.add(q)
+    db.commit()
+    db.refresh(q)
+    return q
+
+
 def _draft_quote(db: Session, req: Requisition, site: CustomerSite, user: User, **kw) -> Quote:
-    defaults = dict(
-        requisition_id=req.id,
-        customer_site_id=site.id,
-        quote_number=f"DQ-{uuid.uuid4().hex[:8]}",
-        status="draft",
-        line_items=[],
-        created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kw)
-    q = Quote(**defaults)
-    db.add(q)
-    db.commit()
-    db.refresh(q)
-    return q
-
-
-def _sent_quote(db: Session, req: Requisition, site: CustomerSite, user: User, **kw) -> Quote:
-    defaults = dict(
-        requisition_id=req.id,
-        customer_site_id=site.id,
-        quote_number=f"SQ-{uuid.uuid4().hex[:8]}",
-        status="sent",
-        line_items=[],
-        created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kw)
-    q = Quote(**defaults)
-    db.add(q)
-    db.commit()
-    db.refresh(q)
-    return q
+    return _quote(db, req, site, user, status="draft", prefix="DQ", **kw)
 
 
 def _won_quote(db: Session, req: Requisition, site: CustomerSite, user: User, **kw) -> Quote:
-    defaults = dict(
-        requisition_id=req.id,
-        customer_site_id=site.id,
-        quote_number=f"WQ-{uuid.uuid4().hex[:8]}",
-        status="won",
-        line_items=[],
-        created_by_id=user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kw)
-    q = Quote(**defaults)
-    db.add(q)
-    db.commit()
-    db.refresh(q)
-    return q
+    return _quote(db, req, site, user, status="won", prefix="WQ", **kw)
 
 
 def _quote_line(db: Session, quote: Quote, offer: Offer | None = None, **kw) -> QuoteLine:
@@ -117,68 +98,29 @@ class TestShellPageRouting:
         assert resp.status_code == 200
         assert "text/html" in resp.headers["content-type"]
 
-    def test_buy_plans_detail(self, client: TestClient):
-        resp = client.get("/v2/buy-plans/42")
-        assert resp.status_code == 200
-
-    def test_excess_list(self, client: TestClient):
-        resp = client.get("/v2/excess")
-        assert resp.status_code == 200
-
-    def test_excess_detail(self, client: TestClient):
-        resp = client.get("/v2/excess/7")
-        assert resp.status_code == 200
-
-    def test_quotes_list(self, client: TestClient):
-        resp = client.get("/v2/quotes")
-        assert resp.status_code == 200
-
-    def test_quotes_detail(self, client: TestClient):
-        resp = client.get("/v2/quotes/99")
-        assert resp.status_code == 200
-
-    def test_settings(self, client: TestClient):
-        resp = client.get("/v2/settings")
-        assert resp.status_code == 200
-
-    def test_prospecting_list(self, client: TestClient):
-        resp = client.get("/v2/prospecting")
-        assert resp.status_code == 200
-
-    def test_prospecting_detail(self, client: TestClient):
-        resp = client.get("/v2/prospecting/3")
-        assert resp.status_code == 200
-
-    def test_proactive(self, client: TestClient):
-        resp = client.get("/v2/proactive")
-        assert resp.status_code == 200
-
-    def test_materials_list(self, client: TestClient):
-        resp = client.get("/v2/materials")
-        assert resp.status_code == 200
-
-    def test_materials_detail(self, client: TestClient):
-        resp = client.get("/v2/materials/5")
-        assert resp.status_code == 200
-
-    def test_follow_ups(self, client: TestClient):
-        resp = client.get("/v2/follow-ups")
-        assert resp.status_code == 200
-
-    def test_crm(self, client: TestClient):
-        resp = client.get("/v2/crm")
-        assert resp.status_code == 200
-
-    def test_sightings(self, client: TestClient):
-        resp = client.get("/v2/sightings")
-        assert resp.status_code == 200
-
-    def test_trouble_tickets_list(self, client: TestClient):
-        resp = client.get("/v2/trouble-tickets")
-        assert resp.status_code == 200
-
-    def test_trouble_tickets_detail(self, client: TestClient):
-        resp = client.get("/v2/trouble-tickets/12")
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/buy-plans/42",
+            "/v2/excess",
+            "/v2/excess/7",
+            "/v2/quotes",
+            "/v2/quotes/99",
+            "/v2/settings",
+            "/v2/prospecting",
+            "/v2/prospecting/3",
+            "/v2/proactive",
+            "/v2/materials",
+            "/v2/materials/5",
+            "/v2/follow-ups",
+            "/v2/crm",
+            "/v2/sightings",
+            "/v2/trouble-tickets",
+            "/v2/trouble-tickets/12",
+        ],
+    )
+    def test_page_returns_200(self, client: TestClient, path: str):
+        resp = client.get(path)
         assert resp.status_code == 200
 
 

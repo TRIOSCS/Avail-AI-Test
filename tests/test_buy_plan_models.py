@@ -33,46 +33,60 @@ from app.models.buy_plan import (
 
 
 class TestEnums:
-    def test_buy_plan_status_values(self):
-        assert set(BuyPlanStatus) == {
-            BuyPlanStatus.DRAFT,
-            BuyPlanStatus.PENDING,
-            BuyPlanStatus.ACTIVE,
-            BuyPlanStatus.HALTED,
-            BuyPlanStatus.COMPLETED,
-            BuyPlanStatus.CANCELLED,
-        }
-
-    def test_so_verification_status_values(self):
-        assert set(SOVerificationStatus) == {
-            SOVerificationStatus.PENDING,
-            SOVerificationStatus.APPROVED,
-            SOVerificationStatus.REJECTED,
-        }
-
-    def test_line_status_values(self):
-        assert set(BuyPlanLineStatus) == {
-            BuyPlanLineStatus.AWAITING_PO,
-            BuyPlanLineStatus.PENDING_VERIFY,
-            BuyPlanLineStatus.VERIFIED,
-            BuyPlanLineStatus.ISSUE,
-            BuyPlanLineStatus.CANCELLED,
-        }
-
-    def test_issue_type_values(self):
-        assert set(LineIssueType) == {
-            LineIssueType.SOLD_OUT,
-            LineIssueType.PRICE_CHANGED,
-            LineIssueType.LEAD_TIME_CHANGED,
-            LineIssueType.OTHER,
-        }
-
-    def test_ai_flag_severity_values(self):
-        assert set(AIFlagSeverity) == {
-            AIFlagSeverity.INFO,
-            AIFlagSeverity.WARNING,
-            AIFlagSeverity.CRITICAL,
-        }
+    @pytest.mark.parametrize(
+        ("enum_cls", "expected_members"),
+        [
+            (
+                BuyPlanStatus,
+                {
+                    BuyPlanStatus.DRAFT,
+                    BuyPlanStatus.PENDING,
+                    BuyPlanStatus.ACTIVE,
+                    BuyPlanStatus.HALTED,
+                    BuyPlanStatus.COMPLETED,
+                    BuyPlanStatus.CANCELLED,
+                },
+            ),
+            (
+                SOVerificationStatus,
+                {
+                    SOVerificationStatus.PENDING,
+                    SOVerificationStatus.APPROVED,
+                    SOVerificationStatus.REJECTED,
+                },
+            ),
+            (
+                BuyPlanLineStatus,
+                {
+                    BuyPlanLineStatus.AWAITING_PO,
+                    BuyPlanLineStatus.PENDING_VERIFY,
+                    BuyPlanLineStatus.VERIFIED,
+                    BuyPlanLineStatus.ISSUE,
+                    BuyPlanLineStatus.CANCELLED,
+                },
+            ),
+            (
+                LineIssueType,
+                {
+                    LineIssueType.SOLD_OUT,
+                    LineIssueType.PRICE_CHANGED,
+                    LineIssueType.LEAD_TIME_CHANGED,
+                    LineIssueType.OTHER,
+                },
+            ),
+            (
+                AIFlagSeverity,
+                {
+                    AIFlagSeverity.INFO,
+                    AIFlagSeverity.WARNING,
+                    AIFlagSeverity.CRITICAL,
+                },
+            ),
+        ],
+        ids=["buy_plan_status", "so_verification_status", "line_status", "issue_type", "ai_flag_severity"],
+    )
+    def test_enum_values(self, enum_cls, expected_members):
+        assert set(enum_cls) == expected_members
 
     def test_enums_are_str_subclass(self):
         """Ensures enums serialize as strings in JSON/DB."""
