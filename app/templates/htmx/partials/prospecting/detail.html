@@ -3,7 +3,7 @@
   Receives: prospect (ProspectAccount ORM), enrichment (dict), warm_intro (dict).
   Called by: htmx_views.py prospecting_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
-#}
+#}{% import "htmx/partials/prospecting/_macros.html" as score %}
 
 <div class="max-w-7xl mx-auto">
 
@@ -91,11 +91,11 @@
     <div class="bg-white border border-brand-200 rounded-lg p-6">
       <div class="text-sm font-medium text-gray-500 mb-2">Fit Score</div>
       {% set fit = prospect.fit_score or 0 %}
-      <div class="text-3xl font-bold {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">
+      <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">
         {{ fit }}%
       </div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}"
              style="width: {{ fit }}%"></div>
       </div>
       {% if prospect.fit_reasoning %}
@@ -107,11 +107,11 @@
     <div class="bg-white border border-brand-200 rounded-lg p-6">
       <div class="text-sm font-medium text-gray-500 mb-2">Readiness Score</div>
       {% set ready = prospect.readiness_score or 0 %}
-      <div class="text-3xl font-bold {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">
+      <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">
         {{ ready }}%
       </div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}"
              style="width: {{ ready }}%"></div>
       </div>
       {% if prospect.readiness_signals %}

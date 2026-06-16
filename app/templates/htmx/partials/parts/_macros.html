@@ -1,0 +1,15 @@
+{# parts/_macros.html — Macros local to the parts split-workspace cluster.
+   Called by: parts/list.html (and other parts/* partials that share these patterns).
+   Depends on: HTMX (inline click-to-edit cell contract).
+#}
+
+{# Inline-editable table cell: clicking swaps in the matching cell/edit fragment.
+   `field` drives the stable id (cell-{field}-{req_id}) and the edit endpoint;
+   the cell's rendered value is supplied by the {% call %} body. #}
+{% macro edit_cell(req_id, field, title) %}<td id="cell-{{ field }}-{{ req_id }}" @click.stop
+                    hx-get="/v2/partials/parts/{{ req_id }}/cell/edit/{{ field }}"
+                    hx-target="#cell-{{ field }}-{{ req_id }}" hx-swap="outerHTML"
+                    class="cursor-pointer hover:bg-brand-50 transition-colors"
+                    title="{{ title }}">
+                  {{ caller() }}
+                </td>{% endmacro %}
