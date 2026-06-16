@@ -44,7 +44,8 @@ def _run(file_path: str, commit: bool) -> dict[str, int]:
     db = SessionLocal()
     created = existing = skipped = 0
     try:
-        content = open(file_path, "rb").read()
+        with open(file_path, "rb") as f:
+            content = f.read()
         mpns = extract_mpns(parse_tabular_file(content, file_path))
         logger.info("Parsed {} part numbers from {}", len(mpns), file_path)
 

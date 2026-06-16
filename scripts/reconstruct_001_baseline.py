@@ -314,6 +314,20 @@ def parse_pg_dump(sql: str) -> ParseResult:
 # ── Python source emitters ─────────────────────────────────────────────
 
 
+def _cascade_kwargs(fk: ForeignKey) -> str:
+    """Render the trailing ``, ondelete=…, onupdate=…`` kwargs for an FK.
+
+    Cascade kwargs are emitted only when the parsed FK has them; default
+    ``NO ACTION`` is left implicit (no kwarg) to match alembic's convention.
+    """
+    extras = ""
+    if fk.ondelete:
+        extras += f", ondelete='{fk.ondelete}'"
+    if fk.onupdate:
+        extras += f", onupdate='{fk.onupdate}'"
+    return extras
+
+
 def render_op_create_table(t: Table) -> str:
     """Render op.create_table for a single table.
 
@@ -343,10 +357,7 @@ def render_op_create_table(t: Table) -> str:
         local = "[" + ", ".join(f"'{c}'" for c in fk.local_columns) + "]"
         ref = "[" + ", ".join(f"'{fk.referenced_table}.{c}'" for c in fk.referenced_columns) + "]"
         extras = f", name='{fk.name}'" if fk.name else ""
-        if fk.ondelete:
-            extras += f", ondelete='{fk.ondelete}'"
-        if fk.onupdate:
-            extras += f", onupdate='{fk.onupdate}'"
+        extras += _cascade_kwargs(fk)
         lines.append(f"    sa.ForeignKeyConstraint({local}, {ref}{extras}),")
     lines.append(")")
     return "\n".join(lines)
@@ -366,9 +377,7 @@ def render_op_create_index(ix: Index) -> str:
       reconstructed from the parsed parts. Alembic's create_index can't
       express partial indexes or per-column ordering, so we emit raw DDL.
     """
-    has_orderings = any(o is not None for o in ix.column_orderings)
-    has_where = ix.where_clause is not None
-    if not has_orderings and not has_where:
+    if not _is_complex_index(ix):
         cols = "[" + ", ".join(f"'{c}'" for c in ix.columns) + "]"
         return f"op.create_index('{ix.name}', '{ix.table}', {cols}, unique={ix.unique})"
 
@@ -407,11 +416,7 @@ def render_op_create_foreign_key(src_table: str, fk: ForeignKey) -> str:
     local = "[" + ", ".join(f"'{c}'" for c in fk.local_columns) + "]"
     remote = "[" + ", ".join(f"'{c}'" for c in fk.referenced_columns) + "]"
     name = f"'{fk.name}'" if fk.name else "None"
-    extras = ""
-    if fk.ondelete:
-        extras += f", ondelete='{fk.ondelete}'"
-    if fk.onupdate:
-        extras += f", onupdate='{fk.onupdate}'"
+    extras = _cascade_kwargs(fk)
     return f"op.create_foreign_key({name}, '{src_table}', '{fk.referenced_table}', {local}, {remote}{extras})"
 
 
@@ -526,7 +531,7 @@ engine = create_engine({dsn!r})
 Base.metadata.create_all(bind=engine)
 """
     env = os.environ.copy()
-    env["PYTHONPATH"] = str(REPO_ROOT) + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    env["PYTHONPATH"] = os.pathsep.join(p for p in (str(REPO_ROOT), env.get("PYTHONPATH")) if p)
     subprocess.run([sys.executable, "-c", script], check=True, env=env)
 
 

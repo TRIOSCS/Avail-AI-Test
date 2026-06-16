@@ -39,13 +39,43 @@ def _resolve_or_create(norm_key: str, display_mpn: str, db, card_cache: dict) ->
     return None
 
 
+def _backfill_table(db, card_cache: dict, *, label: str, model, mpn_of, norm_key_of, dry_run: bool) -> dict:
+    """Link one table's rows to material cards via offset-paginated batches.
+
+    ``mpn_of(row)`` returns the raw MPN string; ``norm_key_of(row, mpn)`` returns the
+    normalization key (Requirements reuse their precomputed ``normalized_mpn`` column).
+    """
+    counts = {"linked": 0, "created": 0, "skipped": 0}
+    logger.info(f"Backfilling {label}...")
+    offset = 0
+    while True:
+        batch = db.query(model).filter(model.material_card_id.is_(None)).limit(BATCH_SIZE).offset(offset).all()
+        if not batch:
+            break
+        for row in batch:
+            mpn = mpn_of(row)
+            norm_key = norm_key_of(row, mpn) if mpn else None
+            if not norm_key:
+                counts["skipped"] += 1
+                continue
+            display = normalize_mpn(mpn) or mpn.strip()
+            was_new = norm_key not in card_cache
+            card_id = _resolve_or_create(norm_key, display, db, card_cache)
+            if card_id:
+                if not dry_run:
+                    row.material_card_id = card_id
+                counts["linked"] += 1
+                if was_new:
+                    counts["created"] += 1
+        if not dry_run:
+            db.commit()
+        offset += BATCH_SIZE
+        logger.info(f"  {label.capitalize()}: {offset} processed...")
+    return counts
+
+
 def backfill(dry_run: bool = False) -> dict:
     db = SessionLocal()
-    stats = {
-        "requirements": {"linked": 0, "created": 0, "skipped": 0},
-        "sightings": {"linked": 0, "created": 0, "skipped": 0},
-        "offers": {"linked": 0, "created": 0, "skipped": 0},
-    }
     card_cache: dict[str, int] = {}
 
     try:
@@ -55,103 +85,35 @@ def backfill(dry_run: bool = False) -> dict:
             card_cache[norm] = card_id
         logger.info(f"Loaded {len(card_cache)} material cards into cache")
 
-        # --- Requirements ---
-        logger.info("Backfilling requirements...")
-        offset = 0
-        while True:
-            batch = (
-                db.query(Requirement)
-                .filter(Requirement.material_card_id.is_(None))
-                .limit(BATCH_SIZE)
-                .offset(offset)
-                .all()
-            )
-            if not batch:
-                break
-            for r in batch:
-                mpn = r.primary_mpn
-                if not mpn:
-                    stats["requirements"]["skipped"] += 1
-                    continue
-                norm_key = r.normalized_mpn or normalize_mpn_key(mpn)
-                if not norm_key:
-                    stats["requirements"]["skipped"] += 1
-                    continue
-                display = normalize_mpn(mpn) or mpn.strip()
-                was_new = norm_key not in card_cache
-                card_id = _resolve_or_create(norm_key, display, db, card_cache)
-                if card_id:
-                    if not dry_run:
-                        r.material_card_id = card_id
-                    stats["requirements"]["linked"] += 1
-                    if was_new:
-                        stats["requirements"]["created"] += 1
-            if not dry_run:
-                db.commit()
-            offset += BATCH_SIZE
-            logger.info(f"  Requirements: {offset} processed...")
-
-        # --- Sightings ---
-        logger.info("Backfilling sightings...")
-        offset = 0
-        while True:
-            batch = (
-                db.query(Sighting).filter(Sighting.material_card_id.is_(None)).limit(BATCH_SIZE).offset(offset).all()
-            )
-            if not batch:
-                break
-            for s in batch:
-                mpn = s.mpn_matched
-                if not mpn:
-                    stats["sightings"]["skipped"] += 1
-                    continue
-                norm_key = normalize_mpn_key(mpn)
-                if not norm_key:
-                    stats["sightings"]["skipped"] += 1
-                    continue
-                display = normalize_mpn(mpn) or mpn.strip()
-                was_new = norm_key not in card_cache
-                card_id = _resolve_or_create(norm_key, display, db, card_cache)
-                if card_id:
-                    if not dry_run:
-                        s.material_card_id = card_id
-                    stats["sightings"]["linked"] += 1
-                    if was_new:
-                        stats["sightings"]["created"] += 1
-            if not dry_run:
-                db.commit()
-            offset += BATCH_SIZE
-            logger.info(f"  Sightings: {offset} processed...")
-
-        # --- Offers (batched) ---
-        logger.info("Backfilling offers...")
-        offset = 0
-        while True:
-            batch = db.query(Offer).filter(Offer.material_card_id.is_(None)).limit(BATCH_SIZE).offset(offset).all()
-            if not batch:
-                break
-            for o in batch:
-                mpn = o.mpn
-                if not mpn:
-                    stats["offers"]["skipped"] += 1
-                    continue
-                norm_key = normalize_mpn_key(mpn)
-                if not norm_key:
-                    stats["offers"]["skipped"] += 1
-                    continue
-                display = normalize_mpn(mpn) or mpn.strip()
-                was_new = norm_key not in card_cache
-                card_id = _resolve_or_create(norm_key, display, db, card_cache)
-                if card_id:
-                    if not dry_run:
-                        o.material_card_id = card_id
-                    stats["offers"]["linked"] += 1
-                    if was_new:
-                        stats["offers"]["created"] += 1
-            if not dry_run:
-                db.commit()
-            offset += BATCH_SIZE
-            logger.info(f"  Offers: {offset} processed...")
+        stats = {
+            "requirements": _backfill_table(
+                db,
+                card_cache,
+                label="requirements",
+                model=Requirement,
+                mpn_of=lambda r: r.primary_mpn,
+                norm_key_of=lambda r, mpn: r.normalized_mpn or normalize_mpn_key(mpn),
+                dry_run=dry_run,
+            ),
+            "sightings": _backfill_table(
+                db,
+                card_cache,
+                label="sightings",
+                model=Sighting,
+                mpn_of=lambda s: s.mpn_matched,
+                norm_key_of=lambda s, mpn: normalize_mpn_key(mpn),
+                dry_run=dry_run,
+            ),
+            "offers": _backfill_table(
+                db,
+                card_cache,
+                label="offers",
+                model=Offer,
+                mpn_of=lambda o: o.mpn,
+                norm_key_of=lambda o, mpn: normalize_mpn_key(mpn),
+                dry_run=dry_run,
+            ),
+        }
 
         logger.info("Backfill complete!")
         for table, s in stats.items():

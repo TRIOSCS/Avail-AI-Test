@@ -201,16 +201,14 @@ def walk_migration_ops(model: SchemaModel, migration_paths: list[Path]) -> list[
                 col_name = _string_arg(col_node, 0) if isinstance(col_node, ast.Call) else None
                 if col_name:
                     model.add_column(table, col_name)
-            elif op_name == "drop_column":
+            elif op_name in ("drop_column", "alter_column"):
                 col = _string_arg(node, 1)
-                if col and not model.has_column(table, col):
+                if not col:
+                    continue
+                if not model.has_column(table, col):
                     gaps.append(Gap(path.name, op_name, f"{table}.{col}", f"column {col!r} not in {table!r}"))
-                elif col:
+                elif op_name == "drop_column":
                     model.drop_column(table, col)
-            elif op_name == "alter_column":
-                col = _string_arg(node, 1)
-                if col and not model.has_column(table, col):
-                    gaps.append(Gap(path.name, op_name, f"{table}.{col}", f"column {col!r} not in {table!r}"))
             # create_index / drop_index / create_foreign_key etc. only checked for table existence
     return gaps
 
