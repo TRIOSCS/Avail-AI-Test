@@ -855,35 +855,41 @@ class TestOverrideO1LiveTruth:
 
 
 class TestOverrideO2Restock:
-    def test_fires_at_exact_factor_boundary(self, db_session: Session):
+    @pytest.mark.parametrize(
+        ("reason", "qty_at_mark", "fresh_qty", "expected_count", "expected_flag"),
+        [
+            (UnavailabilityReason.SOLD_ELSEWHERE, 100, 200, 0, False),  # fires at exact factor boundary
+            (UnavailabilityReason.SOLD_ELSEWHERE, 100, 199, 1, True),  # below factor stays stamped
+            (UnavailabilityReason.SOLD_ELSEWHERE, None, 100000, 1, True),  # null snapshot is no signal
+            (UnavailabilityReason.SOLD_ELSEWHERE, 100, None, 1, True),  # null fresh qty is no signal
+            (UnavailabilityReason.SOLD_ELSEWHERE, 0, 1, 0, False),  # snapshot zero releases on any positive fresh qty
+            (UnavailabilityReason.DIFFERENT_PART, 100, 1000, 1, True),  # disabled for different part
+        ],
+        ids=[
+            "fires_at_exact_factor_boundary",
+            "below_factor_stays_stamped",
+            "null_snapshot_is_no_signal",
+            "null_fresh_qty_is_no_signal",
+            "snapshot_zero_releases_on_any_positive_fresh_qty",
+            "disabled_for_different_part",
+        ],
+    )
+    def test_restock_jump_matrix(
+        self, db_session: Session, reason, qty_at_mark, fresh_qty, expected_count, expected_flag
+    ):
         requirement = _make_requirement(db_session)
-        _make_record(db_session, qty_at_mark=100)
+        _make_record(db_session, reason=reason, qty_at_mark=qty_at_mark)
         row = _make_sighting(
             db_session,
             requirement,
             "Acme Components",
             mpn_matched="ST3300657SS",
-            qty_available=200,
+            qty_available=fresh_qty,
             source_type="brokerbin",
         )
 
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 0
-        assert bool(row.is_unavailable) is False
-
-    def test_below_factor_stays_stamped(self, db_session: Session):
-        requirement = _make_requirement(db_session)
-        _make_record(db_session, qty_at_mark=100)
-        row = _make_sighting(
-            db_session,
-            requirement,
-            "Acme Components",
-            mpn_matched="ST3300657SS",
-            qty_available=199,
-            source_type="brokerbin",
-        )
-
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 1
-        assert row.is_unavailable is True
+        assert apply_to_fresh_sightings(db_session, requirement, [row]) == expected_count
+        assert bool(row.is_unavailable) is expected_flag
 
     def test_strict_greater_required_even_at_factor_one(self, db_session: Session, monkeypatch):
         """An identical echo can never release regardless of knob misconfiguration."""
@@ -898,67 +904,6 @@ class TestOverrideO2Restock:
             "Acme Components",
             mpn_matched="ST3300657SS",
             qty_available=100,
-            source_type="brokerbin",
-        )
-
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 1
-        assert row.is_unavailable is True
-
-    def test_null_snapshot_is_no_signal(self, db_session: Session):
-        requirement = _make_requirement(db_session)
-        _make_record(db_session, qty_at_mark=None)
-        row = _make_sighting(
-            db_session,
-            requirement,
-            "Acme Components",
-            mpn_matched="ST3300657SS",
-            qty_available=100000,
-            source_type="brokerbin",
-        )
-
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 1
-        assert row.is_unavailable is True
-
-    def test_null_fresh_qty_is_no_signal(self, db_session: Session):
-        requirement = _make_requirement(db_session)
-        _make_record(db_session, qty_at_mark=100)
-        row = _make_sighting(
-            db_session,
-            requirement,
-            "Acme Components",
-            mpn_matched="ST3300657SS",
-            qty_available=None,
-            source_type="brokerbin",
-        )
-
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 1
-        assert row.is_unavailable is True
-
-    def test_snapshot_zero_releases_on_any_positive_fresh_qty(self, db_session: Session):
-        requirement = _make_requirement(db_session)
-        _make_record(db_session, qty_at_mark=0)
-        row = _make_sighting(
-            db_session,
-            requirement,
-            "Acme Components",
-            mpn_matched="ST3300657SS",
-            qty_available=1,
-            source_type="brokerbin",
-        )
-
-        assert apply_to_fresh_sightings(db_session, requirement, [row]) == 0
-        assert bool(row.is_unavailable) is False
-
-    def test_disabled_for_different_part(self, db_session: Session):
-        """More of the wrong part is still the wrong part."""
-        requirement = _make_requirement(db_session)
-        _make_record(db_session, reason=UnavailabilityReason.DIFFERENT_PART, qty_at_mark=100)
-        row = _make_sighting(
-            db_session,
-            requirement,
-            "Acme Components",
-            mpn_matched="ST3300657SS",
-            qty_available=1000,
             source_type="brokerbin",
         )
 

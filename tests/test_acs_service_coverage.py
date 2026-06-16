@@ -10,22 +10,24 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 # ---------------------------------------------------------------------------
 # initiate_call
 # ---------------------------------------------------------------------------
 
 
-async def test_initiate_call_no_connection_string():
+@pytest.mark.parametrize(
+    ("from_phone", "connection_string"),
+    [
+        pytest.param("+15550009999", "", id="no_connection_string"),
+        pytest.param("", "endpoint=abc", id="no_from_phone"),
+    ],
+)
+async def test_initiate_call_missing_config(from_phone, connection_string):
     from app.services.acs_service import initiate_call
 
-    result = await initiate_call("+15550001234", "+15550009999", "https://cb.example.com/hook", "")
-    assert result is None
-
-
-async def test_initiate_call_no_from_phone():
-    from app.services.acs_service import initiate_call
-
-    result = await initiate_call("+15550001234", "", "https://cb.example.com/hook", "endpoint=abc")
+    result = await initiate_call("+15550001234", from_phone, "https://cb.example.com/hook", connection_string)
     assert result is None
 
 

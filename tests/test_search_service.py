@@ -20,7 +20,9 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -152,6 +154,37 @@ def _setup_mock_connectors(mocks, default_results=None, class_names=None):
     for mock, cls_name in zip(mocks, class_names):
         mock.return_value.search = AsyncMock(return_value=list(default_results))
         mock.return_value.__class__.__name__ = cls_name
+
+
+# Short attribute name per connector class, in the canonical order above.
+_CONNECTOR_ATTR_NAMES = [
+    "nexar",
+    "brokerbin",
+    "ebay",
+    "digikey",
+    "mouser",
+    "oemsecrets",
+    "sourcengine",
+    "element14",
+]
+
+
+@contextmanager
+def _patched_connectors(creds_value="fake-key"):
+    """Patch all 8 connector classes (at their source in app.search_service) plus the
+    standard credential lookups, configure them with default empty results, and yield a
+    namespace of the mocks keyed by short name (m.nexar, m.brokerbin, ...).
+
+    Tests override individual connectors via m.<name>.return_value.search = AsyncMock(...).
+    """
+    with ExitStack() as stack:
+        stack.enter_context(
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch(creds_value))
+        )
+        stack.enter_context(patch("app.services.credential_service.get_credential", return_value=creds_value))
+        mocks = [stack.enter_context(patch(f"app.search_service.{cls}")) for cls in _CONNECTOR_CLASS_NAMES]
+        _setup_mock_connectors(mocks)
+        yield SimpleNamespace(**dict(zip(_CONNECTOR_ATTR_NAMES, mocks)))
 
 
 # ── get_all_pns ──────────────────────────────────────────────────────────
@@ -1640,21 +1673,8 @@ class TestFetchFresh:
         """One connector returns results successfully."""
         _make_api_source(db_session, "nexar")
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "ARR-1", "source_type": "nexar"},
                 ]
@@ -1671,25 +1691,11 @@ class TestFetchFresh:
         _make_api_source(db_session, "nexar")
         _make_api_source(db_session, "brokerbin")
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-
+        with _patched_connectors() as m:
             # Nexar errors out
-            MockNexar.return_value.search = AsyncMock(side_effect=Exception("Nexar down"))
+            m.nexar.return_value.search = AsyncMock(side_effect=Exception("Nexar down"))
             # BrokerBin returns results
-            MockBB.return_value.search = AsyncMock(
+            m.brokerbin.return_value.search = AsyncMock(
                 return_value=[
                     {
                         "vendor_name": "BrokerVendor",
@@ -1710,29 +1716,15 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_dedup_results(self, db_session):
         """Duplicate results (same vendor, mpn_key, vendor_sku) are deduped."""
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-
+        with _patched_connectors() as m:
             dup_result = {
                 "vendor_name": "Arrow",
                 "mpn_matched": "LM317T",
                 "vendor_sku": "ARR-1",
                 "source_type": "nexar",
             }
-            MockNexar.return_value.search = AsyncMock(return_value=[dup_result.copy()])
-            MockBB.return_value.search = AsyncMock(return_value=[dup_result.copy()])
+            m.nexar.return_value.search = AsyncMock(return_value=[dup_result.copy()])
+            m.brokerbin.return_value.search = AsyncMock(return_value=[dup_result.copy()])
 
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
@@ -1743,23 +1735,9 @@ class TestFetchFresh:
     async def test_dedup_integer_vendor_sku(self, db_session):
         """Dedup handles integer vendor_sku without crashing (OEMSecrets returns int
         SKUs)."""
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-
+        with _patched_connectors() as m:
             # OEMSecrets returns vendor_sku as integer
-            MockOEM.return_value.search = AsyncMock(
+            m.oemsecrets.return_value.search = AsyncMock(
                 return_value=[
                     {
                         "vendor_name": "Farnell",
@@ -1778,21 +1756,7 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_junk_vendors_filtered(self, db_session):
         """Junk vendor names (empty, 'unknown', etc.) are filtered out."""
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-
+        with _patched_connectors() as m:
             junk_results = [
                 {"vendor_name": "", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 {"vendor_name": "Unknown", "mpn_matched": "LM317T", "vendor_sku": "2"},
@@ -1806,7 +1770,7 @@ class TestFetchFresh:
                 {"vendor_name": "no sellers listed", "mpn_matched": "LM317T", "vendor_sku": "10"},
                 {"vendor_name": "Good Vendor", "mpn_matched": "LM317T", "vendor_sku": "11"},
             ]
-            MockNexar.return_value.search = AsyncMock(return_value=junk_results)
+            m.nexar.return_value.search = AsyncMock(return_value=junk_results)
 
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
@@ -1818,27 +1782,14 @@ class TestFetchFresh:
         """Stats are aggregated across multiple PNs for same connector."""
         _make_api_source(db_session, "nexar")
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
+        with _patched_connectors() as m:
 
             async def _nexar_search(pn):
                 return [
                     {"vendor_name": f"V-{pn}", "mpn_matched": pn, "vendor_sku": f"SKU-{pn}", "source_type": "nexar"}
                 ]
 
-            MockNexar.return_value.search = AsyncMock(side_effect=_nexar_search)
+            m.nexar.return_value.search = AsyncMock(side_effect=_nexar_search)
 
             results, stats = await _fetch_fresh(["LM317T", "LM7805"], db_session)
 
@@ -1850,21 +1801,8 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_db_stats_commit_failure(self, db_session):
         """DB stats commit failure doesn't break the search."""
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 ]
@@ -1934,21 +1872,8 @@ class TestFetchFresh:
                 raise Exception("Temporary failure")
             return [{"vendor_name": "Arrow", "mpn_matched": pn, "vendor_sku": "A1"}]
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(side_effect=_flaky_search)
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(side_effect=_flaky_search)
 
             results, stats = await _fetch_fresh(["PN1", "PN2"], db_session)
 
@@ -1973,21 +1898,8 @@ class TestFetchFresh:
             # Second call errors
             raise Exception("Second call failed")
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(side_effect=_flaky_search)
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(side_effect=_flaky_search)
 
             results, stats = await _fetch_fresh(["PN1", "PN2"], db_session)
 
@@ -2019,21 +1931,8 @@ class TestFetchFresh:
         src = _make_api_source(db_session, "nexar")
         old_searches = src.total_searches
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 ]
@@ -2053,21 +1952,8 @@ class TestFetchFresh:
         """ApiSource.last_error, last_error_at, error_count_24h updated on failure."""
         src = _make_api_source(db_session, "nexar")
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(side_effect=Exception("API timeout"))
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(side_effect=Exception("API timeout"))
 
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
@@ -2083,21 +1969,8 @@ class TestFetchFresh:
         src.avg_response_ms = 200
         db_session.commit()
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 ]
@@ -2115,21 +1988,8 @@ class TestFetchFresh:
         src.avg_response_ms = None
         db_session.commit()
 
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 ]
@@ -2145,21 +2005,8 @@ class TestFetchFresh:
     async def test_source_not_in_src_map_skipped(self, db_session):
         """Connectors without matching ApiSource records skip stats update."""
         # Don't create any ApiSource records
-        with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
-        ):
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = AsyncMock(
+        with _patched_connectors() as m:
+            m.nexar.return_value.search = AsyncMock(
                 return_value=[
                     {"vendor_name": "Arrow", "mpn_matched": "LM317T", "vendor_sku": "1"},
                 ]
@@ -2707,24 +2554,13 @@ class TestSearchThrottling:
             return result
 
         with (
-            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
-            patch("app.services.credential_service.get_credential", return_value="fake-key"),
-            patch("app.search_service.NexarConnector") as MockNexar,
-            patch("app.search_service.BrokerBinConnector") as MockBB,
-            patch("app.search_service.EbayConnector") as MockEbay,
-            patch("app.search_service.DigiKeyConnector") as MockDK,
-            patch("app.search_service.MouserConnector") as MockMouser,
-            patch("app.search_service.OEMSecretsConnector") as MockOEM,
-            patch("app.search_service.SourcengineConnector") as MockSrc,
-            patch("app.search_service.Element14Connector") as MockE14,
+            _patched_connectors() as m,
             patch("app.config.settings") as mock_settings,
         ):
             mock_settings.search_concurrency_limit = 2
             mock_settings.search_total_timeout_s = 5.0
 
-            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
-            _setup_mock_connectors(mocks)
-            MockNexar.return_value.search = _tracking_search
+            m.nexar.return_value.search = _tracking_search
 
             _make_api_source(db_session, "nexar")
             # Search 5 PNs — only nexar is active, so 5 tasks

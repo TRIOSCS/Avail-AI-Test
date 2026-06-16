@@ -25,6 +25,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.models.intelligence import ActivityLog
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -147,26 +149,20 @@ class TestHeatmapCriticalHotUrgency:
 class TestDetailPhoneFromCard:
     """Vendor phone fallback from VendorCard (lines 365-367), age_days (line 372)."""
 
-    def test_phone_populated_from_vendor_card_list(self, client, db_session):
-        """VendorCard.phones list used when summary has no vendor_phone."""
+    @pytest.mark.parametrize(
+        "phones",
+        [
+            pytest.param(["+1-555-9999"], id="list"),
+            pytest.param("+1-555-8888", id="string"),
+        ],
+    )
+    def test_phone_populated_from_vendor_card(self, client, db_session, phones):
+        """VendorCard.phones (list or string) used when summary has no vendor_phone."""
         req, r, _ = _seed_active(db_session)
         vc = VendorCard(
             normalized_name="cover vendor",
             display_name="Cover Vendor",
-            phones=["+1-555-9999"],
-        )
-        db_session.add(vc)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
-
-    def test_phone_populated_from_vendor_card_string(self, client, db_session):
-        """VendorCard.phones as string used when summary has no vendor_phone."""
-        req, r, _ = _seed_active(db_session)
-        vc = VendorCard(
-            normalized_name="cover vendor",
-            display_name="Cover Vendor",
-            phones="+1-555-8888",
+            phones=phones,
         )
         db_session.add(vc)
         db_session.commit()
@@ -264,26 +260,22 @@ class TestSuggestedActionSourcingStatus:
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
 
-    def test_offered_no_pending_offers(self, client, db_session):
-        """'offered' status but no pending offers → advance to quoted."""
-        _, r, _ = _seed_active(db_session)
-        r.sourcing_status = "offered"
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
+    @pytest.mark.parametrize(
+        "sourcing_status",
+        [
+            pytest.param("offered", id="offered_no_pending_offers"),
+            pytest.param("won", id="won_status"),
+            pytest.param("custom_unknown_status", id="unknown_status_returns_none_action"),
+        ],
+    )
+    def test_status_only_detail_renders(self, client, db_session, sourcing_status):
+        """Status-only suggested-action branches each render detail (200).
 
-    def test_won_status(self, client, db_session):
-        """'won' status → proceed to fulfillment."""
+        'offered' (no pending offers) → advance to quoted; 'won' → fulfillment; unknown
+        status → suggested_action is None (else branch).
+        """
         _, r, _ = _seed_active(db_session)
-        r.sourcing_status = "won"
-        db_session.commit()
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
-
-    def test_unknown_status_returns_none_action(self, client, db_session):
-        """Unknown status → suggested_action is None (else branch)."""
-        _, r, _ = _seed_active(db_session)
-        r.sourcing_status = "custom_unknown_status"
+        r.sourcing_status = sourcing_status
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
@@ -547,24 +539,18 @@ class TestSendInquiryEndpoint:
 class TestSortDirections:
     """Sort direction asc/desc for all sort columns to cover branching."""
 
-    def test_sort_by_created_asc(self, client, db_session):
+    @pytest.mark.parametrize(
+        "sort,direction",
+        [
+            ("created", "asc"),
+            ("created", "desc"),
+            ("status", "asc"),
+            ("priority", "asc"),
+        ],
+    )
+    def test_sort(self, client, db_session, sort, direction):
         _seed_active(db_session)
-        resp = client.get("/v2/partials/sightings?sort=created&dir=asc")
-        assert resp.status_code == 200
-
-    def test_sort_by_created_desc(self, client, db_session):
-        _seed_active(db_session)
-        resp = client.get("/v2/partials/sightings?sort=created&dir=desc")
-        assert resp.status_code == 200
-
-    def test_sort_by_status_asc(self, client, db_session):
-        _seed_active(db_session)
-        resp = client.get("/v2/partials/sightings?sort=status&dir=asc")
-        assert resp.status_code == 200
-
-    def test_sort_by_priority_asc(self, client, db_session):
-        _seed_active(db_session)
-        resp = client.get("/v2/partials/sightings?sort=priority&dir=asc")
+        resp = client.get(f"/v2/partials/sightings?sort={sort}&dir={direction}")
         assert resp.status_code == 200
 
 

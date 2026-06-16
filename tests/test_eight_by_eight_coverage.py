@@ -76,28 +76,19 @@ def _mock_async_client(*, get=None, post=None):
 
 
 class TestNormalizePhone:
-    def test_empty_string_returns_empty(self):
-        assert normalize_phone("") == ""
-
-    def test_strips_formatting(self):
-        assert normalize_phone("+1 (555) 123-4567") == "5551234567"
-
-    def test_strips_leading_1(self):
-        assert normalize_phone("15551234567") == "5551234567"
-
-    def test_10_digit_number_unchanged(self):
-        assert normalize_phone("5551234567") == "5551234567"
-
-    def test_short_number_returned_as_is(self):
-        result = normalize_phone("+1234")
-        assert result == "1234"
-
-    def test_dots_removed(self):
-        assert normalize_phone("555.123.4567") == "5551234567"
-
-    def test_none_like_empty_string(self):
-        # Edge: None passed — shouldn't crash
-        assert normalize_phone("") == ""
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("", "", id="empty_string_returns_empty"),
+            pytest.param("+1 (555) 123-4567", "5551234567", id="strips_formatting"),
+            pytest.param("15551234567", "5551234567", id="strips_leading_1"),
+            pytest.param("5551234567", "5551234567", id="10_digit_number_unchanged"),
+            pytest.param("+1234", "1234", id="short_number_returned_as_is"),
+            pytest.param("555.123.4567", "5551234567", id="dots_removed"),
+        ],
+    )
+    def test_normalize_phone(self, raw, expected):
+        assert normalize_phone(raw) == expected
 
 
 # ── get_access_token ───────────────────────────────────────────────────
@@ -306,12 +297,14 @@ class TestReverseLookupPhone:
 
 
 class TestProcessCdrsEdgeCases:
-    def _make_mock_db(self, watermark=None, users=None):
+    def _make_mock_db(self, watermark=None, users=None, requisition=None):
         db = MagicMock()
         wm_query = MagicMock()
         wm_query.filter.return_value.first.return_value = watermark
         user_query = MagicMock()
         user_query.filter.return_value.all.return_value = users or []
+        req_query = MagicMock()
+        req_query.join.return_value.filter.return_value.first.return_value = requisition
 
         def query_router(model):
             name = getattr(model, "__tablename__", "")
@@ -319,10 +312,19 @@ class TestProcessCdrsEdgeCases:
                 return wm_query
             if name == "users":
                 return user_query
+            if name == "requisitions":
+                return req_query
             return MagicMock()
 
         db.query.side_effect = query_router
         return db
+
+    @staticmethod
+    def _make_user(extension="1001", user_id=1):
+        user = MagicMock()
+        user.id = user_id
+        user.eight_by_eight_extension = extension
+        return user
 
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
     async def test_auth_failure_returns_zeros(self, mock_auth):
@@ -402,29 +404,7 @@ class TestProcessCdrsEdgeCases:
         mock_log.return_value = record
         mock_reverse.return_value = None
 
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_user.eight_by_eight_extension = "1001"
-
-        db = MagicMock()
-        wm_query = MagicMock()
-        wm_query.filter.return_value.first.return_value = None
-        user_query = MagicMock()
-        user_query.filter.return_value.all.return_value = [mock_user]
-        req_join = MagicMock()
-        req_join.join.return_value.filter.return_value.first.return_value = None
-
-        def query_router(model):
-            name = getattr(model, "__tablename__", "")
-            if name == "system_config":
-                return wm_query
-            if name == "users":
-                return user_query
-            if name == "requisitions":
-                return req_join
-            return MagicMock()
-
-        db.query.side_effect = query_router
+        db = self._make_mock_db(users=[self._make_user()], requisition=None)
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 1
 
@@ -455,25 +435,7 @@ class TestProcessCdrsEdgeCases:
         mock_log.return_value = None
         mock_reverse.return_value = None
 
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_user.eight_by_eight_extension = "1001"
-
-        db = MagicMock()
-        wm_query = MagicMock()
-        wm_query.filter.return_value.first.return_value = None
-        user_query = MagicMock()
-        user_query.filter.return_value.all.return_value = [mock_user]
-
-        def query_router(model):
-            name = getattr(model, "__tablename__", "")
-            if name == "system_config":
-                return wm_query
-            if name == "users":
-                return user_query
-            return MagicMock()
-
-        db.query.side_effect = query_router
+        db = self._make_mock_db(users=[self._make_user()])
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["skipped"] == 1
 
@@ -513,25 +475,7 @@ class TestProcessCdrsEdgeCases:
             "vendor_card_id": 99,
         }
 
-        mock_user = MagicMock()
-        mock_user.id = 1
-        mock_user.eight_by_eight_extension = "1001"
-
-        db = MagicMock()
-        wm_query = MagicMock()
-        wm_query.filter.return_value.first.return_value = None
-        user_query = MagicMock()
-        user_query.filter.return_value.all.return_value = [mock_user]
-
-        def query_router(model):
-            name = getattr(model, "__tablename__", "")
-            if name == "system_config":
-                return wm_query
-            if name == "users":
-                return user_query
-            return MagicMock()
-
-        db.query.side_effect = query_router
+        db = self._make_mock_db(users=[self._make_user()])
         result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["matched"] == 1
         assert record.vendor_card_id == 99

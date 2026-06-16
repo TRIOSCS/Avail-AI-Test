@@ -40,6 +40,15 @@ def _clean_breakers():
     _breakers.pop("_FakeConnector", None)
 
 
+def _trip_breaker(conn: "_FakeConnector", times: int = 5) -> None:
+    """Drive `times` failing searches so the connector's breaker opens."""
+    for _ in range(times):
+        try:
+            asyncio.run(conn.search("LM317T"))
+        except ConnectionError:
+            pass
+
+
 # ── CircuitBreaker unit tests ─────────────────────────────────────────
 
 
@@ -113,11 +122,7 @@ def test_connector_success_keeps_breaker_closed():
 def test_connector_opens_breaker_after_failures():
     """After 5 consecutive failures, connector breaker opens."""
     conn = _FakeConnector(fail=True)
-    for _ in range(5):
-        try:
-            asyncio.run(conn.search("LM317T"))
-        except ConnectionError:
-            pass
+    _trip_breaker(conn)
     assert conn._breaker.current_state == "open"
 
 
@@ -132,11 +137,7 @@ def test_open_breaker_raises_without_calling():
 
     conn = _FakeConnector(fail=True)
     # Trip the breaker (fail_max=5, max_retries=0 → 5 search calls)
-    for _ in range(5):
-        try:
-            asyncio.run(conn.search("LM317T"))
-        except ConnectionError:
-            pass
+    _trip_breaker(conn)
     assert conn._breaker.current_state == "open"
 
     # Reset call count and stop failing

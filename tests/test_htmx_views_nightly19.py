@@ -15,6 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -22,6 +23,15 @@ from app.models import Requisition, VendorCard
 from app.models.buy_plan import BuyPlan
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _make_company(db: Session, name: str):
+    from app.models import Company
+
+    company = Company(name=name, is_active=True)
+    db.add(company)
+    db.commit()
+    return company
 
 
 def _make_buy_plan(db: Session, req: Requisition, **kw) -> BuyPlan:
@@ -82,20 +92,12 @@ class TestInsights:
         assert resp.status_code == 200
 
     def test_company_insights_panel(self, client: TestClient, db_session: Session):
-        from app.models import Company
-
-        company = Company(name="InsightCo", is_active=True)
-        db_session.add(company)
-        db_session.commit()
+        company = _make_company(db_session, "InsightCo")
         resp = client.get(f"/v2/partials/customers/{company.id}/insights")
         assert resp.status_code == 200
 
     def test_company_insights_refresh(self, client: TestClient, db_session: Session):
-        from app.models import Company
-
-        company = Company(name="InsightCo2", is_active=True)
-        db_session.add(company)
-        db_session.commit()
+        company = _make_company(db_session, "InsightCo2")
         resp = client.post(f"/v2/partials/customers/{company.id}/insights/refresh")
         assert resp.status_code == 200
 
@@ -112,23 +114,20 @@ class TestInsights:
 
 
 class TestBuyPlansListPartial:
-    def test_list_empty(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans")
+    @pytest.mark.parametrize(
+        "url",
+        [
+            pytest.param("/v2/partials/buy-plans", id="empty"),
+            pytest.param("/v2/partials/buy-plans?status=draft", id="filter_status"),
+            pytest.param("/v2/partials/buy-plans?mine=true", id="mine_only"),
+            pytest.param("/v2/partials/buy-plans?q=SO-12345", id="search"),
+        ],
+    )
+    def test_list_loads(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200
 
     def test_list_with_plan(self, client: TestClient, db_session: Session, test_requisition: Requisition):
         _make_buy_plan(db_session, test_requisition)
         resp = client.get("/v2/partials/buy-plans")
-        assert resp.status_code == 200
-
-    def test_list_filter_status(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans?status=draft")
-        assert resp.status_code == 200
-
-    def test_list_mine_only(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans?mine=true")
-        assert resp.status_code == 200
-
-    def test_list_search(self, client: TestClient):
-        resp = client.get("/v2/partials/buy-plans?q=SO-12345")
         assert resp.status_code == 200

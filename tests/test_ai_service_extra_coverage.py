@@ -13,6 +13,8 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.services.ai_service import (
     company_intel,
     draft_rfq,
@@ -24,22 +26,21 @@ from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 class TestEnrichContactsWebsearchErrorPaths:
     """Cover lines 103-107, 126-128 — error handlers in enrich_contacts_websearch."""
 
-    async def test_claude_unavailable_returns_empty_list(self):
-        """ClaudeUnavailableError → returns [] (line 103-104)."""
+    @pytest.mark.parametrize(
+        ("exc", "kwargs"),
+        [
+            (ClaudeUnavailableError("not configured"), {}),
+            (ClaudeError("api error"), {"domain": "widget.com"}),
+        ],
+        ids=["claude_unavailable", "claude_error"],
+    )
+    async def test_claude_failure_returns_empty_list(self, exc, kwargs):
+        """ClaudeUnavailableError / ClaudeError → returns [] (lines 103-107)."""
         with patch(
             "app.services.ai_service.claude_json",
-            new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+            new=AsyncMock(side_effect=exc),
         ):
-            result = await enrich_contacts_websearch("Acme Corp")
-        assert result == []
-
-    async def test_claude_error_returns_empty_list(self):
-        """ClaudeError → returns [] (line 106-107)."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(side_effect=ClaudeError("api error")),
-        ):
-            result = await enrich_contacts_websearch("Widget Co", domain="widget.com")
+            result = await enrich_contacts_websearch("Acme Corp", **kwargs)
         assert result == []
 
     async def test_validation_error_falls_back_to_raw_contacts(self):
@@ -75,70 +76,64 @@ class TestEnrichContactsWebsearchErrorPaths:
         assert "Alice Chen" in names
         assert "Charlie" in names
 
-    async def test_domain_match_sets_medium_confidence(self):
-        """Email matching domain → confidence=medium (line 138-139)."""
-        raw_result = {"contacts": [{"full_name": "Jane Doe", "email": "jane@acme.com"}]}
+    @pytest.mark.parametrize(
+        ("contact", "kwargs", "expected_confidence"),
+        [
+            (
+                {"full_name": "Jane Doe", "email": "jane@acme.com"},
+                {"domain": "acme.com"},
+                "medium",
+            ),
+            (
+                {"full_name": "Jane Doe", "email": "jane@other.com"},
+                {"domain": "acme.com"},
+                "medium",
+            ),
+            (
+                {"full_name": "Tom Smith", "linkedin_url": "https://linkedin.com/in/tom"},
+                {},
+                "low",
+            ),
+        ],
+        ids=[
+            "domain_match_medium",
+            "email_without_domain_medium",
+            "linkedin_without_email_low",
+        ],
+    )
+    async def test_confidence_assignment(self, contact, kwargs, expected_confidence):
+        """Confidence is derived from email/domain/linkedin presence (lines 138-144)."""
+        raw_result = {"contacts": [contact]}
         with patch(
             "app.services.ai_service.claude_json",
             new=AsyncMock(return_value=raw_result),
         ):
-            result = await enrich_contacts_websearch("Acme", domain="acme.com")
-        assert result[0]["confidence"] == "medium"
-
-    async def test_email_without_domain_sets_medium_confidence(self):
-        """Email present but not matching domain → confidence=medium (line 141)."""
-        raw_result = {"contacts": [{"full_name": "Jane Doe", "email": "jane@other.com"}]}
-        with patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(return_value=raw_result),
-        ):
-            result = await enrich_contacts_websearch("Acme", domain="acme.com")
-        assert result[0]["confidence"] == "medium"
-
-    async def test_linkedin_without_email_stays_low_confidence(self):
-        """No email but linkedin → confidence=low (line 143-144)."""
-        raw_result = {
-            "contacts": [
-                {
-                    "full_name": "Tom Smith",
-                    "linkedin_url": "https://linkedin.com/in/tom",
-                }
-            ]
-        }
-        with patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(return_value=raw_result),
-        ):
-            result = await enrich_contacts_websearch("Parts Inc")
-        assert result[0]["confidence"] == "low"
+            result = await enrich_contacts_websearch("Acme", **kwargs)
+        assert result[0]["confidence"] == expected_confidence
 
 
 class TestCompanyIntelErrorPaths:
     """Cover lines 231-235, 242-243 — error handlers and validation failure in
     company_intel."""
 
-    async def test_claude_unavailable_returns_none(self):
-        """ClaudeUnavailableError → returns None (lines 231-232)."""
+    @pytest.mark.parametrize(
+        ("exc", "kwargs"),
+        [
+            (ClaudeUnavailableError("not configured"), {}),
+            (ClaudeError("api failure"), {"domain": "widget.com"}),
+        ],
+        ids=["claude_unavailable", "claude_error"],
+    )
+    async def test_claude_failure_returns_none(self, exc, kwargs):
+        """ClaudeUnavailableError / ClaudeError → returns None (lines 231-235)."""
         with (
             patch("app.cache.intel_cache.get_cached", return_value=None),
             patch(
                 "app.services.ai_service.claude_json",
-                new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+                new=AsyncMock(side_effect=exc),
             ),
         ):
-            result = await company_intel("Acme Corp")
-        assert result is None
-
-    async def test_claude_error_returns_none(self):
-        """ClaudeError → returns None (lines 234-235)."""
-        with (
-            patch("app.cache.intel_cache.get_cached", return_value=None),
-            patch(
-                "app.services.ai_service.claude_json",
-                new=AsyncMock(side_effect=ClaudeError("api failure")),
-            ),
-        ):
-            result = await company_intel("Widget Co", domain="widget.com")
+            result = await company_intel("Acme Corp", **kwargs)
         assert result is None
 
     async def test_validation_failure_falls_through_to_raw_dict(self):

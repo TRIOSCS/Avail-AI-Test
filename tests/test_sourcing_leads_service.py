@@ -6,6 +6,7 @@ Depends on: conftest fixtures, sourcing lead models, vendor card models
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -114,42 +115,38 @@ class TestNormalizeMpn:
     """sourcing_leads now uses the canonical normalize_mpn_key (lowercase, strips all
     non-alphanumeric) instead of a local re-implementation."""
 
-    def test_normalizes_dashes_spaces(self):
-        assert normalize_mpn_key("LM-317 T") == "lm317t"
-
-    def test_normalizes_underscores_dots(self):
-        assert normalize_mpn_key("LM_317.T") == "lm317t"
-
-    def test_empty_string(self):
-        assert normalize_mpn_key("") == ""
-
-    def test_none(self):
-        assert normalize_mpn_key(None) == ""
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("LM-317 T", "lm317t"),
+            ("LM_317.T", "lm317t"),
+            ("", ""),
+            (None, ""),
+        ],
+        ids=["dashes_spaces", "underscores_dots", "empty_string", "none"],
+    )
+    def test_normalize(self, raw, expected):
+        assert normalize_mpn_key(raw) == expected
 
 
 class TestClamp:
-    def test_within_range(self):
-        assert _clamp(50.0) == 50.0
-
-    def test_below_minimum(self):
-        assert _clamp(-10.0) == 0.0
-
-    def test_above_maximum(self):
-        assert _clamp(120.0) == 100.0
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [(50.0, 50.0), (-10.0, 0.0), (120.0, 100.0)],
+        ids=["within_range", "below_minimum", "above_maximum"],
+    )
+    def test_clamp(self, value, expected):
+        assert _clamp(value) == expected
 
 
 class TestConfidenceBand:
-    def test_high(self):
-        assert _confidence_band(80.0) == "high"
-
-    def test_medium(self):
-        assert _confidence_band(60.0) == "medium"
-
-    def test_low(self):
-        assert _confidence_band(30.0) == "low"
-
-    def test_boundary_75(self):
-        assert _confidence_band(75.0) == "high"
+    @pytest.mark.parametrize(
+        ("score", "expected"),
+        [(80.0, "high"), (60.0, "medium"), (30.0, "low"), (75.0, "high")],
+        ids=["high", "medium", "low", "boundary_75"],
+    )
+    def test_confidence_band(self, score, expected):
+        assert _confidence_band(score) == expected
 
 
 class TestSafetyBand:
@@ -167,78 +164,74 @@ class TestSafetyBand:
 
 
 class TestSourceReliability:
-    def test_authorized_distributor(self):
-        assert _source_reliability("digikey", None) == 90
-
-    def test_marketplace_source(self):
-        assert _source_reliability("brokerbin", None) == 72
-
-    def test_ai_source(self):
-        assert _source_reliability("ai", None) == 40
-
-    def test_tier_bonus(self):
-        score = _source_reliability("digikey", "T1")
-        assert score == 98  # 90 + 8
-
-    def test_tier_penalty(self):
-        score = _source_reliability("digikey", "T7")
-        assert score == 75  # 90 - 15
-
-    def test_unknown_source(self):
-        assert _source_reliability("unknown_thing", None) == 60
+    @pytest.mark.parametrize(
+        ("source", "tier", "expected"),
+        [
+            ("digikey", None, 90),
+            ("brokerbin", None, 72),
+            ("ai", None, 40),
+            ("digikey", "T1", 98),  # 90 + 8 tier bonus
+            ("digikey", "T7", 75),  # 90 - 15 tier penalty
+            ("unknown_thing", None, 60),
+        ],
+        ids=[
+            "authorized_distributor",
+            "marketplace_source",
+            "ai_source",
+            "tier_bonus",
+            "tier_penalty",
+            "unknown_source",
+        ],
+    )
+    def test_source_reliability(self, source, tier, expected):
+        assert _source_reliability(source, tier) == expected
 
 
 class TestFreshnessScore:
-    def test_recent(self):
-        now = datetime.now(timezone.utc)
-        assert _freshness_score(now) == 95.0
-
-    def test_week_old(self):
-        week_ago = datetime.now(timezone.utc) - timedelta(days=5)
-        assert _freshness_score(week_ago) == 72.0
-
-    def test_old(self):
-        old = datetime.now(timezone.utc) - timedelta(days=60)
-        assert _freshness_score(old) == 25.0
+    @pytest.mark.parametrize(
+        ("days_ago", "expected"),
+        [(0, 95.0), (5, 72.0), (60, 25.0)],
+        ids=["recent", "week_old", "old"],
+    )
+    def test_freshness_score(self, days_ago, expected):
+        when = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        assert _freshness_score(when) == expected
 
     def test_none_date(self):
         assert _freshness_score(None) == 45.0
 
 
 class TestMatchType:
-    def test_exact(self):
-        assert _match_type_for_parts("LM317T", "LM317T") == "exact"
-
-    def test_normalized(self):
-        assert _match_type_for_parts("LM317T", "LM-317T") == "exact"
-
-    def test_substring_normalized(self):
-        assert _match_type_for_parts("LM317", "LM317TANOPB") == "normalized"
-
-    def test_cross_ref(self):
-        subs = [{"mpn": "MC7805"}, {"mpn": "LM340"}]
-        assert _match_type_for_parts("LM317T", "MC7805", substitutes=subs) == "cross_ref"
-
-    def test_fuzzy(self):
-        assert _match_type_for_parts("ABC123", "XYZ789") == "fuzzy"
-
-    def test_empty_parts(self):
-        assert _match_type_for_parts("", "") == "exact"
+    @pytest.mark.parametrize(
+        ("requirement_mpn", "candidate_mpn", "substitutes", "expected"),
+        [
+            ("LM317T", "LM317T", None, "exact"),
+            ("LM317T", "LM-317T", None, "exact"),
+            ("LM317", "LM317TANOPB", None, "normalized"),
+            ("LM317T", "MC7805", [{"mpn": "MC7805"}, {"mpn": "LM340"}], "cross_ref"),
+            ("ABC123", "XYZ789", None, "fuzzy"),
+            ("", "", None, "exact"),
+        ],
+        ids=["exact", "normalized", "substring_normalized", "cross_ref", "fuzzy", "empty_parts"],
+    )
+    def test_match_type(self, requirement_mpn, candidate_mpn, substitutes, expected):
+        assert _match_type_for_parts(requirement_mpn, candidate_mpn, substitutes=substitutes) == expected
 
 
 class TestSourceCategory:
-    def test_api_sources(self):
-        assert _source_category("digikey") == "api"
-        assert _source_category("mouser") == "api"
-
-    def test_marketplace_sources(self):
-        assert _source_category("brokerbin") == "marketplace"
-
-    def test_web_ai(self):
-        assert _source_category("ai") == "web_ai"
-
-    def test_unknown_defaults_marketplace(self):
-        assert _source_category("something_random") == "marketplace"
+    @pytest.mark.parametrize(
+        ("source", "expected"),
+        [
+            ("digikey", "api"),
+            ("mouser", "api"),
+            ("brokerbin", "marketplace"),
+            ("ai", "web_ai"),
+            ("something_random", "marketplace"),
+        ],
+        ids=["api_digikey", "api_mouser", "marketplace", "web_ai", "unknown_defaults_marketplace"],
+    )
+    def test_source_category(self, source, expected):
+        assert _source_category(source) == expected
 
 
 # ── DB-integrated tests ─────────────────────────────────────────────
@@ -420,8 +413,6 @@ class TestUpdateLeadStatus:
 
     def test_invalid_status_raises(self, db_session: Session):
         lead = self._setup_lead(db_session)
-        import pytest
-
         with pytest.raises(ValueError, match="Unsupported lead status"):
             update_lead_status(db_session, lead.id, "invalid_status")
 

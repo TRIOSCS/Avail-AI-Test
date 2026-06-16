@@ -129,17 +129,20 @@ def _make_req_mock(id_, deadline, req_name):
     return SimpleNamespace(id=id_, deadline=deadline, name=req_name, status="active")
 
 
+def _db_returning_reqs(mock_db, reqs):
+    """Wire mock_db.query so the bid-due-alerts query returns ``reqs``."""
+    mock_query = MagicMock()
+    mock_query.filter.return_value.limit.return_value.all.return_value = reqs
+    mock_db.query.return_value = mock_query
+
+
 class TestJobBidDueAlerts:
     def test_creates_tasks_for_approaching_deadlines(self):
         """_job_bid_due_alerts creates tasks for requisitions with deadlines within 2
         days."""
         mock_db = MagicMock()
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
-        mock_req = _make_req_mock(1, tomorrow, "REQ-001")
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_req]
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-001")])
 
         mock_on_bid_due = MagicMock(return_value=MagicMock())
 
@@ -157,11 +160,7 @@ class TestJobBidDueAlerts:
     def test_skips_non_iso_deadlines(self):
         """_job_bid_due_alerts skips requisitions with non-ISO deadlines."""
         mock_db = MagicMock()
-        mock_req = _make_req_mock(1, "not-a-date", "REQ-002")
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_req]
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, [_make_req_mock(1, "not-a-date", "REQ-002")])
 
         mock_on_bid_due = MagicMock()
 
@@ -176,37 +175,18 @@ class TestJobBidDueAlerts:
         mock_on_bid_due.assert_not_called()
         mock_db.close.assert_called_once()
 
-    def test_skips_far_future_deadlines(self):
-        """_job_bid_due_alerts skips requisitions with deadlines > 2 days away."""
+    @pytest.mark.parametrize(
+        ("days_offset", "req_name"),
+        [
+            pytest.param(10, "REQ-003", id="far_future_deadlines"),
+            pytest.param(-5, "REQ-004", id="old_past_deadlines"),
+        ],
+    )
+    def test_skips_out_of_window_deadlines(self, days_offset, req_name):
+        """_job_bid_due_alerts skips deadlines > 2 days out or > 1 day in the past."""
         mock_db = MagicMock()
-        far_future = (datetime.now(timezone.utc) + timedelta(days=10)).strftime("%Y-%m-%dT%H:%M:%S")
-        mock_req = _make_req_mock(1, far_future, "REQ-003")
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_req]
-        mock_db.query.return_value = mock_query
-
-        mock_on_bid_due = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.task_service.on_bid_due_soon", mock_on_bid_due),
-        ):
-            from app.jobs.task_jobs import _job_bid_due_alerts
-
-            asyncio.run(_job_bid_due_alerts())
-
-        mock_on_bid_due.assert_not_called()
-
-    def test_skips_old_past_deadlines(self):
-        """_job_bid_due_alerts skips deadlines more than 1 day in the past."""
-        mock_db = MagicMock()
-        old_past = (datetime.now(timezone.utc) - timedelta(days=5)).strftime("%Y-%m-%dT%H:%M:%S")
-        mock_req = _make_req_mock(1, old_past, "REQ-004")
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_req]
-        mock_db.query.return_value = mock_query
+        deadline = (datetime.now(timezone.utc) + timedelta(days=days_offset)).strftime("%Y-%m-%dT%H:%M:%S")
+        _db_returning_reqs(mock_db, [_make_req_mock(1, deadline, req_name)])
 
         mock_on_bid_due = MagicMock()
 
@@ -227,10 +207,7 @@ class TestJobBidDueAlerts:
         mock_db = MagicMock()
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(_BID_DUE_CAP + 5)]
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = mock_reqs
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, mock_reqs)
 
         mock_on_bid_due = MagicMock(return_value=MagicMock())  # Always returns a task
 
@@ -247,9 +224,7 @@ class TestJobBidDueAlerts:
     def test_no_reqs_found(self):
         """_job_bid_due_alerts handles no matching requisitions."""
         mock_db = MagicMock()
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = []
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, [])
 
         mock_on_bid_due = MagicMock()
 
@@ -270,10 +245,7 @@ class TestJobBidDueAlerts:
         mock_db = MagicMock()
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%S")
         mock_reqs = [_make_req_mock(i, tomorrow, f"REQ-{i}") for i in range(3)]
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = mock_reqs
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, mock_reqs)
 
         mock_on_bid_due = MagicMock(side_effect=[MagicMock(), None, MagicMock()])
 
@@ -305,11 +277,7 @@ class TestJobBidDueAlerts:
         """Naive datetime deadlines are treated as UTC."""
         mock_db = MagicMock()
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-        mock_req = _make_req_mock(1, tomorrow, "REQ-TZ")
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.limit.return_value.all.return_value = [mock_req]
-        mock_db.query.return_value = mock_query
+        _db_returning_reqs(mock_db, [_make_req_mock(1, tomorrow, "REQ-TZ")])
 
         mock_on_bid_due = MagicMock(return_value=MagicMock())
 
@@ -678,6 +646,11 @@ class TestJobExpireStale:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+async def _run_fn_to_thread(fn, *args):
+    """asyncio.to_thread stand-in that runs the callable synchronously."""
+    return fn(*args)
+
+
 class TestRegisterTaggingJobs:
     def test_registers_all_jobs_unconditionally(self):
         """register_tagging_jobs adds the 5 tagging/spec jobs unconditionally.
@@ -708,13 +681,10 @@ class TestJobInternalBoost:
         mock_db = MagicMock()
         mock_boost = MagicMock(return_value={"boosted": 10})
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.enrichment.boost_confidence_internal", mock_boost),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_internal_boost
 
@@ -727,13 +697,10 @@ class TestJobInternalBoost:
         """Exception rolls back and re-raises."""
         mock_db = MagicMock()
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.enrichment.boost_confidence_internal", side_effect=Exception("Boost failed")),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_internal_boost
 
@@ -750,13 +717,10 @@ class TestJobPrefixBackfill:
         mock_db = MagicMock()
         mock_backfill = MagicMock(return_value={"tagged": 5})
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.tagging_backfill.run_prefix_backfill", mock_backfill),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_prefix_backfill
 
@@ -769,13 +733,10 @@ class TestJobPrefixBackfill:
         """Exception rolls back and re-raises."""
         mock_db = MagicMock()
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.tagging_backfill.run_prefix_backfill", side_effect=Exception("Backfill failed")),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_prefix_backfill
 
@@ -792,13 +753,10 @@ class TestJobSightingMining:
         mock_db = MagicMock()
         mock_mining = MagicMock(return_value={"mined": 3})
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.tagging_backfill.backfill_manufacturer_from_sightings", mock_mining),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_sighting_mining
 
@@ -811,16 +769,13 @@ class TestJobSightingMining:
         """Exception rolls back and re-raises."""
         mock_db = MagicMock()
 
-        async def fake_to_thread(fn, *args):
-            return fn(*args)
-
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch(
                 "app.services.tagging_backfill.backfill_manufacturer_from_sightings",
                 side_effect=Exception("Mining failed"),
             ),
-            patch("asyncio.to_thread", side_effect=fake_to_thread),
+            patch("asyncio.to_thread", side_effect=_run_fn_to_thread),
         ):
             from app.jobs.tagging_jobs import _job_sighting_mining
 

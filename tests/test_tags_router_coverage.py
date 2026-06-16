@@ -26,6 +26,13 @@ def _make_tag(db: Session, name: str, tag_type: str = "brand") -> Tag:
     return tag
 
 
+def _make_card(db: Session, normalized_mpn: str, display_mpn: str, search_count: int = 0) -> MaterialCard:
+    mc = MaterialCard(normalized_mpn=normalized_mpn, display_mpn=display_mpn, search_count=search_count)
+    db.add(mc)
+    db.flush()
+    return mc
+
+
 class TestListTags:
     """Tests for GET /api/tags/ list endpoint."""
 
@@ -257,12 +264,7 @@ class TestGetMaterialCardTags:
 
     def test_returns_empty_for_card_with_no_tags(self, client, db_session: Session):
         """Returns empty list for a material card with no tags."""
-        mc = MaterialCard(
-            normalized_mpn="test-mpn-001",
-            display_mpn="TEST-MPN-001",
-            search_count=0,
-        )
-        db_session.add(mc)
+        mc = _make_card(db_session, "test-mpn-001", "TEST-MPN-001")
         db_session.commit()
 
         resp = client.get(f"/api/tags/material-cards/{mc.id}")
@@ -271,13 +273,7 @@ class TestGetMaterialCardTags:
 
     def test_returns_high_confidence_tags_only(self, client, db_session: Session):
         """Returns only material tags with confidence >= 0.7."""
-        mc = MaterialCard(
-            normalized_mpn="lm317t-tag-test",
-            display_mpn="LM317T",
-            search_count=5,
-        )
-        db_session.add(mc)
-        db_session.flush()
+        mc = _make_card(db_session, "lm317t-tag-test", "LM317T", search_count=5)
 
         tag_high = _make_tag(db_session, "TI", "brand")
         tag_low = _make_tag(db_session, "Regulator", "commodity")
@@ -310,13 +306,7 @@ class TestGetMaterialCardTags:
     def test_material_tag_response_fields(self, client, db_session: Session):
         """Material tag response includes tag details, confidence, source,
         classified_at."""
-        mc = MaterialCard(
-            normalized_mpn="ne555-tag-test",
-            display_mpn="NE555",
-            search_count=1,
-        )
-        db_session.add(mc)
-        db_session.flush()
+        mc = _make_card(db_session, "ne555-tag-test", "NE555", search_count=1)
 
         tag = _make_tag(db_session, "Signetics", "brand")
         db_session.flush()
@@ -345,13 +335,7 @@ class TestGetMaterialCardTags:
 
     def test_boundary_confidence_070_included(self, client, db_session: Session):
         """Tag with exactly 0.7 confidence is included."""
-        mc = MaterialCard(
-            normalized_mpn="boundary-conf-test",
-            display_mpn="BOUNDARY",
-            search_count=0,
-        )
-        db_session.add(mc)
-        db_session.flush()
+        mc = _make_card(db_session, "boundary-conf-test", "BOUNDARY")
 
         tag = _make_tag(db_session, "BoundaryTag", "commodity")
         db_session.flush()
@@ -378,13 +362,7 @@ class TestGetMaterialCardTags:
         db_session.add(child)
         db_session.flush()
 
-        mc = MaterialCard(
-            normalized_mpn="mosfet-parent-test",
-            display_mpn="MOSFET",
-            search_count=0,
-        )
-        db_session.add(mc)
-        db_session.flush()
+        mc = _make_card(db_session, "mosfet-parent-test", "MOSFET")
 
         mt = MaterialTag(
             material_card_id=mc.id,

@@ -33,13 +33,19 @@ from app.services.requirement_status import (
 )
 
 
+def set_requirement_status(test_requisition, db_session, status):
+    """Arrange the requisition's first requirement at `status` and return it."""
+    req_item = test_requisition.requirements[0]
+    req_item.sourcing_status = status
+    db_session.commit()
+    return req_item
+
+
 class TestTransitionRequirementNoActor:
     """Lines 73-74 — transition with no actor logs with user_id=None."""
 
     def test_transition_without_actor_creates_log_with_null_user(self, db_session, test_requisition):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         changed = transition_requirement(req_item, "sourcing", db_session, actor=None)
         assert changed is True
@@ -58,9 +64,7 @@ class TestTransitionRequirementNoActor:
 
     def test_transition_activity_log_exception_does_not_crash(self, db_session, test_requisition):
         """ActivityLog creation failure is swallowed (lines 73-74)."""
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         with patch("app.services.requirement_status.ActivityLog", side_effect=Exception("db error")):
             # Should not raise — exception is swallowed
@@ -74,9 +78,7 @@ class TestOnRfqSentValueError:
 
     def test_value_error_during_rfq_transition_is_caught(self, db_session, test_requisition):
         """If transition_requirement raises ValueError, it's caught and skipped."""
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         with patch(
             "app.services.requirement_status.transition_requirement",
@@ -90,9 +92,7 @@ class TestOnOfferCreatedEdgeCases:
     """Lines 105-107 — ValueError during offer transition is caught."""
 
     def test_value_error_during_offer_transition_is_caught(self, db_session, test_requisition):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         with patch(
             "app.services.requirement_status.transition_requirement",
@@ -103,9 +103,7 @@ class TestOnOfferCreatedEdgeCases:
 
     def test_on_offer_created_from_won_does_not_change(self, db_session, test_requisition):
         """Won status → on_offer_created returns False without transition."""
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "won"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "won")
 
         result = on_offer_created(req_item, db_session)
         assert result is False
@@ -113,9 +111,7 @@ class TestOnOfferCreatedEdgeCases:
 
     def test_on_offer_created_from_quoted_does_not_change(self, db_session, test_requisition):
         """Quoted status → on_offer_created returns False without transition."""
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "quoted"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "quoted")
 
         result = on_offer_created(req_item, db_session)
         assert result is False
@@ -125,9 +121,7 @@ class TestOnQuoteBuiltValueError:
     """Lines 124-125 — ValueError during quote transition is caught."""
 
     def test_value_error_during_quote_transition_is_caught(self, db_session, test_requisition):
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         with patch(
             "app.services.requirement_status.transition_requirement",
@@ -138,9 +132,7 @@ class TestOnQuoteBuiltValueError:
 
     def test_on_quote_built_from_open_status(self, db_session, test_requisition, test_user):
         """Open status → on_quote_built transitions to quoted."""
-        req_item = test_requisition.requirements[0]
-        req_item.sourcing_status = "open"
-        db_session.commit()
+        req_item = set_requirement_status(test_requisition, db_session, "open")
 
         changed = on_quote_built([req_item.id], db_session, actor=test_user)
         assert changed == 1

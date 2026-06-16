@@ -20,6 +20,7 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -155,8 +156,18 @@ class TestQuoteBuilderSaveErrors:
         "margin_pct": 33.3,
     }
 
-    def test_save_value_error(
+    @pytest.mark.parametrize(
+        "save_error,expected_status",
+        [
+            (ValueError("requirement not found"), 404),
+            (RuntimeError("DB exploded"), 500),
+        ],
+        ids=["value_error", "generic_exception"],
+    )
+    def test_save_error_status(
         self,
+        save_error,
+        expected_status,
         client: TestClient,
         test_requisition: Requisition,
         test_customer_site: CustomerSite,
@@ -167,33 +178,13 @@ class TestQuoteBuilderSaveErrors:
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
                 "app.services.quote_builder_service.save_quote_from_builder",
-                side_effect=ValueError("requirement not found"),
+                side_effect=save_error,
             ):
                 resp = client.post(
                     f"/v2/partials/quote-builder/{test_requisition.id}/save",
                     json={"lines": [self._VALID_LINE]},
                 )
-        assert resp.status_code == 404
-
-    def test_save_generic_exception(
-        self,
-        client: TestClient,
-        test_requisition: Requisition,
-        test_customer_site: CustomerSite,
-        db_session: Session,
-    ):
-        test_requisition.customer_site_id = test_customer_site.id
-        db_session.flush()
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch(
-                "app.services.quote_builder_service.save_quote_from_builder",
-                side_effect=RuntimeError("DB exploded"),
-            ):
-                resp = client.post(
-                    f"/v2/partials/quote-builder/{test_requisition.id}/save",
-                    json={"lines": [self._VALID_LINE]},
-                )
-        assert resp.status_code == 500
+        assert resp.status_code == expected_status
 
 
 # ── quote_builder_export_excel: error path ────────────────────────────────
@@ -223,24 +214,21 @@ class TestQuoteBuilderExportPdfErrors:
         )
         assert resp.status_code == 404
 
-    def test_export_pdf_value_error(self, client: TestClient, test_quote):
+    @pytest.mark.parametrize(
+        "pdf_error,expected_status",
+        [
+            (ValueError("quote not found"), 404),
+            (RuntimeError("weasyprint crash"), 500),
+        ],
+        ids=["value_error", "generic_exception"],
+    )
+    def test_export_pdf_error_status(self, pdf_error, expected_status, client: TestClient, test_quote):
         with patch(
             "app.services.document_service.generate_quote_report_pdf",
-            side_effect=ValueError("quote not found"),
+            side_effect=pdf_error,
         ):
             resp = client.get(
                 f"/v2/partials/quote-builder/{test_quote.requisition_id}/export/pdf",
                 params={"quote_id": test_quote.id},
             )
-        assert resp.status_code == 404
-
-    def test_export_pdf_generic_exception(self, client: TestClient, test_quote):
-        with patch(
-            "app.services.document_service.generate_quote_report_pdf",
-            side_effect=RuntimeError("weasyprint crash"),
-        ):
-            resp = client.get(
-                f"/v2/partials/quote-builder/{test_quote.requisition_id}/export/pdf",
-                params={"quote_id": test_quote.id},
-            )
-        assert resp.status_code == 500
+        assert resp.status_code == expected_status

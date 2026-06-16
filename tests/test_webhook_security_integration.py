@@ -57,6 +57,20 @@ def _clear_replay_cache():
     _seen_notifications.clear()
 
 
+def _make_sub(db_session: Session, user: User, subscription_id: str, client_state: str | None):
+    sub = GraphSubscription(
+        user_id=user.id,
+        subscription_id=subscription_id,
+        resource="/me/messages",
+        change_type="created",
+        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
+        client_state=client_state,
+    )
+    db_session.add(sub)
+    db_session.commit()
+    return sub
+
+
 @pytest.fixture()
 def client_state_1():
     return secrets.token_hex(16)
@@ -65,17 +79,7 @@ def client_state_1():
 @pytest.fixture()
 def sub1(db_session: Session, admin_user: User, client_state_1: str):
     """A GraphSubscription with a known client_state."""
-    sub = GraphSubscription(
-        user_id=admin_user.id,
-        subscription_id="sub-sec-001",
-        resource="/me/messages",
-        change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-        client_state=client_state_1,
-    )
-    db_session.add(sub)
-    db_session.commit()
-    return sub
+    return _make_sub(db_session, admin_user, "sub-sec-001", client_state_1)
 
 
 @pytest.fixture()
@@ -85,17 +89,7 @@ def client_state_2():
 
 @pytest.fixture()
 def sub2(db_session: Session, admin_user: User, client_state_2: str):
-    sub = GraphSubscription(
-        user_id=admin_user.id,
-        subscription_id="sub-sec-002",
-        resource="/me/messages",
-        change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-        client_state=client_state_2,
-    )
-    db_session.add(sub)
-    db_session.commit()
-    return sub
+    return _make_sub(db_session, admin_user, "sub-sec-002", client_state_2)
 
 
 @pytest.fixture()
@@ -105,33 +99,13 @@ def client_state_3():
 
 @pytest.fixture()
 def sub3(db_session: Session, admin_user: User, client_state_3: str):
-    sub = GraphSubscription(
-        user_id=admin_user.id,
-        subscription_id="sub-sec-003",
-        resource="/me/messages",
-        change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-        client_state=client_state_3,
-    )
-    db_session.add(sub)
-    db_session.commit()
-    return sub
+    return _make_sub(db_session, admin_user, "sub-sec-003", client_state_3)
 
 
 @pytest.fixture()
 def sub_no_state(db_session: Session, admin_user: User):
     """Subscription with no client_state set."""
-    sub = GraphSubscription(
-        user_id=admin_user.id,
-        subscription_id="sub-sec-004",
-        resource="/me/messages",
-        change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-        client_state=None,
-    )
-    db_session.add(sub)
-    db_session.commit()
-    return sub
+    return _make_sub(db_session, admin_user, "sub-sec-004", None)
 
 
 @pytest.fixture()
@@ -141,17 +115,7 @@ def client_state_5():
 
 @pytest.fixture()
 def sub5(db_session: Session, admin_user: User, client_state_5: str):
-    sub = GraphSubscription(
-        user_id=admin_user.id,
-        subscription_id="sub-sec-005",
-        resource="/me/messages",
-        change_type="created",
-        expiration_dt=datetime.now(timezone.utc) + timedelta(hours=48),
-        client_state=client_state_5,
-    )
-    db_session.add(sub)
-    db_session.commit()
-    return sub
+    return _make_sub(db_session, admin_user, "sub-sec-005", client_state_5)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

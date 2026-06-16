@@ -18,6 +18,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import contextlib
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -59,6 +60,32 @@ def _make_db(wm_row=None, users=None):
 
 
 # ---------------------------------------------------------------------------
+# Helper: patch the job's lazy-imported dependencies at their source modules
+# ---------------------------------------------------------------------------
+
+
+@contextlib.contextmanager
+def _patch_job_deps(mock_db, *, graph_client=None, log_call_activity=None, token=None):
+    """Patch SessionLocal/SystemConfig/log_call_activity/GraphClient/get_valid_token.
+
+    Mirrors the exact source-module targets the job lazily imports. Callers override
+    only what varies; the rest default to inert mocks.
+    """
+    if graph_client is None:
+        graph_client = MagicMock()
+    if log_call_activity is None:
+        log_call_activity = MagicMock(return_value=None)
+    with (
+        patch("app.database.SessionLocal", return_value=mock_db),
+        patch("app.models.config.SystemConfig", MagicMock()),
+        patch("app.services.activity_service.log_call_activity", log_call_activity),
+        patch("app.utils.graph_client.GraphClient", graph_client),
+        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=token)),
+    ):
+        yield
+
+
+# ---------------------------------------------------------------------------
 # _job_sync_teams_calls — no users
 # ---------------------------------------------------------------------------
 
@@ -69,13 +96,7 @@ async def test_job_sync_no_users():
 
     mock_db = _make_db(wm_row=None, users=[])
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", MagicMock()),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-    ):
+    with _patch_job_deps(mock_db):
         await _job_sync_teams_calls()
 
     mock_db.commit.assert_called_once()
@@ -96,13 +117,7 @@ async def test_job_sync_with_existing_watermark():
 
     mock_db = _make_db(wm_row=wm_row, users=[])
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", MagicMock()),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-    ):
+    with _patch_job_deps(mock_db):
         await _job_sync_teams_calls()
 
     mock_db.commit.assert_called_once()
@@ -126,13 +141,7 @@ async def test_job_sync_corrupted_watermark():
 
     mock_db = _make_db(wm_row=wm_row, users=[])
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", MagicMock()),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-    ):
+    with _patch_job_deps(mock_db):
         await _job_sync_teams_calls()
 
     mock_db.commit.assert_called_once()
@@ -154,13 +163,7 @@ async def test_job_sync_token_failure_skips_user():
     mock_db = _make_db(wm_row=None, users=[mock_user])
     mock_graph_cls = MagicMock()
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls):
         await _job_sync_teams_calls()
 
     mock_graph_cls.assert_not_called()
@@ -186,13 +189,7 @@ async def test_job_sync_graph_fetch_failure_continues():
     mock_gc_instance.get_all_pages.side_effect = RuntimeError("Graph API timeout")
     mock_graph_cls = MagicMock(return_value=mock_gc_instance)
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok-abc")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, token="tok-abc"):
         await _job_sync_teams_calls()
 
     mock_db.commit.assert_called_once()
@@ -232,13 +229,7 @@ async def test_job_sync_logs_call_records():
 
     mock_log = MagicMock(return_value=MagicMock())  # truthy return value
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", mock_log),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok-xyz")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, log_call_activity=mock_log, token="tok-xyz"):
         await _job_sync_teams_calls()
 
     assert mock_log.call_count == 2
@@ -268,13 +259,7 @@ async def test_job_sync_record_missing_id_skipped():
 
     mock_log = MagicMock(return_value=None)
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", mock_log),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok-abc")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, log_call_activity=mock_log, token="tok-abc"):
         await _job_sync_teams_calls()
 
     mock_log.assert_not_called()
@@ -307,13 +292,7 @@ async def test_job_sync_invalid_datetime_duration_zero():
         logged_durations.append(kwargs.get("duration_seconds", -1))
         return MagicMock()
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", _log_call),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, log_call_activity=_log_call, token="tok"):
         await _job_sync_teams_calls()
 
     assert logged_durations == [0]
@@ -331,13 +310,7 @@ async def test_job_sync_top_level_exception_rollback():
     mock_db = MagicMock()
     mock_db.query.side_effect = RuntimeError("DB exploded")
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock()),
-        patch("app.utils.graph_client.GraphClient", MagicMock()),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
-    ):
+    with _patch_job_deps(mock_db):
         with pytest.raises(RuntimeError, match="DB exploded"):
             await _job_sync_teams_calls()
 
@@ -372,13 +345,7 @@ async def test_job_sync_log_call_activity_returns_none():
     mock_gc_instance.get_all_pages.return_value = records
     mock_graph_cls = MagicMock(return_value=mock_gc_instance)
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", MagicMock(return_value=None)),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, token="tok"):
         await _job_sync_teams_calls()
 
     mock_db.commit.assert_called_once()
@@ -412,13 +379,7 @@ async def test_job_sync_record_no_datetime_fields():
         logged_durations.append(kwargs.get("duration_seconds", -1))
         return MagicMock()
 
-    with (
-        patch("app.database.SessionLocal", return_value=mock_db),
-        patch("app.models.config.SystemConfig", MagicMock()),
-        patch("app.services.activity_service.log_call_activity", _log_call),
-        patch("app.utils.graph_client.GraphClient", mock_graph_cls),
-        patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="tok")),
-    ):
+    with _patch_job_deps(mock_db, graph_client=mock_graph_cls, log_call_activity=_log_call, token="tok"):
         await _job_sync_teams_calls()
 
     assert logged_durations == [0]

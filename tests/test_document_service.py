@@ -21,9 +21,7 @@ _fake_weasyprint.HTML = _mock_html_cls
 # Insert into sys.modules so `from weasyprint import HTML` resolves
 sys.modules.setdefault("weasyprint", _fake_weasyprint)
 
-from app.models import (  # noqa: E402
-    Quote,
-)
+from app.models import Quote  # noqa: E402
 from app.services.document_service import (  # noqa: E402
     generate_quote_report_pdf,
     generate_rfq_summary_pdf,
@@ -37,6 +35,23 @@ def _reset_html_mock():
     _mock_html_cls.return_value.write_pdf.reset_mock()
     _mock_html_cls.return_value.write_pdf.return_value = b"%PDF-1.4 fake"
     _mock_html_cls.return_value.write_pdf.side_effect = None
+
+
+def _make_quote(db, requisition, customer_site, user, *, quote_number, **fields):
+    """Persist and return a draft Quote with the common FKs/boilerplate filled in;
+    `fields` overrides/adds quote-specific columns (line_items, notes, terms, …)."""
+    quote = Quote(
+        requisition_id=requisition.id,
+        customer_site_id=customer_site.id,
+        quote_number=quote_number,
+        status="draft",
+        created_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
+        **fields,
+    )
+    db.add(quote)
+    db.commit()
+    return quote
 
 
 # ── generate_rfq_summary_pdf ────────────────────────────────────────
@@ -104,11 +119,12 @@ class TestGenerateQuoteReportPdf:
 
     def test_renders_line_items(self, db_session, test_customer_site, test_company, test_user, test_requisition):
         """Quote with line items should include them in the HTML."""
-        quote = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        quote = _make_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-LI-01",
-            status="draft",
             line_items=[
                 {
                     "mpn": "LM317T",
@@ -130,11 +146,7 @@ class TestGenerateQuoteReportPdf:
             subtotal=975.0,
             total_cost=550.0,
             total_margin_pct=43.6,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(quote)
-        db_session.commit()
 
         generate_quote_report_pdf(quote.id, db_session)
 
@@ -144,34 +156,28 @@ class TestGenerateQuoteReportPdf:
 
     def test_quote_with_empty_line_items(self, db_session, test_customer_site, test_user, test_requisition):
         """Quote with empty line_items list should still render cleanly."""
-        quote = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        quote = _make_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-EMPTY",
-            status="draft",
             line_items=[],
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(quote)
-        db_session.commit()
 
         result = generate_quote_report_pdf(quote.id, db_session)
         assert result == b"%PDF-1.4 fake"
 
     def test_includes_notes_when_present(self, db_session, test_customer_site, test_user, test_requisition):
-        quote = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        quote = _make_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-NOTES",
-            status="draft",
             line_items=[],
             notes="Special pricing for bulk order",
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(quote)
-        db_session.commit()
 
         generate_quote_report_pdf(quote.id, db_session)
 
@@ -179,19 +185,16 @@ class TestGenerateQuoteReportPdf:
         assert "Special pricing for bulk order" in html_string
 
     def test_includes_payment_and_shipping_terms(self, db_session, test_customer_site, test_user, test_requisition):
-        quote = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        quote = _make_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-TERMS",
-            status="draft",
             line_items=[],
             payment_terms="Net 30",
             shipping_terms="FOB Origin",
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
         )
-        db_session.add(quote)
-        db_session.commit()
 
         generate_quote_report_pdf(quote.id, db_session)
 

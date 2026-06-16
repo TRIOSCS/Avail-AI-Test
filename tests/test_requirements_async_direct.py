@@ -37,6 +37,20 @@ def _make_json_request(body: dict) -> MagicMock:
     return mock_req
 
 
+def _make_form_request(form_get) -> MagicMock:
+    """Create a mock Request whose .form() returns a mock with the given .get."""
+    mock_req = MagicMock(spec=Request)
+    mock_req.headers = {}
+
+    async def _form():
+        form_mock = MagicMock()
+        form_mock.get = form_get
+        return form_mock
+
+    mock_req.form = _form
+    return mock_req
+
+
 def _make_requirement(db: Session, req: Requisition, mpn: str = "LM317T") -> Requirement:
     r = Requirement(
         requisition_id=req.id,
@@ -398,17 +412,9 @@ async def test_import_stock_list_success(db_session: Session, test_user: User, t
     mock_file.read = AsyncMock(return_value=csv_content)
     mock_file.filename = "stock.csv"
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else "Test Vendor" if key == "vendor_name" else default
-        )
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(
+        lambda key, default=None: mock_file if key == "file" else "Test Vendor" if key == "vendor_name" else default
+    )
 
     with (
         patch(
@@ -438,15 +444,7 @@ async def test_import_stock_list_no_file_raises(db_session: Session, test_user: 
     """Covers lines 1204-1207: no file → 400."""
     from app.routers.requisitions.requirements import import_stock_list
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: None  # no file
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(lambda key, default=None: None)  # no file
 
     with pytest.raises(HTTPException) as exc:
         await import_stock_list(
@@ -892,15 +890,7 @@ async def test_import_stock_list_no_filename_raises_400(
     mock_file.read = AsyncMock(return_value=b"mpn,qty\nLM317T,100\n")
     mock_file.filename = None  # no filename
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(lambda key, default=None: mock_file if key == "file" else default)
 
     with pytest.raises(HTTPException) as exc_info:
         await import_stock_list(
@@ -941,17 +931,9 @@ async def test_import_stock_list_with_requirement_having_substitutes(
     mock_file.read = AsyncMock(return_value=csv_content)
     mock_file.filename = "stock.csv"
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else "Acme Surplus" if key == "vendor_name" else default
-        )
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(
+        lambda key, default=None: mock_file if key == "file" else "Acme Surplus" if key == "vendor_name" else default
+    )
 
     with (
         patch(
@@ -992,15 +974,7 @@ async def test_import_stock_list_commit_exception_raises_500(
     mock_file.read = AsyncMock(return_value=b"mpn,qty\nLM317T,100\n")
     mock_file.filename = "stock.csv"
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(lambda key, default=None: mock_file if key == "file" else default)
 
     with (
         patch(
@@ -1164,15 +1138,7 @@ async def test_import_stock_list_normalize_stock_row_returns_none(
     mock_file.read = AsyncMock(return_value=b"mpn,qty\nBAD_ROW,100\n")
     mock_file.filename = "stock.csv"
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(lambda key, default=None: mock_file if key == "file" else default)
 
     with (
         patch(
@@ -1213,15 +1179,7 @@ async def test_import_stock_list_mpn_not_in_req_mpns(
     mock_file.read = AsyncMock(return_value=b"mpn,qty\nXYZ999,100\n")
     mock_file.filename = "stock.csv"
 
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-
-    async def _form():
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
-        return form_mock
-
-    mock_req.form = _form
+    mock_req = _make_form_request(lambda key, default=None: mock_file if key == "file" else default)
 
     with (
         patch(

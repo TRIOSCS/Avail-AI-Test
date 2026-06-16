@@ -18,6 +18,7 @@ values, so they remain stable when run in parallel with xdist.
 
 from unittest.mock import patch
 
+import pytest
 from fastapi import APIRouter, FastAPI
 from fastapi.testclient import TestClient
 from starlette.responses import StreamingResponse
@@ -121,36 +122,26 @@ def test_metrics_path_itself_is_excluded() -> None:
     assert 'handler="/metrics"' not in body
 
 
-def test_static_assets_excluded() -> None:
-    """/static/* is excluded — would otherwise create one label per asset filename."""
+@pytest.mark.parametrize(
+    "paths",
+    [
+        # /static/* — would otherwise create one label per asset filename.
+        pytest.param(["/static/htmx_app.js"], id="static_assets"),
+        # /health — pings would dominate the counter and skew SLO percentiles.
+        pytest.param(["/health"], id="health"),
+        # /sw.js, /favicon.ico, /robots.txt — high-rate, no-signal browser noise.
+        pytest.param(["/sw.js", "/favicon.ico", "/robots.txt"], id="browser_noise"),
+    ],
+)
+def test_cardinality_dangerous_paths_excluded(paths: list[str]) -> None:
+    """Excluded paths never appear as a counted handler label."""
     with patch("app.main.settings.metrics_token", "test-token"):
         with _client() as client:
-            client.get("/static/htmx_app.js")
+            for path in paths:
+                client.get(path)
             body = _get_metrics_text(client)
-    assert 'handler="/static/htmx_app.js"' not in body
-
-
-def test_health_excluded() -> None:
-    """/health is excluded — pings would dominate the counter and skew SLO
-    percentiles."""
-    with patch("app.main.settings.metrics_token", "test-token"):
-        with _client() as client:
-            client.get("/health")
-            body = _get_metrics_text(client)
-    assert 'handler="/health"' not in body
-
-
-def test_browser_noise_paths_excluded() -> None:
-    """/sw.js, /favicon.ico, /robots.txt are excluded — high-rate, no-signal noise."""
-    with patch("app.main.settings.metrics_token", "test-token"):
-        with _client() as client:
-            client.get("/sw.js")
-            client.get("/favicon.ico")
-            client.get("/robots.txt")
-            body = _get_metrics_text(client)
-    assert 'handler="/sw.js"' not in body
-    assert 'handler="/favicon.ico"' not in body
-    assert 'handler="/robots.txt"' not in body
+    for path in paths:
+        assert f'handler="{path}"' not in body
 
 
 # ── Critical regressions surfaced during review ──────────────────────────────

@@ -3,28 +3,21 @@
 Covers: percent, underscore, backslash, combined, and clean string.
 """
 
+import pytest
+
 from app.utils.sql_helpers import escape_like
 
 
-def test_escape_percent():
-    assert escape_like("100%") == r"100\%"
-
-
-def test_escape_underscore():
-    assert escape_like("some_name") == r"some\_name"
-
-
-def test_escape_backslash():
-    assert escape_like(r"path\to") == r"path\\to"
-
-
-def test_escape_combined():
-    assert escape_like(r"100%_test\end") == r"100\%\_test\\end"
-
-
-def test_clean_string():
-    assert escape_like("normal text") == "normal text"
-
-
-def test_empty_string():
-    assert escape_like("") == ""
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        pytest.param("100%", r"100\%", id="percent"),
+        pytest.param("some_name", r"some\_name", id="underscore"),
+        pytest.param(r"path\to", r"path\\to", id="backslash"),
+        pytest.param(r"100%_test\end", r"100\%\_test\\end", id="combined"),
+        pytest.param("normal text", "normal text", id="clean_string"),
+        pytest.param("", "", id="empty_string"),
+    ],
+)
+def test_escape_like(value, expected):
+    assert escape_like(value) == expected

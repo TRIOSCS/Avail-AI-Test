@@ -4,6 +4,8 @@ Called by: pytest
 Depends on: conftest.py, nc_worker.monitoring
 """
 
+import pytest
+
 from app.services.nc_worker.monitoring import (
     _get_hash_set,
     _known_html_hashes,
@@ -12,29 +14,26 @@ from app.services.nc_worker.monitoring import (
 )
 
 
-def test_log_daily_report(capsys):
-    """log_daily_report produces structured log output."""
-    # Just verify it doesn't raise
-    log_daily_report(
-        searches_completed=47,
-        sightings_created=312,
-        parts_gated_out=23,
-        parts_deduped=11,
-        failed_searches=0,
-        queue_remaining=8,
-        circuit_breaker_status="OK",
-    )
+@pytest.mark.parametrize(
+    ("searches_completed", "sightings_created", "parts_gated_out", "parts_deduped", "queue_remaining"),
+    [
+        pytest.param(47, 312, 23, 11, 8, id="active"),
+        pytest.param(0, 0, 0, 0, 0, id="zero_searches"),
+    ],
+)
+def test_log_daily_report(searches_completed, sightings_created, parts_gated_out, parts_deduped, queue_remaining):
+    """log_daily_report produces structured log output without raising.
 
-
-def test_log_daily_report_zero_searches():
-    """Daily report handles zero activity (confirms worker is alive)."""
+    The zero-activity case confirms the report still emits when the worker is alive but
+    idle.
+    """
     log_daily_report(
-        searches_completed=0,
-        sightings_created=0,
-        parts_gated_out=0,
-        parts_deduped=0,
+        searches_completed=searches_completed,
+        sightings_created=sightings_created,
+        parts_gated_out=parts_gated_out,
+        parts_deduped=parts_deduped,
         failed_searches=0,
-        queue_remaining=0,
+        queue_remaining=queue_remaining,
         circuit_breaker_status="OK",
     )
 
