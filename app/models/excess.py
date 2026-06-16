@@ -56,7 +56,9 @@ class ExcessList(Base):
     # --- Validators ---
     @validates("status")
     def _validate_status(self, _key, value):
-        valid = {"draft", "active", "bidding", "closed", "expired"}
+        from ..constants import ExcessListStatus
+
+        valid = {e.value for e in ExcessListStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid ExcessList status: {value!r}")
         return value

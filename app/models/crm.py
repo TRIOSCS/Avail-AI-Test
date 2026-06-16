@@ -1,5 +1,6 @@
 """CRM models — Companies, Sites, and Site Contacts."""
 
+import re
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint
@@ -80,11 +81,8 @@ class Company(Base):
 
     @validates("currency")
     def _validate_currency(self, _key, value):
-        if value is not None:
-            import re
-
-            if not re.fullmatch(r"[A-Z]{3}", value):
-                raise ValueError(f"Invalid ISO 4217 currency code: {value}")
+        if value is not None and not re.fullmatch(r"[A-Z]{3}", value):
+            raise ValueError(f"Invalid ISO 4217 currency code: {value}")
         return value
 
     __table_args__ = (
