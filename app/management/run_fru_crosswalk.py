@@ -110,20 +110,22 @@ def select_drain_card_ids(db: Session, *, limit: int = 0) -> list[int]:
     )
     if not fru_norms:
         return []
+    # SQL filters to active, non-internal, unfaceted-OR-uncategorized cards; the fru_norm
+    # membership test stays in Python (fru_norm is a normalize_mpn_key output, not
+    # reproducible in SQL). Stream like _existing_card_keys — this can be a full-table scan.
     has_facet = select(MaterialSpecFacet.id).where(MaterialSpecFacet.material_card_id == MaterialCard.id).exists()
     has_category = func.coalesce(func.trim(MaterialCard.category), "") != ""
-    rows = db.execute(
-        select(MaterialCard.id, MaterialCard.normalized_mpn, ~has_facet, ~has_category).where(
-            MaterialCard.deleted_at.is_(None),
-            MaterialCard.is_internal_part.is_(False),
-        )
-    ).all()
-    card_ids: list[int] = []
-    for card_id, normalized_mpn, unfaceted, uncategorized in rows:
-        if not (unfaceted or uncategorized):
-            continue
-        if normalize_mpn_key(normalized_mpn) in fru_norms:
-            card_ids.append(int(card_id))
+    card_ids = [
+        int(card_id)
+        for card_id, normalized_mpn in db.execute(
+            select(MaterialCard.id, MaterialCard.normalized_mpn).where(
+                MaterialCard.deleted_at.is_(None),
+                MaterialCard.is_internal_part.is_(False),
+                ~has_facet | ~has_category,
+            )
+        ).yield_per(5000)
+        if normalize_mpn_key(normalized_mpn) in fru_norms
+    ]
     card_ids.sort()
     return card_ids[:limit] if limit else card_ids
 

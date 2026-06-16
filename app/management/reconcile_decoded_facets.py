@@ -174,13 +174,10 @@ def _gate_fru_facet(
     gaps stay visible in the persisted run report instead of silently passing.
     """
     if facet.spec_key == "capacity_gb" and category == "hdd":
-        value = facet.value_numeric
-        on_grid = False
-        if value is not None:
-            try:
-                on_grid = float(value) in HDD_SHIPPED_CAPACITY_GB
-            except (TypeError, ValueError):
-                on_grid = False
+        try:
+            on_grid = float(facet.value_numeric) in HDD_SHIPPED_CAPACITY_GB
+        except (TypeError, ValueError):
+            on_grid = False
         if on_grid:
             return "fru_capacity_grid", "unchanged"
         return "fru_capacity_grid", _delete_facet_row(db, card, facet, apply=apply)

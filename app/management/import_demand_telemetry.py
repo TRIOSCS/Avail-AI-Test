@@ -81,6 +81,16 @@ def _parse_ts(raw: str | None) -> datetime | None:
     return None
 
 
+def _max_present(a, b):
+    """Column-wise max that treats None as "no value": the other operand wins, or the
+    larger of the two when both are present."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return max(a, b)
+
+
 def read_telemetry(csv_path: str | Path) -> tuple[dict[str, tuple[int | None, datetime | None]], dict]:
     """Stream the export and aggregate (qty, ts) per normalized MPN key.
 
@@ -115,8 +125,8 @@ def read_telemetry(csv_path: str | Path) -> tuple[dict[str, tuple[int | None, da
             prev = telemetry.get(key)
             if prev is not None:
                 prev_qty, prev_ts = prev
-                qty = prev_qty if qty is None else (qty if prev_qty is None else max(qty, prev_qty))
-                ts = prev_ts if ts is None else (ts if prev_ts is None else max(ts, prev_ts))
+                qty = _max_present(qty, prev_qty)
+                ts = _max_present(ts, prev_ts)
             telemetry[key] = (qty, ts)
     return telemetry, stats
 

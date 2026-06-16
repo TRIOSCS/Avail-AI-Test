@@ -98,12 +98,17 @@ def _ladder_set(
     apply: bool,
     overlay: _Overlay,
 ) -> bool:
-    """Apply (or, dry-run, simulate) one ladder-gated brand/manufacturer write."""
+    """Apply (or, dry-run, simulate) one ladder-gated brand/manufacturer write.
+
+    In apply mode the setter flushes inside a per-card SAVEPOINT, so a DB-level failure
+    rolls back only this card (the exception propagates to the pass's per-card tally).
+    """
     if value is None or not str(value).strip():
         return False
     setter = set_brand if attr == "brand" else set_manufacturer
     if apply:
-        return setter(card, value, source, confidence)
+        with db.begin_nested():
+            return setter(card, value, source, confidence)
 
     key = (card.id, attr)
     incoming = {
@@ -146,15 +151,9 @@ def _pass_b1(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
     for card in cards:
         tally["scanned"] += 1
         try:
-            if apply:
-                with db.begin_nested():
-                    won = _ladder_set(
-                        db, card, "brand", card.manufacturer, "legacy_backfill", 0.5, apply=True, overlay=overlay
-                    )
-            else:
-                won = _ladder_set(
-                    db, card, "brand", card.manufacturer, "legacy_backfill", 0.5, apply=False, overlay=overlay
-                )
+            won = _ladder_set(
+                db, card, "brand", card.manufacturer, "legacy_backfill", 0.5, apply=apply, overlay=overlay
+            )
         except Exception:
             tally["failed"] += 1
             logger.exception("backfill_dual_brand B1: failed on card id={} — skipping", card.id)
@@ -192,15 +191,9 @@ def _pass_b2(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
     for link, card in rows:
         tally["links_scanned"] += 1
         try:
-            if apply:
-                with db.begin_nested():
-                    won = _ladder_set(
-                        db, card, "manufacturer", link.manufacturer, "trio_source", 0.9, apply=True, overlay=overlay
-                    )
-            else:
-                won = _ladder_set(
-                    db, card, "manufacturer", link.manufacturer, "trio_source", 0.9, apply=False, overlay=overlay
-                )
+            won = _ladder_set(
+                db, card, "manufacturer", link.manufacturer, "trio_source", 0.9, apply=apply, overlay=overlay
+            )
         except Exception:
             tally["failed"] += 1
             logger.exception("backfill_dual_brand B2: failed on card id={} (fru_link id={})", card.id, link.id)
@@ -258,11 +251,7 @@ def _pass_b3(db: Session, *, apply: bool, overlay: _Overlay) -> dict:
             tally["missing_cards"] += 1
             continue
         try:
-            if apply:
-                with db.begin_nested():
-                    won = _ladder_set(db, card, attr, token, "desc_parse", 0.85, apply=True, overlay=overlay)
-            else:
-                won = _ladder_set(db, card, attr, token, "desc_parse", 0.85, apply=False, overlay=overlay)
+            won = _ladder_set(db, card, attr, token, "desc_parse", 0.85, apply=apply, overlay=overlay)
         except Exception:
             tally["failed"] += 1
             logger.exception("backfill_dual_brand B3: failed on card id={} — skipping", card_id)

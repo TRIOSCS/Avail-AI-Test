@@ -45,7 +45,7 @@ Depends on: openpyxl, app.models.FruLink, app.constants.FruLinkKind/CDC_PENDING,
 import argparse
 import re
 from collections import Counter
-from dataclasses import dataclass, field, fields, replace
+from dataclasses import asdict, dataclass, field, fields, replace
 from datetime import date, datetime
 from functools import lru_cache
 from typing import Callable, Iterable
@@ -811,23 +811,9 @@ def upsert_links(db, links: Iterable[ParsedLink], chunk_size: int = 1000) -> tup
         for link in chunk:
             row = existing.get(link.key)
             if row is None:
-                to_insert.append(
-                    {
-                        "fru_raw": link.fru_raw,
-                        "fru_norm": link.fru_norm,
-                        "related_raw": link.related_raw,
-                        "related_norm": link.related_norm,
-                        "rel_kind": FruLinkKind(link.rel_kind).value,  # Core insert skips @validates
-                        "source_sheet": link.source_sheet,
-                        "manufacturer": link.manufacturer,
-                        "description": link.description,
-                        "series": link.series,
-                        "machine": link.machine,
-                        "qual_status": link.qual_status,
-                        "qual_date": link.qual_date,
-                        "note": link.note,
-                    }
-                )
+                values = asdict(link)  # ParsedLink fields == FruLink insertable columns
+                values["rel_kind"] = FruLinkKind(link.rel_kind).value  # Core insert skips @validates
+                to_insert.append(values)
             else:
                 changed = False
                 for attr in _UPDATABLE:
