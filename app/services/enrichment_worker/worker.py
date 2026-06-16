@@ -300,6 +300,92 @@ async def _oem_resolution_pass(
     return web_calls_today
 
 
+async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
+    """PartSurfer description enrichment — categorize UNCATEGORIZED HP/HPE cards
+    (network).
+
+    For batch cards classified ``hpe`` (classify_oem_vendor) that are still UNCATEGORIZED
+    (``not (card.category or "").strip()``), fetch the OEM's own verbatim description live
+    from partsurfer.hpe.com and feed it into the desc grammar via ``categorize_and_record``
+    at ``partsurfer_desc`` / tier 84 — so the ~70k uncategorized HP spares get a category +
+    facets. PartSurfer's Product Number just echoes the spare, so the canonical-MPN
+    crosswalk is useless for HP; the rich DESCRIPTION is the win.
+
+    Placed AFTER the deterministic categorize/decode passes in run_one_batch so a fetch is
+    only spent on cards STILL uncategorized. Candidates are deduped by display_mpn so the
+    same spare is never fetched twice in a batch, and capped at
+    ``settings.partsurfer_fetch_per_batch``. Politeness is 1 request / 2s — paced here with
+    ``asyncio.sleep(2.0)`` BETWEEN fetches. ``categorize_and_record`` is fill-only (it
+    no-ops on an already-categorized card), so a card a prior pass categorized this batch
+    is skipped without a fetch via the NULL-category gate below.
+
+    Resilient: on a throttle/outage ``fetch_partsurfer_description`` raises
+    ``PartSurferTransient`` — the pass BREAKS (stops hammering the host this batch) rather
+    than burning the remaining candidates against a struggling host; the descriptions
+    already fetched are kept. Each card's ``categorize_and_record`` is wrapped per-card so
+    one bad card (an IntegrityError/DataError on the shared session) can't abort the pass
+    and waste the other fetched descriptions; ``categorize_and_record`` also wraps its own
+    write in a per-card SAVEPOINT. Returns an aggregate
+    {fetched, categorized, specs_written, failed} summary for the log line.
+    """
+    from app.config import settings
+    from app.services.desc_extractor._common import PARTSURFER_DESC_CONFIDENCE, PARTSURFER_DESC_SOURCE
+    from app.services.desc_extractor.writer import categorize_and_record
+    from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
+    from app.services.enrichment_worker.partsurfer_resolver import (
+        PartSurferTransient,
+        fetch_partsurfer_description,
+    )
+
+    # Uncategorized HP/HPE cards only, deduped by display_mpn (one fetch covers every card
+    # sharing the spare). dict preserves insertion order → deterministic fetch order.
+    candidates: dict[str, list] = {}
+    for card in batch:
+        if (card.category or "").strip():
+            continue
+        if classify_oem_vendor(card.display_mpn) != "hpe":
+            continue
+        candidates.setdefault(card.display_mpn, []).append(card)
+    if not candidates:
+        return {"fetched": 0, "categorized": 0, "specs_written": 0, "failed": 0}
+
+    fetch_cap = settings.partsurfer_fetch_per_batch
+    fetched = categorized = specs_written = failed = 0
+    for i, (spare, cards) in enumerate(candidates.items()):
+        if fetched >= fetch_cap:
+            break
+        if i:
+            # 1 request / 2s politeness — between fetches only (not before the first).
+            await asyncio.sleep(2.0)
+        try:
+            desc = await fetch_partsurfer_description(spare)
+        except PartSurferTransient as exc:
+            # The host is throttling / down — stop hammering it for the rest of this batch.
+            # The aborted fetch is NOT counted; descriptions already fetched are kept.
+            logger.warning("partsurfer-desc: backing off this batch — {}", exc)
+            break
+        fetched += 1
+        if not desc:
+            continue
+        for card in cards:
+            # categorize_and_record is fill-only (no-op on an already-set category) and
+            # wraps category + facets in one SAVEPOINT. Per-card try/except (mirrors
+            # extract_and_record_specs) so one bad card never aborts the pass and wastes the
+            # other fetched descriptions.
+            try:
+                was_categorized, written = categorize_and_record(
+                    db, card, description=desc, source=PARTSURFER_DESC_SOURCE, confidence=PARTSURFER_DESC_CONFIDENCE
+                )
+            except Exception:
+                failed += 1
+                logger.exception("partsurfer-desc: failed on card_id={}", card.id)
+                continue
+            if was_categorized:
+                categorized += 1
+                specs_written += written
+    return {"fetched": fetched, "categorized": categorized, "specs_written": specs_written, "failed": failed}
+
+
 async def run_one_batch(
     db: Session,
     config: "EnrichmentWorkerConfig",
@@ -589,6 +675,21 @@ async def run_one_batch(
                 logger.info("ENRICH_WORKER: desc-parse {}", extract_and_record_specs(db, enriched_ids))
             except Exception:
                 logger.exception("ENRICH_WORKER: desc-parse failed over {} cards", len(enriched_ids))
+
+    # PartSurfer description enrichment (HTTP, paced): for STILL-uncategorized HP/HPE cards
+    # in this batch, fetch the OEM's own verbatim description live from partsurfer.hpe.com
+    # (robots-allowed, 1 GET / 2s) and feed it into the desc grammar to categorize them at
+    # partsurfer_desc / tier 84. Placed AFTER the deterministic categorize/decode passes so
+    # a billable fetch is only spent on cards nothing else could categorize. Gated by the
+    # flag; bounded by partsurfer_fetch_per_batch. Same session, committed with the batch.
+    if batch_ids:
+        from app.config import settings
+
+        if settings.partsurfer_desc_enabled:
+            try:
+                logger.info("ENRICH_WORKER: partsurfer-desc {}", await _partsurfer_desc_pass(db, batch))
+            except Exception:
+                logger.exception("ENRICH_WORKER: partsurfer-desc pass failed over {} cards", len(batch_ids))
 
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same

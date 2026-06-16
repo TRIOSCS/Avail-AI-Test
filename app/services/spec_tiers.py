@@ -76,6 +76,11 @@ SOURCE_TIER: dict[str, int] = {
     "trio_source_ai": 88,
     "mpn_decode": 85,
     "fru_matrix_decode": 84,
+    # PartSurfer = the OEM's own authoritative description → outranks the card's own
+    # desc_parse (83); still a description-parse, so it loses to the deterministic
+    # decoders (mpn_decode 85). Ties fru_matrix_decode (84) — different vendors, the tie
+    # is not load-bearing.
+    "partsurfer_desc": 84,
     "desc_parse": 83,
     "fru_desc_parse": 82,
     "partsurfer": 80,
@@ -709,8 +714,8 @@ def _set_brand_or_maker(
     write: bool,
 ) -> bool:
     """Shared body of set_brand/set_manufacturer: reject empties + garbage fragments
-    (is_garbage_brand_value — unbalanced-paren / single-char shapes, logged at WARNING),
-    normalize, ladder.
+    (is_garbage_brand_value — unbalanced-paren / single-char shapes, logged at
+    WARNING), normalize, ladder.
 
     PRECONDITION: *card* should be session-attached — the alias lookup derives its DB
     session via ``Session.object_session(card)``. A detached/transient card cannot be

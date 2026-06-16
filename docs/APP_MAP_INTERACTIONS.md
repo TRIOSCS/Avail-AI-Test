@@ -1493,10 +1493,39 @@ owns arbitration in one place:
        MaterialCardAudit action="categorized" per card) and at ingest time by
        source_ingest/clean.py (same grammar, fallback when the source carries no
        mappable Commodity_Code__c). The F1 ladder (fru_desc_parse 82 < desc_parse
-       83 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90) keeps decode/vendor
+       83 < partsurfer_desc 84 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90)
+       keeps decode/vendor
        values authoritative and the card's OWN description above its FRU-linked
        prose — no per-writer pre-gate. The phase-2/3 commodities have no MPN
        decoders, so desc_parse is their top non-vendor deterministic source.
+    3.5. enrichment_worker/worker.py::_partsurfer_desc_pass    — PartSurfer
+       description enrichment (HTTP, paced), source="partsurfer_desc" (tier 84),
+       confidence 0.90 (settings.partsurfer_desc_enabled, default ON). Runs AFTER
+       the deterministic categorize/decode passes so a billable fetch is only spent
+       on cards STILL uncategorized. For batch cards classified "hpe"
+       (classify_oem_vendor) that are UNCATEGORIZED, it does ONE polite GET against
+       https://partsurfer.hpe.com/Search.aspx (robots-allowed; UA
+       "AvailAI-PartLookup/1.0 …"; 1 req / 2s paced with asyncio.sleep; capped at
+       settings.partsurfer_fetch_per_batch, deduped by display_mpn) via
+       partsurfer_resolver.fetch_partsurfer_description, extracts the OEM's own
+       verbatim description (the ctl00_BodyContentPlaceHolder_lblDescription span),
+       and feeds it into the SAME desc grammar through
+       writer.categorize_and_record(source="partsurfer_desc"). PartSurfer's Product
+       Number just echoes the spare (so the canonical-MPN crosswalk is useless for
+       HP); the rich DESCRIPTION is the win — it categorizes the ~70k uncategorized
+       HP cards. Resilient: fetch_partsurfer_description returns None on a GENUINE
+       no-result (404/3xx, missing/empty span, invalid input) but RAISES
+       PartSurferTransient on a throttle/outage (429, 5xx, or any httpx
+       transport/timeout error) — the pass then BREAKS for the rest of this batch
+       (stops hammering a struggling host; descriptions already fetched are kept).
+       Each card's categorize_and_record is wrapped per-card (mirrors
+       extract_and_record_specs) so one bad card (IntegrityError/DataError on the
+       shared session) can't abort the pass — failures are tallied into the summary's
+       "failed" key. categorize_and_record is fill-only (a card already categorized
+       this batch is skipped via the NULL-category gate). partsurfer_desc (84) outranks the card's own desc_parse
+       (83) — OEM catalog text beats the card's own desc — but loses to the
+       deterministic decoders (mpn_decode 85); it ties fru_matrix_decode (84, a
+       different vendor — tie not load-bearing).
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -1545,7 +1574,12 @@ load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest
 
 ```
 SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
-             · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
+             · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84
+             · partsurfer_desc:84 (HP PartSurfer description channel — the OEM's OWN
+               verbatim description fetched live via partsurfer_resolver and fed to the
+               desc grammar; outranks the card's own desc_parse 83, loses to mpn_decode 85,
+               ties fru_matrix_decode 84 — different vendors, tie not load-bearing)
+             · desc_parse:83
              · fru_desc_parse:82 (FRU-linked qual-sheet descriptions — below the card's
                OWN description, above the OEM scrapers)
              · {partsurfer,psref,oem_official}:80 (partsurfer/psref are written by the

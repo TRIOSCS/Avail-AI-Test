@@ -63,6 +63,12 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar. Arbitration is by the F1 
 # spec reader 60) — record_spec rejects any write that loses the ladder, so this
 # confidence is provenance metadata, not the cross-source conflict rule.
 
+# OEM-authoritative description: the same desc grammar run over HP/HPE's OWN verbatim
+# PartSurfer catalog text (fetched live), not the card's own desc. Outranks desc_parse
+# (spec_tiers.SOURCE_TIER: partsurfer_desc=84 > desc_parse 83).
+PARTSURFER_DESC_SOURCE = "partsurfer_desc"
+PARTSURFER_DESC_CONFIDENCE = 0.90
+
 # The only commodities the extractor fills specs for — single source of truth shared
 # by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
 # set). The PSU-vs-CPU wattage guard is structural: only extract_psu can emit the

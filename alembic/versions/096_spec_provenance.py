@@ -64,6 +64,7 @@ _SOURCE_TIER_SQL_CASE = (
     "WHEN 'trio_source_ai' THEN 88 "
     "WHEN 'mpn_decode' THEN 85 "
     "WHEN 'fru_matrix_decode' THEN 84 "
+    "WHEN 'partsurfer_desc' THEN 84 "
     "WHEN 'desc_parse' THEN 83 "
     "WHEN 'fru_desc_parse' THEN 82 "
     "WHEN 'partsurfer' THEN 80 "
