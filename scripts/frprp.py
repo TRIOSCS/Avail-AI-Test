@@ -288,7 +288,8 @@ def scan_security_patterns() -> list[dict]:
     for rf in ROUTERS_DIR.rglob("*.py"):
         content = rf.read_text(errors="replace")
         rel = str(rf.relative_to(PROJECT_ROOT))
-        for i, line in enumerate(content.splitlines(), 1):
+        lines = content.splitlines()
+        for i, line in enumerate(lines, 1):
             if "HTMLResponse" in line and ("f'" in line or 'f"' in line):
                 # Skip if already escaped or marked safe
                 if "html.escape" in line or "html_mod.escape" in line:
@@ -305,7 +306,7 @@ def scan_security_patterns() -> list[dict]:
                 if "json.dumps" in line or "json_dumps" in line:
                     continue
                 # Check surrounding lines for json.dumps too
-                ctx = "\n".join(content.splitlines()[max(0, i - 3) : i + 3])
+                ctx = "\n".join(lines[max(0, i - 3) : i + 3])
                 if "json.dumps" in ctx and ".replace(" in ctx:
                     continue
                 findings.append(
@@ -387,10 +388,11 @@ def scan_template_consistency() -> list[dict]:
     for tf in TEMPLATES_DIR.rglob("*.html"):
         content = tf.read_text(errors="replace")
         rel = str(tf.relative_to(PROJECT_ROOT))
+        lines = content.splitlines()
 
         # Raw status strings that should use status_badge macro
         for status in raw_statuses:
-            for i, line in enumerate(content.splitlines(), 1):
+            for i, line in enumerate(lines, 1):
                 stripped = line.strip()
                 # Skip Jinja2 comments and comparisons
                 if (
@@ -422,7 +424,7 @@ def scan_template_consistency() -> list[dict]:
                         )
 
         # Inline styles (should use Tailwind) — skip dynamic/unfixable ones
-        for i, line in enumerate(content.splitlines(), 1):
+        for i, line in enumerate(lines, 1):
             if 'style="' in line and "hx-" not in line:
                 # Skip dynamic styles that can't be converted
                 if any(
@@ -517,8 +519,9 @@ def scan_loading_states() -> list[dict]:
     for tf in TEMPLATES_DIR.rglob("*.html"):
         content = tf.read_text(errors="replace")
         rel = str(tf.relative_to(PROJECT_ROOT))
+        lines = content.splitlines()
 
-        for i, line in enumerate(content.splitlines(), 1):
+        for i, line in enumerate(lines, 1):
             # Only flag forms/buttons with mutations, or lazy-load triggers
             is_mutation = re.search(r"hx-(post|put|delete|patch)", line)
             is_lazy = re.search(r'hx-trigger="(load|revealed|intersect)', line)
@@ -526,18 +529,11 @@ def scan_loading_states() -> list[dict]:
             if not (is_mutation or is_lazy):
                 continue
 
+            # Check wider context (15 lines) — loading attrs may be on child
+            # elements; this window includes the current line itself.
+            context = "\n".join(lines[max(0, i - 3) : i + 12])
             has_indicator = (
-                "hx-indicator" in line
-                or "data-loading" in line
-                or "data-loading-disable" in line
-                or "data-loading-aria-busy" in line
-            )
-            # Check wider context (15 lines) — loading attrs may be on child elements
-            context_lines = content.splitlines()[max(0, i - 3) : min(len(content.splitlines()), i + 12)]
-            context = "\n".join(context_lines)
-            has_indicator = (
-                has_indicator
-                or "hx-indicator" in context
+                "hx-indicator" in context
                 or "htmx-indicator" in context
                 or "data-loading" in context
                 or "data-loading-disable" in context
@@ -619,8 +615,9 @@ def scan_accessibility_static() -> list[dict]:
     for tf in TEMPLATES_DIR.rglob("*.html"):
         content = tf.read_text(errors="replace")
         rel = str(tf.relative_to(PROJECT_ROOT))
+        lines = content.splitlines()
 
-        for i, line in enumerate(content.splitlines(), 1):
+        for i, line in enumerate(lines, 1):
             # Images without alt
             if "<img" in line and "alt=" not in line:
                 findings.append(
@@ -638,7 +635,7 @@ def scan_accessibility_static() -> list[dict]:
 
             # Inputs without label or aria-label
             if "<input" in line and 'type="hidden"' not in line:
-                ctx = "\n".join(content.splitlines()[max(0, i - 3) : i + 3])
+                ctx = "\n".join(lines[max(0, i - 3) : i + 3])
                 if "aria-label" not in ctx and "<label" not in ctx and "aria-labelledby" not in ctx:
                     findings.append(
                         {
@@ -857,6 +854,34 @@ def run_phase2_classify(scan_report: dict) -> dict:
 # ── Phase 3: FIX (auto-patterns) ─────────────────────────────────────
 
 
+def _rewrite_line(content: str, line_num: int, transform) -> str:
+    """Apply ``transform`` to the 1-based ``line_num`` of ``content``.
+
+    Returns ``content`` unchanged if ``line_num`` is out of range, so callers can
+    rely on an out-of-bounds finding being a no-op.
+    """
+    lines = content.splitlines()
+    if not (0 < line_num <= len(lines)):
+        return content
+    lines[line_num - 1] = transform(lines[line_num - 1])
+    return "\n".join(lines)
+
+
+def _add_input_label(line: str) -> str:
+    """Add an ``aria-label`` to a bare ``<input>``, derived from placeholder/name."""
+    if "<input" not in line or "aria-label" in line:
+        return line
+    placeholder = re.search(r'placeholder="([^"]*)"', line)
+    name = re.search(r'name="([^"]*)"', line)
+    if placeholder:
+        label = placeholder.group(1)
+    elif name:
+        label = name.group(1).replace("_", " ").title()
+    else:
+        label = "Input"
+    return line.replace("<input", f'<input aria-label="{label}"', 1)
+
+
 def apply_auto_fix(finding: dict, all_findings: list[dict]) -> bool:
     """Apply a deterministic auto-fix pattern.
 
@@ -875,34 +900,39 @@ def apply_auto_fix(finding: dict, all_findings: list[dict]) -> bool:
     original = content
     line_num = finding.get("line", 0)
 
+    def add_x_cloak(line: str) -> str:
+        # Add x-cloak after x-show or x-if
+        if "x-cloak" in line:
+            return line
+        line = re.sub(r'(x-show="[^"]*")', r"\1 x-cloak", line)
+        return re.sub(r'(x-if="[^"]*")', r"\1 x-cloak", line)
+
+    def add_alt(line: str) -> str:
+        if "<img" in line and "alt=" not in line:
+            return line.replace("<img", '<img alt=""', 1)
+        return line
+
+    def add_role_button(line: str) -> str:
+        if "@click" in line and "role=" not in line:
+            return re.sub(r"(@click)", r'role="button" tabindex="0" \1', line)
+        return line
+
     if pattern == "missing_rel_noopener":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            lines[line_num - 1] = lines[line_num - 1].replace(
-                'target="_blank"', 'target="_blank" rel="noopener noreferrer"'
-            )
-            content = "\n".join(lines)
+        content = _rewrite_line(
+            content,
+            line_num,
+            lambda line: line.replace('target="_blank"', 'target="_blank" rel="noopener noreferrer"'),
+        )
 
     elif pattern == "missing_x_cloak":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            line = lines[line_num - 1]
-            # Add x-cloak after x-show or x-if
-            if "x-cloak" not in line:
-                line = re.sub(r'(x-show="[^"]*")', r"\1 x-cloak", line)
-                line = re.sub(r'(x-if="[^"]*")', r"\1 x-cloak", line)
-                lines[line_num - 1] = line
-            content = "\n".join(lines)
+        content = _rewrite_line(content, line_num, add_x_cloak)
 
     elif pattern == "deprecated_db_query_get":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            lines[line_num - 1] = re.sub(
-                r"db\.query\((\w+)\)\.get\((\w+)\)",
-                r"db.get(\1, \2)",
-                lines[line_num - 1],
-            )
-            content = "\n".join(lines)
+        content = _rewrite_line(
+            content,
+            line_num,
+            lambda line: re.sub(r"db\.query\((\w+)\)\.get\((\w+)\)", r"db.get(\1, \2)", line),
+        )
 
     elif pattern == "unescaped_html_response":
         # Add html import and escape the f-string content
@@ -918,39 +948,13 @@ def apply_auto_fix(finding: dict, all_findings: list[dict]) -> bool:
         content = "\n".join(lines)
 
     elif pattern == "missing_alt":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            line = lines[line_num - 1]
-            if "<img" in line and "alt=" not in line:
-                line = line.replace("<img", '<img alt=""', 1)
-                lines[line_num - 1] = line
-            content = "\n".join(lines)
+        content = _rewrite_line(content, line_num, add_alt)
 
     elif pattern == "missing_role_button":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            line = lines[line_num - 1]
-            if "@click" in line and "role=" not in line:
-                line = re.sub(r"(@click)", r'role="button" tabindex="0" \1', line)
-                lines[line_num - 1] = line
-            content = "\n".join(lines)
+        content = _rewrite_line(content, line_num, add_role_button)
 
     elif pattern == "missing_input_label":
-        lines = content.splitlines()
-        if 0 < line_num <= len(lines):
-            line = lines[line_num - 1]
-            if "<input" in line and "aria-label" not in line:
-                # Try to use placeholder or name as label
-                placeholder = re.search(r'placeholder="([^"]*)"', line)
-                name = re.search(r'name="([^"]*)"', line)
-                label = (
-                    placeholder.group(1)
-                    if placeholder
-                    else (name.group(1).replace("_", " ").title() if name else "Input")
-                )
-                line = line.replace("<input", f'<input aria-label="{label}"', 1)
-                lines[line_num - 1] = line
-            content = "\n".join(lines)
+        content = _rewrite_line(content, line_num, _add_input_label)
 
     if content != original:
         full_path.write_text(content)

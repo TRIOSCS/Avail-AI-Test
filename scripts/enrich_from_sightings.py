@@ -111,9 +111,14 @@ def enrich_card_from_sightings(
                     needs_description = False  # Got from authorized, stop looking
 
         # Manufacturer
-        if needs_manufacturer and "manufacturer" not in updates:
-            if manufacturer and isinstance(manufacturer, str) and manufacturer.strip():
-                updates["manufacturer"] = manufacturer.strip()
+        if (
+            needs_manufacturer
+            and "manufacturer" not in updates
+            and manufacturer
+            and isinstance(manufacturer, str)
+            and manufacturer.strip()
+        ):
+            updates["manufacturer"] = manufacturer.strip()
 
         # Datasheet URL
         if needs_datasheet and "datasheet_url" not in updates:

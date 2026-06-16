@@ -415,7 +415,7 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
     return requisitions, all_requirements, all_offers
 
 
-def seed_quotes(db, user, requisitions, requirements, offers, sites, *, now):
+def seed_quotes(db, user, requisitions, offers, sites, *, now):
     """Create quotes in every status."""
     quote_configs = [
         {"status": QuoteStatus.DRAFT, "req_idx": 5},
@@ -482,7 +482,7 @@ def seed_quotes(db, user, requisitions, requirements, offers, sites, *, now):
     return quotes
 
 
-def seed_buy_plans(db, user, quotes, requisitions, requirements, offers, *, now):
+def seed_buy_plans(db, user, quotes, offers, *, now):
     """Create buy plans in every status."""
     bp_configs = [
         {"status": BuyPlanStatus.DRAFT, "so_status": SOVerificationStatus.PENDING, "quote_idx": 0},
@@ -650,8 +650,8 @@ def main():
         vendor_cards = seed_vendor_cards(db)
         material_cards = seed_material_cards(db)
         requisitions, requirements, offers = seed_requisitions(db, user, companies, sites, material_cards, vendor_cards)
-        quotes = seed_quotes(db, user, requisitions, requirements, offers, sites, now=now)
-        seed_buy_plans(db, user, quotes, requisitions, requirements, offers, now=now)
+        quotes = seed_quotes(db, user, requisitions, offers, sites, now=now)
+        seed_buy_plans(db, user, quotes, offers, now=now)
         seed_excess_lists(db, user, companies, sites, vendor_cards)
 
         db.commit()

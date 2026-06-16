@@ -108,7 +108,7 @@ def migrate(dry_run: bool = True) -> dict:
                     discovery_source="salesforce_import",
                     discovery_batch_id=batch.id if batch else None,
                     import_priority=co.import_priority,
-                    historical_context=historical if historical else None,
+                    historical_context=historical or None,
                 )
                 db.add(pa)
 

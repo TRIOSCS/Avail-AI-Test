@@ -16,8 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
-from typing import Iterable
+from collections.abc import Callable, Iterable
 
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
@@ -46,21 +45,15 @@ def filter_allowlist(diffs: Iterable[tuple]) -> list[tuple]:
     out: list[tuple] = []
     for d in diffs:
         kind = d[0] if d else None
-        skip = False
-        for allow_kind, predicate in _ALLOWLIST:
-            if kind == allow_kind and predicate(d):
-                skip = True
-                break
-        if not skip:
+        allowed = any(kind == allow_kind and predicate(d) for allow_kind, predicate in _ALLOWLIST)
+        if not allowed:
             out.append(d)
     return out
 
 
 def format_diffs(diffs: Iterable[tuple]) -> str:
     """Human-readable rendering of remaining diffs, one per line."""
-    lines = []
-    for d in diffs:
-        lines.append("  " + " | ".join(repr(part) for part in d))
+    lines = ["  " + " | ".join(repr(part) for part in d) for d in diffs]
     return "\n".join(lines) if lines else "(no diffs)"
 
 

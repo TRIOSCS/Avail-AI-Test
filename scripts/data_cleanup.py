@@ -86,6 +86,18 @@ def audit(phase: int, action: str, entity: str, details: dict):
     log.info(f"  [{action}] {entity}: {json.dumps(details, default=str)[:200]}")
 
 
+def _reassign_fk(db: Session, model, column: str, loser_id, winner_id):
+    """Bulk-repoint a foreign-key column from loser_id to winner_id."""
+    db.query(model).filter_by(**{column: loser_id}).update({column: winner_id}, synchronize_session=False)
+
+
+def _copy_missing_fields(winner, loser, fields):
+    """Fill blank winner fields from the loser."""
+    for field in fields:
+        if not getattr(winner, field) and getattr(loser, field):
+            setattr(winner, field, getattr(loser, field))
+
+
 # ── Backup ──────────────────────────────────────────────────────────
 
 
@@ -214,81 +226,36 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     winner.total_pos = (winner.total_pos or 0) + (loser.total_pos or 0)
 
     # Copy enrichment fields if winner is missing them
-    for field in [
-        "website",
-        "linkedin_url",
-        "legal_name",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "industry",
-    ]:
-        if not getattr(winner, field) and getattr(loser, field):
-            setattr(winner, field, getattr(loser, field))
+    _copy_missing_fields(
+        winner,
+        loser,
+        ["website", "linkedin_url", "legal_name", "employee_size", "hq_city", "hq_state", "hq_country", "industry"],
+    )
 
     # Update FK tables
     loser_id = loser.id
     winner_id = winner.id
 
-    # Offers
-    db.query(Offer).filter_by(vendor_card_id=loser_id).update({"vendor_card_id": winner_id}, synchronize_session=False)
+    # Move a child whose unique key (keyed by `unique_attr`) doesn't already
+    # exist on the winner; delete it when the winner already holds that key.
+    # A falsy key (None/"") is always moved, never treated as a collision.
+    def _move_or_delete(model, unique_attr):
+        existing = {getattr(row, unique_attr) for row in db.query(model).filter_by(vendor_card_id=winner_id).all()}
+        for child in db.query(model).filter_by(vendor_card_id=loser_id).all():
+            key = getattr(child, unique_attr)
+            if key and key in existing:
+                db.delete(child)
+            else:
+                child.vendor_card_id = winner_id
 
-    # VendorMetricsSnapshot — check unique on vendor_card_id+snapshot_date
-    existing_dates = {
-        r[0] for r in db.query(VendorMetricsSnapshot.snapshot_date).filter_by(vendor_card_id=winner_id).all()
-    }
-    for vms in db.query(VendorMetricsSnapshot).filter_by(vendor_card_id=loser_id).all():
-        if vms.snapshot_date in existing_dates:
-            db.delete(vms)
-        else:
-            vms.vendor_card_id = winner_id
+    # Simple repoint (no unique constraint to honor)
+    for model in (Offer, StockListHash, VendorReview, ProspectContact, ActivityLog, RoutingAssignment, EnrichmentQueue):
+        _reassign_fk(db, model, "vendor_card_id", loser_id, winner_id)
 
-    # StockListHashes
-    db.query(StockListHash).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
-    # VendorContacts — check unique on vendor_card_id+email
-    existing_emails = {r[0] for r in db.query(VendorContact.email).filter_by(vendor_card_id=winner_id).all()}
-    for vc in db.query(VendorContact).filter_by(vendor_card_id=loser_id).all():
-        if vc.email and vc.email in existing_emails:
-            db.delete(vc)
-        else:
-            vc.vendor_card_id = winner_id
-
-    # VendorReviews
-    db.query(VendorReview).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
-    # ProspectContacts
-    db.query(ProspectContact).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
-    # ActivityLog
-    db.query(ActivityLog).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
-    # BuyerVendorStats — check unique on user_id+vendor_card_id
-    existing_bvs_users = {r[0] for r in db.query(BuyerVendorStats.user_id).filter_by(vendor_card_id=winner_id).all()}
-    for bvs in db.query(BuyerVendorStats).filter_by(vendor_card_id=loser_id).all():
-        if bvs.user_id in existing_bvs_users:
-            db.delete(bvs)
-        else:
-            bvs.vendor_card_id = winner_id
-
-    # RoutingAssignments
-    db.query(RoutingAssignment).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
-
-    # EnrichmentQueue
-    db.query(EnrichmentQueue).filter_by(vendor_card_id=loser_id).update(
-        {"vendor_card_id": winner_id}, synchronize_session=False
-    )
+    # Constrained repoint — move or delete on the winner's existing unique key
+    _move_or_delete(VendorMetricsSnapshot, "snapshot_date")  # unique: vendor_card_id+snapshot_date
+    _move_or_delete(VendorContact, "email")  # unique: vendor_card_id+email
+    _move_or_delete(BuyerVendorStats, "user_id")  # unique: user_id+vendor_card_id
 
     db.flush()
     db.delete(loser)
@@ -348,33 +315,31 @@ def phase2_company_dedup(db: Session, dry_run: bool):
 def _merge_companies(db: Session, winner: Company, loser: Company):
     """Merge loser company into winner."""
     # Copy missing fields
-    for field in [
-        "domain",
-        "website",
-        "industry",
-        "linkedin_url",
-        "legal_name",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "account_type",
-        "phone",
-        "credit_terms",
-        "tax_id",
-    ]:
-        if not getattr(winner, field) and getattr(loser, field):
-            setattr(winner, field, getattr(loser, field))
+    _copy_missing_fields(
+        winner,
+        loser,
+        [
+            "domain",
+            "website",
+            "industry",
+            "linkedin_url",
+            "legal_name",
+            "employee_size",
+            "hq_city",
+            "hq_state",
+            "hq_country",
+            "account_type",
+            "phone",
+            "credit_terms",
+            "tax_id",
+        ],
+    )
 
     # Update FK tables
-    db.query(CustomerSite).filter_by(company_id=loser.id).update({"company_id": winner.id}, synchronize_session=False)
-    db.query(Sighting).filter_by(source_company_id=loser.id).update(
-        {"source_company_id": winner.id}, synchronize_session=False
-    )
-    db.query(ActivityLog).filter_by(company_id=loser.id).update({"company_id": winner.id}, synchronize_session=False)
-    db.query(EnrichmentQueue).filter_by(company_id=loser.id).update(
-        {"company_id": winner.id}, synchronize_session=False
-    )
+    _reassign_fk(db, CustomerSite, "company_id", loser.id, winner.id)
+    _reassign_fk(db, Sighting, "source_company_id", loser.id, winner.id)
+    _reassign_fk(db, ActivityLog, "company_id", loser.id, winner.id)
+    _reassign_fk(db, EnrichmentQueue, "company_id", loser.id, winner.id)
 
     db.flush()
     db.delete(loser)
@@ -392,62 +357,22 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     log.info("--- Phase 3a: Phone Normalization ---")
     phone_updates = 0
 
-    # VendorContacts
-    contacts = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).all()
-    for c in contacts:
-        new_phone = normalize_phone_e164(c.phone)
-        if new_phone and new_phone != c.phone:
-            audit(
-                3,
-                "normalize_phone",
-                "vendor_contact",
-                {
-                    "id": c.id,
-                    "old": c.phone,
-                    "new": new_phone,
-                },
-            )
-            if not dry_run:
-                c.phone = new_phone
-            phone_updates += 1
-
-    # CustomerSites
-    sites = db.query(CustomerSite).filter(CustomerSite.contact_phone.isnot(None)).all()
-    for s in sites:
-        new_phone = normalize_phone_e164(s.contact_phone)
-        if new_phone and new_phone != s.contact_phone:
-            audit(
-                3,
-                "normalize_phone",
-                "customer_site",
-                {
-                    "id": s.id,
-                    "old": s.contact_phone,
-                    "new": new_phone,
-                },
-            )
-            if not dry_run:
-                s.contact_phone = new_phone
-            phone_updates += 1
-
-    # Companies
-    cos = db.query(Company).filter(Company.phone.isnot(None)).all()
-    for co in cos:
-        new_phone = normalize_phone_e164(co.phone)
-        if new_phone and new_phone != co.phone:
-            audit(
-                3,
-                "normalize_phone",
-                "company",
-                {
-                    "id": co.id,
-                    "old": co.phone,
-                    "new": new_phone,
-                },
-            )
-            if not dry_run:
-                co.phone = new_phone
-            phone_updates += 1
+    # (model, phone column, audit entity) for the scalar phone fields
+    phone_columns = [
+        (VendorContact, "phone", "vendor_contact"),
+        (CustomerSite, "contact_phone", "customer_site"),
+        (Company, "phone", "company"),
+    ]
+    for model, column, entity in phone_columns:
+        col = getattr(model, column)
+        for row in db.query(model).filter(col.isnot(None)).all():
+            old = getattr(row, column)
+            new_phone = normalize_phone_e164(old)
+            if new_phone and new_phone != old:
+                audit(3, "normalize_phone", entity, {"id": row.id, "old": old, "new": new_phone})
+                if not dry_run:
+                    setattr(row, column, new_phone)
+                phone_updates += 1
 
     # VendorCard.phones (JSON array)
     cards = db.query(VendorCard).filter(VendorCard.phones.isnot(None)).all()
@@ -483,48 +408,23 @@ def phase3_contact_cleanup(db: Session, dry_run: bool):
     log.info("--- Phase 3b: Contact Name Cleanup ---")
     name_updates = 0
 
-    contacts = db.query(VendorContact).filter(VendorContact.full_name.isnot(None)).all()
-    for c in contacts:
-        if not c.full_name:
-            continue
-        cleaned, is_person = clean_contact_name(c.full_name)
-        if cleaned != c.full_name:
-            audit(
-                3,
-                "clean_name",
-                "vendor_contact",
-                {
-                    "id": c.id,
-                    "old": c.full_name,
-                    "new": cleaned,
-                    "is_person": is_person,
-                },
-            )
-            if not dry_run:
-                c.full_name = cleaned
-            name_updates += 1
-
-    # ProspectContacts
-    prospects = db.query(ProspectContact).filter(ProspectContact.full_name.isnot(None)).all()
-    for p in prospects:
-        if not p.full_name:
-            continue
-        cleaned, is_person = clean_contact_name(p.full_name)
-        if cleaned != p.full_name:
-            audit(
-                3,
-                "clean_name",
-                "prospect_contact",
-                {
-                    "id": p.id,
-                    "old": p.full_name,
-                    "new": cleaned,
-                    "is_person": is_person,
-                },
-            )
-            if not dry_run:
-                p.full_name = cleaned
-            name_updates += 1
+    # (model, audit entity) for the full_name fields
+    name_models = [(VendorContact, "vendor_contact"), (ProspectContact, "prospect_contact")]
+    for model, entity in name_models:
+        for row in db.query(model).filter(model.full_name.isnot(None)).all():
+            if not row.full_name:
+                continue
+            cleaned, is_person = clean_contact_name(row.full_name)
+            if cleaned != row.full_name:
+                audit(
+                    3,
+                    "clean_name",
+                    entity,
+                    {"id": row.id, "old": row.full_name, "new": cleaned, "is_person": is_person},
+                )
+                if not dry_run:
+                    setattr(row, "full_name", cleaned)
+                name_updates += 1
 
     log.info(f"Name cleanups: {name_updates}")
 
@@ -595,114 +495,29 @@ def phase5_field_standardization(db: Session, dry_run: bool):
     country_fixes = 0
     state_fixes = 0
 
-    # Companies
-    for co in db.query(Company).all():
-        if co.hq_country:
-            new_country = normalize_country(co.hq_country)
-            if new_country and new_country != co.hq_country:
-                audit(
-                    5,
-                    "normalize_country",
-                    "company",
-                    {
-                        "id": co.id,
-                        "old": co.hq_country,
-                        "new": new_country,
-                    },
-                )
-                if not dry_run:
-                    co.hq_country = new_country
+    def normalize_field(row, column, normalizer, action, entity):
+        old = getattr(row, column, None)
+        if not old:
+            return False
+        new = normalizer(old)
+        if not new or new == old:
+            return False
+        audit(5, action, entity, {"id": row.id, "old": old, "new": new})
+        if not dry_run:
+            setattr(row, column, new)
+        return True
+
+    # (model, country column, state column, audit entity)
+    targets = [
+        (Company, "hq_country", "hq_state", "company"),
+        (CustomerSite, "country", "state", "customer_site"),
+        (VendorCard, "hq_country", "hq_state", "vendor_card"),
+    ]
+    for model, country_col, state_col, entity in targets:
+        for row in db.query(model).all():
+            if normalize_field(row, country_col, normalize_country, "normalize_country", entity):
                 country_fixes += 1
-
-        if co.hq_state:
-            new_state = normalize_us_state(co.hq_state)
-            if new_state and new_state != co.hq_state:
-                audit(
-                    5,
-                    "normalize_state",
-                    "company",
-                    {
-                        "id": co.id,
-                        "old": co.hq_state,
-                        "new": new_state,
-                    },
-                )
-                if not dry_run:
-                    co.hq_state = new_state
-                state_fixes += 1
-
-    # CustomerSites
-    for site in db.query(CustomerSite).all():
-        country = getattr(site, "country", None)
-        if country:
-            new_country = normalize_country(country)
-            if new_country and new_country != country:
-                audit(
-                    5,
-                    "normalize_country",
-                    "customer_site",
-                    {
-                        "id": site.id,
-                        "old": country,
-                        "new": new_country,
-                    },
-                )
-                if not dry_run:
-                    site.country = new_country
-                country_fixes += 1
-
-        state = getattr(site, "state", None)
-        if state:
-            new_state = normalize_us_state(state)
-            if new_state and new_state != state:
-                audit(
-                    5,
-                    "normalize_state",
-                    "customer_site",
-                    {
-                        "id": site.id,
-                        "old": state,
-                        "new": new_state,
-                    },
-                )
-                if not dry_run:
-                    site.state = new_state
-                state_fixes += 1
-
-    # VendorCards
-    for card in db.query(VendorCard).all():
-        if card.hq_country:
-            new_country = normalize_country(card.hq_country)
-            if new_country and new_country != card.hq_country:
-                audit(
-                    5,
-                    "normalize_country",
-                    "vendor_card",
-                    {
-                        "id": card.id,
-                        "old": card.hq_country,
-                        "new": new_country,
-                    },
-                )
-                if not dry_run:
-                    card.hq_country = new_country
-                country_fixes += 1
-
-        if card.hq_state:
-            new_state = normalize_us_state(card.hq_state)
-            if new_state and new_state != card.hq_state:
-                audit(
-                    5,
-                    "normalize_state",
-                    "vendor_card",
-                    {
-                        "id": card.id,
-                        "old": card.hq_state,
-                        "new": new_state,
-                    },
-                )
-                if not dry_run:
-                    card.hq_state = new_state
+            if normalize_field(row, state_col, normalize_us_state, "normalize_state", entity):
                 state_fixes += 1
 
     if not dry_run and (country_fixes or state_fixes):

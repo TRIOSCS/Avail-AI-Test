@@ -132,7 +132,7 @@ async def run(*, commit: bool, limit, max_web_calls: int, csv_path: str, db=None
             w.writeheader()
             w.writerows(rows)
         logger.info("BACKFILL: coverage CSV → {}", csv_path)
-        logger.info("BACKFILL SUMMARY: {}", {k: v for k, v in counts.items()})
+        logger.info("BACKFILL SUMMARY: {}", counts)
         return counts
     except Exception:
         db.rollback()

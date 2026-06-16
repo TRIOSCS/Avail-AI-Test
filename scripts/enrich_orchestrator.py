@@ -19,6 +19,7 @@ import json
 import os
 import sys
 import uuid
+from collections import defaultdict
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -49,8 +50,14 @@ from scripts.enrich_specs_batch import (
 )
 
 
-def _parse_parts(result_data: dict) -> list | None:
-    """Extract and parse 'parts' from batch result, handling JSON string edge case."""
+def _parse_parts(result_data) -> list | None:
+    """Extract a 'parts' list from a batch result entry.
+
+    Returns None if the entry is missing/malformed (not a dict, or 'parts' is neither a
+    list nor a JSON-encoded list), so callers can treat None as an error.
+    """
+    if not isinstance(result_data, dict):
+        return None
     parts = result_data.get("parts", [])
     if isinstance(parts, str):
         try:
@@ -99,6 +106,23 @@ def _fail_run(db, run: EnrichmentRun, error: str):
     run.status = "failed"
     run.error_message = error
     db.commit()
+
+
+def _resumable_run(db, phase: str) -> EnrichmentRun | None:
+    """Return an in-flight run for this phase (running/submitted), or None."""
+    return (
+        db.query(EnrichmentRun)
+        .filter(EnrichmentRun.phase == phase, EnrichmentRun.status.in_(["running", "submitted"]))
+        .first()
+    )
+
+
+def _phase_completed(db, phase: str) -> bool:
+    """Whether a completed run exists for this phase (used to skip on resume)."""
+    return (
+        db.query(EnrichmentRun).filter(EnrichmentRun.phase == phase, EnrichmentRun.status == "completed").first()
+        is not None
+    )
 
 
 # ── Phase 0: Reclassify coarse categories ────────────────────────────
@@ -201,12 +225,9 @@ async def phase_1_mine_sightings(db, dry_run: bool) -> dict:
             .all()
         )
 
-        card_sightings: dict[int, list] = {}
+        card_sightings: dict[int, list] = defaultdict(list)
         for s in sightings:
-            cid = s.material_card_id
-            if cid not in card_sightings:
-                card_sightings[cid] = []
-            card_sightings[cid].append((s.source_type, s.manufacturer, s.is_authorized, s.raw_data))
+            card_sightings[s.material_card_id].append((s.source_type, s.manufacturer, s.is_authorized, s.raw_data))
 
         for cid in card_sightings:
             card_sightings[cid].sort(key=lambda x: SOURCE_PRIORITY.get(x[0] or "", 0), reverse=True)
@@ -254,11 +275,7 @@ async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     logger.info("═══ Phase 2: AI batch enrichment (Sonnet) ═══")
 
     # Check for resumable run
-    existing = (
-        db.query(EnrichmentRun)
-        .filter(EnrichmentRun.phase == "phase_2_batch", EnrichmentRun.status.in_(["running", "submitted"]))
-        .first()
-    )
+    existing = _resumable_run(db, "phase_2_batch")
 
     if existing and existing.batch_ids:
         logger.info(f"Resuming Phase 2 run {existing.run_id} — polling batch results")
@@ -347,16 +364,12 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
             # Apply results
             for custom_id, result_data in results.items():
-                if result_data is None or not isinstance(result_data, dict):
-                    stats["errors"] += 1
-                    continue
-
-                card_meta_list = run.request_map.get(custom_id, [])
                 parts = _parse_parts(result_data)
                 if parts is None:
                     stats["errors"] += 1
                     continue
 
+                card_meta_list = run.request_map.get(custom_id, [])
                 for card_info, ai_part in zip(card_meta_list, parts):
                     stats["processed"] += 1
                     cat = ai_part.get("category", "other")
@@ -434,14 +447,7 @@ async def phase_3_spec_extraction(db, dry_run: bool) -> dict:
 
     for category in COMMODITY_SPECS:
         # Check for resumable run
-        existing = (
-            db.query(EnrichmentRun)
-            .filter(
-                EnrichmentRun.phase == f"phase_3_specs_{category}",
-                EnrichmentRun.status.in_(["running", "submitted"]),
-            )
-            .first()
-        )
+        existing = _resumable_run(db, f"phase_3_specs_{category}")
 
         if existing and existing.batch_ids:
             logger.info(f"  Resuming {category} spec extraction")
@@ -539,16 +545,12 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None or not isinstance(result_data, dict):
-                    stats["errors"] += 1
-                    continue
-
-                card_meta_list = run.request_map.get(custom_id, [])
                 parts = _parse_parts(result_data)
                 if parts is None:
                     stats["errors"] += 1
                     continue
 
+                card_meta_list = run.request_map.get(custom_id, [])
                 for card_info, ai_part in zip(card_meta_list, parts):
                     stats["processed"] += 1
                     summary = _specs_to_summary(category, ai_part)
@@ -589,11 +591,7 @@ async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
 
     logger.info("═══ Phase 4: Premium descriptions (Sonnet) ═══")
 
-    existing = (
-        db.query(EnrichmentRun)
-        .filter(EnrichmentRun.phase == "phase_4_descriptions", EnrichmentRun.status.in_(["running", "submitted"]))
-        .first()
-    )
+    existing = _resumable_run(db, "phase_4_descriptions")
 
     if existing and existing.batch_ids:
         logger.info("Resuming Phase 4")
@@ -738,16 +736,12 @@ async def _poll_and_apply_descriptions(db, run: EnrichmentRun, dry_run: bool) ->
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None or not isinstance(result_data, dict):
-                    stats["errors"] += 1
-                    continue
-
-                card_meta = run.request_map.get(custom_id, [])
                 parts = _parse_parts(result_data)
                 if parts is None:
                     stats["errors"] += 1
                     continue
 
+                card_meta = run.request_map.get(custom_id, [])
                 for card_info, ai_part in zip(card_meta, parts):
                     stats["processed"] += 1
                     desc = ai_part.get("description")
@@ -803,34 +797,19 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         logger.info(f"{'═' * 60}")
 
         # Phase 0: Reclassify coarse categories
-        if (
-            not resume
-            or not db.query(EnrichmentRun)
-            .filter(EnrichmentRun.phase == "phase_0_reclassify", EnrichmentRun.status == "completed")
-            .first()
-        ):
+        if not resume or not _phase_completed(db, "phase_0_reclassify"):
             await phase_0_reclassify(db, dry_run)
         else:
             logger.info("Phase 0 already complete — skipping")
 
         # Phase 1: Mine sighting data
-        if (
-            not resume
-            or not db.query(EnrichmentRun)
-            .filter(EnrichmentRun.phase == "phase_1_sightings", EnrichmentRun.status == "completed")
-            .first()
-        ):
+        if not resume or not _phase_completed(db, "phase_1_sightings"):
             await phase_1_mine_sightings(db, dry_run)
         else:
             logger.info("Phase 1 already complete — skipping")
 
         # Phase 2: AI batch enrichment (Sonnet)
-        if (
-            not resume
-            or not db.query(EnrichmentRun)
-            .filter(EnrichmentRun.phase == "phase_2_batch", EnrichmentRun.status == "completed")
-            .first()
-        ):
+        if not resume or not _phase_completed(db, "phase_2_batch"):
             await phase_2_batch_enrichment(db, dry_run)
         else:
             logger.info("Phase 2 already complete — skipping")
@@ -839,24 +818,14 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         await phase_3_spec_extraction(db, dry_run)
 
         # Phase 4: Premium descriptions
-        if (
-            not resume
-            or not db.query(EnrichmentRun)
-            .filter(EnrichmentRun.phase == "phase_4_descriptions", EnrichmentRun.status == "completed")
-            .first()
-        ):
+        if not resume or not _phase_completed(db, "phase_4_descriptions"):
             await phase_4_premium_descriptions(db, dry_run)
         else:
             logger.info("Phase 4 already complete — skipping")
 
         # Phase 5: Web search enrichment (lifecycle, RoHS, cross-refs)
         if not dry_run:
-            if (
-                not resume
-                or not db.query(EnrichmentRun)
-                .filter(EnrichmentRun.phase == "phase_5_web", EnrichmentRun.status == "completed")
-                .first()
-            ):
+            if not resume or not _phase_completed(db, "phase_5_web"):
                 from scripts.enrich_web_verified import run_web_enrichment
 
                 await run_web_enrichment(db, limit=5000, dry_run=False)

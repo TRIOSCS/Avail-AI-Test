@@ -213,38 +213,28 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    async def with_session(run):
+        """Open a session for the duration of one CLI command, then close it."""
+        db = SessionLocal()
+        try:
+            await run(db)
+        finally:
+            db.close()
+
+    async def run_submit_all(db):
+        for cat in COMMODITY_SPECS:
+            result = await submit_spec_extraction(db, cat, limit=args.limit)
+            logger.info(f"[{cat}] {result}")
+
+    async def run_submit_one(db):
+        result = await submit_spec_extraction(db, args.category, limit=args.limit)
+        logger.info(result)
+
+    async def run_apply(db):
+        result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
+        logger.info(result)
+
     if args.command == "submit":
-        if args.all:
-
-            async def submit_all():
-                db = SessionLocal()
-                try:
-                    for cat in COMMODITY_SPECS:
-                        result = await submit_spec_extraction(db, cat, limit=args.limit)
-                        logger.info(f"[{cat}] {result}")
-                finally:
-                    db.close()
-
-            asyncio.run(submit_all())
-        else:
-
-            async def submit_one():
-                db = SessionLocal()
-                try:
-                    result = await submit_spec_extraction(db, args.category, limit=args.limit)
-                    logger.info(result)
-                finally:
-                    db.close()
-
-            asyncio.run(submit_one())
+        asyncio.run(with_session(run_submit_all if args.all else run_submit_one))
     elif args.command == "apply":
-
-        async def apply():
-            db = SessionLocal()
-            try:
-                result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
-                logger.info(result)
-            finally:
-                db.close()
-
-        asyncio.run(apply())
+        asyncio.run(with_session(run_apply))

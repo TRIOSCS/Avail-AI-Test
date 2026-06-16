@@ -66,6 +66,17 @@ def find_merge_candidates(db) -> list[tuple[int, str, int, str]]:
     return candidates
 
 
+def _move_rows(db, model, suffix_id: int, base_id: int, dry_run: bool) -> int:
+    """Re-point ``model`` rows from the suffix card to the base card.
+
+    Returns the number of rows moved (in dry-run, the number that *would* move).
+    """
+    if dry_run:
+        return db.query(model).filter(model.material_card_id == suffix_id).count()
+    result = db.execute(update(model).where(model.material_card_id == suffix_id).values(material_card_id=base_id))
+    return result.rowcount
+
+
 def merge(dry_run: bool = False) -> dict:
     """Execute the merge of suffix MaterialCards into their base cards."""
     db = SessionLocal()
@@ -87,34 +98,9 @@ def merge(dry_run: bool = False) -> dict:
                 f"[{i}/{len(candidates)}] Merging '{suffix_mpn}' (id={suffix_id}) → '{base_mpn}' (id={base_id})"
             )
 
-            if not dry_run:
-                # Move sightings
-                result = db.execute(
-                    update(Sighting).where(Sighting.material_card_id == suffix_id).values(material_card_id=base_id)
-                )
-                sightings_count = result.rowcount
-            else:
-                sightings_count = db.query(Sighting).filter(Sighting.material_card_id == suffix_id).count()
-
-            if not dry_run:
-                # Move offers
-                result = db.execute(
-                    update(Offer).where(Offer.material_card_id == suffix_id).values(material_card_id=base_id)
-                )
-                offers_count = result.rowcount
-            else:
-                offers_count = db.query(Offer).filter(Offer.material_card_id == suffix_id).count()
-
-            if not dry_run:
-                # Move requirements
-                result = db.execute(
-                    update(Requirement)
-                    .where(Requirement.material_card_id == suffix_id)
-                    .values(material_card_id=base_id)
-                )
-                requirements_count = result.rowcount
-            else:
-                requirements_count = db.query(Requirement).filter(Requirement.material_card_id == suffix_id).count()
+            sightings_count = _move_rows(db, Sighting, suffix_id, base_id, dry_run)
+            offers_count = _move_rows(db, Offer, suffix_id, base_id, dry_run)
+            requirements_count = _move_rows(db, Requirement, suffix_id, base_id, dry_run)
 
             if not dry_run:
                 # Soft-delete the suffix card
