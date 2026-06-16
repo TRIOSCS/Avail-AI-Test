@@ -1,0 +1,15 @@
+{# Manufacturer-picker shared JS helpers.
+   Imported by: htmx/partials/manufacturers/search_results.html
+   Depends on: nothing (pure inline-JS string builders)
+
+   mfr_picker_apply(el_expr, value_expr) emits the body of an onclick handler that:
+   walks from `el_expr` up to the enclosing .mfr-dropdown / .sub-mfr-dropdown, finds the
+   sibling <input>, sets it to `value_expr` (via Alpine's _x_model if bound, else input
+   events), clears the dropdown and blurs the input. `el_expr` and `value_expr` are raw
+   JS expressions (e.g. 'this'/'el' and a JS variable or {{ ...|tojson }} literal).
+
+   The macro is whitespace-trimmed so callers control the exact surrounding bytes; the
+   emitted body is identical to the previously inlined handler logic. #}
+{% macro mfr_picker_apply(el_expr, value_expr) -%}
+var drop = {{ el_expr }}.closest('.mfr-dropdown') || {{ el_expr }}.closest('.sub-mfr-dropdown'); var cont = drop ? drop.closest('.relative, td, [class*=w-]') : null; var inp = cont ? cont.querySelector('input') : null; if(!inp){ console.warn('Mfr picker: target input not found'); return; } inp.value = {{ value_expr }}; if(inp._x_model){ inp._x_model.set({{ value_expr }}); } else { inp.dispatchEvent(new Event('input', {bubbles:true})); } inp.dispatchEvent(new Event('change', {bubbles:true})); if(drop) drop.textContent = ''; inp.blur();
+{%- endmacro %}

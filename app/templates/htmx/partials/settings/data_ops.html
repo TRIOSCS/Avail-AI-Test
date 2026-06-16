@@ -3,6 +3,7 @@
    Called by: htmx_views.py settings_data_ops endpoint.
    Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/settings/_macros.html" import merge_button -%}
 <div class="space-y-6">
 
   {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
@@ -53,24 +54,8 @@
         </div>
         <template x-if="!merged" x-cloak>
           <div class="flex gap-2">
-            <button data-loading-disable
-                    hx-post="/v2/partials/admin/vendor-merge"
-                    hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
-                    hx-target="closest div[x-data]"
-                    hx-swap="innerHTML"
-                    hx-confirm="Merge '{{ pair.name_b }}' into '{{ pair.name_a }}'?"
-                    class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-              Keep "{{ pair.name_a|truncate(20) }}"
-            </button>
-            <button data-loading-disable
-                    hx-post="/v2/partials/admin/vendor-merge"
-                    hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
-                    hx-target="closest div[x-data]"
-                    hx-swap="innerHTML"
-                    hx-confirm="Merge '{{ pair.name_a }}' into '{{ pair.name_b }}'?"
-                    class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-              Keep "{{ pair.name_b|truncate(20) }}"
-            </button>
+            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', 'closest div[x-data]', pair.id_a, pair.id_b, pair.name_a, pair.name_b) }}
+            {{ merge_button('            ', '/v2/partials/admin/vendor-merge', 'closest div[x-data]', pair.id_b, pair.id_a, pair.name_b, pair.name_a) }}
           </div>
         </template>
       </div>
@@ -102,24 +87,8 @@
           <p class="text-xs text-gray-500 mt-0.5">Score: {{ pair.score }}% match</p>
         </div>
         <div class="flex gap-2">
-          <button data-loading-disable
-                  hx-post="/v2/partials/admin/company-merge"
-                  hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
-                  hx-target="closest div.flex.items-center"
-                  hx-swap="innerHTML"
-                  hx-confirm="Merge '{{ pair.name_b }}' into '{{ pair.name_a }}'?"
-                  class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-            Keep "{{ pair.name_a|truncate(20) }}"
-          </button>
-          <button data-loading-disable
-                  hx-post="/v2/partials/admin/company-merge"
-                  hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
-                  hx-target="closest div.flex.items-center"
-                  hx-swap="innerHTML"
-                  hx-confirm="Merge '{{ pair.name_a }}' into '{{ pair.name_b }}'?"
-                  class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
-            Keep "{{ pair.name_b|truncate(20) }}"
-          </button>
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', pair.id_a, pair.id_b, pair.name_a, pair.name_b) }}
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', pair.id_b, pair.id_a, pair.name_b, pair.name_a) }}
         </div>
       </div>
       {% endfor %}

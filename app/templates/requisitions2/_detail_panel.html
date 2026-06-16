@@ -4,6 +4,7 @@
   Called by: GET /requisitions2/{id}/detail → HTMX swap into #rq2-detail
   Depends on: req dict, requirements list, user, Tailwind, Alpine.js
 #}
+{% from "requisitions2/_row_macros.html" import action_btn -%}
 {% set status_styles = {
   'active': 'bg-brand-100 text-brand-600',
   'draft': 'bg-gray-100 text-gray-600',
@@ -46,45 +47,20 @@
       <div x-show="open" x-cloak x-transition
            class="absolute right-0 top-full mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-10">
         {% if req.status != 'archived' %}
-        <button hx-post="/requisitions2/{{ req.id }}/action/archive"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                hx-confirm="Archive this requisition?"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Archive</button>
+        {{ action_btn(req.id, 'archive', 'Archive', 'text-gray-700 hover:bg-gray-50', confirm='Archive this requisition?') }}
         {% else %}
-        <button hx-post="/requisitions2/{{ req.id }}/action/activate"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Activate</button>
+        {{ action_btn(req.id, 'activate', 'Activate', 'text-gray-700 hover:bg-gray-50') }}
         {% endif %}
         {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
-        <button hx-post="/requisitions2/{{ req.id }}/action/claim"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Claim</button>
+        {{ action_btn(req.id, 'claim', 'Claim', 'text-gray-700 hover:bg-gray-50') }}
         {% elif req.claimed_by_id == user.id %}
-        <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Unclaim</button>
+        {{ action_btn(req.id, 'unclaim', 'Unclaim', 'text-gray-700 hover:bg-gray-50') }}
         {% endif %}
         {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
-        <button hx-post="/requisitions2/{{ req.id }}/action/won"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-50">Mark Won</button>
+        {{ action_btn(req.id, 'won', 'Mark Won', 'text-emerald-600 hover:bg-emerald-50') }}
         {% endif %}
         <div class="border-t border-gray-100 my-1"></div>
-        <button hx-post="/requisitions2/{{ req.id }}/action/clone"
-                hx-target="#rq2-table" hx-include="#rq2-filters"
-                data-loading-disable
-                @click="open = false"
-                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Clone</button>
+        {{ action_btn(req.id, 'clone', 'Clone', 'text-gray-700 hover:bg-gray-50') }}
       </div>
     </div>
   </div>

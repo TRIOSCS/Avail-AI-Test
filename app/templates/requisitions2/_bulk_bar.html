@@ -2,34 +2,13 @@
    Called by: page.html (include)
    Depends on: Alpine.js rq2 store (selectedIds)
 #}
+{% from "requisitions2/_row_macros.html" import bulk_action_form -%}
 <div x-show="selectedIds.size > 0" x-collapse x-cloak
      class="flex items-center gap-2 mt-1 text-sm text-gray-600">
 
   <span x-text="selectedIds.size + ' selected'"></span>
 
-  <form hx-post="/requisitions2/bulk/archive"
-        hx-target="#rq2-table"
-        hx-swap="innerHTML"
-        hx-target-error="#rq2-error"
-        class="inline">
-    <input type="hidden" name="ids" :value="getSelectedIdsString()">
-    <button type="submit"
-            data-loading-disable
-            class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-medium">
-      Archive
-    </button>
-  </form>
+  {{ bulk_action_form('archive', 'Archive') }}
 
-  <form hx-post="/requisitions2/bulk/activate"
-        hx-target="#rq2-table"
-        hx-swap="innerHTML"
-        hx-target-error="#rq2-error"
-        class="inline">
-    <input type="hidden" name="ids" :value="getSelectedIdsString()">
-    <button type="submit"
-            data-loading-disable
-            class="px-3 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-medium">
-      Activate
-    </button>
-  </form>
+  {{ bulk_action_form('activate', 'Activate') }}
 </div>
