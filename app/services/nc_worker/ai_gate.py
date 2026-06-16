@@ -126,10 +126,12 @@ async def process_ai_gate(db: Session):
     cooldown after API failures.
     """
     global _last_api_failure
-    if _last_api_failure and (time.monotonic() - _last_api_failure) < _GATE_COOLDOWN_SECONDS:
-        remaining = int(_GATE_COOLDOWN_SECONDS - (time.monotonic() - _last_api_failure))
-        logger.debug("AI gate: in cooldown after API failure ({}s remaining)", remaining)
-        return
+    if _last_api_failure:
+        elapsed = time.monotonic() - _last_api_failure
+        if elapsed < _GATE_COOLDOWN_SECONDS:
+            remaining = int(_GATE_COOLDOWN_SECONDS - elapsed)
+            logger.debug("AI gate: in cooldown after API failure ({}s remaining)", remaining)
+            return
 
     pending = (
         db.query(NcSearchQueue)

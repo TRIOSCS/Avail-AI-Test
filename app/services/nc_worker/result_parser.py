@@ -97,6 +97,49 @@ def parse_price_breaks(element) -> tuple[list[PriceBreak], str | None]:
         return [], None
 
 
+def _cell(cell_texts: list[str], index: int) -> str:
+    """Return the stripped text of cell ``index``, or '' if out of range."""
+    return cell_texts[index] if len(cell_texts) > index else ""
+
+
+def _build_sighting(
+    cell_texts: list[str],
+    *,
+    part_number: str,
+    vendor_name: str,
+    region: str,
+    inventory_type: str,
+    is_sponsor: bool,
+    price_breaks: list[PriceBreak],
+    currency: str | None,
+    supplier_url: str,
+) -> NcSighting:
+    """Assemble an NcSighting from a parsed row's cell texts plus the per-row extras.
+
+    The fixed-position cell mapping (mfr=3, date_code=4, …, qty=8) is shared by both the
+    region-container and flat parsers, so they only differ in how they derive the extras
+    passed in by keyword.
+    """
+    return NcSighting(
+        part_number=part_number,
+        manufacturer=_cell(cell_texts, 3),
+        date_code=_cell(cell_texts, 4),
+        description=_cell(cell_texts, 5),
+        uploaded_date=_cell(cell_texts, 6),
+        country=_cell(cell_texts, 7),
+        quantity=parse_quantity(_cell(cell_texts, 8)),
+        vendor_name=vendor_name,
+        region=region,
+        inventory_type=inventory_type,
+        is_sponsor=is_sponsor,
+        # Authorized distributor heuristic: has price breaks = authorized
+        is_authorized=len(price_breaks) > 0,
+        price_breaks=price_breaks,
+        currency=currency,
+        supplier_product_url=supplier_url,
+    )
+
+
 def parse_results_html(html: str) -> list[NcSighting]:
     """Parse NC results HTML into a list of NcSighting instances.
 
@@ -149,14 +192,6 @@ def parse_results_html(html: str) -> list[NcSighting]:
                     if not part_number or part_number.lower() in ("part number", ""):
                         continue
 
-                    manufacturer = cell_texts[3] if len(cell_texts) > 3 else ""
-                    date_code = cell_texts[4] if len(cell_texts) > 4 else ""
-                    description = cell_texts[5] if len(cell_texts) > 5 else ""
-                    uploaded_date = cell_texts[6] if len(cell_texts) > 6 else ""
-                    country = cell_texts[7] if len(cell_texts) > 7 else ""
-                    qty_text = cell_texts[8] if len(cell_texts) > 8 else ""
-                    vendor_name = cell_texts[12] if len(cell_texts) > 12 else ""
-
                     # Sponsor check (cell 13)
                     is_sponsor = bool(cell_texts[13].strip()) if len(cell_texts) > 13 else False
 
@@ -172,27 +207,19 @@ def parse_results_html(html: str) -> list[NcSighting]:
                         ncprc = row.select_one(".ncprc")
                     price_breaks, currency = parse_price_breaks(ncprc)
 
-                    # Authorized distributor heuristic: has price breaks = authorized
-                    is_authorized = len(price_breaks) > 0
-
-                    sighting = NcSighting(
-                        part_number=part_number,
-                        manufacturer=manufacturer,
-                        date_code=date_code,
-                        description=description,
-                        uploaded_date=uploaded_date,
-                        country=country,
-                        quantity=parse_quantity(qty_text),
-                        vendor_name=vendor_name,
-                        region=region,
-                        inventory_type=inventory_type,
-                        is_sponsor=is_sponsor,
-                        is_authorized=is_authorized,
-                        price_breaks=price_breaks,
-                        currency=currency,
-                        supplier_product_url=supplier_url,
+                    sightings.append(
+                        _build_sighting(
+                            cell_texts,
+                            part_number=part_number,
+                            vendor_name=_cell(cell_texts, 12),
+                            region=region,
+                            inventory_type=inventory_type,
+                            is_sponsor=is_sponsor,
+                            price_breaks=price_breaks,
+                            currency=currency,
+                            supplier_url=supplier_url,
+                        )
                     )
-                    sightings.append(sighting)
 
                 except (IndexError, AttributeError) as e:
                     logger.warning("NC parser: skipping malformed row: {}", e)
@@ -245,24 +272,19 @@ def _parse_flat(soup) -> list[NcSighting]:
             nctd = row.select_one(".nctd")
             supplier_url = nctd.get("data-url", "") if nctd else ""
 
-            sighting = NcSighting(
-                part_number=part_number,
-                manufacturer=cell_texts[3] if len(cell_texts) > 3 else "",
-                date_code=cell_texts[4] if len(cell_texts) > 4 else "",
-                description=cell_texts[5] if len(cell_texts) > 5 else "",
-                uploaded_date=cell_texts[6] if len(cell_texts) > 6 else "",
-                country=cell_texts[7] if len(cell_texts) > 7 else "",
-                quantity=parse_quantity(cell_texts[8] if len(cell_texts) > 8 else ""),
-                vendor_name=cell_texts[12] if len(cell_texts) > 12 else cell_texts[-1],
-                region=current_region,
-                inventory_type=current_inventory_type,
-                is_sponsor=bool(cell_texts[13].strip()) if len(cell_texts) > 13 else False,
-                is_authorized=len(price_breaks) > 0,
-                price_breaks=price_breaks,
-                currency=currency,
-                supplier_product_url=supplier_url,
+            sightings.append(
+                _build_sighting(
+                    cell_texts,
+                    part_number=part_number,
+                    vendor_name=cell_texts[12] if len(cell_texts) > 12 else cell_texts[-1],
+                    region=current_region,
+                    inventory_type=current_inventory_type,
+                    is_sponsor=bool(cell_texts[13].strip()) if len(cell_texts) > 13 else False,
+                    price_breaks=price_breaks,
+                    currency=currency,
+                    supplier_url=supplier_url,
+                )
             )
-            sightings.append(sighting)
         except (IndexError, AttributeError) as e:
             logger.warning("NC parser (flat): skipping row: {}", e)
             continue

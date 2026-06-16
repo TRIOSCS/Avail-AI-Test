@@ -66,10 +66,7 @@ def save_nc_sightings(
         existing_keys.add(dedup_key)
 
         # Extract best unit price from price breaks (lowest qty tier = unit price)
-        unit_price = None
-        currency = nc.currency
-        if nc.price_breaks:
-            unit_price = nc.price_breaks[0].price
+        unit_price = nc.price_breaks[0].price if nc.price_breaks else None
 
         # Build raw_data with all NC-specific fields
         raw_data = {
@@ -94,7 +91,7 @@ def save_nc_sightings(
             manufacturer=nc.manufacturer,
             qty_available=nc.quantity,
             unit_price=unit_price,
-            currency=currency,
+            currency=nc.currency,
             source_type="netcomponents",
             source_searched_at=now,
             is_authorized=nc.is_authorized,

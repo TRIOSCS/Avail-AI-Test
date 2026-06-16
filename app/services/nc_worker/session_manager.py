@@ -103,8 +103,7 @@ class NcSessionManager:
                 "https://www.netcomponents.com/client/isauthorized",
                 timeout=15,
             )
-            is_auth = resp.status_code == 200 and "true" in resp.text.lower()
-            return is_auth
+            return resp.status_code == 200 and "true" in resp.text.lower()
         except (requests.RequestException, OSError) as e:
             logger.warning("NC session health check failed: {}", e)
             return False
@@ -164,6 +163,8 @@ class NcSessionManager:
 
     async def login_browser(self) -> bool:
         """Log in via browser (fallback if HTTP login fails)."""
+        import asyncio
+
         from .human_behavior import HumanBehavior
 
         if not self.has_browser:
@@ -171,8 +172,6 @@ class NcSessionManager:
 
         try:
             await self._page.goto("https://www.netcomponents.com/#/account/login")
-            import asyncio
-
             await asyncio.sleep(3)
 
             acct_input = self._page.locator("#AccountNumber")
