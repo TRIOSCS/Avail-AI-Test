@@ -182,3 +182,38 @@ def test_connector_desc_loses_to_mpn_decode(db_session: Session):
     # mpn_decode (85) is not clobbered by connector_desc (84).
     assert facets["ddr_type"].value_text == "DDR4"
     assert facets["ddr_type"].source == "mpn_decode"
+
+
+def test_harvest_failure_does_not_propagate(db_session: Session, monkeypatch):
+    """A harvest failure is best-effort — caught + logged, never aborts the caller's
+    batch.
+
+    enrich_batch._process_one calls _apply_enrichment_to_card unguarded, so an exception
+    escaping the harvest would abort the whole batch and waste the rest of its work.
+    """
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="boom1", display_mpn="BOOM1", category=None)
+    db_session.add(card)
+    db_session.flush()
+
+    def _boom(*a, **k):
+        raise RuntimeError("harvest blew up")
+
+    # categorize_and_record is imported lazily inside _harvest_connector_enrichment from
+    # app.services.desc_extractor.writer — patch it at the source module.
+    monkeypatch.setattr("app.services.desc_extractor.writer.categorize_and_record", _boom)
+    enrichment_data = {
+        "manufacturer": "Samsung",
+        "confidence": 0.95,
+        "source": "digikey",
+        "category": None,
+        "description": "16GB DDR4-2666 REGISTERED ECC MEMORY",
+        "package_type": None,
+        "pin_count": None,
+        "rohs_status": None,
+        "datasheet_url": None,
+    }
+    # Must NOT raise — the failure is swallowed; the pre-harvest manufacturer apply survives.
+    enrichment._apply_enrichment_to_card(card, enrichment_data, db_session)
+    db_session.commit()
+    assert card.manufacturer  # set_manufacturer ran before the harvest blew up

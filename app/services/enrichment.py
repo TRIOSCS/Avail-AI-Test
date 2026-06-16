@@ -226,7 +226,15 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
     from app.config import settings
 
     if settings.connector_desc_harvest_enabled:
-        _harvest_connector_enrichment(card, enrichment, ladder_source, db)
+        # Best-effort: harvest is bonus (manufacturer/category/tags above are already
+        # applied). A failure here — e.g. record_spec/categorize_and_record raising
+        # IntegrityError/DataError, which re-raise out of their own per-card SAVEPOINTs
+        # (leaving the outer txn usable) — must NOT propagate and abort the caller's
+        # batch loop (enrich_batch._process_one is unguarded). Log this card and move on.
+        try:
+            _harvest_connector_enrichment(card, enrichment, ladder_source, db)
+        except Exception:
+            logger.exception("connector-desc harvest failed for card_id={}", card.id)
 
 
 # Connector structured fields → seeded facet keys. lifecycle_status is intentionally
