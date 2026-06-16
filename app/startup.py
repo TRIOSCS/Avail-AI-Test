@@ -9,22 +9,13 @@ Depends on: database.py (engine), models.py (Base)
 """
 
 import os
-import re as _re
 
 from loguru import logger
 from sqlalchemy import text as sqltext
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from .database import SessionLocal, engine
-
-_NONALNUM = _re.compile(r"[^a-z0-9]")
-
-
-def _norm_key(raw):
-    """Normalize a string for dedup comparison: lowercase, strip non-alphanumeric."""
-    if not raw:
-        return ""
-    return _NONALNUM.sub("", str(raw).strip().lower())
+from .utils.normalization import normalize_mpn_key as _norm_key
 
 
 def run_startup_migrations() -> None:
@@ -32,8 +23,6 @@ def run_startup_migrations() -> None:
 
     Safe to call on every app boot.
     """
-    import os
-
     # Warn if password login backdoor is active outside test mode
     if os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true" and not os.getenv("TESTING"):
         logger.critical(
@@ -83,7 +72,6 @@ def _create_default_user_if_env_set() -> None:
     """
     import base64
     import hashlib
-    import os
 
     email = os.environ.get("DEFAULT_USER_EMAIL")
     password = os.environ.get("DEFAULT_USER_PASSWORD")
@@ -126,8 +114,6 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     Called by: run_startup_migrations
     Depends on: User model, SessionLocal
     """
-    import os
-
     email = os.environ.get("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
     name = os.environ.get("SEED_ADMIN_NAME", "Vinod")
 
@@ -449,7 +435,7 @@ def _backfill_normalized_mpn() -> None:
                 ).fetchall()
                 if not rows:
                     break
-                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
                 if batch:
                     conn.execute(
                         sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
@@ -539,7 +525,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                 ).fetchall()
                 if not rows:
                     break
-                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
                 if batch:
                     conn.execute(
                         sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
@@ -571,7 +557,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                 ).fetchall()
                 if not rows:
                     break
-                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                batch = [{"nk": nk, "id": r[0]} for r in rows if (nk := _norm_key(r[1]))]
                 if batch:
                     conn.execute(
                         sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),

@@ -3,6 +3,19 @@
 from .vendor_utils import normalize_vendor_name as normalize_company_name
 
 
+def _auto_keep_rank(company: dict) -> tuple[int, int, int, int]:
+    """Sort key for the auto-keep heuristic (higher wins).
+
+    Priority: more sites → has account owner → is strategic → lower id (older record).
+    """
+    return (
+        company["site_count"],
+        int(company["has_owner"]),
+        int(company["is_strategic"]),
+        -company["id"],
+    )
+
+
 def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
     """Find potential duplicate companies using fuzzy name matching.
 
@@ -51,24 +64,13 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
                 }
             )
 
-    seen_pairs: set[tuple] = set()
     candidates = []
 
     for i, a in enumerate(enriched):
         for b in enriched[i + 1 :]:
-            pair_key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
-            if pair_key in seen_pairs:  # pragma: no cover
-                continue
-
             score = fuzz.token_sort_ratio(a["norm"], b["norm"])
             if score >= threshold:
-                seen_pairs.add(pair_key)
-
-                # Auto-keep heuristic
-                def _rank(x):
-                    return (x["site_count"], int(x["has_owner"]), int(x["is_strategic"]), -x["id"])
-
-                auto_keep = a if _rank(a) >= _rank(b) else b
+                auto_keep = a if _auto_keep_rank(a) >= _auto_keep_rank(b) else b
 
                 candidates.append(
                     {

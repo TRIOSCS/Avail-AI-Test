@@ -39,11 +39,8 @@ async def close_clients():
 
     Call from app lifespan shutdown.
     """
-    try:
-        await http.aclose()
-    except RuntimeError as e:
-        logger.debug("http client close RuntimeError (expected during shutdown): {}", e)
-    try:
-        await http_redirect.aclose()
-    except RuntimeError as e:
-        logger.debug("http_redirect client close RuntimeError (expected during shutdown): {}", e)
+    for name, client in (("http", http), ("http_redirect", http_redirect)):
+        try:
+            await client.aclose()
+        except RuntimeError as e:
+            logger.debug("{} client close RuntimeError (expected during shutdown): {}", name, e)

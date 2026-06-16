@@ -339,9 +339,7 @@ class Settings(BaseSettings):
         if isinstance(self.stock_sale_notify_emails, str):
             object.__setattr__(self, "stock_sale_notify_emails", _csv_to_list(self.stock_sale_notify_emails))
         if isinstance(self.own_domains, str):
-            object.__setattr__(
-                self, "own_domains", frozenset(d.strip().lower() for d in self.own_domains.split(",") if d.strip())
-            )
+            object.__setattr__(self, "own_domains", frozenset(_csv_to_list(self.own_domains)))
         return self
 
 

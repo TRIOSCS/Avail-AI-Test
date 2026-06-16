@@ -30,12 +30,9 @@ def tier_for_sighting(source_type: str | None, is_authorized: bool) -> str:
 
     src = (source_type or "").lower().strip()
 
-    if src in _AUTHORIZED_SOURCES:
-        # DigiKey/Mouser/Element14 results that aren't flagged authorized
-        # still come from reliable structured APIs
-        return "T2"
-
-    if src in _API_SOURCES:
+    # DigiKey/Mouser/Element14 results that aren't flagged authorized still come
+    # from reliable structured APIs, same trust level as the direct API connectors.
+    if src in _AUTHORIZED_SOURCES or src in _API_SOURCES:
         return "T2"
 
     if src in _MARKETPLACE_SOURCES:

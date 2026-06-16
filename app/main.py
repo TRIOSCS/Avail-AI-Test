@@ -31,13 +31,12 @@ async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
     from .startup import run_startup_migrations
 
-    # S1: Fail-fast on default secret key (skip in test mode)
     if not os.environ.get("TESTING"):
+        # S1: Fail-fast on default secret key (skip in test mode)
         if settings.secret_key == "change-me-in-production":
             raise RuntimeError("SESSION_SECRET or SECRET_KEY must be set. See .env.example for required variables.")
 
-    # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
-    if not os.environ.get("TESTING"):
+        # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
         missing = []
         if not settings.azure_client_id:
             missing.append("AZURE_CLIENT_ID")
@@ -421,8 +420,6 @@ async def api_version_middleware(request: Request, call_next):
 @app.get("/sw.js", include_in_schema=False)
 async def root_sw():
     """Serve self-destruct service worker at root scope to kill any old SW."""
-    from fastapi.responses import Response
-
     body = (
         "self.addEventListener('install',function(){self.skipWaiting()});\n"
         "self.addEventListener('activate',function(e){e.waitUntil("
@@ -504,8 +501,6 @@ async def health(
         payload["scheduler"] = scheduler_status
         payload["connectors_enabled"] = connectors_enabled
         payload["backup"] = backup_status
-
-    from fastapi.responses import JSONResponse
 
     return JSONResponse(
         content=payload,
