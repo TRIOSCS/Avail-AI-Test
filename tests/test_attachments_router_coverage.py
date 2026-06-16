@@ -18,6 +18,8 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.models import Requirement, RequirementAttachment, RequisitionAttachment
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -157,7 +159,15 @@ class TestUploadRequisitionAttachment:
             )
         assert resp.status_code == 401
 
-    def test_onedrive_returns_401(self, client, test_requisition):
+    @pytest.mark.parametrize(
+        ("onedrive_status", "expected_status"),
+        [
+            pytest.param(401, 401, id="onedrive_401"),
+            pytest.param(403, 403, id="onedrive_403"),
+            pytest.param(500, 502, id="onedrive_500_to_502"),
+        ],
+    )
+    def test_onedrive_error_maps_status(self, client, test_requisition, onedrive_status, expected_status):
         with (
             patch(
                 "app.scheduler.get_valid_token",
@@ -167,52 +177,14 @@ class TestUploadRequisitionAttachment:
             patch(
                 "app.http_client.http.put",
                 new_callable=AsyncMock,
-                return_value=_mock_resp(401),
+                return_value=_mock_resp(onedrive_status, text="server error"),
             ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments",
                 files={"file": ("doc.pdf", b"content", "application/pdf")},
             )
-        assert resp.status_code == 401
-
-    def test_onedrive_returns_403(self, client, test_requisition):
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.put",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(403),
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments",
-                files={"file": ("doc.pdf", b"content", "application/pdf")},
-            )
-        assert resp.status_code == 403
-
-    def test_onedrive_returns_502_on_server_error(self, client, test_requisition):
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.put",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(500, text="server error"),
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments",
-                files={"file": ("doc.pdf", b"content", "application/pdf")},
-            )
-        assert resp.status_code == 502
+        assert resp.status_code == expected_status
 
     def test_successful_upload_returns_201(self, client, test_requisition):
         onedrive_resp = {"id": "od-123", "webUrl": "https://od.example.com/doc.pdf"}
@@ -269,9 +241,17 @@ class TestAttachRequisitionFromOneDrive:
             )
         assert resp.status_code == 401
 
-    def test_graph_token_expired_returns_401(self, client, test_requisition):
+    @pytest.mark.parametrize(
+        ("graph_error_code", "expected_status"),
+        [
+            pytest.param("InvalidAuthenticationToken", 401, id="token_expired"),
+            pytest.param("accessDenied", 403, id="access_denied"),
+            pytest.param("itemNotFound", 404, id="item_not_found"),
+        ],
+    )
+    def test_graph_error_maps_status(self, client, test_requisition, graph_error_code, expected_status):
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "InvalidAuthenticationToken"}})
+        gc_mock.get_json = AsyncMock(return_value={"error": {"code": graph_error_code}})
         with (
             patch(
                 "app.scheduler.get_valid_token",
@@ -287,47 +267,7 @@ class TestAttachRequisitionFromOneDrive:
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
                 json={"item_id": "od-file-001"},
             )
-        assert resp.status_code == 401
-
-    def test_graph_access_denied_returns_403(self, client, test_requisition):
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "accessDenied"}})
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-file-001"},
-            )
-        assert resp.status_code == 403
-
-    def test_graph_item_not_found_returns_404(self, client, test_requisition):
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "itemNotFound"}})
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-file-001"},
-            )
-        assert resp.status_code == 404
+        assert resp.status_code == expected_status
 
     def test_successful_link_returns_attachment(self, client, test_requisition):
         gc_mock = MagicMock()
@@ -447,7 +387,15 @@ class TestUploadRequirementAttachment:
             )
         assert resp.status_code == 401
 
-    def test_onedrive_401_returns_401(self, client, db_session, test_requisition):
+    @pytest.mark.parametrize(
+        ("onedrive_status", "expected_status"),
+        [
+            pytest.param(401, 401, id="onedrive_401"),
+            pytest.param(403, 403, id="onedrive_403"),
+            pytest.param(500, 502, id="onedrive_500_to_502"),
+        ],
+    )
+    def test_onedrive_error_maps_status(self, client, db_session, test_requisition, onedrive_status, expected_status):
         requirement = _make_requirement(db_session, test_requisition.id)
         with (
             patch(
@@ -458,54 +406,14 @@ class TestUploadRequirementAttachment:
             patch(
                 "app.http_client.http.put",
                 new_callable=AsyncMock,
-                return_value=_mock_resp(401),
+                return_value=_mock_resp(onedrive_status, text="fail"),
             ),
         ):
             resp = client.post(
                 f"/api/requirements/{requirement.id}/attachments",
                 files={"file": ("spec.pdf", b"data", "application/pdf")},
             )
-        assert resp.status_code == 401
-
-    def test_onedrive_403_returns_403(self, client, db_session, test_requisition):
-        requirement = _make_requirement(db_session, test_requisition.id)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.put",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(403),
-            ),
-        ):
-            resp = client.post(
-                f"/api/requirements/{requirement.id}/attachments",
-                files={"file": ("spec.pdf", b"data", "application/pdf")},
-            )
-        assert resp.status_code == 403
-
-    def test_onedrive_502_on_server_error(self, client, db_session, test_requisition):
-        requirement = _make_requirement(db_session, test_requisition.id)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.put",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(500, text="fail"),
-            ),
-        ):
-            resp = client.post(
-                f"/api/requirements/{requirement.id}/attachments",
-                files={"file": ("spec.pdf", b"data", "application/pdf")},
-            )
-        assert resp.status_code == 502
+        assert resp.status_code == expected_status
 
     def test_successful_upload(self, client, db_session, test_requisition):
         requirement = _make_requirement(db_session, test_requisition.id)

@@ -12,23 +12,33 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
 
-def test_submit_ticket_json_success(client):
-    """POST /api/trouble-tickets/submit with JSON body creates a ticket."""
+
+def _post_json(client, body):
+    """POST a JSON ticket with _generate_ai_summary stubbed out."""
     with patch(
         "app.routers.error_reports._generate_ai_summary",
         new_callable=AsyncMock,
     ):
-        resp = client.post(
+        return client.post(
             "/api/trouble-tickets/submit",
-            json={
-                "description": "The search button is broken",
-                "page_url": "/v2/sightings",
-                "user_agent": "Mozilla/5.0",
-                "viewport": {"width": 1920, "height": 1080},
-            },
+            json=body,
             headers={"Content-Type": "application/json"},
         )
+
+
+def test_submit_ticket_json_success(client):
+    """POST /api/trouble-tickets/submit with JSON body creates a ticket."""
+    resp = _post_json(
+        client,
+        {
+            "description": "The search button is broken",
+            "page_url": "/v2/sightings",
+            "user_agent": "Mozilla/5.0",
+            "viewport": {"width": 1920, "height": 1080},
+        },
+    )
 
     assert resp.status_code == 200
     assert "submitted" in resp.text.lower() or "TT-" in resp.text
@@ -94,57 +104,40 @@ def test_submit_ticket_form_missing_message(client):
     assert resp.status_code == 422
 
 
-def test_submit_ticket_with_ua_and_viewport(client):
-    """JSON body with user_agent and viewport stores browser_info."""
-    with patch(
-        "app.routers.error_reports._generate_ai_summary",
-        new_callable=AsyncMock,
-    ):
-        resp = client.post(
-            "/api/trouble-tickets/submit",
-            json={
+@pytest.mark.parametrize(
+    "body",
+    [
+        pytest.param(
+            {
                 "description": "Modal won't close on mobile",
                 "user_agent": "iPhone Safari/16",
                 "viewport": {"width": 390, "height": 844},
             },
-            headers={"Content-Type": "application/json"},
-        )
-
-    assert resp.status_code == 200
-
-
-def test_submit_ticket_with_network_log_json(client):
-    """JSON body with network_log as JSON string is parsed correctly."""
-    with patch(
-        "app.routers.error_reports._generate_ai_summary",
-        new_callable=AsyncMock,
-    ):
-        resp = client.post(
-            "/api/trouble-tickets/submit",
-            json={
+            id="ua_and_viewport",
+        ),
+        pytest.param(
+            {
                 "description": "API call returned 500",
                 "network_log": '[{"url": "/api/x", "status": 500}]',
             },
-            headers={"Content-Type": "application/json"},
-        )
-
-    assert resp.status_code == 200
-
-
-def test_submit_ticket_with_invalid_network_log(client):
-    """Invalid JSON in network_log is gracefully ignored (not 500)."""
-    with patch(
-        "app.routers.error_reports._generate_ai_summary",
-        new_callable=AsyncMock,
-    ):
-        resp = client.post(
-            "/api/trouble-tickets/submit",
-            json={
+            id="network_log_json",
+        ),
+        pytest.param(
+            {
                 "description": "Some error happened",
                 "network_log": "not-valid-json{{",
             },
-            headers={"Content-Type": "application/json"},
-        )
+            id="invalid_network_log",
+        ),
+    ],
+)
+def test_submit_ticket_optional_fields_return_200(client, body):
+    """JSON bodies with optional browser_info / network_log fields create a ticket.
+
+    Covers user_agent+viewport storage, valid network_log parsing, and graceful handling
+    of invalid network_log JSON (must not 500).
+    """
+    resp = _post_json(client, body)
 
     assert resp.status_code == 200
 

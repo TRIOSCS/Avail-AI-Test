@@ -95,38 +95,73 @@ def _make_line_item(
     return item
 
 
+def _make_solicitation(db: Session, recipient_email: str = "buyer@test.com", contact_id: int = 1):
+    """Build a full company → user → list → line item → sent solicitation chain.
+
+    Returns (user, line_item, solicitation) so callers can assert on any of them.
+    """
+    company = _make_company(db)
+    user = _make_user(db)
+    el = _make_excess_list(db, company, user)
+    item = _make_line_item(db, el)
+    sol = BidSolicitation(
+        excess_line_item_id=item.id,
+        contact_id=contact_id,
+        sent_by=user.id,
+        recipient_email=recipient_email,
+        status="sent",
+    )
+    db.add(sol)
+    db.commit()
+    db.refresh(sol)
+    return user, item, sol
+
+
+def _mock_item(
+    part_number: str = "LM317T",
+    manufacturer="TI",
+    quantity: int = 100,
+    condition="New",
+    date_code="2024+",
+    asking_price=Decimal("1.50"),
+) -> MagicMock:
+    """A MagicMock line item shaped for the solicitation-HTML builders."""
+    item = MagicMock()
+    item.part_number = part_number
+    item.manufacturer = manufacturer
+    item.quantity = quantity
+    item.condition = condition
+    item.date_code = date_code
+    item.asking_price = asking_price
+    return item
+
+
 # ---------------------------------------------------------------------------
 # _parse_quantity edge cases
 # ---------------------------------------------------------------------------
 
 
 class TestParseQuantity:
-    def test_none_returns_none(self):
-        assert _parse_quantity(None) is None
-
-    def test_valid_int(self):
-        assert _parse_quantity("100") == 100
-
-    def test_valid_float_string(self):
-        assert _parse_quantity("100.5") == 100
-
-    def test_comma_separated(self):
-        assert _parse_quantity("1,000") == 1000
-
-    def test_zero_returns_none(self):
-        assert _parse_quantity("0") is None
-
-    def test_negative_returns_none(self):
-        assert _parse_quantity("-5") is None
-
-    def test_invalid_string(self):
-        assert _parse_quantity("abc") is None
-
-    def test_empty_string(self):
-        assert _parse_quantity("") is None
-
-    def test_whitespace(self):
-        assert _parse_quantity("  50  ") == 50
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param(None, None, id="none_returns_none"),
+            pytest.param("100", 100, id="valid_int"),
+            pytest.param("100.5", 100, id="valid_float_string"),
+            pytest.param("1,000", 1000, id="comma_separated"),
+            pytest.param("0", None, id="zero_returns_none"),
+            pytest.param("-5", None, id="negative_returns_none"),
+            pytest.param("abc", None, id="invalid_string"),
+            pytest.param("", None, id="empty_string"),
+            pytest.param("  50  ", 50, id="whitespace"),
+        ],
+    )
+    def test_parse_quantity(self, raw, expected):
+        result = _parse_quantity(raw)
+        if expected is None:
+            assert result is None
+        else:
+            assert result == expected
 
 
 # ---------------------------------------------------------------------------
@@ -135,35 +170,27 @@ class TestParseQuantity:
 
 
 class TestParsePrice:
-    def test_none_returns_none(self):
-        assert _parse_price(None) is None
-
-    def test_empty_string_returns_none(self):
-        assert _parse_price("") is None
-
-    def test_whitespace_returns_none(self):
-        assert _parse_price("   ") is None
-
-    def test_valid_decimal(self):
-        assert _parse_price("1.25") == Decimal("1.25")
-
-    def test_dollar_sign(self):
-        assert _parse_price("$1.25") == Decimal("1.25")
-
-    def test_comma_separated(self):
-        assert _parse_price("$1,234.56") == Decimal("1234.56")
-
-    def test_zero_is_valid(self):
-        assert _parse_price("0") == Decimal("0")
-
-    def test_negative_returns_none(self):
-        assert _parse_price("-1.50") is None
-
-    def test_invalid_string(self):
-        assert _parse_price("abc") is None
-
-    def test_integer_value(self):
-        assert _parse_price(5) == Decimal("5")
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param(None, None, id="none_returns_none"),
+            pytest.param("", None, id="empty_string_returns_none"),
+            pytest.param("   ", None, id="whitespace_returns_none"),
+            pytest.param("1.25", Decimal("1.25"), id="valid_decimal"),
+            pytest.param("$1.25", Decimal("1.25"), id="dollar_sign"),
+            pytest.param("$1,234.56", Decimal("1234.56"), id="comma_separated"),
+            pytest.param("0", Decimal("0"), id="zero_is_valid"),
+            pytest.param("-1.50", None, id="negative_returns_none"),
+            pytest.param("abc", None, id="invalid_string"),
+            pytest.param(5, Decimal("5"), id="integer_value"),
+        ],
+    )
+    def test_parse_price(self, raw, expected):
+        result = _parse_price(raw)
+        if expected is None:
+            assert result is None
+        else:
+            assert result == expected
 
 
 # ---------------------------------------------------------------------------
@@ -314,13 +341,7 @@ class TestBackfillNormalizedPartNumbers:
 
 class TestBuildSolicitationHtml:
     def test_with_recipient_name(self):
-        item = MagicMock()
-        item.part_number = "LM317T"
-        item.manufacturer = "TI"
-        item.quantity = 100
-        item.condition = "New"
-        item.date_code = "2024+"
-        item.asking_price = Decimal("1.50")
+        item = _mock_item()
 
         html = _build_solicitation_html(item, "Please send bid.", "John")
         assert "Hi John," in html
@@ -329,13 +350,7 @@ class TestBuildSolicitationHtml:
         assert "TI" in html
 
     def test_without_recipient_name(self):
-        item = MagicMock()
-        item.part_number = "LM317T"
-        item.manufacturer = None
-        item.quantity = 100
-        item.condition = None
-        item.date_code = None
-        item.asking_price = None
+        item = _mock_item(manufacturer=None, condition=None, date_code=None, asking_price=None)
 
         html = _build_solicitation_html(item, "Body text", None)
         assert "Hello," in html
@@ -349,16 +364,7 @@ class TestBuildSolicitationHtml:
 
 class TestBuildBundledSolicitationHtml:
     def test_multiple_items(self):
-        items = []
-        for pn in ["LM317T", "NE555P"]:
-            item = MagicMock()
-            item.part_number = pn
-            item.manufacturer = "TI"
-            item.quantity = 100
-            item.condition = "New"
-            item.date_code = "2024+"
-            item.asking_price = Decimal("1.50")
-            items.append(item)
+        items = [_mock_item(part_number=pn) for pn in ["LM317T", "NE555P"]]
 
         html = _build_bundled_solicitation_html(items, "Please review.", "Jane")
         assert "Hi Jane," in html
@@ -366,13 +372,9 @@ class TestBuildBundledSolicitationHtml:
         assert "NE555P" in html
 
     def test_without_recipient_name(self):
-        item = MagicMock()
-        item.part_number = "ABC123"
-        item.manufacturer = None
-        item.quantity = 50
-        item.condition = None
-        item.date_code = None
-        item.asking_price = None
+        item = _mock_item(
+            part_number="ABC123", manufacturer=None, quantity=50, condition=None, date_code=None, asking_price=None
+        )
 
         html = _build_bundled_solicitation_html([item], "Body", None)
         assert "Hello," in html
@@ -435,21 +437,7 @@ class TestFindSentMessage:
 
 class TestParseBidResponse:
     def test_creates_bid_from_solicitation(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        solicitation = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(solicitation)
-        db_session.commit()
-        db_session.refresh(solicitation)
+        _user, _item, solicitation = _make_solicitation(db_session)
 
         bid = parse_bid_response(
             db_session,
@@ -482,21 +470,7 @@ class TestParseBidResponse:
     def test_missing_line_item_raises_404(self, db_session: Session):
         from unittest.mock import patch as mpatch
 
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        eli = _make_line_item(db_session, el)
-
-        solicitation = BidSolicitation(
-            excess_line_item_id=eli.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(solicitation)
-        db_session.commit()
-        db_session.refresh(solicitation)
+        _user, _item, solicitation = _make_solicitation(db_session)
 
         original_get = db_session.get
 
@@ -523,22 +497,9 @@ class TestParseBidResponse:
 
 class TestListSolicitations:
     def test_returns_solicitations_for_list(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
+        _user, item, _sol = _make_solicitation(db_session)
 
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-
-        result = list_solicitations(db_session, el.id)
+        result = list_solicitations(db_session, item.excess_list_id)
         assert len(result) == 1
 
     def test_filters_by_item_id(self, db_session: Session):
@@ -605,21 +566,7 @@ class TestCallClaudeBidParse:
 class TestParseBidFromEmail:
     @pytest.mark.asyncio
     async def test_successful_parse(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
+        _user, _item, sol = _make_solicitation(db_session)
 
         claude_response = '{"unit_price": 1.25, "quantity_wanted": 50, "lead_time_days": 5}'
         with patch(
@@ -635,21 +582,7 @@ class TestParseBidFromEmail:
 
     @pytest.mark.asyncio
     async def test_declined_bid(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
+        _user, _item, sol = _make_solicitation(db_session)
 
         with patch(
             "app.services.excess_service._call_claude_bid_parse",
@@ -664,21 +597,7 @@ class TestParseBidFromEmail:
 
     @pytest.mark.asyncio
     async def test_invalid_json(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
+        _user, _item, sol = _make_solicitation(db_session)
 
         with patch(
             "app.services.excess_service._call_claude_bid_parse",
@@ -691,21 +610,7 @@ class TestParseBidFromEmail:
 
     @pytest.mark.asyncio
     async def test_incomplete_data(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
+        _user, _item, sol = _make_solicitation(db_session)
 
         with patch(
             "app.services.excess_service._call_claude_bid_parse",
@@ -723,21 +628,7 @@ class TestParseBidFromEmail:
 
     @pytest.mark.asyncio
     async def test_strips_markdown_fences(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item = _make_line_item(db_session, el)
-
-        sol = BidSolicitation(
-            excess_line_item_id=item.id,
-            contact_id=1,
-            sent_by=user.id,
-            recipient_email="buyer@test.com",
-            status="sent",
-        )
-        db_session.add(sol)
-        db_session.commit()
-        db_session.refresh(sol)
+        _user, _item, sol = _make_solicitation(db_session)
 
         claude_response = '```json\n{"unit_price": 2.00, "quantity_wanted": 100}\n```'
         with patch(
@@ -760,23 +651,15 @@ class TestCreateProactiveMatchesForExcess:
         result = create_proactive_matches_for_excess(db_session, el.id, user_id=user.id)
         assert result["matches_created"] == 0
 
-    def test_closed_status_processes(self, db_session: Session):
+    @pytest.mark.parametrize("status", ["closed", "expired"])
+    def test_archived_status_processes(self, db_session: Session, status):
         company = _make_company(db_session)
         user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user, status="closed")
+        el = _make_excess_list(db_session, company, user, status=status)
         _make_line_item(db_session, el, part_number="NONEXISTENT123")
 
         result = create_proactive_matches_for_excess(db_session, el.id, user_id=user.id)
         # No matching requirements, so 0 matches
-        assert result["matches_created"] == 0
-
-    def test_expired_status_processes(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user, status="expired")
-        _make_line_item(db_session, el, part_number="NONEXISTENT123")
-
-        result = create_proactive_matches_for_excess(db_session, el.id, user_id=user.id)
         assert result["matches_created"] == 0
 
     def test_empty_part_number_skipped(self, db_session: Session):

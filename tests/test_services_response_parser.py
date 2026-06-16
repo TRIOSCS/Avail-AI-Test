@@ -28,27 +28,29 @@ from app.services.response_parser import (
 
 
 class TestConfidenceThresholds:
-    def test_auto_apply_high_confidence(self):
-        assert should_auto_apply({"confidence": 0.9}) is True
+    @pytest.mark.parametrize(
+        ("confidence", "expected"),
+        [
+            pytest.param(0.9, True, id="high_confidence"),
+            pytest.param(CONFIDENCE_AUTO, True, id="exact_threshold"),
+            pytest.param(0.79, False, id="below_threshold"),
+        ],
+    )
+    def test_auto_apply(self, confidence, expected):
+        assert should_auto_apply({"confidence": confidence}) is expected
 
-    def test_auto_apply_exact_threshold(self):
-        assert should_auto_apply({"confidence": CONFIDENCE_AUTO}) is True
-
-    def test_auto_apply_below_threshold(self):
-        assert should_auto_apply({"confidence": 0.79}) is False
-
-    def test_flag_review_in_range(self):
-        assert should_flag_review({"confidence": 0.6}) is True
-
-    def test_flag_review_at_lower_bound(self):
-        assert should_flag_review({"confidence": CONFIDENCE_REVIEW}) is True
-
-    def test_flag_review_below_range(self):
-        assert should_flag_review({"confidence": 0.4}) is False
-
-    def test_flag_review_above_range(self):
-        """≥0.8 should auto-apply, not flag for review."""
-        assert should_flag_review({"confidence": 0.85}) is False
+    @pytest.mark.parametrize(
+        ("confidence", "expected"),
+        [
+            pytest.param(0.6, True, id="in_range"),
+            pytest.param(CONFIDENCE_REVIEW, True, id="at_lower_bound"),
+            pytest.param(0.4, False, id="below_range"),
+            # ≥0.8 should auto-apply, not flag for review.
+            pytest.param(0.85, False, id="above_range"),
+        ],
+    )
+    def test_flag_review(self, confidence, expected):
+        assert should_flag_review({"confidence": confidence}) is expected
 
     def test_missing_confidence(self):
         assert should_auto_apply({}) is False
@@ -192,6 +194,34 @@ class TestCrossValidate:
 # ── Full parse flow (mocked Claude) ────────────────────────────────
 
 
+async def _run_retry_flow(first_result, retry_result, *, email_body, vendor_name):
+    """Drive parse_vendor_response with routed_structured -> first_result and the
+    extended- thinking retry (claude_structured) -> retry_result.
+
+    Returns (result, mock_retry).
+    """
+    from app.services.response_parser import parse_vendor_response
+
+    with (
+        patch(
+            "app.services.response_parser.routed_structured",
+            new_callable=AsyncMock,
+            return_value=first_result,
+        ),
+        patch(
+            "app.services.response_parser.claude_structured",
+            new_callable=AsyncMock,
+            return_value=retry_result,
+        ) as mock_retry,
+    ):
+        result = await parse_vendor_response(
+            email_body=email_body,
+            email_subject="RE: RFQ",
+            vendor_name=vendor_name,
+        )
+    return result, mock_retry
+
+
 class TestParseVendorResponse:
     @pytest.mark.asyncio
     async def test_parse_with_mock_claude(self):
@@ -308,8 +338,6 @@ class TestParseVendorResponse:
     async def test_extended_thinking_retry_upgrades_confidence(self):
         """Ambiguous confidence triggers retry with smart model; higher confidence
         wins."""
-        from app.services.response_parser import parse_vendor_response
-
         first_result = {
             "overall_sentiment": "neutral",
             "overall_classification": "clarification_needed",
@@ -323,23 +351,9 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.75}],
         }
 
-        with (
-            patch(
-                "app.services.response_parser.routed_structured",
-                new_callable=AsyncMock,
-                return_value=first_result,
-            ),
-            patch(
-                "app.services.response_parser.claude_structured",
-                new_callable=AsyncMock,
-                return_value=retry_result,
-            ) as mock_retry,
-        ):
-            result = await parse_vendor_response(
-                email_body="We can offer LM317T",
-                email_subject="RE: RFQ",
-                vendor_name="Arrow",
-            )
+        result, mock_retry = await _run_retry_flow(
+            first_result, retry_result, email_body="We can offer LM317T", vendor_name="Arrow"
+        )
 
         mock_retry.assert_called_once()  # Extended thinking retry called
         assert result["confidence"] == 0.88  # Retry result used
@@ -348,8 +362,6 @@ class TestParseVendorResponse:
     @pytest.mark.asyncio
     async def test_extended_thinking_retry_keeps_original_if_no_improvement(self):
         """Retry that doesn't improve confidence keeps original result."""
-        from app.services.response_parser import parse_vendor_response
-
         first_result = {
             "overall_sentiment": "neutral",
             "overall_classification": "clarification_needed",
@@ -363,23 +375,9 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "X", "status": "follow_up"}],
         }
 
-        with (
-            patch(
-                "app.services.response_parser.routed_structured",
-                new_callable=AsyncMock,
-                return_value=first_result,
-            ),
-            patch(
-                "app.services.response_parser.claude_structured",
-                new_callable=AsyncMock,
-                return_value=retry_result,
-            ) as mock_retry,
-        ):
-            result = await parse_vendor_response(
-                email_body="Unclear response",
-                email_subject="RE: RFQ",
-                vendor_name="Vendor",
-            )
+        result, mock_retry = await _run_retry_flow(
+            first_result, retry_result, email_body="Unclear response", vendor_name="Vendor"
+        )
 
         mock_retry.assert_called_once()
         assert result["confidence"] == 0.65  # Original kept
@@ -387,8 +385,6 @@ class TestParseVendorResponse:
     @pytest.mark.asyncio
     async def test_extended_thinking_retry_returns_none(self):
         """Retry returning None keeps original result."""
-        from app.services.response_parser import parse_vendor_response
-
         first_result = {
             "overall_sentiment": "neutral",
             "overall_classification": "clarification_needed",
@@ -396,23 +392,7 @@ class TestParseVendorResponse:
             "parts": [],
         }
 
-        with (
-            patch(
-                "app.services.response_parser.routed_structured",
-                new_callable=AsyncMock,
-                return_value=first_result,
-            ),
-            patch(
-                "app.services.response_parser.claude_structured",
-                new_callable=AsyncMock,
-                return_value=None,
-            ) as mock_retry,
-        ):
-            result = await parse_vendor_response(
-                email_body="Hmm",
-                email_subject="RE: RFQ",
-                vendor_name="V",
-            )
+        result, mock_retry = await _run_retry_flow(first_result, None, email_body="Hmm", vendor_name="V")
 
         mock_retry.assert_called_once()
         assert result["confidence"] == 0.6

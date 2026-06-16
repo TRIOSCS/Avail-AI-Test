@@ -14,95 +14,53 @@ from unittest.mock import patch
 from loguru import logger
 
 
+def _critical_msgs_from_startup(env: dict[str, str], *, remove_keys: tuple[str, ...] = ()) -> list[str]:
+    """Run startup under ``env`` (with ``remove_keys`` popped from os.environ) and
+    return the captured CRITICAL log lines mentioning ENABLE_PASSWORD_LOGIN.
+
+    Startup attempts DB operations after the guard check, so the DB error is swallowed —
+    only the log is under test.
+    """
+    messages = []
+    handler_id = logger.add(messages.append, level="CRITICAL")
+    saved = {}
+    try:
+        with patch.dict(os.environ, env, clear=False):
+            for key in remove_keys:
+                saved[key] = os.environ.pop(key, None)
+            try:
+                from app.startup import run_startup_migrations
+
+                try:
+                    run_startup_migrations()
+                except Exception:
+                    pass  # DB not available in test — that's fine
+            finally:
+                for key, value in saved.items():
+                    if value is not None:
+                        os.environ[key] = value
+        return [m for m in messages if "ENABLE_PASSWORD_LOGIN is active" in str(m)]
+    finally:
+        logger.remove(handler_id)
+
+
 class TestStartupPasswordWarning:
     """Startup should log CRITICAL when ENABLE_PASSWORD_LOGIN=true in non-test mode."""
 
     def test_critical_warning_when_password_login_enabled_no_testing(self):
         """ENABLE_PASSWORD_LOGIN=true + no TESTING → CRITICAL log."""
-        messages = []
-
-        def sink(message):
-            messages.append(message)
-
-        handler_id = logger.add(sink, level="CRITICAL")
-        try:
-            env = {
-                "ENABLE_PASSWORD_LOGIN": "true",
-            }
-            # Remove TESTING from env temporarily
-            with patch.dict(os.environ, env, clear=False):
-                old_testing = os.environ.pop("TESTING", None)
-                try:
-                    from app.startup import run_startup_migrations
-
-                    # The function will try DB operations after the check, so we
-                    # only need to verify the log; catch the DB error.
-                    try:
-                        run_startup_migrations()
-                    except Exception:
-                        pass  # DB not available in test — that's fine
-
-                    critical_msgs = [m for m in messages if "ENABLE_PASSWORD_LOGIN is active" in str(m)]
-                    assert len(critical_msgs) >= 1, (
-                        f"Expected CRITICAL log about ENABLE_PASSWORD_LOGIN, got: {messages}"
-                    )
-                finally:
-                    if old_testing is not None:
-                        os.environ["TESTING"] = old_testing
-        finally:
-            logger.remove(handler_id)
+        critical_msgs = _critical_msgs_from_startup({"ENABLE_PASSWORD_LOGIN": "true"}, remove_keys=("TESTING",))
+        assert len(critical_msgs) >= 1, f"Expected CRITICAL log about ENABLE_PASSWORD_LOGIN, got: {critical_msgs}"
 
     def test_no_warning_when_testing_is_set(self):
         """ENABLE_PASSWORD_LOGIN=true + TESTING=1 → no CRITICAL log."""
-        messages = []
-
-        def sink(message):
-            messages.append(message)
-
-        handler_id = logger.add(sink, level="CRITICAL")
-        try:
-            env = {
-                "ENABLE_PASSWORD_LOGIN": "true",
-                "TESTING": "1",
-            }
-            with patch.dict(os.environ, env, clear=False):
-                from app.startup import run_startup_migrations
-
-                try:
-                    run_startup_migrations()
-                except Exception:
-                    pass
-
-                critical_msgs = [m for m in messages if "ENABLE_PASSWORD_LOGIN is active" in str(m)]
-                assert len(critical_msgs) == 0, f"Should NOT log CRITICAL when TESTING is set, got: {critical_msgs}"
-        finally:
-            logger.remove(handler_id)
+        critical_msgs = _critical_msgs_from_startup({"ENABLE_PASSWORD_LOGIN": "true", "TESTING": "1"})
+        assert len(critical_msgs) == 0, f"Should NOT log CRITICAL when TESTING is set, got: {critical_msgs}"
 
     def test_no_warning_when_password_login_disabled(self):
         """ENABLE_PASSWORD_LOGIN=false → no CRITICAL log."""
-        messages = []
-
-        def sink(message):
-            messages.append(message)
-
-        handler_id = logger.add(sink, level="CRITICAL")
-        try:
-            env = {
-                "ENABLE_PASSWORD_LOGIN": "false",
-                "TESTING": "1",
-            }
-            with patch.dict(os.environ, env, clear=False):
-                from app.startup import run_startup_migrations
-
-                try:
-                    run_startup_migrations()
-                except Exception:
-                    pass
-
-                critical_msgs = [m for m in messages if "ENABLE_PASSWORD_LOGIN is active" in str(m)]
-                assert len(critical_msgs) == 0
-        finally:
-            logger.remove(handler_id)
+        critical_msgs = _critical_msgs_from_startup({"ENABLE_PASSWORD_LOGIN": "false", "TESTING": "1"})
+        assert len(critical_msgs) == 0
 
 
 class TestLoginFormRateLimit:

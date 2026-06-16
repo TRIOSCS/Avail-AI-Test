@@ -10,6 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -86,28 +87,52 @@ def _make_fake_stream(tmp_path: str):
     return _FakeStream(tmp_path)
 
 
+def _run_chunked_apply_with_jsonl(mock_http, jsonl_text: str):
+    """Wire mock_http with an ended-batch status + a fake stream serving jsonl_text,
+    then run apply_batch_results_chunked and return its result.
+
+    Encapsulates the temp-file + status-mock boilerplate shared by the JSONL tests.
+    """
+    tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+    tmp.write(jsonl_text)
+    tmp.close()
+    tmp_path = tmp.name
+
+    status_resp = MagicMock()
+    status_resp.status_code = 200
+    status_resp.json.return_value = {
+        "processing_status": "ended",
+        "results_url": "https://api.anthropic.com/results/batch_123",
+    }
+    mock_http.get = AsyncMock(return_value=status_resp)
+    mock_http.stream = _make_fake_stream(tmp_path)
+
+    try:
+        return _run(apply_batch_results_chunked("batch_123"))
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+
 # ── _apply_chunked_batch ─────────────────────────────────────────────
 
 
 class TestApplyChunkedBatch:
     """Tests for _apply_chunked_batch — DB-level tag application."""
 
-    def test_empty_classifications(self, db_session: Session):
-        """Empty classifications list returns (0, 0)."""
-        matched, unknown = _apply_chunked_batch([], db_session)
-        assert matched == 0
-        assert unknown == 0
-
-    def test_classifications_with_no_mpn(self, db_session: Session):
-        """Classifications without MPN key return (0, 0)."""
-        classifications = [{"manufacturer": "TI", "category": "MCU"}]
-        matched, unknown = _apply_chunked_batch(classifications, db_session)
-        assert matched == 0
-        assert unknown == 0
-
-    def test_classifications_with_empty_mpn(self, db_session: Session):
-        """Classifications with empty MPN string return (0, 0)."""
-        classifications = [{"mpn": "", "manufacturer": "TI", "category": "MCU"}]
+    @pytest.mark.parametrize(
+        "classifications",
+        [
+            [],
+            [{"manufacturer": "TI", "category": "MCU"}],
+            [{"mpn": "", "manufacturer": "TI", "category": "MCU"}],
+        ],
+        ids=["empty_classifications", "no_mpn_key", "empty_mpn_string"],
+    )
+    def test_no_op_classifications_return_zero(self, classifications, db_session: Session):
+        """Empty list, missing MPN key, or empty MPN string all return (0, 0)."""
         matched, unknown = _apply_chunked_batch(classifications, db_session)
         assert matched == 0
         assert unknown == 0
@@ -135,23 +160,21 @@ class TestApplyChunkedBatch:
         assert mt.source == "ai_classified"
         assert mt.confidence == 0.92  # default when no model_confidence
 
-    def test_unknown_manufacturer_counted_as_unknown(self, db_session: Session):
-        """Unknown manufacturer is skipped (v2 schema: no junk tags)."""
-        _make_card(db_session, "CUSTOM-PART-001")
+    @pytest.mark.parametrize(
+        ("mpn", "manufacturer"),
+        [
+            ("CUSTOM-PART-001", "Unknown"),
+            ("CUSTOM-PART-002", None),
+        ],
+        ids=["unknown_manufacturer", "null_manufacturer"],
+    )
+    def test_unknown_manufacturer_counted_as_unknown(self, mpn, manufacturer, db_session: Session):
+        """Unknown or null manufacturer is skipped (v2 schema: no junk tags) and counted
+        as unknown."""
+        _make_card(db_session, mpn)
         db_session.commit()
 
-        classifications = [{"mpn": "CUSTOM-PART-001", "manufacturer": "Unknown", "category": "Miscellaneous"}]
-        matched, unknown = _apply_chunked_batch(classifications, db_session)
-
-        assert matched == 0
-        assert unknown == 1
-
-    def test_null_manufacturer_counted_as_unknown(self, db_session: Session):
-        """Null/empty manufacturer is counted as unknown."""
-        _make_card(db_session, "CUSTOM-PART-002")
-        db_session.commit()
-
-        classifications = [{"mpn": "CUSTOM-PART-002", "manufacturer": None, "category": "Miscellaneous"}]
+        classifications = [{"mpn": mpn, "manufacturer": manufacturer, "category": "Miscellaneous"}]
         matched, unknown = _apply_chunked_batch(classifications, db_session)
 
         assert matched == 0
@@ -226,29 +249,25 @@ class TestApplyChunkedBatch:
         mt = db_session.query(MaterialTag).filter_by(material_card_id=card.id, tag_id=brand_tag.id).first()
         assert mt.confidence == 0.97
 
-    def test_model_confidence_clamped_to_090(self, db_session: Session):
-        """Model confidence below 0.90 is clamped to 0.90."""
-        _make_card(db_session, "XYZ123")
+    @pytest.mark.parametrize(
+        ("mpn", "manufacturer", "category", "confidence", "expected"),
+        [
+            ("XYZ123", "Some Corp", "Logic ICs", 0.85, 0.90),
+            ("ABC456", "Test Corp", "Resistors", 1.5, 1.0),
+        ],
+        ids=["clamped_to_090", "clamped_to_100"],
+    )
+    def test_model_confidence_clamped(self, mpn, manufacturer, category, confidence, expected, db_session: Session):
+        """Model confidence below 0.90 is clamped up; above 1.0 is clamped down."""
+        _make_card(db_session, mpn)
         db_session.commit()
 
-        classifications = [{"mpn": "XYZ123", "manufacturer": "Some Corp", "category": "Logic ICs", "confidence": 0.85}]
+        classifications = [{"mpn": mpn, "manufacturer": manufacturer, "category": category, "confidence": confidence}]
         _apply_chunked_batch(classifications, db_session)
 
-        brand_tag = db_session.query(Tag).filter_by(tag_type="brand", name="Some Corp").first()
+        brand_tag = db_session.query(Tag).filter_by(tag_type="brand", name=manufacturer).first()
         mt = db_session.query(MaterialTag).join(Tag).filter(Tag.id == brand_tag.id).first()
-        assert mt.confidence == 0.90
-
-    def test_model_confidence_clamped_to_100(self, db_session: Session):
-        """Model confidence above 1.0 is clamped to 1.0."""
-        _make_card(db_session, "ABC456")
-        db_session.commit()
-
-        classifications = [{"mpn": "ABC456", "manufacturer": "Test Corp", "category": "Resistors", "confidence": 1.5}]
-        _apply_chunked_batch(classifications, db_session)
-
-        brand_tag = db_session.query(Tag).filter_by(tag_type="brand", name="Test Corp").first()
-        mt = db_session.query(MaterialTag).join(Tag).filter(Tag.id == brand_tag.id).first()
-        assert mt.confidence == 1.0
+        assert mt.confidence == expected
 
     def test_multiple_cards_in_batch(self, db_session: Session):
         """Multiple cards in a single batch are all processed."""
@@ -470,29 +489,7 @@ class TestApplyBatchResultsChunked:
             }
         )
 
-        # Write temp JSONL file
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line_1 + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        # Mock status check
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_123",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
-
-        try:
-            result = _run(apply_batch_results_chunked("batch_123"))
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        result = _run_chunked_apply_with_jsonl(mock_http, result_line_1 + "\n")
 
         assert result["total_lines"] == 1
         assert result["matched"] == 2
@@ -515,27 +512,7 @@ class TestApplyBatchResultsChunked:
             }
         )
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_123",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
-
-        try:
-            result = _run(apply_batch_results_chunked("batch_123"))
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        result = _run_chunked_apply_with_jsonl(mock_http, result_line + "\n")
 
         assert result["total_lines"] == 1
         assert result["errors"] == 1
@@ -558,27 +535,7 @@ class TestApplyBatchResultsChunked:
             }
         )
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_123",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
-
-        try:
-            result = _run(apply_batch_results_chunked("batch_123"))
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        result = _run_chunked_apply_with_jsonl(mock_http, result_line + "\n")
 
         assert result["total_lines"] == 1
         assert result["errors"] == 1
@@ -619,28 +576,7 @@ class TestApplyBatchResultsChunked:
         """Malformed JSON lines are counted as errors, not crashes."""
         mock_session_local.return_value = db_session
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write("this is not json\n")
-        tmp.write("{invalid json too\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_123",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
-
-        try:
-            result = _run(apply_batch_results_chunked("batch_123"))
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        result = _run_chunked_apply_with_jsonl(mock_http, "this is not json\n{invalid json too\n")
 
         assert result["total_lines"] == 2
         assert result["errors"] == 2

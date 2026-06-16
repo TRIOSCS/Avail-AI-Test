@@ -67,6 +67,30 @@ def _make_vendor_history(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _make_req_and_requirement(db_session, test_user, req_name: str, primary_mpn: str = "LM317T"):
+    """Persist a Requisition + a single Requirement and return both (flushed, not
+    committed)."""
+    req = Requisition(
+        name=req_name,
+        customer_name="Test Co",
+        status="active",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    requirement = Requirement(
+        requisition_id=req.id,
+        primary_mpn=primary_mpn,
+        target_qty=100,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(requirement)
+    db_session.flush()
+    return req, requirement
+
+
 # ── Admin client fixture ─────────────────────────────────────────────────
 
 
@@ -128,24 +152,7 @@ def test_material_card_to_dict_no_history():
 
 def test_material_card_to_dict_with_sightings_and_offers(db_session, test_material_card, test_user):
     """material_card_to_dict includes sightings and offers for matching requirements."""
-    req = Requisition(
-        name="REQ-MAT-001",
-        customer_name="Test Co",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    requirement = Requirement(
-        requisition_id=req.id,
-        primary_mpn="LM317T",
-        target_qty=100,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(requirement)
-    db_session.flush()
+    req, requirement = _make_req_and_requirement(db_session, test_user, "REQ-MAT-001")
 
     sighting = Sighting(
         requirement_id=requirement.id,
@@ -183,24 +190,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
 
 def test_material_card_to_dict_unavailable_sightings_excluded(db_session, test_material_card, test_user):
     """material_card_to_dict excludes unavailable sightings."""
-    req = Requisition(
-        name="REQ-MAT-002",
-        customer_name="Test Co",
-        status="active",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    requirement = Requirement(
-        requisition_id=req.id,
-        primary_mpn="LM317T",
-        target_qty=100,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(requirement)
-    db_session.flush()
+    _req, requirement = _make_req_and_requirement(db_session, test_user, "REQ-MAT-002")
 
     sighting = Sighting(
         requirement_id=requirement.id,
@@ -713,12 +703,8 @@ def test_import_stock_skips_bad_rows(client, db_session, monkeypatch):
 
 
 class TestMaterialCardMerge:
-    def test_merge_material_cards(self, db_session, test_material_card, admin_user):
+    def test_merge_material_cards(self, admin_client, db_session, test_material_card):
         """Merge source card into target (lines 1786-1825)."""
-        from app.database import get_db
-        from app.dependencies import require_admin, require_user
-        from app.main import app
-
         source = MaterialCard(
             normalized_mpn="lm317t-alt",
             display_mpn="LM317T-ALT",
@@ -729,22 +715,10 @@ class TestMaterialCardMerge:
         db_session.add(source)
         db_session.commit()
 
-        def _override_db():
-            yield db_session
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = lambda: admin_user
-        app.dependency_overrides[require_admin] = lambda: admin_user
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post(
-                    "/api/materials/merge",
-                    json={"source_card_id": source.id, "target_card_id": test_material_card.id},
-                )
-        finally:
-            for dep in [get_db, require_user, require_admin]:
-                app.dependency_overrides.pop(dep, None)
+        resp = admin_client.post(
+            "/api/materials/merge",
+            json={"source_card_id": source.id, "target_card_id": test_material_card.id},
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True

@@ -14,6 +14,7 @@ Real decoding MPNs used: ST4000NM0035 / ST8000NM0055 (Seagate hdd), HUS726040ALE
 (00VN…) that do NOT decode — exactly the live-data shape.
 """
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -217,120 +218,81 @@ def test_create_dry_run_does_not_insert(db_session: Session):
 # ── §2.6(c): drive_pn decode-widening misread gate ──────────────────────────────────
 
 
-def test_measure_drive_pn_gate_passes_when_nothing_decodes(db_session: Session):
+@pytest.mark.parametrize(
+    ("related", "mfg", "description", "expected"),
+    [
+        # Live shape: drive_pn related parts are IBM FRU numbers that never decode.
+        (
+            "00VN528",
+            None,
+            "HDD; Seagate; 14000GB; 3.5; 7200 RPM; SAS",
+            {"decoded": 0, "misread": 0, "misread_pct": 0.0, "passes": True},  # 0% <= 2% gate
+        ),
+        # A drive_pn whose related part DECODES (a real Seagate MPN) but whose qual-sheet
+        # description contradicts the decode → a misread. The decode is hdd/Seagate/4000GB;
+        # the prose says SSD → commodity contradiction.
+        (
+            "ST4000NM0035",
+            "Seagate",
+            "SSD; Samsung; 960GB; 2.5; SATA",
+            {"decoded": 1, "misread": 1, "misread_pct": 100.0, "passes": False},  # 100% > 2% gate
+        ),
+        # Decodes but has no description to check against → unverifiable (not pass, not misread).
+        (
+            "ST4000NM0035",
+            "Seagate",
+            None,
+            {"decoded": 1, "misread": 0, "unverifiable": 1, "passes": True},
+        ),
+        # Decodes hdd/4000GB and the prose agrees (hdd, 4000GB) → not a misread.
+        (
+            "ST4000NM0035",
+            "Seagate",
+            "HDD; Seagate; 4000GB; 3.5; 7200 RPM; SAS",
+            {"decoded": 1, "misread": 0, "passes": True},
+        ),
+    ],
+    ids=["nothing_decodes", "contradiction_misread", "no_description_unverifiable", "decode_agrees_with_prose"],
+)
+def test_measure_drive_pn_gate(db_session: Session, related, mfg, description, expected):
     seed_commodity_schemas(db_session)
-    # Live shape: drive_pn related parts are IBM FRU numbers that never decode.
-    _link(
-        db_session,
-        "49Y7443",
-        "00VN528",
-        kind=FruLinkKind.DRIVE_PN.value,
-        mfg=None,
-        description="HDD; Seagate; 14000GB; 3.5; 7200 RPM; SAS",
-    )
+    _link(db_session, "49Y7443", related, kind=FruLinkKind.DRIVE_PN.value, mfg=mfg, description=description)
     db_session.flush()
 
     result = measure_drive_pn_misreads(db_session, sample=100)
-    assert result["decoded"] == 0
-    assert result["misread"] == 0
-    assert result["misread_pct"] == 0.0
-    assert result["passes"] is True  # 0% <= 2% gate
-
-
-def test_measure_drive_pn_gate_counts_misread_on_contradiction(db_session: Session):
-    seed_commodity_schemas(db_session)
-    # A drive_pn whose related part DECODES (a real Seagate MPN) but whose qual-sheet
-    # description contradicts the decode → a misread. The decode is hdd/Seagate/4000GB;
-    # the prose says SSD → commodity contradiction.
-    _link(
-        db_session,
-        "49Y7443",
-        "ST4000NM0035",
-        kind=FruLinkKind.DRIVE_PN.value,
-        mfg="Seagate",
-        description="SSD; Samsung; 960GB; 2.5; SATA",
-    )
-    db_session.flush()
-
-    result = measure_drive_pn_misreads(db_session, sample=100)
-    assert result["decoded"] == 1
-    assert result["misread"] == 1
-    assert result["misread_pct"] == 100.0
-    assert result["passes"] is False  # 100% > 2% gate
-
-
-def test_measure_drive_pn_unverifiable_when_no_description(db_session: Session):
-    seed_commodity_schemas(db_session)
-    # Decodes but has no description to check against → unverifiable (not pass, not misread).
-    _link(
-        db_session,
-        "49Y7443",
-        "ST4000NM0035",
-        kind=FruLinkKind.DRIVE_PN.value,
-        mfg="Seagate",
-        description=None,
-    )
-    db_session.flush()
-
-    result = measure_drive_pn_misreads(db_session, sample=100)
-    assert result["decoded"] == 1
-    assert result["misread"] == 0
-    assert result["unverifiable"] == 1
-    assert result["passes"] is True
-
-
-def test_measure_drive_pn_no_misread_when_decode_agrees_with_prose(db_session: Session):
-    seed_commodity_schemas(db_session)
-    # Decodes hdd/4000GB and the prose agrees (hdd, 4000GB) → not a misread.
-    _link(
-        db_session,
-        "49Y7443",
-        "ST4000NM0035",
-        kind=FruLinkKind.DRIVE_PN.value,
-        mfg="Seagate",
-        description="HDD; Seagate; 4000GB; 3.5; 7200 RPM; SAS",
-    )
-    db_session.flush()
-
-    result = measure_drive_pn_misreads(db_session, sample=100)
-    assert result["decoded"] == 1
-    assert result["misread"] == 0
-    assert result["passes"] is True
+    for key, value in expected.items():
+        assert result[key] == value
 
 
 # ── §2.6(c): drive_pn decode-WIDENING flag gates the decode channel ─────────────────
 
 
-def test_drive_pn_decode_widening_flag_includes_decoding_drive_pn(db_session: Session, monkeypatch):
-    # Flag ON (default): a drive_pn link whose related part DECODES feeds the decode
-    # channel → the card is decoded + categorized from it.
+@pytest.mark.parametrize(
+    ("flag_enabled", "expected_decoded", "expected_category"),
+    [
+        # Flag ON (default): a drive_pn link whose related part DECODES feeds the decode
+        # channel → the card is decoded + categorized from it.
+        (True, 1, "hdd"),
+        # Flag OFF: the SAME decoding drive_pn link is NOT decoded (only mfg_model feeds the
+        # decode channel). With no decodable model and no description, the card gets nothing.
+        (False, 0, None),
+    ],
+    ids=["flag_on_includes_drive_pn", "flag_off_excludes_drive_pn"],
+)
+def test_drive_pn_decode_widening_flag(
+    db_session: Session, monkeypatch, flag_enabled, expected_decoded, expected_category
+):
     seed_commodity_schemas(db_session)
-    monkeypatch.setattr(settings, "fru_crosswalk_drive_pn_decode_enabled", True)
+    monkeypatch.setattr(settings, "fru_crosswalk_drive_pn_decode_enabled", flag_enabled)
     card = _card(db_session, "00AJ141", category=None)
     _link(db_session, "00AJ141", "ST4000NM0035", kind=FruLinkKind.DRIVE_PN.value, mfg="Seagate")
     db_session.flush()
 
     stats = crosswalk_and_record_specs(db_session, [card.id])
     db_session.commit()
-    assert stats["decoded"] == 1
-    assert stats["categorized"] == 1
-    assert db_session.get(MaterialCard, card.id).category == "hdd"
-
-
-def test_drive_pn_decode_widening_flag_off_excludes_drive_pn_from_decode(db_session: Session, monkeypatch):
-    # Flag OFF: the SAME decoding drive_pn link is NOT decoded (only mfg_model feeds the
-    # decode channel). With no decodable model and no description, the card gets nothing.
-    seed_commodity_schemas(db_session)
-    monkeypatch.setattr(settings, "fru_crosswalk_drive_pn_decode_enabled", False)
-    card = _card(db_session, "00AJ141", category=None)
-    _link(db_session, "00AJ141", "ST4000NM0035", kind=FruLinkKind.DRIVE_PN.value, mfg="Seagate")
-    db_session.flush()
-
-    stats = crosswalk_and_record_specs(db_session, [card.id])
-    db_session.commit()
-    assert stats["decoded"] == 0
-    assert stats["categorized"] == 0
-    assert db_session.get(MaterialCard, card.id).category is None
+    assert stats["decoded"] == expected_decoded
+    assert stats["categorized"] == expected_decoded
+    assert db_session.get(MaterialCard, card.id).category == expected_category
 
 
 # ── §2.6(d): deterministic maker propagation (positive + negative) ───────────────────

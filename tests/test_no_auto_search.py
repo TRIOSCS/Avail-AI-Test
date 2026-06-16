@@ -27,14 +27,26 @@ def _route_paths():
     return paths
 
 
-class TestAutoSearchRemoved:
-    def test_v1_search_one_route_is_not_registered(self):
-        """Used to be POST /api/requirements/{item_id}/search — removed entirely."""
-        assert "/api/requirements/{item_id}/search" not in _route_paths()
+def _app_file_text(*parts):
+    """Read an app/ source file relative to the repo root as text."""
+    from pathlib import Path
 
-    def test_v1_search_all_route_is_not_registered(self):
-        """Used to be POST /api/requisitions/{req_id}/search — removed entirely."""
-        assert "/api/requisitions/{req_id}/search" not in _route_paths()
+    path = Path(__file__).parent.parent.joinpath("app", *parts)
+    return path.read_text()
+
+
+class TestAutoSearchRemoved:
+    @pytest.mark.parametrize(
+        "removed_path",
+        [
+            # Used to be POST /api/requirements/{item_id}/search — removed entirely.
+            "/api/requirements/{item_id}/search",
+            # Used to be POST /api/requisitions/{req_id}/search — removed entirely.
+            "/api/requisitions/{req_id}/search",
+        ],
+    )
+    def test_v1_search_route_is_not_registered(self, removed_path):
+        assert removed_path not in _route_paths()
 
     def test_sourcing_refresh_module_does_not_exist(self):
         """The 3 AM cron module is gone; the import path itself should not exist."""
@@ -44,19 +56,13 @@ class TestAutoSearchRemoved:
     def test_jobs_init_does_not_register_sourcing_refresh(self):
         """register_sourcing_refresh_jobs is no longer imported/called from
         jobs/__init__.py."""
-        from pathlib import Path
-
-        path = Path(__file__).parent.parent / "app" / "jobs" / "__init__.py"
-        text = path.read_text()
+        text = _app_file_text("jobs", "__init__.py")
         assert "register_sourcing_refresh_jobs" not in text
         assert "sourcing_refresh_jobs" not in text
 
     def test_htmx_views_does_not_auto_search_on_requisition_create(self):
         """No background _bg_full_search after requisition create."""
-        from pathlib import Path
-
-        path = Path(__file__).parent.parent / "app" / "routers" / "htmx_views.py"
-        text = path.read_text()
+        text = _app_file_text("routers", "htmx_views.py")
         assert "_bg_full_search" not in text
         assert "Auto-search all created requirements" not in text
 

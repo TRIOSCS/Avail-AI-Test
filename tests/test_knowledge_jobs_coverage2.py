@@ -15,9 +15,31 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+
+@contextmanager
+def _patch_insight_generators(**overrides):
+    """Patch all five knowledge_service insight generators at the source module.
+
+    Each generator defaults to an AsyncMock returning []. Pass an override (e.g.
+    generate_vendor_insights=mock) to swap a specific one.
+    """
+    names = (
+        "generate_insights",
+        "generate_pipeline_insights",
+        "generate_vendor_insights",
+        "generate_company_insights",
+        "generate_mpn_insights",
+    )
+    with patch.multiple(
+        "app.services.knowledge_service",
+        **{name: overrides.get(name, AsyncMock(return_value=[])) for name in names},
+    ):
+        yield
 
 
 def _make_mock_session_full(req_ids=None, vendor_ids=None, company_ids=None, mpns=None):
@@ -59,16 +81,8 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session = _make_mock_session_full(vendor_ids=[10, 20])
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=mock_vendor):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()  # Should not raise
+            with _patch_insight_generators(generate_vendor_insights=mock_vendor):
+                await _job_refresh_insights()  # Should not raise
 
         assert mock_vendor.call_count == 2
 
@@ -80,16 +94,8 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session = _make_mock_session_full(company_ids=[100, 200])
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch("app.services.knowledge_service.generate_company_insights", new=mock_company):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()  # Should not raise
+            with _patch_insight_generators(generate_company_insights=mock_company):
+                await _job_refresh_insights()  # Should not raise
 
         assert mock_company.call_count == 2
 
@@ -101,16 +107,8 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session = _make_mock_session_full(mpns=["LM317T", "TL431"])
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch("app.services.knowledge_service.generate_mpn_insights", new=mock_mpn):
-                                await _job_refresh_insights()  # Should not raise
+            with _patch_insight_generators(generate_mpn_insights=mock_mpn):
+                await _job_refresh_insights()  # Should not raise
 
         assert mock_mpn.call_count == 2
 
@@ -122,16 +120,8 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session = _make_mock_session_full(company_ids=[30, 40, 50])
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch("app.services.knowledge_service.generate_company_insights", new=mock_company):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()
+            with _patch_insight_generators(generate_company_insights=mock_company):
+                await _job_refresh_insights()
 
         assert mock_company.call_count == 3
 
@@ -143,16 +133,8 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session = _make_mock_session_full(mpns=["ABC123", "DEF456", "GHI789"])
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch("app.services.knowledge_service.generate_mpn_insights", new=mock_mpn):
-                                await _job_refresh_insights()
+            with _patch_insight_generators(generate_mpn_insights=mock_mpn):
+                await _job_refresh_insights()
 
         assert mock_mpn.call_count == 3
 
@@ -211,8 +193,7 @@ class TestJobRefreshInsightsMissingBranches:
         mock_session.query.side_effect = query_side_effect
 
         with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    await _job_refresh_insights()  # Should not raise
+            with _patch_insight_generators():
+                await _job_refresh_insights()  # Should not raise
 
         mock_session.close.assert_called_once()

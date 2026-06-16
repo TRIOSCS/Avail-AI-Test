@@ -7,6 +7,8 @@ Called by: pytest
 Depends on: app/utils/file_validation.py
 """
 
+import pytest
+
 from app.utils.file_validation import (
     MAX_FILE_SIZE,
     _get_extension,
@@ -31,23 +33,19 @@ class TestValidateFile:
         assert ok is False
         assert "too large" in reason
 
-    def test_csv_file_accepted(self):
-        content = b"MPN,Qty,Price\nLM317T,1000,0.50\n"
-        ok, file_type = validate_file(content, "stock.csv")
+    @pytest.mark.parametrize(
+        "content, filename, expected_type",
+        [
+            (b"MPN,Qty,Price\nLM317T,1000,0.50\n", "stock.csv", "csv"),
+            (b"MPN\tQty\tPrice\nLM317T\t1000\t0.50\n", "stock.tsv", "tsv"),
+            (b"MPN,Qty,Price\nLM317T,1000,0.50\n", "data.txt", "csv"),
+        ],
+        ids=["csv", "tsv", "txt_as_csv"],
+    )
+    def test_text_file_accepted(self, content, filename, expected_type):
+        ok, file_type = validate_file(content, filename)
         assert ok is True
-        assert file_type == "csv"
-
-    def test_tsv_file_accepted(self):
-        content = b"MPN\tQty\tPrice\nLM317T\t1000\t0.50\n"
-        ok, file_type = validate_file(content, "stock.tsv")
-        assert ok is True
-        assert file_type == "tsv"
-
-    def test_txt_treated_as_csv(self):
-        content = b"MPN,Qty,Price\nLM317T,1000,0.50\n"
-        ok, file_type = validate_file(content, "data.txt")
-        assert ok is True
-        assert file_type == "csv"
+        assert file_type == expected_type
 
     def test_unsupported_extension_rejected(self):
         content = b"some content"
@@ -148,22 +146,20 @@ class TestFileFingerprint:
 
 
 class TestGetExtension:
-    def test_normal_extension(self):
-        assert _get_extension("stock.csv") == ".csv"
-        assert _get_extension("data.xlsx") == ".xlsx"
-
-    def test_uppercase_normalized(self):
-        assert _get_extension("REPORT.CSV") == ".csv"
-        assert _get_extension("Data.XLSX") == ".xlsx"
-
-    def test_no_extension(self):
-        assert _get_extension("noext") == ""
-
-    def test_empty_filename(self):
-        assert _get_extension("") == ""
-
-    def test_multiple_dots(self):
-        assert _get_extension("report.2024.csv") == ".csv"
+    @pytest.mark.parametrize(
+        "filename, expected",
+        [
+            ("stock.csv", ".csv"),
+            ("data.xlsx", ".xlsx"),
+            ("REPORT.CSV", ".csv"),
+            ("Data.XLSX", ".xlsx"),
+            ("noext", ""),
+            ("", ""),
+            ("report.2024.csv", ".csv"),
+        ],
+    )
+    def test_extension(self, filename, expected):
+        assert _get_extension(filename) == expected
 
 
 # ── Additional coverage: validate_file edge cases ────────────────────

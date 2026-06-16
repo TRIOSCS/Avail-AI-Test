@@ -4,6 +4,7 @@ Called by: pytest
 Depends on: app.services.global_search_service, conftest fixtures
 """
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -11,6 +12,24 @@ import pytest
 from app.models.crm import Company
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard, VendorContact
+
+
+@contextmanager
+def _patch_ai_search(claude_return, cache_hit=None):
+    """Patch the global_search_service Claude + cache hooks at the source module.
+
+    Yields (mock_claude, mock_set_cache) so tests can assert call behavior.
+    """
+    with (
+        patch(
+            "app.services.global_search_service.claude_structured",
+            new_callable=AsyncMock,
+            return_value=claude_return,
+        ) as mock_claude,
+        patch("app.services.global_search_service._get_ai_cache", return_value=cache_hit),
+        patch("app.services.global_search_service._set_ai_cache") as mock_set,
+    ):
+        yield mock_claude, mock_set
 
 
 @pytest.fixture
@@ -53,11 +72,7 @@ async def test_ai_search_parses_single_intent(search_db):
             {"entity_type": "part", "text_query": "LM358N"},
         ]
     }
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(mock_intent):
         result = await ai_search("who sells LM358N?", search_db)
 
     assert result["total_count"] > 0
@@ -76,11 +91,7 @@ async def test_ai_search_parses_multi_intent(search_db):
             {"entity_type": "company", "text_query": "Acme"},
         ]
     }
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(mock_intent):
         result = await ai_search("LM358N from Arrow for Acme", search_db)
 
     assert len(result["groups"]["parts"]) > 0
@@ -93,11 +104,7 @@ async def test_ai_search_falls_back_on_claude_failure(search_db):
     """When Claude fails, ai_search falls back to fast_search."""
     from app.services.global_search_service import ai_search
 
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=None),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(None):
         result = await ai_search("LM358", search_db)
 
     # Should still return results via fast_search fallback
@@ -110,11 +117,7 @@ async def test_ai_search_returns_structure(search_db):
     from app.services.global_search_service import ai_search
 
     mock_intent = {"searches": [{"entity_type": "company", "text_query": "Acme"}]}
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(mock_intent):
         result = await ai_search("find Acme", search_db)
 
     assert "best_match" in result
@@ -128,11 +131,7 @@ async def test_ai_search_caches_results(search_db):
     from app.services.global_search_service import ai_search
 
     mock_intent = {"searches": [{"entity_type": "company", "text_query": "Acme"}]}
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache") as mock_set,
-    ):
+    with _patch_ai_search(mock_intent) as (_, mock_set):
         await ai_search("find Acme", search_db)
         mock_set.assert_called_once()
 
@@ -143,10 +142,7 @@ async def test_ai_search_uses_cache_hit(search_db):
     from app.services.global_search_service import ai_search
 
     cached = {"best_match": None, "groups": {}, "total_count": 0}
-    with (
-        patch("app.services.global_search_service._get_ai_cache", return_value=cached),
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock) as mock_claude,
-    ):
+    with _patch_ai_search(None, cache_hit=cached) as (mock_claude, _):
         result = await ai_search("find Acme", search_db)
         mock_claude.assert_not_called()
         assert result == cached
@@ -166,11 +162,7 @@ async def test_ai_search_with_filters(search_db):
             },
         ]
     }
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(mock_intent):
         result = await ai_search("open reqs for Raytheon", search_db)
 
     # Should find the Raytheon requisition (customer_name filter matches)
@@ -186,11 +178,7 @@ def test_global_search_endpoint_returns_200(client, search_db):
 
 
 def test_ai_search_endpoint_returns_200(client, search_db):
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=None),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(None):
         resp = client.post("/v2/partials/search/ai", data={"q": "LM358"})
     assert resp.status_code == 200
 
@@ -212,11 +200,7 @@ async def test_ai_search_deduplicates_overlapping_intents(search_db):
             {"entity_type": "part", "text_query": "LM358"},
         ]
     }
-    with (
-        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
-        patch("app.services.global_search_service._get_ai_cache", return_value=None),
-        patch("app.services.global_search_service._set_ai_cache"),
-    ):
+    with _patch_ai_search(mock_intent):
         result = await ai_search("LM358N parts", search_db)
 
     # Check no duplicate IDs in the parts group

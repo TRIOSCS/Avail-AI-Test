@@ -87,6 +87,15 @@ def _make_review(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _make_card_db(*, reviews=(), brands=(), unique_parts=0) -> MagicMock:
+    """Build a MagicMock db wired for card_to_dict: review query + brand/part SQL."""
+    db = MagicMock()
+    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = list(reviews)
+    db.execute.return_value.fetchall.return_value = list(brands)
+    db.execute.return_value.scalar.return_value = unique_parts
+    return db
+
+
 # ── Admin client fixture ─────────────────────────────────────────────────
 
 
@@ -122,10 +131,7 @@ def test_card_to_dict_with_reviews():
     """card_to_dict includes avg rating, review list, brand profile."""
     card = _make_vendor_card()
     review = _make_review(rating=4)
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = [review]
-    db.execute.return_value.fetchall.return_value = [("Texas Instruments", 5)]
-    db.execute.return_value.scalar.return_value = 12
+    db = _make_card_db(reviews=[review], brands=[("Texas Instruments", 5)], unique_parts=12)
 
     result = card_to_dict(card, db)
 
@@ -142,10 +148,7 @@ def test_card_to_dict_with_reviews():
 def test_card_to_dict_no_reviews():
     """card_to_dict handles zero reviews gracefully."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     result = card_to_dict(card, db)
 
@@ -162,10 +165,7 @@ def test_card_to_dict_none_timestamps():
         created_at=None,
         updated_at=None,
     )
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     result = card_to_dict(card, db)
 
@@ -179,8 +179,7 @@ def test_card_to_dict_redis_cache_hit():
     import json
 
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
+    db = _make_card_db()
 
     mock_redis = MagicMock()
     cached_data = json.dumps({"brands": [{"name": "TI", "count": 10}], "mpn_count": 42})
@@ -198,10 +197,7 @@ def test_card_to_dict_redis_cache_hit():
 def test_card_to_dict_redis_cache_set():
     """card_to_dict sets Redis cache after computing brand profile."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = [("Microchip", 3)]
-    db.execute.return_value.scalar.return_value = 7
+    db = _make_card_db(brands=[("Microchip", 3)], unique_parts=7)
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None  # Cache miss
@@ -218,10 +214,7 @@ def test_card_to_dict_redis_cache_set():
 def test_card_to_dict_redis_cache_miss_no_redis():
     """card_to_dict works when Redis is unavailable (returns None)."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     with patch("app.cache.intel_cache._get_redis", return_value=None):
         result = card_to_dict(card, db)
@@ -233,10 +226,7 @@ def test_card_to_dict_redis_cache_miss_no_redis():
 def test_card_to_dict_redis_cache_error():
     """card_to_dict handles Redis errors gracefully (OSError on get)."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     mock_redis = MagicMock()
     mock_redis.get.side_effect = OSError("Connection refused")
@@ -251,10 +241,7 @@ def test_card_to_dict_redis_cache_error():
 def test_card_to_dict_redis_setex_error():
     """card_to_dict handles Redis setex errors gracefully."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = [("NXP", 2)]
-    db.execute.return_value.scalar.return_value = 5
+    db = _make_card_db(brands=[("NXP", 2)], unique_parts=5)
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
@@ -270,10 +257,7 @@ def test_card_to_dict_redis_setex_error():
 def test_card_to_dict_redis_cache_invalid_json():
     """card_to_dict handles invalid JSON from Redis cache."""
     card = _make_vendor_card()
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = "not-valid-json{{"
@@ -291,10 +275,7 @@ def test_card_to_dict_with_enrichment_timestamps():
         last_enriched_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         material_tags_updated_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
     )
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     result = card_to_dict(card, db)
 
@@ -305,10 +286,7 @@ def test_card_to_dict_with_enrichment_timestamps():
 def test_card_to_dict_is_new_vendor_none():
     """card_to_dict defaults is_new_vendor to True when None."""
     card = _make_vendor_card(is_new_vendor=None)
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db()
 
     result = card_to_dict(card, db)
 
@@ -319,10 +297,7 @@ def test_card_to_dict_review_user_none():
     """card_to_dict handles review with no associated user."""
     card = _make_vendor_card()
     review = _make_review(user=None)
-    db = MagicMock()
-    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = [review]
-    db.execute.return_value.fetchall.return_value = []
-    db.execute.return_value.scalar.return_value = 0
+    db = _make_card_db(reviews=[review])
 
     result = card_to_dict(card, db)
 
@@ -425,32 +400,18 @@ def test_clean_emails_deduplicates_case():
     assert clean_emails(raw) == ["a@b.com"]
 
 
-def test_clean_emails_css_extension():
-    """clean_emails filters out emails ending in .css."""
-    raw = ["valid@vendor.com", "style@file.css"]
-    result = clean_emails(raw)
-    assert result == ["valid@vendor.com"]
-
-
-def test_clean_emails_js_extension():
-    """clean_emails filters out emails ending in .js."""
-    raw = ["valid@vendor.com", "script@vendor.js"]
-    result = clean_emails(raw)
-    assert result == ["valid@vendor.com"]
-
-
-def test_clean_emails_svg_extension():
-    """clean_emails filters out emails ending in .svg."""
-    raw = ["valid@vendor.com", "image@site.svg"]
-    result = clean_emails(raw)
-    assert result == ["valid@vendor.com"]
-
-
-def test_clean_emails_no_at_sign():
-    """clean_emails filters out strings without @."""
-    raw = ["notanemail", "valid@vendor.com", ""]
-    result = clean_emails(raw)
-    assert result == ["valid@vendor.com"]
+@pytest.mark.parametrize(
+    "raw",
+    [
+        pytest.param(["valid@vendor.com", "style@file.css"], id="css_extension"),
+        pytest.param(["valid@vendor.com", "script@vendor.js"], id="js_extension"),
+        pytest.param(["valid@vendor.com", "image@site.svg"], id="svg_extension"),
+        pytest.param(["notanemail", "valid@vendor.com", ""], id="no_at_sign"),
+    ],
+)
+def test_clean_emails_filters_invalid(raw):
+    """clean_emails filters out asset-extension emails and non-emails."""
+    assert clean_emails(raw) == ["valid@vendor.com"]
 
 
 def test_clean_phones_filters_short():
@@ -502,74 +463,44 @@ def test_clean_phones_empty_string():
 # ── is_private_url tests ─────────────────────────────────────────────────
 
 
-def test_is_private_url_blocks_localhost():
-    """SSRF protection blocks localhost and private IPs."""
-    assert is_private_url("http://127.0.0.1/admin") is True
-    assert is_private_url("http://localhost/etc/passwd") is True
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("http://127.0.0.1/admin", id="loopback_ip_admin"),
+        pytest.param("http://localhost/etc/passwd", id="localhost_passwd"),
+        pytest.param("http://localhost/contact", id="localhost_contact"),
+        pytest.param("http://127.0.0.1/api", id="loopback_ip_api"),
+        pytest.param("", id="empty"),
+        pytest.param("not-a-url", id="malformed"),
+    ],
+)
+def test_is_private_url_blocks_localhost_and_malformed(url):
+    """SSRF protection blocks localhost, loopback IPs, and empty/malformed URLs."""
+    assert is_private_url(url) is True
 
 
-def test_is_private_url_blocks_empty():
-    """SSRF protection blocks empty/malformed URLs."""
-    assert is_private_url("") is True
-    assert is_private_url("not-a-url") is True
-
-
-def test_is_private_url_blocks_localhost_variants():
-    assert is_private_url("http://localhost/contact") is True
-    assert is_private_url("http://127.0.0.1/api") is True
-
-
-def test_is_private_url_blocks_empty_malformed():
-    assert is_private_url("") is True
-    assert is_private_url("not-a-url") is True
-
-
-def test_is_private_url_allows_public():
-    """is_private_url returns False for a known public IP."""
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
-        assert is_private_url("http://google.com") is False
-
-
-def test_is_private_url_blocks_private_ip():
-    """is_private_url blocks 10.x.x.x and 192.168.x.x addresses."""
-    with patch("socket.gethostbyname", return_value="10.0.0.1"):
-        assert is_private_url("http://internal.corp") is True
-
-    with patch("socket.gethostbyname", return_value="192.168.1.1"):
-        assert is_private_url("http://myrouter.local") is True
-
-
-def test_is_private_url_blocks_link_local():
-    """is_private_url blocks link-local addresses."""
-    with patch("socket.gethostbyname", return_value="169.254.1.1"):
-        assert is_private_url("http://link-local.test") is True
-
-
-def test_is_private_url_allows_public_8888():
-    """is_private_url returns False for 8.8.8.8 (Google DNS)."""
-    with patch("socket.gethostbyname", return_value="8.8.8.8"):
-        result = is_private_url("http://dns.google.com")
-    assert result is False
-
-
-def test_is_private_url_blocks_reserved():
-    """is_private_url blocks reserved IP addresses."""
-    with patch("socket.gethostbyname", return_value="240.0.0.1"):
-        result = is_private_url("http://reserved.test")
-    assert result is True
+@pytest.mark.parametrize(
+    ("url", "resolved_ip", "expected"),
+    [
+        pytest.param("http://google.com", "8.8.8.8", False, id="public_google"),
+        pytest.param("http://dns.google.com", "8.8.8.8", False, id="public_8888"),
+        pytest.param("http://internal.corp", "10.0.0.1", True, id="private_10"),
+        pytest.param("http://myrouter.local", "192.168.1.1", True, id="private_192_168"),
+        pytest.param("http://link-local.test", "169.254.1.1", True, id="link_local"),
+        pytest.param("http://reserved.test", "240.0.0.1", True, id="reserved"),
+        pytest.param("http://badip.test", "not-an-ip", True, id="value_error"),
+    ],
+)
+def test_is_private_url_by_resolved_ip(url, resolved_ip, expected):
+    """is_private_url classifies URLs by the IP their host resolves to."""
+    with patch("socket.gethostbyname", return_value=resolved_ip):
+        assert is_private_url(url) is expected
 
 
 def test_is_private_url_dns_resolution_failure():
     """is_private_url blocks URLs when DNS resolution fails (gaierror)."""
     with patch("socket.gethostbyname", side_effect=socket.gaierror("Name resolution failed")):
         result = is_private_url("http://unresolvable-domain.test")
-    assert result is True
-
-
-def test_is_private_url_value_error():
-    """is_private_url blocks URLs when ipaddress.ip_address raises ValueError."""
-    with patch("socket.gethostbyname", return_value="not-an-ip"):
-        result = is_private_url("http://badip.test")
     assert result is True
 
 
@@ -1439,14 +1370,11 @@ def test_avg_rating_calculation(db_session, test_vendor_card, test_user):
     db_session.commit()
 
     card = _make_vendor_card(id=test_vendor_card.id)
-    mock_db = MagicMock()
     mock_reviews = [
         _make_review(id=r1.id, rating=3, user_id=test_user.id),
         _make_review(id=r2.id, rating=5, user_id=test_user.id),
     ]
-    mock_db.query.return_value.options.return_value.filter_by.return_value.all.return_value = mock_reviews
-    mock_db.execute.return_value.fetchall.return_value = []
-    mock_db.execute.return_value.scalar.return_value = 0
+    mock_db = _make_card_db(reviews=mock_reviews)
 
     result = card_to_dict(card, mock_db)
     assert result["avg_rating"] == 4.0

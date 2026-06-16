@@ -13,6 +13,8 @@ import os
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.models import CustomerSite, ProspectContact
 
 os.environ["TESTING"] = "1"
@@ -383,26 +385,21 @@ class TestDraftRfq:
 
 
 class TestIntakeParse:
-    def test_text_too_short_returns_422(self, client):
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param(b'{"text": "hi", "mode": "auto"}', id="text_too_short"),
+            pytest.param(
+                ('{"text": "' + "A" * 12001 + '", "mode": "auto"}').encode(),
+                id="text_too_long",
+            ),
+            pytest.param(b'{"text": "LM317T qty 1000", "mode": "invalid"}', id="invalid_mode"),
+        ],
+    )
+    def test_invalid_payload_returns_422(self, client, body):
         resp = client.post(
             "/api/ai/intake-parse",
-            content=b'{"text": "hi", "mode": "auto"}',
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 422
-
-    def test_text_too_long_returns_422(self, client):
-        resp = client.post(
-            "/api/ai/intake-parse",
-            content=('{"text": "' + "A" * 12001 + '", "mode": "auto"}').encode(),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 422
-
-    def test_invalid_mode_returns_422(self, client):
-        resp = client.post(
-            "/api/ai/intake-parse",
-            content=b'{"text": "LM317T qty 1000", "mode": "invalid"}',
+            content=body,
             headers={"Content-Type": "application/json"},
         )
         assert resp.status_code == 422

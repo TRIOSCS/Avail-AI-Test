@@ -69,17 +69,6 @@ def _make_line_item(
     return item
 
 
-def _setup(db: Session):
-    """Create user, company, excess list, and 2 line items."""
-    user = _make_user(db)
-    company = _make_company(db)
-    el = _make_excess_list(db, company, user)
-    item1 = _make_line_item(db, el, "PART-001")
-    item2 = _make_line_item(db, el, "PART-002")
-    db.commit()
-    return user, company, el, item1, item2
-
-
 def _setup_solicitation(db: Session):
     """Create user, company, excess list, line item, and a BidSolicitation
     (status=sent)."""

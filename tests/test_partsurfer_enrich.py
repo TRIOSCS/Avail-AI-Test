@@ -40,6 +40,23 @@ def _hp_card(db: Session, mpn: str = "726719-B21") -> MaterialCard:
     return card
 
 
+def _patch_fetch(monkeypatch, fake_fetch) -> None:
+    """Patch fetch_partsurfer_description on the resolver module (the pass imports it
+    lazily from there, so that module is the only effective patch target)."""
+    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
+
+    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
+
+
+def _patch_no_sleep(monkeypatch, worker) -> None:
+    """Replace the pass's worker.asyncio.sleep(2.0) pacing with a no-op."""
+
+    async def no_sleep(_s):
+        return None
+
+    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+
+
 def test_partsurfer_source_is_registered_at_tier_84():
     # The source string MUST be a registered ladder key (tier 84) or every write loses.
     assert SOURCE_TIER[PARTSURFER_DESC_SOURCE] == 84
@@ -170,17 +187,8 @@ async def test_worker_pass_only_fetches_uncategorized_hp_cards_and_dedupes(db_se
         fetched_spares.append(spare)
         return {"726719-B21": _DIMM_DESC, "875507-B21": _SSD_DESC}.get(spare)
 
-    # The pass imports fetch_partsurfer_description LAZILY from the resolver module, so the
-    # only effective patch is on that module — patch it there.
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-    # Avoid the real 2s sleep between fetches.
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
 
     batch = [hp_a1, hp_a2, hp_b, hp_done, non_hp]
     stats = await worker._partsurfer_desc_pass(db_session, batch)
@@ -215,14 +223,8 @@ async def test_worker_pass_respects_fetch_cap(db_session: Session, monkeypatch):
         fetched.append(spare)
         return _DIMM_DESC
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
     monkeypatch.setattr(settings, "partsurfer_fetch_per_batch", 1)
 
     stats = await worker._partsurfer_desc_pass(db_session, cards)
@@ -247,9 +249,7 @@ async def test_worker_pass_no_hp_cards_is_a_noop(db_session: Session, monkeypatc
         called = True
         return None
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
+    _patch_fetch(monkeypatch, fake_fetch)
 
     stats = await worker._partsurfer_desc_pass(db_session, [non_hp])
     assert stats == {"fetched": 0, "categorized": 0, "specs_written": 0, "failed": 0}
@@ -268,9 +268,7 @@ async def test_worker_pass_paces_one_sleep_between_each_fetch(db_session: Sessio
     async def fake_fetch(spare, **_kw):
         return _DIMM_DESC
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
+    _patch_fetch(monkeypatch, fake_fetch)
     monkeypatch.setattr(settings, "partsurfer_fetch_per_batch", 10)
 
     sleeps: list[float] = []
@@ -308,14 +306,8 @@ async def test_worker_pass_aborts_on_transient_and_keeps_earlier(db_session: Ses
             raise PartSurferTransient("partsurfer 503 for 875507-B21")
         return _DIMM_DESC
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
 
     stats = await worker._partsurfer_desc_pass(db_session, [c1, c2, c3])
     db_session.commit()
@@ -346,14 +338,8 @@ async def test_worker_pass_isolates_a_single_failing_card(db_session: Session, m
     async def fake_fetch(spare, **_kw):
         return {"726719-B21": _DIMM_DESC, "875507-B21": _SSD_DESC}[spare]
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
 
     real_categorize = desc_writer.categorize_and_record
 
@@ -388,14 +374,8 @@ async def test_worker_pass_grammar_declines_categorize_none(db_session: Session,
     async def fake_fetch(spare, **_kw):
         return "SOME OPAQUE HP DESCRIPTION THE GRAMMAR DECLINES"
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
     # Grammar declines every description.
     monkeypatch.setattr(desc_writer, "categorize_and_record", lambda *a, **k: (False, 0))
 
@@ -422,14 +402,8 @@ async def test_run_one_batch_gates_partsurfer_pass_on_flag(db_session: Session, 
         fetched.append(spare)
         return _DIMM_DESC  # the DIMM description → categorizes to dram
 
-    import app.services.enrichment_worker.partsurfer_resolver as resolver_mod
-
-    monkeypatch.setattr(resolver_mod, "fetch_partsurfer_description", fake_fetch)
-
-    async def no_sleep(_s):
-        return None
-
-    monkeypatch.setattr(worker.asyncio, "sleep", no_sleep)
+    _patch_fetch(monkeypatch, fake_fetch)
+    _patch_no_sleep(monkeypatch, worker)
     # Isolate the partsurfer pass: enrich_card is a no-op miss; the other deterministic
     # passes are gated off so only the partsurfer flag is under test.
     monkeypatch.setattr(settings, "oem_crosswalk_enrich_enabled", False)

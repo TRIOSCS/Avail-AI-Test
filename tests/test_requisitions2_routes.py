@@ -7,7 +7,10 @@ Called by: pytest
 Depends on: app/routers/requisitions2.py, conftest fixtures
 """
 
+import json
 from datetime import datetime, timezone
+
+import pytest
 
 # ── Page load ────────────────────────────────────────────────────────
 
@@ -373,55 +376,23 @@ def test_row_action_assign_without_owner_id(client, test_requisition, test_user,
 # ── Row actions — invalid state transitions ──────────────────────────
 
 
-def test_row_action_archive_invalid_state(client, test_requisition, db_session):
-    """Archive from 'closed' (no transitions) still returns 200 with error toast."""
-    test_requisition.status = "closed"
+@pytest.mark.parametrize(
+    ("start_status", "action"),
+    [
+        pytest.param("closed", "archive", id="archive_from_closed"),
+        pytest.param("offers", "activate", id="activate_from_offers"),
+        pytest.param("closed", "won", id="won_from_closed"),
+        pytest.param("active", "lost", id="lost_from_active"),
+    ],
+)
+def test_row_action_invalid_state(client, test_requisition, db_session, start_status, action):
+    """Row actions that aren't valid transitions return 200 with an error toast."""
+    test_requisition.status = start_status
     db_session.commit()
 
-    resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
+    resp = client.post(f"/requisitions2/{test_requisition.id}/action/{action}")
     assert resp.status_code == 200
     assert "HX-Trigger" in resp.headers
-    import json
-
-    trigger = json.loads(resp.headers["HX-Trigger"])
-    assert "Invalid transition" in trigger["showToast"]["message"]
-
-
-def test_row_action_activate_invalid_state(client, test_requisition, db_session):
-    """Activate from 'offers' (not allowed → active) returns 200 with error toast."""
-    test_requisition.status = "offers"
-    db_session.commit()
-
-    resp = client.post(f"/requisitions2/{test_requisition.id}/action/activate")
-    assert resp.status_code == 200
-    assert "HX-Trigger" in resp.headers
-    import json
-
-    trigger = json.loads(resp.headers["HX-Trigger"])
-    assert "Invalid transition" in trigger["showToast"]["message"]
-
-
-def test_row_action_won_invalid_state(client, test_requisition, db_session):
-    """Won from 'closed' (no transitions) returns 200 with error toast."""
-    test_requisition.status = "closed"
-    db_session.commit()
-
-    resp = client.post(f"/requisitions2/{test_requisition.id}/action/won")
-    assert resp.status_code == 200
-    import json
-
-    trigger = json.loads(resp.headers["HX-Trigger"])
-    assert "Invalid transition" in trigger["showToast"]["message"]
-
-
-def test_row_action_lost_invalid_state(client, test_requisition, db_session):
-    """Lost from 'active' (not in allowed set) returns 200 with error toast."""
-    test_requisition.status = "active"
-    db_session.commit()
-
-    resp = client.post(f"/requisitions2/{test_requisition.id}/action/lost")
-    assert resp.status_code == 200
-    import json
 
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "Invalid transition" in trigger["showToast"]["message"]
@@ -494,34 +465,24 @@ def test_bulk_nonexistent_ids(client):
     assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
 
 
-def test_bulk_activate_invalid_state(client, test_requisition, db_session):
-    """Bulk activate on 'offers' status (→active not allowed) skips gracefully."""
-    test_requisition.status = "offers"
+@pytest.mark.parametrize(
+    ("start_status", "action"),
+    [
+        pytest.param("offers", "activate", id="activate_from_offers"),
+        pytest.param("closed", "archive", id="archive_from_closed"),
+    ],
+)
+def test_bulk_action_invalid_state(client, test_requisition, db_session, start_status, action):
+    """Bulk actions on non-transitionable statuses skip gracefully (0 affected)."""
+    test_requisition.status = start_status
     db_session.commit()
 
     resp = client.post(
-        "/requisitions2/bulk/activate",
+        f"/requisitions2/bulk/{action}",
         data={"ids": str(test_requisition.id)},
     )
     assert resp.status_code == 200
     assert "HX-Trigger" in resp.headers
-    import json
-
-    trigger = json.loads(resp.headers["HX-Trigger"])
-    assert "0 requisition" in trigger["showToast"]["message"]
-
-
-def test_bulk_archive_invalid_state(client, test_requisition, db_session):
-    """Bulk archive on 'closed' status (no transitions) skips gracefully."""
-    test_requisition.status = "closed"
-    db_session.commit()
-
-    resp = client.post(
-        "/requisitions2/bulk/archive",
-        data={"ids": str(test_requisition.id)},
-    )
-    assert resp.status_code == 200
-    import json
 
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "0 requisition" in trigger["showToast"]["message"]
@@ -537,7 +498,6 @@ def test_row_action_returns_toast_header(client, test_requisition, db_session):
 
     resp = client.post(f"/requisitions2/{test_requisition.id}/action/archive")
     assert "HX-Trigger" in resp.headers
-    import json
 
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "showToast" in trigger
@@ -553,7 +513,6 @@ def test_bulk_action_returns_toast_and_clear(client, test_requisition, db_sessio
         "/requisitions2/bulk/archive",
         data={"ids": str(test_requisition.id)},
     )
-    import json
 
     trigger = json.loads(resp.headers["HX-Trigger"])
     assert "showToast" in trigger

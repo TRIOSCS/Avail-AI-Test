@@ -4,6 +4,8 @@ All tests use synthetic raw-response dicts matching the documented API shapes. N
 network or DB required.
 """
 
+import pytest
+
 from app.connectors._core_attrs import (
     clean_str,
     digikey_parameter,
@@ -16,58 +18,73 @@ from app.connectors._core_attrs import (
 # ── _core_attrs helpers ───────────────────────────────────────────────
 
 
-def test_lifecycle_mapping():
-    assert map_lifecycle("Active") == "active"
-    assert map_lifecycle("Not For New Designs") == "nrfnd"
-    assert map_lifecycle("Obsolete") == "obsolete"
-    assert map_lifecycle("totally unknown status") is None
-    assert map_lifecycle(None) is None
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("Active", "active"),
+        ("Not For New Designs", "nrfnd"),
+        ("Obsolete", "obsolete"),
+        ("totally unknown status", None),
+        (None, None),
+        ("NRND", "nrfnd"),
+        ("Discontinued", "obsolete"),
+        ("Last Time Buy", "ltb"),
+        ("End Of Life", "eol"),
+        ("EOL", "eol"),
+        ("", None),
+    ],
+)
+def test_lifecycle_mapping(value, expected):
+    assert map_lifecycle(value) == expected
 
 
-def test_lifecycle_mapping_extra():
-    assert map_lifecycle("NRND") == "nrfnd"
-    assert map_lifecycle("Discontinued") == "obsolete"
-    assert map_lifecycle("Last Time Buy") == "ltb"
-    assert map_lifecycle("End Of Life") == "eol"
-    assert map_lifecycle("EOL") == "eol"
-    assert map_lifecycle("") is None
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("ROHS Compliant", "compliant"),
+        ("Non-Compliant", "non-compliant"),
+        ("weird", None),
+        ("compliant", "compliant"),
+        ("RoHS3 Compliant", "compliant"),
+        ("Not Compliant", "non-compliant"),
+        ("RoHS Exempt", "exempt"),
+        ("Exempt", "exempt"),
+        (None, None),
+        ("", None),
+    ],
+)
+def test_rohs_mapping(value, expected):
+    assert map_rohs(value) == expected
 
 
-def test_rohs_mapping():
-    assert map_rohs("ROHS Compliant") == "compliant"
-    assert map_rohs("Non-Compliant") == "non-compliant"
-    assert map_rohs("weird") is None
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("64", 64),
+        ("0", None),
+        ("abc", None),
+        (32, 32),
+        (-1, None),
+        (None, None),
+        ("  128  ", 128),
+    ],
+)
+def test_pin_count(value, expected):
+    assert safe_pin_count(value) == expected
 
 
-def test_rohs_mapping_extra():
-    assert map_rohs("compliant") == "compliant"
-    assert map_rohs("RoHS3 Compliant") == "compliant"
-    assert map_rohs("Not Compliant") == "non-compliant"
-    assert map_rohs("RoHS Exempt") == "exempt"
-    assert map_rohs("Exempt") == "exempt"
-    assert map_rohs(None) is None
-    assert map_rohs("") is None
-
-
-def test_pin_count():
-    assert safe_pin_count("64") == 64
-    assert safe_pin_count("0") is None
-    assert safe_pin_count("abc") is None
-
-
-def test_pin_count_extra():
-    assert safe_pin_count(32) == 32
-    assert safe_pin_count(-1) is None
-    assert safe_pin_count(None) is None
-    assert safe_pin_count("  128  ") == 128
-
-
-def test_clean_str():
-    assert clean_str("  hello  ", maxlen=100) == "hello"
-    assert clean_str("toolongstring", maxlen=5) == "toolo"
-    assert clean_str(None, maxlen=100) is None
-    assert clean_str("  ", maxlen=100) is None
-    assert clean_str(42, maxlen=100) == "42"
+@pytest.mark.parametrize(
+    ("value", "maxlen", "expected"),
+    [
+        ("  hello  ", 100, "hello"),
+        ("toolongstring", 5, "toolo"),
+        (None, 100, None),
+        ("  ", 100, None),
+        (42, 100, "42"),
+    ],
+)
+def test_clean_str(value, maxlen, expected):
+    assert clean_str(value, maxlen=maxlen) == expected
 
 
 def test_digikey_parameter():

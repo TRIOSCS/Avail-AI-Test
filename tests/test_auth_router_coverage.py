@@ -20,6 +20,8 @@ import hashlib
 import secrets
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import User
 
 # ── Helper: generate a real PBKDF2 password hash ────────────────────
@@ -30,6 +32,22 @@ def _hash_password(password: str) -> str:
     salt = secrets.token_bytes(16)
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
     return f"{base64.b64encode(salt).decode()}${base64.b64encode(dk).decode()}"
+
+
+def _make_user(db_session, *, email, azure_id, password=None, role="buyer", name="Test User") -> User:
+    """Persist a User row, hashing `password` when given (None leaves password_hash
+    unset)."""
+    user = User(
+        email=email,
+        name=name,
+        role=role,
+        azure_id=azure_id,
+        password_hash=_hash_password(password) if password is not None else None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(user)
+    db_session.commit()
+    return user
 
 
 # ── _password_login_enabled tests ───────────────────────────────────
@@ -43,40 +61,25 @@ class TestPasswordLoginEnabled:
         # TESTING=1 is set in conftest so this should always return True
         assert _password_login_enabled() is True
 
-    def test_disabled_without_enable_flag(self, monkeypatch):
-        """Returns False when TESTING is unset and ENABLE_PASSWORD_LOGIN is false."""
+    @pytest.mark.parametrize(
+        ("enable_flag", "app_url", "expected"),
+        [
+            pytest.param("false", None, False, id="disabled_without_enable_flag"),
+            pytest.param("true", "https://app.example.com", True, id="enabled_when_env_set_https_url"),
+            pytest.param("true", "http://localhost:8000", True, id="enabled_on_http_url"),
+            pytest.param("true", "", True, id="enabled_on_empty_url"),
+        ],
+    )
+    def test_enabled_from_env(self, monkeypatch, enable_flag, app_url, expected):
+        """With TESTING unset, the result tracks ENABLE_PASSWORD_LOGIN regardless of
+        APP_URL scheme."""
         from app.routers.auth import _password_login_enabled
 
         monkeypatch.delenv("TESTING", raising=False)
-        monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "false")
-        assert _password_login_enabled() is False
-
-    def test_enabled_when_env_set_https_url(self, monkeypatch):
-        """Returns True when ENABLE_PASSWORD_LOGIN=true regardless of APP_URL scheme."""
-        from app.routers.auth import _password_login_enabled
-
-        monkeypatch.delenv("TESTING", raising=False)
-        monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "true")
-        monkeypatch.setenv("APP_URL", "https://app.example.com")
-        assert _password_login_enabled() is True
-
-    def test_enabled_on_http_url(self, monkeypatch):
-        """Returns True when APP_URL is HTTP (development mode)."""
-        from app.routers.auth import _password_login_enabled
-
-        monkeypatch.delenv("TESTING", raising=False)
-        monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "true")
-        monkeypatch.setenv("APP_URL", "http://localhost:8000")
-        assert _password_login_enabled() is True
-
-    def test_enabled_on_empty_url(self, monkeypatch):
-        """Returns True when APP_URL is empty and ENABLE_PASSWORD_LOGIN=true."""
-        from app.routers.auth import _password_login_enabled
-
-        monkeypatch.delenv("TESTING", raising=False)
-        monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "true")
-        monkeypatch.setenv("APP_URL", "")
-        assert _password_login_enabled() is True
+        monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", enable_flag)
+        if app_url is not None:
+            monkeypatch.setenv("APP_URL", app_url)
+        assert _password_login_enabled() is expected
 
 
 # ── _verify_password tests ───────────────────────────────────────────
@@ -125,16 +128,7 @@ class TestPasswordLoginEndpoint:
     def test_login_success(self, client, db_session):
         """POST /auth/login with valid credentials returns 200."""
         password = "test-password-123"
-        user = User(
-            email="pwuser@trioscs.com",
-            name="PW User",
-            role="buyer",
-            azure_id="pw-azure-001",
-            password_hash=_hash_password(password),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
+        _make_user(db_session, email="pwuser@trioscs.com", name="PW User", azure_id="pw-azure-001", password=password)
 
         resp = client.post(
             "/auth/login",
@@ -147,16 +141,7 @@ class TestPasswordLoginEndpoint:
 
     def test_login_wrong_password(self, client, db_session):
         """POST /auth/login with wrong password returns 401."""
-        user = User(
-            email="pwfail@trioscs.com",
-            name="PW Fail",
-            role="buyer",
-            azure_id="pw-azure-002",
-            password_hash=_hash_password("correct"),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
+        _make_user(db_session, email="pwfail@trioscs.com", name="PW Fail", azure_id="pw-azure-002", password="correct")
 
         resp = client.post(
             "/auth/login",
@@ -176,15 +161,7 @@ class TestPasswordLoginEndpoint:
 
     def test_login_user_no_password_hash(self, client, db_session):
         """POST /auth/login with user that has no password_hash returns 401."""
-        user = User(
-            email="nohash@trioscs.com",
-            name="No Hash",
-            role="buyer",
-            azure_id="pw-azure-003",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
+        _make_user(db_session, email="nohash@trioscs.com", name="No Hash", azure_id="pw-azure-003")
 
         resp = client.post(
             "/auth/login",
@@ -196,16 +173,9 @@ class TestPasswordLoginEndpoint:
     def test_login_normalizes_email_to_lowercase(self, client, db_session):
         """Login accepts uppercase email and normalizes it."""
         password = "test-password-456"
-        user = User(
-            email="casetest@trioscs.com",
-            name="Case Test",
-            role="buyer",
-            azure_id="pw-azure-004",
-            password_hash=_hash_password(password),
-            created_at=datetime.now(timezone.utc),
+        _make_user(
+            db_session, email="casetest@trioscs.com", name="Case Test", azure_id="pw-azure-004", password=password
         )
-        db_session.add(user)
-        db_session.commit()
 
         resp = client.post(
             "/auth/login",
@@ -229,16 +199,14 @@ class TestPasswordLoginEndpoint:
     def test_login_returns_user_role(self, client, db_session):
         """Login response includes user role."""
         password = "role-test-pass"
-        user = User(
+        _make_user(
+            db_session,
             email="roletest@trioscs.com",
             name="Role Test",
             role="admin",
             azure_id="pw-azure-005",
-            password_hash=_hash_password(password),
-            created_at=datetime.now(timezone.utc),
+            password=password,
         )
-        db_session.add(user)
-        db_session.commit()
 
         resp = client.post(
             "/auth/login",
@@ -250,16 +218,14 @@ class TestPasswordLoginEndpoint:
     def test_login_role_defaults_to_buyer_when_none(self, client, db_session):
         """Login response defaults role to 'buyer' when user.role is None."""
         password = "role-default-pass"
-        user = User(
+        _make_user(
+            db_session,
             email="norole@trioscs.com",
             name="No Role",
             role=None,
             azure_id="pw-azure-006",
-            password_hash=_hash_password(password),
-            created_at=datetime.now(timezone.utc),
+            password=password,
         )
-        db_session.add(user)
-        db_session.commit()
 
         resp = client.post(
             "/auth/login",

@@ -76,6 +76,14 @@ def _make_history(**overrides) -> dict:
     return defaults
 
 
+def _sort_by_confidence(results: list[dict]) -> None:
+    """Sort results in place using the same key as search_requirement."""
+    results.sort(
+        key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)),
+        reverse=True,
+    )
+
+
 # ── Tests ────────────────────────────────────────────────────────────────
 
 
@@ -163,10 +171,7 @@ def test_results_sorted_by_confidence():
     ]
 
     # Apply the same sort logic used in search_requirement
-    results.sort(
-        key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)),
-        reverse=True,
-    )
+    _sort_by_confidence(results)
 
     assert results[0]["vendor_name"] == "High"
     assert results[1]["vendor_name"] == "Mid"
@@ -180,10 +185,7 @@ def test_confidence_pct_tiebreak_uses_score():
         {"vendor_name": "HighScore", "confidence_pct": 80, "score": 70},
     ]
 
-    results.sort(
-        key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)),
-        reverse=True,
-    )
+    _sort_by_confidence(results)
 
     assert results[0]["vendor_name"] == "HighScore"
     assert results[1]["vendor_name"] == "LowScore"
@@ -203,10 +205,7 @@ def test_live_stock_above_historical():
     # Live results get mapped to 70-95 range, historical decays from 80
     # With 60-day-old history, confidence should be lower
     results = [hist_d, live_d]
-    results.sort(
-        key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)),
-        reverse=True,
-    )
+    _sort_by_confidence(results)
 
     assert results[0]["source_badge"] == "Live Stock"
     assert results[0]["confidence_pct"] >= results[1]["confidence_pct"]

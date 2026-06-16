@@ -239,67 +239,32 @@ class TestProgressContactStatus:
         vr.classification = classification
         return vr
 
-    def test_quoted_terminal_no_change(self):
-        c = self._make_contact("quoted")
-        _progress_contact_status(c, self._make_vr("no_stock"), MagicMock())
-        assert c.status == "quoted"
-
-    def test_declined_terminal_no_change(self):
-        c = self._make_contact("declined")
-        _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
-        assert c.status == "declined"
-
-    def test_quote_provided_sets_quoted(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("quote_provided"), MagicMock())
-        assert c.status == "quoted"
-
-    def test_no_stock_sets_declined(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("no_stock"), MagicMock())
-        assert c.status == "declined"
-
-    def test_ooo_bounce_sets_pending(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("ooo_bounce"), MagicMock())
-        assert c.status == "pending"
-
-    def test_clarification_needed_sets_responded(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("clarification_needed"), MagicMock())
-        assert c.status == "responded"
-
-    def test_counter_offer_sets_responded(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("counter_offer"), MagicMock())
-        assert c.status == "responded"
-
-    def test_partial_availability_sets_responded(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("partial_availability"), MagicMock())
-        assert c.status == "responded"
-
-    def test_unknown_classification_sent_to_responded(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr("unknown_type"), MagicMock())
-        assert c.status == "responded"
-
-    def test_unknown_classification_opened_to_responded(self):
-        c = self._make_contact("opened")
-        _progress_contact_status(c, self._make_vr("anything"), MagicMock())
-        assert c.status == "responded"
-
-    def test_unknown_classification_responded_stays(self):
-        c = self._make_contact("responded")
-        _progress_contact_status(c, self._make_vr("something_else"), MagicMock())
-        # Not in ("sent", "opened") so status doesn't change from the else branch
-        assert c.status == "responded"
-
-    def test_none_classification(self):
-        c = self._make_contact("sent")
-        _progress_contact_status(c, self._make_vr(None), MagicMock())
-        # None -> empty string -> falls to else branch -> sent->responded
-        assert c.status == "responded"
+    @pytest.mark.parametrize(
+        ("initial_status", "classification", "expected_status"),
+        [
+            # Terminal statuses are never changed by a later response.
+            pytest.param("quoted", "no_stock", "quoted", id="quoted_terminal_no_change"),
+            pytest.param("declined", "quote_provided", "declined", id="declined_terminal_no_change"),
+            # Classification-driven transitions from a non-terminal "sent".
+            pytest.param("sent", "quote_provided", "quoted", id="quote_provided_sets_quoted"),
+            pytest.param("sent", "no_stock", "declined", id="no_stock_sets_declined"),
+            pytest.param("sent", "ooo_bounce", "pending", id="ooo_bounce_sets_pending"),
+            pytest.param("sent", "clarification_needed", "responded", id="clarification_needed_sets_responded"),
+            pytest.param("sent", "counter_offer", "responded", id="counter_offer_sets_responded"),
+            pytest.param("sent", "partial_availability", "responded", id="partial_availability_sets_responded"),
+            # Unknown / None classification falls to the else branch.
+            pytest.param("sent", "unknown_type", "responded", id="unknown_classification_sent_to_responded"),
+            pytest.param("opened", "anything", "responded", id="unknown_classification_opened_to_responded"),
+            # Not in ("sent", "opened") so status doesn't change from the else branch.
+            pytest.param("responded", "something_else", "responded", id="unknown_classification_responded_stays"),
+            # None -> empty string -> falls to else branch -> sent->responded.
+            pytest.param("sent", None, "responded", id="none_classification"),
+        ],
+    )
+    def test_status_transition(self, initial_status, classification, expected_status):
+        c = self._make_contact(initial_status)
+        _progress_contact_status(c, self._make_vr(classification), MagicMock())
+        assert c.status == expected_status
 
     def test_status_updated_at_is_set(self):
         c = self._make_contact("sent")

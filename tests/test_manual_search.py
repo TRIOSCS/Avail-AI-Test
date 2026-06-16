@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.constants import RequisitionStatus, SourcingStatus
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendor_sighting_summary import VendorSightingSummary
@@ -48,21 +50,46 @@ class TestRequirementLastSearchedAt:
 
 
 class TestSearchRequirementStamp:
-    @patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
-    async def test_search_requirement_stamps_last_searched_at_on_success(self, mock_fetch, db_session):
-        """search_requirement() stamps last_searched_at when at least one source
-        returned status=ok (even with zero results)."""
-        mock_fetch.return_value = (
-            [],
-            [{"source": "nexar", "results": 0, "ms": 50, "error": None, "status": "ok"}],
-        )
+    """search_requirement() stamps last_searched_at only when at least one source
+    returned status=ok (even with zero results).
 
-        req = Requisition(name="Stamp Test", status=RequisitionStatus.ACTIVE, customer_name="Acme")
+    Without the total-failure guard, the 5-minute rate guard would silence retries after
+    a failed search.
+    """
+
+    @pytest.mark.parametrize(
+        "req_name, mpn, source_statuses, expect_stamped",
+        [
+            (
+                "Stamp Test",
+                "STAMP-001",
+                [{"source": "nexar", "results": 0, "ms": 50, "error": None, "status": "ok"}],
+                True,
+            ),
+            (
+                "Fail Test",
+                "FAIL-001",
+                [
+                    {"source": "nexar", "results": 0, "ms": 50, "error": "quota", "status": "error"},
+                    {"source": "mouser", "results": 0, "ms": 50, "error": "auth", "status": "error"},
+                ],
+                False,
+            ),
+        ],
+        ids=["stamps_on_success", "does_not_stamp_on_total_failure"],
+    )
+    @patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
+    async def test_search_requirement_stamp(
+        self, mock_fetch, db_session, req_name, mpn, source_statuses, expect_stamped
+    ):
+        mock_fetch.return_value = ([], source_statuses)
+
+        req = Requisition(name=req_name, status=RequisitionStatus.ACTIVE, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
         r = Requirement(
             requisition_id=req.id,
-            primary_mpn="STAMP-001",
+            primary_mpn=mpn,
             manufacturer="TestMfr",
             target_qty=100,
             sourcing_status=SourcingStatus.OPEN,
@@ -77,45 +104,10 @@ class TestSearchRequirementStamp:
         await search_requirement(r, db_session)
 
         db_session.refresh(r)
-        assert r.last_searched_at is not None
-
-    @patch("app.search_service._fetch_fresh", new_callable=AsyncMock)
-    async def test_search_requirement_does_not_stamp_on_total_failure(self, mock_fetch, db_session):
-        """search_requirement() does NOT stamp last_searched_at when every source
-        errored.
-
-        Without this guard, the 5-minute rate guard would silence retries after a failed
-        search.
-        """
-        mock_fetch.return_value = (
-            [],
-            [
-                {"source": "nexar", "results": 0, "ms": 50, "error": "quota", "status": "error"},
-                {"source": "mouser", "results": 0, "ms": 50, "error": "auth", "status": "error"},
-            ],
-        )
-
-        req = Requisition(name="Fail Test", status=RequisitionStatus.ACTIVE, customer_name="Acme")
-        db_session.add(req)
-        db_session.flush()
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="FAIL-001",
-            manufacturer="TestMfr",
-            target_qty=100,
-            sourcing_status=SourcingStatus.OPEN,
-        )
-        db_session.add(r)
-        db_session.commit()
-
-        assert r.last_searched_at is None
-
-        from app.search_service import search_requirement
-
-        await search_requirement(r, db_session)
-
-        db_session.refresh(r)
-        assert r.last_searched_at is None
+        if expect_stamped:
+            assert r.last_searched_at is not None
+        else:
+            assert r.last_searched_at is None
 
 
 def _seed_requirement(db_session, mpn="RATE-001", last_searched_at=None):
