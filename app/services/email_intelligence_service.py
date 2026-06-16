@@ -165,8 +165,7 @@ def store_email_intelligence(
 
     if cls_type not in no_review:
         if conf >= 0.8:
-            if parsed_quotes:
-                auto_applied = True
+            auto_applied = bool(parsed_quotes)
         elif conf >= 0.5:
             needs_review = True
 
@@ -175,7 +174,7 @@ def store_email_intelligence(
         user_id=user_id,
         sender_email=sender_email.lower(),
         sender_domain=domain,
-        classification=classification.get("classification", "general"),
+        classification=cls_type,
         confidence=conf,
         has_pricing=has_pricing,
         parts_detected=classification.get("parts_mentioned", []),
@@ -215,8 +214,6 @@ async def process_email_intelligence(
 
     Returns: classification dict with all intelligence, or None if skipped.
     """
-    classification = None
-
     if regex_offer_matches >= 2:
         # Clear offer — skip AI classification, use regex result
         classification = {
@@ -362,7 +359,10 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
                 logger.warning("Claude AI failed for specialty detection: {}", e)
                 return None
 
-    results = list(await asyncio.gather(*[_limited(t) for t in texts]))
+    results = await asyncio.gather(*[_limited(t) for t in texts])
+
+    def _as_list(value: object) -> list:
+        return value if isinstance(value, list) else []
 
     # Validate/normalize results
     normalized = []
@@ -372,8 +372,8 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
             continue
         normalized.append(
             {
-                "brands": r.get("brands", []) if isinstance(r.get("brands"), list) else [],
-                "commodities": r.get("commodities", []) if isinstance(r.get("commodities"), list) else [],
+                "brands": _as_list(r.get("brands")),
+                "commodities": _as_list(r.get("commodities")),
                 "sender_type": r.get("sender_type", "unknown"),
             }
         )

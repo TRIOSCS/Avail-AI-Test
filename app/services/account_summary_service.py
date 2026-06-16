@@ -5,6 +5,7 @@ to produce a strategic account summary via Claude. Called from the companies
 router and rendered on the account overview tab.
 """
 
+from collections import Counter
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -35,11 +36,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
     # ── Gather context ───────────────────────────────────────────────
 
     # Sites
-    sites = (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active == True)  # noqa: E712
-        .all()
-    )
+    sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
     site_ids = [s.id for s in sites]
 
     # Contacts across all sites
@@ -47,7 +44,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
     if site_ids:
         contacts = (
             db.query(SiteContact)
-            .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active == True)  # noqa: E712
+            .filter(SiteContact.customer_site_id.in_(site_ids), SiteContact.is_active.is_(True))
             .all()
         )
 
@@ -136,10 +133,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
 
     # Pipeline summary
     if reqs:
-        status_counts = {}
-        for r in reqs:
-            st = (r.status or "open").lower()
-            status_counts[st] = status_counts.get(st, 0) + 1
+        status_counts = Counter((r.status or "open").lower() for r in reqs)
         pipeline_parts = [f"{st}: {cnt}" for st, cnt in status_counts.items()]
         ctx_parts.append(f"Pipeline ({len(reqs)} total): {', '.join(pipeline_parts)}")
 
@@ -153,10 +147,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
 
     # Activity summary
     if activities:
-        type_counts = {}
-        for a in activities:
-            t = a.activity_type or "other"
-            type_counts[t] = type_counts.get(t, 0) + 1
+        type_counts = Counter(a.activity_type or "other" for a in activities)
         act_parts = [f"{t}: {cnt}" for t, cnt in type_counts.items()]
         ctx_parts.append(f"Recent activity ({len(activities)} events): {', '.join(act_parts)}")
 

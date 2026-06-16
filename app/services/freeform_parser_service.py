@@ -123,6 +123,23 @@ Rules:
 - Include all parts mentioned, even if some are "no stock" (qty 0)."""
 
 
+def _normalize_if_present(item: dict, key: str, normalizer) -> None:
+    """Normalize item[key] in place, keeping the original on a falsy result.
+
+    Only runs when the existing value is truthy, so unset/empty fields are untouched.
+    """
+    value = item.get(key)
+    if value:
+        item[key] = normalizer(value) or value
+
+
+def _normalize_if_not_none(item: dict, key: str, normalizer) -> None:
+    """Normalize item[key] in place when the value is not None (0 counts)."""
+    value = item.get(key)
+    if value is not None:
+        item[key] = normalizer(value)
+
+
 async def parse_freeform_rfq(raw_text: str) -> dict | None:
     """Parse free-form customer text into RFQ template (requisition + requirements)."""
     text = (raw_text or "").strip()[:6000]
@@ -141,18 +158,14 @@ async def parse_freeform_rfq(raw_text: str) -> dict | None:
     for r in result.get("requirements", []):
         if r.get("target_qty") is None:
             r["target_qty"] = 1
-        if r.get("target_price") is not None:
-            r["target_price"] = normalize_price(r["target_price"])
         if r.get("substitutes") is None:
             r["substitutes"] = []
-        if r.get("condition"):
-            r["condition"] = normalize_condition(r["condition"]) or r["condition"]
+        _normalize_if_not_none(r, "target_price", normalize_price)
+        _normalize_if_present(r, "condition", normalize_condition)
         if not r.get("condition"):
             r["condition"] = "new"
-        if r.get("packaging"):
-            r["packaging"] = normalize_packaging(r["packaging"]) or r["packaging"]
-        if r.get("date_codes"):
-            r["date_codes"] = normalize_date_code(r["date_codes"]) or r["date_codes"]
+        _normalize_if_present(r, "packaging", normalize_packaging)
+        _normalize_if_present(r, "date_codes", normalize_date_code)
     return result
 
 
@@ -176,17 +189,11 @@ async def parse_freeform_offer(raw_text: str, rfq_context: list | None = None) -
         return None
     # Normalize offers
     for o in result.get("offers", []):
-        if o.get("unit_price") is not None:
-            o["unit_price"] = normalize_price(o["unit_price"])
-        if o.get("qty_available") is not None:
-            o["qty_available"] = normalize_quantity(o["qty_available"])
-        if o.get("condition"):
-            o["condition"] = normalize_condition(o["condition"]) or o["condition"]
-        if o.get("date_code"):
-            o["date_code"] = normalize_date_code(o["date_code"]) or o["date_code"]
-        if o.get("moq") is not None:
-            o["moq"] = normalize_moq(o["moq"])
-        if o.get("packaging"):
-            o["packaging"] = normalize_packaging(o["packaging"]) or o["packaging"]
+        _normalize_if_not_none(o, "unit_price", normalize_price)
+        _normalize_if_not_none(o, "qty_available", normalize_quantity)
+        _normalize_if_not_none(o, "moq", normalize_moq)
+        _normalize_if_present(o, "condition", normalize_condition)
+        _normalize_if_present(o, "date_code", normalize_date_code)
+        _normalize_if_present(o, "packaging", normalize_packaging)
         o["currency"] = detect_currency(o.get("currency")) or "USD"
     return result

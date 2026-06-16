@@ -63,6 +63,30 @@ _PART_SCHEMA = {
 VALID_LIFECYCLE = {"active", "eol", "obsolete", "nrfnd", "ltb"}
 
 
+def _build_enrich_prompt(cards: list[MaterialCard]) -> str:
+    """Build the enrichment prompt for a list of material cards.
+
+    Shared by the real-time (_enrich_batch) and Batch API (batch_enrich_materials) paths
+    so both stay in lockstep with the same schema/system prompt.
+    """
+    parts_list = []
+    for card in cards:
+        entry = f"- MPN: {card.display_mpn}"
+        if card.manufacturer:
+            entry += f" | Manufacturer: {card.manufacturer}"
+        parts_list.append(entry)
+
+    parts_text = "\n".join(parts_list)
+    cats_text = ", ".join(VALID_CATEGORIES)
+    return (
+        f"Classify and describe each electronic component:\n\n"
+        f"{parts_text}\n\n"
+        f"Valid categories: {cats_text}\n\n"
+        f"Return a JSON object with a 'parts' array, one entry per MPN above, "
+        f"in the same order."
+    )
+
+
 def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
     """Apply AI enrichment result to a MaterialCard."""
     desc = ai.get("description")
@@ -117,22 +141,7 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
     """Enrich a single batch of cards via Claude Haiku."""
     from ..utils.claude_client import claude_structured
 
-    parts_list = []
-    for card in cards:
-        entry = f"- MPN: {card.display_mpn}"
-        if card.manufacturer:
-            entry += f" | Manufacturer: {card.manufacturer}"
-        parts_list.append(entry)
-
-    parts_text = "\n".join(parts_list)
-    cats_text = ", ".join(VALID_CATEGORIES)
-    prompt = (
-        f"Classify and describe each electronic component:\n\n"
-        f"{parts_text}\n\n"
-        f"Valid categories: {cats_text}\n\n"
-        f"Return a JSON object with a 'parts' array, one entry per MPN above, "
-        f"in the same order."
-    )
+    prompt = _build_enrich_prompt(cards)
 
     try:
         result = await claude_structured(
@@ -230,26 +239,6 @@ async def enrich_pending_cards(db: Session, *, limit: int = 300, batch_size: int
 
 _REDIS_KEY = "batch:material_enrich:current"
 _BATCH_LIMIT = 200
-
-
-def _build_enrich_prompt(cards: list[MaterialCard]) -> str:
-    """Build the enrichment prompt for a list of material cards."""
-    parts_list = []
-    for card in cards:
-        entry = f"- MPN: {card.display_mpn}"
-        if card.manufacturer:
-            entry += f" | Manufacturer: {card.manufacturer}"
-        parts_list.append(entry)
-
-    parts_text = "\n".join(parts_list)
-    cats_text = ", ".join(VALID_CATEGORIES)
-    return (
-        f"Classify and describe each electronic component:\n\n"
-        f"{parts_text}\n\n"
-        f"Valid categories: {cats_text}\n\n"
-        f"Return a JSON object with a 'parts' array, one entry per MPN above, "
-        f"in the same order."
-    )
 
 
 async def batch_enrich_materials(db: Session) -> str | None:

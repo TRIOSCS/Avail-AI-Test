@@ -171,10 +171,8 @@ def compute_enrichment_status(db: Session, company_id: int) -> str:
     if len(contacts) >= target and verified_count >= target // 2:
         return "complete"
 
-    if len(contacts) > 0:
-        return "partial"
-
-    return "missing"  # pragma: no cover — unreachable: line 155 already returns for empty
+    # contacts is guaranteed non-empty here (the empty case returned "missing" above)
+    return "partial"
 
 
 def update_company_enrichment_status(db: Session, company_id: int) -> str:

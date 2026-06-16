@@ -8,6 +8,7 @@ Called by: routers/task.py, services/knowledge_service.py, jobs/
 Depends on: models/task.py, models/auth.py
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -17,6 +18,14 @@ from sqlalchemy.orm import Session
 from app.constants import ActivityType, TaskStatus
 from app.models.task import RequisitionTask
 from app.services.activity_service import log_activity
+
+
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Coerce a naive datetime to UTC-aware (SQLite can return naive values)."""
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 
 # ---------------------------------------------------------------------------
 # CRUD
@@ -45,8 +54,7 @@ def create_task(
     # Belt-and-suspenders 24h check for manual tasks (schema also validates)
     if source == "manual" and due_at:
         now = datetime.now(timezone.utc)
-        check_due = due_at.replace(tzinfo=timezone.utc) if due_at.tzinfo is None else due_at
-        if check_due < now + timedelta(hours=24):
+        if _as_utc(due_at) < now + timedelta(hours=24):
             raise ValueError("Due date must be at least 24 hours from now")
     task = RequisitionTask(
         requisition_id=requisition_id,
@@ -157,11 +165,12 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
     for key, val in kwargs.items():
         if val is not None and hasattr(task, key):
             setattr(task, key, val)
-    # Auto-set completed_at when transitioning to done
-    if kwargs.get("status") == TaskStatus.DONE and not task.completed_at:
-        task.completed_at = datetime.now(timezone.utc)
-    # Clear completed_at if moved back from done
-    if kwargs.get("status") and kwargs["status"] != TaskStatus.DONE:
+    # Sync completed_at with any status change: set on transition to done, clear otherwise
+    new_status = kwargs.get("status")
+    if new_status == TaskStatus.DONE:
+        if not task.completed_at:
+            task.completed_at = datetime.now(timezone.utc)
+    elif new_status:
         task.completed_at = None
     db.commit()
     db.refresh(task)
@@ -274,6 +283,19 @@ def delete_task(db: Session, task_id: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _find_open_task_by_ref(db: Session, requisition_id: int, source_ref: str) -> RequisitionTask | None:
+    """Find the non-done task matching a (requisition, source_ref) pair, if any."""
+    return (
+        db.query(RequisitionTask)
+        .filter(
+            RequisitionTask.requisition_id == requisition_id,
+            RequisitionTask.source_ref == source_ref,
+            RequisitionTask.status != TaskStatus.DONE,
+        )
+        .first()
+    )
+
+
 def auto_create_task(
     db: Session,
     *,
@@ -287,16 +309,7 @@ def auto_create_task(
 ) -> RequisitionTask | None:
     """Create a system-generated task, skipping if a matching source_ref already
     exists."""
-    existing = (
-        db.query(RequisitionTask)
-        .filter(
-            RequisitionTask.requisition_id == requisition_id,
-            RequisitionTask.source_ref == source_ref,
-            RequisitionTask.status != TaskStatus.DONE,
-        )
-        .first()
-    )
-    if existing:
+    if _find_open_task_by_ref(db, requisition_id, source_ref):
         return None  # Don't create duplicates
     return create_task(
         db,
@@ -313,15 +326,7 @@ def auto_create_task(
 
 def auto_close_task(db: Session, requisition_id: int, source_ref: str) -> RequisitionTask | None:
     """Auto-close a system task by source_ref when the triggering action completes."""
-    task = (
-        db.query(RequisitionTask)
-        .filter(
-            RequisitionTask.requisition_id == requisition_id,
-            RequisitionTask.source_ref == source_ref,
-            RequisitionTask.status != TaskStatus.DONE,
-        )
-        .first()
-    )
+    task = _find_open_task_by_ref(db, requisition_id, source_ref)
     if task:
         task.status = TaskStatus.DONE
         task.completed_at = datetime.now(timezone.utc)
@@ -501,8 +506,6 @@ async def score_tasks_with_ai(db: Session, tasks: list[RequisitionTask]) -> None
         )
 
     try:
-        import json
-
         prompt = f"Score these procurement tasks:\n{json.dumps(task_descriptions, indent=2)}"
         result = await claude_json(prompt, system=TASK_SCORING_PROMPT, model_tier="fast", max_tokens=512)
         if not result or not isinstance(result, list):
@@ -531,7 +534,7 @@ def compute_simple_priority(task: RequisitionTask) -> float:
 
     # Due date urgency
     if task.due_at:
-        due = task.due_at if task.due_at.tzinfo else task.due_at.replace(tzinfo=timezone.utc)
+        due = _as_utc(task.due_at)
         days_left = (due - now).total_seconds() / 86400
         if days_left < 0:
             score += 0.4  # overdue
@@ -553,10 +556,8 @@ def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
     for t in tasks:
         t.ai_priority_score = compute_simple_priority(t)
         # Simple risk flags — handle naive datetimes from SQLite
-        due = t.due_at.replace(tzinfo=timezone.utc) if t.due_at and not t.due_at.tzinfo else t.due_at
-        created = (
-            t.created_at.replace(tzinfo=timezone.utc) if t.created_at and not t.created_at.tzinfo else t.created_at
-        )
+        due = _as_utc(t.due_at)
+        created = _as_utc(t.created_at)
         if due and due < now:
             t.ai_risk_flag = "Overdue"
         elif due and (due - now).days <= 1:

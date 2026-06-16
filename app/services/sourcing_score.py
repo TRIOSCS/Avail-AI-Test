@@ -40,6 +40,42 @@ def _sigmoid(x: float, midpoint: float, steepness: float = 1.0) -> float:
     return 1 / (1 + math.exp(-steepness * (x - midpoint)))
 
 
+# Per-signal tuning, shared by score_requirement() and _build_signals() so the
+# sigmoid normalization is defined exactly once. Each entry is
+# (key, midpoint, steepness, input_scale, weight):
+#   - midpoint/steepness: shape of the sigmoid for that signal
+#   - input_scale: multiplier applied to the raw input before the sigmoid
+#     (reply_rate is a 0–1 fraction, scaled ×5 so 0.3 = 30% reply rate sits
+#     near the midpoint; every other signal feeds in unscaled)
+#   - weight: contribution to the composite — all roughly equal, RFQs/replies
+#     weighted slightly higher to reward outreach and vendor engagement
+_SIGNAL_SPECS: tuple[tuple[str, float, float, float, float], ...] = (
+    ("sightings", 2.0, 1.0, 1.0, 0.15),  # found sources at all? diminishing returns
+    ("offers", 1.0, 1.5, 1.0, 0.15),  # real offers in hand
+    ("rfqs", 1.5, 1.2, 1.0, 0.20),  # outreach effort, RFQs sent per part
+    ("replies", 1.5, 1.0, 5.0, 0.20),  # vendor engagement (reply_rate ×5)
+    ("calls", 0.3, 3.0, 1.0, 0.15),  # incentivize picking up the phone
+    ("emails", 0.5, 2.0, 1.0, 0.15),  # back-and-forth with vendors
+)
+
+
+def _normalized_signals(
+    sighting_count: float,
+    offer_count: float,
+    rfqs_per_part: float,
+    reply_rate: float,
+    calls_per_part: float,
+    emails_per_part: float,
+) -> list[float]:
+    """Normalize each raw signal to 0–1 via its tuned sigmoid, in _SIGNAL_SPECS
+    order."""
+    inputs = (sighting_count, offer_count, rfqs_per_part, reply_rate, calls_per_part, emails_per_part)
+    return [
+        _sigmoid(value * scale, midpoint=midpoint, steepness=steepness)
+        for value, (_key, midpoint, steepness, scale, _weight) in zip(inputs, _SIGNAL_SPECS)
+    ]
+
+
 def score_requirement(
     sighting_count: int,
     offer_count: int,
@@ -57,30 +93,13 @@ def score_requirement(
     received, calls made, and offers in hand. It represents "we worked this part well
     and can look the customer in the eye."
     """
-    # Sightings: found sources at all? More = better, diminishing returns.
-    # midpoint=2 means 2 sightings = 50% credit on this factor
-    s_sightings = _sigmoid(sighting_count, midpoint=2, steepness=1.0)
+    scores = _normalized_signals(
+        sighting_count, offer_count, rfqs_per_part, reply_rate, calls_per_part, emails_per_part
+    )
 
-    # Offers: having real offers in hand (midpoint=1)
-    s_offers = _sigmoid(offer_count, midpoint=1, steepness=1.5)
-
-    # RFQs sent per part: outreach effort (midpoint=1.5 RFQs per part)
-    s_rfqs = _sigmoid(rfqs_per_part, midpoint=1.5, steepness=1.2)
-
-    # Reply rate: vendor engagement (0–1 input; midpoint=0.3 = 30% reply rate)
-    s_replies = _sigmoid(reply_rate * 5, midpoint=1.5, steepness=1.0)
-
-    # Phone calls: incentivize picking up the phone (midpoint=0.3 per part)
-    s_calls = _sigmoid(calls_per_part, midpoint=0.3, steepness=3.0)
-
-    # Email exchanges: back-and-forth with vendors (midpoint=0.5 per part)
-    s_emails = _sigmoid(emails_per_part, midpoint=0.5, steepness=2.0)
-
-    # Weighted combination — all signals matter roughly equally
-    # but calls get a slight boost to incentivize phone usage
-    raw = s_sightings * 0.15 + s_offers * 0.15 + s_rfqs * 0.20 + s_replies * 0.20 + s_calls * 0.15 + s_emails * 0.15
-
-    # Scale to 0–100.
+    # Weighted combination — all signals matter roughly equally, with RFQs and
+    # replies nudged up to reward outreach and engagement. Scale to 0–100.
+    raw = sum(s * spec[4] for s, spec in zip(scores, _SIGNAL_SPECS))
     score = raw * 100
 
     return round(min(score, 100), 1)
@@ -293,12 +312,9 @@ def _build_signals(
     parts: int = 1,
 ) -> dict:
     """Build per-signal breakdown for tooltip display."""
-    s_sightings = _sigmoid(sighting_count, midpoint=2, steepness=1.0)
-    s_offers = _sigmoid(offer_count, midpoint=1, steepness=1.5)
-    s_rfqs = _sigmoid(rfqs_per_part, midpoint=1.5, steepness=1.2)
-    s_replies = _sigmoid(reply_rate * 5, midpoint=1.5, steepness=1.0)
-    s_calls = _sigmoid(calls_per_part, midpoint=0.3, steepness=3.0)
-    s_emails = _sigmoid(emails_per_part, midpoint=0.5, steepness=2.0)
+    s_sightings, s_offers, s_rfqs, s_replies, s_calls, s_emails = _normalized_signals(
+        sighting_count, offer_count, rfqs_per_part, reply_rate, calls_per_part, emails_per_part
+    )
 
     return {
         "sources": {

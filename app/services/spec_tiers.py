@@ -177,6 +177,44 @@ def values_contradict(kept_value, incoming_value) -> bool:
     return _conflict_value_key(kept_value) != _conflict_value_key(incoming_value)
 
 
+def _is_conflict_for(conflict: dict, key: str, source: str) -> bool:
+    """True iff *conflict* is this card's recorded entry for ``(key, evidence.source)``.
+
+    The single de-dup predicate both recorders share: a card holds at most one conflict
+    entry per ``(spec key, contributing source)``, so newest evidence replaces and a
+    same-source corroboration drops the stale entry.
+    """
+    return conflict.get("key") == key and (conflict.get("evidence") or {}).get("source") == source
+
+
+def _drop_same_source_conflicts(card: "MaterialCard", key: str, source: str) -> None:
+    """Drop *card*'s conflict entries for ``(key, source)`` and recompute the flag.
+
+    Called from the corroboration branch of both recorders: a deterministic source that
+    re-fires and now AGREES must not leave its earlier contradiction/dissent on the card.
+    No-op (leaves the JSONB column untouched) when nothing matched, so a fixed decoder's
+    agreeing pass doesn't churn the column on every card.
+    """
+    conflicts = card.validation_conflicts or []
+    kept = [c for c in conflicts if not _is_conflict_for(c, key, source)]
+    if len(kept) != len(conflicts):
+        card.validation_conflicts = kept
+        card.has_validation_conflict = bool(kept)
+
+
+def _replace_conflict(card: "MaterialCard", key: str, source: str, entry: dict) -> None:
+    """Replace *card*'s conflict entry for ``(key, source)`` with *entry* and flag it.
+
+    The append path both recorders share: drop any prior entry for this
+    ``(key, source)`` (newest replaces) and store *entry*, then set
+    ``has_validation_conflict``.
+    """
+    conflicts = [c for c in (card.validation_conflicts or []) if not _is_conflict_for(c, key, source)]
+    conflicts.append(entry)
+    card.validation_conflicts = conflicts
+    card.has_validation_conflict = True
+
+
 # Daily ladder-rejection counters survive ~a month so weekly trust reviews can read
 # them back; the date-keyed hash self-partitions, so a longer TTL only costs bytes.
 REJECTION_COUNTER_TTL_DAYS = 35.0
@@ -247,15 +285,7 @@ def record_validation_conflict(
         # Corroboration: this source's NEWEST observation agrees with the manual
         # value. "Newest evidence replaces" includes replacing-with-nothing — drop
         # any stale contradiction this source recorded earlier and recompute the flag.
-        stale = [
-            c
-            for c in (card.validation_conflicts or [])
-            if c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source
-        ]
-        if stale:
-            kept = [c for c in (card.validation_conflicts or []) if c not in stale]
-            card.validation_conflicts = kept
-            card.has_validation_conflict = bool(kept)
+        _drop_same_source_conflicts(card, key, incoming_source)
         return False
 
     entry = {
@@ -272,14 +302,7 @@ def record_validation_conflict(
             "observed_at": datetime.now(timezone.utc).isoformat(),
         },
     }
-    conflicts = [
-        c
-        for c in (card.validation_conflicts or [])
-        if not (c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source)
-    ]
-    conflicts.append(entry)
-    card.validation_conflicts = conflicts
-    card.has_validation_conflict = True
+    _replace_conflict(card, key, incoming_source, entry)
     logger.info(
         "validation conflict: card={} key={} manual={!r} kept; {} (tier {}) reported {!r}",
         getattr(card, "id", None),
@@ -342,15 +365,7 @@ def record_evidence_dissent(
         # drop any stale dissent it recorded earlier and recompute the flag
         # (deterministic sources re-fire every pass; a fixed decoder must not leave
         # the card flagged forever).
-        stale = [
-            c
-            for c in (card.validation_conflicts or [])
-            if c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source
-        ]
-        if stale:
-            kept_entries = [c for c in (card.validation_conflicts or []) if c not in stale]
-            card.validation_conflicts = kept_entries
-            card.has_validation_conflict = bool(kept_entries)
+        _drop_same_source_conflicts(card, key, incoming_source)
         return False
 
     kept_tier = kept_prov.get("tier")
@@ -373,14 +388,7 @@ def record_evidence_dissent(
             "observed_at": datetime.now(timezone.utc).isoformat(),
         },
     }
-    conflicts = [
-        c
-        for c in (card.validation_conflicts or [])
-        if not (c.get("key") == key and (c.get("evidence") or {}).get("source") == incoming_source)
-    ]
-    conflicts.append(entry)
-    card.validation_conflicts = conflicts
-    card.has_validation_conflict = True
+    _replace_conflict(card, key, incoming_source, entry)
     logger.info(
         "evidence dissent: card={} key={} kept {!r} ({}, tier {}); {} (tier {}) reported {!r}",
         getattr(card, "id", None),

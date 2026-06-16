@@ -23,6 +23,8 @@ from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 ACTIVITY_CAP = 30
 
+_VALID_STATUS_SIGNALS = frozenset(s.value for s in DigestStatusSignal)
+
 
 class DigestState(StrEnum):
     READY = "ready"
@@ -208,7 +210,7 @@ async def get_or_build_digest(
             return {"state": DigestState.ERROR}
 
         sig = result.get("status_signal")
-        if sig and sig not in {s.value for s in DigestStatusSignal}:
+        if sig and sig not in _VALID_STATUS_SIGNALS:
             logger.warning("Unexpected status_signal from digest AI: {!r}", sig)
             sig = None
 
