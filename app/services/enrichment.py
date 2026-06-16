@@ -223,6 +223,56 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
     if tags_to_apply:
         tag_material_card(card.id, tags_to_apply, db)
 
+    from app.config import settings
+
+    if settings.connector_desc_harvest_enabled:
+        _harvest_connector_enrichment(card, enrichment, ladder_source, db)
+
+
+# Connector structured fields → seeded facet keys. lifecycle_status is intentionally
+# omitted: no commodity schema defines a `lifecycle` facet (confirmed against
+# commodity_seeds.json), so it would only ever no-op.
+_CONNECTOR_FIELD_TO_FACET = {"package_type": "package", "pin_count": "pin_count", "rohs_status": "rohs"}
+
+
+def _harvest_connector_enrichment(card: MaterialCard, enrichment: dict, ladder_source: str, db: Session) -> None:
+    """Record the description + structured fields the connector returned (previously
+    discarded).
+
+    Description → categorize_and_record (categorizes an uncategorized card + fills
+    facets) at connector_desc / tier 84. Structured fields → record_spec at the
+    connector's vendor-API tier (90) — only stick where the commodity schema defines the
+    key. datasheet_url → card column. All writes arbitrated by the F1 ladder; each in a
+    per-card SAVEPOINT.
+    """
+    from app.services.desc_extractor._common import CONNECTOR_DESC_CONFIDENCE, CONNECTOR_DESC_SOURCE
+    from app.services.desc_extractor.writer import categorize_and_record
+    from app.services.spec_write_service import load_schema_cache, record_spec
+
+    datasheet_url = (enrichment.get("datasheet_url") or "").strip()
+    if datasheet_url and not card.datasheet_url:
+        card.datasheet_url = datasheet_url[:1000]
+
+    description = (enrichment.get("description") or "").strip()
+    if description:
+        # Fill-only: categorizes only if still uncategorized; always fills facets via the ladder.
+        categorize_and_record(
+            db, card, description=description, source=CONNECTOR_DESC_SOURCE, confidence=CONNECTOR_DESC_CONFIDENCE
+        )
+
+    category = (card.category or "").lower().strip()
+    if not category:
+        return  # no schema without a category — structured facets can't be validated
+    schema_cache = load_schema_cache(db, category)
+    with db.begin_nested():
+        for field, facet_key in _CONNECTOR_FIELD_TO_FACET.items():
+            value = enrichment.get(field)
+            if value is None or value == "":
+                continue
+            record_spec(
+                db, int(card.id), facet_key, value, source=ladder_source, confidence=0.95, schema_cache=schema_cache
+            )
+
 
 def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
     """Boost confidence for AI tags confirmed by internal data (no API calls).
