@@ -106,24 +106,14 @@ class TestRecordHeartbeat:
 
 
 class TestHandleShutdown:
-    def test_sets_shutdown_flag(self):
+    @pytest.mark.parametrize("sig", [signal.SIGTERM, signal.SIGINT], ids=["sigterm", "sigint"])
+    def test_sets_shutdown_flag(self, sig):
         import app.services.ics_worker.worker as worker_mod
 
         original = worker_mod._shutdown_requested
         try:
             worker_mod._shutdown_requested = False
-            _handle_shutdown(signal.SIGTERM, None)
-            assert worker_mod._shutdown_requested is True
-        finally:
-            worker_mod._shutdown_requested = original
-
-    def test_handles_sigint(self):
-        import app.services.ics_worker.worker as worker_mod
-
-        original = worker_mod._shutdown_requested
-        try:
-            worker_mod._shutdown_requested = False
-            _handle_shutdown(signal.SIGINT, None)
+            _handle_shutdown(sig, None)
             assert worker_mod._shutdown_requested is True
         finally:
             worker_mod._shutdown_requested = original

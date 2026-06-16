@@ -36,6 +36,22 @@ def _make_card(db, mpn, manufacturer=None, category=None):
     return card
 
 
+def _add_sighting(db, req_item, card, vendor_name, manufacturer, mpn):
+    """Add a test Sighting linking a requirement to a material card."""
+    from app.models.sourcing import Sighting
+
+    s = Sighting(
+        requirement_id=req_item.id,
+        material_card_id=card.id,
+        vendor_name=vendor_name,
+        manufacturer=manufacturer,
+        mpn_matched=mpn,
+        source_type="test",
+    )
+    db.add(s)
+    return s
+
+
 # ── seed_from_existing_manufacturers ───────────────────────────────────
 
 
@@ -263,17 +279,7 @@ def test_backfill_mfr_sightings_consensus_3_plus(db_session, test_requisition):
     req_item = test_requisition.requirements[0]
 
     for i in range(3):
-        from app.models.sourcing import Sighting
-
-        s = Sighting(
-            requirement_id=req_item.id,
-            material_card_id=card.id,
-            vendor_name=f"Vendor{i}",
-            manufacturer="Texas Instruments",
-            mpn_matched="BF-CONSENSUS-3",
-            source_type="test",
-        )
-        db_session.add(s)
+        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Texas Instruments", "BF-CONSENSUS-3")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session)
@@ -291,17 +297,7 @@ def test_backfill_mfr_sightings_2_agree(db_session, test_requisition):
     req_item = test_requisition.requirements[0]
 
     for i in range(2):
-        from app.models.sourcing import Sighting
-
-        s = Sighting(
-            requirement_id=req_item.id,
-            material_card_id=card.id,
-            vendor_name=f"Vendor{i}",
-            manufacturer="Analog Devices",
-            mpn_matched="BF-TWOVOTE",
-            source_type="test",
-        )
-        db_session.add(s)
+        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Analog Devices", "BF-TWOVOTE")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session)
@@ -315,17 +311,7 @@ def test_backfill_mfr_sightings_single_skipped(db_session, test_requisition):
     card = _make_card(db_session, "BF-SINGLE")
     req_item = test_requisition.requirements[0]
 
-    from app.models.sourcing import Sighting
-
-    s = Sighting(
-        requirement_id=req_item.id,
-        material_card_id=card.id,
-        vendor_name="Vendor1",
-        manufacturer="OnSemi",
-        mpn_matched="BF-SINGLE",
-        source_type="test",
-    )
-    db_session.add(s)
+    _add_sighting(db_session, req_item, card, "Vendor1", "OnSemi", "BF-SINGLE")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session)
@@ -340,18 +326,8 @@ def test_backfill_mfr_sightings_junk_filtered(db_session, test_requisition):
     card = _make_card(db_session, "BF-JUNK")
     req_item = test_requisition.requirements[0]
 
-    from app.models.sourcing import Sighting
-
     for junk in ["Unknown", "N/A", "Various"]:
-        s = Sighting(
-            requirement_id=req_item.id,
-            material_card_id=card.id,
-            vendor_name="Vendor",
-            manufacturer=junk,
-            mpn_matched="BF-JUNK",
-            source_type="test",
-        )
-        db_session.add(s)
+        _add_sighting(db_session, req_item, card, "Vendor", junk, "BF-JUNK")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session)
@@ -375,18 +351,8 @@ def test_backfill_mfr_sightings_keeps_existing_manufacturer(db_session, test_req
     card = _make_card(db_session, "BF-KEEPMFR", manufacturer="Original Corp")
     req_item = test_requisition.requirements[0]
 
-    from app.models.sourcing import Sighting
-
     for i in range(3):
-        s = Sighting(
-            requirement_id=req_item.id,
-            material_card_id=card.id,
-            vendor_name=f"Vendor{i}",
-            manufacturer="Different Corp",
-            mpn_matched="BF-KEEPMFR",
-            source_type="test",
-        )
-        db_session.add(s)
+        _add_sighting(db_session, req_item, card, f"Vendor{i}", "Different Corp", "BF-KEEPMFR")
     db_session.flush()
 
     backfill_manufacturer_from_sightings(db_session)
@@ -402,25 +368,8 @@ def test_backfill_mfr_sightings_distinct_sources_triggers_consensus(db_session, 
     card = _make_card(db_session, "BF-MULTISRC")
     req_item = test_requisition.requirements[0]
 
-    from app.models.sourcing import Sighting
-
-    s1 = Sighting(
-        requirement_id=req_item.id,
-        material_card_id=card.id,
-        vendor_name="VendorA",
-        manufacturer="TI",
-        mpn_matched="BF-MULTISRC",
-        source_type="test",
-    )
-    s2 = Sighting(
-        requirement_id=req_item.id,
-        material_card_id=card.id,
-        vendor_name="VendorB",
-        manufacturer="Analog Devices",
-        mpn_matched="BF-MULTISRC",
-        source_type="test",
-    )
-    db_session.add_all([s1, s2])
+    _add_sighting(db_session, req_item, card, "VendorA", "TI", "BF-MULTISRC")
+    _add_sighting(db_session, req_item, card, "VendorB", "Analog Devices", "BF-MULTISRC")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session)
@@ -433,20 +382,10 @@ def test_backfill_mfr_sightings_batch_processing(db_session, test_requisition):
 
     req_item = test_requisition.requirements[0]
 
-    from app.models.sourcing import Sighting
-
     for i in range(3):
         card = _make_card(db_session, f"BF-BATCH{i}")
         for j in range(3):
-            s = Sighting(
-                requirement_id=req_item.id,
-                material_card_id=card.id,
-                vendor_name=f"Vendor{j}",
-                manufacturer="TI",
-                mpn_matched=f"BF-BATCH{i}",
-                source_type="test",
-            )
-            db_session.add(s)
+            _add_sighting(db_session, req_item, card, f"Vendor{j}", "TI", f"BF-BATCH{i}")
     db_session.flush()
 
     result = backfill_manufacturer_from_sightings(db_session, batch_size=2)

@@ -44,108 +44,96 @@ from app.services.email_threads import (
 
 
 class TestTrIocsDomainDetection:
-    def test_trioscs_domain(self):
-        assert _is_trioscs_domain("john@trioscs.com") is True
-
-    def test_non_trioscs_domain(self):
-        assert _is_trioscs_domain("vendor@arrow.com") is False
-
-    def test_empty_email(self):
-        assert _is_trioscs_domain("") is False
-
-    def test_no_at_sign(self):
-        assert _is_trioscs_domain("invalid") is False
-
-    def test_none_email(self):
-        assert _is_trioscs_domain(None) is False
+    @pytest.mark.parametrize(
+        "email, expected",
+        [
+            pytest.param("john@trioscs.com", True, id="trioscs_domain"),
+            pytest.param("vendor@arrow.com", False, id="non_trioscs_domain"),
+            pytest.param("", False, id="empty_email"),
+            pytest.param("invalid", False, id="no_at_sign"),
+            pytest.param(None, False, id="none_email"),
+        ],
+    )
+    def test_is_trioscs_domain(self, email, expected):
+        assert _is_trioscs_domain(email) is expected
 
 
 class TestInternalMessageDetection:
-    def test_internal_trioscs_to_trioscs(self):
-        assert _is_internal_message("buyer@trioscs.com", ["manager@trioscs.com"]) is True
-
-    def test_external_vendor_to_trioscs(self):
-        assert _is_internal_message("vendor@arrow.com", ["buyer@trioscs.com"]) is False
-
-    def test_trioscs_to_vendor(self):
-        assert _is_internal_message("buyer@trioscs.com", ["vendor@arrow.com"]) is False
-
-    def test_mixed_recipients(self):
-        # If any recipient is non-TRIOSCS, it's external
-        assert _is_internal_message("buyer@trioscs.com", ["manager@trioscs.com", "vendor@arrow.com"]) is False
-
-    def test_empty_to_list(self):
-        assert _is_internal_message("buyer@trioscs.com", []) is False
+    @pytest.mark.parametrize(
+        "from_addr, to_addrs, expected",
+        [
+            pytest.param("buyer@trioscs.com", ["manager@trioscs.com"], True, id="internal_trioscs_to_trioscs"),
+            pytest.param("vendor@arrow.com", ["buyer@trioscs.com"], False, id="external_vendor_to_trioscs"),
+            pytest.param("buyer@trioscs.com", ["vendor@arrow.com"], False, id="trioscs_to_vendor"),
+            # If any recipient is non-TRIOSCS, it's external
+            pytest.param(
+                "buyer@trioscs.com",
+                ["manager@trioscs.com", "vendor@arrow.com"],
+                False,
+                id="mixed_recipients",
+            ),
+            pytest.param("buyer@trioscs.com", [], False, id="empty_to_list"),
+        ],
+    )
+    def test_is_internal_message(self, from_addr, to_addrs, expected):
+        assert _is_internal_message(from_addr, to_addrs) is expected
 
 
 class TestDirectionExtraction:
-    def test_sent_from_trioscs(self):
-        assert _extract_direction("buyer@trioscs.com") == "sent"
+    @pytest.mark.parametrize(
+        "from_addr, expected",
+        [
+            pytest.param("buyer@trioscs.com", "sent", id="sent_from_trioscs"),
+            pytest.param("vendor@arrow.com", "received", id="received_from_vendor"),
+        ],
+    )
+    def test_extract_direction(self, from_addr, expected):
+        assert _extract_direction(from_addr) == expected
 
-    def test_received_from_vendor(self):
-        assert _extract_direction("vendor@arrow.com") == "received"
+
+def _msg(from_addr, received="", hours_ago=None):
+    """Build a minimal Graph message dict for needs-response/direction tests.
+
+    Pass hours_ago to set receivedDateTime relative to now; otherwise received is used
+    verbatim.
+    """
+    if hours_ago is not None:
+        received = (datetime.now(timezone.utc) - timedelta(hours=hours_ago)).isoformat()
+    return {
+        "from": {"emailAddress": {"address": from_addr}},
+        "receivedDateTime": received,
+    }
 
 
 class TestNeedsResponseDetection:
     def test_no_messages(self):
         assert _detect_needs_response([]) is False
 
-    def test_last_message_from_trioscs(self):
-        """No response needed — we sent the last message."""
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "buyer@trioscs.com"}},
-                "receivedDateTime": datetime.now(timezone.utc).isoformat(),
-            }
-        ]
-        assert _detect_needs_response(messages) is False
-
-    def test_last_message_from_vendor_recent(self):
-        """Vendor replied recently — not yet 24h, no response flag."""
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": datetime.now(timezone.utc).isoformat(),
-            }
-        ]
-        assert _detect_needs_response(messages) is False
-
-    def test_last_message_from_vendor_old(self):
-        """Vendor replied >24h ago — needs response."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": old_time,
-            }
-        ]
-        assert _detect_needs_response(messages) is True
+    @pytest.mark.parametrize(
+        "from_addr, hours_ago, expected",
+        [
+            # No response needed — we sent the last message.
+            pytest.param("buyer@trioscs.com", 0, False, id="last_message_from_trioscs"),
+            # Vendor replied recently — not yet 24h, no response flag.
+            pytest.param("vendor@arrow.com", 0, False, id="last_message_from_vendor_recent"),
+            # Vendor replied >24h ago — needs response.
+            pytest.param("vendor@arrow.com", 25, True, id="last_message_from_vendor_old"),
+        ],
+    )
+    def test_single_message(self, from_addr, hours_ago, expected):
+        assert _detect_needs_response([_msg(from_addr, hours_ago=hours_ago)]) is expected
 
     def test_multiple_messages_last_from_vendor(self):
         """Multiple messages, vendor sent last one >24h ago."""
-        old_time = (datetime.now(timezone.utc) - timedelta(hours=30)).isoformat()
-        recent_time = (datetime.now(timezone.utc) - timedelta(hours=35)).isoformat()
         messages = [
-            {
-                "from": {"emailAddress": {"address": "buyer@trioscs.com"}},
-                "receivedDateTime": recent_time,
-            },
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": old_time,
-            },
+            _msg("buyer@trioscs.com", hours_ago=35),
+            _msg("vendor@arrow.com", hours_ago=30),
         ]
         assert _detect_needs_response(messages) is True
 
     def test_no_date_defaults_to_needs_response(self):
         """No date on vendor message — assume needs response."""
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": "",
-            }
-        ]
-        assert _detect_needs_response(messages) is True
+        assert _detect_needs_response([_msg("vendor@arrow.com", received="")]) is True
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -788,35 +776,16 @@ class TestFetchThreadsForRequirementTiers:
 class TestDetectNeedsResponseEdgeCases:
     def test_invalid_date_format_returns_true(self):
         """Invalid date string in receivedDateTime triggers needs_response=True."""
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": "not-a-valid-date",
-            }
-        ]
-        assert _detect_needs_response(messages) is True
+        assert _detect_needs_response([_msg("vendor@arrow.com", received="not-a-valid-date")]) is True
 
     def test_date_with_z_suffix(self):
         """Date with Z suffix is correctly parsed (recent = no response needed)."""
         now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": now_iso,
-            }
-        ]
-        assert _detect_needs_response(messages) is False
+        assert _detect_needs_response([_msg("vendor@arrow.com", received=now_iso)]) is False
 
     def test_vendor_message_23h_ago_no_response_needed(self):
         """Message received 23h ago — within 24h window, no response needed."""
-        dt = (datetime.now(timezone.utc) - timedelta(hours=23)).isoformat()
-        messages = [
-            {
-                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
-                "receivedDateTime": dt,
-            }
-        ]
-        assert _detect_needs_response(messages) is False
+        assert _detect_needs_response([_msg("vendor@arrow.com", hours_ago=23)]) is False
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -35,6 +35,15 @@ def resolver(db_session):
     return SpecCodeResolver(db_session, claude_call=AsyncMock())
 
 
+def set_claude_response(resolver, response):
+    """Wire the resolver's LLM to return a fixed response dict (ignoring kwargs)."""
+
+    async def fake_claude(**kwargs):
+        return response
+
+    resolver._claude_call = fake_claude
+
+
 @pytest.fixture
 def loguru_warnings():
     """Capture loguru WARNING+ messages into a list.
@@ -153,10 +162,7 @@ async def test_blacklist_passes_into_llm_prompt(resolver, db_session):
 
 
 async def test_empty_avl_treated_as_unresolved(resolver):
-    async def fake_claude(**kwargs):
-        return {"avl": [], "confidence": 0.0, "citations": [], "reasoning": ""}
-
-    resolver._claude_call = fake_claude
+    set_claude_response(resolver, {"avl": [], "confidence": 0.0, "citations": [], "reasoning": ""})
     result = await resolver.resolve("UNKNOWN")
     assert result.status == "unresolved"
 
@@ -167,51 +173,51 @@ async def test_empty_avl_treated_as_unresolved(resolver):
 # ── Confidence floor + WebSearch penalty (Task 3.8) ──────────────────
 
 
-async def test_confidence_below_floor_unresolved(resolver):
-    async def fake_claude(**kwargs):
-        return {
+@pytest.mark.parametrize(
+    ("confidence", "citations", "reasoning", "expected_status", "expected_confidence"),
+    [
+        pytest.param(
+            0.2,
+            [{"url": "https://example.com", "snippet": "..."}],
+            "low",
+            "unresolved",
+            None,
+            id="below_default_floor",
+        ),
+        pytest.param(
+            0.5,
+            [],
+            "no citations",
+            "pending",
+            0.35,  # 0.5 * 0.7 = 0.35 ≥ floor 0.3
+            id="no_citations_applies_penalty",
+        ),
+        pytest.param(
+            0.4,
+            [],
+            "no citations, just below penalized floor",
+            "unresolved",
+            None,  # 0.4 * 0.7 = 0.28 < floor 0.3
+            id="no_citations_below_penalized_floor",
+        ),
+    ],
+)
+async def test_confidence_floor_and_citation_penalty(
+    resolver, confidence, citations, reasoning, expected_status, expected_confidence
+):
+    set_claude_response(
+        resolver,
+        {
             "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
-            "confidence": 0.2,  # below default floor 0.3
-            "citations": [{"url": "https://example.com", "snippet": "..."}],
-            "reasoning": "low",
-        }
-
-    resolver._claude_call = fake_claude
+            "confidence": confidence,
+            "citations": citations,
+            "reasoning": reasoning,
+        },
+    )
     result = await resolver.resolve("FOO")
-    assert result.status == "unresolved"
-
-
-async def test_no_citations_applies_penalty(resolver):
-    """Confidence 0.5 with no citations → 0.5 * 0.7 = 0.35 ≥ floor 0.3."""
-
-    async def fake_claude(**kwargs):
-        return {
-            "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
-            "confidence": 0.5,
-            "citations": [],
-            "reasoning": "no citations",
-        }
-
-    resolver._claude_call = fake_claude
-    result = await resolver.resolve("FOO")
-    assert result.status == "pending"
-    assert result.confidence == pytest.approx(0.35)
-
-
-async def test_no_citations_below_penalized_floor_unresolved(resolver):
-    """Confidence 0.4 with no citations → 0.4 * 0.7 = 0.28 < floor 0.3."""
-
-    async def fake_claude(**kwargs):
-        return {
-            "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
-            "confidence": 0.4,
-            "citations": [],
-            "reasoning": "no citations, just below penalized floor",
-        }
-
-    resolver._claude_call = fake_claude
-    result = await resolver.resolve("FOO")
-    assert result.status == "unresolved"
+    assert result.status == expected_status
+    if expected_confidence is not None:
+        assert result.confidence == pytest.approx(expected_confidence)
 
 
 # ── LLM failure modes (Task 3.9) ─────────────────────────────────────
@@ -227,10 +233,7 @@ async def test_llm_exception_returns_unresolved(resolver):
 
 
 async def test_llm_none_returns_unresolved(resolver):
-    async def fake_claude(**kwargs):
-        return None
-
-    resolver._claude_call = fake_claude
+    set_claude_response(resolver, None)
     result = await resolver.resolve("FOO")
     assert result.status == "unresolved"
 
@@ -243,11 +246,7 @@ async def test_llm_none_emits_sentry_visible_warning(resolver, loguru_warnings):
     WARNING is the Sentry capture floor, so this is what makes a hallucinated/truncated
     response observable.
     """
-
-    async def fake_claude(**kwargs):
-        return None
-
-    resolver._claude_call = fake_claude
+    set_claude_response(resolver, None)
     await resolver.resolve("SPREJ", oem="IBM")
 
     assert any("SPREJ" in m and "IBM" in m for m in loguru_warnings), (
@@ -256,10 +255,7 @@ async def test_llm_none_emits_sentry_visible_warning(resolver, loguru_warnings):
 
 
 async def test_llm_schema_invalid_returns_unresolved(resolver):
-    async def fake_claude(**kwargs):
-        return {"avl": "not a list", "confidence": 0.9}  # invalid
-
-    resolver._claude_call = fake_claude
+    set_claude_response(resolver, {"avl": "not a list", "confidence": 0.9})  # invalid
     result = await resolver.resolve("FOO")
     assert result.status == "unresolved"
 
@@ -334,8 +330,9 @@ async def test_llm_proposing_blacklisted_mpn_is_filtered(resolver, db_session):
     )
     db_session.commit()
 
-    async def fake_claude(**kwargs):
-        return {
+    set_claude_response(
+        resolver,
+        {
             "avl": [
                 {"mpn": "BAD_MPN", "manufacturer": "Bad", "rank": 1, "notes": None},
                 {"mpn": "GOOD_MPN", "manufacturer": "Good", "rank": 2, "notes": None},
@@ -343,9 +340,8 @@ async def test_llm_proposing_blacklisted_mpn_is_filtered(resolver, db_session):
             "confidence": 0.9,
             "citations": [{"url": "https://example.com", "snippet": "..."}],
             "reasoning": "ok",
-        }
-
-    resolver._claude_call = fake_claude
+        },
+    )
     result = await resolver.resolve("SPREJ")
 
     assert result.status == "pending"
@@ -365,8 +361,9 @@ async def test_llm_proposing_only_blacklisted_mpns_returns_unresolved(resolver, 
     )
     db_session.commit()
 
-    async def fake_claude(**kwargs):
-        return {
+    set_claude_response(
+        resolver,
+        {
             "avl": [
                 {"mpn": "BAD_MPN_1", "manufacturer": "X", "rank": 1, "notes": None},
                 {"mpn": "BAD_MPN_2", "manufacturer": "Y", "rank": 2, "notes": None},
@@ -374,9 +371,8 @@ async def test_llm_proposing_only_blacklisted_mpns_returns_unresolved(resolver, 
             "confidence": 0.95,
             "citations": [{"url": "https://example.com", "snippet": "..."}],
             "reasoning": "all blacklisted",
-        }
-
-    resolver._claude_call = fake_claude
+        },
+    )
     result = await resolver.resolve("SPREJ")
 
     assert result.status == "unresolved"
@@ -389,9 +385,9 @@ async def test_llm_citation_with_bad_scheme_is_filtered_not_fatal(resolver, db_s
 
     The good citation must survive.
     """
-
-    async def fake_claude(**kwargs):
-        return {
+    set_claude_response(
+        resolver,
+        {
             "avl": [{"mpn": "GOOD_MPN", "manufacturer": "M", "rank": 1, "notes": None}],
             "confidence": 0.9,
             "citations": [
@@ -399,9 +395,8 @@ async def test_llm_citation_with_bad_scheme_is_filtered_not_fatal(resolver, db_s
                 {"url": "https://example.com", "snippet": "good"},
             ],
             "reasoning": "mixed citations",
-        }
-
-    resolver._claude_call = fake_claude
+        },
+    )
     result = await resolver.resolve("FILTERED")
 
     assert result.status == "pending"
@@ -417,9 +412,9 @@ async def test_llm_only_bad_citations_falls_through_to_no_citation_penalty(resol
     With confidence 0.5 and no citations surviving, adjusted = 0.35 ≥ floor 0.3 → still
     pending.
     """
-
-    async def fake_claude(**kwargs):
-        return {
+    set_claude_response(
+        resolver,
+        {
             "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
             "confidence": 0.5,
             "citations": [
@@ -427,9 +422,8 @@ async def test_llm_only_bad_citations_falls_through_to_no_citation_penalty(resol
                 {"url": "data:text/html,evil", "snippet": "evil2"},
             ],
             "reasoning": "all citations dangerous",
-        }
-
-    resolver._claude_call = fake_claude
+        },
+    )
     result = await resolver.resolve("ALLBAD")
     assert result.status == "pending"
     assert result.confidence == pytest.approx(0.35)

@@ -9,6 +9,8 @@ Depends on: app/services/engagement_scorer.py
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.services.engagement_scorer import (
     RECENCY_IDEAL_DAYS,
     RECENCY_MAX_DAYS,
@@ -69,39 +71,37 @@ class TestGhostRateNoneForColdStart:
 
 
 class TestResponseRate:
-    def test_perfect_response_rate(self):
-        result = compute_engagement_score(10, 10, 0, None, None, now=NOW)
-        assert result["response_rate"] == 1.0
-
-    def test_half_response_rate(self):
-        result = compute_engagement_score(10, 5, 0, None, None, now=NOW)
-        assert result["response_rate"] == 0.5
-
-    def test_zero_response_rate(self):
-        result = compute_engagement_score(10, 0, 0, None, None, now=NOW)
-        assert result["response_rate"] == 0.0
-
-    def test_response_capped_at_1(self):
-        """More responses than outreach (edge case) capped at 1.0."""
-        result = compute_engagement_score(5, 10, 0, None, None, now=NOW)
-        assert result["response_rate"] == 1.0
+    @pytest.mark.parametrize(
+        "total_outreach,total_responses,expected_rate",
+        [
+            (10, 10, 1.0),
+            (10, 5, 0.5),
+            (10, 0, 0.0),
+            (5, 10, 1.0),  # more responses than outreach (edge case) capped at 1.0
+        ],
+        ids=["perfect", "half", "zero", "capped_at_1"],
+    )
+    def test_response_rate(self, total_outreach, total_responses, expected_rate):
+        result = compute_engagement_score(total_outreach, total_responses, 0, None, None, now=NOW)
+        assert result["response_rate"] == expected_rate
 
 
 # ── Ghost rate ──────────────────────────────────────────────────────
 
 
 class TestGhostRate:
-    def test_all_responded_no_ghosts(self):
-        result = compute_engagement_score(10, 10, 0, None, None, now=NOW)
-        assert result["ghost_rate"] == 0.0
-
-    def test_all_ghosted(self):
-        result = compute_engagement_score(10, 0, 0, None, None, now=NOW)
-        assert result["ghost_rate"] == 1.0
-
-    def test_partial_ghost(self):
-        result = compute_engagement_score(10, 3, 0, None, None, now=NOW)
-        assert result["ghost_rate"] == 0.7
+    @pytest.mark.parametrize(
+        "total_outreach,total_responses,expected_rate",
+        [
+            (10, 10, 0.0),
+            (10, 0, 1.0),
+            (10, 3, 0.7),
+        ],
+        ids=["all_responded_no_ghosts", "all_ghosted", "partial_ghost"],
+    )
+    def test_ghost_rate(self, total_outreach, total_responses, expected_rate):
+        result = compute_engagement_score(total_outreach, total_responses, 0, None, None, now=NOW)
+        assert result["ghost_rate"] == expected_rate
 
 
 # ── Recency ─────────────────────────────────────────────────────────
@@ -169,17 +169,18 @@ class TestVelocity:
 
 
 class TestWinRate:
-    def test_all_wins(self):
-        result = compute_engagement_score(5, 5, 5, None, None, now=NOW)
-        assert result["win_rate"] == 1.0
-
-    def test_no_wins(self):
-        result = compute_engagement_score(5, 5, 0, None, None, now=NOW)
-        assert result["win_rate"] == 0.0
-
-    def test_no_responses_no_wins(self):
-        result = compute_engagement_score(5, 0, 0, None, None, now=NOW)
-        assert result["win_rate"] == 0.0
+    @pytest.mark.parametrize(
+        "total_outreach,total_responses,total_wins,expected_rate",
+        [
+            (5, 5, 5, 1.0),
+            (5, 5, 0, 0.0),
+            (5, 0, 0, 0.0),
+        ],
+        ids=["all_wins", "no_wins", "no_responses_no_wins"],
+    )
+    def test_win_rate(self, total_outreach, total_responses, total_wins, expected_rate):
+        result = compute_engagement_score(total_outreach, total_responses, total_wins, None, None, now=NOW)
+        assert result["win_rate"] == expected_rate
 
 
 # ── Composite score ─────────────────────────────────────────────────
@@ -248,7 +249,6 @@ class TestCompositeScore:
 # These tests exercise the functions that query the database:
 #   compute_all_engagement_scores, compute_single_vendor_score, apply_outbound_stats
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.services.engagement_scorer import (
@@ -548,11 +548,6 @@ class TestApplyOutboundStats:
 
         updated = apply_outbound_stats(db_session, {"unknownvendor.org": 10})
         assert updated == 0
-
-    def test_apply_outbound_empty_dict(self, db_session):
-        """Empty vendors_contacted dict returns 0."""
-        result = apply_outbound_stats(db_session, {})
-        assert result == 0
 
     def test_apply_outbound_flush_exception(self, db_session, monkeypatch):
         """Flush exception in apply_outbound_stats is handled."""

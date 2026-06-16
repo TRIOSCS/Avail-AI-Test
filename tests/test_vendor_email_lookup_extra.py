@@ -86,6 +86,17 @@ def _make_sighting(db: Session, requirement_id: int, mpn: str, vendor_name: str,
     return s
 
 
+def _vendor_dict(vendor_name: str, domain: str, card_id=None) -> dict:
+    """Build the vendor dict shape that ``_enrich_vendors_batch`` consumes."""
+    return {
+        "vendor_name": vendor_name,
+        "domain": domain,
+        "card_id": card_id,
+        "emails": [],
+        "phones": [],
+    }
+
+
 # ══════════════════════════════════════════════════════════════════════
 #  Sighting phone and source_type handling
 # ══════════════════════════════════════════════════════════════════════
@@ -488,9 +499,7 @@ _PATCH_MERGE_PHONES = "app.vendor_utils.merge_phones_into_card"
 class TestEnrichVendorsBatch:
     async def test_enrich_calls_find_suggested_contacts(self, db_session: Session):
         """_enrich_vendors_batch calls find_suggested_contacts for each vendor."""
-        vendors = [
-            {"vendor_name": "Test Vendor", "domain": "testvendor.com", "card_id": None, "emails": [], "phones": []}
-        ]
+        vendors = [_vendor_dict("Test Vendor", "testvendor.com")]
         mock_contacts = [{"email": "sales@testvendor.com", "phone": "+1-555-0001"}]
 
         with patch(_PATCH_FIND_CONTACTS, new=AsyncMock(return_value=mock_contacts)) as mock_enrich:
@@ -499,15 +508,7 @@ class TestEnrichVendorsBatch:
 
     async def test_enrich_updates_vendor_emails(self, db_session: Session, test_vendor_card: VendorCard):
         """_enrich_vendors_batch updates card emails when card_id is provided."""
-        vendors = [
-            {
-                "vendor_name": "Arrow Electronics",
-                "domain": "arrow.com",
-                "card_id": test_vendor_card.id,
-                "emails": [],
-                "phones": [],
-            }
-        ]
+        vendors = [_vendor_dict("Arrow Electronics", "arrow.com", card_id=test_vendor_card.id)]
         mock_contacts = [{"email": "new@arrow.com", "phone": "+1-800-ARROW"}]
 
         with (
@@ -521,8 +522,7 @@ class TestEnrichVendorsBatch:
 
     async def test_enrich_handles_timeout(self, db_session: Session):
         """_enrich_vendors_batch handles overall timeout gracefully."""
-
-        vendors = [{"vendor_name": "Slow Vendor", "domain": "slow.com", "card_id": None, "emails": [], "phones": []}]
+        vendors = [_vendor_dict("Slow Vendor", "slow.com")]
 
         async def _slow_enrich(*a, **kw):
             await asyncio.sleep(10)
@@ -534,7 +534,7 @@ class TestEnrichVendorsBatch:
 
     async def test_enrich_handles_exception_per_vendor(self, db_session: Session):
         """_enrich_vendors_batch handles per-vendor exceptions gracefully."""
-        vendors = [{"vendor_name": "Error Vendor", "domain": "error.com", "card_id": None, "emails": [], "phones": []}]
+        vendors = [_vendor_dict("Error Vendor", "error.com")]
 
         async def _raise(*a, **kw):
             raise Exception("External API failure")
@@ -545,7 +545,7 @@ class TestEnrichVendorsBatch:
 
     async def test_enrich_skips_vendor_without_domain_and_name(self, db_session: Session):
         """Vendor without domain and name is skipped during enrichment."""
-        vendors = [{"vendor_name": "", "domain": "", "card_id": None, "emails": [], "phones": []}]
+        vendors = [_vendor_dict("", "")]
 
         with patch(_PATCH_FIND_CONTACTS, new=AsyncMock(return_value=[])) as mock_enrich:
             await _enrich_vendors_batch(vendors, db_session, timeout=5.0)
@@ -554,9 +554,7 @@ class TestEnrichVendorsBatch:
 
     async def test_enrich_no_card_id_updates_vendor_dict_only(self, db_session: Session):
         """When card_id is None, only vendor dict emails are updated (no DB write)."""
-        vendors = [
-            {"vendor_name": "No Card Vendor", "domain": "nocard.com", "card_id": None, "emails": [], "phones": []}
-        ]
+        vendors = [_vendor_dict("No Card Vendor", "nocard.com")]
         mock_contacts = [{"email": "info@nocard.com", "phone": ""}]
 
         with patch(_PATCH_FIND_CONTACTS, new=AsyncMock(return_value=mock_contacts)):

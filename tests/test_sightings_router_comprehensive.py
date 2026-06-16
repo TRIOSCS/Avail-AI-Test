@@ -13,6 +13,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.constants import ActivityType
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
@@ -137,34 +139,21 @@ class TestSightingsListFilters:
         resp = client.get(f"/v2/partials/sightings?sales_person={test_user.name}")
         assert resp.status_code == 200
 
-    def test_sort_by_created(self, client, db_session):
+    @pytest.mark.parametrize(
+        "query",
+        [
+            "sort=created&dir=asc",
+            "sort=status&dir=desc",
+            "sort=mpn&dir=desc",
+            "sort=priority&dir=asc",
+            "page=999",
+            "limit=10",
+        ],
+        ids=["sort_created", "sort_status", "sort_mpn_desc", "sort_priority_asc", "page_beyond_total", "limit_custom"],
+    )
+    def test_list_query_variants(self, client, db_session, query):
         _seed(db_session)
-        resp = client.get("/v2/partials/sightings?sort=created&dir=asc")
-        assert resp.status_code == 200
-
-    def test_sort_by_status(self, client, db_session):
-        _seed(db_session)
-        resp = client.get("/v2/partials/sightings?sort=status&dir=desc")
-        assert resp.status_code == 200
-
-    def test_sort_by_mpn_desc(self, client, db_session):
-        _seed(db_session)
-        resp = client.get("/v2/partials/sightings?sort=mpn&dir=desc")
-        assert resp.status_code == 200
-
-    def test_sort_priority_asc(self, client, db_session):
-        _seed(db_session)
-        resp = client.get("/v2/partials/sightings?sort=priority&dir=asc")
-        assert resp.status_code == 200
-
-    def test_page_beyond_total(self, client, db_session):
-        _seed(db_session)
-        resp = client.get("/v2/partials/sightings?page=999")
-        assert resp.status_code == 200
-
-    def test_limit_custom(self, client, db_session):
-        _seed(db_session)
-        resp = client.get("/v2/partials/sightings?limit=10")
+        resp = client.get(f"/v2/partials/sightings?{query}")
         assert resp.status_code == 200
 
     def test_multiple_filters_combined(self, client, db_session, test_user):
@@ -212,9 +201,10 @@ class TestSightingsDetailBranches:
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
 
-    def test_detail_sourcing_no_rfq(self, client, db_session):
-        """Detail: sourcing status with no RFQ activity."""
-        _, r, _ = _seed(db_session, sourcing_status="sourcing")
+    @pytest.mark.parametrize("sourcing_status", ["sourcing", "offered", "won", "archived"])
+    def test_detail_status_variants(self, client, db_session, sourcing_status):
+        """Detail renders for each sourcing status with no extra activity/offers."""
+        _, r, _ = _seed(db_session, sourcing_status=sourcing_status)
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
 
@@ -249,22 +239,6 @@ class TestSightingsDetailBranches:
         )
         db_session.add(offer)
         db_session.commit()
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
-
-    def test_detail_offered_no_pending(self, client, db_session):
-        """Detail: offered status with no pending offers."""
-        _, r, _ = _seed(db_session, sourcing_status="offered")
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
-
-    def test_detail_won_status(self, client, db_session):
-        _, r, _ = _seed(db_session, sourcing_status="won")
-        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
-        assert resp.status_code == 200
-
-    def test_detail_archived_status(self, client, db_session):
-        _, r, _ = _seed(db_session, sourcing_status="archived")
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
 
@@ -820,19 +794,11 @@ class TestHeatmapBranches:
         assert resp.status_code == 200
         assert "bg-rose-50/30" in resp.text
 
-    def test_critical_urgency_heatmap(self, client, db_session):
-        """Critical urgency from requisition triggers heatmap."""
+    @pytest.mark.parametrize("urgency", ["critical", "hot"])
+    def test_urgency_heatmap(self, client, db_session, urgency):
+        """Critical/hot urgency from requisition triggers heatmap."""
         req, r, _ = _seed(db_session)
-        req.urgency = "critical"
-        db_session.commit()
-        resp = client.get("/v2/partials/sightings")
-        assert resp.status_code == 200
-        assert "bg-rose-50/30" in resp.text
-
-    def test_hot_urgency_heatmap(self, client, db_session):
-        """Hot urgency triggers heatmap."""
-        req, r, _ = _seed(db_session)
-        req.urgency = "hot"
+        req.urgency = urgency
         db_session.commit()
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200

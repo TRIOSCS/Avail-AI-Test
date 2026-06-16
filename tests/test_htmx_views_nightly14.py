@@ -24,6 +24,7 @@ import os
 os.environ["TESTING"] = "1"
 
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -73,29 +74,30 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "BC547", **kw) -
 
 
 class TestReviewOffer:
-    def test_approve_offer(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    @pytest.mark.parametrize(
+        ("action", "expected_status"),
+        [
+            ("approve", OfferStatus.APPROVED),
+            ("reject", OfferStatus.REJECTED),
+        ],
+    )
+    def test_review_action(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        test_user: User,
+        action: str,
+        expected_status: OfferStatus,
     ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/review",
-            data={"action": "approve"},
+            data={"action": action},
         )
         assert resp.status_code == 200
         db_session.refresh(offer)
-        assert offer.status == OfferStatus.APPROVED
-
-    def test_reject_offer(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
-    ):
-        offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/review",
-            data={"action": "reject"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(offer)
-        assert offer.status == OfferStatus.REJECTED
+        assert offer.status == expected_status
 
     def test_invalid_action(
         self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
@@ -139,17 +141,18 @@ class TestAddOffer:
         )
         assert resp.status_code == 200
 
-    def test_missing_vendor_name(self, client: TestClient, test_requisition: Requisition):
+    @pytest.mark.parametrize(
+        ("data", "field"),
+        [
+            ({"vendor_name": "", "mpn": "LM317T"}, "vendor_name"),
+            ({"vendor_name": "Vendor", "mpn": ""}, "mpn"),
+        ],
+        ids=["missing_vendor_name", "missing_mpn"],
+    )
+    def test_missing_required_field(self, client: TestClient, test_requisition: Requisition, data: dict, field: str):
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
-            data={"vendor_name": "", "mpn": "LM317T"},
-        )
-        assert resp.status_code == 400
-
-    def test_missing_mpn(self, client: TestClient, test_requisition: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
-            data={"vendor_name": "Vendor", "mpn": ""},
+            data=data,
         )
         assert resp.status_code == 400
 
@@ -332,23 +335,28 @@ class TestSaveParsedOffers:
 
 
 class TestRequisitionsBulkAction:
-    def test_bulk_archive(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    @pytest.mark.parametrize(
+        ("action", "expected_status"),
+        [
+            ("archive", RequisitionStatus.ARCHIVED),
+            ("activate", RequisitionStatus.ACTIVE),
+        ],
+    )
+    def test_bulk_sets_status(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        action: str,
+        expected_status: RequisitionStatus,
+    ):
         resp = client.post(
-            "/v2/partials/requisitions/bulk/archive",
+            f"/v2/partials/requisitions/bulk/{action}",
             data={"ids": str(test_requisition.id)},
         )
         assert resp.status_code == 200
         db_session.refresh(test_requisition)
-        assert test_requisition.status == RequisitionStatus.ARCHIVED
-
-    def test_bulk_activate(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        resp = client.post(
-            "/v2/partials/requisitions/bulk/activate",
-            data={"ids": str(test_requisition.id)},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(test_requisition)
-        assert test_requisition.status == RequisitionStatus.ACTIVE
+        assert test_requisition.status == expected_status
 
     def test_bulk_assign(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
         resp = client.post(
@@ -428,16 +436,9 @@ class TestCreateQuoteFromOffers:
 
 
 class TestRequisitionInlineEditCell:
-    def test_get_name_field(self, client: TestClient, test_requisition: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/edit/name")
-        assert resp.status_code == 200
-
-    def test_get_owner_field(self, client: TestClient, test_requisition: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/edit/owner")
-        assert resp.status_code == 200
-
-    def test_get_urgency_field(self, client: TestClient, test_requisition: Requisition):
-        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/edit/urgency")
+    @pytest.mark.parametrize("field", ["name", "owner", "urgency"])
+    def test_get_valid_field(self, client: TestClient, test_requisition: Requisition, field: str):
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/edit/{field}")
         assert resp.status_code == 200
 
     def test_invalid_field(self, client: TestClient, test_requisition: Requisition):
@@ -519,37 +520,10 @@ class TestRequisitionRowAction:
         )
         assert resp.status_code == 404
 
-    def test_archive_action(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    @pytest.mark.parametrize("action", ["archive", "activate", "claim", "unclaim", "clone"])
+    def test_valid_action(self, client: TestClient, test_requisition: Requisition, action: str):
         resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/archive",
-            data={},
-        )
-        assert resp.status_code == 200
-
-    def test_activate_action(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/activate",
-            data={},
-        )
-        assert resp.status_code == 200
-
-    def test_claim_action(self, client: TestClient, test_requisition: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/claim",
-            data={},
-        )
-        assert resp.status_code == 200
-
-    def test_unclaim_action(self, client: TestClient, test_requisition: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/unclaim",
-            data={},
-        )
-        assert resp.status_code == 200
-
-    def test_clone_action(self, client: TestClient, test_requisition: Requisition):
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/action/clone",
+            f"/v2/partials/requisitions/{test_requisition.id}/action/{action}",
             data={},
         )
         assert resp.status_code == 200

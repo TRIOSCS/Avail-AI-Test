@@ -115,36 +115,22 @@ class TestGraphClientRetry:
         mock_sleep.assert_called_with(2)
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("status_code", "text"),
+        [
+            (400, "Bad Request"),
+            (401, "Unauthorized"),
+            (404, "Not Found"),
+        ],
+    )
     @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.graph_client.http")
-    async def test_400_no_retry(self, mock_http, mock_sleep):
-        mock_http.get = AsyncMock(return_value=_mock_response(400, text="Bad Request"))
+    async def test_4xx_no_retry(self, mock_http, mock_sleep, status_code, text):
+        mock_http.get = AsyncMock(return_value=_mock_response(status_code, text=text))
 
         gc = GraphClient("test-token")
         result = await gc.get_json("/me/messages")
-        assert result["error"] == 400
-        mock_sleep.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
-    @patch("app.utils.graph_client.http")
-    async def test_401_no_retry(self, mock_http, mock_sleep):
-        mock_http.get = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
-
-        gc = GraphClient("test-token")
-        result = await gc.get_json("/me/messages")
-        assert result["error"] == 401
-        mock_sleep.assert_not_called()
-
-    @pytest.mark.asyncio
-    @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
-    @patch("app.utils.graph_client.http")
-    async def test_404_no_retry(self, mock_http, mock_sleep):
-        mock_http.get = AsyncMock(return_value=_mock_response(404, text="Not Found"))
-
-        gc = GraphClient("test-token")
-        result = await gc.get_json("/me/messages")
-        assert result["error"] == 404
+        assert result["error"] == status_code
         mock_sleep.assert_not_called()
 
     @pytest.mark.asyncio

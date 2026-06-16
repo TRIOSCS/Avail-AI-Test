@@ -46,49 +46,32 @@ def _clear_scheduler_jobs():
 # ── _job_contacts_sync() ─────────────────────────────────────────────
 
 
-def test_contacts_sync_syncs_eligible_user(scheduler_db, test_user):
-    """Users with no prior sync get synced."""
+@pytest.mark.parametrize(
+    ("m365_connected", "last_sync", "should_sync"),
+    [
+        pytest.param(True, None, True, id="eligible_no_prior_sync"),
+        pytest.param(True, timedelta(hours=12), False, id="skips_recently_synced"),
+        pytest.param(False, None, False, id="skips_disconnected"),
+        pytest.param(True, timedelta(hours=30), True, id="syncs_stale_user"),
+    ],
+)
+def test_contacts_sync_eligibility(scheduler_db, test_user, m365_connected, last_sync, should_sync):
+    """Eligible/stale connected users get synced; recently-synced or disconnected users
+    are skipped."""
     test_user.refresh_token = "rt_contacts"
     test_user.access_token = "at_contacts"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = None
+    test_user.m365_connected = m365_connected
+    test_user.last_contacts_sync = None if last_sync is None else datetime.now(timezone.utc) - last_sync
     scheduler_db.commit()
 
     with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         from app.jobs.email_jobs import _job_contacts_sync
 
         asyncio.run(_job_contacts_sync())
-        mock_sync.assert_called_once()
-
-
-def test_contacts_sync_skips_recently_synced(scheduler_db, test_user):
-    """Users synced within 24 hours are skipped."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = datetime.now(timezone.utc) - timedelta(hours=12)
-    scheduler_db.commit()
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        asyncio.run(_job_contacts_sync())
-        mock_sync.assert_not_called()
-
-
-def test_contacts_sync_skips_disconnected_user(scheduler_db, test_user):
-    """Disconnected users are skipped."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = False
-    test_user.last_contacts_sync = None
-    scheduler_db.commit()
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        asyncio.run(_job_contacts_sync())
-        mock_sync.assert_not_called()
+        if should_sync:
+            mock_sync.assert_called_once()
+        else:
+            mock_sync.assert_not_called()
 
 
 def test_contacts_sync_handles_per_user_error(scheduler_db, test_user):
@@ -105,21 +88,6 @@ def test_contacts_sync_handles_per_user_error(scheduler_db, test_user):
 
         # Should not raise
         asyncio.run(_job_contacts_sync())
-
-
-def test_contacts_sync_syncs_stale_user(scheduler_db, test_user):
-    """Users last synced >24h ago get synced."""
-    test_user.refresh_token = "rt_contacts"
-    test_user.access_token = "at_contacts"
-    test_user.m365_connected = True
-    test_user.last_contacts_sync = datetime.now(timezone.utc) - timedelta(hours=30)
-    scheduler_db.commit()
-
-    with patch("app.jobs.email_jobs._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
-        from app.jobs.email_jobs import _job_contacts_sync
-
-        asyncio.run(_job_contacts_sync())
-        mock_sync.assert_called_once()
 
 
 def test_contacts_sync_error_in_user_gathering(scheduler_db):
@@ -1563,7 +1531,6 @@ def test_calendar_scan_user_not_found(scheduler_db, test_user):
     mock_scan_db.get.return_value = None
 
     call_count = 0
-    original_session_local = None
 
     def _session_factory():
         nonlocal call_count
@@ -1578,8 +1545,15 @@ def test_calendar_scan_user_not_found(scheduler_db, test_user):
         asyncio.run(_job_calendar_scan())
 
 
-def test_calendar_scan_timeout(scheduler_db, test_user):
-    """asyncio.TimeoutError in _safe_cal_scan."""
+@pytest.mark.parametrize(
+    "scan_error",
+    [
+        pytest.param(asyncio.TimeoutError, id="timeout"),
+        pytest.param(RuntimeError("boom"), id="generic_error"),
+    ],
+)
+def test_calendar_scan_error_in_safe_cal_scan(scheduler_db, test_user, scan_error):
+    """Timeout/generic exception in _safe_cal_scan rolls back the scan session."""
     test_user.access_token = "at_cal"
     test_user.refresh_token = "rt_cal"
     test_user.m365_connected = True
@@ -1606,45 +1580,7 @@ def test_calendar_scan_timeout(scheduler_db, test_user):
         patch(
             "app.services.calendar_intelligence.scan_calendar_events",
             new_callable=AsyncMock,
-            side_effect=asyncio.TimeoutError,
-        ),
-    ):
-        from app.jobs.email_jobs import _job_calendar_scan
-
-        asyncio.run(_job_calendar_scan())
-
-    mock_scan_db.rollback.assert_called()
-
-
-def test_calendar_scan_generic_error(scheduler_db, test_user):
-    """Generic exception in _safe_cal_scan."""
-    test_user.access_token = "at_cal"
-    test_user.refresh_token = "rt_cal"
-    test_user.m365_connected = True
-    scheduler_db.commit()
-
-    mock_scan_db = MagicMock()
-    mock_user = MagicMock()
-    mock_user.id = test_user.id
-    mock_user.email = test_user.email
-    mock_scan_db.get.return_value = mock_user
-
-    call_count = 0
-
-    def _session_factory():
-        nonlocal call_count
-        call_count += 1
-        if call_count == 1:
-            return scheduler_db
-        return mock_scan_db
-
-    with (
-        patch("app.database.SessionLocal", side_effect=_session_factory),
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
-        patch(
-            "app.services.calendar_intelligence.scan_calendar_events",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("boom"),
+            side_effect=scan_error,
         ),
     ):
         from app.jobs.email_jobs import _job_calendar_scan

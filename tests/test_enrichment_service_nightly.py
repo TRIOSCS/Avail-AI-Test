@@ -23,6 +23,7 @@ os.environ["TESTING"] = "1"
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
+import pytest
 
 # ═══════════════════════════════════════════════════════════════════════
 #  normalize_company_input — exception path (lines 190-191)
@@ -82,44 +83,31 @@ class TestNormalizeCompanyInputExceptionPath:
 
 
 class TestNormalizeCompanyOutputBranches:
-    def test_employee_size_non_digit_string_preserved(self):
-        """employee_size that matches range pattern hits the else branch (line 229
-        skipped)."""
+    @pytest.mark.parametrize(
+        ("field", "raw", "expected"),
+        [
+            # employee_size "51-200" matches the range regex → else branch (line 231)
+            ("employee_size", "51-200", "51-200"),
+            # "small company" → "smallcompany" doesn't match range regex → elif (line 229)
+            ("employee_size", "small company", "smallcompany"),
+            # hq_state not a US abbreviation → title() fallback (line 241)
+            ("hq_state", "ontario", "Ontario"),
+            # hq_state IS a US abbreviation → uppercased (not line 241)
+            ("hq_state", "ca", "CA"),
+        ],
+        ids=[
+            "employee_size_range_preserved",
+            "employee_size_non_matching_string_stripped",
+            "hq_state_non_us_title_cased",
+            "hq_state_us_abbreviation_uppercased",
+        ],
+    )
+    def test_field_normalization_branches(self, field, raw, expected):
+        """employee_size and hq_state normalization branches (lines 229, 241)."""
         from app.enrichment_service import normalize_company_output
 
-        # Pattern like "51-200" matches the regex => goes to else at line 231
-        data = {"employee_size": "51-200"}
-        result = normalize_company_output(data)
-        assert result["employee_size"] == "51-200"
-
-    def test_employee_size_non_matching_string_uses_else(self):
-        """employee_size that doesn't match range pattern uses the elif branch (line
-        229)."""
-        from app.enrichment_service import normalize_company_output
-
-        # "small company" after replace(" ", "") → "smallcompany"
-        # doesn't match digit range regex → hits elif branch at line 228-229
-        data = {"employee_size": "small company"}
-        result = normalize_company_output(data)
-        # Spaces are stripped and the processed value is assigned
-        assert result["employee_size"] == "smallcompany"
-
-    def test_hq_state_non_us_state_uses_title_case(self):
-        """hq_state not in _US_STATES triggers title() fallback (line 241)."""
-        from app.enrichment_service import normalize_company_output
-
-        data = {"hq_state": "ontario"}
-        result = normalize_company_output(data)
-        # Not a US state abbreviation, so title() applied
-        assert result["hq_state"] == "Ontario"
-
-    def test_hq_state_us_abbreviation_uppercased(self):
-        """hq_state that IS a US state abbreviation gets uppercased (not line 241)."""
-        from app.enrichment_service import normalize_company_output
-
-        data = {"hq_state": "ca"}
-        result = normalize_company_output(data)
-        assert result["hq_state"] == "CA"
+        result = normalize_company_output({field: raw})
+        assert result[field] == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -349,8 +337,16 @@ class TestAiFindCompanyBranches:
 
         assert result is None
 
-    async def test_httpx_error_returns_none(self):
-        """HTTPError during AI company lookup returns None (lines 406-408)."""
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ConnectError("Connection error"),
+            TypeError("unexpected type"),
+        ],
+        ids=["httpx_error", "type_error"],
+    )
+    async def test_claude_json_raises_returns_none(self, error):
+        """Exception during AI company lookup returns None (lines 406-408)."""
         from app.enrichment_service import _ai_find_company
 
         with (
@@ -360,28 +356,10 @@ class TestAiFindCompanyBranches:
             ),
             patch(
                 "app.enrichment_service.claude_json",
-                side_effect=httpx.ConnectError("Connection error"),
+                side_effect=error,
             ),
         ):
             result = await _ai_find_company("example.com")
-
-        assert result is None
-
-    async def test_type_error_returns_none(self):
-        """TypeError during AI company lookup returns None (lines 406-408)."""
-        from app.enrichment_service import _ai_find_company
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-anthropic-key",
-            ),
-            patch(
-                "app.enrichment_service.claude_json",
-                side_effect=TypeError("unexpected type"),
-            ),
-        ):
-            result = await _ai_find_company("example.com", "Corp")
 
         assert result is None
 
@@ -404,7 +382,15 @@ class TestAiFindCompanyBranches:
 
 
 class TestAiFindContactsExceptionPath:
-    async def test_exception_returns_empty_list(self):
+    @pytest.mark.parametrize(
+        "error",
+        [
+            httpx.ConnectError("Connection error"),
+            TypeError("bad type"),
+        ],
+        ids=["httpx_error", "type_error"],
+    )
+    async def test_websearch_raises_returns_empty_list(self, error):
         """Exception during AI contacts lookup returns empty list (lines 441-443)."""
         from app.enrichment_service import _ai_find_contacts
 
@@ -415,25 +401,7 @@ class TestAiFindContactsExceptionPath:
             ),
             patch(
                 "app.enrichment_service.enrich_contacts_websearch",
-                side_effect=httpx.ConnectError("Connection error"),
-            ),
-        ):
-            result = await _ai_find_contacts("example.com", "Example Corp", "procurement")
-
-        assert result == []
-
-    async def test_type_error_returns_empty_list(self):
-        """TypeError during AI contacts lookup returns empty list (lines 441-443)."""
-        from app.enrichment_service import _ai_find_contacts
-
-        with (
-            patch(
-                "app.enrichment_service.get_credential_cached",
-                return_value="fake-anthropic-key",
-            ),
-            patch(
-                "app.enrichment_service.enrich_contacts_websearch",
-                side_effect=TypeError("bad type"),
+                side_effect=error,
             ),
         ):
             result = await _ai_find_contacts("example.com")
@@ -878,29 +846,28 @@ class TestNormalizeCompanyInputSuccessPath:
 
 
 class TestNormalizeCompanyOutputMoreBranches:
-    def test_employee_size_large_digit_formatted_with_plus(self):
-        """employee_size ≥ 1000 digits gets formatted with comma and + (line 227)."""
+    @pytest.mark.parametrize(
+        ("field", "raw", "expected"),
+        [
+            # employee_size ≥ 1000 digits → comma + "+" formatting (line 227)
+            ("employee_size", "5000", "5,000+"),
+            # website without scheme → https:// prefix added (line 250)
+            ("website", "example.com", "https://example.com"),
+            # linkedin_url without scheme → https:// prefix added (lines 254-256)
+            ("linkedin_url", "linkedin.com/company/example", "https://linkedin.com/company/example"),
+        ],
+        ids=[
+            "employee_size_large_digit_with_plus",
+            "website_https_prefix",
+            "linkedin_url_https_prefix",
+        ],
+    )
+    def test_field_formatting_branches(self, field, raw, expected):
+        """employee_size formatting and website/linkedin scheme prefixing."""
         from app.enrichment_service import normalize_company_output
 
-        data = {"employee_size": "5000"}
-        result = normalize_company_output(data)
-        assert result["employee_size"] == "5,000+"
-
-    def test_website_without_http_gets_https_prefix(self):
-        """website without http:// prefix gets https:// added (line 250)."""
-        from app.enrichment_service import normalize_company_output
-
-        data = {"website": "example.com"}
-        result = normalize_company_output(data)
-        assert result["website"] == "https://example.com"
-
-    def test_linkedin_url_without_http_gets_https_prefix(self):
-        """linkedin_url without http:// gets https:// added (lines 254-256)."""
-        from app.enrichment_service import normalize_company_output
-
-        data = {"linkedin_url": "linkedin.com/company/example"}
-        result = normalize_company_output(data)
-        assert result["linkedin_url"] == "https://linkedin.com/company/example"
+        result = normalize_company_output({field: raw})
+        assert result[field] == expected
 
 
 class TestExploriumFindCompanyNoKey:
@@ -1158,42 +1125,33 @@ class TestEnrichEntityCacheHit:
 
 
 class TestNameLooksSuspiciousEdgeCases:
-    def test_all_short_words_returns_false(self):
-        """Name with only short words (≤2 chars) → no qualifying words → False (line
-        163)."""
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "AI Co",  # only short words (≤2 chars) → no qualifying words
+            "",  # empty name → no words
+            "IBM TDK LLC",  # all known acronyms → no qualifying words
+        ],
+        ids=["all_short_words", "empty_string", "known_acronyms"],
+    )
+    def test_no_qualifying_words_returns_false(self, name):
+        """Names with no qualifying words are not suspicious → False (line 163)."""
         from app.enrichment_service import _name_looks_suspicious
 
-        # "AI Co" → words with len > 2: none (AI=2, Co=2) → empty list → False
-        result = _name_looks_suspicious("AI Co")
-        assert result is False
-
-    def test_empty_string_returns_false(self):
-        """Empty name → no words → False (line 163)."""
-        from app.enrichment_service import _name_looks_suspicious
-
-        result = _name_looks_suspicious("")
-        assert result is False
-
-    def test_known_acronym_words_returns_false(self):
-        """Name of all known acronyms → no qualifying words → False (line 163)."""
-        from app.enrichment_service import _name_looks_suspicious
-
-        # IBM TDK LLC are all in _KNOWN_ACRONYMS
-        result = _name_looks_suspicious("IBM TDK LLC")
-        assert result is False
+        assert _name_looks_suspicious(name) is False
 
 
 class TestTitleCasePreserveAcronymsEdgeCases:
-    def test_empty_string_returns_empty(self):
-        """Empty string returns empty string immediately (line 199)."""
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("", ""),  # empty string returned immediately (line 199)
+            ("ibm semiconductor", "IBM Semiconductor"),  # acronym preserved, word title-cased
+        ],
+        ids=["empty_string", "known_acronym_preserved"],
+    )
+    def test_title_case_preserves_acronyms(self, raw, expected):
+        """Acronyms stay uppercase, regular words are title-cased."""
         from app.enrichment_service import _title_case_preserve_acronyms
 
-        result = _title_case_preserve_acronyms("")
-        assert result == ""
-
-    def test_known_acronym_preserved_uppercase(self):
-        """Known acronym stays uppercase; regular word title-cased."""
-        from app.enrichment_service import _title_case_preserve_acronyms
-
-        result = _title_case_preserve_acronyms("ibm semiconductor")
-        assert result == "IBM Semiconductor"
+        assert _title_case_preserve_acronyms(raw) == expected

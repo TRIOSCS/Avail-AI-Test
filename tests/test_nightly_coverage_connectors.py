@@ -146,34 +146,42 @@ class TestEbayConnector:
         result = connector._parse(data, "LM317T")
         assert len(result) == 1
 
-    def test_parse_no_qty_sets_confidence_2(self):
+    @pytest.mark.parametrize(
+        "item,expected_confidence,expected_qty",
+        [
+            (
+                {
+                    "seller": {"username": "sel1"},
+                    "title": "T",
+                    "price": {"value": "0.99", "currency": "USD"},
+                    "condition": "Used",
+                    "itemWebUrl": "",
+                    "itemId": "y1",
+                },
+                2,
+                None,
+            ),
+            (
+                {
+                    "seller": {"username": "sel2"},
+                    "title": "T",
+                    "price": {"value": "0.50", "currency": "USD"},
+                    "condition": "New",
+                    "itemWebUrl": "",
+                    "itemId": "z1",
+                    "estimatedAvailabilities": [{"estimatedAvailableQuantity": "50"}],
+                },
+                3,
+                50,
+            ),
+        ],
+        ids=["no_qty_confidence_2", "with_qty_confidence_3"],
+    )
+    def test_parse_qty_sets_confidence(self, item, expected_confidence, expected_qty):
         connector = _make_ebay()
-        item = {
-            "seller": {"username": "sel1"},
-            "title": "T",
-            "price": {"value": "0.99", "currency": "USD"},
-            "condition": "Used",
-            "itemWebUrl": "",
-            "itemId": "y1",
-        }
         result = connector._parse({"itemSummaries": [item]}, "ABC")
-        assert result[0]["confidence"] == 2
-        assert result[0]["qty_available"] is None
-
-    def test_parse_with_qty_sets_confidence_3(self):
-        connector = _make_ebay()
-        item = {
-            "seller": {"username": "sel2"},
-            "title": "T",
-            "price": {"value": "0.50", "currency": "USD"},
-            "condition": "New",
-            "itemWebUrl": "",
-            "itemId": "z1",
-            "estimatedAvailabilities": [{"estimatedAvailableQuantity": "50"}],
-        }
-        result = connector._parse({"itemSummaries": [item]}, "ABC")
-        assert result[0]["confidence"] == 3
-        assert result[0]["qty_available"] == 50
+        assert result[0]["confidence"] == expected_confidence
+        assert result[0]["qty_available"] == expected_qty
 
     def test_parse_empty_item_summaries(self):
         connector = _make_ebay()
@@ -203,58 +211,51 @@ class TestMouserConnector:
         assert result == []
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status_code,text,exc_kind",
+        [
+            (403, "Forbidden", "auth"),
+            (429, "Too many", "rate_limit"),
+        ],
+        ids=["403_auth", "429_rate_limit"],
+    )
     @patch("app.connectors.mouser.http")
-    async def test_do_search_403_raises_auth_error(self, mock_http):
-        from app.connectors.errors import ConnectorAuthError
+    async def test_do_search_status_code_raises(self, mock_http, status_code, text, exc_kind):
+        from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
+
+        exc_type = {"auth": ConnectorAuthError, "rate_limit": ConnectorRateLimitError}[exc_kind]
 
         connector = _make_mouser()
-        mock_http.post = AsyncMock(return_value=MagicMock(status_code=403, text="Forbidden"))
-        with pytest.raises(ConnectorAuthError):
+        mock_http.post = AsyncMock(return_value=MagicMock(status_code=status_code, text=text))
+        with pytest.raises(exc_type):
             await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "error_message,exc_kind,match,query",
+        [
+            ("Too many requests per second", "rate_limit", None, "LM317T"),
+            ("Invalid API Key identifier", "auth", None, "LM317T"),
+            ("Invalid part number", "runtime", "Mouser API", "BADPART"),
+        ],
+        ids=["rate_limit", "auth", "generic_runtime"],
+    )
     @patch("app.connectors.mouser.http")
-    async def test_do_search_429_raises_rate_limit(self, mock_http):
-        from app.connectors.errors import ConnectorRateLimitError
+    async def test_do_search_body_error(self, mock_http, error_message, exc_kind, match, query):
+        from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
 
-        connector = _make_mouser()
-        mock_http.post = AsyncMock(return_value=MagicMock(status_code=429, text="Too many"))
-        with pytest.raises(ConnectorRateLimitError):
-            await connector._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    @patch("app.connectors.mouser.http")
-    async def test_do_search_body_rate_limit_error(self, mock_http):
-        from app.connectors.errors import ConnectorRateLimitError
+        exc_type = {
+            "rate_limit": ConnectorRateLimitError,
+            "auth": ConnectorAuthError,
+            "runtime": RuntimeError,
+        }[exc_kind]
 
         connector = _make_mouser()
         resp = MagicMock(status_code=200, raise_for_status=MagicMock())
-        resp.json.return_value = {"Errors": [{"Message": "Too many requests per second"}]}
+        resp.json.return_value = {"Errors": [{"Message": error_message}]}
         mock_http.post = AsyncMock(return_value=resp)
-        with pytest.raises(ConnectorRateLimitError):
-            await connector._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    @patch("app.connectors.mouser.http")
-    async def test_do_search_body_auth_error(self, mock_http):
-        from app.connectors.errors import ConnectorAuthError
-
-        connector = _make_mouser()
-        resp = MagicMock(status_code=200, raise_for_status=MagicMock())
-        resp.json.return_value = {"Errors": [{"Message": "Invalid API Key identifier"}]}
-        mock_http.post = AsyncMock(return_value=resp)
-        with pytest.raises(ConnectorAuthError):
-            await connector._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    @patch("app.connectors.mouser.http")
-    async def test_do_search_body_generic_error_raises_runtime(self, mock_http):
-        connector = _make_mouser()
-        resp = MagicMock(status_code=200, raise_for_status=MagicMock())
-        resp.json.return_value = {"Errors": [{"Message": "Invalid part number"}]}
-        mock_http.post = AsyncMock(return_value=resp)
-        with pytest.raises(RuntimeError, match="Mouser API"):
-            await connector._do_search("BADPART")
+        with pytest.raises(exc_type, match=match):
+            await connector._do_search(query)
 
     @pytest.mark.asyncio
     @patch("app.connectors.mouser.http")
@@ -354,7 +355,6 @@ class TestDigiKeyConnector:
         ok_resp = MagicMock(status_code=200, raise_for_status=MagicMock())
         ok_resp.json.return_value = {"Products": []}
 
-        mock_http.post = AsyncMock(side_effect=[token_resp, token_resp, ok_resp])
         # First call: token; second call: 401 on search; third call: token refresh; fourth: search ok
         mock_http.post = AsyncMock(side_effect=[token_resp, unauth, token_resp, ok_resp])
         results = await connector._do_search("LM317T")
@@ -469,23 +469,23 @@ class TestOEMSecretsConnector:
         assert result == []
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "status_code,text,exc_kind,match",
+        [
+            (401, "Unauthorized", "auth", "OEMSecrets auth"),
+            (429, "Rate limited", "rate_limit", None),
+        ],
+        ids=["401_auth", "429_rate_limit"],
+    )
     @patch("app.connectors.oemsecrets.http")
-    async def test_do_search_401_raises_auth_error(self, mock_http):
-        from app.connectors.errors import ConnectorAuthError
+    async def test_do_search_status_code_raises(self, mock_http, status_code, text, exc_kind, match):
+        from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
+
+        exc_type = {"auth": ConnectorAuthError, "rate_limit": ConnectorRateLimitError}[exc_kind]
 
         connector = _make_oems()
-        mock_http.get = AsyncMock(return_value=MagicMock(status_code=401, text="Unauthorized"))
-        with pytest.raises(ConnectorAuthError, match="OEMSecrets auth"):
-            await connector._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    @patch("app.connectors.oemsecrets.http")
-    async def test_do_search_429_raises_rate_limit(self, mock_http):
-        from app.connectors.errors import ConnectorRateLimitError
-
-        connector = _make_oems()
-        mock_http.get = AsyncMock(return_value=MagicMock(status_code=429, text="Rate limited"))
-        with pytest.raises(ConnectorRateLimitError):
+        mock_http.get = AsyncMock(return_value=MagicMock(status_code=status_code, text=text))
+        with pytest.raises(exc_type, match=match):
             await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
@@ -592,31 +592,26 @@ class TestOEMSecretsConnector:
         results = connector._parse(data, "EUR-PART")
         assert results[0]["unit_price"] == 2.50
 
-    def test_parse_authorised_status(self):
+    @pytest.mark.parametrize(
+        "dist_name,part,auth_status,expected",
+        [
+            ("RS", "AUTH", "authorised", True),
+            ("XYZ-DIST", "NONAUTH", "unauthorised", False),
+        ],
+        ids=["authorised", "non_authorised"],
+    )
+    def test_parse_authorisation_status(self, dist_name, part, auth_status, expected):
         connector = _make_oems()
         data = [
             {
-                "distributor": {"distributor_name": "RS"},
-                "source_part_number": "AUTH",
-                "distributor_authorisation_status": "authorised",
+                "distributor": {"distributor_name": dist_name},
+                "source_part_number": part,
+                "distributor_authorisation_status": auth_status,
                 "quantity_in_stock": 5,
             }
         ]
-        results = connector._parse(data, "AUTH")
-        assert results[0]["is_authorized"] is True
-
-    def test_parse_non_authorised_status(self):
-        connector = _make_oems()
-        data = [
-            {
-                "distributor": {"distributor_name": "XYZ-DIST"},
-                "source_part_number": "NONAUTH",
-                "distributor_authorisation_status": "unauthorised",
-                "quantity_in_stock": 5,
-            }
-        ]
-        results = connector._parse(data, "NONAUTH")
-        assert results[0]["is_authorized"] is False
+        results = connector._parse(data, part)
+        assert results[0]["is_authorized"] is expected
 
     def test_parse_skips_non_dict_items(self):
         connector = _make_oems()

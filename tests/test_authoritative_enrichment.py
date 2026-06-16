@@ -139,25 +139,25 @@ def test_enrich_card_ai_inferred_when_no_authoritative(mock_conns, mock_claude, 
     assert card.enrichment_provenance["reconfirm_needed"] is True  # flagged for reconfirmation
 
 
+import pytest
+
+
+@pytest.mark.parametrize(
+    "mpn, claude_return",
+    [
+        # Below the 95% confidence gate -> not persisted.
+        ("04M3HJ", {"description": "maybe a bezel", "category": "Mechanical", "confidence": 0.8}),
+        # Claude declines entirely.
+        ("ZZ9PLURAL", {"description": "", "category": "", "confidence": 0.0}),
+    ],
+    ids=["below_95_confidence", "claude_declines"],
+)
 @patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock)
 @patch("app.services.authoritative_enrichment_service._connectors_in_order")
-def test_enrich_card_below_95_confidence_is_not_found(mock_conns, mock_claude, db_session):
-    card = _card(db_session, "04M3HJ")
+def test_enrich_card_not_found(mock_conns, mock_claude, db_session, mpn, claude_return):
+    card = _card(db_session, mpn)
     mock_conns.return_value = [_FakeConn("digikey", [])]
-    mock_claude.return_value = {"description": "maybe a bezel", "category": "Mechanical", "confidence": 0.8}
-    import asyncio
-
-    asyncio.run(enrich_card(card, db_session))
-    assert card.enrichment_status == "not_found"
-    assert card.description is None
-
-
-@patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock)
-@patch("app.services.authoritative_enrichment_service._connectors_in_order")
-def test_enrich_card_not_found(mock_conns, mock_claude, db_session):
-    card = _card(db_session, "ZZ9PLURAL")
-    mock_conns.return_value = [_FakeConn("digikey", [])]
-    mock_claude.return_value = {"description": "", "category": "", "confidence": 0.0}
+    mock_claude.return_value = claude_return
     import asyncio
 
     asyncio.run(enrich_card(card, db_session))
@@ -590,10 +590,6 @@ def test_enrich_cards_already_verified_skipped(mock_conns, db_session):
     assert call_count["n"] == 0
     assert counts.get("verified", 0) == 1
 
-
-from unittest.mock import AsyncMock, patch
-
-import pytest
 
 from app.constants import MaterialEnrichmentStatus
 from app.services import authoritative_enrichment_service as aes

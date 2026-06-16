@@ -30,6 +30,15 @@ from app.services.proactive_service import (
 from tests.conftest import engine  # noqa: F401
 
 
+@pytest.fixture
+def mock_graph_client():
+    """Patch GraphClient with a stub whose post_json is a no-op AsyncMock."""
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(return_value=None)
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        yield mock_gc
+
+
 def _setup_send_scenario(db):
     """Create scenario with matches and contacts ready for sending."""
     owner = User(
@@ -136,23 +145,19 @@ def _setup_send_scenario(db):
 
 
 @pytest.mark.asyncio
-async def test_send_creates_throttle_records(db_session):
+async def test_send_creates_throttle_records(db_session, mock_graph_client):
     """Sending creates throttle records for each MPN+site."""
     data = _setup_send_scenario(db_session)
 
-    mock_gc = MagicMock()
-    mock_gc.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        result = await send_proactive_offer(
-            db=db_session,
-            user=data["owner"],
-            token="fake-token",
-            match_ids=[data["match"].id],
-            contact_ids=[data["contact1"].id],
-            sell_prices={},
-            subject="Test",
-        )
+    result = await send_proactive_offer(
+        db=db_session,
+        user=data["owner"],
+        token="fake-token",
+        match_ids=[data["match"].id],
+        contact_ids=[data["contact1"].id],
+        sell_prices={},
+        subject="Test",
+    )
 
     assert result is not None
     throttle = (
@@ -170,67 +175,55 @@ async def test_send_creates_throttle_records(db_session):
 
 
 @pytest.mark.asyncio
-async def test_send_to_multiple_contacts(db_session):
+async def test_send_to_multiple_contacts(db_session, mock_graph_client):
     """Sending to multiple contacts includes all emails."""
     data = _setup_send_scenario(db_session)
 
-    mock_gc = MagicMock()
-    mock_gc.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        result = await send_proactive_offer(
-            db=db_session,
-            user=data["owner"],
-            token="fake-token",
-            match_ids=[data["match"].id],
-            contact_ids=[data["contact1"].id, data["contact2"].id],
-            sell_prices={},
-        )
+    result = await send_proactive_offer(
+        db=db_session,
+        user=data["owner"],
+        token="fake-token",
+        match_ids=[data["match"].id],
+        contact_ids=[data["contact1"].id, data["contact2"].id],
+        sell_prices={},
+    )
 
     assert "jane@acme.com" in result["recipient_emails"]
     assert "bob@acme.com" in result["recipient_emails"]
 
 
 @pytest.mark.asyncio
-async def test_send_with_custom_subject(db_session):
+async def test_send_with_custom_subject(db_session, mock_graph_client):
     """Custom subject is preserved in the ProactiveOffer."""
     data = _setup_send_scenario(db_session)
 
-    mock_gc = MagicMock()
-    mock_gc.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        result = await send_proactive_offer(
-            db=db_session,
-            user=data["owner"],
-            token="fake-token",
-            match_ids=[data["match"].id],
-            contact_ids=[data["contact1"].id],
-            sell_prices={},
-            subject="Custom Subject Line",
-        )
+    result = await send_proactive_offer(
+        db=db_session,
+        user=data["owner"],
+        token="fake-token",
+        match_ids=[data["match"].id],
+        contact_ids=[data["contact1"].id],
+        sell_prices={},
+        subject="Custom Subject Line",
+    )
 
     assert result["subject"] == "Custom Subject Line"
 
 
 @pytest.mark.asyncio
-async def test_send_with_email_html(db_session):
+async def test_send_with_email_html(db_session, mock_graph_client):
     """Pre-built email HTML is used instead of fallback."""
     data = _setup_send_scenario(db_session)
 
-    mock_gc = MagicMock()
-    mock_gc.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        result = await send_proactive_offer(
-            db=db_session,
-            user=data["owner"],
-            token="fake-token",
-            match_ids=[data["match"].id],
-            contact_ids=[data["contact1"].id],
-            sell_prices={},
-            email_html="<p>Custom HTML body</p>",
-        )
+    result = await send_proactive_offer(
+        db=db_session,
+        user=data["owner"],
+        token="fake-token",
+        match_ids=[data["match"].id],
+        contact_ids=[data["contact1"].id],
+        sell_prices={},
+        email_html="<p>Custom HTML body</p>",
+    )
 
     po = db_session.get(ProactiveOffer, result["id"])
     assert "Custom HTML body" in po.email_body_html

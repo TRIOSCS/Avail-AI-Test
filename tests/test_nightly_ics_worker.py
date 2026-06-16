@@ -11,6 +11,7 @@ Called by: pytest
 Depends on: tests/conftest.py, unittest.mock
 """
 
+import asyncio
 import os
 
 os.environ["TESTING"] = "1"
@@ -21,6 +22,16 @@ import pytest
 from sqlalchemy.orm import Session
 
 from tests.conftest import engine  # noqa: F401
+
+
+def _run(coro):
+    """Run a coroutine to completion on a fresh event loop."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # circuit_breaker.py
@@ -33,21 +44,24 @@ class TestIcsCircuitBreaker:
 
         return CircuitBreaker()
 
+    def _page(self, url, content):
+        """A mock page whose evaluate() resolves to the given content."""
+        page = MagicMock()
+        page.url = url
+
+        async def fake_evaluate(js):
+            return content
+
+        page.evaluate = fake_evaluate
+        return page
+
     def test_check_page_health_exception_increments_failures(self):
         cb = self._make_cb()
         page = MagicMock()
         page.url = "https://icsource.com/search"
-
-        async def raise_exc():
-            raise RuntimeError("evaluate failed")
-
         page.evaluate = MagicMock(side_effect=RuntimeError("evaluate failed"))
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
+        result = _run(cb.check_page_health(page))
 
         assert result == "CHECK_FAILED"
         assert cb.consecutive_failures == 1
@@ -58,172 +72,86 @@ class TestIcsCircuitBreaker:
         page.url = "https://icsource.com/search"
         page.evaluate = MagicMock(side_effect=RuntimeError("fail"))
 
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        loop.run_until_complete(cb.check_page_health(page))
-        loop.run_until_complete(cb.check_page_health(page))
-        loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
+        for _ in range(3):
+            _run(cb.check_page_health(page))
 
         assert cb.is_open is True
         assert "3 consecutive" in cb.trip_reason
 
-    def test_check_page_health_unexpected_redirect_trips(self):
+    @pytest.mark.parametrize(
+        ("url", "content", "expected_result", "expected_attrs"),
+        [
+            pytest.param(
+                "https://evil.com/redirect",
+                "page content here",
+                "UNEXPECTED_REDIRECT",
+                {"is_open": True},
+                id="unexpected_redirect_trips",
+            ),
+            pytest.param(
+                "https://icsource.com/login.aspx",
+                "please login",
+                "SESSION_EXPIRED",
+                {"is_open": False},
+                id="session_expired_from_url",
+            ),
+            pytest.param(
+                "https://icsource.com/browse",
+                "please verify you are human to continue",
+                "CAPTCHA_WARNING",
+                {"captcha_count": 1, "is_open": False},
+                id="captcha_warning",
+            ),
+            pytest.param(
+                "https://icsource.com/browse",
+                "too many requests from your ip",
+                "RATE_LIMITED",
+                {"is_open": True},
+                id="rate_limited",
+            ),
+            pytest.param(
+                "https://icsource.com/browse",
+                "access denied by server policy",
+                "ACCESS_DENIED",
+                {"is_open": True},
+                id="access_denied",
+            ),
+            pytest.param(
+                "https://icsource.com/account/login",
+                "please sign in to continue",
+                "SESSION_EXPIRED",
+                {},
+                id="login_in_path_segment",
+            ),
+        ],
+    )
+    def test_check_page_health(self, url, content, expected_result, expected_attrs):
         cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://evil.com/redirect"
+        result = _run(cb.check_page_health(self._page(url, content)))
 
-        async def fake_evaluate(js):
-            return "page content here"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "UNEXPECTED_REDIRECT"
-        assert cb.is_open is True
-
-    def test_check_page_health_session_expired_from_url(self):
-        cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://icsource.com/login.aspx"
-
-        async def fake_evaluate(js):
-            return "please login"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "SESSION_EXPIRED"
-        assert cb.is_open is False
-
-    def test_check_page_health_captcha_warning(self):
-        cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://icsource.com/browse"
-
-        async def fake_evaluate(js):
-            return "please verify you are human to continue"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "CAPTCHA_WARNING"
-        assert cb.captcha_count == 1
-        assert cb.is_open is False
+        assert result == expected_result
+        for attr, value in expected_attrs.items():
+            assert getattr(cb, attr) == value
 
     def test_check_page_health_captcha_twice_trips(self):
         cb = self._make_cb()
         cb.captcha_count = 1  # Pre-set so second triggers trip
 
-        page = MagicMock()
-        page.url = "https://icsource.com/browse"
-
-        async def fake_evaluate(js):
-            return "verify you are human"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
+        page = self._page("https://icsource.com/browse", "verify you are human")
+        result = _run(cb.check_page_health(page))
 
         assert result == "CAPTCHA_WARNING"
-        assert cb.is_open is True
-
-    def test_check_page_health_rate_limited(self):
-        cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://icsource.com/browse"
-
-        async def fake_evaluate(js):
-            return "too many requests from your ip"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "RATE_LIMITED"
-        assert cb.is_open is True
-
-    def test_check_page_health_access_denied(self):
-        cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://icsource.com/browse"
-
-        async def fake_evaluate(js):
-            return "access denied by server policy"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "ACCESS_DENIED"
         assert cb.is_open is True
 
     def test_check_page_health_healthy_resets_failures(self):
         cb = self._make_cb()
         cb.consecutive_failures = 2  # Prior failures
 
-        page = MagicMock()
-        page.url = "https://icsource.com/browse"
-
-        async def fake_evaluate(js):
-            return "normal component listing results here"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
+        page = self._page("https://icsource.com/browse", "normal component listing results here")
+        result = _run(cb.check_page_health(page))
 
         assert result == "HEALTHY"
         assert cb.consecutive_failures == 0
-
-    def test_check_page_health_login_in_path_segment(self):
-        cb = self._make_cb()
-        page = MagicMock()
-        page.url = "https://icsource.com/account/login"
-
-        async def fake_evaluate(js):
-            return "please sign in to continue"
-
-        page.evaluate = fake_evaluate
-
-        import asyncio
-
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(cb.check_page_health(page))
-        loop.close()
-
-        assert result == "SESSION_EXPIRED"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -232,20 +160,22 @@ class TestIcsCircuitBreaker:
 
 
 class TestIcsResultParser:
-    def test_parse_quantity_normal(self):
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("1000", 1000, id="plain"),
+            pytest.param("1,500", 1500, id="comma_separated"),
+            pytest.param("500+", 500, id="trailing_plus"),
+            pytest.param("", None, id="empty_string"),
+            pytest.param(None, None, id="none"),
+            pytest.param("N/A", None, id="not_available"),
+            pytest.param("--", None, id="dashes"),
+        ],
+    )
+    def test_parse_quantity(self, raw, expected):
         from app.services.ics_worker.result_parser import parse_quantity
 
-        assert parse_quantity("1000") == 1000
-        assert parse_quantity("1,500") == 1500
-        assert parse_quantity("500+") == 500
-        assert parse_quantity("") is None
-        assert parse_quantity(None) is None  # type: ignore[arg-type]
-
-    def test_parse_quantity_bad_value(self):
-        from app.services.ics_worker.result_parser import parse_quantity
-
-        assert parse_quantity("N/A") is None
-        assert parse_quantity("--") is None
+        assert parse_quantity(raw) == expected  # type: ignore[arg-type]
 
     def test_extract_company_info_with_open_profile(self):
         from bs4 import BeautifulSoup
@@ -424,77 +354,28 @@ class TestIcsScheduler:
         finally:
             del os.environ["FORCE_BUSINESS_HOURS"]
 
-    def test_is_business_hours_saturday(self):
-        scheduler = self._make_scheduler()
-        # Saturday = weekday 5, always off
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 5
-            mock_now.hour = 12
-            mock_dt.now.return_value = mock_now
-            result = scheduler.is_business_hours()
-
-        assert result is False
-
-    def test_is_business_hours_sunday_before_6pm(self):
-        scheduler = self._make_scheduler()
-
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 6  # Sunday
-            mock_now.hour = 15  # 3 PM — before 6 PM threshold
-            mock_dt.now.return_value = mock_now
-            result = scheduler.is_business_hours()
-
-        assert result is False
-
-    def test_is_business_hours_sunday_after_6pm(self):
+    @pytest.mark.parametrize(
+        ("weekday", "hour", "expected"),
+        [
+            pytest.param(5, 12, False, id="saturday"),  # Saturday always off
+            pytest.param(6, 15, False, id="sunday_before_6pm"),  # 3 PM, before threshold
+            pytest.param(6, 19, True, id="sunday_after_6pm"),  # 7 PM, after threshold
+            pytest.param(4, 14, True, id="friday_before_5pm"),  # 2 PM
+            pytest.param(4, 17, False, id="friday_after_5pm"),  # 5 PM, off
+            pytest.param(0, 10, True, id="monday"),
+        ],
+    )
+    def test_is_business_hours(self, weekday, hour, expected):
         scheduler = self._make_scheduler()
 
         with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
-            mock_now.weekday.return_value = 6  # Sunday
-            mock_now.hour = 19  # 7 PM — after 6 PM threshold
+            mock_now.weekday.return_value = weekday
+            mock_now.hour = hour
             mock_dt.now.return_value = mock_now
             result = scheduler.is_business_hours()
 
-        assert result is True
-
-    def test_is_business_hours_friday_before_5pm(self):
-        scheduler = self._make_scheduler()
-
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4  # Friday
-            mock_now.hour = 14  # 2 PM
-            mock_dt.now.return_value = mock_now
-            result = scheduler.is_business_hours()
-
-        assert result is True
-
-    def test_is_business_hours_friday_after_5pm(self):
-        scheduler = self._make_scheduler()
-
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4  # Friday
-            mock_now.hour = 17  # 5 PM — off
-            mock_dt.now.return_value = mock_now
-            result = scheduler.is_business_hours()
-
-        assert result is False
-
-    def test_is_business_hours_monday(self):
-        scheduler = self._make_scheduler()
-
-        with patch("app.services.ics_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 0  # Monday
-            mock_now.hour = 10
-            mock_dt.now.return_value = mock_now
-            result = scheduler.is_business_hours()
-
-        assert result is True
+        assert result is expected
 
     def test_next_delay_returns_float_in_range(self):
         scheduler = self._make_scheduler()
@@ -608,6 +489,30 @@ class TestIcsSightingWriter:
             yield session
             session.rollback()
 
+    def _make_queue_item(self, db, mpn, normalized_mpn, target_qty):
+        """Create a Requisition/MaterialCard/Requirement chain and return a queue_item
+        MagicMock pointing at the new requirement."""
+        from app.models import MaterialCard, Requirement, Requisition
+
+        req = Requisition(name=f"Test Req {normalized_mpn}", status="active")
+        db.add(req)
+        db.flush()
+
+        mc = MaterialCard(display_mpn=mpn, normalized_mpn=normalized_mpn)
+        db.add(mc)
+        db.flush()
+
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            target_qty=target_qty,
+            material_card_id=mc.id,
+        )
+        db.add(requirement)
+        db.flush()
+
+        return MagicMock(requirement_id=requirement.id)
+
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_ics_sightings_returns_zero_if_no_requirement(self, mock_rebuild, db):
         from app.services.ics_worker.sighting_writer import save_ics_sightings
@@ -619,54 +524,19 @@ class TestIcsSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_ics_sightings_empty_list(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.ics_worker.sighting_writer import save_ics_sightings
 
-        # Create required objects
-        req = Requisition(name="Test Req", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="LM317T", normalized_mpn="lm317t_empty")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            target_qty=100,
-            material_card_id=mc.id,
-        )
-        db.add(requirement)
-        db.flush()
-
-        queue_item = MagicMock(requirement_id=requirement.id)
+        queue_item = self._make_queue_item(db, "LM317T", "lm317t_empty", 100)
         result = save_ics_sightings(db, queue_item, [])
         assert result == 0
         mock_rebuild.assert_not_called()
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_ics_sightings_skips_no_vendor_name(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.ics_worker.result_parser import IcsSighting
         from app.services.ics_worker.sighting_writer import save_ics_sightings
 
-        req = Requisition(name="Test Req2", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="ABC123", normalized_mpn="abc123_skip")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="ABC123",
-            target_qty=50,
-            material_card_id=mc.id,
-        )
-        db.add(requirement)
-        db.flush()
+        queue_item = self._make_queue_item(db, "ABC123", "abc123_skip", 50)
 
         # Sighting with no vendor_name should be skipped
         sighting = IcsSighting(
@@ -674,32 +544,15 @@ class TestIcsSightingWriter:
             vendor_name="",
             quantity=100,
         )
-        queue_item = MagicMock(requirement_id=requirement.id)
         result = save_ics_sightings(db, queue_item, [sighting])
         assert result == 0
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_ics_sightings_creates_sighting(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.ics_worker.result_parser import IcsSighting
         from app.services.ics_worker.sighting_writer import save_ics_sightings
 
-        req = Requisition(name="Test Req3", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="XYZ789", normalized_mpn="xyz789_create")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="XYZ789",
-            target_qty=200,
-            material_card_id=mc.id,
-        )
-        db.add(requirement)
-        db.flush()
+        queue_item = self._make_queue_item(db, "XYZ789", "xyz789_create", 200)
 
         sighting = IcsSighting(
             part_number="XYZ789",
@@ -715,33 +568,16 @@ class TestIcsSightingWriter:
             description="Component",
             uploaded_date="2024-01-01",
         )
-        queue_item = MagicMock(requirement_id=requirement.id)
         result = save_ics_sightings(db, queue_item, [sighting])
         assert result == 1
         mock_rebuild.assert_called_once()
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_ics_sightings_deduplicates(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.ics_worker.result_parser import IcsSighting
         from app.services.ics_worker.sighting_writer import save_ics_sightings
 
-        req = Requisition(name="Test Req4", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="DUP001", normalized_mpn="dup001_dedup")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="DUP001",
-            target_qty=10,
-            material_card_id=mc.id,
-        )
-        db.add(requirement)
-        db.flush()
+        queue_item = self._make_queue_item(db, "DUP001", "dup001_dedup", 10)
 
         sighting1 = IcsSighting(
             part_number="DUP001",
@@ -755,7 +591,6 @@ class TestIcsSightingWriter:
             quantity=100,
             in_stock=True,
         )
-        queue_item = MagicMock(requirement_id=requirement.id)
         result = save_ics_sightings(db, queue_item, [sighting1, sighting2])
         # Only 1 unique sighting should be created
         assert result == 1
