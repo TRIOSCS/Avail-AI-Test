@@ -11,6 +11,7 @@ Depends on: conftest (db_session, test_user)
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, VendorCard, VendorContact
@@ -141,63 +142,60 @@ def test_one_liner_warm_intro(db_session):
     assert "prior engagement" in result.lower()
 
 
-def test_one_liner_historical(db_session):
-    """Historical bought_before generates one-liner."""
-    p = _make_prospect(db_session, historical_context={"bought_before": True})
-    result = generate_one_liner(p)
-    assert "previous" in result.lower() or "purchased" in result.lower()
+# Each case: prospect kwargs → all listed (case-insensitive) substrings must appear.
+@pytest.mark.parametrize(
+    ("prospect_kwargs", "expected_substrings"),
+    [
+        pytest.param(
+            {"readiness_signals": {"events": [{"type": "funding", "description": "Series B round"}]}},
+            ["fund"],
+            id="funding_event",
+        ),
+        pytest.param(
+            {"similar_customers": [{"name": "Raytheon", "match_strength": "strong"}]},
+            ["Raytheon"],
+            id="similar_customer",
+        ),
+    ],
+)
+def test_one_liner_all_substrings(db_session, prospect_kwargs, expected_substrings):
+    """One-liner contains every expected (case-insensitive) substring."""
+    p = _make_prospect(db_session, **prospect_kwargs)
+    result = generate_one_liner(p).lower()
+    assert all(sub.lower() in result for sub in expected_substrings)
 
 
-def test_one_liner_strong_intent(db_session):
-    """Strong intent signal generates one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"intent": {"strength": "strong", "component_topics": ["semiconductors"]}},
-    )
-    result = generate_one_liner(p)
-    assert "intent" in result.lower() or "sourcing" in result.lower()
-
-
-def test_one_liner_funding_event(db_session):
-    """Funding event generates one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"events": [{"type": "funding", "description": "Series B round"}]},
-    )
-    result = generate_one_liner(p)
-    assert "fund" in result.lower()
-
-
-def test_one_liner_hiring(db_session):
-    """Hiring signal generates one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"hiring": {"type": "procurement"}},
-    )
-    result = generate_one_liner(p)
-    assert "procurement" in result.lower() or "hiring" in result.lower()
-
-
-def test_one_liner_similar_customer(db_session):
-    """Similar customer generates one-liner."""
-    p = _make_prospect(
-        db_session,
-        similar_customers=[{"name": "Raytheon", "match_strength": "strong"}],
-    )
-    result = generate_one_liner(p)
-    assert "Raytheon" in result
-
-
-def test_one_liner_fallback(db_session):
-    """Fallback uses industry/size."""
-    p = _make_prospect(
-        db_session,
-        industry="Electronics Manufacturing",
-        employee_count_range="201-500",
-        fit_score=80,
-    )
-    result = generate_one_liner(p)
-    assert "Electronics" in result or "201-500" in result
+# Each case: prospect kwargs → at least one of the listed substrings must appear.
+@pytest.mark.parametrize(
+    ("prospect_kwargs", "any_substrings"),
+    [
+        pytest.param(
+            {"historical_context": {"bought_before": True}},
+            ["previous", "purchased"],
+            id="historical",
+        ),
+        pytest.param(
+            {"readiness_signals": {"intent": {"strength": "strong", "component_topics": ["semiconductors"]}}},
+            ["intent", "sourcing"],
+            id="strong_intent",
+        ),
+        pytest.param(
+            {"readiness_signals": {"hiring": {"type": "procurement"}}},
+            ["procurement", "hiring"],
+            id="hiring",
+        ),
+        pytest.param(
+            {"industry": "Electronics Manufacturing", "employee_count_range": "201-500", "fit_score": 80},
+            ["Electronics", "201-500"],
+            id="fallback",
+        ),
+    ],
+)
+def test_one_liner_any_substring(db_session, prospect_kwargs, any_substrings):
+    """One-liner contains at least one of the expected (case-insensitive) substrings."""
+    p = _make_prospect(db_session, **prospect_kwargs)
+    result = generate_one_liner(p).lower()
+    assert any(sub.lower() in result for sub in any_substrings)
 
 
 def test_one_liner_empty(db_session):
@@ -395,24 +393,31 @@ def test_one_liner_quoted_before_single(db_session):
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def test_one_liner_expansion_event(db_session):
-    """Expansion event generates 'Expanding operations' one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"events": [{"type": "expansion", "description": "New plant"}]},
-    )
-    result = generate_one_liner(p)
-    assert "Expanding operations" in result
-
-
-def test_one_liner_product_launch_event(db_session):
-    """Product launch event generates 'New product launch' one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"events": [{"type": "product_launch", "description": "Widget v2"}]},
-    )
-    result = generate_one_liner(p)
-    assert "New product launch" in result
+# Each case: prospect kwargs → the exact (case-sensitive) substring must appear.
+@pytest.mark.parametrize(
+    ("prospect_kwargs", "expected"),
+    [
+        pytest.param(
+            {"readiness_signals": {"events": [{"type": "expansion", "description": "New plant"}]}},
+            "Expanding operations",
+            id="expansion_event",
+        ),
+        pytest.param(
+            {"readiness_signals": {"events": [{"type": "product_launch", "description": "Widget v2"}]}},
+            "New product launch",
+            id="product_launch_event",
+        ),
+        pytest.param(
+            {"readiness_signals": {"intent": {"strength": "strong", "component_topics": []}}},
+            "Strong buying intent for electronic components detected",
+            id="strong_intent_no_topics",
+        ),
+    ],
+)
+def test_one_liner_exact_substring(db_session, prospect_kwargs, expected):
+    """One-liner contains the exact case-sensitive substring."""
+    p = _make_prospect(db_session, **prospect_kwargs)
+    assert expected in generate_one_liner(p)
 
 
 def test_one_liner_hiring_engineering(db_session):
@@ -548,16 +553,6 @@ def test_warm_intro_sighting_import_error(db_session):
 # ═══════════════════════════════════════════════════════════════════════
 #  Lines 184, 198-199: additional one-liner branches
 # ═══════════════════════════════════════════════════════════════════════
-
-
-def test_one_liner_strong_intent_no_topics(db_session):
-    """Strong intent with no component_topics returns generic intent one-liner."""
-    p = _make_prospect(
-        db_session,
-        readiness_signals={"intent": {"strength": "strong", "component_topics": []}},
-    )
-    result = generate_one_liner(p)
-    assert "Strong buying intent for electronic components detected" in result
 
 
 def test_one_liner_acquisition_event(db_session):

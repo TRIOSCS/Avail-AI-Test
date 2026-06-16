@@ -94,47 +94,38 @@ class TestAutoProgressStatus:
         count = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == requirement.id).count()
         assert count == 0
 
-    def test_already_ahead_not_downgraded(self, db_session: Session, requirement: Requirement, user: User):
-        """SOURCING should not be downgraded to OPEN."""
-        requirement.sourcing_status = SourcingStatus.SOURCING
-        db_session.commit()
-
-        result = auto_progress_status(requirement, SourcingStatus.OPEN, db_session, user.id)
-
-        assert result is False
-        assert requirement.sourcing_status == SourcingStatus.SOURCING
-
-    def test_already_ahead_offered_not_downgraded_to_sourcing(
-        self, db_session: Session, requirement: Requirement, user: User
+    @pytest.mark.parametrize(
+        ("current_status", "target_status"),
+        [
+            (SourcingStatus.SOURCING, SourcingStatus.OPEN),
+            (SourcingStatus.OFFERED, SourcingStatus.SOURCING),
+            (SourcingStatus.LOST, SourcingStatus.SOURCING),
+            (SourcingStatus.ARCHIVED, SourcingStatus.SOURCING),
+        ],
+        ids=[
+            "ahead_sourcing_not_downgraded_to_open",
+            "ahead_offered_not_downgraded_to_sourcing",
+            "non_progression_lost",
+            "non_progression_archived",
+        ],
+    )
+    def test_no_progression_returns_false(
+        self,
+        db_session: Session,
+        requirement: Requirement,
+        user: User,
+        current_status: SourcingStatus,
+        target_status: SourcingStatus,
     ):
-        """OFFERED should not be downgraded to SOURCING."""
-        requirement.sourcing_status = SourcingStatus.OFFERED
+        """Statuses ahead of the target or outside the progression order are not
+        changed."""
+        requirement.sourcing_status = current_status
         db_session.commit()
 
-        result = auto_progress_status(requirement, SourcingStatus.SOURCING, db_session, user.id)
+        result = auto_progress_status(requirement, target_status, db_session, user.id)
 
         assert result is False
-        assert requirement.sourcing_status == SourcingStatus.OFFERED
-
-    def test_non_progression_status_returns_false(self, db_session: Session, requirement: Requirement, user: User):
-        """LOST status is not in the progression order — should return False."""
-        requirement.sourcing_status = SourcingStatus.LOST
-        db_session.commit()
-
-        result = auto_progress_status(requirement, SourcingStatus.SOURCING, db_session, user.id)
-
-        assert result is False
-        assert requirement.sourcing_status == SourcingStatus.LOST
-
-    def test_archived_status_returns_false(self, db_session: Session, requirement: Requirement, user: User):
-        """ARCHIVED status is not in the progression order — should return False."""
-        requirement.sourcing_status = SourcingStatus.ARCHIVED
-        db_session.commit()
-
-        result = auto_progress_status(requirement, SourcingStatus.SOURCING, db_session, user.id)
-
-        assert result is False
-        assert requirement.sourcing_status == SourcingStatus.ARCHIVED
+        assert requirement.sourcing_status == current_status
 
     def test_activity_log_created_on_change(self, db_session: Session, requirement: Requirement, user: User):
         """ActivityLog should be created when status changes."""

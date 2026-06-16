@@ -7,6 +7,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user)
 """
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -48,11 +49,17 @@ def _make_requirement(db, requisition_id, **kwargs):
     return item
 
 
+def _setup_part(db, user, **kwargs):
+    """Create a committed requisition + requirement; return the requirement."""
+    requisition = _make_requisition(db, user.id)
+    part = _make_requirement(db, requisition.id, **kwargs)
+    db.commit()
+    return part
+
+
 def test_part_header_returns_200(client, db_session, test_user):
     """GET /v2/partials/parts/{id}/header returns 200 with part data."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
@@ -75,10 +82,9 @@ def test_part_header_missing_part_returns_404(client, db_session, test_user):
 
 def test_part_header_null_fields(client, db_session, test_user):
     """Header renders gracefully when optional fields are null."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(
+    part = _setup_part(
         db_session,
-        requisition.id,
+        test_user,
         primary_mpn="UNKNOWN",
         brand=None,
         target_qty=None,
@@ -86,7 +92,6 @@ def test_part_header_null_fields(client, db_session, test_user):
         condition=None,
         sourcing_status=None,
     )
-    db_session.commit()
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
@@ -98,9 +103,7 @@ def test_part_header_null_fields(client, db_session, test_user):
 
 def test_edit_cell_returns_input(client, db_session, test_user):
     """GET edit/{field} returns an input or select element."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header/edit/brand")
     assert resp.status_code == 200
@@ -109,9 +112,7 @@ def test_edit_cell_returns_input(client, db_session, test_user):
 
 def test_edit_cell_invalid_field(client, db_session, test_user):
     """GET edit/bogus returns 400."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header/edit/bogus_field")
     assert resp.status_code == 400
@@ -119,9 +120,7 @@ def test_edit_cell_invalid_field(client, db_session, test_user):
 
 def test_patch_header_updates_field(client, db_session, test_user):
     """PATCH saves target_qty and returns updated header."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",
@@ -134,9 +133,7 @@ def test_patch_header_updates_field(client, db_session, test_user):
 
 def test_patch_header_hx_trigger(client, db_session, test_user):
     """PATCH response includes HX-Trigger for list sync."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",
@@ -148,13 +145,7 @@ def test_patch_header_hx_trigger(client, db_session, test_user):
 
 def test_header_shows_substitutes(client, db_session, test_user):
     """Header renders substitute pills when present."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(
-        db_session,
-        requisition.id,
-        substitutes=["LM317AHVT", "LM317MDT"],
-    )
-    db_session.commit()
+    part = _setup_part(db_session, test_user, substitutes=["LM317AHVT", "LM317MDT"])
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
@@ -169,9 +160,7 @@ def test_header_shows_substitutes(client, db_session, test_user):
 
 def test_header_no_substitutes_shows_primary_as_chip(client, db_session, test_user):
     """Header shows primary MPN as chip even when no substitutes."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, substitutes=[])
-    db_session.commit()
+    part = _setup_part(db_session, test_user, substitutes=[])
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
@@ -181,13 +170,7 @@ def test_header_no_substitutes_shows_primary_as_chip(client, db_session, test_us
 
 def test_edit_substitutes_returns_input(client, db_session, test_user):
     """GET edit/substitutes returns comma-separated input."""
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(
-        db_session,
-        requisition.id,
-        substitutes=["LM317AHVT", "LM317MDT"],
-    )
-    db_session.commit()
+    part = _setup_part(db_session, test_user, substitutes=["LM317AHVT", "LM317MDT"])
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header/edit/substitutes")
     assert resp.status_code == 200
@@ -197,11 +180,7 @@ def test_edit_substitutes_returns_input(client, db_session, test_user):
 
 def test_patch_header_saves_substitutes(client, db_session, test_user):
     """PATCH substitutes saves normalized, deduplicated list (JSON format)."""
-    import json
-
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id)
-    db_session.commit()
+    part = _setup_part(db_session, test_user)
 
     subs_json = json.dumps(
         [
@@ -224,11 +203,7 @@ def test_patch_header_saves_substitutes(client, db_session, test_user):
 
 def test_patch_header_substitutes_excludes_primary(client, db_session, test_user):
     """PATCH substitutes excludes the primary MPN from the list (JSON format)."""
-    import json
-
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(db_session, requisition.id, primary_mpn="LM317T")
-    db_session.commit()
+    part = _setup_part(db_session, test_user, primary_mpn="LM317T")
 
     subs_json = json.dumps(
         [
@@ -249,15 +224,11 @@ def test_patch_header_substitutes_excludes_primary(client, db_session, test_user
 
 def test_patch_header_clear_substitutes(client, db_session, test_user):
     """PATCH with empty JSON value clears substitutes."""
-    import json
-
-    requisition = _make_requisition(db_session, test_user.id)
-    part = _make_requirement(
+    part = _setup_part(
         db_session,
-        requisition.id,
+        test_user,
         substitutes=[{"mpn": "LM317AHVT", "manufacturer": ""}],
     )
-    db_session.commit()
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",

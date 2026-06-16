@@ -23,8 +23,11 @@ import socket
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.models import User, VendorCard, VendorReview
 from app.models.tags import EntityTag, Tag
@@ -69,59 +72,67 @@ class TestCleanEmails:
         result = clean_emails([long_email, "ok@acme.com"])
         assert result == ["ok@acme.com"]
 
-    def test_filters_junk_local_parts(self):
-        junk = [
-            "noreply@acme.com",
-            "no-reply@acme.com",
-            "donotreply@acme.com",
-            "mailer-daemon@acme.com",
-            "postmaster@acme.com",
-            "webmaster@acme.com",
-            "privacy@acme.com",
-            "abuse@acme.com",
-            "spam@acme.com",
-            "unsubscribe@acme.com",
-            "root@acme.com",
-            "hostmaster@acme.com",
-            "example@acme.com",
-            "test@acme.com",
-        ]
-        result = clean_emails(junk + ["sales@acme.com"])
-        assert result == ["sales@acme.com"]
-
-    def test_filters_junk_domains(self):
-        junk = [
-            "user@example.com",
-            "user@sentry.io",
-            "user@googleapis.com",
-            "user@google.com",
-            "user@facebook.com",
-            "user@twitter.com",
-            "user@youtube.com",
-            "user@linkedin.com",
-            "user@schema.org",
-            "user@w3.org",
-            "user@cloudflare.com",
-            "user@jquery.com",
-            "user@bootstrapcdn.com",
-            "user@gstatic.com",
-            "user@gravatar.com",
-            "user@wordpress.org",
-        ]
-        result = clean_emails(junk + ["sales@realcompany.com"])
-        assert result == ["sales@realcompany.com"]
-
-    def test_filters_file_extension_emails(self):
-        bad = [
-            "icon@site.png",
-            "logo@brand.jpg",
-            "bg@site.gif",
-            "img@site.svg",
-            "style@site.css",
-            "bundle@site.js",
-        ]
-        result = clean_emails(bad + ["real@site.com"])
-        assert result == ["real@site.com"]
+    @pytest.mark.parametrize(
+        ("junk", "good"),
+        [
+            pytest.param(
+                [
+                    "noreply@acme.com",
+                    "no-reply@acme.com",
+                    "donotreply@acme.com",
+                    "mailer-daemon@acme.com",
+                    "postmaster@acme.com",
+                    "webmaster@acme.com",
+                    "privacy@acme.com",
+                    "abuse@acme.com",
+                    "spam@acme.com",
+                    "unsubscribe@acme.com",
+                    "root@acme.com",
+                    "hostmaster@acme.com",
+                    "example@acme.com",
+                    "test@acme.com",
+                ],
+                "sales@acme.com",
+                id="junk_local_parts",
+            ),
+            pytest.param(
+                [
+                    "user@example.com",
+                    "user@sentry.io",
+                    "user@googleapis.com",
+                    "user@google.com",
+                    "user@facebook.com",
+                    "user@twitter.com",
+                    "user@youtube.com",
+                    "user@linkedin.com",
+                    "user@schema.org",
+                    "user@w3.org",
+                    "user@cloudflare.com",
+                    "user@jquery.com",
+                    "user@bootstrapcdn.com",
+                    "user@gstatic.com",
+                    "user@gravatar.com",
+                    "user@wordpress.org",
+                ],
+                "sales@realcompany.com",
+                id="junk_domains",
+            ),
+            pytest.param(
+                [
+                    "icon@site.png",
+                    "logo@brand.jpg",
+                    "bg@site.gif",
+                    "img@site.svg",
+                    "style@site.css",
+                    "bundle@site.js",
+                ],
+                "real@site.com",
+                id="file_extension_emails",
+            ),
+        ],
+    )
+    def test_filters_junk(self, junk, good):
+        assert clean_emails(junk + [good]) == [good]
 
     def test_empty_input(self):
         assert clean_emails([]) == []
@@ -170,54 +181,73 @@ class TestCleanPhones:
 
 
 class TestIsPrivateUrl:
-    @patch("socket.gethostbyname", return_value="127.0.0.1")
-    def test_loopback_blocked(self, mock_dns):
-        assert is_private_url("http://localhost/secret") is True
+    @pytest.mark.parametrize(
+        ("resolved_ip", "url", "expected"),
+        [
+            pytest.param("127.0.0.1", "http://localhost/secret", True, id="loopback_blocked"),
+            pytest.param("192.168.1.1", "http://internal.corp/api", True, id="private_ip_blocked"),
+            pytest.param("169.254.1.1", "http://link-local.test", True, id="link_local_blocked"),
+            pytest.param("240.0.0.1", "http://reserved.test", True, id="reserved_blocked"),
+            pytest.param("93.184.216.34", "https://example.com", False, id="public_ip_allowed"),
+        ],
+    )
+    def test_resolved_ip_classification(self, resolved_ip, url, expected):
+        with patch("socket.gethostbyname", return_value=resolved_ip):
+            assert is_private_url(url) is expected
 
-    @patch("socket.gethostbyname", return_value="192.168.1.1")
-    def test_private_ip_blocked(self, mock_dns):
-        assert is_private_url("http://internal.corp/api") is True
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            pytest.param("http://", True, id="empty_hostname_blocked"),
+            pytest.param("not-a-url", True, id="no_hostname_blocked"),
+        ],
+    )
+    def test_no_dns_lookup(self, url, expected):
+        assert is_private_url(url) is expected
 
-    @patch("socket.gethostbyname", return_value="169.254.1.1")
-    def test_link_local_blocked(self, mock_dns):
-        assert is_private_url("http://link-local.test") is True
-
-    @patch("socket.gethostbyname", return_value="240.0.0.1")
-    def test_reserved_blocked(self, mock_dns):
-        assert is_private_url("http://reserved.test") is True
-
-    @patch("socket.gethostbyname", return_value="93.184.216.34")
-    def test_public_ip_allowed(self, mock_dns):
-        assert is_private_url("https://example.com") is False
-
-    def test_empty_hostname_blocked(self):
-        assert is_private_url("http://") is True
-
-    def test_no_hostname_blocked(self):
-        assert is_private_url("not-a-url") is True
-
-    @patch("socket.gethostbyname", side_effect=socket.gaierror("DNS fail"))
-    def test_unresolvable_blocked(self, mock_dns):
-        assert is_private_url("http://nonexistent.invalid") is True
-
-    @patch("socket.gethostbyname", side_effect=ValueError("bad IP"))
-    def test_value_error_blocked(self, mock_dns):
-        assert is_private_url("http://badvalue.test") is True
+    @pytest.mark.parametrize(
+        ("dns_error", "url"),
+        [
+            pytest.param(socket.gaierror("DNS fail"), "http://nonexistent.invalid", id="unresolvable_blocked"),
+            pytest.param(ValueError("bad IP"), "http://badvalue.test", id="value_error_blocked"),
+        ],
+    )
+    def test_dns_failure_blocked(self, dns_error, url):
+        with patch("socket.gethostbyname", side_effect=dns_error):
+            assert is_private_url(url) is True
 
 
 # ── get_or_create_card ───────────────────────────────────────────────
 
 
+@contextmanager
+def mock_rapidfuzz_score(score):
+    """Patch sys.modules so `from rapidfuzz import fuzz` returns a fuzz whose
+    token_sort_ratio yields the given score."""
+    mock_fuzz = MagicMock()
+    mock_fuzz.token_sort_ratio.return_value = score
+    mock_module = MagicMock()
+    mock_module.fuzz = mock_fuzz
+    with patch.dict("sys.modules", {"rapidfuzz": mock_module, "rapidfuzz.fuzz": mock_fuzz}):
+        yield
+
+
+def _add_arrow_card(db_session, **overrides) -> VendorCard:
+    card = VendorCard(
+        normalized_name="arrow electronics",
+        display_name="Arrow Electronics",
+        emails=[],
+        phones=[],
+        **overrides,
+    )
+    db_session.add(card)
+    db_session.commit()
+    return card
+
+
 class TestGetOrCreateCard:
     def test_exact_match_returns_existing(self, db_session):
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session)
 
         result = get_or_create_card("Arrow Electronics", db_session)
         assert result.id == card.id
@@ -232,25 +262,9 @@ class TestGetOrCreateCard:
     def test_fuzzy_match_merges_alternate_name(self, db_session):
         """When thefuzz scores >= 90, existing card is returned with alternate name
         added."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-            alternate_names=[],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session, alternate_names=[])
 
-        mock_fuzz = MagicMock()
-        mock_fuzz.token_sort_ratio.return_value = 95
-
-        # The function does: from thefuzz import fuzz
-        # So we mock the thefuzz module's fuzz attribute
-        mock_rapidfuzz_module = MagicMock()
-        mock_rapidfuzz_module.fuzz = mock_fuzz
-
-        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
+        with mock_rapidfuzz_score(95):
             result = get_or_create_card("Arrow Elecctronics", db_session)
 
         assert result.id == card.id
@@ -259,22 +273,9 @@ class TestGetOrCreateCard:
     def test_fuzzy_match_same_display_name_no_duplicate_alt(self, db_session):
         """When fuzzy-matched vendor_name equals display_name, don't add to
         alternates."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-            alternate_names=[],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session, alternate_names=[])
 
-        mock_fuzz = MagicMock()
-        mock_fuzz.token_sort_ratio.return_value = 95
-        mock_rapidfuzz_module = MagicMock()
-        mock_rapidfuzz_module.fuzz = mock_fuzz
-
-        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
+        with mock_rapidfuzz_score(95):
             result = get_or_create_card("Arrow Electronics", db_session)
 
         assert result.id == card.id
@@ -282,22 +283,9 @@ class TestGetOrCreateCard:
 
     def test_fuzzy_match_already_in_alternates(self, db_session):
         """When vendor name already in alternate_names, don't duplicate."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-            alternate_names=["Arrow Elecctronics"],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session, alternate_names=["Arrow Elecctronics"])
 
-        mock_fuzz = MagicMock()
-        mock_fuzz.token_sort_ratio.return_value = 95
-        mock_rapidfuzz_module = MagicMock()
-        mock_rapidfuzz_module.fuzz = mock_fuzz
-
-        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
+        with mock_rapidfuzz_score(95):
             result = get_or_create_card("Arrow Elecctronics", db_session)
 
         assert result.id == card.id
@@ -305,21 +293,9 @@ class TestGetOrCreateCard:
 
     def test_fuzzy_low_score_creates_new(self, db_session):
         """Score below 90 means no fuzzy match — create new card."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session)
 
-        mock_fuzz = MagicMock()
-        mock_fuzz.token_sort_ratio.return_value = 50
-        mock_rapidfuzz_module = MagicMock()
-        mock_rapidfuzz_module.fuzz = mock_fuzz
-
-        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
+        with mock_rapidfuzz_score(50):
             result = get_or_create_card("Completely Different Vendor", db_session)
 
         assert result.id != card.id
@@ -327,14 +303,7 @@ class TestGetOrCreateCard:
 
     def test_rapidfuzz_import_error_creates_new(self, db_session):
         """If rapidfuzz not installed, skip fuzzy and create new card."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _add_arrow_card(db_session)
 
         import builtins
 
@@ -353,19 +322,7 @@ class TestGetOrCreateCard:
 
     def test_fuzzy_match_card_none_after_get(self, db_session):
         """Edge case: best_card_id valid but db.get returns None (deleted between query/get)."""
-        card = VendorCard(
-            normalized_name="arrow electronics",
-            display_name="Arrow Electronics",
-            emails=[],
-            phones=[],
-        )
-        db_session.add(card)
-        db_session.commit()
-
-        mock_fuzz = MagicMock()
-        mock_fuzz.token_sort_ratio.return_value = 95
-        mock_rapidfuzz_module = MagicMock()
-        mock_rapidfuzz_module.fuzz = mock_fuzz
+        card = _add_arrow_card(db_session)
 
         # Patch db.get to return None for the fuzzy match lookup
         original_get = db_session.get
@@ -375,9 +332,8 @@ class TestGetOrCreateCard:
                 return None
             return original_get(model, id_val)
 
-        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
-            with patch.object(db_session, "get", side_effect=patched_get):
-                result = get_or_create_card("Arrow Elecctronics", db_session)
+        with mock_rapidfuzz_score(95), patch.object(db_session, "get", side_effect=patched_get):
+            result = get_or_create_card("Arrow Elecctronics", db_session)
 
         # Should have created a new card since db.get returned None
         assert result.display_name == "Arrow Elecctronics"
@@ -1054,14 +1010,24 @@ class TestScrapeWebsiteContacts:
 # ── merge_contact_into_card ──────────────────────────────────────────
 
 
+@contextmanager
+def mock_merge_counts(emails_added, phones_added):
+    """Patch merge_emails/phones_into_card to report the given counts of new entries.
+
+    Yields the merge_emails mock so callers can assert on its calls.
+    """
+    with (
+        patch("app.vendor_utils.merge_emails_into_card", return_value=emails_added) as mock_emails,
+        patch("app.vendor_utils.merge_phones_into_card", return_value=phones_added),
+    ):
+        yield mock_emails
+
+
 class TestMergeContactIntoCard:
     def test_merge_emails_only(self):
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=2) as mock_emails,
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(2, 0) as mock_emails:
             changed = merge_contact_into_card(card, ["a@b.com", "c@d.com"], [])
         assert changed is True
         mock_emails.assert_called_once_with(card, ["a@b.com", "c@d.com"])
@@ -1069,20 +1035,14 @@ class TestMergeContactIntoCard:
     def test_merge_phones_only(self):
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=1),
-        ):
+        with mock_merge_counts(0, 1):
             changed = merge_contact_into_card(card, [], ["+1-555-0100"])
         assert changed is True
 
     def test_merge_website_when_missing(self):
         card = MagicMock()
         card.website = None
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(0, 0):
             changed = merge_contact_into_card(card, [], [], website="https://new.com")
         assert changed is True
         assert card.website == "https://new.com"
@@ -1090,10 +1050,7 @@ class TestMergeContactIntoCard:
     def test_website_not_overwritten_if_exists(self):
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(0, 0):
             changed = merge_contact_into_card(card, [], [], website="https://new.com")
         assert changed is False
         assert card.website == "https://existing.com"
@@ -1101,10 +1058,7 @@ class TestMergeContactIntoCard:
     def test_source_set_when_changed(self):
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=1),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(1, 0):
             changed = merge_contact_into_card(card, ["a@b.com"], [], source="scrape")
         assert changed is True
         assert card.source == "scrape"
@@ -1113,10 +1067,7 @@ class TestMergeContactIntoCard:
         card = MagicMock()
         card.website = "https://existing.com"
         card.source = "original"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(0, 0):
             changed = merge_contact_into_card(card, [], [], source="scrape")
         assert changed is False
         # source should not have been set since changed is False
@@ -1125,10 +1076,7 @@ class TestMergeContactIntoCard:
     def test_no_change(self):
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=0),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(0, 0):
             changed = merge_contact_into_card(card, [], [])
         assert changed is False
 
@@ -1137,10 +1085,7 @@ class TestMergeContactIntoCard:
         card = MagicMock()
         card.website = "https://existing.com"
         card.source = "original"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=1),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=0),
-        ):
+        with mock_merge_counts(1, 0):
             changed = merge_contact_into_card(card, ["a@b.com"], [], source=None)
         assert changed is True
         assert card.source == "original"
@@ -1149,10 +1094,7 @@ class TestMergeContactIntoCard:
         """Both emails and phones new — changed is True."""
         card = MagicMock()
         card.website = "https://existing.com"
-        with (
-            patch("app.vendor_utils.merge_emails_into_card", return_value=1),
-            patch("app.vendor_utils.merge_phones_into_card", return_value=1),
-        ):
+        with mock_merge_counts(1, 1):
             changed = merge_contact_into_card(card, ["a@b.com"], ["+1-555-0100"], source="api")
         assert changed is True
         assert card.source == "api"

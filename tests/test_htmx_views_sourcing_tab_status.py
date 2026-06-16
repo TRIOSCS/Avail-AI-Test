@@ -19,6 +19,7 @@ from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_part_unavailability import VendorPartUnavailability
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard
+from app.services.sighting_status import compute_vendor_statuses
 from app.utils.normalization import normalize_mpn_key
 from app.vendor_utils import normalize_vendor_name
 
@@ -66,8 +67,6 @@ class TestDeriveVendorStatus:
     """Test the compute_vendor_statuses helper function."""
 
     def test_default_status_is_sighting(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -76,8 +75,6 @@ class TestDeriveVendorStatus:
         assert statuses["Acme Corp"] == "sighting"
 
     def test_contacted_status(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         user = _make_user(db_session)
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
@@ -96,8 +93,6 @@ class TestDeriveVendorStatus:
         assert statuses["Acme Corp"] == "contacted"
 
     def test_offer_in_status(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -113,8 +108,6 @@ class TestDeriveVendorStatus:
         assert statuses["Acme Corp"] == "offer-in"
 
     def test_unavailable_status(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -130,8 +123,6 @@ class TestDeriveVendorStatus:
         assert statuses["Acme Corp"] == "unavailable"
 
     def test_blacklisted_overrides_all(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Bad Vendor")
@@ -149,8 +140,6 @@ class TestDeriveVendorStatus:
         assert statuses["Bad Vendor"] == "blacklisted"
 
     def test_offer_in_overrides_contacted(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         user = _make_user(db_session)
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
@@ -182,8 +171,6 @@ class TestDeriveVendorStatus:
         made after contacting must be visible. Active record + all rows stamped +
         contacted → 'unavailable' (offer-in still dominates everything but
         blacklisted)."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         user = _make_user(db_session)
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
@@ -207,8 +194,6 @@ class TestDeriveVendorStatus:
     def test_offer_in_overrides_unavailable_and_contacted(self, db_session):
         """offer-in dominance pin survives the F4 reorder: offer-in beats both
         unavailable and contacted."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         user = _make_user(db_session)
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
@@ -239,8 +224,6 @@ class TestDeriveVendorStatus:
 
     def test_empty_vendor_names_returns_empty_dict(self, db_session):
         """Line 43: compute_vendor_statuses with no vendors returns empty dict."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         db_session.commit()
@@ -250,8 +233,6 @@ class TestDeriveVendorStatus:
 
     def test_explicit_vendor_names_bypasses_db_query(self, db_session):
         """When vendor_names is passed explicitly, no DB query for summaries."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         db_session.commit()
@@ -266,8 +247,6 @@ class TestDurableUnavailabilityStatus:
     def test_durable_record_alone_is_unavailable(self, db_session):
         """A record on the requirement's primary-MPN key marks the vendor unavailable
         even with no sighting rows flagged (or none at all)."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -290,8 +269,6 @@ class TestDurableUnavailabilityStatus:
         under the reader-authority rule an unstamped row would flip the pill off
         (rows-win), so this pins purely the matched-key record matching.
         """
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -316,8 +293,6 @@ class TestDurableUnavailabilityStatus:
         assert statuses["Acme Corp"] == "unavailable"
 
     def test_offer_dominates_durable_record(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -344,8 +319,6 @@ class TestDurableUnavailabilityStatus:
         """Summary says 'ACME CORP', sighting rows say 'Acme Corp' — the legacy all-
         rows-flagged branch is anchored on normalized names, so the drift no longer
         silently misses (architect finding 2)."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "ACME CORP")
@@ -394,8 +367,6 @@ class TestReaderAuthorityRule:
     def test_rows_win_unstamped_row_flips_pill_off(self, db_session):
         """One unstamped (e.g. override-surfaced) row + an active record → NOT
         unavailable."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -408,8 +379,6 @@ class TestReaderAuthorityRule:
         assert statuses["Acme Corp"] == "sighting"
 
     def test_active_record_all_rows_stamped_is_unavailable(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -424,8 +393,6 @@ class TestReaderAuthorityRule:
     def test_expired_record_stale_stamped_rows_do_not_pin_pill(self, db_session):
         """All rows still carry the stale stamp, but the record's 30d LOT window has
         lapsed → NOT unavailable (RFQ and pill agree again)."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -437,8 +404,6 @@ class TestReaderAuthorityRule:
         assert statuses["Acme Corp"] == "sighting"
 
     def test_released_record_stale_stamped_rows_do_not_pin_pill(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -455,8 +420,6 @@ class TestReaderAuthorityRule:
         """MINOR-9 pin: vendor with a record + a MIX of stamped and unstamped rows is
         NOT unavailable — the legacy all-rows-flagged branch is restricted to vendors
         with NO record (deliberate strictening of the v1 OR-semantics)."""
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -470,8 +433,6 @@ class TestReaderAuthorityRule:
         assert statuses["Acme Corp"] == "sighting"
 
     def test_no_record_all_rows_flagged_legacy_unavailable(self, db_session):
-        from app.services.sighting_status import compute_vendor_statuses
-
         req = _make_requisition(db_session)
         r = _make_requirement(db_session, req)
         _make_summary(db_session, r.id, "Acme Corp")
@@ -486,8 +447,6 @@ class TestReaderAuthorityRule:
         """MINOR-8: a status computation against a missing requirement row warns
         instead of silently treating it as key-less."""
         from loguru import logger as loguru_logger
-
-        from app.services.sighting_status import compute_vendor_statuses
 
         req = _make_requisition(db_session)
         db_session.commit()

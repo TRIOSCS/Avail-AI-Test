@@ -3,6 +3,8 @@ matching."""
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from app.vendor_utils import (
     find_vendor_dedup_candidates,
     fuzzy_match_vendor,
@@ -19,78 +21,64 @@ class TestNormalizeVendorName:
         assert normalize_vendor_name("") == ""
         assert normalize_vendor_name("   ") == ""
 
-    def test_basic_lowercase(self):
-        assert normalize_vendor_name("Arrow Electronics") == "arrow electronics"
-
-    def test_strip_inc(self):
-        assert normalize_vendor_name("Mouser Electronics, Inc.") == "mouser electronics"
-
-    def test_strip_llc(self):
-        assert normalize_vendor_name("Acme Parts LLC") == "acme parts"
-
-    def test_strip_ltd(self):
-        assert normalize_vendor_name("RS Components Ltd.") == "rs components"
-
-    def test_strip_corp(self):
-        assert normalize_vendor_name("Digi-Key Corp.") == "digi-key"
-
-    def test_strip_gmbh(self):
-        assert normalize_vendor_name("Siemens GmbH") == "siemens"
-
-    def test_strip_company(self):
-        assert normalize_vendor_name("The Phoenix Company LLC") == "phoenix"
-
-    def test_strip_leading_the(self):
-        assert normalize_vendor_name("The Arrow Group") == "arrow group"
-
-    def test_strip_plc(self):
-        assert normalize_vendor_name("Texas Instruments PLC") == "texas instruments"
-
-    def test_strip_sa(self):
-        assert normalize_vendor_name("STMicroelectronics S.A.") == "stmicroelectronics"
-
-    def test_strip_bv(self):
-        assert normalize_vendor_name("NXP B.V.") == "nxp"
-
-    def test_strip_ag(self):
-        assert normalize_vendor_name("Infineon AG") == "infineon"
-
-    def test_strip_corporation(self):
-        assert normalize_vendor_name("Intel Corporation") == "intel"
-
-    def test_strip_incorporated(self):
-        assert normalize_vendor_name("Analog Devices Incorporated") == "analog devices"
-
-    def test_strip_limited(self):
-        assert normalize_vendor_name("Murata Limited") == "murata"
-
-    def test_multiple_suffixes(self):
-        # "Co. Ltd." → strips "Ltd." then trailing punct leaves "acme co"
-        # "co" alone is not a suffix (only "co." is), so it stays
-        assert normalize_vendor_name("Acme Co. Ltd.") == "acme co"
-
-    def test_trailing_comma(self):
-        assert normalize_vendor_name("Acme Electronics,") == "acme electronics"
-
-    def test_collapse_whitespace(self):
-        assert normalize_vendor_name("  Acme   Electronics  Inc.  ") == "acme electronics"
-
-    def test_no_false_strip_partial(self):
-        # Should NOT strip "co" from "Costco" — the suffix regex requires word boundary
-        result = normalize_vendor_name("Costco")
-        assert result == "costco"
-
-    def test_preserves_hyphens_in_name(self):
-        assert normalize_vendor_name("Digi-Key") == "digi-key"
-
-    def test_strip_sp_z_oo(self):
-        assert normalize_vendor_name("Farnell sp. z o.o.") == "farnell"
-
-    def test_strip_pty(self):
-        assert normalize_vendor_name("Element14 Pty") == "element14"
-
-    def test_strip_aps(self):
-        assert normalize_vendor_name("Nordic Semiconductor APS") == "nordic semiconductor"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("Arrow Electronics", "arrow electronics"),
+            ("Mouser Electronics, Inc.", "mouser electronics"),
+            ("Acme Parts LLC", "acme parts"),
+            ("RS Components Ltd.", "rs components"),
+            ("Digi-Key Corp.", "digi-key"),
+            ("Siemens GmbH", "siemens"),
+            ("The Phoenix Company LLC", "phoenix"),
+            ("The Arrow Group", "arrow group"),
+            ("Texas Instruments PLC", "texas instruments"),
+            ("STMicroelectronics S.A.", "stmicroelectronics"),
+            ("NXP B.V.", "nxp"),
+            ("Infineon AG", "infineon"),
+            ("Intel Corporation", "intel"),
+            ("Analog Devices Incorporated", "analog devices"),
+            ("Murata Limited", "murata"),
+            # "Co. Ltd." → strips "Ltd." then trailing punct leaves "acme co"
+            # "co" alone is not a suffix (only "co." is), so it stays
+            ("Acme Co. Ltd.", "acme co"),
+            ("Acme Electronics,", "acme electronics"),
+            ("  Acme   Electronics  Inc.  ", "acme electronics"),
+            # Should NOT strip "co" from "Costco" — the suffix regex requires word boundary
+            ("Costco", "costco"),
+            ("Digi-Key", "digi-key"),
+            ("Farnell sp. z o.o.", "farnell"),
+            ("Element14 Pty", "element14"),
+            ("Nordic Semiconductor APS", "nordic semiconductor"),
+        ],
+        ids=[
+            "basic_lowercase",
+            "strip_inc",
+            "strip_llc",
+            "strip_ltd",
+            "strip_corp",
+            "strip_gmbh",
+            "strip_company",
+            "strip_leading_the",
+            "strip_plc",
+            "strip_sa",
+            "strip_bv",
+            "strip_ag",
+            "strip_corporation",
+            "strip_incorporated",
+            "strip_limited",
+            "multiple_suffixes",
+            "trailing_comma",
+            "collapse_whitespace",
+            "no_false_strip_partial",
+            "preserves_hyphens_in_name",
+            "strip_sp_z_oo",
+            "strip_pty",
+            "strip_aps",
+        ],
+    )
+    def test_normalization(self, raw, expected):
+        assert normalize_vendor_name(raw) == expected
 
 
 # ── merge_emails_into_card ───────────────────────────────────────────

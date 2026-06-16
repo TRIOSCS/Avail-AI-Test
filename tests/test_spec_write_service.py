@@ -6,6 +6,7 @@ Depends on: conftest.py (db_session), faceted search models
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
@@ -49,12 +50,19 @@ def _make_schema(
     return schema
 
 
+@pytest.fixture
+def ddr_card(db_session: Session) -> MaterialCard:
+    """A default dram MaterialCard with the standard ddr_type enum schema (DDR3/4/5)."""
+    card = _make_card(db_session)
+    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    return card
+
+
 # --- Basic write ---
 
 
-def test_record_spec_creates_facet(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+def test_record_spec_creates_facet(db_session: Session, ddr_card: MaterialCard):
+    card = ddr_card
 
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.99)
 
@@ -64,9 +72,8 @@ def test_record_spec_creates_facet(db_session: Session):
     assert facet.category == "dram"
 
 
-def test_record_spec_writes_jsonb(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+def test_record_spec_writes_jsonb(db_session: Session, ddr_card: MaterialCard):
+    card = ddr_card
 
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.99)
 
@@ -109,9 +116,8 @@ def test_record_spec_numeric_normalized(db_session: Session):
 # --- Enum validation ---
 
 
-def test_record_spec_rejects_invalid_enum(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+def test_record_spec_rejects_invalid_enum(db_session: Session, ddr_card: MaterialCard):
+    card = ddr_card
 
     record_spec(db_session, card.id, "ddr_type", "DDR99", source="ai", confidence=0.5)
 
@@ -131,62 +137,74 @@ def test_record_spec_no_schema_skips(db_session: Session):
     assert count == 0
 
 
-# --- Conflict: higher tier overwrites lower tier (ladder) ---
-
-
-def test_conflict_higher_tier_overwrites_lower(db_session: Session):
-    # spec_extraction (tier 60) → web_search (tier 70) wins by tier, regardless of confidence.
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.99)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="web_search", confidence=0.50)
+# --- Conflict arbitration: two sequential writes, the ladder picks the winner ---
+# Each case: (value, source, confidence) for write 1 then write 2 → the expected subset
+# of the surviving specs_structured["ddr_type"] entry (only the keys the case cares about).
+@pytest.mark.parametrize(
+    ("write1", "write2", "expected"),
+    [
+        pytest.param(
+            ("DDR3", "spec_extraction", 0.99),
+            ("DDR4", "web_search", 0.50),
+            {"value": "DDR4", "source": "web_search", "tier": 70},
+            id="higher_tier_overwrites_lower",
+        ),
+        pytest.param(
+            ("DDR3", "spec_extraction", 0.85),
+            ("DDR4", "digikey_api", 0.95),
+            {"value": "DDR4", "source": "digikey_api", "tier": 90},
+            id="vendor_api_overwrites_lower_tier",
+        ),
+        pytest.param(
+            ("DDR4", "digikey_api", 0.95),
+            ("DDR3", "spec_extraction", 0.99),
+            {"value": "DDR4", "source": "digikey_api"},
+            id="lower_tier_cannot_overwrite_vendor_api",
+        ),
+        pytest.param(
+            ("DDR3", "digikey_api", 0.90),
+            ("DDR4", "nexar_api", 0.95),
+            {"value": "DDR4", "source": "nexar_api"},
+            id="equal_tier_higher_confidence_wins",
+        ),
+        pytest.param(
+            ("DDR3", "digikey_api", 0.95),
+            ("DDR4", "nexar_api", 0.88),
+            {"value": "DDR3", "source": "digikey_api"},
+            id="equal_tier_lower_confidence_loses",
+        ),
+        pytest.param(
+            ("DDR3", "digikey_api", 0.90),
+            ("DDR4", "digikey_api", 0.95),
+            {"value": "DDR4"},
+            id="same_source_updates_in_place",
+        ),
+        pytest.param(
+            ("DDR4", "digikey_api", 0.95),
+            ("DDR3", "digikey_api", 0.80),
+            {"value": "DDR4", "confidence": 0.95},
+            id="same_source_lower_confidence_rejected",
+        ),
+    ],
+)
+def test_conflict_ladder_arbitration(db_session: Session, ddr_card: MaterialCard, write1, write2, expected):
+    card = ddr_card
+    for value, source, confidence in (write1, write2):
+        record_spec(db_session, card.id, "ddr_type", value, source=source, confidence=confidence)
 
     db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    assert card.specs_structured["ddr_type"]["source"] == "web_search"
-    assert card.specs_structured["ddr_type"]["tier"] == 70
-
-
-# --- Conflict: vendor API overwrites lower tier ---
-
-
-def test_conflict_vendor_api_overwrites_lower_tier(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.85)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.95)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    assert card.specs_structured["ddr_type"]["source"] == "digikey_api"
-    assert card.specs_structured["ddr_type"]["tier"] == 90
-
-
-# --- Conflict: lower tier cannot overwrite higher tier, even at higher confidence ---
-
-
-def test_conflict_lower_tier_cannot_overwrite_vendor_api(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.95)
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.99)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    assert card.specs_structured["ddr_type"]["source"] == "digikey_api"
+    entry = card.specs_structured["ddr_type"]
+    for key, want in expected.items():
+        assert entry[key] == want
 
 
 # --- Headline regression: decode (85) beats higher-confidence extraction (60) ---
 
 
-def test_decode_then_extraction_rejected(db_session: Session):
+def test_decode_then_extraction_rejected(db_session: Session, ddr_card: MaterialCard):
     # decode writes tier 85; spec_extraction (tier 60) must NOT overwrite it even though
     # it runs LATER. The JSONB + facet keep the decode value/tier (kills the ordering band-aid).
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
 
     assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95) is True
     assert record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.85) is False
@@ -200,10 +218,9 @@ def test_decode_then_extraction_rejected(db_session: Session):
     assert facet.tier == 85
 
 
-def test_extraction_then_decode_upgrades(db_session: Session):
+def test_extraction_then_decode_upgrades(db_session: Session, ddr_card: MaterialCard):
     # Reverse order: extraction first, then decode → decode wins. Proves order-independence.
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
 
     assert record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.85) is True
     assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95) is True
@@ -220,9 +237,8 @@ def test_extraction_then_decode_upgrades(db_session: Session):
 # --- Legacy entry missing "tier" key is backfilled from its source before compare ---
 
 
-def test_legacy_entry_without_tier_backfilled(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+def test_legacy_entry_without_tier_backfilled(db_session: Session, ddr_card: MaterialCard):
+    card = ddr_card
 
     # Simulate a legacy JSONB entry written before the ladder (no "tier" key), source=spec_extraction.
     card.specs_structured = {
@@ -245,9 +261,8 @@ def test_legacy_entry_without_tier_backfilled(db_session: Session):
 # --- Facet provenance: untouched after a losing write ---
 
 
-def test_facet_untouched_after_losing_write(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+def test_facet_untouched_after_losing_write(db_session: Session, ddr_card: MaterialCard):
+    card = ddr_card
 
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95)
     record_spec(db_session, card.id, "ddr_type", "DDR3", source="spec_extraction", confidence=0.85)
@@ -257,47 +272,6 @@ def test_facet_untouched_after_losing_write(db_session: Session):
     assert facet.source == "mpn_decode"
     assert facet.confidence == 0.95
     assert facet.tier == 85
-
-
-# --- Conflict: vendor API overwrites vendor API (equal tier → higher confidence) ---
-
-
-def test_conflict_equal_tier_higher_confidence_wins(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.90)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="nexar_api", confidence=0.95)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    assert card.specs_structured["ddr_type"]["source"] == "nexar_api"
-
-
-def test_conflict_equal_tier_lower_confidence_loses(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.95)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="nexar_api", confidence=0.88)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR3"
-    assert card.specs_structured["ddr_type"]["source"] == "digikey_api"
-
-
-# --- Upsert: same source updates in place ---
-
-
-def test_same_source_updates_in_place(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.90)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.95)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
 
 
 # --- Boolean type ---
@@ -337,10 +311,9 @@ def test_record_spec_uses_schema_cache(db_session: Session):
     assert card.specs_structured["ddr_type"]["value"] == "DDR4"
 
 
-def test_record_spec_schema_cache_miss_skips(db_session: Session):
+def test_record_spec_schema_cache_miss_skips(db_session: Session, ddr_card: MaterialCard):
     """When schema_cache is provided but key is missing, record_spec skips."""
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
 
     # Empty cache — schema exists in DB but won't be queried
     cache: dict = {}
@@ -372,22 +345,6 @@ def test_load_schema_cache(db_session: Session):
     assert ("dram", "ecc") in cache
     assert ("capacitors", "capacitance") not in cache
     assert len(cache) == 2
-
-
-# --- Same-source lower confidence is rejected ---
-
-
-def test_same_source_lower_confidence_rejected(db_session: Session):
-    """Same source with lower confidence should NOT overwrite existing value."""
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.95)
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.80)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-    assert card.specs_structured["ddr_type"]["confidence"] == 0.95
 
 
 # --- Non-existent card_id ---
@@ -436,12 +393,11 @@ def test_record_spec_card_no_category_skips(db_session: Session):
 # --- Losing writes never mutate the existing (ORM-aliased) JSONB entry ---
 
 
-def test_losing_write_never_mutates_existing_jsonb_entry(db_session: Session):
+def test_losing_write_never_mutates_existing_jsonb_entry(db_session: Session, ddr_card: MaterialCard):
     # The legacy-tier backfill for the ladder comparison happens on a COPY: a losing
     # write must leave the in-memory specs_structured byte-identical to the DB (no
     # hidden "tier" key materializing through the shallow-copy alias).
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
     legacy = {
         "value": "DDR4",
         "source": "mpn_decode",
@@ -459,11 +415,10 @@ def test_losing_write_never_mutates_existing_jsonb_entry(db_session: Session):
 # --- spec_would_write: the read-only dry-run twin ---
 
 
-def test_spec_would_write_mirrors_record_spec_gates(db_session: Session):
+def test_spec_would_write_mirrors_record_spec_gates(db_session: Session, ddr_card: MaterialCard):
     from app.services.spec_write_service import spec_would_write
 
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=0.95)
     existing = card.specs_structured
 
@@ -535,11 +490,10 @@ def test_spec_would_write_mirrors_record_spec_gates(db_session: Session):
     assert card.specs_structured["ddr_type"]["value"] == "DDR4"
 
 
-def test_record_spec_clamps_out_of_range_confidence(db_session: Session):
+def test_record_spec_clamps_out_of_range_confidence(db_session: Session, ddr_card: MaterialCard):
     # A percent-style confidence (95) must never be persisted: it would dominate every
     # same-tier comparison forever. Clamped to 1.0 at the boundary.
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+    card = ddr_card
     assert record_spec(db_session, card.id, "ddr_type", "DDR4", source="mpn_decode", confidence=95) is True
     assert card.specs_structured["ddr_type"]["confidence"] == 1.0
     facet = db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="ddr_type").first()

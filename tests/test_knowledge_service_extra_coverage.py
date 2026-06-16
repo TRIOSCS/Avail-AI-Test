@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Company, Offer, Requirement, Requisition, User, VendorCard
 from app.services import knowledge_service
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 
 def _make_create_entry_with_user(user_id_override):
@@ -40,6 +41,21 @@ def _make_create_entry_with_user(user_id_override):
         return original(db, user_id=actual_id, **kwargs)
 
     return wrapped
+
+
+async def _raise_claude_error(*a, **kw):
+    """Stand-in for claude_structured that raises a (non-unavailable) ClaudeError."""
+    raise ClaudeError("Rate limited")
+
+
+async def _raise_claude_unavailable(*a, **kw):
+    """Stand-in for claude_structured that raises ClaudeUnavailableError."""
+    raise ClaudeUnavailableError("Not configured")
+
+
+async def _return_none(*a, **kw):
+    """Stand-in for claude_structured that returns no result."""
+    return None
 
 
 @pytest.fixture()
@@ -77,50 +93,57 @@ def requirement_for_req(db_session: Session, requisition: Requisition) -> Requir
 
 
 class TestCaptureQuoteFactAlternateFields:
-    def test_uses_sell_price_field(self, db_session: Session, test_user: User, requisition: Requisition):
-        """capture_quote_fact falls back to sell_price when unit_sell missing."""
+    @pytest.mark.parametrize(
+        ("quote_number", "line_items", "expected_substrings"),
+        [
+            pytest.param(
+                "Q-ALT-001",
+                [{"mpn": "STM32F4", "sell_price": 2.50, "quantity": 200}],
+                ["STM32F4", "Q-ALT-001"],
+                id="sell_price_field",
+            ),
+            pytest.param(
+                "Q-PN-001",
+                [{"part_number": "BC547", "unit_sell": 0.05, "qty": 500}],
+                ["BC547"],
+                id="part_number_field",
+            ),
+            pytest.param(
+                "Q-MULTI",
+                [
+                    {"mpn": "LM317T", "unit_sell": 1.50, "qty": 100},
+                    {"mpn": "BC547", "unit_sell": 0.05, "qty": 500},
+                ],
+                ["LM317T", "BC547"],
+                id="multiple_line_items",
+            ),
+            pytest.param(
+                "Q-NOQTY",
+                [{"mpn": "NE555", "unit_sell": 0.25}],
+                ["NE555"],
+                id="item_without_qty",
+            ),
+        ],
+    )
+    def test_alternate_fields_captured(
+        self,
+        db_session: Session,
+        test_user: User,
+        requisition: Requisition,
+        quote_number,
+        line_items,
+        expected_substrings,
+    ):
+        """capture_quote_fact captures alternate field names / shapes into entry
+        content."""
         mock_quote = MagicMock()
-        mock_quote.quote_number = "Q-ALT-001"
+        mock_quote.quote_number = quote_number
         mock_quote.requisition_id = requisition.id
-        mock_quote.line_items = [{"mpn": "STM32F4", "sell_price": 2.50, "quantity": 200}]
+        mock_quote.line_items = line_items
         entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
         assert entry is not None
-        assert "STM32F4" in entry.content
-        assert "Q-ALT-001" in entry.content
-
-    def test_uses_part_number_field(self, db_session: Session, test_user: User, requisition: Requisition):
-        """capture_quote_fact uses part_number when mpn missing."""
-        mock_quote = MagicMock()
-        mock_quote.quote_number = "Q-PN-001"
-        mock_quote.requisition_id = requisition.id
-        mock_quote.line_items = [{"part_number": "BC547", "unit_sell": 0.05, "qty": 500}]
-        entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
-        assert entry is not None
-        assert "BC547" in entry.content
-
-    def test_multiple_line_items(self, db_session: Session, test_user: User, requisition: Requisition):
-        """Multiple line items all appear in the content."""
-        mock_quote = MagicMock()
-        mock_quote.quote_number = "Q-MULTI"
-        mock_quote.requisition_id = requisition.id
-        mock_quote.line_items = [
-            {"mpn": "LM317T", "unit_sell": 1.50, "qty": 100},
-            {"mpn": "BC547", "unit_sell": 0.05, "qty": 500},
-        ]
-        entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
-        assert entry is not None
-        assert "LM317T" in entry.content
-        assert "BC547" in entry.content
-
-    def test_item_without_qty_still_captured(self, db_session: Session, test_user: User, requisition: Requisition):
-        """Line item with price but no qty is still captured."""
-        mock_quote = MagicMock()
-        mock_quote.quote_number = "Q-NOQTY"
-        mock_quote.requisition_id = requisition.id
-        mock_quote.line_items = [{"mpn": "NE555", "unit_sell": 0.25}]
-        entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
-        assert entry is not None
-        assert "NE555" in entry.content
+        for substring in expected_substrings:
+            assert substring in entry.content
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -611,8 +634,6 @@ class TestBuildCompanyContextExtended:
 class TestGenerateInsightsClaudeError:
     async def test_claude_error_returns_empty(self, db_session: Session, test_user: User, requisition: Requisition):
         """ClaudeError (non-unavailable) returns empty list."""
-        from app.utils.claude_errors import ClaudeError
-
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -623,19 +644,23 @@ class TestGenerateInsightsClaudeError:
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        async def _raise(*a, **kw):
-            raise ClaudeError("Rate limited")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
+        with patch("app.utils.claude_client.claude_structured", new=_raise_claude_error):
             result = await knowledge_service.generate_insights(db_session, requisition.id)
         assert result == []
 
 
 class TestGenerateMpnInsightsClaudeError:
-    async def test_claude_error_returns_empty(self, db_session: Session, test_user: User):
-        """ClaudeError in generate_mpn_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeError
-
+    @pytest.mark.parametrize(
+        "claude_stub",
+        [
+            pytest.param(_raise_claude_error, id="claude_error"),
+            pytest.param(_raise_claude_unavailable, id="claude_unavailable"),
+            pytest.param(_return_none, id="no_result"),
+        ],
+    )
+    async def test_failure_returns_empty(self, db_session: Session, test_user: User, claude_stub):
+        """ClaudeError, ClaudeUnavailableError, and None result all return empty
+        list."""
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -646,50 +671,7 @@ class TestGenerateMpnInsightsClaudeError:
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        async def _raise(*a, **kw):
-            raise ClaudeError("Rate limited")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
-        assert result == []
-
-    async def test_claude_unavailable_returns_empty(self, db_session: Session, test_user: User):
-        """ClaudeUnavailableError in generate_mpn_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeUnavailableError
-
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T data",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _raise(*a, **kw):
-            raise ClaudeUnavailableError("Not configured")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
-        assert result == []
-
-    async def test_no_result_returns_empty(self, db_session: Session, test_user: User):
-        """None result from Claude returns empty list."""
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="fact",
-            content="LM317T data",
-            mpn="LM317T",
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _mock(*a, **kw):
-            return None
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
+        with patch("app.utils.claude_client.claude_structured", new=claude_stub):
             result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
         assert result == []
 
@@ -730,33 +712,19 @@ class TestGenerateMpnInsightsClaudeError:
 
 
 class TestGenerateVendorInsightsClaudeError:
-    async def test_claude_error_returns_empty(self, db_session: Session, test_user: User, test_vendor_card: VendorCard):
-        """ClaudeError in generate_vendor_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeError
-
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="note",
-            content="Arrow note",
-            vendor_card_id=test_vendor_card.id,
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _raise(*a, **kw):
-            raise ClaudeError("Rate limited")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_vendor_insights(db_session, test_vendor_card.id)
-        assert result == []
-
-    async def test_claude_unavailable_returns_empty(
-        self, db_session: Session, test_user: User, test_vendor_card: VendorCard
+    @pytest.mark.parametrize(
+        "claude_stub",
+        [
+            pytest.param(_raise_claude_error, id="claude_error"),
+            pytest.param(_raise_claude_unavailable, id="claude_unavailable"),
+            pytest.param(_return_none, id="no_result"),
+        ],
+    )
+    async def test_failure_returns_empty(
+        self, db_session: Session, test_user: User, test_vendor_card: VendorCard, claude_stub
     ):
-        """ClaudeUnavailableError in generate_vendor_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeUnavailableError
-
+        """ClaudeError, ClaudeUnavailableError, and None result all return empty
+        list."""
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -767,29 +735,7 @@ class TestGenerateVendorInsightsClaudeError:
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        async def _raise(*a, **kw):
-            raise ClaudeUnavailableError("Not configured")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_vendor_insights(db_session, test_vendor_card.id)
-        assert result == []
-
-    async def test_no_result_returns_empty(self, db_session: Session, test_user: User, test_vendor_card: VendorCard):
-        """None result from Claude in vendor insights returns empty list."""
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="note",
-            content="Arrow note",
-            vendor_card_id=test_vendor_card.id,
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _mock(*a, **kw):
-            return None
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
+        with patch("app.utils.claude_client.claude_structured", new=claude_stub):
             result = await knowledge_service.generate_vendor_insights(db_session, test_vendor_card.id)
         assert result == []
 
@@ -832,12 +778,19 @@ class TestGenerateVendorInsightsClaudeError:
 
 
 class TestGeneratePipelineInsightsClaudeError:
-    async def test_claude_error_returns_empty(self, db_session: Session, test_user: User):
-        """ClaudeError in generate_pipeline_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeError
-
+    @pytest.mark.parametrize(
+        ("req_name", "claude_stub"),
+        [
+            pytest.param("PIPE-ERR-REQ", _raise_claude_error, id="claude_error"),
+            pytest.param("PIPE-UNAVAIL-REQ", _raise_claude_unavailable, id="claude_unavailable"),
+            pytest.param("PIPE-NONE-REQ", _return_none, id="no_result"),
+        ],
+    )
+    async def test_failure_returns_empty(self, db_session: Session, test_user: User, req_name, claude_stub):
+        """ClaudeError, ClaudeUnavailableError, and None result all return empty
+        list."""
         req = Requisition(
-            name="PIPE-ERR-REQ",
+            name=req_name,
             customer_name="Test",
             status="active",
             created_by=test_user.id,
@@ -846,50 +799,7 @@ class TestGeneratePipelineInsightsClaudeError:
         db_session.add(req)
         db_session.commit()
 
-        async def _raise(*a, **kw):
-            raise ClaudeError("Rate limited")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_pipeline_insights(db_session)
-        assert result == []
-
-    async def test_claude_unavailable_returns_empty(self, db_session: Session, test_user: User):
-        """ClaudeUnavailableError in generate_pipeline_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeUnavailableError
-
-        req = Requisition(
-            name="PIPE-UNAVAIL-REQ",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        async def _raise(*a, **kw):
-            raise ClaudeUnavailableError("Not configured")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_pipeline_insights(db_session)
-        assert result == []
-
-    async def test_no_result_returns_empty(self, db_session: Session, test_user: User):
-        """None Claude result in pipeline insights returns empty list."""
-        req = Requisition(
-            name="PIPE-NONE-REQ",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.commit()
-
-        async def _mock(*a, **kw):
-            return None
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
+        with patch("app.utils.claude_client.claude_structured", new=claude_stub):
             result = await knowledge_service.generate_pipeline_insights(db_session)
         assert result == []
 
@@ -930,10 +840,19 @@ class TestGeneratePipelineInsightsClaudeError:
 
 
 class TestGenerateCompanyInsightsClaudeError:
-    async def test_claude_error_returns_empty(self, db_session: Session, test_user: User, test_company: Company):
-        """ClaudeError in generate_company_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeError
-
+    @pytest.mark.parametrize(
+        "claude_stub",
+        [
+            pytest.param(_raise_claude_error, id="claude_error"),
+            pytest.param(_raise_claude_unavailable, id="claude_unavailable"),
+            pytest.param(_return_none, id="no_result"),
+        ],
+    )
+    async def test_failure_returns_empty(
+        self, db_session: Session, test_user: User, test_company: Company, claude_stub
+    ):
+        """ClaudeError, ClaudeUnavailableError, and None result all return empty
+        list."""
         entry = knowledge_service.create_entry(
             db_session,
             user_id=test_user.id,
@@ -944,50 +863,7 @@ class TestGenerateCompanyInsightsClaudeError:
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        async def _raise(*a, **kw):
-            raise ClaudeError("Rate limited")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_company_insights(db_session, test_company.id)
-        assert result == []
-
-    async def test_claude_unavailable_returns_empty(self, db_session: Session, test_user: User, test_company: Company):
-        """ClaudeUnavailableError in generate_company_insights returns empty list."""
-        from app.utils.claude_errors import ClaudeUnavailableError
-
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="note",
-            content="Acme note",
-            company_id=test_company.id,
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _raise(*a, **kw):
-            raise ClaudeUnavailableError("Not configured")
-
-        with patch("app.utils.claude_client.claude_structured", new=_raise):
-            result = await knowledge_service.generate_company_insights(db_session, test_company.id)
-        assert result == []
-
-    async def test_no_result_returns_empty(self, db_session: Session, test_user: User, test_company: Company):
-        """None Claude result in company insights returns empty list."""
-        entry = knowledge_service.create_entry(
-            db_session,
-            user_id=test_user.id,
-            entry_type="note",
-            content="Acme note",
-            company_id=test_company.id,
-        )
-        entry.created_at = datetime.now(timezone.utc)
-        db_session.commit()
-
-        async def _mock(*a, **kw):
-            return None
-
-        with patch("app.utils.claude_client.claude_structured", new=_mock):
+        with patch("app.utils.claude_client.claude_structured", new=claude_stub):
             result = await knowledge_service.generate_company_insights(db_session, test_company.id)
         assert result == []
 

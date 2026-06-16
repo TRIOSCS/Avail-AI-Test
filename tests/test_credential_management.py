@@ -159,19 +159,17 @@ def test_set_ignores_unknown_vars(admin_client, test_source):
 # ── Access Control Tests ─────────────────────────────────────────────
 
 
-def test_buyer_cannot_access_credentials(client, db_session):
-    """Non-admin (buyer) should be denied."""
+@pytest.mark.parametrize(
+    ("method", "kwargs"),
+    [
+        pytest.param("get", {}, id="cannot_access"),
+        pytest.param("put", {"json": {"TEST_API_KEY": "sneaky"}}, id="cannot_set"),
+    ],
+)
+def test_buyer_denied_credentials(client, db_session, method, kwargs):
+    """Non-admin (buyer) should be denied both reading and writing credentials."""
     src = _seed_source(db_session)
-    resp = client.get(f"/api/admin/sources/{src.id}/credentials")
-    assert resp.status_code in (401, 403)
-
-
-def test_buyer_cannot_set_credentials(client, db_session):
-    src = _seed_source(db_session)
-    resp = client.put(
-        f"/api/admin/sources/{src.id}/credentials",
-        json={"TEST_API_KEY": "sneaky"},
-    )
+    resp = getattr(client, method)(f"/api/admin/sources/{src.id}/credentials", **kwargs)
     assert resp.status_code in (401, 403)
 
 

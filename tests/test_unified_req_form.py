@@ -7,17 +7,19 @@ Called by: pytest
 Depends on: tests/conftest.py (client, db_session, test_user fixtures)
 """
 
-
-def test_unified_modal_renders(client, db_session, test_user):
-    """GET import-form returns the unified modal."""
-    resp = client.get("/v2/partials/requisitions/import-form")
-    assert resp.status_code == 200
-    assert "unifiedReqModal" in resp.text
+import pytest
 
 
-def test_unified_modal_from_create_form(client, db_session, test_user):
-    """GET create-form also returns the unified modal."""
-    resp = client.get("/v2/partials/requisitions/create-form")
+@pytest.mark.parametrize(
+    "endpoint",
+    [
+        pytest.param("/v2/partials/requisitions/import-form", id="import-form"),
+        pytest.param("/v2/partials/requisitions/create-form", id="create-form"),
+    ],
+)
+def test_unified_modal_renders(client, db_session, test_user, endpoint):
+    """GET import-form and create-form both return the unified modal."""
+    resp = client.get(endpoint)
     assert resp.status_code == 200
     assert "unifiedReqModal" in resp.text
 

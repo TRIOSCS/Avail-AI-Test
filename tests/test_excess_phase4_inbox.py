@@ -20,17 +20,21 @@ _EXCESS_BID_RE = re.compile(r"\[EXCESS-BID-(\d+)\]")
 
 
 class TestExcessBidRegex:
-    def test_matches_valid_tag(self):
-        match = _EXCESS_BID_RE.search("Re: Bid Request: LM358N x 5000 [EXCESS-BID-42]")
-        assert match is not None
-        assert match.group(1) == "42"
-
-    def test_no_match_without_tag(self):
-        assert _EXCESS_BID_RE.search("Regular email subject") is None
-
-    def test_extracts_from_reply_chain(self):
-        match = _EXCESS_BID_RE.search("RE: RE: Bid Request [EXCESS-BID-999]")
-        assert match.group(1) == "999"
+    @pytest.mark.parametrize(
+        ("subject", "expected_id"),
+        [
+            pytest.param("Re: Bid Request: LM358N x 5000 [EXCESS-BID-42]", "42", id="valid_tag"),
+            pytest.param("Regular email subject", None, id="no_tag"),
+            pytest.param("RE: RE: Bid Request [EXCESS-BID-999]", "999", id="reply_chain"),
+        ],
+    )
+    def test_extracts_bid_id(self, subject, expected_id):
+        match = _EXCESS_BID_RE.search(subject)
+        if expected_id is None:
+            assert match is None
+        else:
+            assert match is not None
+            assert match.group(1) == expected_id
 
 
 class TestScanExcessBidResponses:

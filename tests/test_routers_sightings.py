@@ -16,6 +16,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -122,27 +123,21 @@ class TestSightingsRenderedReqIdHeader:
 
 
 class TestSightingsRefreshSourceValidation:
-    """Source=Literal[user|sse] — FastAPI rejects unknown values with 422."""
+    """Source=Literal[user|sse] — FastAPI rejects unknown values with 422.
 
-    def test_sightings_refresh_unknown_source_rejected_with_422(self, client: TestClient, req_with_item: tuple):
-        """?source=foo → 422.
+    foo: arbitrary typo used to fall into the user-path branch, silently
+    re-enabling the toast + broker.publish loop.
+    SSE: Literal is case-sensitive, so the uppercase variant is also rejected.
+    """
 
-        Closes the silent re-enable of toast + broker.publish loop on typos like
-        ?source=SSE (any value other than user/sse used to fall into the user-path
-        branch).
-        """
+    @pytest.mark.parametrize("source", ["foo", "SSE"])
+    def test_sightings_refresh_unknown_source_rejected_with_422(
+        self, client: TestClient, req_with_item: tuple, source: str
+    ):
+        """?source=<unknown> → 422."""
         _, item = req_with_item
         resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh?source=foo",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 422
-
-    def test_sightings_refresh_uppercase_sse_rejected_with_422(self, client: TestClient, req_with_item: tuple):
-        """?source=SSE → 422 (Literal is case-sensitive)."""
-        _, item = req_with_item
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh?source=SSE",
+            f"/v2/partials/sightings/{item.id}/refresh?source={source}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 422
@@ -156,8 +151,6 @@ class TestSightingsRefreshFailureToast:
 
         Background-fired SSE refreshes must not surface user-targeted warning toasts.
         """
-        from unittest.mock import AsyncMock
-
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
@@ -173,8 +166,6 @@ class TestSightingsRefreshFailureToast:
     def test_sightings_refresh_user_emits_failure_toast(self, client: TestClient, req_with_item: tuple):
         """search_requirement raises + no source param → 200, HX-Trigger contains
         'Search refresh failed'."""
-        from unittest.mock import AsyncMock
-
         _, item = req_with_item
         boom = AsyncMock(side_effect=RuntimeError("connector down"))
         with patch("app.search_service.search_requirement", new=boom):
@@ -202,8 +193,6 @@ class TestSightingsClickPendingCounter:
 
     def test_no_click_in_flight_field_in_htmx_app_js(self):
         """htmx_app.js must not reintroduce the clickInFlight boolean."""
-        from pathlib import Path
-
         js = Path("app/static/htmx_app.js").read_text()
         assert "clickInFlight" not in js, (
             "clickInFlight reintroduced in htmx_app.js — multi-click race regression. Use clickPending counter instead."
@@ -211,8 +200,6 @@ class TestSightingsClickPendingCounter:
 
     def test_no_click_in_flight_field_in_sightings_list_template(self):
         """sightings/list.html must not reintroduce the clickInFlight boolean."""
-        from pathlib import Path
-
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
         assert "clickInFlight" not in html, (
             "clickInFlight reintroduced in sightings/list.html — multi-click race regression. "
@@ -222,8 +209,6 @@ class TestSightingsClickPendingCounter:
     def test_click_pending_counter_present_in_htmx_app_js(self):
         """htmx_app.js exposes the clickPending counter on the sightingSelection
         store."""
-        from pathlib import Path
-
         js = Path("app/static/htmx_app.js").read_text()
         assert "clickPending: 0" in js, "clickPending counter missing from sightingSelection store"
         # Decrement uses Math.max clamp to guard against double-decrement.
@@ -235,8 +220,6 @@ class TestSightingsClickPendingCounter:
         SSE handler still consults it to suppress background refreshes while a user
         click is in flight.
         """
-        from pathlib import Path
-
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
         assert "store.clickPending += 1" in html, (
             "selectReq() must increment clickPending by 1 (one GET /detail; row click is read-only)"
@@ -300,8 +283,6 @@ class TestSightingsListTemplateSelectReqShape:
 
     def test_selectreq_fires_detail_get(self):
         """SelectReq must call htmx.ajax GET /detail."""
-        from pathlib import Path
-
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
         assert "htmx.ajax('GET', '/v2/partials/sightings/' + id + '/detail'" in html, (
             "selectReq must fire GET /detail for fast cached paint"
@@ -313,8 +294,6 @@ class TestSightingsListTemplateSelectReqShape:
         The detail panel's m.search_button and the per-row refresh icon are the only
         places that POST /refresh — selectReq must not.
         """
-        from pathlib import Path
-
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
         # Scope the check to the selectReq function body via a static slice.
         select_req_start = html.index("selectReq(id) {")
@@ -518,8 +497,6 @@ class TestPerRowSearchIconAlwaysVisible:
     """
 
     def test_row_refresh_icon_has_no_stale_only_conditional(self):
-        from pathlib import Path
-
         path = Path(__file__).parent.parent / "app" / "templates" / "htmx" / "partials" / "sightings" / "table.html"
         text = path.read_text()
         # The icon block must NOT be wrapped in a {% if ... is_stale %} or

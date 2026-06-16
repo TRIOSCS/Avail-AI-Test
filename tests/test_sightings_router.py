@@ -9,6 +9,8 @@ import re
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
 
+import pytest
+
 from app.constants import ActivityType, UnavailabilityReason
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
@@ -3858,27 +3860,23 @@ class TestMPNClickableLinks:
 class TestRequisitionStatusFilter:
     """Sightings list excludes requirements from archived/cancelled requisitions."""
 
-    def test_archived_requisition_excluded(self, client, db_session):
-        req = Requisition(name="Archived RFQ", status="archived", customer_name="Acme")
+    @pytest.mark.parametrize(
+        ("status", "mpn"),
+        [
+            ("archived", "ARCHIVED-MPN"),
+            ("cancelled", "CANCELLED-MPN"),
+        ],
+    )
+    def test_inactive_requisition_excluded(self, client, db_session, status, mpn):
+        req = Requisition(name=f"{status} RFQ", status=status, customer_name="Acme")
         db_session.add(req)
         db_session.flush()
-        r = Requirement(requisition_id=req.id, primary_mpn="ARCHIVED-MPN", target_qty=10, sourcing_status="open")
+        r = Requirement(requisition_id=req.id, primary_mpn=mpn, target_qty=10, sourcing_status="open")
         db_session.add(r)
         db_session.commit()
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        assert "ARCHIVED-MPN" not in resp.text
-
-    def test_cancelled_requisition_excluded(self, client, db_session):
-        req = Requisition(name="Cancelled RFQ", status="cancelled", customer_name="Acme")
-        db_session.add(req)
-        db_session.flush()
-        r = Requirement(requisition_id=req.id, primary_mpn="CANCELLED-MPN", target_qty=10, sourcing_status="open")
-        db_session.add(r)
-        db_session.commit()
-        resp = client.get("/v2/partials/sightings")
-        assert resp.status_code == 200
-        assert "CANCELLED-MPN" not in resp.text
+        assert mpn not in resp.text
 
     def test_non_active_requisition_included(self, client, db_session):
         """WON/SOURCING/QUOTED requisitions should appear in sightings."""

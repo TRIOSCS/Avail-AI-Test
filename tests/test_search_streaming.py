@@ -13,6 +13,34 @@ from app.connectors.mouser import MouserConnector
 from app.connectors.sources import NexarConnector
 
 
+def _render_template(name, **context):
+    """Render a Jinja2 template from app/templates with the given context."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    return env.get_template(name).render(**context)
+
+
+def _render_vendor_card(card, card_index, search_id):
+    """Render the vendor_card.html partial for a single card."""
+    return _render_template(
+        "htmx/partials/search/vendor_card.html",
+        card=card,
+        card_index=card_index,
+        search_id=search_id,
+    )
+
+
+def _make_event_collector():
+    """Return (events_list, async_publish) for capturing broker.publish calls."""
+    published_events = []
+
+    async def mock_publish(channel, event, data=""):
+        published_events.append({"channel": channel, "event": event, "data": data})
+
+    return published_events, mock_publish
+
+
 def test_base_connector_has_source_name():
     """Each connector exposes a source_name property matching its source_type."""
     nexar = NexarConnector.__new__(NexarConnector)
@@ -213,10 +241,7 @@ async def test_stream_search_publishes_events(db_session):
     broker."""
     from app.search_service import stream_search_mpn
 
-    published_events = []
-
-    async def mock_publish(channel, event, data=""):
-        published_events.append({"channel": channel, "event": event, "data": data})
+    published_events, mock_publish = _make_event_collector()
 
     # Mock broker and connectors. The worker now opens its own SessionLocal(),
     # so we patch it to return the test's db_session (which is bound to the
@@ -289,11 +314,7 @@ def test_search_run_returns_shell_html(client, db_session):
 
 def test_vendor_card_template_renders():
     """vendor_card.html renders without errors with sample data."""
-    from jinja2 import Environment, FileSystemLoader
-
-    env = Environment(loader=FileSystemLoader("app/templates"))
-    tpl = env.get_template("htmx/partials/search/vendor_card.html")
-    html = tpl.render(
+    html = _render_vendor_card(
         card={
             "vendor_name": "Arrow Electronics",
             "mpn_matched": "LM317T",
@@ -356,11 +377,7 @@ def test_render_search_vendor_cards_html_for_streaming():
 
 def test_vendor_card_template_renders_no_price():
     """vendor_card.html renders gracefully when unit_price is None."""
-    from jinja2 import Environment, FileSystemLoader
-
-    env = Environment(loader=FileSystemLoader("app/templates"))
-    tpl = env.get_template("htmx/partials/search/vendor_card.html")
-    html = tpl.render(
+    html = _render_vendor_card(
         card={
             "vendor_name": "Unknown Vendor",
             "mpn_matched": "ABC123",
@@ -389,11 +406,7 @@ def test_vendor_card_template_renders_no_price():
 
 def test_vendor_card_template_renders_sub_offers():
     """vendor_card.html renders expandable sub-offers table."""
-    from jinja2 import Environment, FileSystemLoader
-
-    env = Environment(loader=FileSystemLoader("app/templates"))
-    tpl = env.get_template("htmx/partials/search/vendor_card.html")
-    html = tpl.render(
+    html = _render_vendor_card(
         card={
             "vendor_name": "Mouser",
             "mpn_matched": "LM317T",
@@ -425,11 +438,7 @@ def test_vendor_card_template_renders_sub_offers():
 
 def test_shortlist_bar_template_renders():
     """shortlist_bar.html renders with Alpine.js directives."""
-    from jinja2 import Environment, FileSystemLoader
-
-    env = Environment(loader=FileSystemLoader("app/templates"))
-    tpl = env.get_template("htmx/partials/search/shortlist_bar.html")
-    html = tpl.render()
+    html = _render_template("htmx/partials/search/shortlist_bar.html")
     assert "$store.shortlist" in html
     assert "Add to Requisition" in html
 
@@ -851,17 +860,12 @@ class TestStreamSearchMpnNonOkChips:
             },
         }
 
-        published_events = []
-
-        async def mock_publish(channel, event, data=""):
-            published_events.append({"channel": channel, "event": event, "data": data})
+        published_events, mock_publish = _make_event_collector()
 
         # Need at least one connector to keep the function from short-circuiting
         # — otherwise it emits 'done' and returns before reaching the
         # full event flow. But the non-ok publish loop runs BEFORE the
         # short-circuit, so this also tests the no-connector case.
-        from unittest.mock import AsyncMock, MagicMock
-
         fake_connector = MagicMock()
         fake_connector.source_name = "nexar"
         fake_connector.search = AsyncMock(return_value=[])
@@ -912,10 +916,7 @@ class TestStreamSearchMpnNonOkChips:
             },
         }
 
-        published_events = []
-
-        async def mock_publish(channel, event, data=""):
-            published_events.append({"channel": channel, "event": event, "data": data})
+        published_events, mock_publish = _make_event_collector()
 
         with (
             patch("app.search_service.broker", create=True) as mock_broker,
@@ -946,10 +947,7 @@ class TestStreamSearchMpnNonOkChips:
             "nexar": {"source": "nexar", "status": "ok", "results": 0, "ms": 0, "error": None},
         }
 
-        published_events = []
-
-        async def mock_publish(channel, event, data=""):
-            published_events.append({"channel": channel, "event": event, "data": data})
+        published_events, mock_publish = _make_event_collector()
 
         with (
             patch("app.search_service.broker", create=True) as mock_broker,

@@ -15,6 +15,35 @@ import pytest
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 from app.models.unified_score import UnifiedScoreSnapshot
 
+# ── Helpers ─────────────────────────────────────────────────────────
+
+
+def _snap_with_scores(value, attrs):
+    """MagicMock snapshot with every score attr set to a single value."""
+    snap = MagicMock()
+    for attr in attrs:
+        setattr(snap, attr, value)
+    return snap
+
+
+_BUYER_ATTRS = ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score")
+_SALES_ATTRS = ("b2_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score")
+
+
+def _blurb_results(user_id):
+    """Single-entry results payload passed to _refresh_blurbs."""
+    return [
+        {
+            "user_id": user_id,
+            "user_name": "Test Buyer",
+            "primary_role": "buyer",
+            "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
+            "score": 75.0,
+            "rank": 1,
+        }
+    ]
+
+
 # ── Category Math Tests ─────────────────────────────────────────────
 
 
@@ -22,28 +51,13 @@ class TestBuyerCategories:
     def test_perfect_scores(self):
         from app.services.unified_score_service import _buyer_categories
 
-        snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
-            setattr(snap, attr, 10.0)
-
-        cats = _buyer_categories(snap)
+        cats = _buyer_categories(_snap_with_scores(10.0, _BUYER_ATTRS))
         assert len(cats) == 4
         assert "prospecting" not in cats
         assert cats["execution"] == 100.0  # (10+10+10)/30 * 100
         assert cats["followthrough"] == 100.0  # (10+10)/20 * 100
         assert cats["closing"] == 100.0  # (10+10)/20 * 100
         assert cats["depth"] == 100.0  # 10/10 * 100
-
-    def test_zero_scores(self):
-        from app.services.unified_score_service import _buyer_categories
-
-        snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
-            setattr(snap, attr, 0)
-
-        cats = _buyer_categories(snap)
-        assert len(cats) == 4
-        assert all(v == 0.0 for v in cats.values())
 
     def test_partial_scores(self):
         from app.services.unified_score_service import _buyer_categories
@@ -65,14 +79,11 @@ class TestBuyerCategories:
         assert cats["closing"] == pytest.approx((2 + 8) / 20 * 100, abs=0.1)
         assert cats["depth"] == pytest.approx(6 / 10 * 100, abs=0.1)
 
-    def test_none_scores_treated_as_zero(self):
+    @pytest.mark.parametrize("value", [0, None], ids=["zero", "none"])
+    def test_zero_and_none_scores_are_zero(self, value):
         from app.services.unified_score_service import _buyer_categories
 
-        snap = MagicMock()
-        for attr in ("b1_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
-            setattr(snap, attr, None)
-
-        cats = _buyer_categories(snap)
+        cats = _buyer_categories(_snap_with_scores(value, _BUYER_ATTRS))
         assert len(cats) == 4
         assert all(v == 0.0 for v in cats.values())
 
@@ -81,11 +92,7 @@ class TestSalesCategories:
     def test_perfect_scores(self):
         from app.services.unified_score_service import _sales_categories
 
-        snap = MagicMock()
-        for attr in ("b2_score", "b3_score", "b4_score", "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
-            setattr(snap, attr, 10.0)
-
-        cats = _sales_categories(snap)
+        cats = _sales_categories(_snap_with_scores(10.0, _SALES_ATTRS))
         assert len(cats) == 4
         assert "prospecting" not in cats
         assert cats["execution"] == 100.0  # (10+10+10)/30
@@ -108,19 +115,19 @@ class TestTraderMerge:
         assert merged["closing"] == 70.0
         assert merged["depth"] == 50.0
 
-    def test_buyer_only(self):
+    @pytest.mark.parametrize(
+        ("buyer", "sales"),
+        [
+            ({"execution": 60, "followthrough": 40, "closing": 100, "depth": 20}, None),
+            (None, {"execution": 80, "followthrough": 60, "closing": 40, "depth": 80}),
+        ],
+        ids=["buyer_only", "sales_only"],
+    )
+    def test_single_role_passes_through(self, buyer, sales):
         from app.services.unified_score_service import _merge_trader_categories
 
-        buyer = {"execution": 60, "followthrough": 40, "closing": 100, "depth": 20}
-        merged = _merge_trader_categories(buyer, None)
-        assert merged == buyer
-
-    def test_sales_only(self):
-        from app.services.unified_score_service import _merge_trader_categories
-
-        sales = {"execution": 80, "followthrough": 60, "closing": 40, "depth": 80}
-        merged = _merge_trader_categories(None, sales)
-        assert merged == sales
+        merged = _merge_trader_categories(buyer, sales)
+        assert merged == (buyer if buyer is not None else sales)
 
     def test_neither_role(self):
         from app.services.unified_score_service import _merge_trader_categories
@@ -577,15 +584,15 @@ class TestUnifiedScoreSnapshotModel:
 class TestSafePctEdge:
     """Cover line 93: _safe_pct when max_raw <= 0."""
 
-    def test_max_raw_zero_returns_zero(self):
+    @pytest.mark.parametrize(
+        ("raw", "max_raw"),
+        [(10, 0), (5, -3)],
+        ids=["max_raw_zero", "max_raw_negative"],
+    )
+    def test_non_positive_max_raw_returns_zero(self, raw, max_raw):
         from app.services.unified_score_service import _safe_pct
 
-        assert _safe_pct(10, 0) == 0.0
-
-    def test_max_raw_negative_returns_zero(self):
-        from app.services.unified_score_service import _safe_pct
-
-        assert _safe_pct(5, -3) == 0.0
+        assert _safe_pct(raw, max_raw) == 0.0
 
 
 class TestMultiplierIndexPopulation:
@@ -678,16 +685,7 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [
-            {
-                "user_id": test_user.id,
-                "user_name": "Test Buyer",
-                "primary_role": "buyer",
-                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-                "score": 75.0,
-                "rank": 1,
-            }
-        ]
+        results = _blurb_results(test_user.id)
 
         blurb_return = {"strength": "Great execution!", "improvement": "Work on depth."}
         with patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return):
@@ -718,16 +716,7 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [
-            {
-                "user_id": test_user.id,
-                "user_name": "Test Buyer",
-                "primary_role": "buyer",
-                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-                "score": 75.0,
-                "rank": 1,
-            }
-        ]
+        results = _blurb_results(test_user.id)
 
         blurb_return = {"strength": "New strength!", "improvement": "New improvement!"}
         # Patch datetime.now in the service so cutoff is aware UTC
@@ -764,16 +753,7 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [
-            {
-                "user_id": test_user.id,
-                "user_name": "Test Buyer",
-                "primary_role": "buyer",
-                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-                "score": 75.0,
-                "rank": 1,
-            }
-        ]
+        results = _blurb_results(test_user.id)
 
         # Patch datetime.now in the service so cutoff is aware UTC
         fake_now = datetime.now(timezone.utc)
@@ -806,16 +786,7 @@ class TestRefreshBlurbs:
         db_session.add(snap)
         db_session.commit()
 
-        results = [
-            {
-                "user_id": test_user.id,
-                "user_name": "Test Buyer",
-                "primary_role": "buyer",
-                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-                "score": 75.0,
-                "rank": 1,
-            }
-        ]
+        results = _blurb_results(test_user.id)
 
         with patch(
             "app.services.unified_score_service._generate_blurb",
@@ -833,16 +804,7 @@ class TestRefreshBlurbs:
 
         month = date(2026, 2, 1)
         # No UnifiedScoreSnapshot created — result references non-existent snap
-        results = [
-            {
-                "user_id": test_user.id,
-                "user_name": "Test Buyer",
-                "primary_role": "buyer",
-                "cats": {"execution": 70, "followthrough": 80, "closing": 90, "depth": 60},
-                "score": 75.0,
-                "rank": 1,
-            }
-        ]
+        results = _blurb_results(test_user.id)
 
         with patch("app.services.unified_score_service._generate_blurb") as mock_gen:
             _refresh_blurbs(db_session, month, results)

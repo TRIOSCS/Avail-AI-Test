@@ -9,9 +9,11 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
             conftest fixtures (db_session, test_user, test_company, test_customer_site)
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -36,30 +38,22 @@ from app.services.eight_by_eight_service import (
 class TestPhoneNormalization:
     """Test normalize_phone() strips formatting correctly."""
 
-    def test_strips_dashes(self):
-        assert normalize_phone("555-123-4567") == "5551234567"
-
-    def test_strips_parens_and_spaces(self):
-        assert normalize_phone("(555) 123 4567") == "5551234567"
-
-    def test_strips_plus_one(self):
-        assert normalize_phone("+1-555-123-4567") == "5551234567"
-
-    def test_strips_plus_one_no_dashes(self):
-        assert normalize_phone("+15551234567") == "5551234567"
-
-    def test_already_clean(self):
-        assert normalize_phone("5551234567") == "5551234567"
-
-    def test_empty_string(self):
-        assert normalize_phone("") == ""
-
-    def test_dots_as_separators(self):
-        assert normalize_phone("555.123.4567") == "5551234567"
-
-    def test_international_non_us(self):
-        """Non-US numbers (not 11 digits starting with 1) are kept as-is."""
-        assert normalize_phone("+44-20-7946-0958") == "442079460958"
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            pytest.param("555-123-4567", "5551234567", id="strips_dashes"),
+            pytest.param("(555) 123 4567", "5551234567", id="strips_parens_and_spaces"),
+            pytest.param("+1-555-123-4567", "5551234567", id="strips_plus_one"),
+            pytest.param("+15551234567", "5551234567", id="strips_plus_one_no_dashes"),
+            pytest.param("5551234567", "5551234567", id="already_clean"),
+            pytest.param("", "", id="empty_string"),
+            pytest.param("555.123.4567", "5551234567", id="dots_as_separators"),
+            # Non-US numbers (not 11 digits starting with 1) are kept as-is.
+            pytest.param("+44-20-7946-0958", "442079460958", id="international_non_us"),
+        ],
+    )
+    def test_normalize_phone(self, raw, expected):
+        assert normalize_phone(raw) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -233,16 +227,7 @@ class TestCdrLinksToCrm:
             }
         ]
 
-        with (
-            patch(
-                "app.services.eight_by_eight_service.get_access_token",
-                new=AsyncMock(return_value="fake-token"),
-            ),
-            patch(
-                "app.services.eight_by_eight_service.get_cdrs",
-                new=AsyncMock(return_value=fake_cdrs),
-            ),
-        ):
+        with _patch_8x8_api(fake_cdrs):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
             # Need to patch the imports inside _process_cdrs since they're local
@@ -287,16 +272,7 @@ class TestCdrLinksToCrm:
             }
         ]
 
-        with (
-            patch(
-                "app.services.eight_by_eight_service.get_access_token",
-                new=AsyncMock(return_value="fake-token"),
-            ),
-            patch(
-                "app.services.eight_by_eight_service.get_cdrs",
-                new=AsyncMock(return_value=fake_cdrs),
-            ),
-        ):
+        with _patch_8x8_api(fake_cdrs):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
             result = await _process_cdrs(db_session, _FakeSettings())
@@ -410,16 +386,7 @@ class TestCdrLinksToRequisition:
             }
         ]
 
-        with (
-            patch(
-                "app.services.eight_by_eight_service.get_access_token",
-                new=AsyncMock(return_value="fake-token"),
-            ),
-            patch(
-                "app.services.eight_by_eight_service.get_cdrs",
-                new=AsyncMock(return_value=fake_cdrs),
-            ),
-        ):
+        with _patch_8x8_api(fake_cdrs):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
             result = await _process_cdrs(db_session, _FakeSettings())
@@ -447,6 +414,22 @@ class _FakeSettings:
     eight_by_eight_timezone = "America/New_York"
     eight_by_eight_enabled = True
     eight_by_eight_poll_interval_minutes = 30
+
+
+@contextmanager
+def _patch_8x8_api(fake_cdrs):
+    """Patch the 8x8 token + CDR fetch calls used by _process_cdrs."""
+    with (
+        patch(
+            "app.services.eight_by_eight_service.get_access_token",
+            new=AsyncMock(return_value="fake-token"),
+        ),
+        patch(
+            "app.services.eight_by_eight_service.get_cdrs",
+            new=AsyncMock(return_value=fake_cdrs),
+        ),
+    ):
+        yield
 
 
 def _mock_async_client(*, get_status=200, get_json=None):

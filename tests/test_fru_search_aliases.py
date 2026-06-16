@@ -18,6 +18,7 @@ Depends on: app.search_service, app.services.fru_matrix_service,
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -68,6 +69,11 @@ def _make_requirement(db: Session, user, primary_mpn: str, substitutes=None) -> 
     db.add(req)
     db.commit()
     return req
+
+
+def _patch_fetch_fresh():
+    """Patch the supplier fan-out to return no offers/sightings."""
+    return patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], [])))
 
 
 class TestGetSearchAliases:
@@ -202,12 +208,15 @@ class TestSearchRequirementFruAliases:
     """Integration: aliases flow into the connector fan-out and persist as
     system-derived substitutes."""
 
-    async def test_forward_alias_injected_and_persisted(self, db_session, test_user, monkeypatch):
+    @pytest.fixture(autouse=True)
+    def _disable_spec_resolver(self, monkeypatch):
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
+
+    async def test_forward_alias_injected_and_persisted(self, db_session, test_user):
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL, manufacturer="Seagate")
         req = _make_requirement(db_session, test_user, "00AJ001")
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+        with _patch_fetch_fresh() as fetch_mock:
             result = await search_requirement(req, db_session)
 
         # Alias reaches the supplier fan-out alongside the primary.
@@ -220,23 +229,21 @@ class TestSearchRequirementFruAliases:
         # Future searches pick it up through the normal primary+subs contract.
         assert get_all_pns(req) == ["00AJ001", "ST91000640NS"]
 
-    async def test_reverse_alias_injected(self, db_session, test_user, monkeypatch):
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
+    async def test_reverse_alias_injected(self, db_session, test_user):
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL, manufacturer="Seagate")
         req = _make_requirement(db_session, test_user, "ST91000640NS")
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+        with _patch_fetch_fresh() as fetch_mock:
             await search_requirement(req, db_session)
 
         assert fetch_mock.call_args[0][0] == ["ST91000640NS", "00AJ001"]
         db_session.expire(req)
         assert req.substitutes == [{"mpn": "00AJ001", "manufacturer": "", "source": FRU_ALIAS_SOURCE}]
 
-    async def test_no_links_path_unchanged(self, db_session, test_user, monkeypatch):
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
+    async def test_no_links_path_unchanged(self, db_session, test_user):
         req = _make_requirement(db_session, test_user, "LM317T")
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+        with _patch_fetch_fresh() as fetch_mock:
             result = await search_requirement(req, db_session)
 
         assert fetch_mock.call_args[0][0] == ["LM317T"]
@@ -244,8 +251,7 @@ class TestSearchRequirementFruAliases:
         db_session.expire(req)
         assert req.substitutes == []
 
-    async def test_alias_matching_explicit_substitute_not_duplicated(self, db_session, test_user, monkeypatch):
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
+    async def test_alias_matching_explicit_substitute_not_duplicated(self, db_session, test_user):
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL)
         req = _make_requirement(
             db_session,
@@ -254,7 +260,7 @@ class TestSearchRequirementFruAliases:
             substitutes=[{"mpn": "ST91000640NS", "manufacturer": "Seagate"}],
         )
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+        with _patch_fetch_fresh() as fetch_mock:
             await search_requirement(req, db_session)
 
         assert fetch_mock.call_args[0][0] == ["00AJ001", "ST91000640NS"]
@@ -262,10 +268,9 @@ class TestSearchRequirementFruAliases:
         # Explicit substitute untouched — no duplicate, no provenance rewrite.
         assert req.substitutes == [{"mpn": "ST91000640NS", "manufacturer": "Seagate"}]
 
-    async def test_short_circuit_path_still_persists_aliases(self, db_session, test_user, monkeypatch):
+    async def test_short_circuit_path_still_persists_aliases(self, db_session, test_user):
         """Every MPN within cooldown including the alias → no connector calls, but the
         system-derived substitute still lands on the requirement."""
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL, manufacturer="Seagate")
         for mpn in ("00AJ001", "ST91000640NS"):
@@ -278,7 +283,7 @@ class TestSearchRequirementFruAliases:
             )
         req = _make_requirement(db_session, test_user, "00AJ001")
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+        with _patch_fetch_fresh() as fetch_mock:
             result = await search_requirement(req, db_session)
 
         assert fetch_mock.call_count == 0
@@ -286,12 +291,11 @@ class TestSearchRequirementFruAliases:
         db_session.expire(req)
         assert req.substitutes == [{"mpn": "ST91000640NS", "manufacturer": "Seagate", "source": FRU_ALIAS_SOURCE}]
 
-    async def test_second_search_does_not_duplicate_aliases(self, db_session, test_user, monkeypatch):
-        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
+    async def test_second_search_does_not_duplicate_aliases(self, db_session, test_user):
         _link(db_session, "00AJ001", "ST91000640NS", FruLinkKind.MFG_MODEL)
         req = _make_requirement(db_session, test_user, "00AJ001")
 
-        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))):
+        with _patch_fetch_fresh():
             await search_requirement(req, db_session)
             db_session.expire(req)
             await search_requirement(req, db_session)

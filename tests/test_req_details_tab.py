@@ -44,6 +44,30 @@ def _make_requisition_and_parts(db_session, test_user, num_parts=2, **part_kwarg
     return reqn, parts
 
 
+def _make_req_with_part(db_session, test_user, *, req_name, **part_kwargs):
+    """Helper: create a requisition named ``req_name`` with a single custom part."""
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(
+        name=req_name,
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(requisition_id=reqn.id, **part_kwargs)
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    return reqn, part
+
+
 def test_req_details_tab_returns_html(client, db_session, test_user):
     """GET /v2/partials/parts/{id}/tab/req-details returns requisition info and sibling
     table."""
@@ -147,23 +171,12 @@ def test_req_details_tab_shows_new_columns(client, db_session, test_user):
     """The sibling table shows Brand, Tgt $, Cust PN, Subs, and Offers columns."""
     from decimal import Decimal
 
-    from app.models import Requirement, Requisition
     from app.models.offers import Offer
 
-    reqn = Requisition(
-        name="Col Test",
-        status="active",
-        urgency="normal",
-        customer_name="TestCo",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(reqn)
-    db_session.commit()
-    db_session.refresh(reqn)
-
-    part = Requirement(
-        requisition_id=reqn.id,
+    reqn, part = _make_req_with_part(
+        db_session,
+        test_user,
+        req_name="Col Test",
         primary_mpn="LM358",
         brand="Texas Instruments",
         target_qty=500,
@@ -172,9 +185,6 @@ def test_req_details_tab_shows_new_columns(client, db_session, test_user):
         substitutes=["LM358A", "LM358B"],
         sourcing_status="sourcing",
     )
-    db_session.add(part)
-    db_session.commit()
-    db_session.refresh(part)
 
     offer = Offer(
         requisition_id=reqn.id,
@@ -198,31 +208,16 @@ def test_req_details_tab_shows_new_columns(client, db_session, test_user):
 
 def test_req_details_tab_shows_part_specs_section(client, db_session, test_user):
     """The tab shows a Part Specifications section with the 6 spec fields."""
-    from app.models import Requirement, Requisition
-
-    reqn = Requisition(
-        name="Spec Test",
-        status="active",
-        urgency="normal",
-        customer_name="TestCo",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(reqn)
-    db_session.commit()
-    db_session.refresh(reqn)
-
-    part = Requirement(
-        requisition_id=reqn.id,
+    reqn, part = _make_req_with_part(
+        db_session,
+        test_user,
+        req_name="Spec Test",
         primary_mpn="LM358",
         customer_pn="CUST-ABC",
         condition="New",
         firmware="v2.1",
         sourcing_status="open",
     )
-    db_session.add(part)
-    db_session.commit()
-    db_session.refresh(part)
 
     resp = client.get(f"/v2/partials/parts/{part.id}/tab/req-details")
     assert resp.status_code == 200
@@ -235,29 +230,14 @@ def test_req_details_tab_shows_part_specs_section(client, db_session, test_user)
 
 def test_spec_edit_returns_form(client, db_session, test_user):
     """GET /v2/partials/parts/{id}/edit-spec/{field} returns an edit form."""
-    from app.models import Requirement, Requisition
-
-    reqn = Requisition(
-        name="Edit Test",
-        status="active",
-        urgency="normal",
-        customer_name="TestCo",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(reqn)
-    db_session.commit()
-    db_session.refresh(reqn)
-
-    part = Requirement(
-        requisition_id=reqn.id,
+    reqn, part = _make_req_with_part(
+        db_session,
+        test_user,
+        req_name="Edit Test",
         primary_mpn="ABC123",
         firmware="v1.0",
         sourcing_status="open",
     )
-    db_session.add(part)
-    db_session.commit()
-    db_session.refresh(part)
 
     resp = client.get(f"/v2/partials/parts/{part.id}/edit-spec/firmware?context=tab")
     assert resp.status_code == 200
@@ -276,28 +256,15 @@ def test_spec_save_updates_field(client, db_session, test_user):
     """PATCH /v2/partials/parts/{id}/save-spec persists the value."""
     import json
 
-    from app.models import Requirement, Requisition
+    from app.models import Requirement
 
-    reqn = Requisition(
-        name="Save Test",
-        status="active",
-        urgency="normal",
-        customer_name="TestCo",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(reqn)
-    db_session.commit()
-    db_session.refresh(reqn)
-
-    part = Requirement(
-        requisition_id=reqn.id,
+    reqn, part = _make_req_with_part(
+        db_session,
+        test_user,
+        req_name="Save Test",
         primary_mpn="XYZ789",
         sourcing_status="open",
     )
-    db_session.add(part)
-    db_session.commit()
-    db_session.refresh(part)
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/save-spec",
@@ -317,29 +284,16 @@ def test_spec_save_updates_field(client, db_session, test_user):
 
 def test_spec_save_clears_empty_value(client, db_session, test_user):
     """PATCH with empty value sets field to None."""
-    from app.models import Requirement, Requisition
+    from app.models import Requirement
 
-    reqn = Requisition(
-        name="Clear Test",
-        status="active",
-        urgency="normal",
-        customer_name="TestCo",
-        created_by=test_user.id,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(reqn)
-    db_session.commit()
-    db_session.refresh(reqn)
-
-    part = Requirement(
-        requisition_id=reqn.id,
+    reqn, part = _make_req_with_part(
+        db_session,
+        test_user,
+        req_name="Clear Test",
         primary_mpn="ABC",
         condition="New",
         sourcing_status="open",
     )
-    db_session.add(part)
-    db_session.commit()
-    db_session.refresh(part)
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/save-spec",

@@ -34,6 +34,15 @@ def _make_card(db, mpn, *, manufacturer=None, description=None, enriched_at=None
     return card
 
 
+def _patch_claude(**mock_kwargs):
+    """Patch claude_structured at its source module with the given AsyncMock kwargs."""
+    return patch(
+        "app.utils.claude_client.claude_structured",
+        new_callable=AsyncMock,
+        **mock_kwargs,
+    )
+
+
 # ── enrich_material_cards tests ──────────────────────────────────────
 
 
@@ -60,13 +69,7 @@ async def test_enrich_material_cards_success(db):
         ]
     }
 
-    with (
-        patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ),
-    ):
+    with _patch_claude(return_value=mock_result):
         stats = await enrich_material_cards([card1.id, card2.id], db)
 
     assert stats["enriched"] == 2
@@ -98,11 +101,7 @@ async def test_enrich_material_cards_invalid_category(db):
         ]
     }
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ):
+    with _patch_claude(return_value=mock_result):
         stats = await enrich_material_cards([card.id], db)
 
     assert stats["enriched"] == 1
@@ -127,11 +126,7 @@ async def test_enrich_material_cards_null_description(db):
         ]
     }
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ):
+    with _patch_claude(return_value=mock_result):
         stats = await enrich_material_cards([card.id], db)
 
     assert stats["enriched"] == 1
@@ -147,11 +142,7 @@ async def test_enrich_material_cards_api_failure(db):
 
     card = _make_card(db, "FAIL-PART")
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        side_effect=Exception("API timeout"),
-    ):
+    with _patch_claude(side_effect=Exception("API timeout")):
         stats = await enrich_material_cards([card.id], db)
 
     assert stats["errors"] == 1
@@ -165,18 +156,7 @@ async def test_enrich_material_cards_empty_response(db):
 
     card = _make_card(db, "EMPTY-PART")
 
-    with (
-        patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-        patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value=None,
-        ),
-    ):
+    with _patch_claude(return_value=None):
         stats = await enrich_material_cards([card.id], db)
 
     assert stats["errors"] == 1
@@ -203,11 +183,7 @@ async def test_enrich_material_cards_batch_processing(db):
             ]
         }
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        side_effect=mock_claude,
-    ):
+    with _patch_claude(side_effect=mock_claude):
         stats = await enrich_material_cards([c.id for c in cards], db, batch_size=2)
 
     # 5 cards / batch_size 2 = 3 Claude calls
@@ -248,11 +224,7 @@ async def test_enrich_pending_cards_picks_unenriched(db):
         ]
     }
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ):
+    with _patch_claude(return_value=mock_result):
         result = await enrich_pending_cards(db, limit=10)
 
     assert result["enriched"] == 1
@@ -290,11 +262,7 @@ async def test_enrich_apply_exception_counts_error(db):
     # Return a result where ai part is not a dict (will raise on .get())
     mock_result = {"parts": ["not-a-dict"]}
 
-    with patch(
-        "app.utils.claude_client.claude_structured",
-        new_callable=AsyncMock,
-        return_value=mock_result,
-    ):
+    with _patch_claude(return_value=mock_result):
         stats = await enrich_material_cards([card.id], db)
 
     assert stats["errors"] >= 1

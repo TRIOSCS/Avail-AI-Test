@@ -242,58 +242,38 @@ class TestOfferRoutes:
         )
         assert resp.status_code == 200
 
-    def test_add_offer_missing_vendor_name(self, client, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"mpn": "LM317T"}, id="missing_vendor_name"),
+            pytest.param({"vendor_name": "Arrow"}, id="missing_mpn"),
+        ],
+    )
+    def test_add_offer_missing_required_field(self, client, db_session: Session, test_user: User, data):
         req = _req(db_session, test_user)
         db_session.commit()
 
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/add-offer",
-            data={"mpn": "LM317T"},
-        )
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/add-offer", data=data)
         assert resp.status_code == 400
 
-    def test_add_offer_missing_mpn(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/add-offer",
-            data={"vendor_name": "Arrow"},
-        )
-        assert resp.status_code == 400
-
-    def test_review_offer_approve(self, client, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "action, expected_status",
+        [
+            ("approve", 200),
+            ("reject", 200),
+            ("invalid", 400),
+        ],
+    )
+    def test_review_offer(self, client, db_session: Session, test_user: User, action, expected_status):
         req = _req(db_session, test_user)
         offer = _offer(db_session, req, status=OfferStatus.PENDING_REVIEW)
         db_session.commit()
 
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/review",
-            data={"action": "approve"},
+            data={"action": action},
         )
-        assert resp.status_code == 200
-
-    def test_review_offer_reject(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        offer = _offer(db_session, req, status=OfferStatus.PENDING_REVIEW)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/review",
-            data={"action": "reject"},
-        )
-        assert resp.status_code == 200
-
-    def test_review_offer_invalid_action(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        offer = _offer(db_session, req, status=OfferStatus.PENDING_REVIEW)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/review",
-            data={"action": "invalid"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == expected_status
 
     def test_edit_offer_form(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -326,20 +306,13 @@ class TestOfferRoutes:
         resp = client.get("/v2/partials/offers/review-queue")
         assert resp.status_code == 200
 
-    def test_promote_offer(self, client, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("endpoint", ["promote", "reject"])
+    def test_offer_queue_action(self, client, db_session: Session, test_user: User, endpoint):
         req = _req(db_session, test_user)
         offer = _offer(db_session, req, status=OfferStatus.PENDING_REVIEW)
         db_session.commit()
 
-        resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-
-    def test_reject_offer(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        offer = _offer(db_session, req, status=OfferStatus.PENDING_REVIEW)
-        db_session.commit()
-
-        resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
+        resp = client.post(f"/v2/partials/offers/{offer.id}/{endpoint}")
         assert resp.status_code == 200
 
     def test_offer_changelog(self, client, db_session: Session, test_user: User):
@@ -366,24 +339,18 @@ class TestOfferRoutes:
 
 
 class TestLogActivityAndRFQCompose:
-    def test_log_activity_note(self, client, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"activity_type": "note", "notes": "Followed up with vendor"}, id="note"),
+            pytest.param({"activity_type": "phone_call", "contact_phone": "555-1234"}, id="phone_call"),
+        ],
+    )
+    def test_log_activity(self, client, db_session: Session, test_user: User, data):
         req = _req(db_session, test_user)
         db_session.commit()
 
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/log-activity",
-            data={"activity_type": "note", "notes": "Followed up with vendor"},
-        )
-        assert resp.status_code == 200
-
-    def test_log_activity_phone_call(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/log-activity",
-            data={"activity_type": "phone_call", "contact_phone": "555-1234"},
-        )
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/log-activity", data=data)
         assert resp.status_code == 200
 
     def test_rfq_compose(self, client, db_session: Session, test_user: User):
@@ -698,9 +665,16 @@ class TestQuoteLineCRUD:
 
 
 class TestAddOffersAndBuildBuyPlan:
-    def test_add_offers_to_draft_quote(self, client, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "quote_status, expected_status",
+        [
+            pytest.param("draft", 200, id="draft_quote"),
+            pytest.param("sent", 400, id="non_draft_quote"),
+        ],
+    )
+    def test_add_offers_to_quote(self, client, db_session: Session, test_user: User, quote_status, expected_status):
         req = _req(db_session, test_user)
-        quote = _quote(db_session, req, test_user, status="draft")
+        quote = _quote(db_session, req, test_user, status=quote_status)
         offer = _offer(db_session, req)
         db_session.commit()
 
@@ -709,20 +683,7 @@ class TestAddOffersAndBuildBuyPlan:
             content=json.dumps({"quote_id": quote.id, "offer_ids": [offer.id]}),
             headers={"Content-Type": "application/json"},
         )
-        assert resp.status_code == 200
-
-    def test_add_offers_to_non_draft_quote(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        quote = _quote(db_session, req, test_user, status="sent")
-        offer = _offer(db_session, req)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/add-offers-to-quote",
-            content=json.dumps({"quote_id": quote.id, "offer_ids": [offer.id]}),
-            headers={"Content-Type": "application/json"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == expected_status
 
     def test_build_buy_plan_from_won_quote(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -768,15 +729,15 @@ class TestProactiveBatchDismiss:
         resp = client.post("/v2/partials/proactive/draft", data={})
         assert resp.status_code == 200  # returns error HTML
 
-    def test_proactive_send_no_matches(self, client, db_session: Session, test_user: User):
-        resp = client.post("/v2/proactive/send", data={})
-        assert resp.status_code == 400
-
-    def test_proactive_send_no_contacts(self, client, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/proactive/send",
-            data={"match_ids": ["1"], "contact_ids": []},
-        )
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({}, id="no_matches"),
+            pytest.param({"match_ids": ["1"], "contact_ids": []}, id="no_contacts"),
+        ],
+    )
+    def test_proactive_send_rejects_incomplete(self, client, db_session: Session, test_user: User, data):
+        resp = client.post("/v2/proactive/send", data=data)
         assert resp.status_code == 400
 
 

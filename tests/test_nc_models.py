@@ -9,17 +9,22 @@ Depends on: conftest.py (db_session, test_requisition fixtures)
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import NcSearchLog, NcSearchQueue, Sighting
 
 
-def test_nc_search_queue_import():
-    """NcSearchQueue model can be imported from app.models."""
-    assert NcSearchQueue.__tablename__ == "nc_search_queue"
-
-
-def test_nc_search_log_import():
-    """NcSearchLog model can be imported from app.models."""
-    assert NcSearchLog.__tablename__ == "nc_search_log"
+@pytest.mark.parametrize(
+    "model,tablename",
+    [
+        (NcSearchQueue, "nc_search_queue"),
+        (NcSearchLog, "nc_search_log"),
+    ],
+    ids=["nc_search_queue", "nc_search_log"],
+)
+def test_model_import_and_tablename(model, tablename):
+    """Model can be imported from app.models and maps to its expected table."""
+    assert model.__tablename__ == tablename
 
 
 def test_nc_search_queue_create(db_session, test_requisition):

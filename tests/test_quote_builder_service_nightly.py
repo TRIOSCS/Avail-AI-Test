@@ -198,14 +198,7 @@ class TestSaveQuoteFromBuilder:
             material_card_id=None,
             notes=None,
         )
-        payload = SimpleNamespace(
-            quote_id=None,
-            lines=[line],
-            payment_terms=None,
-            shipping_terms=None,
-            validity_days=30,
-            notes=None,
-        )
+        payload = _make_payload(lines=[line])
 
         with patch("app.services.crm_service.next_quote_number", return_value="Q-0002"):
             with patch("app.services.requisition_state.transition", side_effect=ValueError):

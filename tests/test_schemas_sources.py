@@ -11,11 +11,9 @@ from app.schemas.sources import MiningOptions, SourceStatusToggle
 
 
 class TestSourceStatusToggle:
-    def test_valid_live(self):
-        assert SourceStatusToggle(status="live").status == "live"
-
-    def test_valid_disabled(self):
-        assert SourceStatusToggle(status="disabled").status == "disabled"
+    @pytest.mark.parametrize("status", ["live", "disabled"], ids=["live", "disabled"])
+    def test_valid_status(self, status):
+        assert SourceStatusToggle(status=status).status == status
 
     def test_invalid_status_raises(self):
         with pytest.raises(ValidationError):
@@ -35,14 +33,11 @@ class TestMiningOptions:
         m = MiningOptions(lookback_days=7)
         assert m.lookback_days == 7
 
-    def test_zero_lookback_raises(self):
+    @pytest.mark.parametrize(
+        "lookback_days",
+        [0, -5, 999],
+        ids=["zero", "negative", "above_max"],
+    )
+    def test_invalid_lookback_raises(self, lookback_days):
         with pytest.raises(ValidationError):
-            MiningOptions(lookback_days=0)
-
-    def test_negative_lookback_raises(self):
-        with pytest.raises(ValidationError):
-            MiningOptions(lookback_days=-5)
-
-    def test_max_lookback(self):
-        with pytest.raises(ValidationError):
-            MiningOptions(lookback_days=999)
+            MiningOptions(lookback_days=lookback_days)

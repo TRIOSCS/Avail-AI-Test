@@ -10,6 +10,8 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.services.ai_intake_parser import _coerce_mode, _heuristic_parse, parse_freeform_intake
 
 # --- Lines 140-142: LLM exception → heuristic fallback ---
@@ -35,20 +37,37 @@ async def test_llm_exception_with_unparseable_text_returns_none():
     assert result is None
 
 
-# --- Line 236: offer row with empty mpn → skipped ---
+# --- Line 236: only offer rows with a real MPN survive _normalize_offers ---
 
 
-async def test_offer_row_with_empty_mpn_is_skipped():
+@pytest.mark.parametrize(
+    "offers",
+    [
+        pytest.param(
+            [
+                {"mpn": "", "qty_available": 100, "unit_price": 0.50},
+                {"mpn": None, "qty_available": 200, "unit_price": 0.75},
+                {"mpn": "LM7805", "qty_available": 500, "unit_price": 0.30},
+            ],
+            id="empty-and-none-mpn",
+        ),
+        pytest.param(
+            [
+                "not-a-dict",
+                42,
+                {"mpn": "LM7805", "qty_available": 100, "unit_price": 0.30},
+            ],
+            id="non-dict-rows",
+        ),
+    ],
+)
+async def test_offer_rows_without_real_mpn_are_skipped(offers):
     mock_result = {
         "document_type": "offer",
         "confidence": 0.8,
         "vendor_name": "Acme",
         "requirements": [],
-        "offers": [
-            {"mpn": "", "qty_available": 100, "unit_price": 0.50},
-            {"mpn": None, "qty_available": 200, "unit_price": 0.75},
-            {"mpn": "LM7805", "qty_available": 500, "unit_price": 0.30},
-        ],
+        "offers": offers,
     }
     with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=mock_result)):
         result = await parse_freeform_intake("offer text")
@@ -174,41 +193,27 @@ def test_heuristic_parse_skips_hash_comment_lines():
 # --- Lines 368-380: heuristic parser with qty/price/manufacturer columns ---
 
 
-def test_heuristic_parse_single_column_mpn_only():
-    # len(cells) == 1: qty stays None → defaults to 1
-    result = _heuristic_parse("LM317T")
+@pytest.mark.parametrize(
+    ("text", "expected_qty", "expected_price", "expected_manufacturer"),
+    [
+        # len(cells) == 1: qty stays None → defaults to 1
+        pytest.param("LM317T", 1, None, None, id="single-column-mpn-only"),
+        # len(cells) > 1: qty parsed
+        pytest.param("LM317T\t250", 250, None, None, id="two-columns-mpn-qty"),
+        # len(cells) > 2: price also parsed
+        pytest.param("LM317T\t250\t0.99", 250, 0.99, None, id="three-columns-mpn-qty-price"),
+        # len(cells) > 3: manufacturer also parsed
+        pytest.param("LM317T\t250\t0.99\tTexas Instruments", 250, 0.99, "Texas Instruments", id="four-columns"),
+    ],
+)
+def test_heuristic_parse_column_counts(text, expected_qty, expected_price, expected_manufacturer):
+    result = _heuristic_parse(text)
 
     assert result is not None
-    assert result["requirements"][0]["quantity"] == 1
-    assert result["requirements"][0]["target_price"] is None
-    assert result["requirements"][0]["manufacturer"] is None
-
-
-def test_heuristic_parse_two_columns_mpn_and_qty():
-    # len(cells) > 1: qty parsed
-    result = _heuristic_parse("LM317T\t250")
-
-    assert result is not None
-    assert result["requirements"][0]["quantity"] == 250
-    assert result["requirements"][0]["target_price"] is None
-
-
-def test_heuristic_parse_three_columns_mpn_qty_price():
-    # len(cells) > 2: price also parsed
-    result = _heuristic_parse("LM317T\t250\t0.99")
-
-    assert result is not None
-    assert result["requirements"][0]["quantity"] == 250
-    assert result["requirements"][0]["target_price"] == 0.99
-    assert result["requirements"][0]["manufacturer"] is None
-
-
-def test_heuristic_parse_four_columns_includes_manufacturer():
-    # len(cells) > 3: manufacturer also parsed
-    result = _heuristic_parse("LM317T\t250\t0.99\tTexas Instruments")
-
-    assert result is not None
-    assert result["requirements"][0]["manufacturer"] == "Texas Instruments"
+    req = result["requirements"][0]
+    assert req["quantity"] == expected_qty
+    assert req["target_price"] == expected_price
+    assert req["manufacturer"] == expected_manufacturer
 
 
 # --- Line 396: _heuristic_parse returns full result dict ---
@@ -233,27 +238,3 @@ def test_heuristic_parse_no_valid_rows_returns_none():
     result = _heuristic_parse("# comment\n\n   \n// another")
 
     assert result is None
-
-
-# --- Line 236: offer row that is not a dict → skipped via continue ---
-
-
-async def test_offer_row_not_a_dict_is_skipped():
-    # _normalize_offers skips rows that aren't dicts (line 235-236)
-    mock_result = {
-        "document_type": "offer",
-        "confidence": 0.8,
-        "vendor_name": "Acme",
-        "requirements": [],
-        "offers": [
-            "not-a-dict",
-            42,
-            {"mpn": "LM7805", "qty_available": 100, "unit_price": 0.30},
-        ],
-    }
-    with patch("app.services.ai_intake_parser.routed_structured", AsyncMock(return_value=mock_result)):
-        result = await parse_freeform_intake("offer text")
-
-    assert result is not None
-    assert len(result["offers"]) == 1
-    assert result["offers"][0]["mpn"] == "LM7805"

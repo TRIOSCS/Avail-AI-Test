@@ -437,33 +437,20 @@ class TestEditOfferDirect:
 
 
 class TestLogActivityDirect:
-    async def test_log_activity_creates_log_entry(self, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"activity_type": "phone_call", "vendor_name": "TestVendor", "notes": "Spoke about availability"},
+            {"activity_type": "note", "notes": "Quick note"},
+        ],
+        ids=["phone_call", "note"],
+    )
+    async def test_log_activity_creates_log_entry(self, db_session: Session, test_user: User, fields: dict):
         """Lines 2385–2404: creates ActivityLog and returns activity tab."""
         from app.routers.htmx_views import log_activity
 
         req = _make_requisition(db_session, test_user)
-        mock_req = _mock_form_request(
-            path=f"/v2/partials/requisitions/{req.id}/activity",
-            fields={
-                "activity_type": "phone_call",
-                "vendor_name": "TestVendor",
-                "notes": "Spoke about availability",
-            },
-        )
-        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
-            mock_tab.return_value = HTMLResponse("tab OK")
-            result = await log_activity(request=mock_req, req_id=req.id, user=test_user, db=db_session)
-        assert result.status_code == 200
-
-    async def test_log_activity_note_type(self, db_session: Session, test_user: User):
-        """Activity type 'note' maps to channel 'note'."""
-        from app.routers.htmx_views import log_activity
-
-        req = _make_requisition(db_session, test_user)
-        mock_req = _mock_form_request(
-            path=f"/v2/partials/requisitions/{req.id}/activity",
-            fields={"activity_type": "note", "notes": "Quick note"},
-        )
+        mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/activity", fields=fields)
         with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
             mock_tab.return_value = HTMLResponse("tab OK")
             result = await log_activity(request=mock_req, req_id=req.id, user=test_user, db=db_session)
@@ -474,31 +461,21 @@ class TestLogActivityDirect:
 
 
 class TestLeadStatusUpdateDirect:
-    async def test_update_lead_status_has_stock(self, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"status": "has_stock", "note": "Confirmed 500 units"},
+            {"status": "no_stock"},
+        ],
+        ids=["has_stock", "no_stock"],
+    )
+    async def test_update_lead_status_valid(self, db_session: Session, test_user: User, fields: dict):
         """Lines 6539–6607: updates lead status, returns lead card."""
         from app.routers.htmx_views import lead_status_update
 
         req = _make_requisition(db_session, test_user)
         lead = _make_lead(db_session, req)
-        mock_req = _mock_form_request(
-            path=f"/v2/partials/sourcing/leads/{lead.id}/status",
-            fields={"status": "has_stock", "note": "Confirmed 500 units"},
-        )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
-            mock_tpl.return_value = HTMLResponse("lead OK")
-            result = await lead_status_update(request=mock_req, lead_id=lead.id, user=test_user, db=db_session)
-        assert result.status_code == 200
-
-    async def test_update_lead_status_no_stock(self, db_session: Session, test_user: User):
-        """Another valid status."""
-        from app.routers.htmx_views import lead_status_update
-
-        req = _make_requisition(db_session, test_user)
-        lead = _make_lead(db_session, req)
-        mock_req = _mock_form_request(
-            path=f"/v2/partials/sourcing/leads/{lead.id}/status",
-            fields={"status": "no_stock"},
-        )
+        mock_req = _mock_form_request(path=f"/v2/partials/sourcing/leads/{lead.id}/status", fields=fields)
         with patch("app.routers.htmx_views.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("lead OK")
             result = await lead_status_update(request=mock_req, lead_id=lead.id, user=test_user, db=db_session)

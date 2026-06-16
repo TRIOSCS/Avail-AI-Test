@@ -61,30 +61,26 @@ class TestStrategicToggle:
 
 
 class TestActivityAttributeRequest:
-    def test_valid(self):
+    @pytest.mark.parametrize(
+        "entity_type,entity_id",
+        [
+            ("company", 5),
+            ("vendor", 10),
+        ],
+    )
+    def test_valid(self, entity_type, entity_id):
         from app.schemas.v13_features import ActivityAttributeRequest
 
-        a = ActivityAttributeRequest(entity_type="company", entity_id=5)
-        assert a.entity_type == "company"
-        assert a.entity_id == 5
+        a = ActivityAttributeRequest(entity_type=entity_type, entity_id=entity_id)
+        assert a.entity_type == entity_type
+        assert a.entity_id == entity_id
 
-    def test_vendor_type(self):
-        from app.schemas.v13_features import ActivityAttributeRequest
-
-        a = ActivityAttributeRequest(entity_type="vendor", entity_id=10)
-        assert a.entity_type == "vendor"
-
-    def test_zero_entity_id_raises(self):
-        from app.schemas.v13_features import ActivityAttributeRequest
-
-        with pytest.raises(ValidationError, match="entity_id must be positive"):
-            ActivityAttributeRequest(entity_type="company", entity_id=0)
-
-    def test_negative_entity_id_raises(self):
+    @pytest.mark.parametrize("entity_id", [0, -1])
+    def test_non_positive_entity_id_raises(self, entity_id):
         from app.schemas.v13_features import ActivityAttributeRequest
 
         with pytest.raises(ValidationError, match="entity_id must be positive"):
-            ActivityAttributeRequest(entity_type="company", entity_id=-1)
+            ActivityAttributeRequest(entity_type="company", entity_id=entity_id)
 
 
 # ── Other v13 schemas ────────────────────────────────────────────────

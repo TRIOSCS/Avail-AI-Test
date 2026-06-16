@@ -93,6 +93,29 @@ def _make_customer_site(db: Session, company: Company) -> CustomerSite:
     return site
 
 
+def _make_closed_list_with_archived_demand(db: Session, company: Company, user: User) -> ExcessList:
+    """Set up an archived requisition with a matching requirement plus a closed excess
+    list holding the same part — the precondition for proactive-match creation."""
+    _make_customer_site(db, company)  # required for ProactiveMatch
+
+    req = Requisition(name="Old RFQ", status="archived", created_by=user.id, company_id=company.id)
+    db.add(req)
+    db.flush()
+    requirement = Requirement(
+        requisition_id=req.id,
+        primary_mpn="LM317T",
+        normalized_mpn=normalize_mpn_key("LM317T"),
+        target_qty=100,
+    )
+    db.add(requirement)
+    db.commit()
+
+    el = _make_excess_list(db, company, user)
+    _make_line_item(db, el, "LM317T")
+    update_excess_list(db, el.id, status="closed")
+    return el
+
+
 @pytest.fixture()
 def company(db_session: Session) -> Company:
     return _make_company(db_session)
@@ -241,26 +264,7 @@ class TestProactiveMatchForArchived:
         assert result["matches_created"] == 0
 
     def test_creates_matches_for_closed_list(self, db_session: Session, company, trader):
-        # Create customer site (required for ProactiveMatch)
-        site = _make_customer_site(db_session, company)
-
-        # Create an archived requisition with a matching requirement
-        req = Requisition(name="Old RFQ", status="archived", created_by=trader.id, company_id=company.id)
-        db_session.add(req)
-        db_session.flush()
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            normalized_mpn=normalize_mpn_key("LM317T"),
-            target_qty=100,
-        )
-        db_session.add(requirement)
-        db_session.commit()
-
-        # Create and close excess list
-        el = _make_excess_list(db_session, company, trader)
-        _make_line_item(db_session, el, "LM317T")
-        update_excess_list(db_session, el.id, status="closed")
+        el = _make_closed_list_with_archived_demand(db_session, company, trader)
 
         result = create_proactive_matches_for_excess(db_session, el.id, user_id=trader.id)
         assert result["matches_created"] >= 1
@@ -271,23 +275,7 @@ class TestProactiveMatchForArchived:
         assert pm.status == "new"
 
     def test_skips_duplicate_proactive_matches(self, db_session: Session, company, trader):
-        site = _make_customer_site(db_session, company)
-
-        req = Requisition(name="Old RFQ", status="archived", created_by=trader.id, company_id=company.id)
-        db_session.add(req)
-        db_session.flush()
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            normalized_mpn=normalize_mpn_key("LM317T"),
-            target_qty=100,
-        )
-        db_session.add(requirement)
-        db_session.commit()
-
-        el = _make_excess_list(db_session, company, trader)
-        _make_line_item(db_session, el, "LM317T")
-        update_excess_list(db_session, el.id, status="closed")
+        el = _make_closed_list_with_archived_demand(db_session, company, trader)
 
         # First run
         result1 = create_proactive_matches_for_excess(db_session, el.id, user_id=trader.id)

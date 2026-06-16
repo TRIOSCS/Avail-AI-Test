@@ -108,26 +108,21 @@ class TestMaterialList:
         assert "materialsFilter" in resp.text
         assert "Category" in resp.text
 
-    def test_search_by_mpn(self, client: TestClient, material_cards):
-        """Faceted search results endpoint returns matching cards."""
-        resp = client.get("/v2/partials/materials/faceted?q=LM317")
+    @pytest.mark.parametrize(
+        "query, expected_substring",
+        [
+            pytest.param("LM317", "LM317T", id="search_by_mpn"),
+            pytest.param("obsolete", None, id="filter_by_lifecycle"),
+            pytest.param("eol", None, id="filter_eol"),
+            pytest.param("NONEXISTENT999", None, id="empty_search"),
+        ],
+    )
+    def test_faceted_search(self, client: TestClient, material_cards, query, expected_substring):
+        """Faceted search results endpoint responds 200 (and returns matching cards)."""
+        resp = client.get(f"/v2/partials/materials/faceted?q={query}")
         assert resp.status_code == 200
-        assert "LM317T" in resp.text
-
-    def test_filter_by_lifecycle(self, client: TestClient, material_cards):
-        """Faceted search results with lifecycle filter."""
-        resp = client.get("/v2/partials/materials/faceted?q=obsolete")
-        assert resp.status_code == 200
-
-    def test_filter_eol(self, client: TestClient, material_cards):
-        """Faceted search results with EOL lifecycle filter."""
-        resp = client.get("/v2/partials/materials/faceted?q=eol")
-        assert resp.status_code == 200
-
-    def test_empty_search(self, client: TestClient, material_cards):
-        """Faceted search with no results shows empty state."""
-        resp = client.get("/v2/partials/materials/faceted?q=NONEXISTENT999")
-        assert resp.status_code == 200
+        if expected_substring is not None:
+            assert expected_substring in resp.text
 
     def test_empty_db(self, client: TestClient):
         """Workspace loads even with no material cards."""

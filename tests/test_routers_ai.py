@@ -7,6 +7,7 @@ Covers: ai feature flag modes (off/mike_only/all), vendor history aggregation,
         all /api/ai/* HTTP endpoints
 """
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,18 +20,6 @@ from fastapi.testclient import TestClient
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def mike_user():
-    u = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike", role="admin")
-    return u
-
-
-@pytest.fixture
-def other_user():
-    u = SimpleNamespace(email="buyer@trioscs.com", id=2, name="Buyer", role="buyer")
-    return u
-
-
 def _make_settings(flag: str, admin_emails: list[str] | None = None):
     s = SimpleNamespace(
         ai_features_enabled=flag,
@@ -39,43 +28,22 @@ def _make_settings(flag: str, admin_emails: list[str] | None = None):
     return s
 
 
-def test_ai_enabled_off(mike_user):
-    with patch("app.routers.ai.settings", _make_settings("off")):
+@pytest.mark.parametrize(
+    ("flag", "email", "expected"),
+    [
+        pytest.param("off", "mike@trioscs.com", False, id="off"),
+        pytest.param("all", "buyer@trioscs.com", True, id="all"),
+        pytest.param("mike_only", "mike@trioscs.com", True, id="mike_only_allows_mike"),
+        pytest.param("mike_only", "buyer@trioscs.com", False, id="mike_only_blocks_non_allowlisted_user"),
+        pytest.param("mike_only", "MIKE@TRIOSCS.COM", True, id="mike_only_case_insensitive"),
+    ],
+)
+def test_ai_enabled(flag, email, expected):
+    user = SimpleNamespace(email=email, id=1, name="User", role="admin")
+    with patch("app.routers.ai.settings", _make_settings(flag)):
         from app.routers.ai import _ai_enabled
 
-        assert _ai_enabled(mike_user) is False
-
-
-def test_ai_enabled_all(other_user):
-    with patch("app.routers.ai.settings", _make_settings("all")):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(other_user) is True
-
-
-def test_ai_enabled_mike_only_allows_mike(mike_user):
-    mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(mike_user) is True
-
-
-def test_ai_enabled_mike_only_blocks_non_allowlisted_user(other_user):
-    mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(other_user) is False
-
-
-def test_ai_enabled_mike_only_case_insensitive():
-    user = SimpleNamespace(email="MIKE@TRIOSCS.COM", id=1, name="Mike", role="admin")
-    mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings):
-        from app.routers.ai import _ai_enabled
-
-        assert _ai_enabled(user) is True
+        assert _ai_enabled(user) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +149,29 @@ def ai_client(db_session, ai_test_user):
             yield c
     finally:
         for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
+
+
+@contextmanager
+def sales_client(db_session, sales_user):
+    """TestClient acting as a sales user (for cross-requisition scope tests)."""
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return sales_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user]:
             app.dependency_overrides.pop(dep, None)
 
 
@@ -451,9 +442,6 @@ def test_parse_response_not_found(ai_client):
 
 def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_requisition):
     """Sales users cannot parse responses tied to foreign requisitions."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
     from app.models import VendorResponse
 
     vr = VendorResponse(
@@ -467,20 +455,8 @@ def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_re
     db_session.add(vr)
     db_session.commit()
 
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return sales_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    try:
-        with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
-            resp = c.post(f"/api/ai/parse-response/{vr.id}")
-    finally:
-        for dep in [get_db, require_user]:
-            app.dependency_overrides.pop(dep, None)
+    with sales_client(db_session, sales_user) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+        resp = c.post(f"/api/ai/parse-response/{vr.id}")
     assert resp.status_code == 404
 
 
@@ -593,36 +569,15 @@ def test_save_parsed_offers(ai_client, db_session, ai_test_user):
 
 def test_save_parsed_offers_scope_enforced_for_sales(db_session, sales_user, test_requisition):
     """Sales users cannot save parsed offers onto foreign requisitions."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
     payload = {
         "requisition_id": test_requisition.id,
         "response_id": None,
         "offers": [{"vendor_name": "X", "mpn": "LM317T", "qty_available": 10, "unit_price": 1.0, "currency": "USD"}],
     }
 
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return sales_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    try:
-        with TestClient(app) as c:
-            resp = c.post("/api/ai/save-parsed-offers", json=payload)
-    finally:
-        for dep in [get_db, require_user]:
-            app.dependency_overrides.pop(dep, None)
+    with sales_client(db_session, sales_user) as c:
+        resp = c.post("/api/ai/save-parsed-offers", json=payload)
     assert resp.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Intake Draft (4 tests)
-# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------
@@ -1163,27 +1118,11 @@ def test_parse_freeform_offer_success(ai_client, db_session):
 
 def test_parse_freeform_offer_scope_enforced_for_sales(db_session, sales_user, test_requisition):
     """Sales users cannot build context from foreign requisitions."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    def _override_db():
-        yield db_session
-
-    def _override_user():
-        return sales_user
-
-    app.dependency_overrides[get_db] = _override_db
-    app.dependency_overrides[require_user] = _override_user
-    try:
-        with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
-            resp = c.post(
-                "/api/ai/parse-freeform-offer",
-                json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
-            )
-    finally:
-        for dep in [get_db, require_user]:
-            app.dependency_overrides.pop(dep, None)
+    with sales_client(db_session, sales_user) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+        resp = c.post(
+            "/api/ai/parse-freeform-offer",
+            json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
+        )
     assert resp.status_code == 404
 
 
