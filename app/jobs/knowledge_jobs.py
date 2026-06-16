@@ -15,6 +15,24 @@ from loguru import logger
 from ..scheduler import _traced_job
 
 
+async def _refresh_each(rows, generate, *, noun, warn_template):
+    """Generate insights for each id in ``rows`` (list of 1-tuples), tolerating per-id
+    failures, and log a ``successes/total`` summary.
+
+    ``generate`` is an async callable ``(id) -> entries``; a non-empty result counts as a
+    success. ``warn_template`` is a Loguru ``"... {} ... {}"`` format taking (id, error).
+    """
+    ok = 0
+    for (item_id,) in rows:
+        try:
+            entries = await generate(item_id)
+            if entries:
+                ok += 1
+        except Exception as e:
+            logger.warning(warn_template, item_id, e)
+    logger.info("Refreshed insights for {}/{} active {}", ok, len(rows), noun)
+
+
 def register_knowledge_jobs(scheduler, settings):
     """Register knowledge ledger background jobs."""
     # DISABLED (2026-03-26) — Knowledge insights not active in UI; heavy Anthropic
@@ -58,15 +76,12 @@ async def _job_refresh_insights():
                 .limit(50)
                 .all()
             )
-            req_ok = 0
-            for (req_id,) in active_reqs:
-                try:
-                    entries = await knowledge_service.generate_insights(db, req_id)
-                    if entries:
-                        req_ok += 1
-                except Exception as e:
-                    logger.warning("Insight generation failed for req {}: {}", req_id, e)
-            logger.info("Refreshed insights for {}/{} active reqs", req_ok, len(active_reqs))
+            await _refresh_each(
+                active_reqs,
+                lambda req_id: knowledge_service.generate_insights(db, req_id),
+                noun="reqs",
+                warn_template="Insight generation failed for req {}: {}",
+            )
         except Exception as e:
             logger.error("Requisition insight refresh failed: {}", e)
 
@@ -87,15 +102,12 @@ async def _job_refresh_insights():
                 .limit(20)
                 .all()
             )
-            vendor_ok = 0
-            for (vid,) in top_vendors:
-                try:
-                    entries = await knowledge_service.generate_vendor_insights(db, vid)
-                    if entries:
-                        vendor_ok += 1
-                except Exception as e:
-                    logger.warning("Vendor insight failed for vendor_card {}: {}", vid, e)
-            logger.info("Refreshed insights for {}/{} active vendors", vendor_ok, len(top_vendors))
+            await _refresh_each(
+                top_vendors,
+                lambda vid: knowledge_service.generate_vendor_insights(db, vid),
+                noun="vendors",
+                warn_template="Vendor insight failed for vendor_card {}: {}",
+            )
         except Exception as e:
             logger.error("Vendor insight refresh failed: {}", e)
 
@@ -110,15 +122,12 @@ async def _job_refresh_insights():
                 .limit(20)
                 .all()
             )
-            company_ok = 0
-            for (cid,) in top_companies:
-                try:
-                    entries = await knowledge_service.generate_company_insights(db, cid)
-                    if entries:
-                        company_ok += 1
-                except Exception as e:
-                    logger.warning("Company insight failed for company {}: {}", cid, e)
-            logger.info("Refreshed insights for {}/{} active companies", company_ok, len(top_companies))
+            await _refresh_each(
+                top_companies,
+                lambda cid: knowledge_service.generate_company_insights(db, cid),
+                noun="companies",
+                warn_template="Company insight failed for company {}: {}",
+            )
         except Exception as e:
             logger.error("Company insight refresh failed: {}", e)
 
@@ -132,15 +141,12 @@ async def _job_refresh_insights():
                 .limit(50)
                 .all()
             )
-            mpn_ok = 0
-            for (mpn,) in top_mpns:
-                try:
-                    entries = await knowledge_service.generate_mpn_insights(db, mpn)
-                    if entries:
-                        mpn_ok += 1
-                except Exception as e:
-                    logger.warning("MPN insight failed for {}: {}", mpn, e)
-            logger.info("Refreshed insights for {}/{} active MPNs", mpn_ok, len(top_mpns))
+            await _refresh_each(
+                top_mpns,
+                lambda mpn: knowledge_service.generate_mpn_insights(db, mpn),
+                noun="MPNs",
+                warn_template="MPN insight failed for {}: {}",
+            )
         except Exception as e:
             logger.error("MPN insight refresh failed: {}", e)
 

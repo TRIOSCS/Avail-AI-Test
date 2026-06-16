@@ -172,11 +172,7 @@ async def _job_inbox_scan():
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
-            should_scan = False
-            if not user.last_inbox_scan:
-                should_scan = True
-            elif now - _utc(user.last_inbox_scan) > scan_interval:
-                should_scan = True
+            should_scan = not user.last_inbox_scan or now - _utc(user.last_inbox_scan) > scan_interval
             if should_scan:
                 # Detach user data we need so we can close this session
                 users_to_scan.append(user.id)

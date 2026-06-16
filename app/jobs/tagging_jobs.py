@@ -6,10 +6,31 @@ Depends on: app.database, app.models, app.services.enrichment, app.services.tagg
             app.services.tagging_ai, app.services.spec_enrichment_service, app.utils.claude_client
 """
 
+import asyncio
+
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
+
+
+async def _run_threaded_db_job(label, fn):
+    """Run a synchronous ``fn(db)`` off the event loop with a fresh session.
+
+    Shared body of the prefix/sighting/boost jobs: open a session, call ``fn`` via
+    ``asyncio.to_thread``, log the result, and roll back + re-raise on failure.
+    """
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        result = await asyncio.to_thread(fn, db)
+        logger.info(f"{label}: {result}")
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def register_tagging_jobs(scheduler, settings):
@@ -64,20 +85,9 @@ async def _job_internal_boost():
 
     Every 4h.
     """
-    import asyncio
-
-    from ..database import SessionLocal
     from ..services.enrichment import boost_confidence_internal
 
-    db = SessionLocal()
-    try:
-        result = await asyncio.to_thread(boost_confidence_internal, db)
-        logger.info(f"Internal confidence boost: {result}")
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    await _run_threaded_db_job("Internal confidence boost", boost_confidence_internal)
 
 
 @_traced_job
@@ -86,20 +96,9 @@ async def _job_prefix_backfill():
 
     Every 2h.
     """
-    import asyncio
-
-    from ..database import SessionLocal
     from ..services.tagging_backfill import run_prefix_backfill
 
-    db = SessionLocal()
-    try:
-        result = await asyncio.to_thread(run_prefix_backfill, db)
-        logger.info(f"Prefix backfill: {result}")
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    await _run_threaded_db_job("Prefix backfill", run_prefix_backfill)
 
 
 @_traced_job
@@ -108,20 +107,9 @@ async def _job_sighting_mining():
 
     Every 2h.
     """
-    import asyncio
-
-    from ..database import SessionLocal
     from ..services.tagging_backfill import backfill_manufacturer_from_sightings
 
-    db = SessionLocal()
-    try:
-        result = await asyncio.to_thread(backfill_manufacturer_from_sightings, db)
-        logger.info(f"Sighting mining: {result}")
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    await _run_threaded_db_job("Sighting mining", backfill_manufacturer_from_sightings)
 
 
 @_traced_job
@@ -130,8 +118,6 @@ async def _job_ai_tagging():
 
     Waterfall: prefix_backfill + sighting_mining first (instant), then Claude Haiku for remainder.
     """
-    import asyncio
-
     from ..database import SessionLocal
     from ..models.intelligence import MaterialCard
     from ..models.tags import MaterialTag, Tag

@@ -101,11 +101,7 @@ async def _job_contacts_sync():
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
-            should_sync = False
-            if not user.last_contacts_sync:
-                should_sync = True
-            elif now - _utc(user.last_contacts_sync) > timedelta(hours=24):
-                should_sync = True
+            should_sync = not user.last_contacts_sync or now - _utc(user.last_contacts_sync) > timedelta(hours=24)
             if should_sync:
                 user_ids.append(user.id)
     except Exception as e:
@@ -843,14 +839,15 @@ async def scan_sent_folder(user, db):
     sync_state = db.query(SyncState).filter(SyncState.user_id == user.id, SyncState.folder == folder_key).first()
     delta_token = sync_state.delta_token if sync_state else None
 
+    delta_params = {
+        "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
+        "$top": "100",
+    }
     try:
         messages, new_token = await gc.delta_query(
             "/me/mailFolders/SentItems/messages/delta",
             delta_token=delta_token,
-            params={
-                "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
-                "$top": "100",
-            },
+            params=delta_params,
             max_items=500,
         )
     except GraphSyncStateExpired:
@@ -861,10 +858,7 @@ async def scan_sent_folder(user, db):
         messages, new_token = await gc.delta_query(
             "/me/mailFolders/SentItems/messages/delta",
             delta_token=None,
-            params={
-                "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
-                "$top": "100",
-            },
+            params=delta_params,
             max_items=500,
         )
 

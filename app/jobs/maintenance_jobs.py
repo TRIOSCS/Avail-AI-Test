@@ -11,6 +11,9 @@ from loguru import logger
 
 from ..scheduler import _traced_job
 
+# Optional contact fields used to pick the most-complete duplicate and back-fill it
+_CONTACT_MERGE_FIELDS = ["full_name", "title", "phone", "notes", "linkedin_url"]
+
 
 def register_maintenance_jobs(scheduler, settings):
     """Register maintenance jobs with the scheduler."""
@@ -146,7 +149,6 @@ async def _job_contact_dedup():
             db.query(
                 SiteContact.customer_site_id,
                 func.lower(SiteContact.email).label("em"),
-                func.count().label("cnt"),
             )
             .filter(SiteContact.email.isnot(None))
             .group_by(SiteContact.customer_site_id, func.lower(SiteContact.email))
@@ -166,14 +168,12 @@ async def _job_contact_dedup():
             )
             best = max(
                 contacts,
-                key=lambda c: sum(
-                    1 for col in ["full_name", "title", "phone", "notes", "linkedin_url"] if getattr(c, col, None)
-                ),
+                key=lambda c: sum(1 for col in _CONTACT_MERGE_FIELDS if getattr(c, col, None)),
             )
             for other in contacts:
                 if other.id == best.id:
                     continue
-                for col in ["full_name", "title", "phone", "notes", "linkedin_url"]:
+                for col in _CONTACT_MERGE_FIELDS:
                     if getattr(best, col, None) is None and getattr(other, col, None) is not None:
                         setattr(best, col, getattr(other, col))
                 db.delete(other)
