@@ -1,0 +1,29 @@
+{# _icons.html — Inline heroicon SVGs shared across the trouble-tickets cluster.
+
+Each macro takes the full Tailwind class string for the <svg> so call sites keep
+their existing sizing/color, and the rendered markup stays byte-identical to the
+inline SVGs these macros replaced.
+
+Called-by:
+  htmx/partials/tickets/detail.html   (sparkle_icon, chevron_icon)
+  htmx/partials/tickets/workspace.html (sparkle_icon)
+  htmx/partials/tickets/list.html      (chevron_icon)
+
+Usage:
+  {% from "htmx/partials/tickets/_icons.html" import sparkle_icon, chevron_icon %}
+  {{ sparkle_icon("w-4 h-4 text-brand-500") }}
+  <svg :class="open ? 'rotate-90' : ''" ...>  -- chevron keeps its Alpine :class inline
+#}
+
+{# Sparkles glyph (AI marker). `svg_class` is the literal class= value. #}
+{%- macro sparkle_icon(svg_class) -%}
+<svg class="{{ svg_class }}" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+      </svg>
+{%- endmacro -%}
+
+{# Chevron-right glyph (disclosure). `svg_class` is the literal class= value;
+   call sites that animate the chevron pass their own `:class` BEFORE the call. #}
+{%- macro chevron_icon(svg_class) -%}
+<svg :class="open ? 'rotate-90' : ''" class="{{ svg_class }}" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+{%- endmacro -%}

@@ -1,4 +1,6 @@
 {# Trouble Ticket detail view #}
+{% from "htmx/partials/tickets/_icons.html" import sparkle_icon, chevron_icon -%}
+{% from "htmx/partials/tickets/_context.html" import context_field -%}
 <div class="max-w-4xl mx-auto px-4 py-6">
   {# Back button #}
   <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#main-content" hx-push-url="/v2/trouble-tickets"
@@ -39,9 +41,7 @@
   {% if ticket.ai_summary %}
   <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
     <div class="flex items-center gap-2 mb-1">
-      <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
-      </svg>
+      {{ sparkle_icon("w-4 h-4 text-brand-500") }}
       <span class="text-xs font-medium text-brand-600">AI Summary</span>
     </div>
     <p class="text-sm text-gray-700">{{ ticket.ai_summary }}</p>
@@ -78,25 +78,21 @@
   {# Captured Context (collapsible) #}
   <div x-data="{ open: false }" class="mb-6">
     <button @click="open = !open" class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
-      <svg :class="open ? 'rotate-90' : ''" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+      {{ chevron_icon("w-4 h-4 transition-transform") }}
       Captured Context
     </button>
     <div x-show="open" x-cloak x-collapse class="space-y-3">
       {% if ticket.current_page %}
-      <div><span class="text-xs font-medium text-gray-500">Page URL:</span>
-        <span class="text-xs text-gray-700 ml-1">{{ ticket.current_page }}</span></div>
+      {{ context_field("Page URL:", ticket.current_page) }}
       {% endif %}
       {% if ticket.browser_info %}
-      <div><span class="text-xs font-medium text-gray-500">Browser:</span>
-        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto">{{ ticket.browser_info }}</pre></div>
+      {{ context_field("Browser:", ticket.browser_info, variant="pre") }}
       {% endif %}
       {% if ticket.console_errors %}
-      <div><span class="text-xs font-medium text-gray-500">JS Errors:</span>
-        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto max-h-40">{{ ticket.console_errors }}</pre></div>
+      {{ context_field("JS Errors:", ticket.console_errors, variant="pre", scroll=True) }}
       {% endif %}
       {% if ticket.network_errors %}
-      <div><span class="text-xs font-medium text-gray-500">Network Log:</span>
-        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto max-h-40">{{ ticket.network_errors|tojson(indent=2) }}</pre></div>
+      {{ context_field("Network Log:", ticket.network_errors|tojson(indent=2), variant="pre", scroll=True) }}
       {% endif %}
     </div>
   </div>

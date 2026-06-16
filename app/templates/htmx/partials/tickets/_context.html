@@ -1,0 +1,26 @@
+{# _context.html — One labelled field inside the ticket "Captured Context" panel.
+
+Collapses the four copy-paste-with-variation blocks in detail.html into a single
+parameterised macro. Output is byte-identical to the inline markup it replaced.
+
+Variants:
+  variant="inline" -> value in a <span class="... ml-1"> (used for Page URL)
+  variant="pre"    -> value in a scrollable <pre>            (used for Browser)
+  variant="pre", scroll=True -> adds max-h-40 to the <pre>   (JS Errors, Network Log)
+
+`value` is emitted as-is; the caller pre-applies any filter (e.g. |tojson) so
+Markup-safe values pass through unescaped exactly as before.
+
+Called-by:
+  htmx/partials/tickets/detail.html
+
+Usage:
+  {% from "htmx/partials/tickets/_context.html" import context_field %}
+  {{ context_field("Page URL:", ticket.current_page) }}
+  {{ context_field("Browser:", ticket.browser_info, variant="pre") }}
+  {{ context_field("Network Log:", ticket.network_errors|tojson(indent=2), variant="pre", scroll=True) }}
+#}
+{%- macro context_field(label, value, variant="inline", scroll=False) -%}
+<div><span class="text-xs font-medium text-gray-500">{{ label }}</span>
+        {% if variant == "pre" %}<pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto{% if scroll %} max-h-40{% endif %}">{{ value }}</pre>{% else %}<span class="text-xs text-gray-700 ml-1">{{ value }}</span>{% endif %}</div>
+{%- endmacro -%}

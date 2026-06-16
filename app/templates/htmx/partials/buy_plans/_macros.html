@@ -1,0 +1,27 @@
+{# _macros.html — Buy-plan cluster Jinja2 macros (detail.html / list.html).
+
+Output-neutral helpers extracted from repeated markup. Each macro is whitespace-
+controlled so it renders byte-for-byte identical to the inline markup it replaced.
+
+Usage:
+  {% from "htmx/partials/buy_plans/_macros.html" import collapse_chevron, modal_cancel_btn %}
+  {{ collapse_chevron("showAi") }}
+  {{ modal_cancel_btn() }}
+#}
+
+
+{# ── Collapsible-section chevron ──────────────────────────────────────
+   Toggle chevron for a collapsible section header. `open_var` is the
+   Alpine boolean that controls the section (e.g. 'showAi'); the chevron
+   rotates 180° while that section is open. #}
+{% macro collapse_chevron(open_var) -%}
+<svg class="w-4 h-4 text-gray-400 transition-transform" :class="{{ open_var }} && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+{%- endmacro %}
+
+
+{# ── Modal footer "Cancel" button ─────────────────────────────────────
+   The dismiss button shared by every buy-plan modal footer. Closes the
+   modal without submitting. #}
+{% macro modal_cancel_btn() -%}
+<button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50 transition-colors">Cancel</button>
+{%- endmacro %}
