@@ -213,6 +213,7 @@ async def send_batch_rfq(
             else:
                 err_detail = str(send_result.get("detail", ""))
                 logger.error(f"Send failed to {email}: {send_result}")
+            per_req_parts = _per_req_parts(group)
             failed_contacts: list[Contact] = []
             try:
                 with db.begin_nested():
@@ -229,13 +230,13 @@ async def send_batch_rfq(
                             "failed",
                             err_detail[:500],
                         )
-                        for rid, parts in _per_req_parts(group)
+                        for rid, parts in per_req_parts
                     ]
             except Exception:
                 logger.error(
                     "Contact tracking failed for vendor '{}' (requisitions {}) on the failed-send path",
                     group["vendor_name"],
-                    [rid for rid, _ in _per_req_parts(group)],
+                    [rid for rid, _ in per_req_parts],
                     exc_info=True,
                 )
             results.append(
@@ -249,6 +250,7 @@ async def send_batch_rfq(
             )
             continue
 
+        per_req_parts = _per_req_parts(group)
         try:
             with db.begin_nested():
                 contacts = [
@@ -263,7 +265,7 @@ async def send_batch_rfq(
                         group["body"],
                         "sent",
                     )
-                    for rid, parts in _per_req_parts(group)
+                    for rid, parts in per_req_parts
                 ]
         except Exception:
             # The email WAS delivered — report a tracking error for this vendor
@@ -271,7 +273,7 @@ async def send_batch_rfq(
             logger.error(
                 "Contact tracking failed for vendor '{}' (requisitions {}) — RFQ email was already sent",
                 group["vendor_name"],
-                [rid for rid, _ in _per_req_parts(group)],
+                [rid for rid, _ in per_req_parts],
                 exc_info=True,
             )
             results.append(
@@ -454,12 +456,13 @@ def _scope_thread_contacts_to_sender(thread_contacts: list[Contact], sender_emai
         ]
         if domain_matches:
             return domain_matches
-    if len({(c.vendor_contact or "").lower() for c in thread_contacts}) == 1:
+    distinct_vendor_emails = {(c.vendor_contact or "").lower() for c in thread_contacts}
+    if len(distinct_vendor_emails) == 1:
         return list(thread_contacts)
     logger.warning(
         "Tier-1 thread match dropped: sender {} matches none of the {} vendors on the conversation",
         sender,
-        len({(c.vendor_contact or "").lower() for c in thread_contacts}),
+        len(distinct_vendor_emails),
     )
     return []
 
@@ -1016,7 +1019,7 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
         contact.status = "quoted"
     elif classification == "no_stock":
         contact.status = "declined"
-    elif classification in ("ooo_bounce",):
+    elif classification == "ooo_bounce":
         contact.status = "pending"  # Will need re-follow-up
     elif classification in (
         "clarification_needed",
@@ -1322,10 +1325,9 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
     from .search_service import resolve_material_card
     from .utils.normalization import normalize_mpn_key
 
-    req_obj = db.get(Requisition, vr.requisition_id)
     mpn_to_req_id: dict[str, int] = {}
     mpn_to_card_id: dict[str, int] = {}
-    if req_obj:
+    if req:
         for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
             if r.primary_mpn:
                 key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
@@ -1471,8 +1473,6 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
     # Publish SSE event so sightings page refreshes for affected requirements
     if owner_id:
         try:
-            import asyncio
-
             from .services.sse_broker import broker
 
             affected_req_ids = set(mpn_to_req_id.values())

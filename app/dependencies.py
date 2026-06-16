@@ -17,7 +17,7 @@ Depends on: models, database, config
 """
 
 import hmac
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from loguru import logger
@@ -26,6 +26,10 @@ from sqlalchemy.orm import Session, selectinload
 from .constants import UserRole
 from .database import get_db
 from .models import Quote, Requisition, User
+
+# Non-interactive service account seeded by startup.py. It authenticates via the
+# x-agent-key header and is barred from admin/settings/buyer (RFQ) endpoints.
+_AGENT_EMAIL = "agent@availai.local"
 
 # ── Authentication ────────────────────────────────────────────────────
 
@@ -53,9 +57,9 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         agent_key = request.headers.get("x-agent-key")
         if agent_key and settings.agent_api_key and hmac.compare_digest(agent_key, settings.agent_api_key):
             logger.info("Agent API access: method={} path={}", request.method, request.url.path)
-            user = db.query(User).filter_by(email="agent@availai.local").first()
+            user = db.query(User).filter_by(email=_AGENT_EMAIL).first()
             if not user:
-                logger.error("Agent API key valid but agent@availai.local user not found in DB — seed it first")
+                logger.error("Agent API key valid but {} user not found in DB — seed it first", _AGENT_EMAIL)
                 raise HTTPException(503, "Agent user not provisioned")
     if not user:
         raise HTTPException(401, "Not authenticated")
@@ -70,24 +74,38 @@ def is_admin(user: User) -> bool:
     return bool(user.role == UserRole.ADMIN)
 
 
+def _require_admin_user(request: Request, db: Session, *, agent_msg: str, role_msg: str) -> User:
+    """Resolve an admin-only user, blocking the agent service account.
+
+    Raises 403 with *agent_msg* if the caller is the agent account, or *role_msg* if the
+    caller is not an admin.
+    """
+    user = require_user(request, db)
+    if user.email == _AGENT_EMAIL:
+        raise HTTPException(403, agent_msg)
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, role_msg)
+    return user
+
+
 def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: raises 403 if user is not an admin. Blocks agent service account."""
-    user = require_user(request, db)
-    if user.email == "agent@availai.local":
-        raise HTTPException(403, "Agent keys cannot access admin endpoints")
-    if user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Admin access required")
-    return user
+    return _require_admin_user(
+        request,
+        db,
+        agent_msg="Agent keys cannot access admin endpoints",
+        role_msg="Admin access required",
+    )
 
 
 def require_settings_access(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: allows admin only. Blocks agent service account."""
-    user = require_user(request, db)
-    if user.email == "agent@availai.local":
-        raise HTTPException(403, "Agent keys cannot access settings")
-    if user.role != UserRole.ADMIN:
-        raise HTTPException(403, "Settings access required")
-    return user
+    return _require_admin_user(
+        request,
+        db,
+        agent_msg="Agent keys cannot access settings",
+        role_msg="Settings access required",
+    )
 
 
 # Roles allowed through require_buyer. Single source of truth — templates that hide
@@ -170,26 +188,18 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     if not token:
         raise HTTPException(401, "No access token — please log in")
 
-    # Check if token needs refresh (15-min buffer)
-    needs_refresh = False
+    # The background scheduler job (_job_token_refresh) refreshes proactively within the
+    # 15-min buffer, so the only failure case to handle inline is a truly-expired token
+    # (background job missed it or no refresh token) — everything else uses the DB token.
     if user.token_expires_at:
         expiry = (
             user.token_expires_at
             if user.token_expires_at.tzinfo
             else user.token_expires_at.replace(tzinfo=timezone.utc)
         )
-        if datetime.now(timezone.utc) > expiry - timedelta(minutes=15):
-            needs_refresh = True
-
-    if needs_refresh:
-        # Background scheduler job refreshes tokens proactively.
-        # If within buffer but not expired, continue with current token.
         if datetime.now(timezone.utc) > expiry:
-            # Truly expired — background job missed it or no refresh token
             user.m365_connected = False
             db.commit()
             raise HTTPException(401, "Session expired — please log in again")
-        # Within buffer, not yet expired — use current token
-        return str(token)
 
     return str(token)

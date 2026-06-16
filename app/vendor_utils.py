@@ -103,8 +103,6 @@ def normalize_vendor_name(name: str) -> str:
     if not name:
         return ""
     n = name.strip().lower()
-    # Remove trailing comma before suffix
-    n = re.sub(r",\s*$", "", n)
     # Strip suffixes (may need multiple passes)
     for _ in range(3):
         prev = n
@@ -127,7 +125,7 @@ def merge_emails_into_card(card, new_emails: list[str]) -> int:
     """
     if not new_emails:
         return 0
-    existing = set(e.lower() for e in (card.emails or []))
+    existing = {e.lower() for e in (card.emails or [])}
     added = 0
     merged = list(card.emails or [])
     for email in new_emails:

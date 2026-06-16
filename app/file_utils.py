@@ -217,6 +217,20 @@ LEAD_TIME_HEADERS = {"lead_time", "lead time", "leadtime", "lt", "delivery", "av
 CURRENCY_HEADERS = {"currency", "curr", "ccy"}
 
 
+def _first_header_value(norm: dict, headers: set) -> str | None:
+    """Return the first non-empty value in *norm* whose key is in *headers*."""
+    for h in headers:
+        if h in norm and norm[h]:
+            return norm[h]
+    return None
+
+
+def _first_header_str(norm: dict, headers: set) -> str | None:
+    """Like ``_first_header_value`` but stripped to a string (None if no match)."""
+    raw = _first_header_value(norm, headers)
+    return str(raw).strip() if raw is not None else None
+
+
 def normalize_stock_row(r: dict) -> dict | None:
     """Extract mpn/qty/price/manufacturer/condition/packaging/date_code/lead_time from a
     row.
@@ -228,74 +242,21 @@ def normalize_stock_row(r: dict) -> dict | None:
 
     norm = {k.strip().lower(): v for k, v in r.items() if k}
 
-    mpn = None
-    for h in MPN_HEADERS:
-        if h in norm and norm[h]:
-            mpn = str(norm[h]).strip()
-            break
-
+    mpn = _first_header_str(norm, MPN_HEADERS)
     if not mpn or len(mpn) < 3:
         return None
 
-    qty_raw = None
-    for h in QTY_HEADERS:
-        if h in norm and norm[h]:
-            qty_raw = norm[h]
-            break
-    qty = normalize_quantity(qty_raw)
-
-    price_raw = None
-    for h in PRICE_HEADERS:
-        if h in norm and norm[h]:
-            price_raw = norm[h]
-            break
-    price = normalize_price(price_raw)
-
-    mfr = None
-    for h in MFR_HEADERS:
-        if h in norm and norm[h]:
-            mfr = str(norm[h]).strip()
-            break
-
-    condition = None
-    for h in CONDITION_HEADERS:
-        if h in norm and norm[h]:
-            condition = str(norm[h]).strip()
-            break
-
-    packaging = None
-    for h in PACKAGING_HEADERS:
-        if h in norm and norm[h]:
-            packaging = str(norm[h]).strip()
-            break
-
-    date_code = None
-    for h in DATE_CODE_HEADERS:
-        if h in norm and norm[h]:
-            date_code = str(norm[h]).strip()
-            break
-
-    lead_time = None
-    for h in LEAD_TIME_HEADERS:
-        if h in norm and norm[h]:
-            lead_time = str(norm[h]).strip()
-            break
-
-    currency = None
-    for h in CURRENCY_HEADERS:
-        if h in norm and norm[h]:
-            currency = norm[h]
-            break
-    currency = detect_currency(currency or price_raw)
+    price_raw = _first_header_value(norm, PRICE_HEADERS)
+    currency = _first_header_value(norm, CURRENCY_HEADERS)
 
     return {
         "mpn": mpn,
-        "qty": qty,
-        "price": price,
-        "manufacturer": mfr,
-        "condition": condition,
-        "packaging": packaging,
-        "date_code": date_code,
-        "lead_time": lead_time,
-        "currency": currency,
+        "qty": normalize_quantity(_first_header_value(norm, QTY_HEADERS)),
+        "price": normalize_price(price_raw),
+        "manufacturer": _first_header_str(norm, MFR_HEADERS),
+        "condition": _first_header_str(norm, CONDITION_HEADERS),
+        "packaging": _first_header_str(norm, PACKAGING_HEADERS),
+        "date_code": _first_header_str(norm, DATE_CODE_HEADERS),
+        "lead_time": _first_header_str(norm, LEAD_TIME_HEADERS),
+        "currency": detect_currency(currency or price_raw),
     }

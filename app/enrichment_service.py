@@ -269,14 +269,15 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
 
     Returns normalized company data.
     """
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
+    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+    if not api_key:
         logger.debug("Explorium API key not configured — skipping")
         return None
     try:
         resp = await http.post(
             f"{EXPLORIUM_BASE}/match/business",
             headers={
-                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json={"domain": domain, "name": name},
@@ -309,7 +310,8 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
 
 async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
     """Find contacts at a company via Explorium."""
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
+    api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+    if not api_key:
         return []
     try:
         payload = {"company_domain": domain}
@@ -318,7 +320,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
         resp = await http.post(
             f"{EXPLORIUM_BASE}/fetch/prospects",
             headers={
-                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
             },
             json=payload,
@@ -602,25 +604,23 @@ def apply_enrichment_to_company(company, data: dict) -> list[str]:
     Returns list of fields updated.
     """
     updated = []
-    field_map = {
-        "domain": "domain",
-        "linkedin_url": "linkedin_url",
-        "legal_name": "legal_name",
-        "industry": "industry",
-        "employee_size": "employee_size",
-        "hq_city": "hq_city",
-        "hq_state": "hq_state",
-        "hq_country": "hq_country",
-    }
-    for data_key, model_field in field_map.items():
-        val = data.get(data_key)
-        if val and not getattr(company, model_field, None):
-            setattr(company, model_field, val)
-            updated.append(model_field)
-    # Website: only set if empty
-    if data.get("website") and not company.website:
-        company.website = data["website"]
-        updated.append("website")
+    # Each field is set only when present in `data` and currently empty on the model.
+    fields = (
+        "domain",
+        "linkedin_url",
+        "legal_name",
+        "industry",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "website",
+    )
+    for field in fields:
+        val = data.get(field)
+        if val and not getattr(company, field, None):
+            setattr(company, field, val)
+            updated.append(field)
     if updated:
         company.last_enriched_at = datetime.now(timezone.utc)
         company.enrichment_source = data.get("source", "unknown")
@@ -633,27 +633,23 @@ def apply_enrichment_to_vendor(card, data: dict) -> list[str]:
     Returns list of fields updated.
     """
     updated = []
-    field_map = {
-        "linkedin_url": "linkedin_url",
-        "legal_name": "legal_name",
-        "industry": "industry",
-        "employee_size": "employee_size",
-        "hq_city": "hq_city",
-        "hq_state": "hq_state",
-        "hq_country": "hq_country",
-    }
-    for data_key, model_field in field_map.items():
-        val = data.get(data_key)
-        if val and not getattr(card, model_field, None):
-            setattr(card, model_field, val)
-            updated.append(model_field)
-    # Domain: only set if empty
-    if data.get("domain") and not card.domain:
-        card.domain = data["domain"]
-        updated.append("domain")
-    if data.get("website") and not card.website:
-        card.website = data["website"]
-        updated.append("website")
+    # Each field is set only when present in `data` and currently empty on the model.
+    fields = (
+        "linkedin_url",
+        "legal_name",
+        "industry",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "domain",
+        "website",
+    )
+    for field in fields:
+        val = data.get(field)
+        if val and not getattr(card, field, None):
+            setattr(card, field, val)
+            updated.append(field)
     if updated:
         card.last_enriched_at = datetime.now(timezone.utc)
         card.enrichment_source = data.get("source", "unknown")

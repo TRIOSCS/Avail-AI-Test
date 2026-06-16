@@ -36,7 +36,15 @@ from .models import (
     Requirement,
     Sighting,
 )
-from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
+from .scoring import (
+    classify_lead,
+    confidence_color,
+    explain_lead,
+    is_weak_lead,
+    score_sighting,
+    score_sighting_v2,
+    score_unified,
+)
 from .services.activity_service import log_activity
 from .services.credential_service import get_credential, get_credentials_batch
 from .services.fru_matrix_service import get_search_aliases
@@ -347,7 +355,7 @@ def _affinity_match_to_result(match: dict, mpn: str) -> dict:
         "is_material_history": False,
         "is_affinity": True,
         "confidence_pct": conf_pct,
-        "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
+        "confidence_color": confidence_color(conf_pct),
         "reasoning": match.get("reasoning", ""),
         "qty_available": None,
         "unit_price": None,
@@ -390,7 +398,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
     # 48h per-normalized-MPN cooldown. Split into MPNs that need a connector
     # call vs. ones whose MaterialCard.last_searched_at is recent enough.
-    to_search, cached_card_ids = _mpn_cooldown_partition(db, pns, now=now)
+    to_search, _cached_card_ids = _mpn_cooldown_partition(db, pns, now=now)
 
     searched_keys = {normalize_mpn_key(m) for m in to_search if normalize_mpn_key(m)}
     mpn_results: dict[str, str] = {}
@@ -1572,11 +1580,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
             }
     # Merge with skipped/disabled entries
-    for name, entry in agg.items():
-        source_stats_map[name] = entry
+    source_stats_map.update(agg)
 
     # Cache results for subsequent searches of the same PNs
-    connector_stats = [v for k, v in agg.items()]
+    connector_stats = list(agg.values())
     _set_search_cache(cache_key, out, connector_stats)
 
     return out, list(source_stats_map.values())
