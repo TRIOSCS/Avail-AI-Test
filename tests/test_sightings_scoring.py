@@ -8,11 +8,17 @@ from app.models.intelligence import ActivityLog
 from app.models.sourcing import Requirement, Requisition
 
 
-def test_requirement_has_priority_score(db_session):
-    """Requirement model should have a priority_score column."""
+def _make_requisition(db_session):
+    """Create and flush an active test Requisition, returning it with an id assigned."""
     req = Requisition(name="Test RFQ", status="active")
     db_session.add(req)
     db_session.flush()
+    return req
+
+
+def test_requirement_has_priority_score(db_session):
+    """Requirement model should have a priority_score column."""
+    req = _make_requisition(db_session)
     r = Requirement(
         requisition_id=req.id,
         primary_mpn="TEST-001",
@@ -26,9 +32,7 @@ def test_requirement_has_priority_score(db_session):
 
 def test_requirement_has_assigned_buyer_id(db_session, test_user):
     """Requirement model should have an assigned_buyer_id column."""
-    req = Requisition(name="Test RFQ", status="active")
-    db_session.add(req)
-    db_session.flush()
+    req = _make_requisition(db_session)
     r = Requirement(
         requisition_id=req.id,
         primary_mpn="TEST-002",
@@ -42,9 +46,7 @@ def test_requirement_has_assigned_buyer_id(db_session, test_user):
 
 def test_activity_log_has_requirement_id(db_session, test_user):
     """ActivityLog model should have a requirement_id FK column."""
-    req = Requisition(name="Test RFQ", status="active")
-    db_session.add(req)
-    db_session.flush()
+    req = _make_requisition(db_session)
     r = Requirement(
         requisition_id=req.id,
         primary_mpn="TEST-003",

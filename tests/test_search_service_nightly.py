@@ -27,6 +27,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -95,14 +96,16 @@ def _make_requirement(db: Session, requisition: Requisition, mpn: str = "LM317T"
 
 
 class TestQuickSearchMpnEmptyMpn:
-    async def test_empty_string_returns_empty(self, db_session: Session):
-        """Empty MPN string returns empty result dict (line 370)."""
-        result = await quick_search_mpn("", db_session)
-        assert result == {"sightings": [], "source_stats": [], "material_card": None}
-
-    async def test_whitespace_only_returns_empty(self, db_session: Session):
-        """Whitespace-only MPN hits the guard at line 370."""
-        result = await quick_search_mpn("   ", db_session)
+    @pytest.mark.parametrize(
+        ("mpn", "case"),
+        [
+            ("", "empty_string"),
+            ("   ", "whitespace_only"),
+        ],
+    )
+    async def test_blank_mpn_returns_empty(self, mpn: str, case: str, db_session: Session):
+        """Empty/blank MPN returns empty result dict — hits the guard at line 370."""
+        result = await quick_search_mpn(mpn, db_session)
         assert result == {"sightings": [], "source_stats": [], "material_card": None}
 
 

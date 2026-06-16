@@ -128,6 +128,18 @@ class TestStockListsFieldRemoved:
 
 
 class TestContactsSyncDelta:
+    @staticmethod
+    def _run_sync(mock_gc, test_user, db_session):
+        """Wire access_token + GraphClient(mock_gc) and run _sync_user_contacts to
+        completion."""
+        test_user.access_token = "fake-token"
+        db_session.commit()
+
+        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+            from app.jobs.email_jobs import _sync_user_contacts
+
+            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
+
     def test_sync_user_contacts_uses_delta_query(self, db_session, test_user):
         """_sync_user_contacts uses delta_query instead of get_all_pages."""
         mock_gc = MagicMock()
@@ -146,13 +158,7 @@ class TestContactsSyncDelta:
             )
         )
 
-        test_user.access_token = "fake-token"
-        db_session.commit()
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.jobs.email_jobs import _sync_user_contacts
-
-            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
+        self._run_sync(mock_gc, test_user, db_session)
 
         # Verify delta_query was called (not get_all_pages)
         mock_gc.delta_query.assert_called_once()
@@ -165,13 +171,7 @@ class TestContactsSyncDelta:
         mock_gc = MagicMock()
         mock_gc.delta_query = AsyncMock(return_value=([], "new-delta-token"))
 
-        test_user.access_token = "fake-token"
-        db_session.commit()
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.jobs.email_jobs import _sync_user_contacts
-
-            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
+        self._run_sync(mock_gc, test_user, db_session)
 
         sync = (
             db_session.query(SyncState)
@@ -189,12 +189,6 @@ class TestContactsSyncDelta:
         mock_gc.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("expired"))
         mock_gc.get_all_pages = AsyncMock(return_value=[])
 
-        test_user.access_token = "fake-token"
-        db_session.commit()
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            from app.jobs.email_jobs import _sync_user_contacts
-
-            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
+        self._run_sync(mock_gc, test_user, db_session)
 
         mock_gc.get_all_pages.assert_called_once()

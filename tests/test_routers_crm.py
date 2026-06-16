@@ -149,37 +149,38 @@ def test_quote_to_dict_sent():
 # ── next_quote_number ────────────────────────────────────────────────────
 
 
-def test_next_quote_number_first():
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
-        None
-    )
-    result = next_quote_number(db)
-    assert result.startswith("Q-")
-    assert result.endswith("-0001")
-
-
-def test_next_quote_number_increment():
-    last = MagicMock()
-    last.quote_number = "Q-2026-0042"
+def _mock_db_with_last_quote(last_quote_number):
+    """Build a mock db whose query chain returns a Quote with the given number (or
+    None)."""
+    last = None
+    if last_quote_number is not None:
+        last = MagicMock()
+        last.quote_number = last_quote_number
     db = MagicMock()
     db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
         last
     )
-    result = next_quote_number(db)
-    assert result == "Q-2026-0043"
+    return db
 
 
-def test_next_quote_number_bad_format():
-    """Handles corrupted quote numbers gracefully."""
-    last = MagicMock()
-    last.quote_number = "Q-2026-XXXX"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
-        last
-    )
+@pytest.mark.parametrize(
+    ("last_quote_number", "expected_prefix", "expected_suffix", "expected_exact"),
+    [
+        pytest.param(None, "Q-", "-0001", None, id="first"),
+        pytest.param("Q-2026-0042", None, None, "Q-2026-0043", id="increment"),
+        pytest.param("Q-2026-XXXX", None, "-0001", None, id="bad_format"),
+    ],
+)
+def test_next_quote_number(last_quote_number, expected_prefix, expected_suffix, expected_exact):
+    """First quote, increment, and graceful handling of corrupted quote numbers."""
+    db = _mock_db_with_last_quote(last_quote_number)
     result = next_quote_number(db)
-    assert result.endswith("-0001")
+    if expected_exact is not None:
+        assert result == expected_exact
+    if expected_prefix is not None:
+        assert result.startswith(expected_prefix)
+    if expected_suffix is not None:
+        assert result.endswith(expected_suffix)
 
 
 def test_quote_creation_retries_on_integrity_error(

@@ -120,13 +120,17 @@ class TestOutreachInitiated:
         assert site.last_activity_at is not None
         assert site.last_activity_at.replace(tzinfo=timezone.utc) > before
 
-    def test_invalid_phone_returns_400(self, client, cdm_company):
-        resp = self._post(client, cdm_company, "phone", "call pat")
-        assert resp.status_code == 400
-        assert "error" in resp.json()
-
-    def test_invalid_email_returns_400(self, client, cdm_company):
-        resp = self._post(client, cdm_company, "email", "not-an-email")
+    @pytest.mark.parametrize(
+        ("channel", "value"),
+        [
+            pytest.param("phone", "call pat", id="invalid_phone"),
+            pytest.param("email", "not-an-email", id="invalid_email"),
+            # An all-whitespace WeChat handle must 400, not log 'WeChat message to '.
+            pytest.param("wechat", "   ", id="wechat_whitespace"),
+        ],
+    )
+    def test_invalid_contact_value_returns_400(self, client, cdm_company, channel, value):
+        resp = self._post(client, cdm_company, channel, value)
         assert resp.status_code == 400
         assert "error" in resp.json()
 
@@ -295,12 +299,6 @@ class TestOutreachInitiated:
         assert record.site_contact_id is None
         assert record.customer_site_id == cdm_company["site"].id
         assert "contact" in resp.json()["dropped_links"]
-
-    def test_wechat_whitespace_value_returns_400(self, client, cdm_company):
-        """An all-whitespace WeChat handle must 400, not log 'WeChat message to '."""
-        resp = self._post(client, cdm_company, "wechat", "   ")
-        assert resp.status_code == 400
-        assert "error" in resp.json()
 
     def test_oversized_contact_value_returns_422(self, client, cdm_company):
         """contact_value beyond the String(255) snapshot columns is a 422 at the

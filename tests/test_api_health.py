@@ -15,6 +15,18 @@ from fastapi.testclient import TestClient
 from app.models import User
 from app.models.config import ApiSource, ApiUsageLog
 
+
+def _mock_session_returning(active_sources):
+    """Build a mock DB session whose active-source query returns ``active_sources``.
+
+    Returns ``(mock_session, mock_session_cls)`` matching the query chain
+    ``query(...).filter(...).filter(...).all()`` used by run_health_checks.
+    """
+    mock_session = MagicMock()
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = active_sources
+    return mock_session, MagicMock(return_value=mock_session)
+
+
 # ── Model Tests ──────────────────────────────────────────────────────
 
 
@@ -315,9 +327,7 @@ async def test_run_health_checks_ping(db_session):
     db_session.add_all([src1, src2])
     db_session.commit()
 
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src1, src2]
-    mock_session_cls = MagicMock(return_value=mock_session)
+    mock_session, mock_session_cls = _mock_session_returning([src1, src2])
     ping_mock = AsyncMock(return_value={"success": True, "elapsed_ms": 42, "error": None})
 
     with (
@@ -350,9 +360,7 @@ async def test_run_health_checks_deep(db_session):
     db_session.add(src)
     db_session.commit()
 
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src]
-    mock_session_cls = MagicMock(return_value=mock_session)
+    mock_session, mock_session_cls = _mock_session_returning([src])
     deep_mock = AsyncMock(
         return_value={
             "success": True,
@@ -389,9 +397,7 @@ async def test_run_health_checks_mixed_results(db_session):
     db_session.add_all([src_ok, src_bad])
     db_session.commit()
 
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src_ok, src_bad]
-    mock_session_cls = MagicMock(return_value=mock_session)
+    mock_session, mock_session_cls = _mock_session_returning([src_ok, src_bad])
     ping_mock = AsyncMock(
         side_effect=[
             {"success": True, "elapsed_ms": 50, "error": None},
@@ -423,9 +429,7 @@ async def test_run_health_checks_source_crash(db_session):
     db_session.add(src)
     db_session.commit()
 
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src]
-    mock_session_cls = MagicMock(return_value=mock_session)
+    mock_session, mock_session_cls = _mock_session_returning([src])
     ping_mock = AsyncMock(side_effect=RuntimeError("unexpected crash"))
 
     with (
@@ -467,9 +471,7 @@ async def test_run_health_checks_db_error_rollback():
 @pytest.mark.asyncio
 async def test_run_health_checks_no_active_sources():
     """run_health_checks with no active sources returns zeroes."""
-    mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = []
-    mock_session_cls = MagicMock(return_value=mock_session)
+    mock_session, mock_session_cls = _mock_session_returning([])
 
     with patch("app.database.SessionLocal", mock_session_cls):
         from app.services.health_monitor import run_health_checks

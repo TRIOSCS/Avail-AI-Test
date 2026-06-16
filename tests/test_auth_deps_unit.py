@@ -220,40 +220,18 @@ class TestRequireAdmin:
 class TestRequireBuyer:
     """Tests for require_buyer(request, db)."""
 
-    def test_buyer_role_allowed(self, db_session: Session):
-        user = _create_user(db_session, role="buyer")
-        request = _make_request(session_data={"user_id": user.id})
-
-        result = require_buyer(request, db_session)
-
-        assert result.id == user.id
-
-    def test_sales_role_allowed(self, db_session: Session):
-        user = _create_user(db_session, email="sales@test.com", role="sales")
-        request = _make_request(session_data={"user_id": user.id})
-
-        result = require_buyer(request, db_session)
-
-        assert result.id == user.id
-
-    def test_trader_role_allowed(self, db_session: Session):
-        user = _create_user(db_session, email="trader@test.com", role="trader")
-        request = _make_request(session_data={"user_id": user.id})
-
-        result = require_buyer(request, db_session)
-
-        assert result.id == user.id
-
-    def test_manager_role_allowed(self, db_session: Session):
-        user = _create_user(db_session, email="mgr@test.com", role="manager")
-        request = _make_request(session_data={"user_id": user.id})
-
-        result = require_buyer(request, db_session)
-
-        assert result.id == user.id
-
-    def test_admin_role_allowed(self, db_session: Session):
-        user = _create_user(db_session, email="adm@test.com", role="admin")
+    @pytest.mark.parametrize(
+        ("email", "role"),
+        [
+            pytest.param("unit@test.com", "buyer", id="buyer"),
+            pytest.param("sales@test.com", "sales", id="sales"),
+            pytest.param("trader@test.com", "trader", id="trader"),
+            pytest.param("mgr@test.com", "manager", id="manager"),
+            pytest.param("adm@test.com", "admin", id="admin"),
+        ],
+    )
+    def test_role_allowed(self, db_session: Session, email: str, role: str):
+        user = _create_user(db_session, email=email, role=role)
         request = _make_request(session_data={"user_id": user.id})
 
         result = require_buyer(request, db_session)

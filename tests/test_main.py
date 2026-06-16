@@ -7,10 +7,40 @@ Missing lines: 37-38, 45-53, 57-65, 117-120, 160-170, 191-195,
 
 import asyncio
 import os
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+@contextmanager
+def no_testing_env():
+    """Temporarily unset the TESTING env var, restoring it (to "1") on exit.
+
+    The lifespan/module-import branches under test only run when TESTING is unset.
+    """
+    original = os.environ.pop("TESTING", None)
+    try:
+        yield
+    finally:
+        os.environ["TESTING"] = original if original is not None else "1"
+
+
+def run_lifespan(mock_app):
+    """Run the app lifespan async context (enter + exit) on a fresh event loop."""
+    from app.main import lifespan
+
+    async def _run():
+        async with lifespan(mock_app):
+            pass
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_run())
+    finally:
+        loop.close()
+
 
 # ── Lifespan: S1 secret key fail-fast (lines 37-38) ──────────────────
 
@@ -24,26 +54,19 @@ class TestLifespanSecretKey:
         from app.main import lifespan
 
         mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with patch("app.main.settings") as mock_settings:
-                mock_settings.secret_key = "change-me-in-production"
-                mock_settings.sentry_dsn = ""
-                mock_settings.azure_client_id = "x"
-                mock_settings.azure_client_secret = "x"
-                mock_settings.azure_tenant_id = "x"
+        with no_testing_env(), patch("app.main.settings") as mock_settings:
+            mock_settings.secret_key = "change-me-in-production"
+            mock_settings.sentry_dsn = ""
+            mock_settings.azure_client_id = "x"
+            mock_settings.azure_client_secret = "x"
+            mock_settings.azure_tenant_id = "x"
 
-                loop = asyncio.new_event_loop()
-                try:
-                    with pytest.raises(RuntimeError, match="SESSION_SECRET or SECRET_KEY must be set"):
-                        loop.run_until_complete(lifespan(mock_app).__aenter__())
-                finally:
-                    loop.close()
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+            loop = asyncio.new_event_loop()
+            try:
+                with pytest.raises(RuntimeError, match="SESSION_SECRET or SECRET_KEY must be set"):
+                    loop.run_until_complete(lifespan(mock_app).__aenter__())
+            finally:
+                loop.close()
 
 
 # ── Lifespan: S2 missing env var warnings (lines 45-53) ──────────────
@@ -54,86 +77,52 @@ class TestLifespanMissingEnvVars:
 
     def test_missing_azure_vars_logs_warning(self):
         """When TESTING is unset and Azure vars are missing, logs warning."""
-        from app.main import lifespan
-
         mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.main.settings") as mock_settings,
-                patch("app.startup.run_startup_migrations"),
-                patch("app.startup.seed_api_sources"),
-                patch("app.connector_status.log_connector_status", return_value={}),
-                patch("app.scheduler.configure_scheduler"),
-                patch("app.scheduler.scheduler") as mock_sched,
-                patch("app.http_client.close_clients", new_callable=AsyncMock),
-                patch("app.main.logger") as mock_logger,
-            ):
-                mock_settings.secret_key = "a-real-secret-key"
-                mock_settings.sentry_dsn = ""
-                mock_settings.azure_client_id = ""
-                mock_settings.azure_client_secret = ""
-                mock_settings.azure_tenant_id = ""
+        with (
+            no_testing_env(),
+            patch("app.main.settings") as mock_settings,
+            patch("app.startup.run_startup_migrations"),
+            patch("app.startup.seed_api_sources"),
+            patch("app.connector_status.log_connector_status", return_value={}),
+            patch("app.scheduler.configure_scheduler"),
+            patch("app.scheduler.scheduler"),
+            patch("app.http_client.close_clients", new_callable=AsyncMock),
+            patch("app.main.logger") as mock_logger,
+        ):
+            mock_settings.secret_key = "a-real-secret-key"
+            mock_settings.sentry_dsn = ""
+            mock_settings.azure_client_id = ""
+            mock_settings.azure_client_secret = ""
+            mock_settings.azure_tenant_id = ""
 
-                loop = asyncio.new_event_loop()
-                try:
+            run_lifespan(mock_app)
 
-                    async def run_lifespan():
-                        async with lifespan(mock_app) as _:
-                            pass
-
-                    loop.run_until_complete(run_lifespan())
-                finally:
-                    loop.close()
-
-                mock_logger.warning.assert_called()
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+            mock_logger.warning.assert_called()
 
     def test_no_missing_azure_vars_no_warning(self):
         """When TESTING is unset and all Azure vars are present, no warning."""
-        from app.main import lifespan
-
         mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.main.settings") as mock_settings,
-                patch("app.startup.run_startup_migrations"),
-                patch("app.startup.seed_api_sources"),
-                patch("app.connector_status.log_connector_status", return_value={}),
-                patch("app.scheduler.configure_scheduler"),
-                patch("app.scheduler.scheduler") as mock_sched,
-                patch("app.http_client.close_clients", new_callable=AsyncMock),
-                patch("app.main.logger") as mock_logger,
-            ):
-                mock_settings.secret_key = "a-real-secret-key"
-                mock_settings.sentry_dsn = ""
-                mock_settings.azure_client_id = "cid"
-                mock_settings.azure_client_secret = "csecret"
-                mock_settings.azure_tenant_id = "tid"
+        with (
+            no_testing_env(),
+            patch("app.main.settings") as mock_settings,
+            patch("app.startup.run_startup_migrations"),
+            patch("app.startup.seed_api_sources"),
+            patch("app.connector_status.log_connector_status", return_value={}),
+            patch("app.scheduler.configure_scheduler"),
+            patch("app.scheduler.scheduler"),
+            patch("app.http_client.close_clients", new_callable=AsyncMock),
+            patch("app.main.logger") as mock_logger,
+        ):
+            mock_settings.secret_key = "a-real-secret-key"
+            mock_settings.sentry_dsn = ""
+            mock_settings.azure_client_id = "cid"
+            mock_settings.azure_client_secret = "csecret"
+            mock_settings.azure_tenant_id = "tid"
 
-                loop = asyncio.new_event_loop()
-                try:
+            run_lifespan(mock_app)
 
-                    async def run_lifespan():
-                        async with lifespan(mock_app) as _:
-                            pass
-
-                    loop.run_until_complete(run_lifespan())
-                finally:
-                    loop.close()
-
-                for c in mock_logger.warning.call_args_list:
-                    assert "Missing env vars" not in str(c)
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+            for c in mock_logger.warning.call_args_list:
+                assert "Missing env vars" not in str(c)
 
 
 # ── Lifespan: Sentry init (lines 57-65) ──────────────────────────────
@@ -142,165 +131,85 @@ class TestLifespanMissingEnvVars:
 class TestLifespanSentry:
     """Cover lines 57-65: Sentry SDK initialization when DSN is set."""
 
+    @staticmethod
+    @contextmanager
+    def _sentry_lifespan(*, sentry_dsn, app_url):
+        """Run lifespan with TESTING unset and a Sentry DSN set, yielding the init
+        mock."""
+        mock_app = MagicMock()
+        with (
+            no_testing_env(),
+            patch("app.main.settings") as mock_settings,
+            patch("app.startup.run_startup_migrations"),
+            patch("app.startup.seed_api_sources"),
+            patch("app.connector_status.log_connector_status", return_value={}),
+            patch("app.scheduler.configure_scheduler"),
+            patch("app.scheduler.scheduler"),
+            patch("app.http_client.close_clients", new_callable=AsyncMock),
+            patch("sentry_sdk.init") as mock_sentry_init,
+        ):
+            mock_settings.secret_key = "a-real-secret-key"
+            mock_settings.sentry_dsn = sentry_dsn
+            mock_settings.sentry_traces_sample_rate = 0.1
+            mock_settings.sentry_profiles_sample_rate = 0.1
+            mock_settings.app_url = app_url
+            mock_settings.azure_client_id = "cid"
+            mock_settings.azure_client_secret = "csecret"
+            mock_settings.azure_tenant_id = "tid"
+
+            run_lifespan(mock_app)
+            yield mock_sentry_init
+
     def test_sentry_init_when_dsn_set(self):
         """When sentry_dsn is set, sentry_sdk.init is called."""
-        from app.main import lifespan
-
-        mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.main.settings") as mock_settings,
-                patch("app.startup.run_startup_migrations"),
-                patch("app.startup.seed_api_sources"),
-                patch("app.connector_status.log_connector_status", return_value={}),
-                patch("app.scheduler.configure_scheduler"),
-                patch("app.scheduler.scheduler") as mock_sched,
-                patch("app.http_client.close_clients", new_callable=AsyncMock),
-                patch("sentry_sdk.init") as mock_sentry_init,
-            ):
-                mock_settings.secret_key = "a-real-secret-key"
-                mock_settings.sentry_dsn = "https://examplePublicKey@o0.ingest.sentry.io/0"
-                mock_settings.sentry_traces_sample_rate = 0.1
-                mock_settings.sentry_profiles_sample_rate = 0.1
-                mock_settings.app_url = "https://app.example.com"
-                mock_settings.azure_client_id = "cid"
-                mock_settings.azure_client_secret = "csecret"
-                mock_settings.azure_tenant_id = "tid"
-
-                loop = asyncio.new_event_loop()
-                try:
-
-                    async def run_lifespan():
-                        async with lifespan(mock_app) as _:
-                            pass
-
-                    loop.run_until_complete(run_lifespan())
-                finally:
-                    loop.close()
-
-                mock_sentry_init.assert_called_once()
-                call_kwargs = mock_sentry_init.call_args[1]
-                assert call_kwargs["environment"] == "production"
-                assert "integrations" in call_kwargs
-                assert len(call_kwargs["integrations"]) == 4
-                assert call_kwargs["before_send"] is not None
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+        with self._sentry_lifespan(
+            sentry_dsn="https://examplePublicKey@o0.ingest.sentry.io/0",
+            app_url="https://app.example.com",
+        ) as mock_sentry_init:
+            mock_sentry_init.assert_called_once()
+            call_kwargs = mock_sentry_init.call_args[1]
+            assert call_kwargs["environment"] == "production"
+            assert "integrations" in call_kwargs
+            assert len(call_kwargs["integrations"]) == 4
+            assert call_kwargs["before_send"] is not None
 
     def test_sentry_before_send_scrubs_headers(self):
         """Verify _sentry_before_send scrubs sensitive headers and vars."""
-        from app.main import lifespan
+        with self._sentry_lifespan(
+            sentry_dsn="https://examplePublicKey@o0.ingest.sentry.io/0",
+            app_url="https://app.example.com",
+        ) as mock_sentry_init:
+            before_send = mock_sentry_init.call_args[1]["before_send"]
 
-        mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.main.settings") as mock_settings,
-                patch("app.startup.run_startup_migrations"),
-                patch("app.startup.seed_api_sources"),
-                patch("app.connector_status.log_connector_status", return_value={}),
-                patch("app.scheduler.configure_scheduler"),
-                patch("app.scheduler.scheduler") as mock_sched,
-                patch("app.http_client.close_clients", new_callable=AsyncMock),
-                patch("sentry_sdk.init") as mock_sentry_init,
-            ):
-                mock_settings.secret_key = "a-real-secret-key"
-                mock_settings.sentry_dsn = "https://examplePublicKey@o0.ingest.sentry.io/0"
-                mock_settings.sentry_traces_sample_rate = 0.1
-                mock_settings.sentry_profiles_sample_rate = 0.1
-                mock_settings.app_url = "https://app.example.com"
-                mock_settings.azure_client_id = "cid"
-                mock_settings.azure_client_secret = "csecret"
-                mock_settings.azure_tenant_id = "tid"
+            # Test header scrubbing
+            event = {
+                "request": {
+                    "headers": {"Authorization": "Bearer secret123", "Content-Type": "text/html"},
+                    "query_string": "apiKey=secret123&q=test",
+                },
+                "exception": {
+                    "values": [{"stacktrace": {"frames": [{"vars": {"api_key": "sk-1234", "name": "test"}}]}}]
+                },
+            }
+            result = before_send(event, {})
+            assert result["request"]["headers"]["Authorization"] == "[Filtered]"
+            assert result["request"]["headers"]["Content-Type"] == "text/html"
+            assert result["request"]["query_string"] == "[Filtered]"
+            assert result["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]["api_key"] == "[Filtered]"
+            assert result["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]["name"] == "test"
 
-                loop = asyncio.new_event_loop()
-                try:
-
-                    async def run_lifespan():
-                        async with lifespan(mock_app) as _:
-                            pass
-
-                    loop.run_until_complete(run_lifespan())
-                finally:
-                    loop.close()
-
-                before_send = mock_sentry_init.call_args[1]["before_send"]
-
-                # Test header scrubbing
-                event = {
-                    "request": {
-                        "headers": {"Authorization": "Bearer secret123", "Content-Type": "text/html"},
-                        "query_string": "apiKey=secret123&q=test",
-                    },
-                    "exception": {
-                        "values": [{"stacktrace": {"frames": [{"vars": {"api_key": "sk-1234", "name": "test"}}]}}]
-                    },
-                }
-                result = before_send(event, {})
-                assert result["request"]["headers"]["Authorization"] == "[Filtered]"
-                assert result["request"]["headers"]["Content-Type"] == "text/html"
-                assert result["request"]["query_string"] == "[Filtered]"
-                assert result["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]["api_key"] == "[Filtered]"
-                assert result["exception"]["values"][0]["stacktrace"]["frames"][0]["vars"]["name"] == "test"
-
-                # Test with empty/missing sections
-                assert before_send({}, {}) == {}
-                assert before_send({"exception": None}, {}) == {"exception": None}
-                assert before_send({"exception": {}}, {}) == {"exception": {}}
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+            # Test with empty/missing sections
+            assert before_send({}, {}) == {}
+            assert before_send({"exception": None}, {}) == {"exception": None}
+            assert before_send({"exception": {}}, {}) == {"exception": {}}
 
     def test_sentry_init_development_env(self):
         """When app_url is http, sentry environment is 'development'."""
-        from app.main import lifespan
-
-        mock_app = MagicMock()
-        original = os.environ.pop("TESTING", None)
-        try:
-            with (
-                patch("app.main.settings") as mock_settings,
-                patch("app.startup.run_startup_migrations"),
-                patch("app.startup.seed_api_sources"),
-                patch("app.connector_status.log_connector_status", return_value={}),
-                patch("app.scheduler.configure_scheduler"),
-                patch("app.scheduler.scheduler") as mock_sched,
-                patch("app.http_client.close_clients", new_callable=AsyncMock),
-                patch("sentry_sdk.init") as mock_sentry_init,
-            ):
-                mock_settings.secret_key = "a-real-secret-key"
-                mock_settings.sentry_dsn = "https://example@sentry.io/0"
-                mock_settings.sentry_traces_sample_rate = 0.1
-                mock_settings.sentry_profiles_sample_rate = 0.1
-                mock_settings.app_url = "http://localhost:8000"
-                mock_settings.azure_client_id = "cid"
-                mock_settings.azure_client_secret = "csecret"
-                mock_settings.azure_tenant_id = "tid"
-
-                loop = asyncio.new_event_loop()
-                try:
-
-                    async def run_lifespan():
-                        async with lifespan(mock_app) as _:
-                            pass
-
-                    loop.run_until_complete(run_lifespan())
-                finally:
-                    loop.close()
-
-                call_kwargs = mock_sentry_init.call_args[1]
-                assert call_kwargs["environment"] == "development"
-        finally:
-            if original is not None:
-                os.environ["TESTING"] = original
-            else:
-                os.environ["TESTING"] = "1"
+        with self._sentry_lifespan(
+            sentry_dsn="https://example@sentry.io/0",
+            app_url="http://localhost:8000",
+        ) as mock_sentry_init:
+            assert mock_sentry_init.call_args[1]["environment"] == "development"
 
 
 # ── Rate limit handler (lines 117-120) ────────────────────────────────
@@ -668,22 +577,17 @@ class TestModuleLevelBranches:
         from app.config import settings as real_settings
 
         original_rl = real_settings.rate_limit_enabled
-        original_testing = os.environ.pop("TESTING", None)
         real_settings.rate_limit_enabled = True
 
         try:
-            # Reload the module — this re-runs all module-level code
-            importlib.reload(main_mod)
+            with no_testing_env():
+                # Reload the module — this re-runs all module-level code
+                importlib.reload(main_mod)
         except Exception:
             pass  # Module reload may fail due to side effects, that's ok
         finally:
             # Restore original state
             real_settings.rate_limit_enabled = original_rl
-            if original_testing is not None:
-                os.environ["TESTING"] = original_testing
-            else:
-                os.environ["TESTING"] = "1"
-
             # Restore the original app object to avoid breaking other tests
             main_mod.app = original_app
 

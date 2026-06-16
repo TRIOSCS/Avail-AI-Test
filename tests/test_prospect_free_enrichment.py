@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from xml.etree.ElementTree import Element, SubElement, tostring
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.prospect_account import ProspectAccount
@@ -56,51 +57,66 @@ def _build_rss_xml(items: list[dict]) -> bytes:
     return tostring(rss)
 
 
+def _run(coro):
+    """Run an async coroutine to completion on the event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _mock_http(get_return=None, get_side_effect=None) -> MagicMock:
+    """Build a mock http client whose async .get() returns/raises as configured."""
+    http = MagicMock()
+    http.get = AsyncMock(return_value=get_return, side_effect=get_side_effect)
+    return http
+
+
+def _mock_batch_session(prospect_id_rows: list) -> MagicMock:
+    """Build a mock Session whose chained query returns the given prospect-id rows."""
+    session = MagicMock(spec=Session)
+    query = MagicMock()
+    query.filter.return_value = query
+    query.order_by.return_value = query
+    query.limit.return_value = query
+    query.all.return_value = prospect_id_rows
+    session.query.return_value = query
+    session.close = MagicMock()
+    return session
+
+
 # ── _classify_headline tests ─────────────────────────────────────────
 
 
 class TestClassifyHeadline:
-    def test_funding(self):
-        assert _classify_headline("Acme raises $50M in Series B") == "funding"
-        assert _classify_headline("Company IPO expected next quarter") == "funding"
-
-    def test_acquisition(self):
-        assert _classify_headline("BigCorp acquires SmallCo for $1B") == "acquisition"
-        assert _classify_headline("Merger between Acme and Widget Corp") == "acquisition"
-        assert _classify_headline("Company buys rival firm") == "acquisition"
-
-    def test_expansion(self):
-        assert _classify_headline("Acme opens new facility in Texas") == "expansion"
-        assert _classify_headline("Company expands operations globally") == "expansion"
-        assert _classify_headline("New plant announced in Ohio") == "expansion"
-
-    def test_product(self):
-        assert _classify_headline("Acme launches new product line") == "product"
-        assert _classify_headline("Company unveils groundbreaking tech") == "product"
-        assert _classify_headline("Company introduces new component") == "product"
-
-    def test_hiring(self):
-        assert _classify_headline("Acme hiring 500 engineers") == "hiring"
-        assert _classify_headline("Company recruits top talent") == "hiring"
-
-    def test_layoffs(self):
-        assert _classify_headline("Company announces layoffs") == "layoffs"
-        assert _classify_headline("Acme cuts 200 jobs") == "layoffs"
-        assert _classify_headline("Restructuring plan announced") == "layoffs"
-
-    def test_contract(self):
-        assert _classify_headline("Acme wins $100M defense contract") == "contract"
-        assert _classify_headline("Government awards major deal") == "contract"
-        assert _classify_headline("Pentagon contract to Acme Corp") == "contract"
-
-    def test_regulatory(self):
-        assert _classify_headline("FDA approves new device") == "regulatory"
-        assert _classify_headline("Company receives FAA certification") == "regulatory"
-        assert _classify_headline("Regulatory compliance update") == "regulatory"
-
-    def test_general(self):
-        assert _classify_headline("Acme Corp reports Q4 earnings") == "general"
-        assert _classify_headline("Market update for semiconductors") == "general"
+    @pytest.mark.parametrize(
+        ("headline", "expected"),
+        [
+            ("Acme raises $50M in Series B", "funding"),
+            ("Company IPO expected next quarter", "funding"),
+            ("BigCorp acquires SmallCo for $1B", "acquisition"),
+            ("Merger between Acme and Widget Corp", "acquisition"),
+            ("Company buys rival firm", "acquisition"),
+            ("Acme opens new facility in Texas", "expansion"),
+            ("Company expands operations globally", "expansion"),
+            ("New plant announced in Ohio", "expansion"),
+            ("Acme launches new product line", "product"),
+            ("Company unveils groundbreaking tech", "product"),
+            ("Company introduces new component", "product"),
+            ("Acme hiring 500 engineers", "hiring"),
+            ("Company recruits top talent", "hiring"),
+            ("Company announces layoffs", "layoffs"),
+            ("Acme cuts 200 jobs", "layoffs"),
+            ("Restructuring plan announced", "layoffs"),
+            ("Acme wins $100M defense contract", "contract"),
+            ("Government awards major deal", "contract"),
+            ("Pentagon contract to Acme Corp", "contract"),
+            ("FDA approves new device", "regulatory"),
+            ("Company receives FAA certification", "regulatory"),
+            ("Regulatory compliance update", "regulatory"),
+            ("Acme Corp reports Q4 earnings", "general"),
+            ("Market update for semiconductors", "general"),
+        ],
+    )
+    def test_classify(self, headline, expected):
+        assert _classify_headline(headline) == expected
 
 
 # ── enrich_from_sam_gov tests ────────────────────────────────────────
@@ -109,12 +125,12 @@ class TestClassifyHeadline:
 class TestEnrichFromSamGov:
     def test_empty_name_returns_none(self, db_session):
         prospect = _make_prospect(db_session, name="")
-        result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        result = _run(enrich_from_sam_gov(prospect))
         assert result is None
 
     def test_whitespace_name_returns_none(self, db_session):
         prospect = _make_prospect(db_session, name="   ")
-        result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        result = _run(enrich_from_sam_gov(prospect))
         assert result is None
 
     def test_successful_enrichment(self, db_session):
@@ -153,11 +169,8 @@ class TestEnrichFromSamGov:
             ]
         }
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_sam_gov(prospect))
 
         assert result is not None
         assert result["source"] == "sam_gov"
@@ -175,11 +188,8 @@ class TestEnrichFromSamGov:
         mock_resp.status_code = 429
         mock_resp.text = "Rate limited"
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_sam_gov(prospect))
         assert result is None
 
     def test_no_entities_returns_none(self, db_session):
@@ -188,20 +198,14 @@ class TestEnrichFromSamGov:
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"entityData": []}
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_sam_gov(prospect))
         assert result is None
 
     def test_exception_returns_none(self, db_session):
         prospect = _make_prospect(db_session, name="Acme Corp")
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(side_effect=ConnectionError("DNS failure"))
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        with patch("app.http_client.http", _mock_http(get_side_effect=ConnectionError("DNS failure"))):
+            result = _run(enrich_from_sam_gov(prospect))
         assert result is None
 
     def test_naics_dict_filter(self, db_session):
@@ -225,11 +229,8 @@ class TestEnrichFromSamGov:
             ]
         }
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_sam_gov(prospect))
 
         assert len(result["naics_codes"]) == 1
         assert result["naics_codes"][0]["code"] == "111"
@@ -241,7 +242,7 @@ class TestEnrichFromSamGov:
 class TestEnrichFromGoogleNews:
     def test_empty_name_returns_empty(self, db_session):
         prospect = _make_prospect(db_session, name="")
-        result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
+        result = _run(enrich_from_google_news(prospect))
         assert result == []
 
     def test_successful_fetch(self, db_session):
@@ -257,11 +258,8 @@ class TestEnrichFromGoogleNews:
         mock_resp.status_code = 200
         mock_resp.content = rss_xml
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_google_news(prospect))
 
         assert len(result) == 2
         assert result[0]["signal_type"] == "funding"
@@ -272,11 +270,8 @@ class TestEnrichFromGoogleNews:
         mock_resp = MagicMock()
         mock_resp.status_code = 503
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_google_news(prospect))
         assert result == []
 
     def test_max_items_limit(self, db_session):
@@ -288,11 +283,8 @@ class TestEnrichFromGoogleNews:
         mock_resp.status_code = 200
         mock_resp.content = rss_xml
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect, max_items=3))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_google_news(prospect, max_items=3))
         assert len(result) == 3
 
     def test_no_channel_returns_empty(self, db_session):
@@ -304,20 +296,14 @@ class TestEnrichFromGoogleNews:
         mock_resp.status_code = 200
         mock_resp.content = rss_xml
 
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(return_value=mock_resp)
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
+        with patch("app.http_client.http", _mock_http(get_return=mock_resp)):
+            result = _run(enrich_from_google_news(prospect))
         assert result == []
 
     def test_exception_returns_empty(self, db_session):
         prospect = _make_prospect(db_session, name="Acme Corp")
-        mock_http = MagicMock()
-        mock_http.get = AsyncMock(side_effect=Exception("Network error"))
-
-        with patch("app.http_client.http", mock_http):
-            result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
+        with patch("app.http_client.http", _mock_http(get_side_effect=Exception("Network error"))):
+            result = _run(enrich_from_google_news(prospect))
         assert result == []
 
 
@@ -326,7 +312,7 @@ class TestEnrichFromGoogleNews:
 
 class TestRunFreeEnrichment:
     def test_prospect_not_found(self, db_session):
-        result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(99999, db=db_session))
+        result = _run(run_free_enrichment(99999, db=db_session))
         assert result == {"error": "not_found"}
 
     def test_sam_gov_enriches(self, db_session):
@@ -350,7 +336,7 @@ class TestRunFreeEnrichment:
                 new_callable=AsyncMock,
                 return_value=[],
             ):
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+                result = _run(run_free_enrichment(prospect.id, db=db_session))
 
         assert result["sam_gov"] is True
         assert result["news_count"] == 0
@@ -375,7 +361,7 @@ class TestRunFreeEnrichment:
                 new_callable=AsyncMock,
                 return_value=[],
             ):
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+                result = _run(run_free_enrichment(prospect.id, db=db_session))
 
         mock_sam.assert_not_called()
         assert result["sam_gov"] is False
@@ -411,7 +397,7 @@ class TestRunFreeEnrichment:
                 new_callable=AsyncMock,
                 return_value=news,
             ):
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+                result = _run(run_free_enrichment(prospect.id, db=db_session))
 
         assert result["news_count"] == 2
         db_session.refresh(prospect)
@@ -431,7 +417,7 @@ class TestRunFreeEnrichment:
             new_callable=AsyncMock,
             side_effect=Exception("boom"),
         ):
-            result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+            result = _run(run_free_enrichment(prospect.id, db=db_session))
 
         assert "error" in result
 
@@ -444,7 +430,7 @@ class TestRunFreeEnrichment:
             "app.database.SessionLocal",
             return_value=mock_session,
         ):
-            result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(123))
+            result = _run(run_free_enrichment(123))
 
         assert result == {"error": "not_found"}
         mock_session.close.assert_called_once()
@@ -468,7 +454,7 @@ class TestRunFreeEnrichment:
                 new_callable=AsyncMock,
                 return_value=[],
             ):
-                asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+                _run(run_free_enrichment(prospect.id, db=db_session))
 
         db_session.refresh(prospect)
         assert prospect.naics_code == "999999"  # Unchanged
@@ -503,7 +489,7 @@ class TestRunFreeEnrichment:
                 new_callable=AsyncMock,
                 return_value=news,
             ):
-                asyncio.get_event_loop().run_until_complete(run_free_enrichment(prospect.id, db=db_session))
+                _run(run_free_enrichment(prospect.id, db=db_session))
 
         db_session.refresh(prospect)
         events = prospect.readiness_signals.get("events", [])
@@ -527,14 +513,7 @@ class TestRunFreeEnrichmentBatch:
             )
         db_session.commit()
 
-        mock_session = MagicMock(spec=Session)
-        prospects_query = MagicMock()
-        prospects_query.filter.return_value = prospects_query
-        prospects_query.order_by.return_value = prospects_query
-        prospects_query.limit.return_value = prospects_query
-        prospects_query.all.return_value = [(1,), (2,), (3,)]
-        mock_session.query.return_value = prospects_query
-        mock_session.close = MagicMock()
+        mock_session = _mock_batch_session([(1,), (2,), (3,)])
 
         with patch(
             "app.database.SessionLocal",
@@ -545,7 +524,7 @@ class TestRunFreeEnrichmentBatch:
                 new_callable=AsyncMock,
                 return_value={"sam_gov": True, "news_count": 2},
             ) as mock_enrich:
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch(min_fit_score=40))
+                result = _run(run_free_enrichment_batch(min_fit_score=40))
 
         assert result["processed"] == 3
         assert result["sam_hits"] == 3
@@ -553,14 +532,7 @@ class TestRunFreeEnrichmentBatch:
         assert mock_enrich.call_count == 3
 
     def test_batch_counts_errors(self):
-        mock_session = MagicMock(spec=Session)
-        prospects_query = MagicMock()
-        prospects_query.filter.return_value = prospects_query
-        prospects_query.order_by.return_value = prospects_query
-        prospects_query.limit.return_value = prospects_query
-        prospects_query.all.return_value = [(1,)]
-        mock_session.query.return_value = prospects_query
-        mock_session.close = MagicMock()
+        mock_session = _mock_batch_session([(1,)])
 
         with patch(
             "app.database.SessionLocal",
@@ -571,20 +543,13 @@ class TestRunFreeEnrichmentBatch:
                 new_callable=AsyncMock,
                 return_value={"error": "not_found"},
             ):
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch())
+                result = _run(run_free_enrichment_batch())
 
         assert result["errors"] == 1
         assert result["processed"] == 0
 
     def test_batch_handles_exception_in_enrichment(self):
-        mock_session = MagicMock(spec=Session)
-        prospects_query = MagicMock()
-        prospects_query.filter.return_value = prospects_query
-        prospects_query.order_by.return_value = prospects_query
-        prospects_query.limit.return_value = prospects_query
-        prospects_query.all.return_value = [(1,)]
-        mock_session.query.return_value = prospects_query
-        mock_session.close = MagicMock()
+        mock_session = _mock_batch_session([(1,)])
 
         with patch(
             "app.database.SessionLocal",
@@ -595,25 +560,18 @@ class TestRunFreeEnrichmentBatch:
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("crash"),
             ):
-                result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch())
+                result = _run(run_free_enrichment_batch())
 
         assert result["errors"] == 1
 
     def test_batch_empty_prospects(self):
-        mock_session = MagicMock(spec=Session)
-        prospects_query = MagicMock()
-        prospects_query.filter.return_value = prospects_query
-        prospects_query.order_by.return_value = prospects_query
-        prospects_query.limit.return_value = prospects_query
-        prospects_query.all.return_value = []
-        mock_session.query.return_value = prospects_query
-        mock_session.close = MagicMock()
+        mock_session = _mock_batch_session([])
 
         with patch(
             "app.database.SessionLocal",
             return_value=mock_session,
         ):
-            result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch())
+            result = _run(run_free_enrichment_batch())
 
         assert result["processed"] == 0
         assert result["errors"] == 0

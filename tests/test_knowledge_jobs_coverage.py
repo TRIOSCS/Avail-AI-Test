@@ -10,6 +10,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import ExitStack
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -18,6 +19,26 @@ from sqlalchemy.orm import Session
 
 from app.models import User
 from app.models.sourcing import Requisition
+
+# The five knowledge_service insight generators _job_refresh_insights calls.
+_INSIGHT_GENERATORS = (
+    "generate_insights",
+    "generate_pipeline_insights",
+    "generate_vendor_insights",
+    "generate_company_insights",
+    "generate_mpn_insights",
+)
+
+
+def _patch_insight_generators(stack: ExitStack, **overrides):
+    """Patch every knowledge_service insight generator on the given ExitStack.
+
+    Each generator defaults to an AsyncMock returning []. Pass a generator name as a
+    keyword (e.g. generate_insights=mock) to override one with a specific mock.
+    """
+    for name in _INSIGHT_GENERATORS:
+        mock = overrides.get(name, AsyncMock(return_value=[]))
+        stack.enter_context(patch(f"app.services.knowledge_service.{name}", new=mock))
 
 
 @pytest.fixture()
@@ -135,19 +156,10 @@ class TestJobRefreshInsights:
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
         mock_session = _make_mock_session()
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            _patch_insight_generators(stack)
+            await _job_refresh_insights()
 
         mock_session.close.assert_called_once()
 
@@ -158,19 +170,10 @@ class TestJobRefreshInsights:
         mock_generate = AsyncMock(return_value=[MagicMock()])
         mock_session = _make_mock_session(req_ids=[1, 2, 3])
 
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=mock_generate):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            _patch_insight_generators(stack, generate_insights=mock_generate)
+            await _job_refresh_insights()
 
         assert mock_generate.call_count == 3
 
@@ -181,41 +184,23 @@ class TestJobRefreshInsights:
         mock_generate = AsyncMock(side_effect=Exception("AI failed"))
         mock_session = _make_mock_session(req_ids=[1])
 
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=mock_generate):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()  # Should not raise
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            _patch_insight_generators(stack, generate_insights=mock_generate)
+            await _job_refresh_insights()  # Should not raise
 
     async def test_refresh_pipeline_exception_continues(self):
         """If pipeline insights fail, rest of job continues."""
         from app.jobs.knowledge_jobs import _job_refresh_insights
 
         mock_session = _make_mock_session()
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch(
-                    "app.services.knowledge_service.generate_pipeline_insights",
-                    new=AsyncMock(side_effect=Exception("pipeline fail")),
-                ):
-                    with patch(
-                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
-                    ):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()  # Should not raise
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            _patch_insight_generators(
+                stack,
+                generate_pipeline_insights=AsyncMock(side_effect=Exception("pipeline fail")),
+            )
+            await _job_refresh_insights()  # Should not raise
 
     async def test_refresh_insights_db_error_logs_and_continues(self):
         """DB errors within each section are caught and logged; job completes."""
@@ -239,16 +224,9 @@ class TestJobRefreshInsights:
         mock_vendor = AsyncMock(return_value=[MagicMock()])
         mock_session = _make_mock_session(vendor_ids=[10, 20])
 
-        with patch("app.database.SessionLocal", return_value=mock_session):
-            with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
-                with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=mock_vendor):
-                        with patch(
-                            "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
-                        ):
-                            with patch(
-                                "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
-                            ):
-                                await _job_refresh_insights()
+        with ExitStack() as stack:
+            stack.enter_context(patch("app.database.SessionLocal", return_value=mock_session))
+            _patch_insight_generators(stack, generate_vendor_insights=mock_vendor)
+            await _job_refresh_insights()
 
         assert mock_vendor.call_count == 2

@@ -10,6 +10,8 @@ Depends on: scripts/enrich_from_sightings.py
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from scripts.enrich_from_sightings import (
@@ -22,59 +24,66 @@ from scripts.enrich_from_sightings import (
 
 
 class TestExtractDescription:
-    def test_digikey_description(self):
-        raw = {"description": "IC MCU 32BIT 256KB FLASH 100LQFP", "vendor_name": "DigiKey"}
-        assert _extract_description(raw, "digikey") == "IC MCU 32BIT 256KB FLASH 100LQFP"
-
-    def test_mouser_description(self):
-        raw = {"description": "ARM Cortex-M4 STM32F4 Microcontroller IC", "vendor_name": "Mouser"}
-        assert _extract_description(raw, "mouser") == "ARM Cortex-M4 STM32F4 Microcontroller IC"
-
-    def test_ebay_title_fallback(self):
-        raw = {"ebay_title": "Samsung 16GB DDR4-3200 ECC RDIMM Memory Module"}
-        assert _extract_description(raw, "ebay") == "Samsung 16GB DDR4-3200 ECC RDIMM Memory Module"
-
-    def test_none_raw_data(self):
-        assert _extract_description(None, "digikey") is None
-
-    def test_empty_dict(self):
-        assert _extract_description({}, "digikey") is None
-
-    def test_short_description_skipped(self):
-        raw = {"description": "IC"}
-        assert _extract_description(raw, "digikey") is None
-
-    def test_non_string_description(self):
-        raw = {"description": 12345}
-        assert _extract_description(raw, "digikey") is None
+    @pytest.mark.parametrize(
+        ("raw", "source", "expected"),
+        [
+            (
+                {"description": "IC MCU 32BIT 256KB FLASH 100LQFP", "vendor_name": "DigiKey"},
+                "digikey",
+                "IC MCU 32BIT 256KB FLASH 100LQFP",
+            ),
+            (
+                {"description": "ARM Cortex-M4 STM32F4 Microcontroller IC", "vendor_name": "Mouser"},
+                "mouser",
+                "ARM Cortex-M4 STM32F4 Microcontroller IC",
+            ),
+            (
+                {"ebay_title": "Samsung 16GB DDR4-3200 ECC RDIMM Memory Module"},
+                "ebay",
+                "Samsung 16GB DDR4-3200 ECC RDIMM Memory Module",
+            ),
+            (None, "digikey", None),
+            ({}, "digikey", None),
+            ({"description": "IC"}, "digikey", None),
+            ({"description": 12345}, "digikey", None),
+            ({"description": "  padded description  "}, "digikey", "padded description"),
+        ],
+        ids=[
+            "digikey_description",
+            "mouser_description",
+            "ebay_title_fallback",
+            "none_raw_data",
+            "empty_dict",
+            "short_description_skipped",
+            "non_string_description",
+            "stripped",
+        ],
+    )
+    def test_extract_description(self, raw, source, expected):
+        assert _extract_description(raw, source) == expected
 
     def test_truncated_to_1000(self):
         raw = {"description": "A" * 1500}
         result = _extract_description(raw, "digikey")
         assert len(result) == 1000
 
-    def test_stripped(self):
-        raw = {"description": "  padded description  "}
-        assert _extract_description(raw, "digikey") == "padded description"
-
 
 # ── _extract_datasheet_url tests ──────────────────────────────────────
 
 
 class TestExtractDatasheetUrl:
-    def test_valid_url(self):
-        raw = {"datasheet_url": "https://example.com/datasheet.pdf"}
-        assert _extract_datasheet_url(raw) == "https://example.com/datasheet.pdf"
-
-    def test_no_url(self):
-        assert _extract_datasheet_url({}) is None
-
-    def test_non_http_url(self):
-        raw = {"datasheet_url": "ftp://example.com/file"}
-        assert _extract_datasheet_url(raw) is None
-
-    def test_none_raw_data(self):
-        assert _extract_datasheet_url(None) is None
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ({"datasheet_url": "https://example.com/datasheet.pdf"}, "https://example.com/datasheet.pdf"),
+            ({}, None),
+            ({"datasheet_url": "ftp://example.com/file"}, None),
+            (None, None),
+        ],
+        ids=["valid_url", "no_url", "non_http_url", "none_raw_data"],
+    )
+    def test_extract_datasheet_url(self, raw, expected):
+        assert _extract_datasheet_url(raw) == expected
 
     def test_truncated_to_1000(self):
         raw = {"datasheet_url": "https://example.com/" + "a" * 1500}

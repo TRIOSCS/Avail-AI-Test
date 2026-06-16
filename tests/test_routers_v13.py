@@ -9,6 +9,8 @@ Covers: activity serialization, null handling, GET/POST activity endpoints
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 # ═══════════════════════════════════════════════════════════════════════
 #  _activity_to_dict unit tests (existing)
 # ═══════════════════════════════════════════════════════════════════════
@@ -267,11 +269,6 @@ def test_log_email_click(client):
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Sales / Ownership Endpoints
-# ═══════════════════════════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  Additional Coverage Tests
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -330,39 +327,18 @@ def test_graph_webhook_success(client):
     assert resp.json()["status"] == "accepted"
 
 
-def test_log_company_call_not_found(client):
-    """POST /api/companies/99999/activities/call returns 404."""
-    resp = client.post(
-        "/api/companies/99999/activities/call",
-        json={"phone": "+1-555-1234"},
-    )
-    assert resp.status_code == 404
-
-
-def test_log_company_note_not_found(client):
-    """POST /api/companies/99999/activities/note returns 404."""
-    resp = client.post(
-        "/api/companies/99999/activities/note",
-        json={"notes": "test note"},
-    )
-    assert resp.status_code == 404
-
-
-def test_log_vendor_call_not_found(client):
-    """POST /api/vendors/99999/activities/call returns 404."""
-    resp = client.post(
-        "/api/vendors/99999/activities/call",
-        json={"phone": "+1-555-1234"},
-    )
-    assert resp.status_code == 404
-
-
-def test_log_vendor_note_not_found(client):
-    """POST /api/vendors/99999/activities/note returns 404."""
-    resp = client.post(
-        "/api/vendors/99999/activities/note",
-        json={"notes": "test note"},
-    )
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        pytest.param("/api/companies/99999/activities/call", {"phone": "+1-555-1234"}, id="company_call"),
+        pytest.param("/api/companies/99999/activities/note", {"notes": "test note"}, id="company_note"),
+        pytest.param("/api/vendors/99999/activities/call", {"phone": "+1-555-1234"}, id="vendor_call"),
+        pytest.param("/api/vendors/99999/activities/note", {"notes": "test note"}, id="vendor_note"),
+    ],
+)
+def test_log_activity_not_found(client, path, body):
+    """POST logging endpoints for a non-existent company/vendor returns 404."""
+    resp = client.post(path, json=body)
     assert resp.status_code == 404
 
 

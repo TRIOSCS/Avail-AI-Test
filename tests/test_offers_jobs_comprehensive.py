@@ -40,6 +40,16 @@ def _clear_scheduler_jobs():
         job.remove()
 
 
+def _mock_strategic_vendor(sv_id, expires_at, vendor_card):
+    """Build a mock strategic-vendor row as returned by get_expiring_soon()."""
+    mock_sv = MagicMock()
+    mock_sv.id = sv_id
+    mock_sv.user_id = None  # set by callers that need it
+    mock_sv.expires_at = expires_at
+    mock_sv.vendor_card = vendor_card
+    return mock_sv
+
+
 # ── register_offers_jobs() ─────────────────────────────────────────────
 
 
@@ -246,11 +256,8 @@ class TestWarnStrategicExpiring:
         """Creates ActivityLog entries for expiring strategic vendors."""
         from app.models import ActivityLog
 
-        mock_sv = MagicMock()
-        mock_sv.id = 99
+        mock_sv = _mock_strategic_vendor(99, datetime.now(timezone.utc) + timedelta(days=3), test_vendor_card)
         mock_sv.user_id = test_user.id
-        mock_sv.expires_at = datetime.now(timezone.utc) + timedelta(days=3)
-        mock_sv.vendor_card = test_vendor_card
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
             from app.jobs.offers_jobs import _job_warn_strategic_expiring
@@ -276,11 +283,8 @@ class TestWarnStrategicExpiring:
         scheduler_db.add(existing)
         scheduler_db.commit()
 
-        mock_sv = MagicMock()
-        mock_sv.id = 99
+        mock_sv = _mock_strategic_vendor(99, datetime.now(timezone.utc) + timedelta(days=3), test_vendor_card)
         mock_sv.user_id = test_user.id
-        mock_sv.expires_at = datetime.now(timezone.utc) + timedelta(days=3)
-        mock_sv.vendor_card = test_vendor_card
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
             from app.jobs.offers_jobs import _job_warn_strategic_expiring
@@ -292,11 +296,8 @@ class TestWarnStrategicExpiring:
 
     def test_warn_naive_timezone_handling(self, scheduler_db, test_user, test_vendor_card):
         """Handles naive datetime (no tzinfo) on expires_at."""
-        mock_sv = MagicMock()
-        mock_sv.id = 100
+        mock_sv = _mock_strategic_vendor(100, datetime(2026, 4, 1, 12, 0, 0), test_vendor_card)  # Naive datetime
         mock_sv.user_id = test_user.id
-        mock_sv.expires_at = datetime(2026, 4, 1, 12, 0, 0)  # Naive datetime
-        mock_sv.vendor_card = test_vendor_card
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
             from app.jobs.offers_jobs import _job_warn_strategic_expiring
@@ -307,11 +308,8 @@ class TestWarnStrategicExpiring:
         """Handles missing vendor_card gracefully (shows 'Unknown')."""
         from app.models import ActivityLog
 
-        mock_sv = MagicMock()
-        mock_sv.id = 101
+        mock_sv = _mock_strategic_vendor(101, datetime.now(timezone.utc) + timedelta(days=2), None)
         mock_sv.user_id = test_user.id
-        mock_sv.expires_at = datetime.now(timezone.utc) + timedelta(days=2)
-        mock_sv.vendor_card = None
 
         with patch("app.services.strategic_vendor_service.get_expiring_soon", return_value=[mock_sv]):
             from app.jobs.offers_jobs import _job_warn_strategic_expiring

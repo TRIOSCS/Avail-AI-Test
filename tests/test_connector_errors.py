@@ -14,17 +14,23 @@ class TestConnectorErrorHierarchy:
     """All connector hard-error types must inherit from ConnectorError, which in turn
     inherits from RuntimeError so existing catches still work."""
 
-    def test_connector_error_is_runtime_error(self):
-        assert issubclass(ConnectorError, RuntimeError)
-
-    def test_auth_error_is_connector_error(self):
-        assert issubclass(ConnectorAuthError, ConnectorError)
-
-    def test_rate_limit_error_is_connector_error(self):
-        assert issubclass(ConnectorRateLimitError, ConnectorError)
-
-    def test_quota_error_is_connector_error(self):
-        assert issubclass(ConnectorQuotaError, ConnectorError)
+    @pytest.mark.parametrize(
+        ("subclass", "base"),
+        [
+            (ConnectorError, RuntimeError),
+            (ConnectorAuthError, ConnectorError),
+            (ConnectorRateLimitError, ConnectorError),
+            (ConnectorQuotaError, ConnectorError),
+        ],
+        ids=[
+            "connector_error_is_runtime_error",
+            "auth_error_is_connector_error",
+            "rate_limit_error_is_connector_error",
+            "quota_error_is_connector_error",
+        ],
+    )
+    def test_inheritance(self, subclass, base):
+        assert issubclass(subclass, base)
 
     def test_specific_types_are_distinct(self):
         """Operator code branches on the specific type to produce distinct messages —

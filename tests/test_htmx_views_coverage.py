@@ -17,6 +17,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -167,12 +168,19 @@ class TestUnauthenticatedPageLoad:
 class TestV2PageRouting:
     """Test that various URL patterns derive the correct partial_url."""
 
-    def test_v2_crm(self, client: TestClient):
-        resp = client.get("/v2/crm")
-        assert resp.status_code == 200
-
-    def test_v2_sightings_page(self, client: TestClient):
-        resp = client.get("/v2/sightings")
+    # Non-existent IDs just check partial_url derivation, not 404.
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/v2/crm",
+            "/v2/sightings",
+            "/v2/excess/1",
+            "/v2/prospecting/1",
+            "/v2/trouble-tickets/1",
+        ],
+    )
+    def test_v2_page_routes(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200
 
     def test_v2_buy_plans_detail(self, client: TestClient, db_session: Session, test_user: User):
@@ -184,24 +192,11 @@ class TestV2PageRouting:
         resp = client.get(f"/v2/buy-plans/{bp.id}")
         assert resp.status_code == 200
 
-    def test_v2_excess_detail(self, client: TestClient):
-        # non-existent ID just checks partial_url derivation, not 404
-        resp = client.get("/v2/excess/1")
-        assert resp.status_code == 200
-
     def test_v2_quotes_detail(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
         quote = _make_quote(db_session, req, test_user)
         db_session.commit()
         resp = client.get(f"/v2/quotes/{quote.id}")
-        assert resp.status_code == 200
-
-    def test_v2_prospecting_detail(self, client: TestClient):
-        resp = client.get("/v2/prospecting/1")
-        assert resp.status_code == 200
-
-    def test_v2_trouble_tickets_detail(self, client: TestClient):
-        resp = client.get("/v2/trouble-tickets/1")
         assert resp.status_code == 200
 
 
@@ -211,17 +206,18 @@ class TestV2PageRouting:
 
 
 class TestVendorFindByPart:
-    def test_find_by_part_no_mpn(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part")
-        assert resp.status_code == 200
-
-    def test_find_by_part_with_mpn(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=LM317T")
-        assert resp.status_code == 200
-
-    def test_find_by_part_short_mpn(self, client: TestClient):
-        # Very short MPN that normalize_mpn might return None for
-        resp = client.get("/v2/partials/vendors/find-by-part?mpn=AB")
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/v2/partials/vendors/find-by-part",
+            "/v2/partials/vendors/find-by-part?mpn=LM317T",
+            # Very short MPN that normalize_mpn might return None for
+            "/v2/partials/vendors/find-by-part?mpn=AB",
+        ],
+        ids=["no_mpn", "with_mpn", "short_mpn"],
+    )
+    def test_find_by_part(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200
 
 
@@ -244,35 +240,21 @@ class TestVendorDetailMpnFilter:
 
 
 class TestCustomerTabs:
-    def test_tab_sites(self, client: TestClient, db_session: Session):
+    @pytest.mark.parametrize(
+        ("tab", "expected_status"),
+        [
+            ("sites", 200),
+            ("contacts", 200),
+            ("requisitions", 200),
+            ("activity", 200),
+            ("bogus", 404),
+        ],
+    )
+    def test_tab(self, client: TestClient, db_session: Session, tab: str, expected_status: int):
         co = _make_company(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/partials/customers/{co.id}/tab/sites")
-        assert resp.status_code == 200
-
-    def test_tab_contacts_empty(self, client: TestClient, db_session: Session):
-        co = _make_company(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/customers/{co.id}/tab/contacts")
-        assert resp.status_code == 200
-
-    def test_tab_requisitions_empty(self, client: TestClient, db_session: Session):
-        co = _make_company(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/customers/{co.id}/tab/requisitions")
-        assert resp.status_code == 200
-
-    def test_tab_activity(self, client: TestClient, db_session: Session):
-        co = _make_company(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
-        assert resp.status_code == 200
-
-    def test_tab_invalid(self, client: TestClient, db_session: Session):
-        co = _make_company(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/customers/{co.id}/tab/bogus")
-        assert resp.status_code == 404
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/{tab}")
+        assert resp.status_code == expected_status
 
     def test_tab_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/customers/999999/tab/sites")
@@ -345,12 +327,13 @@ class TestBuyPlanDetail:
 
 
 class TestQuotesList:
-    def test_quotes_list(self, client: TestClient):
-        resp = client.get("/v2/partials/quotes")
-        assert resp.status_code == 200
-
-    def test_quotes_list_with_status(self, client: TestClient):
-        resp = client.get("/v2/partials/quotes?status=draft")
+    @pytest.mark.parametrize(
+        "url",
+        ["/v2/partials/quotes", "/v2/partials/quotes?status=draft"],
+        ids=["all", "with_status"],
+    )
+    def test_quotes_list(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200
 
     def test_quotes_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
@@ -472,41 +455,34 @@ class TestFollowUpSend:
 
 
 class TestOfferPromoteReject:
-    def test_promote_offer(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
-        db_session.commit()
-        resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-        assert resp.status_code == 200
-
-    def test_promote_offer_not_found(self, client: TestClient):
-        resp = client.post("/v2/partials/offers/999999/promote")
-        assert resp.status_code == 404
-
-    def test_promote_wrong_status(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user, status=OfferStatus.ACTIVE)
-        db_session.commit()
-        resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
-        assert resp.status_code == 400
-
-    def test_reject_offer(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
-        db_session.commit()
-        resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
-        assert resp.status_code == 200
-
-    def test_reject_offer_not_found(self, client: TestClient):
-        resp = client.post("/v2/partials/offers/999999/reject")
-        assert resp.status_code == 404
-
-    def test_reject_wrong_status(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user, status=OfferStatus.ACTIVE)
-        db_session.commit()
-        resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
-        assert resp.status_code == 400
+    @pytest.mark.parametrize("action", ["promote", "reject"])
+    @pytest.mark.parametrize(
+        ("offer_status", "expected_status"),
+        [
+            (OfferStatus.PENDING_REVIEW, 200),
+            (None, 404),  # offer does not exist
+            (OfferStatus.ACTIVE, 400),  # wrong status
+        ],
+        ids=["pending_review", "not_found", "wrong_status"],
+    )
+    def test_promote_reject(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        action: str,
+        offer_status,
+        expected_status: int,
+    ):
+        if offer_status is None:
+            offer_id = 999999
+        else:
+            req = _make_requisition(db_session, test_user)
+            offer = _make_offer(db_session, req, test_user, status=offer_status)
+            db_session.commit()
+            offer_id = offer.id
+        resp = client.post(f"/v2/partials/offers/{offer_id}/{action}")
+        assert resp.status_code == expected_status
 
     def test_offer_changelog(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
@@ -841,28 +817,11 @@ class TestReviewResponse:
 
 
 class TestVendorTabsExtra:
-    def test_tab_analytics(self, client: TestClient, db_session: Session):
+    @pytest.mark.parametrize("tab", ["analytics", "emails", "reviews", "find_contacts"])
+    def test_vendor_tab(self, client: TestClient, db_session: Session, tab: str):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/analytics")
-        assert resp.status_code == 200
-
-    def test_tab_emails(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/emails")
-        assert resp.status_code == 200
-
-    def test_tab_reviews(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/reviews")
-        assert resp.status_code == 200
-
-    def test_tab_find_contacts(self, client: TestClient, db_session: Session):
-        vc = _make_vendor_card(db_session)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/find_contacts")
+        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/{tab}")
         assert resp.status_code == 200
 
     def test_vendor_list_with_my_only(self, client: TestClient, db_session: Session):
@@ -904,16 +863,11 @@ class TestRequisitionListEdgeCases:
         resp = client.get("/v2/partials/requisitions?q=CPN-001")
         assert resp.status_code == 200
 
-    def test_list_sort_status(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("sort", ["status", "customer_name"])
+    def test_list_sort(self, client: TestClient, db_session: Session, test_user: User, sort: str):
         _make_requisition(db_session, test_user)
         db_session.commit()
-        resp = client.get("/v2/partials/requisitions?sort=status&dir=asc")
-        assert resp.status_code == 200
-
-    def test_list_sort_customer_name(self, client: TestClient, db_session: Session, test_user: User):
-        _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.get("/v2/partials/requisitions?sort=customer_name&dir=asc")
+        resp = client.get(f"/v2/partials/requisitions?sort={sort}&dir=asc")
         assert resp.status_code == 200
 
 
@@ -923,18 +877,13 @@ class TestRequisitionListEdgeCases:
 
 
 class TestPartsWorkspaceTabExtras:
-    def test_parts_list_endpoint(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("with_req_filter", [False, True], ids=["no_filter", "req_filter"])
+    def test_parts_list(self, client: TestClient, db_session: Session, test_user: User, with_req_filter: bool):
         req = _make_requisition(db_session, test_user)
         _make_requirement(db_session, req)
         db_session.commit()
-        resp = client.get("/v2/partials/parts")
-        assert resp.status_code == 200
-
-    def test_parts_list_with_req_filter(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.get(f"/v2/partials/parts?req_id={req.id}")
+        url = f"/v2/partials/parts?req_id={req.id}" if with_req_filter else "/v2/partials/parts"
+        resp = client.get(url)
         assert resp.status_code == 200
 
 
@@ -944,10 +893,14 @@ class TestPartsWorkspaceTabExtras:
 
 
 class TestSightingsWorkspaceExtra:
-    def test_sightings_workspace(self, client: TestClient):
-        resp = client.get("/v2/partials/sightings/workspace")
-        assert resp.status_code == 200
-
-    def test_sightings_workspace_with_filters(self, client: TestClient):
-        resp = client.get("/v2/partials/sightings/workspace?q=LM317T")
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "/v2/partials/sightings/workspace",
+            "/v2/partials/sightings/workspace?q=LM317T",
+        ],
+        ids=["no_filters", "with_filters"],
+    )
+    def test_sightings_workspace(self, client: TestClient, url: str):
+        resp = client.get(url)
         assert resp.status_code == 200

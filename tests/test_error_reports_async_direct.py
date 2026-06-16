@@ -49,6 +49,16 @@ def _make_mock_request(content_type: str, body: bytes) -> MagicMock:
     return mock_req
 
 
+async def _submit(mock_req, db, user, bg_tasks=None):
+    """Invoke submit_trouble_ticket with the standard kwargs."""
+    return await submit_trouble_ticket(
+        request=mock_req,
+        background_tasks=bg_tasks if bg_tasks is not None else BackgroundTasks(),
+        user=user,
+        db=db,
+    )
+
+
 # ── JSON path (lines 187-193) ────────────────────────────────────────────────
 
 
@@ -58,14 +68,8 @@ async def test_submit_json_path_basic(db_session: Session, test_user: User):
         "application/json",
         b'{"description": "Button broken", "page_url": "/v2/search"}',
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
     assert "Report submitted" in resp.body.decode()
 
@@ -82,14 +86,8 @@ async def test_submit_json_with_ua_and_viewport(db_session: Session, test_user: 
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
     ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "Chrome bug").first()
@@ -112,14 +110,8 @@ async def test_submit_json_with_network_log_string(db_session: Session, test_use
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
 
@@ -134,14 +126,8 @@ async def test_submit_json_with_invalid_network_log(db_session: Session, test_us
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
 
@@ -156,14 +142,8 @@ async def test_submit_json_with_dict_network_log(db_session: Session, test_user:
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
 
@@ -173,14 +153,8 @@ async def test_submit_json_empty_description_returns_422(db_session: Session, te
         "application/json",
         b'{"description": "   "}',
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 422
     assert "describe" in resp.body.decode().lower() or "problem" in resp.body.decode().lower()
 
@@ -193,14 +167,8 @@ async def test_submit_json_too_long_description_returns_422(db_session: Session,
         "application/json",
         json.dumps({"description": "X" * (MAX_MESSAGE_LEN + 1)}).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 422
     assert "too long" in resp.body.decode().lower() or "max" in resp.body.decode().lower()
 
@@ -221,14 +189,8 @@ async def test_submit_json_with_screenshot_saves_path(db_session: Session, test_
             "application/json",
             json.dumps({"description": "Screenshot test", "screenshot": b64}).encode(),
         )
-        bg_tasks = BackgroundTasks()
 
-        resp = await submit_trouble_ticket(
-            request=mock_req,
-            background_tasks=bg_tasks,
-            user=test_user,
-            db=db_session,
-        )
+        resp = await _submit(mock_req, db_session, test_user)
         assert resp.status_code == 200
 
         ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "Screenshot test").first()
@@ -252,14 +214,8 @@ async def test_submit_json_screenshot_bad_b64_no_path(db_session: Session, test_
             "application/json",
             json.dumps({"description": "Bad screenshot test", "screenshot": "invalid!!!"}).encode(),
         )
-        bg_tasks = BackgroundTasks()
 
-        resp = await submit_trouble_ticket(
-            request=mock_req,
-            background_tasks=bg_tasks,
-            user=test_user,
-            db=db_session,
-        )
+        resp = await _submit(mock_req, db_session, test_user)
         assert resp.status_code == 200
     finally:
         er_mod.UPLOAD_DIR = original_dir
@@ -274,14 +230,8 @@ async def test_submit_form_path_basic(db_session: Session, test_user: User):
         "application/x-www-form-urlencoded",
         b"message=Form+encoded+ticket&current_url=%2Fv2%2Fsearch",
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
     assert "Report submitted" in resp.body.decode()
 
@@ -292,14 +242,8 @@ async def test_submit_form_path_empty_message(db_session: Session, test_user: Us
         "application/x-www-form-urlencoded",
         b"message=+",
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 422
 
 
@@ -312,15 +256,9 @@ async def test_submit_db_error_returns_500_html(db_session: Session, test_user: 
         "application/json",
         b'{"description": "DB error test"}',
     )
-    bg_tasks = BackgroundTasks()
 
     with patch("app.routers.error_reports._create_ticket", side_effect=Exception("DB down")):
-        resp = await submit_trouble_ticket(
-            request=mock_req,
-            background_tasks=bg_tasks,
-            user=test_user,
-            db=db_session,
-        )
+        resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 500
     assert "went wrong" in resp.body.decode().lower()
 
@@ -337,14 +275,8 @@ async def test_submit_json_invalid_body_returns_422(db_session: Session, test_us
         raise ValueError("invalid json")
 
     mock_req.json = _bad_json
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 422
     assert "Invalid request" in resp.body.decode()
 
@@ -361,12 +293,7 @@ async def test_submit_adds_background_task(db_session: Session, test_user: User)
 
     bg_tasks = MagicMock(spec=BackgroundTasks)
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user, bg_tasks=bg_tasks)
     assert resp.status_code == 200
     bg_tasks.add_task.assert_called_once()
 
@@ -385,14 +312,8 @@ async def test_submit_json_only_ua_sets_browser_info(db_session: Session, test_u
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
     ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "UA only").first()
@@ -411,14 +332,8 @@ async def test_submit_json_with_error_log(db_session: Session, test_user: User):
             }
         ).encode(),
     )
-    bg_tasks = BackgroundTasks()
 
-    resp = await submit_trouble_ticket(
-        request=mock_req,
-        background_tasks=bg_tasks,
-        user=test_user,
-        db=db_session,
-    )
+    resp = await _submit(mock_req, db_session, test_user)
     assert resp.status_code == 200
 
     ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "JS error test").first()

@@ -15,6 +15,8 @@ Depends on: app/services/buyplan_scoring.py, conftest.py
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from app.models import Offer, Requirement, Requisition, User, VendorCard
 from app.services.buyplan_scoring import (
     _country_to_region,
@@ -30,42 +32,26 @@ from tests.conftest import engine  # noqa: F401
 
 
 class TestParseLeadTimeDays:
-    def test_none_returns_none(self):
-        assert _parse_lead_time_days(None) is None
-
-    def test_empty_string_returns_none(self):
-        assert _parse_lead_time_days("") is None
-
-    def test_stock(self):
-        assert _parse_lead_time_days("stock") == 0
-
-    def test_in_stock(self):
-        assert _parse_lead_time_days("In Stock") == 0
-
-    def test_immediate(self):
-        assert _parse_lead_time_days("immediate") == 0
-
-    def test_same_day(self):
-        assert _parse_lead_time_days("Same Day") == 0
-
-    def test_days_range(self):
-        # "3-5 days" should return 5 (last number)
-        assert _parse_lead_time_days("3-5 days") == 5
-
-    def test_single_days(self):
-        assert _parse_lead_time_days("7 days") == 7
-
-    def test_weeks(self):
-        assert _parse_lead_time_days("2 weeks") == 14
-
-    def test_months(self):
-        assert _parse_lead_time_days("3 months") == 90
-
-    def test_no_numbers(self):
-        assert _parse_lead_time_days("unknown") is None
-
-    def test_whitespace(self):
-        assert _parse_lead_time_days("  10 days  ") == 10
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(None, None, id="none_returns_none"),
+            pytest.param("", None, id="empty_string_returns_none"),
+            pytest.param("stock", 0, id="stock"),
+            pytest.param("In Stock", 0, id="in_stock"),
+            pytest.param("immediate", 0, id="immediate"),
+            pytest.param("Same Day", 0, id="same_day"),
+            # "3-5 days" should return 5 (last number)
+            pytest.param("3-5 days", 5, id="days_range"),
+            pytest.param("7 days", 7, id="single_days"),
+            pytest.param("2 weeks", 14, id="weeks"),
+            pytest.param("3 months", 90, id="months"),
+            pytest.param("unknown", None, id="no_numbers"),
+            pytest.param("  10 days  ", 10, id="whitespace"),
+        ],
+    )
+    def test_parse(self, value, expected):
+        assert _parse_lead_time_days(value) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -209,36 +195,21 @@ class TestScoreOffer:
         score = score_offer(offer, req, None)
         assert 0 <= score <= 100
 
-    def test_lead_time_3_days(self):
-        """3-day lead time gets 100 score."""
-        offer = self._make_offer(unit_price=10.0, lead_time="3 days")
+    @pytest.mark.parametrize(
+        "lead_time",
+        [
+            pytest.param("3 days", id="3_days"),  # 3-day lead time gets 100 score
+            pytest.param("7 days", id="7_days"),
+            pytest.param("14 days", id="14_days"),
+            pytest.param("30 days", id="30_days"),
+            pytest.param(None, id="unknown"),  # unknown lead time (None) gets 40
+        ],
+    )
+    def test_lead_time_variants(self, lead_time):
+        """Each non-long lead time yields a positive score."""
+        offer = self._make_offer(unit_price=10.0, lead_time=lead_time)
         req = self._make_requirement(target_price=10.0)
 
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_lead_time_7_days(self):
-        offer = self._make_offer(unit_price=10.0, lead_time="7 days")
-        req = self._make_requirement(target_price=10.0)
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_lead_time_14_days(self):
-        offer = self._make_offer(unit_price=10.0, lead_time="14 days")
-        req = self._make_requirement(target_price=10.0)
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_lead_time_30_days(self):
-        offer = self._make_offer(unit_price=10.0, lead_time="30 days")
-        req = self._make_requirement(target_price=10.0)
-        score = score_offer(offer, req, None)
-        assert score > 0
-
-    def test_lead_time_unknown(self):
-        """Unknown lead time (None) gets 40."""
-        offer = self._make_offer(unit_price=10.0, lead_time=None)
-        req = self._make_requirement(target_price=10.0)
         score = score_offer(offer, req, None)
         assert score > 0
 

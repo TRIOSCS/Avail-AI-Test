@@ -14,6 +14,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.models import VendorCard
@@ -34,20 +35,17 @@ class TestVendorsListPartial:
         resp = client.get(f"/v2/partials/vendors?q={test_vendor_card.display_name[:5]}")
         assert resp.status_code == 200
 
-    def test_list_show_blacklisted(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors?hide_blacklisted=false")
-        assert resp.status_code == 200
-
-    def test_list_sort_by_name(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors?sort=display_name&dir=asc")
-        assert resp.status_code == 200
-
-    def test_list_my_only(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors?my_only=true")
-        assert resp.status_code == 200
-
-    def test_list_pagination(self, client: TestClient):
-        resp = client.get("/v2/partials/vendors?limit=10&offset=0")
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("hide_blacklisted=false", id="show_blacklisted"),
+            pytest.param("sort=display_name&dir=asc", id="sort_by_name"),
+            pytest.param("my_only=true", id="my_only"),
+            pytest.param("limit=10&offset=0", id="pagination"),
+        ],
+    )
+    def test_list_query_params(self, client: TestClient, query: str):
+        resp = client.get(f"/v2/partials/vendors?{query}")
         assert resp.status_code == 200
 
 
@@ -85,32 +83,20 @@ class TestVendorDetailPartial:
 
 
 class TestVendorTab:
-    def test_tab_overview(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/overview")
-        assert resp.status_code == 200
-
-    def test_tab_contacts(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/contacts")
-        assert resp.status_code == 200
-
-    def test_tab_find_contacts(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/find_contacts")
-        assert resp.status_code == 200
-
-    def test_tab_emails(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/emails")
-        assert resp.status_code == 200
-
-    def test_tab_analytics(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/analytics")
-        assert resp.status_code == 200
-
-    def test_tab_reviews(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/reviews")
-        assert resp.status_code == 200
-
-    def test_tab_offers(self, client: TestClient, test_vendor_card: VendorCard):
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/offers")
+    @pytest.mark.parametrize(
+        "tab",
+        [
+            "overview",
+            "contacts",
+            "find_contacts",
+            "emails",
+            "analytics",
+            "reviews",
+            "offers",
+        ],
+    )
+    def test_tab_valid(self, client: TestClient, test_vendor_card: VendorCard, tab: str):
+        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/tab/{tab}")
         assert resp.status_code == 200
 
     def test_tab_invalid(self, client: TestClient, test_vendor_card: VendorCard):

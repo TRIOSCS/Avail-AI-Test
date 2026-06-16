@@ -6,6 +6,7 @@ Depends on: app.models.vendors, app.models.sourcing, app.models.intelligence
 
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -19,27 +20,24 @@ from tests.conftest import engine  # noqa: F401
 class TestJsonbTagColumns:
     """Test that VendorCard tag columns accept JSONB data."""
 
-    def test_brand_tags_accepts_list(self, db_session: Session):
-        """VendorCard.brand_tags stores a list."""
+    @pytest.mark.parametrize(
+        ("normalized_name", "display_name", "column", "value"),
+        [
+            ("test vendor", "Test Vendor", "brand_tags", ["TI", "NXP", "ST"]),
+            ("test vendor 2", "Test Vendor 2", "commodity_tags", ["Microcontrollers", "Memory"]),
+        ],
+        ids=["brand_tags", "commodity_tags"],
+    )
+    def test_tag_column_accepts_list(self, db_session: Session, normalized_name, display_name, column, value):
+        """VendorCard tag columns store a list."""
         v = VendorCard(
-            normalized_name="test vendor",
-            display_name="Test Vendor",
-            brand_tags=["TI", "NXP", "ST"],
+            normalized_name=normalized_name,
+            display_name=display_name,
+            **{column: value},
         )
         db_session.add(v)
         db_session.flush()
-        assert v.brand_tags == ["TI", "NXP", "ST"]
-
-    def test_commodity_tags_accepts_list(self, db_session: Session):
-        """VendorCard.commodity_tags stores a list."""
-        v = VendorCard(
-            normalized_name="test vendor 2",
-            display_name="Test Vendor 2",
-            commodity_tags=["Microcontrollers", "Memory"],
-        )
-        db_session.add(v)
-        db_session.flush()
-        assert v.commodity_tags == ["Microcontrollers", "Memory"]
+        assert getattr(v, column) == value
 
 
 class TestEnhancedBrowseSearch:

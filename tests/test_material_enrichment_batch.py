@@ -21,6 +21,19 @@ from app.services.material_enrichment_service import (
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
 
+def _run(coro):
+    """Run an async coroutine to completion on the current event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _mock_redis(mock_redis, get_value=None):
+    """Wire mock_redis to return a MagicMock whose .get() yields get_value."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = get_value
+    mock_redis.return_value = mock_r
+    return mock_r
+
+
 @pytest.fixture()
 def unenriched_cards(db_session):
     """Create 5 material cards with enriched_at = NULL."""
@@ -63,7 +76,7 @@ def enriched_cards(db_session):
 
 def test_batch_enrich_no_cards(db_session):
     """Returns None when no unenriched cards exist."""
-    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+    result = _run(batch_enrich_materials(db_session))
     assert result is None
 
 
@@ -72,11 +85,9 @@ def test_batch_enrich_no_cards(db_session):
 def test_batch_enrich_submits_batch(mock_submit, mock_redis, db_session, unenriched_cards):
     """Submits a batch and stores batch_id in Redis."""
     mock_submit.return_value = "batch_abc123"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No in-flight batch
-    mock_redis.return_value = mock_r
+    mock_r = _mock_redis(mock_redis)  # No in-flight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+    result = _run(batch_enrich_materials(db_session))
 
     assert result == "batch_abc123"
     mock_submit.assert_called_once()
@@ -99,11 +110,9 @@ def test_batch_enrich_submits_batch(mock_submit, mock_redis, db_session, unenric
 def test_batch_enrich_skips_enriched(mock_submit, mock_redis, db_session, unenriched_cards, enriched_cards):
     """Only picks up cards with enriched_at IS NULL."""
     mock_submit.return_value = "batch_xyz"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No in-flight batch
-    mock_redis.return_value = mock_r
+    _mock_redis(mock_redis)  # No in-flight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+    result = _run(batch_enrich_materials(db_session))
 
     assert result == "batch_xyz"
     requests = mock_submit.call_args[0][0]
@@ -122,11 +131,9 @@ def test_batch_enrich_skips_enriched(mock_submit, mock_redis, db_session, unenri
 def test_batch_enrich_submit_fails(mock_submit, mock_redis, db_session, unenriched_cards):
     """Returns None when claude_batch_submit fails."""
     mock_submit.return_value = None
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No in-flight batch
-    mock_redis.return_value = mock_r
+    mock_r = _mock_redis(mock_redis)  # No in-flight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+    result = _run(batch_enrich_materials(db_session))
 
     assert result is None
     mock_r.set.assert_not_called()
@@ -136,11 +143,9 @@ def test_batch_enrich_submit_fails(mock_submit, mock_redis, db_session, unenrich
 @patch("app.services.material_enrichment_service.claude_batch_submit")
 def test_batch_enrich_skips_if_inflight(mock_submit, mock_redis, db_session, unenriched_cards):
     """Returns None immediately when a batch is already in-flight in Redis."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_already_running"  # Simulate in-flight batch
-    mock_redis.return_value = mock_r
+    _mock_redis(mock_redis, get_value=b"batch_already_running")  # Simulate in-flight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+    result = _run(batch_enrich_materials(db_session))
 
     assert result is None
     mock_submit.assert_not_called()
@@ -152,11 +157,9 @@ def test_batch_enrich_skips_if_inflight(mock_submit, mock_redis, db_session, une
 @patch("app.services.material_enrichment_service._get_redis")
 def test_process_results_no_batch_id(mock_redis, db_session):
     """Returns 0 when no batch_id is stored in Redis."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = None
-    mock_redis.return_value = mock_r
+    _mock_redis(mock_redis)
 
-    result = asyncio.get_event_loop().run_until_complete(process_material_batch_results(db_session))
+    result = _run(process_material_batch_results(db_session))
     assert result is None
 
 
@@ -164,12 +167,10 @@ def test_process_results_no_batch_id(mock_redis, db_session):
 @patch("app.services.material_enrichment_service.claude_batch_results")
 def test_process_results_still_processing(mock_results, mock_redis, db_session):
     """Returns None when batch is still processing."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_abc123"
-    mock_redis.return_value = mock_r
+    mock_r = _mock_redis(mock_redis, get_value=b"batch_abc123")
     mock_results.return_value = None  # Still processing
 
-    result = asyncio.get_event_loop().run_until_complete(process_material_batch_results(db_session))
+    result = _run(process_material_batch_results(db_session))
     assert result is None
     # Should NOT clear the Redis key
     mock_r.delete.assert_not_called()
@@ -179,9 +180,7 @@ def test_process_results_still_processing(mock_results, mock_redis, db_session):
 @patch("app.services.material_enrichment_service.claude_batch_results")
 def test_process_results_applies_enrichment(mock_results, mock_redis, db_session, unenriched_cards):
     """Applies AI results to material cards and clears Redis key."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_abc123"
-    mock_redis.return_value = mock_r
+    mock_r = _mock_redis(mock_redis, get_value=b"batch_abc123")
 
     # Build results keyed by the custom_id pattern used in batch_enrich_materials
     results_dict = {}
@@ -200,7 +199,7 @@ def test_process_results_applies_enrichment(mock_results, mock_redis, db_session
 
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_material_batch_results(db_session))
+    result = _run(process_material_batch_results(db_session))
 
     assert result["applied"] == 5
     assert result["errors"] == 0
@@ -221,9 +220,7 @@ def test_process_results_applies_enrichment(mock_results, mock_redis, db_session
 @patch("app.services.material_enrichment_service.claude_batch_results")
 def test_process_results_handles_none_entry(mock_results, mock_redis, db_session, unenriched_cards):
     """Skips cards with None results (errors) without crashing."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_abc123"
-    mock_redis.return_value = mock_r
+    mock_r = _mock_redis(mock_redis, get_value=b"batch_abc123")
 
     card = unenriched_cards[0]
     results_dict = {
@@ -231,7 +228,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_material_batch_results(db_session))
+    result = _run(process_material_batch_results(db_session))
 
     # Only the error entry, so 0 applied
     assert result["applied"] == 0
@@ -247,9 +244,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
 @patch("app.services.material_enrichment_service.claude_batch_results")
 def test_process_results_invalid_category_falls_back(mock_results, mock_redis, db_session, unenriched_cards):
     """Invalid category gets replaced with 'other'."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_abc123"
-    mock_redis.return_value = mock_r
+    _mock_redis(mock_redis, get_value=b"batch_abc123")
 
     card = unenriched_cards[0]
     results_dict = {
@@ -265,7 +260,7 @@ def test_process_results_invalid_category_falls_back(mock_results, mock_redis, d
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_material_batch_results(db_session))
+    result = _run(process_material_batch_results(db_session))
 
     assert result["applied"] == 1
     db_session.refresh(card)

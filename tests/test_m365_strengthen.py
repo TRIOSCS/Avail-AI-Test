@@ -238,143 +238,78 @@ def test_group_by_thread_empty():
 # ── test_detect_attachments ──────────────────────────────────────────────
 
 
-def test_detect_attachments_xlsx_flagged():
-    """An email with .xlsx attachment is flagged for mining pipeline."""
+_XLSX_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+@pytest.mark.parametrize(
+    "msg_id, attachments, expected_names",
+    [
+        pytest.param(
+            "msg-123",
+            [{"name": "stock_list.xlsx", "contentType": _XLSX_TYPE, "size": 45000, "isInline": False}],
+            ["stock_list.xlsx"],
+            id="xlsx_flagged",
+        ),
+        pytest.param(
+            "msg-456",
+            [{"name": "quote.pdf", "contentType": "application/pdf", "size": 120000, "isInline": False}],
+            ["quote.pdf"],
+            id="pdf_flagged",
+        ),
+        pytest.param(
+            "msg-789",
+            [{"name": "logo.png", "contentType": "image/png", "size": 5000, "isInline": True}],
+            [],
+            id="inline_image_excluded",
+        ),
+        pytest.param(
+            "msg-mixed",
+            [
+                {"name": "signature.jpg", "contentType": "image/jpeg", "size": 3000, "isInline": True},
+                {"name": "inventory.xlsx", "contentType": _XLSX_TYPE, "size": 80000, "isInline": False},
+            ],
+            ["inventory.xlsx"],
+            id="mixed_only_file_flagged",
+        ),
+    ],
+)
+def test_detect_attachments(msg_id, attachments, expected_names):
+    """File attachments (xlsx/pdf) are flagged; inline images are excluded."""
     mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={
-            "value": [
-                {
-                    "name": "stock_list.xlsx",
-                    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "size": 45000,
-                    "isInline": False,
-                },
-            ]
-        }
-    )
+    mock_gc.get_json = AsyncMock(return_value={"value": attachments})
 
     from app.jobs.email_jobs import detect_attachments
 
-    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-123"))
+    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, msg_id))
 
-    assert len(result) == 1
-    assert result[0]["name"] == "stock_list.xlsx"
-    assert result[0]["size"] == 45000
-
-
-def test_detect_attachments_pdf_flagged():
-    """An email with .pdf attachment is flagged."""
-    mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={
-            "value": [
-                {
-                    "name": "quote.pdf",
-                    "contentType": "application/pdf",
-                    "size": 120000,
-                    "isInline": False,
-                },
-            ]
-        }
-    )
-
-    from app.jobs.email_jobs import detect_attachments
-
-    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-456"))
-
-    assert len(result) == 1
-    assert result[0]["name"] == "quote.pdf"
-
-
-def test_detect_attachments_inline_image_excluded():
-    """An inline image is NOT flagged as a file attachment."""
-    mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={
-            "value": [
-                {
-                    "name": "logo.png",
-                    "contentType": "image/png",
-                    "size": 5000,
-                    "isInline": True,
-                },
-            ]
-        }
-    )
-
-    from app.jobs.email_jobs import detect_attachments
-
-    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-789"))
-
-    assert len(result) == 0
-
-
-def test_detect_attachments_mixed():
-    """Mixed inline image + file attachment: only file is flagged."""
-    mock_gc = AsyncMock()
-    mock_gc.get_json = AsyncMock(
-        return_value={
-            "value": [
-                {
-                    "name": "signature.jpg",
-                    "contentType": "image/jpeg",
-                    "size": 3000,
-                    "isInline": True,
-                },
-                {
-                    "name": "inventory.xlsx",
-                    "contentType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    "size": 80000,
-                    "isInline": False,
-                },
-            ]
-        }
-    )
-
-    from app.jobs.email_jobs import detect_attachments
-
-    result = asyncio.get_event_loop().run_until_complete(detect_attachments(mock_gc, "msg-mixed"))
-
-    assert len(result) == 1
-    assert result[0]["name"] == "inventory.xlsx"
+    assert len(result) == len(expected_names)
+    assert [r["name"] for r in result] == expected_names
+    # Sizes round-trip for flagged attachments
+    sizes_by_name = {a["name"]: a["size"] for a in attachments}
+    for r in result:
+        assert r["size"] == sizes_by_name[r["name"]]
 
 
 # ── test_retry_honors_retry_after ────────────────────────────────────────
 
 
-def test_retry_honors_retry_after():
-    """429 with Retry-After header: client uses max(backoff, Retry-After)."""
-    from app.utils.graph_client import _parse_retry_after
-
-    # Create a mock response with Retry-After header
-    mock_resp = MagicMock()
-    mock_resp.headers = {"Retry-After": "10"}
-
-    result = _parse_retry_after(mock_resp)
-    assert result == 10
-
-
-def test_retry_after_missing():
-    """Missing Retry-After returns None."""
+@pytest.mark.parametrize(
+    "headers, expected",
+    [
+        pytest.param({"Retry-After": "10"}, 10, id="honors_retry_after"),
+        pytest.param({}, None, id="missing"),
+        pytest.param({"Retry-After": "Sat, 01 Jan 2028 00:00:00 GMT"}, None, id="non_numeric"),
+    ],
+)
+def test_parse_retry_after(headers, expected):
+    """_parse_retry_after returns the numeric seconds, or None when absent/non-
+    numeric."""
     from app.utils.graph_client import _parse_retry_after
 
     mock_resp = MagicMock()
-    mock_resp.headers = {}
+    mock_resp.headers = headers
 
-    result = _parse_retry_after(mock_resp)
-    assert result is None
-
-
-def test_retry_after_non_numeric():
-    """Non-numeric Retry-After returns None."""
-    from app.utils.graph_client import _parse_retry_after
-
-    mock_resp = MagicMock()
-    mock_resp.headers = {"Retry-After": "Sat, 01 Jan 2028 00:00:00 GMT"}
-
-    result = _parse_retry_after(mock_resp)
-    assert result is None
+    assert _parse_retry_after(mock_resp) == expected
 
 
 # ── test_401_not_retried ─────────────────────────────────────────────────

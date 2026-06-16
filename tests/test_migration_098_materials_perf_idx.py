@@ -39,6 +39,16 @@ _HISTORICAL_NAMES = {name for name, _cols, _kw in _mod._HISTORICAL_INDEXES}
 _ALL_NAMES = _NEW_NAMES | _HISTORICAL_NAMES
 
 
+def _script_directory():
+    """Build a ScriptDirectory pointed at the repo's alembic/ for chain walks."""
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    cfg = Config()
+    cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
+    return ScriptDirectory.from_config(cfg)
+
+
 class TestRevisionMetadata:
     def test_revision_id(self):
         assert _mod.revision == "098_materials_perf_idx"
@@ -57,12 +67,7 @@ class TestRevisionMetadata:
         # test_migration_chain.py owns that invariant) AND 098 must sit on the mainline
         # walked from that head. Reachability instead of a pinned head name, so this
         # test survives future migrations landing on top.
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
-
-        cfg = Config()
-        cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        script = ScriptDirectory.from_config(cfg)
+        script = _script_directory()
         heads = script.get_heads()
         assert len(heads) == 1, f"expected a single head, got {heads}"
         mainline = {rev.revision for rev in script.iterate_revisions(heads[0], "base")}
@@ -72,12 +77,7 @@ class TestRevisionMetadata:
         # The two _HISTORICAL_INDEXES names are owned by eabe89205d07, which must
         # remain a live ancestor of 098 — the ownership split (downgrade keeps the
         # pair) is only correct while that revision is still in the applied history.
-        from alembic.config import Config
-        from alembic.script import ScriptDirectory
-
-        cfg = Config()
-        cfg.set_main_option("script_location", os.path.join(_REPO_ROOT, "alembic"))
-        script = ScriptDirectory.from_config(cfg)
+        script = _script_directory()
         ancestors = {rev.revision for rev in script.iterate_revisions(_mod.revision, "base")}
         assert "eabe89205d07" in ancestors, (
             "eabe89205d07 is no longer an ancestor of 098 — if it was removed from the "

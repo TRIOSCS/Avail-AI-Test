@@ -18,6 +18,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -73,23 +74,19 @@ class TestStalenessHelper:
 
         assert _staleness_tier(None) == "new"
 
-    def test_recent_timestamp(self):
+    @pytest.mark.parametrize(
+        ("days_ago", "expected"),
+        [
+            pytest.param(5, "recent", id="recent"),
+            pytest.param(20, "due_soon", id="due_soon"),
+            pytest.param(40, "overdue", id="overdue"),
+        ],
+    )
+    def test_aware_timestamp_tier(self, days_ago, expected):
         from app.routers.htmx_views import _staleness_tier
 
-        ts = datetime.now(timezone.utc) - timedelta(days=5)
-        assert _staleness_tier(ts) == "recent"
-
-    def test_due_soon_timestamp(self):
-        from app.routers.htmx_views import _staleness_tier
-
-        ts = datetime.now(timezone.utc) - timedelta(days=20)
-        assert _staleness_tier(ts) == "due_soon"
-
-    def test_overdue_timestamp(self):
-        from app.routers.htmx_views import _staleness_tier
-
-        ts = datetime.now(timezone.utc) - timedelta(days=40)
-        assert _staleness_tier(ts) == "overdue"
+        ts = datetime.now(timezone.utc) - timedelta(days=days_ago)
+        assert _staleness_tier(ts) == expected
 
     def test_naive_datetime_treated_as_utc(self):
         """Naive datetime (no tzinfo) → line 4283 adds UTC, staleness computed
@@ -105,42 +102,42 @@ class TestStalenessHelper:
 class TestSanitizeHxParams:
     """Tests for _sanitize_hx_params() — allowlist enforcement."""
 
-    def test_invalid_hx_target_replaced_with_default(self):
-        """Line 4271: invalid hx_target replaced with '#main-content'."""
+    @pytest.mark.parametrize(
+        ("hx_target", "push_url_base", "default_push", "expected_target", "expected_push"),
+        [
+            # Line 4271: invalid hx_target replaced with '#main-content'.
+            pytest.param(
+                "evil-target",
+                "/v2/vendors",
+                "/v2/vendors",
+                "#main-content",
+                "/v2/vendors",
+                id="invalid_target_replaced",
+            ),
+            # Line 4273: invalid push_url_base replaced with default_push arg.
+            pytest.param(
+                "#main-content", "/evil/path", "/v2/vendors", "#main-content", "/v2/vendors", id="invalid_push_replaced"
+            ),
+            pytest.param("bad", "bad", "/v2/customers", "#main-content", "/v2/customers", id="both_invalid_replaced"),
+            pytest.param(
+                "#main-content", "/v2/vendors", "/v2/vendors", "#main-content", "/v2/vendors", id="valid_pass_through"
+            ),
+            pytest.param(
+                "#crm-tab-content",
+                "/v2/customers",
+                "/v2/vendors",
+                "#crm-tab-content",
+                "/v2/customers",
+                id="crm_tab_content_allowed",
+            ),
+        ],
+    )
+    def test_sanitize_hx_params(self, hx_target, push_url_base, default_push, expected_target, expected_push):
         from app.routers.htmx_views import _sanitize_hx_params
 
-        target, push = _sanitize_hx_params("evil-target", "/v2/vendors", "/v2/vendors")
-        assert target == "#main-content"
-        assert push == "/v2/vendors"
-
-    def test_invalid_push_url_replaced_with_default(self):
-        """Line 4273: invalid push_url_base replaced with default_push arg."""
-        from app.routers.htmx_views import _sanitize_hx_params
-
-        target, push = _sanitize_hx_params("#main-content", "/evil/path", "/v2/vendors")
-        assert target == "#main-content"
-        assert push == "/v2/vendors"
-
-    def test_both_invalid_both_replaced(self):
-        from app.routers.htmx_views import _sanitize_hx_params
-
-        target, push = _sanitize_hx_params("bad", "bad", "/v2/customers")
-        assert target == "#main-content"
-        assert push == "/v2/customers"
-
-    def test_valid_values_pass_through_unchanged(self):
-        from app.routers.htmx_views import _sanitize_hx_params
-
-        target, push = _sanitize_hx_params("#main-content", "/v2/vendors", "/v2/vendors")
-        assert target == "#main-content"
-        assert push == "/v2/vendors"
-
-    def test_crm_tab_content_is_allowed(self):
-        from app.routers.htmx_views import _sanitize_hx_params
-
-        target, push = _sanitize_hx_params("#crm-tab-content", "/v2/customers", "/v2/vendors")
-        assert target == "#crm-tab-content"
-        assert push == "/v2/customers"
+        target, push = _sanitize_hx_params(hx_target, push_url_base, default_push)
+        assert target == expected_target
+        assert push == expected_push
 
 
 class TestV2PageRequisitionsPath:

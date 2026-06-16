@@ -14,6 +14,7 @@ Called by: pytest
 Depends on: app/services/ai_service.py, app/utils/claude_client.py
 """
 
+from contextlib import contextmanager
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -29,6 +30,31 @@ from app.services.ai_service import (
     enrich_contacts_websearch,
     rephrase_rfq,
 )
+
+
+def _patch_claude_json(**kwargs):
+    """Patch claude_json as an AsyncMock (pass return_value or side_effect)."""
+    return patch("app.services.ai_service.claude_json", new_callable=AsyncMock, **kwargs)
+
+
+def _patch_routed_text(**kwargs):
+    """Patch routed_text as an AsyncMock (pass return_value or side_effect)."""
+    return patch("app.services.ai_service.routed_text", new_callable=AsyncMock, **kwargs)
+
+
+@contextmanager
+def _intel_patches(claude_kwargs):
+    """Patch the cache + claude_json trio used by company_intel().
+
+    Yields (mock_get_cached, mock_claude_json, mock_set_cached).
+    """
+    with (
+        patch("app.services.ai_service.get_cached", return_value=None) as mock_get,
+        _patch_claude_json(**claude_kwargs) as mock_claude,
+        patch("app.services.ai_service.set_cached") as mock_set,
+    ):
+        yield mock_get, mock_claude, mock_set
+
 
 # ── Constants & schema sanity checks ───────────────────────────────
 
@@ -89,11 +115,7 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Acme Corp", domain="acme.com")
 
         assert len(contacts) == 2
@@ -115,35 +137,25 @@ class TestEnrichContactsWebsearch:
             }
         ]
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Example Inc")
 
         assert len(contacts) == 1
         assert contacts[0]["full_name"] == "Alice Johnson"
 
-    async def test_empty_result_returns_empty_list(self):
-        """When claude_json returns None, return empty list."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            contacts = await enrich_contacts_websearch("Nobody Corp")
-
-        assert contacts == []
-
-    async def test_dict_without_contacts_key(self):
-        """claude_json returns a dict missing the 'contacts' key."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"error": "no results"},
-        ):
-            contacts = await enrich_contacts_websearch("Ghost Corp")
+    @pytest.mark.parametrize(
+        "claude_return",
+        [
+            pytest.param(None, id="none"),
+            pytest.param({"error": "no results"}, id="dict-without-contacts-key"),
+            pytest.param("not a dict or list", id="string"),
+            pytest.param(42, id="int"),
+        ],
+    )
+    async def test_returns_empty_list_for_unusable_result(self, claude_return):
+        """None, dict-without-contacts, and unexpected types all yield []."""
+        with _patch_claude_json(return_value=claude_return):
+            contacts = await enrich_contacts_websearch("Edge Corp")
 
         assert contacts == []
 
@@ -153,11 +165,7 @@ class TestEnrichContactsWebsearch:
             "contacts": [{"full_name": f"Person {i}", "title": "Buyer", "email": f"p{i}@co.com"} for i in range(10)]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Big Corp", limit=3)
 
         assert len(contacts) == 3
@@ -166,11 +174,7 @@ class TestEnrichContactsWebsearch:
         """Default limit is 5 contacts."""
         mock_result = {"contacts": [{"full_name": f"Person {i}", "title": "Buyer"} for i in range(10)]}
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Big Corp")
 
         assert len(contacts) == 5
@@ -186,11 +190,7 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Filter Corp")
 
         assert len(contacts) == 1
@@ -207,108 +207,52 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Mixed Corp")
 
         assert len(contacts) == 1
 
-    async def test_confidence_medium_when_email_matches_domain(self):
-        """Confidence = medium when email domain matches company domain."""
-        mock_result = {
-            "contacts": [
-                {
-                    "full_name": "Jane",
-                    "email": "jane@acme.com",
-                    "title": "Buyer",
-                }
-            ]
-        }
+    @pytest.mark.parametrize(
+        ("contact", "domain", "expected_confidence"),
+        [
+            pytest.param(
+                {"full_name": "Jane", "email": "jane@acme.com", "title": "Buyer"},
+                "acme.com",
+                "medium",
+                id="email-matches-domain",
+            ),
+            pytest.param(
+                {"full_name": "Jane", "email": "jane@gmail.com", "title": "Buyer"},
+                "acme.com",
+                "medium",
+                id="email-no-domain-match",
+            ),
+            pytest.param(
+                {"full_name": "Jane", "email": None, "linkedin_url": "https://linkedin.com/in/jane"},
+                None,
+                "low",
+                id="no-email-but-linkedin",
+            ),
+            pytest.param(
+                {"full_name": "Jane", "email": None, "linkedin_url": None},
+                None,
+                "low",
+                id="no-email-no-linkedin",
+            ),
+        ],
+    )
+    async def test_confidence_levels(self, contact, domain, expected_confidence):
+        """Confidence is medium with any email, low otherwise."""
+        with _patch_claude_json(return_value={"contacts": [contact]}):
+            contacts = await enrich_contacts_websearch("Acme Corp", domain=domain)
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            contacts = await enrich_contacts_websearch("Acme Corp", domain="acme.com")
-
-        assert contacts[0]["confidence"] == "medium"
-
-    async def test_confidence_medium_when_email_no_domain_match(self):
-        """Confidence = medium when email exists but domain doesn't match."""
-        mock_result = {
-            "contacts": [
-                {
-                    "full_name": "Jane",
-                    "email": "jane@gmail.com",
-                    "title": "Buyer",
-                }
-            ]
-        }
-
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            contacts = await enrich_contacts_websearch("Acme Corp", domain="acme.com")
-
-        assert contacts[0]["confidence"] == "medium"
-
-    async def test_confidence_low_when_no_email_but_linkedin(self):
-        """Confidence = low when no email but LinkedIn present."""
-        mock_result = {
-            "contacts": [
-                {
-                    "full_name": "Jane",
-                    "email": None,
-                    "linkedin_url": "https://linkedin.com/in/jane",
-                }
-            ]
-        }
-
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            contacts = await enrich_contacts_websearch("Acme Corp")
-
-        assert contacts[0]["confidence"] == "low"
-
-    async def test_confidence_low_when_no_email_no_linkedin(self):
-        """Confidence = low when only name is present."""
-        mock_result = {
-            "contacts": [
-                {
-                    "full_name": "Jane",
-                    "email": None,
-                    "linkedin_url": None,
-                }
-            ]
-        }
-
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
-            contacts = await enrich_contacts_websearch("Acme Corp")
-
-        assert contacts[0]["confidence"] == "low"
+        assert contacts[0]["confidence"] == expected_confidence
 
     async def test_email_normalized_lowercase(self):
         """Email addresses are lowercased."""
         mock_result = {"contacts": [{"full_name": "Jane", "email": "  Jane@ACME.com  "}]}
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Acme Corp")
 
         assert contacts[0]["email"] == "jane@acme.com"
@@ -327,11 +271,7 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Acme Corp")
 
         assert contacts[0]["title"] is None
@@ -352,11 +292,7 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Acme Corp")
 
         c = contacts[0]
@@ -367,29 +303,20 @@ class TestEnrichContactsWebsearch:
 
     async def test_custom_title_keywords(self):
         """Custom title_keywords are passed in the prompt."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             await enrich_contacts_websearch(
                 "Acme Corp",
                 title_keywords=["CTO", "engineering manager"],
             )
 
         # The prompt (first positional arg) should include custom keywords
-        call_args = mock_claude.call_args
-        prompt = call_args.args[0]
+        prompt = mock_claude.call_args.args[0]
         assert "CTO" in prompt
         assert "engineering manager" in prompt
 
     async def test_domain_included_in_prompt(self):
         """When domain is provided it appears in the prompt."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             await enrich_contacts_websearch("Acme Corp", domain="acme.com")
 
         prompt = mock_claude.call_args.args[0]
@@ -397,11 +324,7 @@ class TestEnrichContactsWebsearch:
 
     async def test_domain_not_in_prompt_when_none(self):
         """When domain is None, no domain parenthetical in the prompt."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             await enrich_contacts_websearch("Acme Corp", domain=None)
 
         prompt = mock_claude.call_args.args[0]
@@ -410,11 +333,7 @@ class TestEnrichContactsWebsearch:
 
     async def test_uses_smart_model_tier(self):
         """Contact enrichment uses the SMART model tier."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             await enrich_contacts_websearch("Acme Corp")
 
         kwargs = mock_claude.call_args.kwargs
@@ -422,11 +341,7 @@ class TestEnrichContactsWebsearch:
 
     async def test_uses_web_search_tool(self):
         """Contact enrichment enables the web_search tool."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             await enrich_contacts_websearch("Acme Corp")
 
         kwargs = mock_claude.call_args.kwargs
@@ -443,37 +358,11 @@ class TestEnrichContactsWebsearch:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Test Co")
 
         for c in contacts:
             assert c["source"] == "web_search"
-
-    async def test_unexpected_return_type_returns_empty(self):
-        """If claude_json returns an unexpected type (e.g., string), return empty."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value="not a dict or list",
-        ):
-            contacts = await enrich_contacts_websearch("Bad Corp")
-
-        assert contacts == []
-
-    async def test_int_return_type_returns_empty(self):
-        """If claude_json returns an int, return empty."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=42,
-        ):
-            contacts = await enrich_contacts_websearch("Bad Corp")
-
-        assert contacts == []
 
 
 # ── Feature 3: Company Intelligence Cards ──────────────────────────
@@ -495,20 +384,7 @@ class TestCompanyIntel:
             "sources": ["acme.com", "reuters.com"],
         }
 
-        with (
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value=mock_intel,
-            ),
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
+        with _intel_patches({"return_value": mock_intel}) as (_, _, mock_set):
             result = await company_intel("Acme Corp")
 
         assert result is not None
@@ -523,14 +399,8 @@ class TestCompanyIntel:
         cached_data = {"summary": "Cached intel", "revenue": "$1B"}
 
         with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=cached_data,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-            ) as mock_claude,
+            patch("app.services.ai_service.get_cached", return_value=cached_data),
+            _patch_claude_json() as mock_claude,
         ):
             result = await company_intel("Acme Corp")
 
@@ -539,20 +409,7 @@ class TestCompanyIntel:
 
     async def test_cache_key_lowered_and_stripped(self):
         """Cache key normalizes company name to lowercase/stripped."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ) as mock_get,
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (mock_get, _, _):
             await company_intel("  ACME Corp  ")
 
         # get_cached should be called with lowered/stripped key
@@ -560,106 +417,33 @@ class TestCompanyIntel:
 
     async def test_set_cached_with_7_day_ttl(self):
         """Cache entries use 7-day TTL."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (_, _, mock_set):
             await company_intel("Acme Corp")
 
         mock_set.assert_called_once()
         args = mock_set.call_args
         assert args.kwargs.get("ttl_days") == 7 or args.args[2] == 7
 
-    async def test_returns_none_on_api_failure(self):
-        """Returns None when claude_json returns None."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
-            result = await company_intel("Ghost Corp")
-
-        assert result is None
-        mock_set.assert_not_called()
-
-    async def test_returns_none_on_non_dict_response(self):
-        """Returns None when claude_json returns a non-dict (e.g., list, string)."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value=["not", "a", "dict"],
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
+    @pytest.mark.parametrize(
+        "claude_return",
+        [
+            pytest.param(None, id="none"),
+            pytest.param(["not", "a", "dict"], id="list"),
+            pytest.param({}, id="empty-dict"),
+            pytest.param("just a string", id="string"),
+        ],
+    )
+    async def test_returns_none_without_caching_for_unusable_result(self, claude_return):
+        """None, non-dict, and empty-dict results all yield None and skip caching."""
+        with _intel_patches({"return_value": claude_return}) as (_, _, mock_set):
             result = await company_intel("Bad Corp")
 
         assert result is None
         mock_set.assert_not_called()
 
-    async def test_returns_none_on_empty_dict(self):
-        """Returns None when claude_json returns an empty dict (falsy check)."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={},
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
-            result = await company_intel("Empty Corp")
-
-        # Empty dict is falsy -> should return None
-        assert result is None
-        mock_set.assert_not_called()
-
     async def test_domain_included_in_prompt(self):
         """When domain is provided it appears in the prompt."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ) as mock_claude,
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (_, mock_claude, _):
             await company_intel("Acme Corp", domain="acme.com")
 
         prompt = mock_claude.call_args.args[0]
@@ -667,20 +451,7 @@ class TestCompanyIntel:
 
     async def test_domain_not_in_prompt_when_none(self):
         """When domain is None, no domain parenthetical."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ) as mock_claude,
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (_, mock_claude, _):
             await company_intel("Acme Corp", domain=None)
 
         prompt = mock_claude.call_args.args[0]
@@ -688,20 +459,7 @@ class TestCompanyIntel:
 
     async def test_uses_smart_model_tier(self):
         """Company intel uses the SMART model tier."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ) as mock_claude,
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (_, mock_claude, _):
             await company_intel("Acme Corp")
 
         kwargs = mock_claude.call_args.kwargs
@@ -709,47 +467,13 @@ class TestCompanyIntel:
 
     async def test_uses_web_search_tool(self):
         """Company intel enables the web_search tool."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "test"},
-            ) as mock_claude,
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "test"}}) as (_, mock_claude, _):
             await company_intel("Acme Corp")
 
         kwargs = mock_claude.call_args.kwargs
         assert kwargs["tools"] is not None
         tool_types = [t["type"] for t in kwargs["tools"]]
         assert "web_search_20250305" in tool_types
-
-    async def test_string_return_from_claude_returns_none(self):
-        """If claude_json somehow returns a string, return None."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value="just a string",
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ) as mock_set,
-        ):
-            result = await company_intel("String Corp")
-
-        assert result is None
-        mock_set.assert_not_called()
 
 
 # ── Feature 4: Smart RFQ Email Drafts ─────────────────────────────
@@ -766,11 +490,7 @@ class TestDraftRfq:
             "Please provide your best pricing and availability."
         )
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value=expected_body,
-        ):
+        with _patch_routed_text(return_value=expected_body):
             result = await draft_rfq(
                 vendor_name="Arrow Electronics",
                 parts=[{"mpn": "LM317T", "qty": 1000, "target_price": 0.50}],
@@ -780,11 +500,7 @@ class TestDraftRfq:
 
     async def test_returns_none_on_api_failure(self):
         """Returns None when claude_text returns None."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
+        with _patch_routed_text(return_value=None):
             result = await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -802,11 +518,7 @@ class TestDraftRfq:
             "best_price": "$0.45",
         }
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow Electronics",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -822,11 +534,7 @@ class TestDraftRfq:
 
     async def test_no_history_context_when_none(self):
         """No history section in prompt when vendor_history is None."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow Electronics",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -838,11 +546,7 @@ class TestDraftRfq:
 
     async def test_target_price_in_parts_string(self):
         """Target price is shown when provided."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000, "target_price": 0.50}],
@@ -853,11 +557,7 @@ class TestDraftRfq:
 
     async def test_no_target_price_when_absent(self):
         """When target_price is missing, no target mentioned."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -874,11 +574,7 @@ class TestDraftRfq:
             {"mpn": "TL431", "qty": 2000, "target_price": 0.25},
         ]
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(vendor_name="Arrow", parts=parts)
 
         prompt = mock_claude.call_args.args[0]
@@ -890,11 +586,7 @@ class TestDraftRfq:
         """Only the first 20 parts are included in the prompt."""
         parts = [{"mpn": f"PART-{i:03d}", "qty": 100} for i in range(30)]
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(vendor_name="Arrow", parts=parts)
 
         prompt = mock_claude.call_args.args[0]
@@ -903,11 +595,7 @@ class TestDraftRfq:
 
     async def test_uses_fast_model_tier(self):
         """RFQ drafts use the FAST model tier."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -918,11 +606,7 @@ class TestDraftRfq:
 
     async def test_user_name_in_prompt(self):
         """User name is passed into the prompt."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -934,11 +618,7 @@ class TestDraftRfq:
 
     async def test_default_sender_when_no_user_name(self):
         """Default sender label when user_name is empty."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -950,11 +630,7 @@ class TestDraftRfq:
 
     async def test_vendor_name_in_prompt(self):
         """Vendor name appears in the prompt."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Mouser Electronics",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -965,11 +641,7 @@ class TestDraftRfq:
 
     async def test_empty_parts_list(self):
         """Empty parts list still calls claude_text."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             result = await draft_rfq(vendor_name="Arrow", parts=[])
 
         assert result == "email body"
@@ -977,11 +649,7 @@ class TestDraftRfq:
 
     async def test_parts_with_missing_fields(self):
         """Parts with missing mpn/qty use '?' placeholder."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"target_price": 0.50}],  # no mpn or qty
@@ -994,11 +662,7 @@ class TestDraftRfq:
         """Vendor history dict with missing keys uses defaults gracefully."""
         history = {"total_rfqs": 5}  # other fields missing
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="email body",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="email body") as mock_claude:
             await draft_rfq(
                 vendor_name="Arrow",
                 parts=[{"mpn": "LM317T", "qty": 1000}],
@@ -1021,22 +685,14 @@ class TestRephraseRfq:
         original = "Please quote LM317T x1000 pcs."
         rephrased = "Could you provide pricing for LM317T, quantity 1000?"
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value=rephrased,
-        ):
+        with _patch_routed_text(return_value=rephrased):
             result = await rephrase_rfq(original)
 
         assert result == rephrased
 
     async def test_returns_none_on_api_failure(self):
         """Returns None when claude_text returns None."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
+        with _patch_routed_text(return_value=None):
             result = await rephrase_rfq("Please quote LM317T.")
 
         assert result is None
@@ -1045,11 +701,7 @@ class TestRephraseRfq:
         """The original email body is included in the prompt."""
         original = "Please quote LM317T x1000 pcs at $0.50 target."
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="rephrased text",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="rephrased text") as mock_claude:
             await rephrase_rfq(original)
 
         prompt = mock_claude.call_args.args[0]
@@ -1057,11 +709,7 @@ class TestRephraseRfq:
 
     async def test_uses_fast_model_tier(self):
         """Rephrase uses the FAST model tier."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="rephrased text",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="rephrased text") as mock_claude:
             await rephrase_rfq("Please quote LM317T.")
 
         kwargs = mock_claude.call_args.kwargs
@@ -1069,11 +717,7 @@ class TestRephraseRfq:
 
     async def test_max_tokens_is_800(self):
         """Rephrase requests 800 max tokens."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="rephrased text",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="rephrased text") as mock_claude:
             await rephrase_rfq("Please quote LM317T.")
 
         kwargs = mock_claude.call_args.kwargs
@@ -1081,11 +725,7 @@ class TestRephraseRfq:
 
     async def test_empty_body_still_calls_claude(self):
         """Even with empty body, the function calls claude_text."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="rephrased empty",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="rephrased empty") as mock_claude:
             result = await rephrase_rfq("")
 
         assert result == "rephrased empty"
@@ -1095,11 +735,7 @@ class TestRephraseRfq:
         """A long email body is passed through without truncation."""
         long_body = "Line of text. " * 500  # ~7500 chars
 
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            return_value="rephrased",
-        ) as mock_claude:
+        with _patch_routed_text(return_value="rephrased") as mock_claude:
             await rephrase_rfq(long_body)
 
         prompt = mock_claude.call_args.args[0]
@@ -1114,37 +750,19 @@ class TestErrorHandling:
 
     async def test_enrich_contacts_claude_exception_propagates(self):
         """If claude_json raises an unexpected exception, it propagates."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Unexpected error"),
-        ):
+        with _patch_claude_json(side_effect=RuntimeError("Unexpected error")):
             with pytest.raises(RuntimeError, match="Unexpected error"):
                 await enrich_contacts_websearch("Error Corp")
 
     async def test_company_intel_claude_exception_propagates(self):
         """If claude_json raises an unexpected exception, it propagates."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                side_effect=RuntimeError("API down"),
-            ),
-        ):
+        with _intel_patches({"side_effect": RuntimeError("API down")}):
             with pytest.raises(RuntimeError, match="API down"):
                 await company_intel("Error Corp")
 
     async def test_draft_rfq_claude_exception_propagates(self):
         """If claude_text raises an unexpected exception, it propagates."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            side_effect=TimeoutError("Timed out"),
-        ):
+        with _patch_routed_text(side_effect=TimeoutError("Timed out")):
             with pytest.raises(TimeoutError, match="Timed out"):
                 await draft_rfq(
                     vendor_name="Timeout Vendor",
@@ -1153,21 +771,13 @@ class TestErrorHandling:
 
     async def test_rephrase_rfq_claude_exception_propagates(self):
         """If claude_text raises an unexpected exception, it propagates."""
-        with patch(
-            "app.services.ai_service.routed_text",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError("Network failure"),
-        ):
+        with _patch_routed_text(side_effect=ConnectionError("Network failure")):
             with pytest.raises(ConnectionError, match="Network failure"):
                 await rephrase_rfq("Some body")
 
     async def test_enrich_contacts_empty_company_name(self):
         """Empty company name still calls claude_json."""
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"contacts": []},
-        ) as mock_claude:
+        with _patch_claude_json(return_value={"contacts": []}) as mock_claude:
             result = await enrich_contacts_websearch("")
 
         assert result == []
@@ -1175,20 +785,7 @@ class TestErrorHandling:
 
     async def test_company_intel_empty_company_name(self):
         """Empty company name still proceeds (caching with empty key)."""
-        with (
-            patch(
-                "app.services.ai_service.get_cached",
-                return_value=None,
-            ),
-            patch(
-                "app.services.ai_service.claude_json",
-                new_callable=AsyncMock,
-                return_value={"summary": "minimal"},
-            ),
-            patch(
-                "app.services.ai_service.set_cached",
-            ),
-        ):
+        with _intel_patches({"return_value": {"summary": "minimal"}}):
             result = await company_intel("")
 
         assert result is not None
@@ -1205,11 +802,7 @@ class TestErrorHandling:
             ]
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_result,
-        ):
+        with _patch_claude_json(return_value=mock_result):
             contacts = await enrich_contacts_websearch("Mixed Corp")
 
         assert len(contacts) == 2

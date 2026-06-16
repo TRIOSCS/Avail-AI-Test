@@ -122,14 +122,19 @@ class TestProcessAIGate:
         item.updated_at = None
         return item
 
+    def _db_with_items(self, items: list) -> MagicMock:
+        """Build a mock db session whose pending-items query returns `items`."""
+        query_mock = MagicMock()
+        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = items
+        db_mock = MagicMock()
+        db_mock.query.return_value = query_mock
+        return db_mock
+
     @pytest.mark.asyncio
     async def test_no_pending_items_skips(self, db_session):
         model = MagicMock()
         model.status = "pending"
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-        db_session_mock = MagicMock()
-        db_session_mock.query.return_value = query_mock
+        db_session_mock = self._db_with_items([])
 
         gate = AIGate(model, "ICsource", "search_ics")
         await gate.process_ai_gate(db_session_mock)
@@ -150,10 +155,7 @@ class TestProcessAIGate:
         item = self._make_item("LM358")
 
         model = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
-        db_mock = MagicMock()
-        db_mock.query.return_value = query_mock
+        db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
         # Pre-populate cache
@@ -171,10 +173,7 @@ class TestProcessAIGate:
         item = self._make_item("LM358")
 
         model = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
-        db_mock = MagicMock()
-        db_mock.query.return_value = query_mock
+        db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
 
@@ -190,10 +189,7 @@ class TestProcessAIGate:
         item = self._make_item("STM32F407")
 
         model = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
-        db_mock = MagicMock()
-        db_mock.query.return_value = query_mock
+        db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
         classifications = [
@@ -211,10 +207,7 @@ class TestProcessAIGate:
         item = self._make_item("RC0402")
 
         model = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
-        db_mock = MagicMock()
-        db_mock.query.return_value = query_mock
+        db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
         classifications = [{"mpn": "RC0402", "search_ics": False, "commodity": "passive", "reason": "resistor"}]
@@ -230,10 +223,7 @@ class TestProcessAIGate:
         item = self._make_item("UNKNOWNPART")
 
         model = MagicMock()
-        query_mock = MagicMock()
-        query_mock.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
-        db_mock = MagicMock()
-        db_mock.query.return_value = query_mock
+        db_mock = self._db_with_items([item])
 
         gate = AIGate(model, "ICsource", "search_ics")
         # Classification doesn't include this MPN

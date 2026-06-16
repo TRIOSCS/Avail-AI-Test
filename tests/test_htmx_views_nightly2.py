@@ -145,6 +145,14 @@ def _ticket(db: Session, user: User, **kw) -> TroubleTicket:
     return obj
 
 
+def _part(db: Session, user: User) -> Requirement:
+    """Create a committed requisition + requirement and return the requirement."""
+    req = _req(db, user)
+    item = _requirement(db, req)
+    db.commit()
+    return item
+
+
 # ── Parts List Partial ────────────────────────────────────────────────
 
 
@@ -238,66 +246,20 @@ class TestPartsListPartial:
 
 
 class TestPartsTabs:
-    def test_part_tab_offers(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize("tab", ["offers", "sourcing", "req-details", "activity", "comms", "notes"])
+    def test_part_tab(self, client, db_session: Session, test_user: User, tab):
+        item = _part(db_session, test_user)
 
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/offers")
+        resp = client.get(f"/v2/partials/parts/{item.id}/tab/{tab}")
         assert resp.status_code == 200
 
-    def test_part_tab_offers_not_found(self, client, db_session: Session):
-        resp = client.get("/v2/partials/parts/999999/tab/offers")
-        assert resp.status_code == 404
-
-    def test_part_tab_sourcing(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/sourcing")
-        assert resp.status_code == 200
-
-    def test_part_tab_req_details(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/req-details")
-        assert resp.status_code == 200
-
-    def test_part_tab_activity(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/activity")
-        assert resp.status_code == 200
-
-    def test_part_tab_comms(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/comms")
-        assert resp.status_code == 200
-
-    def test_part_tab_notes(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/tab/notes")
-        assert resp.status_code == 200
-
-    def test_part_tab_notes_not_found(self, client, db_session: Session):
-        resp = client.get("/v2/partials/parts/999999/tab/notes")
+    @pytest.mark.parametrize("tab", ["offers", "notes"])
+    def test_part_tab_not_found(self, client, db_session: Session, tab):
+        resp = client.get(f"/v2/partials/parts/999999/tab/{tab}")
         assert resp.status_code == 404
 
     def test_save_part_notes(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+        item = _part(db_session, test_user)
 
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/notes",
@@ -310,237 +272,125 @@ class TestPartsTabs:
 
 
 class TestPartHeaderEdit:
-    def test_part_header_edit_name(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            ("brand", 200),
+            ("sourcing_status", 200),
+            ("condition", 200),
+            ("description", 200),
+            ("substitutes", 200),
+            ("target_qty", 200),
+            ("not_a_field", 400),
+        ],
+    )
+    def test_part_header_edit(self, client, db_session: Session, test_user: User, field, expected):
+        item = _part(db_session, test_user)
 
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/brand")
-        assert resp.status_code == 200
+        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/{field}")
+        assert resp.status_code == expected
 
-    def test_part_header_edit_sourcing_status(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/sourcing_status")
-        assert resp.status_code == 200
-
-    def test_part_header_edit_condition(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/condition")
-        assert resp.status_code == 200
-
-    def test_part_header_edit_description(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/description")
-        assert resp.status_code == 200
-
-    def test_part_header_edit_substitutes(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/substitutes")
-        assert resp.status_code == 200
-
-    def test_part_header_edit_target_qty(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/target_qty")
-        assert resp.status_code == 200
-
-    def test_part_header_edit_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/not_a_field")
-        assert resp.status_code == 400
-
-    def test_part_header_save_brand(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "value", "expected"),
+        [
+            ("brand", "Texas Instruments", 200),
+            ("target_qty", "500", 200),
+            ("target_price", "0.50", 200),
+            ("manufacturer", "TI", 200),
+            ("not_valid", "x", 400),
+        ],
+    )
+    def test_part_header_save(self, client, db_session: Session, test_user: User, field, value, expected):
+        item = _part(db_session, test_user)
 
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/header",
-            data={"field": "brand", "value": "Texas Instruments"},
+            data={"field": field, "value": value},
         )
-        assert resp.status_code == 200
-
-    def test_part_header_save_target_qty(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/header",
-            data={"field": "target_qty", "value": "500"},
-        )
-        assert resp.status_code == 200
-
-    def test_part_header_save_target_price(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/header",
-            data={"field": "target_price", "value": "0.50"},
-        )
-        assert resp.status_code == 200
-
-    def test_part_header_save_manufacturer(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/header",
-            data={"field": "manufacturer", "value": "TI"},
-        )
-        assert resp.status_code == 200
-
-    def test_part_header_save_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/header",
-            data={"field": "not_valid", "value": "x"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == expected
 
 
 # ── Part Cell Inline Edit ─────────────────────────────────────────────
 
 
 class TestPartCellEdit:
-    def test_cell_edit_sourcing_status(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            ("sourcing_status", 200),
+            ("invalid", 400),
+        ],
+    )
+    def test_cell_edit(self, client, db_session: Session, test_user: User, field, expected):
+        item = _part(db_session, test_user)
 
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/edit/sourcing_status")
-        assert resp.status_code == 200
+        resp = client.get(f"/v2/partials/parts/{item.id}/cell/edit/{field}")
+        assert resp.status_code == expected
 
-    def test_cell_edit_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            ("target_qty", 200),
+            ("invalid", 400),
+        ],
+    )
+    def test_cell_display(self, client, db_session: Session, test_user: User, field, expected):
+        item = _part(db_session, test_user)
 
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/edit/invalid")
-        assert resp.status_code == 400
+        resp = client.get(f"/v2/partials/parts/{item.id}/cell/display/{field}")
+        assert resp.status_code == expected
 
-    def test_cell_display(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/display/target_qty")
-        assert resp.status_code == 200
-
-    def test_cell_display_invalid(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/cell/display/invalid")
-        assert resp.status_code == 400
-
-    def test_cell_save_target_qty(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/cell",
-            data={"field": "target_qty", "value": "250"},
-        )
-        assert resp.status_code == 200
-
-    def test_cell_save_target_price(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "value", "expected"),
+        [
+            ("target_qty", "250", 200),
+            ("target_price", "0.75", 200),
+            ("invalid_field", "x", 400),
+        ],
+    )
+    def test_cell_save(self, client, db_session: Session, test_user: User, field, value, expected):
+        item = _part(db_session, test_user)
 
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/cell",
-            data={"field": "target_price", "value": "0.75"},
+            data={"field": field, "value": value},
         )
-        assert resp.status_code == 200
-
-    def test_cell_save_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/cell",
-            data={"field": "invalid_field", "value": "x"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == expected
 
 
 # ── Part Spec Edit ────────────────────────────────────────────────────
 
 
 class TestPartSpecEdit:
-    def test_spec_edit_customer_pn(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "expected"),
+        [
+            ("customer_pn", 200),
+            ("condition", 200),
+            ("invalid", 400),
+        ],
+    )
+    def test_spec_edit(self, client, db_session: Session, test_user: User, field, expected):
+        item = _part(db_session, test_user)
 
-        resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/customer_pn")
-        assert resp.status_code == 200
+        resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/{field}")
+        assert resp.status_code == expected
 
-    def test_spec_edit_condition(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/condition")
-        assert resp.status_code == 200
-
-    def test_spec_edit_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.get(f"/v2/partials/parts/{item.id}/edit-spec/invalid")
-        assert resp.status_code == 400
-
-    def test_spec_save(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+    @pytest.mark.parametrize(
+        ("field", "value", "expected"),
+        [
+            ("customer_pn", "CUST-123", 200),
+            ("not_valid", "x", 400),
+        ],
+    )
+    def test_spec_save(self, client, db_session: Session, test_user: User, field, value, expected):
+        item = _part(db_session, test_user)
 
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/save-spec",
-            data={"field": "customer_pn", "value": "CUST-123"},
+            data={"field": field, "value": value},
         )
-        assert resp.status_code == 200
-
-    def test_spec_save_invalid_field(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
-
-        resp = client.patch(
-            f"/v2/partials/parts/{item.id}/save-spec",
-            data={"field": "not_valid", "value": "x"},
-        )
-        assert resp.status_code == 400
+        assert resp.status_code == expected
 
 
 # ── Part Tasks ────────────────────────────────────────────────────────
@@ -548,9 +398,7 @@ class TestPartSpecEdit:
 
 class TestPartTasks:
     def test_create_part_task(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+        item = _part(db_session, test_user)
 
         resp = client.post(
             f"/v2/partials/parts/{item.id}/tasks",
@@ -559,9 +407,7 @@ class TestPartTasks:
         assert resp.status_code == 200
 
     def test_create_part_task_no_title(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+        item = _part(db_session, test_user)
 
         resp = client.post(f"/v2/partials/parts/{item.id}/tasks", data={"notes": "No title"})
         assert resp.status_code == 422
@@ -678,9 +524,7 @@ class TestPartTasks:
 
 class TestArchiveSystem:
     def test_archive_single_part(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+        item = _part(db_session, test_user)
 
         resp = client.patch(f"/v2/partials/parts/{item.id}/archive")
         assert resp.status_code == 200
@@ -718,9 +562,7 @@ class TestArchiveSystem:
         assert resp.status_code == 200
 
     def test_bulk_archive(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        item = _requirement(db_session, req)
-        db_session.commit()
+        item = _part(db_session, test_user)
 
         resp = client.post(
             "/v2/partials/parts/bulk-archive",

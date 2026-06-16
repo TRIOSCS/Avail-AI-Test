@@ -20,6 +20,8 @@ from app.models import Requisition, User
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
+_AUTH_DEPS = [get_db, require_user, require_buyer, require_admin]
+
 
 def _make_client(db_session: Session, user: User) -> TestClient:
     """Build a TestClient authenticated as the given user."""
@@ -56,6 +58,12 @@ def _make_sales_client(db_session: Session, user: User) -> TestClient:
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_admin] = _not_admin
     return TestClient(app)
+
+
+def _clear_overrides() -> None:
+    """Remove the auth dependency overrides installed by the client helpers."""
+    for dep in _AUTH_DEPS:
+        app.dependency_overrides.pop(dep, None)
 
 
 # ── B2: RequirementUpdate rejects blank MPN ──────────────────────────
@@ -128,8 +136,7 @@ def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_use
         resp = sales_c.get(f"/api/requisitions/{req.id}/sourcing-score")
         assert resp.status_code == 404
     finally:
-        for dep in [get_db, require_user, require_buyer, require_admin]:
-            app.dependency_overrides.pop(dep, None)
+        _clear_overrides()
 
 
 # ── B10: Batch archive respects role ─────────────────────────────────
@@ -169,8 +176,7 @@ def test_batch_archive_sales_only_own(db_session, sales_user, test_user):
         assert own_req.status == "archived"
         assert other_req.status == "active"
     finally:
-        for dep in [get_db, require_user, require_buyer, require_admin]:
-            app.dependency_overrides.pop(dep, None)
+        _clear_overrides()
 
 
 # ── B11: Batch assign requires admin ─────────────────────────────────
@@ -186,8 +192,7 @@ def test_batch_assign_non_admin_rejected(db_session, sales_user):
         )
         assert resp.status_code == 403
     finally:
-        for dep in [get_db, require_user, require_buyer, require_admin]:
-            app.dependency_overrides.pop(dep, None)
+        _clear_overrides()
 
 
 def test_batch_assign_admin_allowed(db_session, admin_user, test_requisition, test_user):
@@ -201,8 +206,7 @@ def test_batch_assign_admin_allowed(db_session, admin_user, test_requisition, te
         assert resp.status_code == 200
         assert resp.json()["assigned_count"] == 1
     finally:
-        for dep in [get_db, require_user, require_buyer, require_admin]:
-            app.dependency_overrides.pop(dep, None)
+        _clear_overrides()
 
 
 # ── B16: Condition/packaging normalized on create ────────────────────

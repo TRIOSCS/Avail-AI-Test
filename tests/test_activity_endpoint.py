@@ -64,20 +64,12 @@ class TestCallInitiated:
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert record.requisition_id == test_requisition.id
 
-    def test_invalid_phone_returns_400(self, client):
+    @pytest.mark.parametrize("phone_number", ["call john", ""], ids=["non_numeric", "empty"])
+    def test_bad_phone_returns_400(self, client, phone_number):
         resp = client.post(
             "/api/activity/call-initiated",
             json={
-                "phone_number": "call john",
-            },
-        )
-        assert resp.status_code == 400
-
-    def test_empty_phone_returns_400(self, client):
-        resp = client.post(
-            "/api/activity/call-initiated",
-            json={
-                "phone_number": "",
+                "phone_number": phone_number,
             },
         )
         assert resp.status_code == 400

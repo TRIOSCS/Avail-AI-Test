@@ -57,29 +57,24 @@ class TestRegisterCoreJobs:
         job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
         assert "webhook_subs" in job_ids
 
-    def test_total_job_count_without_webhooks(self):
-        """Exactly 6 jobs when activity tracking disabled."""
+    @pytest.mark.parametrize(
+        ("activity_tracking_enabled", "expected_count"),
+        [
+            pytest.param(False, 6, id="without_webhooks"),
+            pytest.param(True, 7, id="with_webhooks"),
+        ],
+    )
+    def test_total_job_count(self, activity_tracking_enabled: bool, expected_count: int):
+        """Exactly 6 jobs without activity tracking, 7 with it enabled."""
         from app.jobs.core_jobs import register_core_jobs
 
         scheduler = MagicMock()
         settings = MagicMock()
         settings.inbox_scan_interval_min = 10
-        settings.activity_tracking_enabled = False
+        settings.activity_tracking_enabled = activity_tracking_enabled
 
         register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 6
-
-    def test_total_job_count_with_webhooks(self):
-        """Exactly 7 jobs when activity tracking enabled."""
-        from app.jobs.core_jobs import register_core_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.inbox_scan_interval_min = 10
-        settings.activity_tracking_enabled = True
-
-        register_core_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 7
+        assert scheduler.add_job.call_count == expected_count
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -555,9 +550,16 @@ class TestJobBatchResults:
 
         mock_db.close.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("side_effect", "expected_exc", "match"),
+        [
+            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(ValueError("bad data"), ValueError, "bad data", id="generic_exception"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_handles_timeout(self):
-        """TimeoutError is re-raised for _traced_job to catch."""
+    async def test_reraises_and_closes(self, side_effect, expected_exc, match):
+        """TimeoutError / generic exception is re-raised; session is closed."""
         from app.jobs.core_jobs import _job_batch_results
 
         mock_db = MagicMock()
@@ -565,26 +567,9 @@ class TestJobBatchResults:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.email_service.process_batch_results", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("asyncio.wait_for", side_effect=side_effect),
         ):
-            with pytest.raises(asyncio.TimeoutError):
-                await _job_batch_results.__wrapped__()
-
-        mock_db.close.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_generic_exception(self):
-        """Generic exception is re-raised."""
-        from app.jobs.core_jobs import _job_batch_results
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.email_service.process_batch_results", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=ValueError("bad data")),
-        ):
-            with pytest.raises(ValueError, match="bad data"):
+            with pytest.raises(expected_exc, match=match):
                 await _job_batch_results.__wrapped__()
 
         mock_db.close.assert_called_once()
@@ -615,8 +600,15 @@ class TestJobBatchParseSignatures:
 
         mock_db.close.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("side_effect", "expected_exc", "match"),
+        [
+            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(RuntimeError("parse error"), RuntimeError, "parse error", id="exception"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_handles_timeout(self):
+    async def test_reraises_and_rolls_back(self, side_effect, expected_exc, match):
         from app.jobs.core_jobs import _job_batch_parse_signatures
 
         mock_db = MagicMock()
@@ -624,25 +616,9 @@ class TestJobBatchParseSignatures:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.batch_parse_signatures", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("asyncio.wait_for", side_effect=side_effect),
         ):
-            with pytest.raises(asyncio.TimeoutError):
-                await _job_batch_parse_signatures.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_exception(self):
-        from app.jobs.core_jobs import _job_batch_parse_signatures
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.batch_parse_signatures", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=RuntimeError("parse error")),
-        ):
-            with pytest.raises(RuntimeError, match="parse error"):
+            with pytest.raises(expected_exc, match=match):
                 await _job_batch_parse_signatures.__wrapped__()
 
         mock_db.rollback.assert_called_once()
@@ -667,8 +643,15 @@ class TestJobPollSignatureBatch:
 
         mock_db.close.assert_called_once()
 
+    @pytest.mark.parametrize(
+        ("side_effect", "expected_exc", "match"),
+        [
+            pytest.param(asyncio.TimeoutError(), asyncio.TimeoutError, None, id="timeout"),
+            pytest.param(RuntimeError("poll error"), RuntimeError, "poll error", id="exception"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_handles_timeout(self):
+    async def test_reraises_and_rolls_back(self, side_effect, expected_exc, match):
         from app.jobs.core_jobs import _job_poll_signature_batch
 
         mock_db = MagicMock()
@@ -676,25 +659,9 @@ class TestJobPollSignatureBatch:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.process_signature_batch_results", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
+            patch("asyncio.wait_for", side_effect=side_effect),
         ):
-            with pytest.raises(asyncio.TimeoutError):
-                await _job_poll_signature_batch.__wrapped__()
-
-        mock_db.rollback.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_handles_exception(self):
-        from app.jobs.core_jobs import _job_poll_signature_batch
-
-        mock_db = MagicMock()
-
-        with (
-            patch("app.database.SessionLocal", return_value=mock_db),
-            patch("app.services.signature_parser.process_signature_batch_results", AsyncMock()),
-            patch("asyncio.wait_for", side_effect=RuntimeError("poll error")),
-        ):
-            with pytest.raises(RuntimeError, match="poll error"):
+            with pytest.raises(expected_exc, match=match):
                 await _job_poll_signature_batch.__wrapped__()
 
         mock_db.rollback.assert_called_once()

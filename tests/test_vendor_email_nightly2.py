@@ -49,6 +49,22 @@ def _make_ei_row(sender_email, sender_domain=None, received_at=None):
     return ei
 
 
+def _query_dispatcher(routes, default):
+    """Return a ``db.query`` side_effect that maps each model class to a chain.
+
+    *routes* is a list of ``(model, chain)`` pairs; the first matching model wins.
+    Anything not listed returns *default*.
+    """
+
+    def patched_query(model, *args, **kwargs):
+        for route_model, chain in routes:
+            if model is route_model:
+                return chain
+        return default
+
+    return patched_query
+
+
 class TestMaterialVendorHistoryLoopBody:
     """Cover lines 140-147: the for-loop body inside the MaterialVendorHistory try block."""
 
@@ -62,12 +78,10 @@ class TestMaterialVendorHistoryLoopBody:
         ei_chain = _make_query_chain([])
         sighting_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is EmailIntelligence:
-                return ei_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(MaterialVendorHistory, history_chain), (EmailIntelligence, ei_chain)],
+            default=sighting_chain,
+        )
 
         mock_mpn = MagicMock()
         with patch.object(db_session, "query", side_effect=patched_query):
@@ -87,12 +101,10 @@ class TestMaterialVendorHistoryLoopBody:
         ei_chain = _make_query_chain([])
         sighting_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is EmailIntelligence:
-                return ei_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(MaterialVendorHistory, history_chain), (EmailIntelligence, ei_chain)],
+            default=sighting_chain,
+        )
 
         mock_mpn = MagicMock()
         with patch.object(db_session, "query", side_effect=patched_query):
@@ -111,12 +123,10 @@ class TestMaterialVendorHistoryLoopBody:
         ei_chain = _make_query_chain([])
         sighting_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is EmailIntelligence:
-                return ei_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(MaterialVendorHistory, history_chain), (EmailIntelligence, ei_chain)],
+            default=sighting_chain,
+        )
 
         mock_mpn = MagicMock()
         with patch.object(db_session, "query", side_effect=patched_query):
@@ -163,14 +173,15 @@ class TestMaterialVendorHistoryLoopBody:
             normalize_calls.append((name, r))
             return r
 
-        def patched_query(model, *args, **kwargs):
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is VendorCard or model is VendorContact:
-                return empty_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [
+                (MaterialVendorHistory, history_chain),
+                (EmailIntelligence, ei_chain),
+                (VendorCard, empty_chain),
+                (VendorContact, empty_chain),
+            ],
+            default=sighting_chain,
+        )
 
         mock_mpn = MagicMock()
         with patch.object(db_session, "query", side_effect=patched_query):
@@ -208,14 +219,15 @@ class TestMaterialVendorHistoryLoopBody:
         sighting_chain = _make_query_chain([])
         empty_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is VendorCard or model is VendorContact:
-                return empty_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [
+                (MaterialVendorHistory, history_chain),
+                (EmailIntelligence, ei_chain),
+                (VendorCard, empty_chain),
+                (VendorContact, empty_chain),
+            ],
+            default=sighting_chain,
+        )
 
         mock_mpn = MagicMock()
         with patch.object(db_session, "query", side_effect=patched_query):
@@ -243,12 +255,10 @@ class TestEmailIntelligenceLoopBody:
         sighting_chain = _make_query_chain([])
         history_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(EmailIntelligence, ei_chain), (MaterialVendorHistory, history_chain)],
+            default=sighting_chain,
+        )
 
         with patch.object(db_session, "query", side_effect=patched_query):
             result = _query_db_for_part("LM317T", db_session)
@@ -265,23 +275,15 @@ class TestEmailIntelligenceLoopBody:
         sighting_chain = _make_query_chain([])
         history_chain = _make_query_chain([])
 
-        call_count = {"n": 0}
-
-        def normalize_returning_none(name):
-            call_count["n"] += 1
-            return None
-
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(EmailIntelligence, ei_chain), (MaterialVendorHistory, history_chain)],
+            default=sighting_chain,
+        )
 
         with patch.object(db_session, "query", side_effect=patched_query):
             with patch(
                 "app.services.vendor_email_lookup.normalize_vendor_name",
-                side_effect=normalize_returning_none,
+                return_value=None,
             ):
                 result = _query_db_for_part("LM317T", db_session)
 
@@ -301,12 +303,10 @@ class TestEmailIntelligenceLoopBody:
         sighting_chain = _make_query_chain([])
         history_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(EmailIntelligence, ei_chain), (MaterialVendorHistory, history_chain)],
+            default=sighting_chain,
+        )
 
         with patch.object(db_session, "query", side_effect=patched_query):
             result = _query_db_for_part("LM317T", db_session)
@@ -332,12 +332,10 @@ class TestEmailIntelligenceLoopBody:
         sighting_chain = _make_query_chain([])
         history_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(EmailIntelligence, ei_chain), (MaterialVendorHistory, history_chain)],
+            default=sighting_chain,
+        )
 
         with patch.object(db_session, "query", side_effect=patched_query):
             result = _query_db_for_part("LM317T", db_session)
@@ -374,20 +372,19 @@ class TestEmailIntelligenceLoopBody:
         ei_chain = _make_query_chain([ei_row])
         history_chain = _make_query_chain([])
 
-        real_normalize = __import__("app.vendor_utils", fromlist=["normalize_vendor_name"]).normalize_vendor_name
-
         from app.models.vendors import VendorCard, VendorContact
 
         empty_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            if model is VendorCard or model is VendorContact:
-                return empty_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [
+                (EmailIntelligence, ei_chain),
+                (MaterialVendorHistory, history_chain),
+                (VendorCard, empty_chain),
+                (VendorContact, empty_chain),
+            ],
+            default=sighting_chain,
+        )
 
         # We need the sighting vendor to have domain=arrow.com so the match fires.
         # Patch _query_db_for_part is not ideal — instead we pre-seed vendors via
@@ -418,12 +415,10 @@ class TestEmailIntelligenceLoopBody:
         sighting_chain = _make_query_chain([])
         history_chain = _make_query_chain([])
 
-        def patched_query(model, *args, **kwargs):
-            if model is EmailIntelligence:
-                return ei_chain
-            if model is MaterialVendorHistory:
-                return history_chain
-            return sighting_chain
+        patched_query = _query_dispatcher(
+            [(EmailIntelligence, ei_chain), (MaterialVendorHistory, history_chain)],
+            default=sighting_chain,
+        )
 
         with patch.object(db_session, "query", side_effect=patched_query):
             result = _query_db_for_part("LM317T", db_session)

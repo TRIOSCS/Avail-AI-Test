@@ -45,12 +45,16 @@ def _mk(db, mpn=_PLAIN_MPN):
     return card
 
 
-def _patches(*, web="not_found", connectors_hit=False):
+def _patches(*, web="not_found", connectors_hit=False, oem_tiers_miss=False):
     """Patch every external tier enrich_card may call; return the cm dict.
 
     By default connectors miss (fetch_authoritative -> []) and the web/OEM/Opus tiers
     return their non-hit shapes, so the card terminates not_found unless a tier is
     asserted to have fired.
+
+    With ``oem_tiers_miss=True`` the OEM tiers (cross_reference_mpn / extract_oem_description)
+    and the Opus fallback (infer_part) are pre-wired to return their "no match" shapes, so an
+    OEM-shaped card runs them all and terminates not_catalogued.
     """
     merged = (
         ({"description": "Found"}, {"description": {"source": "digikey_api"}}, ["digikey"])
@@ -58,6 +62,11 @@ def _patches(*, web="not_found", connectors_hit=False):
         else ({}, {}, [])
     )
     web_res = WebExtractResult(status=web)
+    xref_kwargs = (
+        {"return_value": type("Xr", (), {"status": "no_match", "resolved_mpn": None})()} if oem_tiers_miss else {}
+    )
+    oem_kwargs = {"return_value": type("Oem", (), {"status": "not_found"})()} if oem_tiers_miss else {}
+    infer_kwargs = {"return_value": type("Inf", (), {"status": "not_found"})()} if oem_tiers_miss else {}
     return {
         "fetch": patch(
             "app.services.authoritative_enrichment_service.fetch_authoritative",
@@ -76,14 +85,17 @@ def _patches(*, web="not_found", connectors_hit=False):
         "xref": patch(
             "app.services.authoritative_enrichment_service.cross_reference_mpn",
             new_callable=AsyncMock,
+            **xref_kwargs,
         ),
         "oem": patch(
             "app.services.authoritative_enrichment_service.extract_oem_description",
             new_callable=AsyncMock,
+            **oem_kwargs,
         ),
         "infer": patch(
             "app.services.ai_inference_fallback.infer_part",
             new_callable=AsyncMock,
+            **infer_kwargs,
         ),
     }
 
@@ -148,22 +160,7 @@ async def test_priority_lane_runs_oem_tiers_for_oem_mpn_but_skips_web(db_session
     Terminates not_catalogued (HIGH_PRECISION vendor + oem_attempted).
     """
     card = _mk(db_session, _OEM_MPN)
-    p = _patches()
-    p["xref"] = patch(
-        "app.services.authoritative_enrichment_service.cross_reference_mpn",
-        new_callable=AsyncMock,
-        return_value=type("Xr", (), {"status": "no_match", "resolved_mpn": None})(),
-    )
-    p["oem"] = patch(
-        "app.services.authoritative_enrichment_service.extract_oem_description",
-        new_callable=AsyncMock,
-        return_value=type("Oem", (), {"status": "not_found"})(),
-    )
-    p["infer"] = patch(
-        "app.services.ai_inference_fallback.infer_part",
-        new_callable=AsyncMock,
-        return_value=type("Inf", (), {"status": "not_found"})(),
-    )
+    p = _patches(oem_tiers_miss=True)
     with p["fetch"], p["merge"], p["web"] as mweb, p["xref"] as mxref, p["oem"] as moem, p["infer"] as minf:
         status = await enrich_card(card, db_session, connectors=[], full_pipeline=True)
 
@@ -179,22 +176,7 @@ async def test_oem_web_skip_can_be_disabled_by_flag(db_session):
     """With enrichment_skip_web_for_oem_mpns off, the priority lane runs the web tier
     even for an OEM-shaped MPN — pins the flag as the only gate on that skip."""
     card = _mk(db_session, _OEM_MPN)
-    p = _patches()
-    p["xref"] = patch(
-        "app.services.authoritative_enrichment_service.cross_reference_mpn",
-        new_callable=AsyncMock,
-        return_value=type("Xr", (), {"status": "no_match", "resolved_mpn": None})(),
-    )
-    p["oem"] = patch(
-        "app.services.authoritative_enrichment_service.extract_oem_description",
-        new_callable=AsyncMock,
-        return_value=type("Oem", (), {"status": "not_found"})(),
-    )
-    p["infer"] = patch(
-        "app.services.ai_inference_fallback.infer_part",
-        new_callable=AsyncMock,
-        return_value=type("Inf", (), {"status": "not_found"})(),
-    )
+    p = _patches(oem_tiers_miss=True)
     with (
         patch("app.config.settings.enrichment_skip_web_for_oem_mpns", False),
         p["fetch"],

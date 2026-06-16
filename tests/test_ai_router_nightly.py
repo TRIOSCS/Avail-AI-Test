@@ -16,6 +16,7 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition
@@ -69,11 +70,6 @@ class TestGenerateDescription:
         with (
             patch("app.routers.ai.settings") as mock_settings,
             patch(
-                "app.routers.ai.ai_generate_description_for_requirement.__wrapped__",
-                new_callable=AsyncMock,
-            )
-            if False
-            else patch(
                 "app.services.description_service.generate_verified_description",
                 new_callable=AsyncMock,
                 return_value=fake_result,
@@ -130,27 +126,18 @@ class TestSaveParsedOffers:
 
 
 class TestParseIntake:
-    def test_parse_intake_short_text_returns_422(self, client):
-        """POST /api/ai/intake-parse with text < 5 chars → 422."""
-        resp = client.post("/api/ai/intake-parse", json={"text": "hi", "mode": "auto"})
-        assert resp.status_code == 422
-
-    def test_parse_intake_empty_text_returns_422(self, client):
-        """POST /api/ai/intake-parse with empty text → 422."""
-        resp = client.post("/api/ai/intake-parse", json={"text": "", "mode": "auto"})
-        assert resp.status_code == 422
-
-    def test_parse_intake_too_long_returns_422(self, client):
-        """POST /api/ai/intake-parse with text > 12000 chars → 422."""
-        resp = client.post("/api/ai/intake-parse", json={"text": "x" * 12001, "mode": "auto"})
-        assert resp.status_code == 422
-
-    def test_parse_intake_invalid_mode_returns_422(self, client):
-        """POST /api/ai/intake-parse with invalid mode → 422."""
-        resp = client.post(
-            "/api/ai/intake-parse",
-            json={"text": "I need 500 pcs of LM317T", "mode": "invalid"},
-        )
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({"text": "hi", "mode": "auto"}, id="short_text"),
+            pytest.param({"text": "", "mode": "auto"}, id="empty_text"),
+            pytest.param({"text": "x" * 12001, "mode": "auto"}, id="too_long"),
+            pytest.param({"text": "I need 500 pcs of LM317T", "mode": "invalid"}, id="invalid_mode"),
+        ],
+    )
+    def test_parse_intake_invalid_body_returns_422(self, client, body):
+        """POST /api/ai/intake-parse with invalid text/mode → 422."""
+        resp = client.post("/api/ai/intake-parse", json=body)
         assert resp.status_code == 422
 
     def test_parse_intake_invalid_requisition_id_returns_404(self, client):

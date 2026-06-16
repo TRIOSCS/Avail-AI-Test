@@ -17,123 +17,99 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
+def _make_user(db_session, *, email, azure_id, name):
+    """Create, persist, and refresh a buyer User for knowledge_service tests."""
+    from app.models import User
+
+    user = User(
+        email=email,
+        name=name,
+        role="buyer",
+        azure_id=azure_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # Part 1: app/jobs/email_jobs.py
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _register_and_get_job_ids(**enabled_flags):
+    """Register email jobs with all feature flags off except those overridden, return
+    job ids."""
+    from app.jobs.email_jobs import register_email_jobs
+
+    scheduler = MagicMock()
+    settings = MagicMock()
+    settings.contacts_sync_enabled = False
+    settings.activity_tracking_enabled = False
+    settings.ownership_sweep_enabled = False
+    settings.contact_scoring_enabled = False
+    settings.customer_enrichment_enabled = False
+    for name, value in enabled_flags.items():
+        setattr(settings, name, value)
+
+    register_email_jobs(scheduler, settings)
+
+    return [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
+
+
 class TestRegisterEmailJobs:
     """Test register_email_jobs() — the scheduler registration function."""
 
-    def test_registers_always_on_jobs(self):
-        """Should always register contact_status_compute, email_health, calendar, sent
-        folders."""
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = False
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "contact_status_compute" in job_ids
-        assert "email_health_update" in job_ids
-        assert "calendar_scan" in job_ids
-        assert "scan_sent_folders" in job_ids
-        # These should NOT be registered
-        assert "contacts_sync" not in job_ids
-        assert "ownership_sweep" not in job_ids
-        assert "contact_scoring" not in job_ids
-        assert "email_reverification" not in job_ids
-
-    def test_registers_contacts_sync_when_enabled(self):
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = True
-        settings.activity_tracking_enabled = False
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "contacts_sync" in job_ids
-
-    def test_registers_ownership_when_both_enabled(self):
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = True
-        settings.ownership_sweep_enabled = True
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "ownership_sweep" in job_ids
-        assert "site_ownership_sweep" in job_ids
-
-    def test_registers_contact_scoring_when_enabled(self):
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = False
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = True
-        settings.customer_enrichment_enabled = False
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "contact_scoring" in job_ids
-
-    def test_registers_reverification_when_enrichment_enabled(self):
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = False
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = True
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "email_reverification" in job_ids
-
-    def test_activity_tracking_without_ownership(self):
-        """When activity_tracking is on but ownership_sweep is off, no ownership jobs
-        registered."""
-        from app.jobs.email_jobs import register_email_jobs
-
-        scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = True
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
-
-        register_email_jobs(scheduler, settings)
-
-        job_ids = [call.kwargs.get("id") or call[1].get("id") for call in scheduler.add_job.call_args_list]
-        assert "ownership_sweep" not in job_ids
-        assert "site_ownership_sweep" not in job_ids
+    @pytest.mark.parametrize(
+        ("flags", "expected_present", "expected_absent"),
+        [
+            pytest.param(
+                {},
+                ["contact_status_compute", "email_health_update", "calendar_scan", "scan_sent_folders"],
+                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification"],
+                id="always_on_jobs",
+            ),
+            pytest.param(
+                {"contacts_sync_enabled": True},
+                ["contacts_sync"],
+                [],
+                id="contacts_sync_when_enabled",
+            ),
+            pytest.param(
+                {"activity_tracking_enabled": True, "ownership_sweep_enabled": True},
+                ["ownership_sweep", "site_ownership_sweep"],
+                [],
+                id="ownership_when_both_enabled",
+            ),
+            pytest.param(
+                {"contact_scoring_enabled": True},
+                ["contact_scoring"],
+                [],
+                id="contact_scoring_when_enabled",
+            ),
+            pytest.param(
+                {"customer_enrichment_enabled": True},
+                ["email_reverification"],
+                [],
+                id="reverification_when_enrichment_enabled",
+            ),
+            pytest.param(
+                {"activity_tracking_enabled": True, "ownership_sweep_enabled": False},
+                [],
+                ["ownership_sweep", "site_ownership_sweep"],
+                id="activity_tracking_without_ownership",
+            ),
+        ],
+    )
+    def test_job_registration(self, flags, expected_present, expected_absent):
+        job_ids = _register_and_get_job_ids(**flags)
+        for job_id in expected_present:
+            assert job_id in job_ids
+        for job_id in expected_absent:
+            assert job_id not in job_ids
 
 
 class TestDetectAttachments:
@@ -785,25 +761,20 @@ class TestScanOutboundRfqs:
 class TestIsExpired:
     """Test the _is_expired() helper."""
 
-    def test_none_not_expired(self):
+    @pytest.mark.parametrize(
+        ("offset", "expected"),
+        [
+            pytest.param(None, False, id="none_not_expired"),
+            pytest.param(timedelta(days=30), False, id="future_not_expired"),
+            pytest.param(timedelta(days=-1), True, id="past_is_expired"),
+        ],
+    )
+    def test_relative_to_now(self, offset, expected):
         from app.services.knowledge_service import _is_expired
 
         now = datetime.now(timezone.utc)
-        assert _is_expired(None, now) is False
-
-    def test_future_not_expired(self):
-        from app.services.knowledge_service import _is_expired
-
-        now = datetime.now(timezone.utc)
-        future = now + timedelta(days=30)
-        assert _is_expired(future, now) is False
-
-    def test_past_is_expired(self):
-        from app.services.knowledge_service import _is_expired
-
-        now = datetime.now(timezone.utc)
-        past = now - timedelta(days=1)
-        assert _is_expired(past, now) is True
+        value = None if offset is None else now + offset
+        assert _is_expired(value, now) is expected
 
     def test_naive_datetime_handled(self):
         from app.services.knowledge_service import _is_expired
@@ -817,20 +788,9 @@ class TestCreateEntry:
     """Test create_entry() — knowledge entry creation."""
 
     def test_creates_entry_and_commits(self, db_session):
-        # Need a user first
-        from app.models import User
         from app.services.knowledge_service import create_entry
 
-        user = User(
-            email="test@test.com",
-            name="Test",
-            role="buyer",
-            azure_id="az-001",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test@test.com", azure_id="az-001", name="Test")
 
         entry = create_entry(
             db_session,
@@ -849,19 +809,9 @@ class TestCreateEntry:
         assert entry.created_by == user.id
 
     def test_creates_entry_without_commit(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry
 
-        user = User(
-            email="test2@test.com",
-            name="Test2",
-            role="buyer",
-            azure_id="az-002",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test2@test.com", azure_id="az-002", name="Test2")
 
         entry = create_entry(
             db_session,
@@ -874,19 +824,9 @@ class TestCreateEntry:
         assert entry.id is not None
 
     def test_creates_entry_with_entity_linkage(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry
 
-        user = User(
-            email="test3@test.com",
-            name="Test3",
-            role="buyer",
-            azure_id="az-003",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test3@test.com", azure_id="az-003", name="Test3")
 
         entry = create_entry(
             db_session,
@@ -905,19 +845,9 @@ class TestGetEntries:
     """Test get_entries() — flexible query."""
 
     def test_returns_entries_filtered_by_type(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_entries
 
-        user = User(
-            email="test4@test.com",
-            name="Test4",
-            role="buyer",
-            azure_id="az-004",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test4@test.com", azure_id="az-004", name="Test4")
 
         create_entry(db_session, user_id=user.id, entry_type="fact", content="A fact")
         create_entry(db_session, user_id=user.id, entry_type="note", content="A note")
@@ -927,19 +857,9 @@ class TestGetEntries:
         assert facts[0].entry_type == "fact"
 
     def test_excludes_expired_when_requested(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_entries
 
-        user = User(
-            email="test5@test.com",
-            name="Test5",
-            role="buyer",
-            azure_id="az-005",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test5@test.com", azure_id="az-005", name="Test5")
 
         # Create an expired entry
         create_entry(
@@ -966,19 +886,9 @@ class TestGetEntries:
         assert active_entries[0].content == "Fresh fact"
 
     def test_excludes_answers_from_listing(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_entries
 
-        user = User(
-            email="test6@test.com",
-            name="Test6",
-            role="buyer",
-            azure_id="az-006",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test6@test.com", azure_id="az-006", name="Test6")
 
         q = create_entry(db_session, user_id=user.id, entry_type="question", content="Q?")
         create_entry(db_session, user_id=user.id, entry_type="answer", content="A.", parent_id=q.id)
@@ -993,19 +903,9 @@ class TestGetEntry:
     """Test get_entry()."""
 
     def test_returns_entry_with_answers(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_entry
 
-        user = User(
-            email="test7@test.com",
-            name="Test7",
-            role="buyer",
-            azure_id="az-007",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test7@test.com", azure_id="az-007", name="Test7")
 
         q = create_entry(db_session, user_id=user.id, entry_type="question", content="Q?")
         create_entry(db_session, user_id=user.id, entry_type="answer", content="A.", parent_id=q.id)
@@ -1025,19 +925,9 @@ class TestUpdateEntry:
     """Test update_entry()."""
 
     def test_updates_content(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, update_entry
 
-        user = User(
-            email="test8@test.com",
-            name="Test8",
-            role="buyer",
-            azure_id="az-008",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test8@test.com", azure_id="az-008", name="Test8")
 
         entry = create_entry(db_session, user_id=user.id, entry_type="note", content="Original")
         updated = update_entry(db_session, entry.id, user.id, content="Updated")
@@ -1055,19 +945,9 @@ class TestDeleteEntry:
     """Test delete_entry()."""
 
     def test_deletes_entry(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, delete_entry, get_entry
 
-        user = User(
-            email="test9@test.com",
-            name="Test9",
-            role="buyer",
-            azure_id="az-009",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test9@test.com", azure_id="az-009", name="Test9")
 
         entry = create_entry(db_session, user_id=user.id, entry_type="note", content="To delete")
         assert delete_entry(db_session, entry.id, user.id) is True
@@ -1083,19 +963,9 @@ class TestPostQuestion:
     """Test post_question()."""
 
     def test_creates_question_entry(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import post_question
 
-        user = User(
-            email="test10@test.com",
-            name="Test10",
-            role="buyer",
-            azure_id="az-010",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test10@test.com", azure_id="az-010", name="Test10")
 
         q = post_question(
             db_session,
@@ -1114,19 +984,9 @@ class TestPostAnswer:
     """Test post_answer()."""
 
     def test_creates_answer_and_resolves_question(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import post_answer, post_question
 
-        user = User(
-            email="test11@test.com",
-            name="Test11",
-            role="buyer",
-            azure_id="az-011",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test11@test.com", azure_id="az-011", name="Test11")
 
         q = post_question(
             db_session,
@@ -1153,19 +1013,9 @@ class TestPostAnswer:
         assert q.is_resolved is True
 
     def test_returns_none_for_non_question(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, post_answer
 
-        user = User(
-            email="test12@test.com",
-            name="Test12",
-            role="buyer",
-            azure_id="az-012",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test12@test.com", azure_id="az-012", name="Test12")
 
         note = create_entry(db_session, user_id=user.id, entry_type="note", content="Just a note")
         answer = post_answer(db_session, user_id=user.id, question_id=note.id, content="A.")
@@ -1182,19 +1032,9 @@ class TestCaptureQuoteFact:
     """Test capture_quote_fact()."""
 
     def test_captures_price_facts(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import capture_quote_fact
 
-        user = User(
-            email="test13@test.com",
-            name="Test13",
-            role="buyer",
-            azure_id="az-013",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test13@test.com", azure_id="az-013", name="Test13")
 
         mock_quote = MagicMock()
         mock_quote.quote_number = "Q-001"
@@ -1231,19 +1071,9 @@ class TestCaptureOfferFact:
     """Test capture_offer_fact()."""
 
     def test_captures_offer_with_all_fields(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import capture_offer_fact
 
-        user = User(
-            email="test14@test.com",
-            name="Test14",
-            role="buyer",
-            azure_id="az-014",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test14@test.com", azure_id="az-014", name="Test14")
 
         mock_offer = MagicMock()
         mock_offer.mpn = "LM358N"
@@ -1329,19 +1159,10 @@ class TestBuildContext:
         assert build_context(db_session, requisition_id=99999) == ""
 
     def test_returns_context_with_direct_knowledge(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import build_context, create_entry
 
-        user = User(
-            email="test16@test.com",
-            name="Test16",
-            role="buyer",
-            azure_id="az-016",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test16@test.com", azure_id="az-016", name="Test16")
 
         req = Requisition(
             name="Test Req",
@@ -1378,19 +1199,10 @@ class TestGenerateInsights:
 
     @pytest.mark.asyncio
     async def test_generates_insights_from_claude(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import create_entry, generate_insights
 
-        user = User(
-            email="test17@test.com",
-            name="Test17",
-            role="buyer",
-            azure_id="az-017",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test17@test.com", azure_id="az-017", name="Test17")
 
         req = Requisition(
             name="Test Req 2",
@@ -1426,20 +1238,11 @@ class TestGenerateInsights:
 
     @pytest.mark.asyncio
     async def test_handles_claude_unavailable(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import create_entry, generate_insights
         from app.utils.claude_errors import ClaudeUnavailableError
 
-        user = User(
-            email="test18@test.com",
-            name="Test18",
-            role="buyer",
-            azure_id="az-018",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test18@test.com", azure_id="az-018", name="Test18")
 
         req = Requisition(
             name="Test Req 3",
@@ -1469,20 +1272,11 @@ class TestGenerateInsights:
 
     @pytest.mark.asyncio
     async def test_handles_claude_error(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import create_entry, generate_insights
         from app.utils.claude_errors import ClaudeError
 
-        user = User(
-            email="test19@test.com",
-            name="Test19",
-            role="buyer",
-            azure_id="az-019",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test19@test.com", azure_id="az-019", name="Test19")
 
         req = Requisition(
             name="Test Req 4",
@@ -1523,19 +1317,9 @@ class TestGenerateMpnInsights:
 
     @pytest.mark.asyncio
     async def test_generates_mpn_insights(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, generate_mpn_insights
 
-        user = User(
-            email="test20@test.com",
-            name="Test20",
-            role="buyer",
-            azure_id="az-020",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test20@test.com", azure_id="az-020", name="Test20")
 
         create_entry(
             db_session,
@@ -1595,19 +1379,10 @@ class TestGetCachedInsights:
     """Test cached insight getters."""
 
     def test_get_cached_insights(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import create_entry, get_cached_insights
 
-        user = User(
-            email="test21@test.com",
-            name="Test21",
-            role="buyer",
-            azure_id="az-021",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test21@test.com", azure_id="az-021", name="Test21")
 
         req = Requisition(
             name="Test Req 5",
@@ -1633,19 +1408,9 @@ class TestGetCachedInsights:
         assert cached[0].content == "Cached insight"
 
     def test_get_cached_mpn_insights(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_cached_mpn_insights
 
-        user = User(
-            email="test22@test.com",
-            name="Test22",
-            role="buyer",
-            azure_id="az-022",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test22@test.com", azure_id="az-022", name="Test22")
 
         create_entry(
             db_session,
@@ -1660,19 +1425,9 @@ class TestGetCachedInsights:
         assert len(cached) == 1
 
     def test_get_cached_pipeline_insights(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import create_entry, get_cached_pipeline_insights
 
-        user = User(
-            email="test23@test.com",
-            name="Test23",
-            role="buyer",
-            azure_id="az-023",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test23@test.com", azure_id="az-023", name="Test23")
 
         create_entry(
             db_session,
@@ -1708,19 +1463,9 @@ class TestBuildMpnContext:
         assert build_mpn_context(db_session, mpn="UNKNOWN-12345") == ""
 
     def test_includes_knowledge_entries(self, db_session):
-        from app.models import User
         from app.services.knowledge_service import build_mpn_context, create_entry
 
-        user = User(
-            email="test24@test.com",
-            name="Test24",
-            role="buyer",
-            azure_id="az-024",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test24@test.com", azure_id="az-024", name="Test24")
 
         create_entry(
             db_session,
@@ -1772,19 +1517,10 @@ class TestBuildPipelineContext:
         assert build_pipeline_context(db_session) == ""
 
     def test_includes_status_breakdown(self, db_session):
-        from app.models import Requisition, User
+        from app.models import Requisition
         from app.services.knowledge_service import build_pipeline_context
 
-        user = User(
-            email="test25@test.com",
-            name="Test25",
-            role="buyer",
-            azure_id="az-025",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(user)
-        db_session.commit()
-        db_session.refresh(user)
+        user = _make_user(db_session, email="test25@test.com", azure_id="az-025", name="Test25")
 
         for status in ["active", "active", "closed"]:
             req = Requisition(

@@ -8,6 +8,7 @@ Depends on: the /v2/partials/materials/{card_id} and .../tab/{tab_name} routes.
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -74,23 +75,17 @@ def _seed(db: Session) -> MaterialCard:
     return card
 
 
-def test_material_detail_renders_card(client: TestClient, db_session: Session):
-    """Detail page still loads and renders the part MPN after the refactor."""
+@pytest.mark.parametrize(
+    "path_suffix,expected_text",
+    [
+        ("", "LM317T"),  # detail page renders the part MPN after the refactor
+        ("/tab/sourcing", "LM317T"),
+        ("/tab/customers", "ACME Inc"),
+    ],
+    ids=["detail", "sourcing_tab", "customers_tab"],
+)
+def test_material_detail_renders(client: TestClient, db_session: Session, path_suffix: str, expected_text: str):
     card = _seed(db_session)
-    resp = client.get(f"/v2/partials/materials/{card.id}", headers={"HX-Request": "true"})
+    resp = client.get(f"/v2/partials/materials/{card.id}{path_suffix}", headers={"HX-Request": "true"})
     assert resp.status_code == 200
-    assert "LM317T" in resp.text
-
-
-def test_material_sourcing_tab_renders_requirement(client: TestClient, db_session: Session):
-    card = _seed(db_session)
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/sourcing", headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert "LM317T" in resp.text
-
-
-def test_material_customers_tab_renders_purchase(client: TestClient, db_session: Session):
-    card = _seed(db_session)
-    resp = client.get(f"/v2/partials/materials/{card.id}/tab/customers", headers={"HX-Request": "true"})
-    assert resp.status_code == 200
-    assert "ACME Inc" in resp.text
+    assert expected_text in resp.text

@@ -27,56 +27,44 @@ from tests.conftest import engine  # noqa: F401
 
 
 class TestMatchHeadersDeterministicEmptyHeader:
-    def test_empty_string_header_is_skipped(self):
-        """Line 45: empty header string (after strip) is skipped, not matched."""
-        # "" after strip → continue without adding to mapping
-        headers = ["", "Part Number", "Qty"]
-        mapping = _match_headers_deterministic(headers)
-        # Index 0 (empty string) should not be in mapping
-        assert 0 not in mapping
-        # Indices 1 and 2 should still map
-        assert mapping[1] == "mpn"
-        assert mapping[2] == "qty"
-
-    def test_whitespace_only_header_is_skipped(self):
-        """Whitespace-only headers strip to empty and are skipped."""
-        headers = ["   ", "MPN"]
+    @pytest.mark.parametrize(
+        ("headers", "expected"),
+        [
+            pytest.param(["", "Part Number", "Qty"], {1: "mpn", 2: "qty"}, id="empty_string_header"),
+            pytest.param(["   ", "MPN"], {1: "mpn"}, id="whitespace_only_header"),
+        ],
+    )
+    def test_blank_header_is_skipped(self, headers, expected):
+        """Line 45: a blank header (empty/whitespace after strip) is skipped, not matched."""
         mapping = _match_headers_deterministic(headers)
         assert 0 not in mapping
-        assert mapping[1] == "mpn"
+        for idx, field in expected.items():
+            assert mapping[idx] == field
 
 
 class TestAIDetectColumnsNoMappingsKey:
     @pytest.mark.asyncio
-    async def test_result_without_mappings_key_returns_empty(self):
-        """Line 132: claude_structured returns result that has no 'mappings' key."""
+    @pytest.mark.parametrize(
+        ("claude_return", "headers", "sample_rows"),
+        [
+            pytest.param(
+                {"some_other_key": "value"}, ["Col A", "Col B"], [["LM317T", "100"]], id="result_without_mappings_key"
+            ),
+            pytest.param(None, ["Col A"], [["LM317T"]], id="none_result"),
+        ],
+    )
+    async def test_missing_mappings_returns_empty(self, claude_return, headers, sample_rows):
+        """Line 132: claude_structured returns no usable 'mappings' (missing key or None)."""
         from app.services.attachment_parser import _ai_detect_columns
 
         with patch(
             "app.utils.claude_client.claude_structured",
             new_callable=AsyncMock,
-            return_value={"some_other_key": "value"},  # No 'mappings'
+            return_value=claude_return,
         ):
             result = await _ai_detect_columns(
-                headers=["Col A", "Col B"],
-                sample_rows=[["LM317T", "100"]],
-                vendor_domain="test.com",
-            )
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_none_result_returns_empty(self):
-        """Line 132: claude_structured returns None."""
-        from app.services.attachment_parser import _ai_detect_columns
-
-        with patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value=None,
-        ):
-            result = await _ai_detect_columns(
-                headers=["Col A"],
-                sample_rows=[["LM317T"]],
+                headers=headers,
+                sample_rows=sample_rows,
                 vendor_domain="test.com",
             )
         assert result == {}
@@ -170,32 +158,23 @@ class TestParseAttachmentBranches:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_empty_headers_returns_empty(self):
-        """Line 377: no headers → returns []."""
+    @pytest.mark.parametrize(
+        ("file_bytes", "filename", "fingerprint"),
+        [
+            pytest.param(b"", "empty.csv", "fp_empty", id="empty_headers"),
+            pytest.param(b"Part Number,Qty\n", "headers_only.csv", "fp_hdr_only", id="headers_only_no_data_rows"),
+        ],
+    )
+    async def test_no_headers_or_data_rows_returns_empty(self, file_bytes, filename, fingerprint):
+        """Line 377: missing headers or missing data rows → returns []."""
         with (
             patch("app.utils.file_validation.validate_file", return_value=(True, "csv")),
-            patch("app.utils.file_validation.file_fingerprint", return_value="fp_empty"),
-            patch("app.utils.file_validation.detect_encoding", return_value="utf-8"),
-        ):
-            # Empty CSV has no headers
-            result = await parse_attachment(
-                file_bytes=b"",
-                filename="empty.csv",
-                vendor_domain="vendor.com",
-            )
-        assert result == []
-
-    @pytest.mark.asyncio
-    async def test_headers_only_no_data_rows_returns_empty(self):
-        """Line 377: headers exist but no data rows → returns []."""
-        with (
-            patch("app.utils.file_validation.validate_file", return_value=(True, "csv")),
-            patch("app.utils.file_validation.file_fingerprint", return_value="fp_hdr_only"),
+            patch("app.utils.file_validation.file_fingerprint", return_value=fingerprint),
             patch("app.utils.file_validation.detect_encoding", return_value="utf-8"),
         ):
             result = await parse_attachment(
-                file_bytes=b"Part Number,Qty\n",
-                filename="headers_only.csv",
+                file_bytes=file_bytes,
+                filename=filename,
                 vendor_domain="vendor.com",
             )
         assert result == []

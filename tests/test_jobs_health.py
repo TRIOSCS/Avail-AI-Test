@@ -39,36 +39,28 @@ def _clear_scheduler_jobs():
         job.remove()
 
 
-# ── _job_health_ping() ────────────────────────────────────────────────
+# ── _job_health_ping() / _job_health_deep() ───────────────────────────
 
 
-def test_job_health_ping():
-    """_job_health_ping delegates to run_health_checks('ping')."""
+@pytest.mark.parametrize(
+    ("job_name", "check_type", "result"),
+    [
+        ("_job_health_ping", "ping", {"total": 3, "passed": 3, "failed": 0}),
+        ("_job_health_deep", "deep", {"total": 3, "passed": 2, "failed": 1}),
+    ],
+)
+def test_job_health_delegates_to_run_health_checks(job_name, check_type, result):
+    """Health jobs delegate to run_health_checks(check_type)."""
     with patch(
         "app.services.health_monitor.run_health_checks",
         new_callable=AsyncMock,
-        return_value={"total": 3, "passed": 3, "failed": 0},
+        return_value=result,
     ) as mock_check:
-        from app.jobs.health_jobs import _job_health_ping
+        import app.jobs.health_jobs as health_jobs
 
-        asyncio.run(_job_health_ping())
-        mock_check.assert_awaited_once_with("ping")
-
-
-# ── _job_health_deep() ────────────────────────────────────────────────
-
-
-def test_job_health_deep():
-    """_job_health_deep delegates to run_health_checks('deep')."""
-    with patch(
-        "app.services.health_monitor.run_health_checks",
-        new_callable=AsyncMock,
-        return_value={"total": 3, "passed": 2, "failed": 1},
-    ) as mock_check:
-        from app.jobs.health_jobs import _job_health_deep
-
-        asyncio.run(_job_health_deep())
-        mock_check.assert_awaited_once_with("deep")
+        job = getattr(health_jobs, job_name)
+        asyncio.run(job())
+        mock_check.assert_awaited_once_with(check_type)
 
 
 # ── _job_cleanup_usage_log() ──────────────────────────────────────────

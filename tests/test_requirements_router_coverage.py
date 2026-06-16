@@ -107,6 +107,37 @@ def _make_material_card(db: Session, mpn: str = "LM317T") -> MaterialCard:
     return mc
 
 
+def _make_sourcing_lead(db: Session, req: Requisition, user: User, **kw):
+    from app.models.sourcing_lead import SourcingLead
+
+    defaults = dict(
+        requisition_id=req.id,
+        requirement_id=req.requirements[0].id,
+        lead_id="LEAD-TEST-001",
+        vendor_name="Arrow Electronics",
+        vendor_name_normalized="arrow electronics",
+        part_number_requested="LM317T",
+        part_number_matched="LM317T",
+        match_type="exact",
+        primary_source_type="brokerbin",
+        primary_source_name="BrokerBin",
+        confidence_score=80.0,
+        confidence_band="high",
+        vendor_safety_score=75.0,
+        vendor_safety_band="medium",
+        buyer_status="open",
+        buyer_owner_user_id=user.id,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    defaults.update(kw)
+    lead = SourcingLead(**defaults)
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    return lead
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # _dedupe_substitutes helper function
 # ══════════════════════════════════════════════════════════════════════════
@@ -514,62 +545,34 @@ class TestLeadsWithData:
 
 
 class TestSourcingLeadCRUD:
-    def _make_sourcing_lead(self, db, req, user):
-        from app.models.sourcing_lead import SourcingLead
-
-        lead = SourcingLead(
-            requisition_id=req.id,
-            requirement_id=req.requirements[0].id,
-            lead_id="LEAD-TEST-001",
-            vendor_name="Arrow Electronics",
-            vendor_name_normalized="arrow electronics",
-            part_number_requested="LM317T",
-            part_number_matched="LM317T",
-            match_type="exact",
-            primary_source_type="brokerbin",
-            primary_source_name="BrokerBin",
-            confidence_score=80.0,
-            confidence_band="high",
-            vendor_safety_score=75.0,
-            vendor_safety_band="medium",
-            buyer_status="open",
-            buyer_owner_user_id=user.id,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db.add(lead)
-        db.commit()
-        db.refresh(lead)
-        return lead
-
     def test_list_leads_with_lead(self, client, db_session, test_user, test_requisition):
-        self._make_sourcing_lead(db_session, test_requisition, test_user)
+        _make_sourcing_lead(db_session, test_requisition, test_user)
         resp = client.get(f"/api/requisitions/{test_requisition.id}/leads")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
 
     def test_get_lead_detail(self, client, db_session, test_user, test_requisition):
-        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        lead = _make_sourcing_lead(db_session, test_requisition, test_user)
         resp = client.get(f"/api/leads/{lead.id}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["vendor_name"] == "Arrow Electronics"
 
     def test_get_lead_not_authorized(self, client, db_session, test_user, test_requisition):
-        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        lead = _make_sourcing_lead(db_session, test_requisition, test_user)
         with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
             resp = client.get(f"/api/leads/{lead.id}")
         assert resp.status_code == 403
 
     def test_patch_lead_status_not_authorized(self, client, db_session, test_user, test_requisition):
-        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        lead = _make_sourcing_lead(db_session, test_requisition, test_user)
         with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
             resp = client.patch(f"/api/leads/{lead.id}/status", json={"status": "contacted"})
         assert resp.status_code == 403
 
     def test_add_lead_feedback_not_authorized(self, client, db_session, test_user, test_requisition):
-        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        lead = _make_sourcing_lead(db_session, test_requisition, test_user)
         with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
             resp = client.post(f"/api/leads/{lead.id}/feedback", json={"note": "Test note"})
         assert resp.status_code == 403
@@ -684,33 +687,21 @@ class TestBatchAddRequirements:
 
 
 class TestPatchLeadStatus:
-    def _make_sourcing_lead(self, db, req, user):
-        from app.models.sourcing_lead import SourcingLead
-
-        lead = SourcingLead(
-            requisition_id=req.id,
-            requirement_id=req.requirements[0].id,
+    @staticmethod
+    def _make_sourcing_lead(db, req, user):
+        return _make_sourcing_lead(
+            db,
+            req,
+            user,
             lead_id="LEAD-STATUS-001",
             vendor_name="Digi-Key",
             vendor_name_normalized="digi-key",
-            part_number_requested="LM317T",
-            part_number_matched="LM317T",
-            match_type="exact",
             primary_source_type="digikey",
             primary_source_name="DigiKey",
             confidence_score=85.0,
-            confidence_band="high",
             vendor_safety_score=80.0,
-            vendor_safety_band="medium",
             buyer_status="new",
-            buyer_owner_user_id=user.id,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
         )
-        db.add(lead)
-        db.commit()
-        db.refresh(lead)
-        return lead
 
     def test_patch_status_success(self, client, db_session, test_user, test_requisition):
         lead = self._make_sourcing_lead(db_session, test_requisition, test_user)

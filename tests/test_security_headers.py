@@ -7,6 +7,10 @@ Called by: pytest
 Depends on: app.main (request_id_middleware)
 """
 
+import re
+
+import pytest
+
 
 def test_x_request_id_header(client):
     """Every response includes X-Request-ID."""
@@ -15,34 +19,20 @@ def test_x_request_id_header(client):
     assert len(resp.headers["X-Request-ID"]) == 8  # uuid[:8]
 
 
-def test_x_content_type_options(client):
-    """X-Content-Type-Options: nosniff prevents MIME sniffing."""
+@pytest.mark.parametrize(
+    ("header", "expected"),
+    [
+        ("X-Content-Type-Options", "nosniff"),  # prevents MIME sniffing
+        ("X-Frame-Options", "DENY"),  # prevents clickjacking
+        ("X-XSS-Protection", "1; mode=block"),  # enables XSS auditor
+        ("Referrer-Policy", "strict-origin-when-cross-origin"),
+        ("X-API-Version", "v1"),
+    ],
+)
+def test_static_security_header(client, header, expected):
+    """Each fixed security/version header has its expected value on every response."""
     resp = client.get("/health")
-    assert resp.headers.get("X-Content-Type-Options") == "nosniff"
-
-
-def test_x_frame_options(client):
-    """X-Frame-Options: DENY prevents clickjacking."""
-    resp = client.get("/health")
-    assert resp.headers.get("X-Frame-Options") == "DENY"
-
-
-def test_x_xss_protection(client):
-    """X-XSS-Protection enables XSS auditor."""
-    resp = client.get("/health")
-    assert resp.headers.get("X-XSS-Protection") == "1; mode=block"
-
-
-def test_referrer_policy(client):
-    """Referrer-Policy is set to strict-origin-when-cross-origin."""
-    resp = client.get("/health")
-    assert resp.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
-
-
-def test_api_version_header(client):
-    """All responses include X-API-Version: v1."""
-    resp = client.get("/health")
-    assert resp.headers.get("X-API-Version") == "v1"
+    assert resp.headers.get(header) == expected
 
 
 def test_security_headers_on_api_endpoint(client, test_requisition):
@@ -98,9 +88,6 @@ def test_error_response_format(client):
 
 
 # ── CSP tests ────────────────────────────────────────────────────────
-
-
-import re
 
 
 def test_csp_header_present_on_all_responses(client):

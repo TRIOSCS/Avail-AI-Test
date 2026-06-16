@@ -16,6 +16,8 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.connectors.ai_live_web import AIWebSearchConnector
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
@@ -23,92 +25,75 @@ from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 class TestNormalizeVendorUrl:
     """Lines 67-75 — URL normalization edge cases."""
 
-    def test_empty_url_returns_none(self):
-        assert AIWebSearchConnector._normalize_vendor_url("") is None
-
-    def test_www_prefix_gets_https(self):
-        """www.
-
-        URL gets https:// prepended (line 72).
-        """
-        result = AIWebSearchConnector._normalize_vendor_url("www.example.com/part")
-        assert result == "https://www.example.com/part"
-
-    def test_no_scheme_no_www_returns_none(self):
-        """URL without http/https and without www → None (line 74)."""
-        result = AIWebSearchConnector._normalize_vendor_url("example.com/part")
-        assert result is None
-
-    def test_valid_https_url_passes_through(self):
-        result = AIWebSearchConnector._normalize_vendor_url("https://example.com/part")
-        assert result == "https://example.com/part"
-
-    def test_valid_http_url_passes_through(self):
-        result = AIWebSearchConnector._normalize_vendor_url("http://example.com/part")
-        assert result == "http://example.com/part"
+    @pytest.mark.parametrize(
+        ("raw_url", "expected"),
+        [
+            pytest.param("", None, id="empty_url_returns_none"),
+            # www. URL gets https:// prepended (line 72).
+            pytest.param("www.example.com/part", "https://www.example.com/part", id="www_prefix_gets_https"),
+            # URL without http/https and without www → None (line 74).
+            pytest.param("example.com/part", None, id="no_scheme_no_www_returns_none"),
+            pytest.param("https://example.com/part", "https://example.com/part", id="valid_https_passes_through"),
+            pytest.param("http://example.com/part", "http://example.com/part", id="valid_http_passes_through"),
+        ],
+    )
+    def test_normalize(self, raw_url, expected):
+        assert AIWebSearchConnector._normalize_vendor_url(raw_url) == expected
 
 
 class TestHasCurrentStockSignal:
     """Line 78-84 — stock signal detection."""
 
-    def test_explicit_bool_true_returns_true(self):
-        item = {"in_stock_explicit": True}
-        assert AIWebSearchConnector._has_current_stock_signal(item, "") is True
-
-    def test_explicit_bool_false_checks_evidence(self):
-        item = {"in_stock_explicit": False}
-        # evidence contains stock signal
-        assert AIWebSearchConnector._has_current_stock_signal(item, "qty available") is True
-
-    def test_non_bool_explicit_checks_evidence(self):
-        item = {"in_stock_explicit": "yes"}
-        assert AIWebSearchConnector._has_current_stock_signal(item, "in stock now") is True
-
-    def test_no_signal_returns_false(self):
-        item = {}
-        assert AIWebSearchConnector._has_current_stock_signal(item, "no stock info") is False
+    @pytest.mark.parametrize(
+        ("item", "evidence_note", "expected"),
+        [
+            pytest.param({"in_stock_explicit": True}, "", True, id="explicit_bool_true_returns_true"),
+            # explicit False falls through to the evidence check, which contains a signal.
+            pytest.param({"in_stock_explicit": False}, "qty available", True, id="explicit_bool_false_checks_evidence"),
+            pytest.param({"in_stock_explicit": "yes"}, "in stock now", True, id="non_bool_explicit_checks_evidence"),
+            pytest.param({}, "no stock info", False, id="no_signal_returns_false"),
+        ],
+    )
+    def test_has_current_stock_signal(self, item, evidence_note, expected):
+        assert AIWebSearchConnector._has_current_stock_signal(item, evidence_note) is expected
 
 
 class TestIsRecentListing:
     """Lines 87-91 — listing age gate."""
 
-    def test_none_age_is_recent(self):
-        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": None}) is True
-
-    def test_zero_age_is_recent(self):
-        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": 0}) is True
-
-    def test_30_days_is_recent(self):
-        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": 30}) is True
-
-    def test_31_days_is_not_recent(self):
-        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": 31}) is False
-
-    def test_negative_age_is_not_recent(self):
-        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": -1}) is False
+    @pytest.mark.parametrize(
+        ("listing_age_days", "expected"),
+        [
+            pytest.param(None, True, id="none_age_is_recent"),
+            pytest.param(0, True, id="zero_age_is_recent"),
+            pytest.param(30, True, id="30_days_is_recent"),
+            pytest.param(31, False, id="31_days_is_not_recent"),
+            pytest.param(-1, False, id="negative_age_is_not_recent"),
+        ],
+    )
+    def test_is_recent_listing(self, listing_age_days, expected):
+        assert AIWebSearchConnector._is_recent_listing({"listing_age_days": listing_age_days}) is expected
 
 
 class TestDoSearchErrorHandling:
     """Lines 123-128, 132 — Claude error paths."""
 
-    async def test_claude_unavailable_returns_empty(self):
-        """ClaudeUnavailableError → empty list (lines 123-125)."""
+    @pytest.mark.parametrize(
+        ("error", "query"),
+        [
+            # ClaudeUnavailableError → empty list (lines 123-125).
+            pytest.param(ClaudeUnavailableError("not configured"), "LM358", id="claude_unavailable_returns_empty"),
+            # ClaudeError → empty list (lines 126-128).
+            pytest.param(ClaudeError("api error"), "NE555", id="claude_error_returns_empty"),
+        ],
+    )
+    async def test_claude_error_returns_empty(self, error, query):
         connector = AIWebSearchConnector(api_key="test-key")
         with patch(
             "app.connectors.ai_live_web.claude_json",
-            new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+            new=AsyncMock(side_effect=error),
         ):
-            out = await connector._do_search("LM358")
-        assert out == []
-
-    async def test_claude_error_returns_empty(self):
-        """ClaudeError → empty list (lines 126-128)."""
-        connector = AIWebSearchConnector(api_key="test-key")
-        with patch(
-            "app.connectors.ai_live_web.claude_json",
-            new=AsyncMock(side_effect=ClaudeError("api error")),
-        ):
-            out = await connector._do_search("NE555")
+            out = await connector._do_search(query)
         assert out == []
 
     async def test_offers_not_list_returns_empty(self):
@@ -154,34 +139,24 @@ class TestDoSearchQualityGates:
         out = await self._search_with_offers(["not a dict", self._base_offer()])
         assert len(out) == 1
 
-    async def test_zero_qty_dropped(self):
-        """Qty <= 0 → dropped (lines 159-160)."""
-        out = await self._search_with_offers([self._base_offer(qty_available=0)])
-        assert out == []
-
-    async def test_none_qty_dropped(self):
-        """Qty=None → dropped."""
-        out = await self._search_with_offers([self._base_offer(qty_available=None)])
-        assert out == []
-
-    async def test_missing_vendor_url_dropped(self):
-        """No vendor_url → dropped (lines 161-162)."""
-        out = await self._search_with_offers([self._base_offer(vendor_url="")])
-        assert out == []
-
-    async def test_missing_evidence_dropped(self):
-        """No evidence_note → dropped (lines 165-166)."""
-        out = await self._search_with_offers([self._base_offer(evidence_note="")])
-        assert out == []
-
-    async def test_no_stock_signal_dropped(self):
-        """evidence_note with no stock signal → dropped (line 167-169)."""
-        out = await self._search_with_offers([self._base_offer(evidence_note="product page", in_stock_explicit=False)])
-        assert out == []
-
-    async def test_stale_listing_dropped(self):
-        """Listing older than 30 days → dropped (lines 170-172)."""
-        out = await self._search_with_offers([self._base_offer(listing_age_days=45, in_stock_explicit=True)])
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            # Qty <= 0 → dropped (lines 159-160).
+            pytest.param({"qty_available": 0}, id="zero_qty_dropped"),
+            pytest.param({"qty_available": None}, id="none_qty_dropped"),
+            # No vendor_url → dropped (lines 161-162).
+            pytest.param({"vendor_url": ""}, id="missing_vendor_url_dropped"),
+            # No evidence_note → dropped (lines 165-166).
+            pytest.param({"evidence_note": ""}, id="missing_evidence_dropped"),
+            # evidence_note with no stock signal → dropped (line 167-169).
+            pytest.param({"evidence_note": "product page", "in_stock_explicit": False}, id="no_stock_signal_dropped"),
+            # Listing older than 30 days → dropped (lines 170-172).
+            pytest.param({"listing_age_days": 45, "in_stock_explicit": True}, id="stale_listing_dropped"),
+        ],
+    )
+    async def test_offer_dropped(self, overrides):
+        out = await self._search_with_offers([self._base_offer(**overrides)])
         assert out == []
 
     async def test_evidence_without_qty_token_dropped(self):

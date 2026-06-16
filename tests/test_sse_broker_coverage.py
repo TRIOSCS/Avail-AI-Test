@@ -13,6 +13,7 @@ os.environ["TESTING"] = "1"
 
 import asyncio
 
+from app.services.sse_broker import SSEBroker
 from tests.conftest import engine  # noqa: F401
 
 
@@ -21,8 +22,6 @@ class TestSSEBrokerInit:
 
     def test_broker_has_empty_channels_on_init(self):
         """New broker starts with empty channel dict."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         assert len(b._channels) == 0
 
@@ -34,8 +33,6 @@ class TestSSEBrokerInit:
 
     def test_queue_maxsize_default(self):
         """Default queue max size is 200."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         assert b._queue_maxsize == 200
 
@@ -45,24 +42,18 @@ class TestSSEBrokerSubscribe:
 
     def test_subscribe_creates_queue(self):
         """Subscribe() returns an asyncio.Queue."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q = b.subscribe("test-channel")
         assert isinstance(q, asyncio.Queue)
 
     def test_subscribe_adds_queue_to_channel(self):
         """Subscribe() adds queue to the channel set."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q = b.subscribe("my-channel")
         assert q in b._channels["my-channel"]
 
     def test_subscribe_multiple_listeners_same_channel(self):
         """Multiple subscribers on same channel each get their own queue."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q1 = b.subscribe("channel-a")
         q2 = b.subscribe("channel-a")
@@ -71,8 +62,6 @@ class TestSSEBrokerSubscribe:
 
     def test_subscribe_queue_respects_maxsize(self):
         """Subscribed queue uses the configured maxsize."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q = b.subscribe("size-test")
         assert q.maxsize == b._queue_maxsize
@@ -83,8 +72,6 @@ class TestSSEBrokerUnsubscribe:
 
     def test_unsubscribe_removes_queue(self):
         """Unsubscribe() removes the queue from the channel."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q = b.subscribe("unsub-test")
         assert q in b._channels["unsub-test"]
@@ -94,8 +81,6 @@ class TestSSEBrokerUnsubscribe:
 
     def test_unsubscribe_nonexistent_queue_is_safe(self):
         """Unsubscribe() of a queue not in channel does not raise."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         fake_q = asyncio.Queue()
         # Should not raise even if queue was never subscribed
@@ -103,8 +88,6 @@ class TestSSEBrokerUnsubscribe:
 
     def test_unsubscribe_leaves_other_queues_intact(self):
         """Unsubscribing one queue doesn't remove others."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q1 = b.subscribe("multi")
         q2 = b.subscribe("multi")
@@ -119,8 +102,6 @@ class TestSSEBrokerPublish:
 
     async def test_publish_sends_to_all_subscribers(self):
         """Publish() puts event on all subscriber queues."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q1 = b.subscribe("pub-test")
         q2 = b.subscribe("pub-test")
@@ -134,15 +115,11 @@ class TestSSEBrokerPublish:
 
     async def test_publish_to_empty_channel_is_safe(self):
         """Publish() to a channel with no subscribers does not raise."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         await b.publish("empty-channel", "ping", "")
 
     async def test_publish_drops_oldest_when_queue_full(self):
         """When queue is full, oldest event is dropped to make room."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         b._queue_maxsize = 3
         q = b.subscribe("full-test")
@@ -166,8 +143,6 @@ class TestSSEBrokerPublish:
 
     async def test_publish_default_data_is_empty_string(self):
         """Publish() with no data argument defaults to empty string."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         q = b.subscribe("default-data")
 
@@ -182,8 +157,6 @@ class TestSSEBrokerPublish:
         but race)."""
         import asyncio
         from unittest.mock import patch
-
-        from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
         q = b.subscribe("full-exception-test")
@@ -200,8 +173,6 @@ class TestSSEBrokerListen:
 
     async def test_listen_yields_published_events(self):
         """Listen() yields events as they are published."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
 
         received = []
@@ -224,8 +195,6 @@ class TestSSEBrokerListen:
 
     async def test_listen_unsubscribes_on_cancel(self):
         """Listen() unsubscribes from channel when generator exits via break."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
 
         result = []
@@ -247,8 +216,6 @@ class TestSSEBrokerListen:
 
     async def test_listen_subscribes_on_start(self):
         """Listen() subscribes to channel when generator starts iterating."""
-        from app.services.sse_broker import SSEBroker
-
         b = SSEBroker()
         channel = "subscribe-check-2"
 

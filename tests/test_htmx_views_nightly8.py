@@ -13,6 +13,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -239,32 +240,24 @@ class TestBulkActionAssign:
 class TestRequisitionCreateWithParts:
     """Covers lines 1022, 1052-1072 (create req with parts text)."""
 
-    def test_create_with_parts_text(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {
                 "name": "N8-CREATE-01",
                 "customer_name": "Acme",
                 "parts_text": "LM317T, 500\nTL431, 200\n",
             },
-        )
-        assert resp.status_code == 200
-
-    def test_create_with_invalid_qty_in_parts(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={
+            {
                 "name": "N8-CREATE-02",
                 "parts_text": "LM317T, notanumber",
             },
-        )
-        assert resp.status_code == 200
-
-    def test_create_minimal(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/partials/requisitions/create",
-            data={"name": "N8-CREATE-03"},
-        )
+            {"name": "N8-CREATE-03"},
+        ],
+        ids=["with_parts_text", "invalid_qty_in_parts", "minimal"],
+    )
+    def test_create(self, client: TestClient, db_session: Session, test_user: User, data):
+        resp = client.post("/v2/partials/requisitions/create", data=data)
         assert resp.status_code == 200
 
 
@@ -447,40 +440,30 @@ class TestEditOfferHtmx:
 class TestLogActivity:
     """Covers lines 2385-2404 (log activity for requisition)."""
 
-    def test_log_note_activity(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/log-activity",
-            data={
+    @pytest.mark.parametrize(
+        "data",
+        [
+            {
                 "activity_type": "note",
                 "notes": "Contacted vendor about availability.",
                 "vendor_name": "Arrow Electronics",
             },
-        )
-        assert resp.status_code == 200
-
-    def test_log_phone_call_activity(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/log-activity",
-            data={
+            {
                 "activity_type": "phone_call",
                 "notes": "Called about LM317T",
                 "vendor_name": "Mouser",
             },
-        )
-        assert resp.status_code == 200
-
-    def test_log_email_activity(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/log-activity",
-            data={
+            {
                 "activity_type": "email_sent",
                 "vendor_name": "DigiKey",
                 "contact_email": "rfq@digikey.com",
             },
-        )
+        ],
+        ids=["note", "phone_call", "email_sent"],
+    )
+    def test_log_activity(self, client: TestClient, db_session: Session, test_user: User, data):
+        req = _req(db_session, test_user)
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/log-activity", data=data)
         assert resp.status_code == 200
 
     def test_log_activity_req_not_found(self, client: TestClient):
@@ -582,27 +565,17 @@ class TestSendFollowUpHtmx:
 class TestMarkResponseReviewed:
     """Covers lines 2803-2815 (mark vendor response as reviewed)."""
 
-    def test_mark_reviewed(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize("status", ["reviewed", "rejected"])
+    def test_mark_status(self, client: TestClient, db_session: Session, test_user: User, status):
         req = _req(db_session, test_user)
         vr = _vendor_response(db_session, req)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
-            data={"status": "reviewed"},
+            data={"status": status},
         )
         assert resp.status_code == 200
         db_session.refresh(vr)
-        assert vr.status == "reviewed"
-
-    def test_mark_rejected(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        vr = _vendor_response(db_session, req)
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/responses/{vr.id}/review",
-            data={"status": "rejected"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(vr)
-        assert vr.status == "rejected"
+        assert vr.status == status
 
     def test_mark_invalid_status(self, client: TestClient, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -809,20 +782,13 @@ class TestCreateQuoteFromOffers:
 class TestBuyPlansListPartial:
     """Covers lines 5891, 5898-5904 (buy plans list)."""
 
-    def test_buy_plans_list_empty(self, client: TestClient, db_session: Session):
-        resp = client.get("/v2/partials/buy-plans")
-        assert resp.status_code == 200
-
-    def test_buy_plans_list_with_status_filter(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.get("/v2/partials/buy-plans?status=pending")
-        assert resp.status_code == 200
-
-    def test_buy_plans_list_mine_filter(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.get("/v2/partials/buy-plans?mine=true")
-        assert resp.status_code == 200
-
-    def test_buy_plans_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.get("/v2/partials/buy-plans?q=SO-1234")
+    @pytest.mark.parametrize(
+        "query",
+        ["", "?status=pending", "?mine=true", "?q=SO-1234"],
+        ids=["empty", "status_filter", "mine_filter", "search"],
+    )
+    def test_buy_plans_list(self, client: TestClient, db_session: Session, query):
+        resp = client.get(f"/v2/partials/buy-plans{query}")
         assert resp.status_code == 200
 
 
@@ -995,35 +961,22 @@ class TestRfqPreparePanel:
 class TestRequisitionInlineSave:
     """Covers lines 1705, 1731, 1746-1747 (inline save for req fields)."""
 
-    def test_inline_save_urgency(self, client: TestClient, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        ("field", "value", "context"),
+        [
+            ("urgency", "hot", "row"),
+            ("deadline", "2026-06-30", "row"),
+            ("owner", None, "row"),  # value filled with test_user.id below
+            ("name", "Renamed Req", "header"),
+        ],
+        ids=["urgency", "deadline", "owner", "name"],
+    )
+    def test_inline_save_field(self, client: TestClient, db_session: Session, test_user: User, field, value, context):
         req = _req(db_session, test_user)
+        resolved_value = str(test_user.id) if field == "owner" else value
         resp = client.patch(
             f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "urgency", "value": "hot", "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_deadline(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "deadline", "value": "2026-06-30", "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_owner(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "owner", "value": str(test_user.id), "context": "row"},
-        )
-        assert resp.status_code == 200
-
-    def test_inline_save_name(self, client: TestClient, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        resp = client.patch(
-            f"/v2/partials/requisitions/{req.id}/inline",
-            data={"field": "name", "value": "Renamed Req", "context": "header"},
+            data={"field": field, "value": resolved_value, "context": context},
         )
         assert resp.status_code == 200
 

@@ -34,29 +34,31 @@ def _mock_response(status_code=200, json_data=None, text="", headers=None):
 
 
 class TestParseRetryAfter:
-    def test_with_numeric_header(self):
+    @pytest.mark.parametrize(
+        ("headers", "expected"),
+        [
+            pytest.param({"Retry-After": "10"}, 10.0, id="numeric_header"),
+            pytest.param({"Retry-After": "0.5"}, 1.0, id="small_header_clamps_to_1"),
+        ],
+    )
+    def test_explicit_value(self, headers, expected):
         from app.connectors.sources import _parse_retry_after
 
-        resp = _mock_response(429, headers={"Retry-After": "10"})
-        assert _parse_retry_after(resp) == 10.0
+        resp = _mock_response(429, headers=headers)
+        assert _parse_retry_after(resp) == expected
 
-    def test_with_small_header_clamps_to_1(self):
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param({}, id="without_header"),
+            pytest.param({"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}, id="non_numeric_header"),
+        ],
+    )
+    def test_returns_default_with_jitter(self, headers):
+        """Missing or non-numeric header falls back to 5 + jitter(0, 2)."""
         from app.connectors.sources import _parse_retry_after
 
-        resp = _mock_response(429, headers={"Retry-After": "0.5"})
-        assert _parse_retry_after(resp) == 1.0
-
-    def test_without_header_returns_default(self):
-        from app.connectors.sources import _parse_retry_after
-
-        resp = _mock_response(429, headers={})
-        result = _parse_retry_after(resp)
-        assert 5.0 <= result <= 7.0  # 5 + jitter(0, 2)
-
-    def test_with_non_numeric_header_returns_default(self):
-        from app.connectors.sources import _parse_retry_after
-
-        resp = _mock_response(429, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"})
+        resp = _mock_response(429, headers=headers)
         result = _parse_retry_after(resp)
         assert 5.0 <= result <= 7.0
 
@@ -67,18 +69,18 @@ class TestParseRetryAfter:
 
 
 class TestConnectorSemaphore:
-    def test_digikey_concurrency_limit(self):
+    @pytest.mark.parametrize(
+        ("connector_name", "expected_value"),
+        [
+            ("DigiKeyConnector", 2),  # DigiKey limited to 2 concurrent requests
+            ("SomeUnknownConnector", 3),  # default limit
+        ],
+    )
+    def test_concurrency_limit(self, connector_name, expected_value):
         from app.connectors.sources import _get_connector_semaphore
 
-        sem = _get_connector_semaphore("DigiKeyConnector")
-        # DigiKey should be limited to 2 concurrent requests
-        assert sem._value == 2
-
-    def test_default_concurrency_limit(self):
-        from app.connectors.sources import _get_connector_semaphore
-
-        sem = _get_connector_semaphore("SomeUnknownConnector")
-        assert sem._value == 3
+        sem = _get_connector_semaphore(connector_name)
+        assert sem._value == expected_value
 
 
 # ═══════════════════════════════════════════════════════════════════════
