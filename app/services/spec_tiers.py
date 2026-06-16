@@ -67,6 +67,9 @@ if TYPE_CHECKING:
 # two stay in sync, so adding a source here requires updating the migration literal too.
 SOURCE_TIER: dict[str, int] = {
     "manual": 100,
+    "cpu_pollution_fix": 96,  # deterministic re-classification of the polluted `cpu` catch-all:
+    # beats the trio_source 'cpu' DEFAULT (95, an un-coded SFDC dump), below manual (100).
+    # Only ever written by app/management/fix_cpu_pollution.py on category='cpu' cards.
     "trio_source": 95,
     "digikey_api": 90,
     "mouser_api": 90,
