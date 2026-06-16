@@ -624,56 +624,45 @@ class TestMouserConnector:
         results = await c._do_search("LM317T")
         assert results == []
 
-    @pytest.mark.asyncio
-    async def test_do_search_api_errors_in_body(self):
-        """Generic non-auth, non-rate API errors still raise so
-        BaseConnector._search_with_retry() records a failure for the circuit breaker.
-
-        Only auth-shaped ('invalid', 'identifier', 'key') and rate-shaped errors return
-        empty.
-        """
-        c = self._make_connector()
-        resp = _mock_response(
-            200,
-            {"Errors": [{"Message": "Internal server error processing part"}]},
-        )
-        with patch("app.connectors.mouser.http") as mock_http:
-            mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(RuntimeError, match="Mouser API: Internal server error"):
-                await c._do_search("LM317T")
-
     def test_parse_null_search_results(self):
         c = self._make_connector()
         results = c._parse({}, "X")
         assert results == []
 
+    @pytest.mark.parametrize(
+        ("status", "text", "exc", "match"),
+        [
+            # 403 raises ConnectorAuthError (prior silent-empty carve-out hid revoked-key
+            # cases); 429 raises ConnectorRateLimitError. Both auto-recover on next ping.
+            pytest.param(403, "Forbidden", ConnectorAuthError, "Mouser auth error", id="403_auth"),
+            pytest.param(429, "Too Many Requests", ConnectorRateLimitError, "Mouser rate limited", id="429_rate"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_do_search_403_raises_auth_error(self):
-        """Mouser 403 raises ConnectorAuthError.
-
-        The prior silent-empty carve-out hid revoked-key cases — auto-recovery handles
-        transient overload via the next ping flipping status back to 'live'.
-        """
+    async def test_do_search_error_status_raises(self, status, text, exc, match):
         c = self._make_connector()
-        resp = _mock_response(403, text="Forbidden")
+        resp = _mock_response(status, text=text)
         resp.raise_for_status = MagicMock()  # Should not be called
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="Mouser auth error"):
+            with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
 
-    @pytest.mark.asyncio
-    async def test_do_search_auth_error_in_body_raises(self):
-        """Mouser 'Invalid unique identifier' (bad/revoked API key) must raise
-        ConnectorAuthError so health_monitor.ping_source flips status to 'error'.
-
-        See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
-        """
-        c = self._make_connector()
-        resp = _mock_response(
-            200,
-            {
-                "Errors": [
+    @pytest.mark.parametrize(
+        ("errors", "exc", "match"),
+        [
+            # Generic non-auth, non-rate API errors still raise so
+            # BaseConnector._search_with_retry() records a failure for the circuit breaker.
+            pytest.param(
+                [{"Message": "Internal server error processing part"}],
+                RuntimeError,
+                "Mouser API: Internal server error",
+                id="generic_error",
+            ),
+            # 'Invalid unique identifier' (bad/revoked API key) must raise ConnectorAuthError
+            # so health_monitor.ping_source flips status to 'error'.
+            pytest.param(
+                [
                     {
                         "Id": 0,
                         "Code": "Invalid",
@@ -681,56 +670,35 @@ class TestMouserConnector:
                         "ResourceKey": "InvalidIdentifier",
                         "PropertyName": "API Key",
                     }
-                ]
-            },
-        )
-        with patch("app.connectors.mouser.http") as mock_http:
-            mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="Mouser auth error"):
-                await c._do_search("LM317T")
-
+                ],
+                ConnectorAuthError,
+                "Mouser auth error",
+                id="auth_invalid_identifier",
+            ),
+            # A catalog-vocabulary 'Invalid ...' error must NOT be treated as auth — guards
+            # the auth matcher against the 'invalid' substring false-positive.
+            pytest.param(
+                [{"Message": "Invalid part number"}],
+                RuntimeError,
+                "Mouser API: Invalid part number",
+                id="invalid_part_number_not_auth",
+            ),
+            # Quota/rate error in the Errors array raises ConnectorRateLimitError (was return []).
+            pytest.param(
+                [{"Message": "Too many requests per day"}],
+                ConnectorRateLimitError,
+                "Mouser rate",
+                id="quota_rate",
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_do_search_invalid_part_number_still_raises(self):
-        """A catalog-vocabulary 'Invalid ...' error (e.g. 'Invalid part number') must
-        NOT be treated as an auth error.
-
-        It should raise so BaseConnector records the failure and the circuit breaker
-        observes it. This guards the auth-error matcher against the obvious 'invalid'
-        substring false-positive.
-        """
+    async def test_do_search_errors_in_body(self, errors, exc, match):
         c = self._make_connector()
-        resp = _mock_response(
-            200,
-            {"Errors": [{"Message": "Invalid part number"}]},
-        )
+        resp = _mock_response(200, {"Errors": errors})
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(RuntimeError, match="Mouser API: Invalid part number"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_do_search_429_raises_rate_limit(self):
-        """Mouser 429 raises ConnectorRateLimitError.
-
-        Auto-recovers on next ping success.
-        """
-        c = self._make_connector()
-        resp = _mock_response(429, text="Too Many Requests")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.mouser.http") as mock_http:
-            mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorRateLimitError, match="Mouser rate limited"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_do_search_quota_error_in_body_raises_rate_limit(self):
-        """Mouser HTTP 200 with quota/rate error in Errors array raises
-        ConnectorRateLimitError (was return [])."""
-        c = self._make_connector()
-        resp = _mock_response(200, {"Errors": [{"Message": "Too many requests per day"}]})
-        with patch("app.connectors.mouser.http") as mock_http:
-            mock_http.post = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorRateLimitError, match="Mouser rate"):
+            with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
 
     def test_parse_picks_lowest_qty_price_break(self):
@@ -998,59 +966,46 @@ class TestOEMSecretsConnector:
             result = await c._do_search("LM317T")
             assert result == []
 
-    def test_parse_moq_zero_becomes_none(self):
-        """MOQ=0 from API must become None to satisfy chk_sight_moq."""
+    @pytest.mark.parametrize(
+        ("distributor", "moq_in", "moq_out"),
+        [
+            pytest.param("Broker X", 0, None, id="zero_becomes_none"),  # MOQ=0 must become None for chk_sight_moq
+            pytest.param("Arrow", 5, 5, id="positive_kept"),
+        ],
+    )
+    def test_parse_moq(self, distributor, moq_in, moq_out):
         c = self._make_connector()
         data = {
             "stock": [
                 {
-                    "distributor": "Broker X",
+                    "distributor": distributor,
                     "mpn": "ABC",
                     "stock": 100,
-                    "moq": 0,
+                    "moq": moq_in,
                 }
             ]
         }
         results = c._parse(data, "ABC")
-        assert results[0]["moq"] is None
+        assert results[0]["moq"] == moq_out
 
-    def test_parse_moq_positive_kept(self):
-        c = self._make_connector()
-        data = {
-            "stock": [
-                {
-                    "distributor": "Arrow",
-                    "mpn": "ABC",
-                    "stock": 100,
-                    "moq": 5,
-                }
-            ]
-        }
-        results = c._parse(data, "ABC")
-        assert results[0]["moq"] == 5
-
+    @pytest.mark.parametrize(
+        ("status", "text", "exc", "match"),
+        [
+            # 401 (bad key OR quota exhausted) and 429 (rate limit) must each raise so
+            # health_monitor.ping_source flips api_sources.status to 'error', stopping the
+            # 15-min ping loop from continuing to consume quota.
+            pytest.param(401, "User is not accepted", ConnectorAuthError, "OEMSecrets auth/quota error", id="401_auth"),
+            pytest.param(429, "Rate limited", ConnectorRateLimitError, "OEMSecrets rate limited", id="429_rate"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_do_search_401_raises_for_health_monitor(self):
-        """OEMSecrets 401 (bad key OR quota exhausted) must raise RuntimeError so
-        health_monitor.ping_source flips api_sources.status to 'error', stopping the
-        15-min ping loop from continuing to consume quota."""
+    async def test_do_search_error_status_raises_for_health_monitor(self, status, text, exc, match):
         c = self._make_connector()
-        resp = _mock_response(401, text="User is not accepted")
+        resp = _mock_response(status, text=text)
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="OEMSecrets auth/quota error"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_do_search_429_raises_for_health_monitor(self):
-        """OEMSecrets 429 (rate limit) must raise — same contract as 401."""
-        c = self._make_connector()
-        resp = _mock_response(429, text="Rate limited")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.oemsecrets.http") as mock_http:
-            mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorRateLimitError, match="OEMSecrets rate limited"):
+            with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
 
     def test_parse_empty_prices_dict(self):
@@ -1190,8 +1145,14 @@ class TestSourcengineConnector:
         results = await c._do_search("LM317T")
         assert results == []
 
-    def test_parse_moq_zero_becomes_none(self):
-        """MOQ=0 from API must become None to satisfy chk_sight_moq."""
+    @pytest.mark.parametrize(
+        ("moq_in", "moq_out"),
+        [
+            pytest.param(0, None, id="zero_becomes_none"),  # MOQ=0 must become None to satisfy chk_sight_moq
+            pytest.param(10, 10, id="positive_kept"),
+        ],
+    )
+    def test_parse_moq(self, moq_in, moq_out):
         c = self._make_connector()
         data = {
             "results": [
@@ -1199,27 +1160,12 @@ class TestSourcengineConnector:
                     "supplier": "Future Electronics",
                     "mpn": "ABC",
                     "quantity": 100,
-                    "moq": 0,
+                    "moq": moq_in,
                 }
             ]
         }
         results = c._parse(data, "ABC")
-        assert results[0]["moq"] is None
-
-    def test_parse_moq_positive_kept(self):
-        c = self._make_connector()
-        data = {
-            "results": [
-                {
-                    "supplier": "Future Electronics",
-                    "mpn": "ABC",
-                    "quantity": 100,
-                    "moq": 10,
-                }
-            ]
-        }
-        results = c._parse(data, "ABC")
-        assert results[0]["moq"] == 10
+        assert results[0]["moq"] == moq_out
 
     @pytest.mark.asyncio
     async def test_do_search_non_200_raises(self):
@@ -1244,18 +1190,18 @@ class TestSourcengineConnector:
         results = c._parse(data, "X")
         assert results[0]["is_authorized"] is True
 
-    def test_parse_confidence_4_with_qty(self):
-        """Sourcengine confidence is 4 (not 5) when qty is present."""
+    @pytest.mark.parametrize(
+        ("offer", "expected_confidence"),
+        [
+            # Sourcengine confidence is 4 (not 5) when qty is present
+            pytest.param({"supplier": "S1", "mpn": "X", "quantity": 100}, 4, id="4_with_qty"),
+            pytest.param({"supplier": "S1", "mpn": "X"}, 3, id="3_without_qty"),
+        ],
+    )
+    def test_parse_confidence(self, offer, expected_confidence):
         c = self._make_connector()
-        data = {"results": [{"supplier": "S1", "mpn": "X", "quantity": 100}]}
-        results = c._parse(data, "X")
-        assert results[0]["confidence"] == 4
-
-    def test_parse_confidence_3_without_qty(self):
-        c = self._make_connector()
-        data = {"results": [{"supplier": "S1", "mpn": "X"}]}
-        results = c._parse(data, "X")
-        assert results[0]["confidence"] == 3
+        results = c._parse({"results": [offer]}, "X")
+        assert results[0]["confidence"] == expected_confidence
 
     def test_parse_offers_key(self):
         """Sourcengine should also accept 'offers' as top-level key."""
@@ -1264,39 +1210,25 @@ class TestSourcengineConnector:
         results = c._parse(data, "X")
         assert len(results) == 1
 
+    @pytest.mark.parametrize(
+        ("status", "text", "exc", "match"),
+        [
+            # 401/403 (auth) and 429 (rate limit) must each raise so
+            # health_monitor.ping_source flips status to 'error' and stops the
+            # 15-min ping loop from burning quota against bad creds.
+            pytest.param(401, "Unauthorized", ConnectorAuthError, "Sourcengine auth error", id="401_auth"),
+            pytest.param(403, "Forbidden", ConnectorAuthError, "Sourcengine auth error", id="403_auth"),
+            pytest.param(429, "Too Many Requests", ConnectorRateLimitError, "Sourcengine rate limited", id="429_rate"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_search_401_raises_for_health_monitor(self):
-        """Sourcengine 401/403 (auth) must raise RuntimeError so
-        health_monitor.ping_source flips status to 'error' and stops the 15-min ping
-        loop from burning quota against bad creds."""
+    async def test_search_error_status_raises_for_health_monitor(self, status, text, exc, match):
         c = self._make_connector()
-        resp = _mock_response(401, text="Unauthorized")
+        resp = _mock_response(status, text=text)
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.sourcengine.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="Sourcengine auth error"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_search_403_raises_for_health_monitor(self):
-        """Sourcengine 403 (forbidden) must raise — same contract as 401."""
-        c = self._make_connector()
-        resp = _mock_response(403, text="Forbidden")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.sourcengine.http") as mock_http:
-            mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="Sourcengine auth error"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_search_429_raises_for_health_monitor(self):
-        """Sourcengine 429 (rate limit) must raise — same contract as 401/403."""
-        c = self._make_connector()
-        resp = _mock_response(429, text="Too Many Requests")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.sourcengine.http") as mock_http:
-            mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorRateLimitError, match="Sourcengine rate limited"):
+            with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
 
 
@@ -1457,47 +1389,28 @@ class TestElement14Connector:
         assert len(results) == 1
         mock_http.get.assert_awaited_once()  # Only one call — no fallback
 
+    @pytest.mark.parametrize(
+        ("status", "text", "exc", "match"),
+        [
+            # 401 (auth), 403 (key rejected for region/store), and 429 (rate limit) must
+            # each raise so health_monitor.ping_source flips status to 'error'. The first
+            # raise also short-circuits the keyword-fallback in _do_search so we don't burn
+            # a second quota call against the same broken creds (call_count == 1).
+            pytest.param(401, "Unauthorized", ConnectorAuthError, "element14 auth error", id="401_auth"),
+            pytest.param(403, "Forbidden", ConnectorAuthError, "element14 auth error", id="403_auth"),
+            pytest.param(429, "Too Many Requests", ConnectorRateLimitError, "element14 rate limited", id="429_rate"),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_search_401_raises_for_health_monitor(self):
-        """Element14 401 (auth) must raise RuntimeError so health_monitor.ping_source
-        flips status to 'error' — and the first raise short-circuits the keyword-
-        fallback in _do_search so we don't burn a second quota call against the same
-        broken creds."""
+    async def test_search_error_status_raises_for_health_monitor(self, status, text, exc, match):
         c = self._make_connector()
-        resp = _mock_response(401, text="Unauthorized")
+        resp = _mock_response(status, text=text)
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.element14.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="element14 auth error"):
+            with pytest.raises(exc, match=match):
                 await c._do_search("LM317T")
             # Only the exact-MPN call ran — fallback was short-circuited
-            assert mock_http.get.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_search_403_raises_for_health_monitor(self):
-        """Element14 403 (key rejected for region/store) raises ConnectorAuthError.
-
-        Same operator action as 401: rotate the key.
-        """
-        c = self._make_connector()
-        resp = _mock_response(403, text="Forbidden")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.element14.http") as mock_http:
-            mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorAuthError, match="element14 auth error"):
-                await c._do_search("LM317T")
-            assert mock_http.get.call_count == 1
-
-    @pytest.mark.asyncio
-    async def test_search_429_raises_for_health_monitor(self):
-        """Element14 429 (rate limit) must raise — same contract as 401."""
-        c = self._make_connector()
-        resp = _mock_response(429, text="Too Many Requests")
-        resp.raise_for_status = MagicMock()
-        with patch("app.connectors.element14.http") as mock_http:
-            mock_http.get = AsyncMock(return_value=resp)
-            with pytest.raises(ConnectorRateLimitError, match="element14 rate limited"):
-                await c._do_search("LM317T")
             assert mock_http.get.call_count == 1
 
 
@@ -1582,40 +1495,37 @@ class TestBrokerBinConnector:
             results = await c._do_search("LM317T")
             assert results == []
 
+    @pytest.mark.parametrize(
+        ("status", "text", "match"),
+        [
+            # Rate-limit (429) and auth (401/403) responses must raise so health_monitor
+            # flips status. Regression: BrokerBin used to silently swallow these as
+            # `return []`, leaving status 'live' with no operator signal — the silent-failure
+            # mode the contract is designed to eliminate.
+            pytest.param(
+                429,
+                '{"error":"Too many requests! Request limit reached..."}',
+                "rate limited",
+                id="429_rate",
+            ),
+            pytest.param(
+                401,
+                '{"message":"Unauthenticated. Must use secure protocol."}',
+                "auth error",
+                id="401_auth",
+            ),
+        ],
+    )
     @pytest.mark.asyncio
-    async def test_search_429_raises_for_health_monitor(self):
-        """Rate-limit responses must raise so health_monitor flips status.
-
-        Regression: BrokerBin used to silently swallow 429s as `return []`,
-        leaving the source's status as 'live' with no operator signal —
-        the silent-failure mode the contract is designed to eliminate.
-        See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
-        """
-        import pytest as _pytest
-
+    async def test_search_error_status_raises_for_health_monitor(self, status, text, match):
         c = self._make_connector()
         mock_resp = MagicMock()
-        mock_resp.status_code = 429
-        mock_resp.text = '{"error":"Too many requests! Request limit reached..."}'
+        mock_resp.status_code = status
+        mock_resp.text = text
 
         with patch("app.http_client.http_redirect") as mock_client:
             mock_client.get = AsyncMock(return_value=mock_resp)
-            with _pytest.raises(RuntimeError, match="rate limited"):
-                await c._do_search("LM317T")
-
-    @pytest.mark.asyncio
-    async def test_search_401_raises_for_health_monitor(self):
-        """401/403 (auth) responses must raise — same pattern as 429."""
-        import pytest as _pytest
-
-        c = self._make_connector()
-        mock_resp = MagicMock()
-        mock_resp.status_code = 401
-        mock_resp.text = '{"message":"Unauthenticated. Must use secure protocol."}'
-
-        with patch("app.http_client.http_redirect") as mock_client:
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            with _pytest.raises(RuntimeError, match="auth error"):
+            with pytest.raises(RuntimeError, match=match):
                 await c._do_search("LM317T")
 
     @pytest.mark.asyncio
@@ -2631,29 +2541,33 @@ class TestEmailMiner:
 
 
 class TestSafeHelpers:
-    def test_safe_int_valid(self):
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(42, 42, id="int"),
+            pytest.param("100", 100, id="numeric_str"),
+            pytest.param(None, None, id="none"),
+            pytest.param("abc", None, id="non_numeric_str"),
+        ],
+    )
+    def test_safe_int(self, value, expected):
         from app.utils import safe_int
 
-        assert safe_int(42) == 42
-        assert safe_int("100") == 100
+        assert safe_int(value) == expected
 
-    def test_safe_int_invalid(self):
-        from app.utils import safe_int
-
-        assert safe_int(None) is None
-        assert safe_int("abc") is None
-
-    def test_safe_float_valid(self):
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            pytest.param(1.25, 1.25, id="float"),
+            pytest.param("3.14", 3.14, id="numeric_str"),
+            pytest.param(None, None, id="none"),
+            pytest.param("N/A", None, id="non_numeric_str"),
+        ],
+    )
+    def test_safe_float(self, value, expected):
         from app.utils import safe_float
 
-        assert safe_float(1.25) == 1.25
-        assert safe_float("3.14") == 3.14
-
-    def test_safe_float_invalid(self):
-        from app.utils import safe_float
-
-        assert safe_float(None) is None
-        assert safe_float("N/A") is None
+        assert safe_float(value) == expected
 
 
 # ═══════════════════════════════════════════════════════════════════════

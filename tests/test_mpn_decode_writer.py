@@ -1,5 +1,9 @@
 """Unit 3 — the worker decode pass writes decoded specs via record_spec, with guards."""
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+
+from loguru import logger as loguru_logger
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialSpecFacet
@@ -10,6 +14,17 @@ from app.services.mpn_decoder.writer import decode_and_record_specs
 def _facets(db: Session, card_id: int) -> dict:
     rows = db.query(MaterialSpecFacet).filter_by(material_card_id=card_id).all()
     return {r.spec_key: (r.value_text if r.value_text is not None else r.value_numeric) for r in rows}
+
+
+@contextmanager
+def _capture_loguru(level: str = "WARNING") -> Iterator[list[str]]:
+    """Capture loguru messages at ``level`` and above into the yielded list."""
+    messages: list[str] = []
+    sink_id = loguru_logger.add(lambda message: messages.append(str(message)), level=level)
+    try:
+        yield messages
+    finally:
+        loguru_logger.remove(sink_id)
 
 
 def test_decode_writes_facets_for_known_hdd(db_session: Session):
@@ -85,8 +100,6 @@ def test_writer_warns_when_decoded_key_has_no_schema(db_session: Session):
     # If a decoder emits a key with no commodity_spec_schemas row, record_spec drops it at
     # DEBUG (invisible at the production INFO level) — the writer must surface the discard
     # as an aggregate WARNING so a decoder↔seed drift is never silent.
-    from loguru import logger as loguru_logger
-
     from app.models import CommoditySpecSchema
 
     seed_commodity_schemas(db_session)
@@ -96,12 +109,8 @@ def test_writer_warns_when_decoded_key_has_no_schema(db_session: Session):
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("dram.rank" in w and "dropped" in w for w in warnings), warnings
@@ -115,8 +124,6 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     # not in its LIVE enum_values (a stale DB row after a failed/lagging reseed — CI only pins
     # the decoder against the JSON seeds, the worker decodes against live rows). The writer
     # must surface this drop in the same aggregate WARNING as the no-schema case.
-    from loguru import logger as loguru_logger
-
     from app.models import CommoditySpecSchema
 
     seed_commodity_schemas(db_session)
@@ -127,12 +134,8 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("dram.registered=Registered" in w and "dropped" in w for w in warnings), warnings
@@ -148,19 +151,13 @@ def test_writer_warns_when_capacity_off_shipped_grid(db_session: Session):
     # must surface that silent, pure-function drop in the same aggregate WARNING as
     # record_spec's vocabulary drops. No 17 TB HDD has ever shipped, so the T-token
     # read on this Toshiba shape is implausible; the prefix-derived specs still land.
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="mg09aca17te", display_mpn="MG09ACA17TE", category="hdd")
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("hdd.capacity_gb=17000" in w and "shipped-capacity grid" in w for w in warnings), warnings
@@ -178,19 +175,13 @@ def test_writer_warns_when_grid_empties_a_capacity_only_decode(db_session: Sessi
     # it into the same aggregate WARNING — while writing nothing and leaving the card
     # untouched (a decode whose every value failed its plausibility gate contributes
     # no category, no maker, no specs, and does not count as decoded).
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="wd555ab", display_mpn="WD555AB", category="hdd")
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("hdd.capacity_gb=55.5" in w and "shipped-capacity grid" in w for w in warnings), warnings
@@ -204,19 +195,13 @@ def test_writer_warns_on_envelope_rejection_with_its_own_counter(db_session: Ses
     # the same dropped channel but under a SEPARATE counter — an over-tight envelope
     # must be distinguishable from an incomplete shipped-capacity grid. The distrusted
     # decode must also never categorize the card (specs are empty).
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="st120mm0198", display_mpn="ST120MM0198", category=None)
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("hdd.capacity_gb=120" in w and "Seagate family envelope" in w for w in warnings), warnings
@@ -249,8 +234,6 @@ def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
     # in the returned stats and WARNed with the (card_category -> decoded_commodity) pair,
     # because a recurring pair is exactly the signal that the category alias map needs
     # another entry.
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(
         normalized_mpn="st4000nm0035",
@@ -263,12 +246,8 @@ def test_decode_does_not_overwrite_higher_tier_category(db_session: Session):
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     assert stats == {
         "decoded": 1,
         "written": 0,
@@ -292,8 +271,6 @@ def test_decode_maker_ladder_loss_is_counted_and_warned(db_session: Session):
     # maker (85) loses arbitration. set_manufacturer's losing path logs at DEBUG only,
     # so — mirroring skipped_category_conflict — the loss must be counted in the stats
     # and WARNed with the (existing -> incoming) pair.
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(
         normalized_mpn="st4000nm0035",
@@ -307,12 +284,8 @@ def test_decode_maker_ladder_loss_is_counted_and_warned(db_session: Session):
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert stats["manufacturers_set"] == 0
@@ -326,8 +299,6 @@ def test_decode_maker_agreement_is_not_a_conflict(db_session: Session):
     # A higher-tier existing maker that AGREES with the decode is not a conflict: the
     # decode's write returns False (tier 85 < 90) but no counter increments and no
     # WARNING fires — skipped_maker_conflict must stay a pure data-conflict signal.
-    from loguru import logger as loguru_logger
-
     seed_commodity_schemas(db_session)
     card = MaterialCard(
         normalized_mpn="st4000nm0035",
@@ -341,12 +312,8 @@ def test_decode_maker_agreement_is_not_a_conflict(db_session: Session):
     db_session.add(card)
     db_session.flush()
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_loguru() as warnings:
         stats = decode_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
 
     assert stats["manufacturers_set"] == 0
     assert stats["skipped_maker_conflict"] == 0
@@ -454,14 +421,8 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
     monkeypatch.setattr(writer_mod, "record_spec", flaky)
 
-    from loguru import logger as loguru_logger
-
-    infos: list[str] = []
-    sink_id = loguru_logger.add(lambda message: infos.append(str(message)), level="INFO")
-    try:
+    with _capture_loguru("INFO") as infos:
         stats = decode_and_record_specs(db_session, [bad.id, good.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()  # must NOT raise — the bad card's savepoint kept the transaction clean
 
     # The batch summary log surfaces the failure count (ops vocabulary mirrors the

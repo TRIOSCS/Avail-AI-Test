@@ -6,6 +6,7 @@ Depends on: conftest.py, faceted search models, commodity_registry
 
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
@@ -436,25 +437,31 @@ def _mk_global(db, mpn, *, lifecycle=None, rohs=None, datasheet=None):
     return card
 
 
-def test_search_faceted_lifecycle_filter(db_session: Session):
-    _mk_global(db_session, "lc-active", lifecycle="active")
-    _mk_global(db_session, "lc-eol", lifecycle="eol")
-    _mk_global(db_session, "lc-obs", lifecycle="obsolete")
+@pytest.mark.parametrize(
+    ("facet", "seed", "filter_values", "expected"),
+    [
+        pytest.param(
+            "lifecycle",
+            [("lc-active", "active"), ("lc-eol", "eol"), ("lc-obs", "obsolete")],
+            ["active", "eol"],
+            {"lc-active", "lc-eol"},
+            id="lifecycle",
+        ),
+        pytest.param(
+            "rohs",
+            [("rohs-ok", "compliant"), ("rohs-no", "non-compliant"), ("rohs-ex", "exempt")],
+            ["compliant", "exempt"],
+            {"rohs-ok", "rohs-ex"},
+            id="rohs",
+        ),
+    ],
+)
+def test_search_faceted_single_value_global_facet(db_session: Session, facet, seed, filter_values, expected):
+    for mpn, value in seed:
+        _mk_global(db_session, mpn, **{facet: value})
 
-    results, total = search_materials_faceted(db_session, lifecycle=["active", "eol"])
-    mpns = {c.normalized_mpn for c in results}
-    assert mpns == {"lc-active", "lc-eol"}
-    assert total == 2
-
-
-def test_search_faceted_rohs_filter(db_session: Session):
-    _mk_global(db_session, "rohs-ok", rohs="compliant")
-    _mk_global(db_session, "rohs-no", rohs="non-compliant")
-    _mk_global(db_session, "rohs-ex", rohs="exempt")
-
-    results, total = search_materials_faceted(db_session, rohs=["compliant", "exempt"])
-    mpns = {c.normalized_mpn for c in results}
-    assert mpns == {"rohs-ok", "rohs-ex"}
+    results, total = search_materials_faceted(db_session, **{facet: filter_values})
+    assert {c.normalized_mpn for c in results} == expected
     assert total == 2
 
 

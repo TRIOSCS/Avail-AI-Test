@@ -7,8 +7,8 @@ Called by: pytest
 Depends on: app.services.tagging_ai_triage, conftest fixtures
 """
 
+import contextlib
 import json
-import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -63,108 +63,67 @@ def _tag_card(db: Session, card: MaterialCard, tag: Tag) -> MaterialTag:
     return mt
 
 
+@contextlib.contextmanager
+def _mock_ai_batch(status_code: int, batch_id: str | None = None):
+    """Patch credential/http/MODELS so the AI batch POST returns ``status_code``.
+
+    When ``batch_id`` is given the response also exposes ``json() -> {"id": batch_id}``.
+    """
+    mock_resp = MagicMock()
+    mock_resp.status_code = status_code
+    if batch_id is not None:
+        mock_resp.json.return_value = {"id": batch_id}
+
+    with (
+        patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
+        patch("app.http_client.http") as mock_http,
+        patch("app.utils.claude_client.MODELS", {"fast": "claude-3-5-haiku-20241022"}),
+    ):
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        yield
+
+
 # ── triage_internal_parts (heuristic) ───────────────────────────────
 
 
 class TestTriageInternalParts:
     """Tests for the heuristic triage classifier."""
 
-    def test_pure_numeric_flagged(self):
-        results = triage_internal_parts(["12345"])
+    # expected_reason=None means the original test only asserted is_internal,
+    # so the reason is intentionally left unchecked.
+    @pytest.mark.parametrize(
+        ("mpn", "expected_internal", "expected_reason"),
+        [
+            pytest.param("12345", True, "pure numeric sequence", id="pure_numeric"),
+            pytest.param("AB", True, "too short for standard MPN", id="very_short"),
+            pytest.param("X", True, "too short for standard MPN", id="single_char"),
+            pytest.param("INT-00456", True, "contains internal marker", id="marker_int_dash"),
+            pytest.param("CUST-WIDGET", True, "contains internal marker", id="marker_cust"),
+            pytest.param("PO#123456", True, "contains internal marker", id="marker_po_hash"),
+            pytest.param("ASSY-TOP-BOARD", True, "contains internal marker", id="marker_assy"),
+            pytest.param("KIT-EVAL-001", True, "contains internal marker", id="marker_kit"),
+            pytest.param("SAMPLE-LM317T", True, "contains internal marker", id="marker_sample"),
+            pytest.param("TEST-PART-42", True, "contains internal marker", id="marker_test_dash"),
+            pytest.param("PO-987654", True, "contains internal marker", id="marker_po_dash"),
+            pytest.param("LM317[REV-A]", True, "contains unusual characters", id="unusual_brackets"),
+            pytest.param("A=B", True, "contains unusual characters", id="unusual_equals"),
+            pytest.param("PART{1}", True, "contains unusual characters", id="unusual_braces"),
+            pytest.param("PART|ALT", True, "contains unusual characters", id="unusual_pipe"),
+            pytest.param("-LM317T", True, "starts with special character", id="starts_special_char"),
+            pytest.param("_INTERNAL", True, "starts with special character", id="starts_underscore"),
+            pytest.param("A" * 41, True, "unusually long", id="unusually_long"),
+            pytest.param("LM317T", False, "", id="real_mpn"),
+            pytest.param("STM32F407VGT6", False, "", id="real_mpn_with_dash"),
+            pytest.param("A" * 40, False, None, id="exactly_40_chars_not_long"),
+            pytest.param("ABC", False, None, id="exactly_3_chars_not_short"),
+        ],
+    )
+    def test_classification(self, mpn, expected_internal, expected_reason):
+        results = triage_internal_parts([mpn])
         assert len(results) == 1
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "pure numeric sequence"
-
-    def test_very_short_flagged(self):
-        results = triage_internal_parts(["AB"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "too short for standard MPN"
-
-    def test_single_char_flagged(self):
-        results = triage_internal_parts(["X"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "too short for standard MPN"
-
-    def test_internal_marker_int_dash(self):
-        results = triage_internal_parts(["INT-00456"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_cust(self):
-        results = triage_internal_parts(["CUST-WIDGET"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_po_hash(self):
-        results = triage_internal_parts(["PO#123456"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_assy(self):
-        results = triage_internal_parts(["ASSY-TOP-BOARD"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_kit(self):
-        results = triage_internal_parts(["KIT-EVAL-001"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_sample(self):
-        results = triage_internal_parts(["SAMPLE-LM317T"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_internal_marker_test_dash(self):
-        results = triage_internal_parts(["TEST-PART-42"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
-
-    def test_unusual_characters_brackets(self):
-        results = triage_internal_parts(["LM317[REV-A]"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains unusual characters"
-
-    def test_unusual_characters_equals(self):
-        results = triage_internal_parts(["A=B"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains unusual characters"
-
-    def test_unusual_characters_braces(self):
-        results = triage_internal_parts(["PART{1}"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains unusual characters"
-
-    def test_unusual_characters_pipe(self):
-        results = triage_internal_parts(["PART|ALT"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains unusual characters"
-
-    def test_starts_with_special_char(self):
-        results = triage_internal_parts(["-LM317T"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "starts with special character"
-
-    def test_starts_with_underscore(self):
-        results = triage_internal_parts(["_INTERNAL"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "starts with special character"
-
-    def test_unusually_long(self):
-        long_mpn = "A" * 41
-        results = triage_internal_parts([long_mpn])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "unusually long"
-
-    def test_real_mpn_not_flagged(self):
-        results = triage_internal_parts(["LM317T"])
-        assert results[0]["is_internal"] is False
-        assert results[0]["reason"] == ""
-
-    def test_real_mpn_with_dash(self):
-        results = triage_internal_parts(["STM32F407VGT6"])
-        assert results[0]["is_internal"] is False
-        assert results[0]["reason"] == ""
+        assert results[0]["is_internal"] is expected_internal
+        if expected_reason is not None:
+            assert results[0]["reason"] == expected_reason
 
     def test_multiple_mpns(self):
         results = triage_internal_parts(["LM317T", "12345", "INT-001"])
@@ -176,22 +135,6 @@ class TestTriageInternalParts:
     def test_empty_list(self):
         results = triage_internal_parts([])
         assert results == []
-
-    def test_exactly_40_chars_not_long(self):
-        mpn = "A" * 40
-        results = triage_internal_parts([mpn])
-        # 40 chars is NOT > 40, so not flagged as long
-        assert results[0]["is_internal"] is False
-
-    def test_exactly_3_chars_not_short(self):
-        results = triage_internal_parts(["ABC"])
-        # 3 chars is NOT <= 2, so not flagged as short
-        assert results[0]["is_internal"] is False
-
-    def test_po_dash_marker(self):
-        results = triage_internal_parts(["PO-987654"])
-        assert results[0]["is_internal"] is True
-        assert results[0]["reason"] == "contains internal marker"
 
     def test_preserves_original_mpn(self):
         results = triage_internal_parts(["  lm317t  "])
@@ -251,16 +194,7 @@ class TestSubmitTriageBatch:
         _make_material_card(db_session, "STM32F407VGT6")
         db_session.commit()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {"id": "batch_abc123"}
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.utils.claude_client.MODELS", {"fast": "claude-3-5-haiku-20241022"}),
-        ):
-            mock_http.post = AsyncMock(return_value=mock_resp)
+        with _mock_ai_batch(200, batch_id="batch_abc123"):
             result = await submit_triage_batch(db_session, limit=100)
 
         assert result["ai_submitted"] == 2
@@ -273,15 +207,7 @@ class TestSubmitTriageBatch:
         _make_material_card(db_session, "LM317T")
         db_session.commit()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.utils.claude_client.MODELS", {"fast": "claude-3-5-haiku-20241022"}),
-        ):
-            mock_http.post = AsyncMock(return_value=mock_resp)
+        with _mock_ai_batch(500):
             result = await submit_triage_batch(db_session, limit=100)
 
         assert result["ai_submitted"] == 0
@@ -307,16 +233,7 @@ class TestSubmitTriageBatch:
         _make_material_card(db_session, "LM317T")  # ambiguous: real MPN
         db_session.commit()
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 201
-        mock_resp.json.return_value = {"id": "batch_mixed"}
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.utils.claude_client.MODELS", {"fast": "claude-3-5-haiku-20241022"}),
-        ):
-            mock_http.post = AsyncMock(return_value=mock_resp)
+        with _mock_ai_batch(201, batch_id="batch_mixed"):
             result = await submit_triage_batch(db_session, limit=100)
 
         assert result["heuristic_flagged"] == 1
@@ -453,46 +370,7 @@ class TestApplyTriageResults:
 
         jsonl_content = "\n".join(jsonl_lines) + "\n"
 
-        # Write to a temp file and mock the download
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(jsonl_content)
-        tmp.close()
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        # Mock the stream to write our JSONL to the temp file
-        async def mock_stream_write(method, url, **kwargs):
-            class FakeStream:
-                async def aiter_bytes(self, chunk_size=65536):
-                    yield jsonl_content.encode()
-
-            ctx = AsyncMock()
-            ctx.__aenter__.return_value = FakeStream()
-            ctx.__aexit__.return_value = False
-            return ctx
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-
-            # Mock the stream context manager properly
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            # Patch db.close to not actually close our test session
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, jsonl_content)
 
         assert result["total_lines"] == 2
         assert result["flagged"] == 1
@@ -512,29 +390,7 @@ class TestApplyTriageResults:
             "custom_id": "triage_0",
             "result": {"type": "errored", "error": {"message": "rate limited"}},
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         assert result["errors"] == 1
         assert result["total_lines"] == 1
@@ -549,29 +405,7 @@ class TestApplyTriageResults:
                 "message": {"content": [{"type": "image", "url": "..."}]},
             },
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         assert result["errors"] == 1
 
@@ -585,29 +419,7 @@ class TestApplyTriageResults:
                 "message": {"content": [{"type": "text", "text": "not valid json"}]},
             },
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         assert result["errors"] == 1
 
@@ -621,29 +433,7 @@ class TestApplyTriageResults:
                 "message": {"content": [{"type": "text", "text": '{"mpn": "LM317T"}'}]},
             },
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         assert result["errors"] == 1
 
@@ -664,29 +454,7 @@ class TestApplyTriageResults:
                 },
             },
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         assert result["flagged"] == 0
         assert result["real_mpns"] == 0
@@ -709,29 +477,7 @@ class TestApplyTriageResults:
                 },
             },
         }
-        jsonl_content = json.dumps(line) + "\n"
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/abc",
-        }
-
-        with (
-            patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
-            patch("app.http_client.http") as mock_http,
-            patch("app.database.SessionLocal", return_value=db_session),
-        ):
-            mock_http.get = AsyncMock(return_value=status_resp)
-            fake_stream = AsyncMock()
-            fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
-            stream_ctx = AsyncMock()
-            stream_ctx.__aenter__.return_value = fake_stream
-            mock_http.stream = MagicMock(return_value=stream_ctx)
-
-            with patch.object(db_session, "close", lambda: None):
-                result = await apply_triage_results("batch_abc")
+        result = await _run_apply_with_jsonl(db_session, json.dumps(line) + "\n")
 
         # Not an error — just doesn't match any card
         assert result["flagged"] == 0
@@ -745,3 +491,32 @@ async def _async_iter(items):
     """Helper to create an async iterator from a list."""
     for item in items:
         yield item
+
+
+async def _run_apply_with_jsonl(db_session: Session, jsonl_content: str, batch_id: str = "batch_abc"):
+    """Run apply_triage_results against a mocked batch that streams ``jsonl_content``.
+
+    Mocks the Anthropic Batch API status check (ended, with results_url) and the
+    streaming download, and routes the service's own DB session to ``db_session``.
+    """
+    status_resp = MagicMock()
+    status_resp.status_code = 200
+    status_resp.json.return_value = {
+        "processing_status": "ended",
+        "results_url": "https://api.anthropic.com/results/abc",
+    }
+
+    with (
+        patch("app.services.credential_service.get_credential_cached", return_value="sk-test"),
+        patch("app.http_client.http") as mock_http,
+        patch("app.database.SessionLocal", return_value=db_session),
+    ):
+        mock_http.get = AsyncMock(return_value=status_resp)
+        fake_stream = AsyncMock()
+        fake_stream.aiter_bytes = lambda chunk_size=65536: _async_iter([jsonl_content.encode()])
+        stream_ctx = AsyncMock()
+        stream_ctx.__aenter__.return_value = fake_stream
+        mock_http.stream = MagicMock(return_value=stream_ctx)
+
+        with patch.object(db_session, "close", lambda: None):
+            return await apply_triage_results(batch_id)

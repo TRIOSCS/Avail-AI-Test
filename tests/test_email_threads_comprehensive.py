@@ -12,6 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -24,6 +25,16 @@ from app.services.email_threads import (
     fetch_threads_for_vendor,
     group_by_thread,
 )
+
+
+@contextmanager
+def mock_graph_client(*, return_value=None, side_effect=None):
+    """Patch email_threads.GraphClient so get_all_pages returns/raises as given."""
+    with patch("app.services.email_threads.GraphClient") as MockGC:
+        instance = MockGC.return_value
+        instance.get_all_pages = AsyncMock(return_value=return_value, side_effect=side_effect)
+        yield instance
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  group_by_thread — Union-Find threading via headers
@@ -328,10 +339,7 @@ class TestFetchThreadsVendorResponseTier:
             },
         ]
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(return_value=mock_messages)
-
+        with mock_graph_client(return_value=mock_messages):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -367,10 +375,7 @@ class TestFetchThreadsVendorResponseTier:
                 raise Exception("Graph API timeout")
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_failing)
-
+        with mock_graph_client(side_effect=mock_failing):
             # Should not raise
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
@@ -406,10 +411,7 @@ class TestFetchThreadsVendorResponseTier:
             },
         ]
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(return_value=internal_msgs)
-
+        with mock_graph_client(return_value=internal_msgs):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -470,10 +472,7 @@ class TestFetchThreadsTier4VendorCard:
                 ]
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
-
+        with mock_graph_client(side_effect=mock_get_all_pages):
             with patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"):
                 threads = await fetch_threads_for_requirement(
                     requirement.id, "fake-token", db_session, user_id=test_user.id
@@ -504,10 +503,7 @@ class TestFetchThreadsTier4VendorCard:
                 raise Exception("Network error")
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_error)
-
+        with mock_graph_client(side_effect=mock_error):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -536,10 +532,7 @@ class TestFetchThreadsTier4VendorCard:
         db_session.add(item)
         db_session.commit()
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(return_value=[])
-
+        with mock_graph_client(return_value=[]):
             threads = await fetch_threads_for_requirement(item.id, "fake-token", db_session, user_id=test_user.id)
 
         assert threads == []
@@ -558,10 +551,7 @@ class TestFetchThreadsTier4VendorCard:
                 raise Exception("Search API error")
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_err)
-
+        with mock_graph_client(side_effect=mock_err):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -579,10 +569,7 @@ class TestFetchThreadsTier4VendorCard:
                 raise Exception("Part number search error")
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_err)
-
+        with mock_graph_client(side_effect=mock_err):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -623,10 +610,7 @@ class TestTier1ContactError:
                 raise Exception("Auth expired")
             return []
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=mock_err)
-
+        with mock_graph_client(side_effect=mock_err):
             threads = await fetch_threads_for_requirement(
                 requirement.id, "fake-token", db_session, user_id=test_user.id
             )
@@ -654,10 +638,7 @@ class TestFetchThreadsVendorDomainError:
         db_session.add(card)
         db_session.commit()
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(side_effect=Exception("API down"))
-
+        with mock_graph_client(side_effect=Exception("API down")):
             threads = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert threads == []
@@ -685,10 +666,7 @@ class TestFetchThreadsVendorDomainError:
             },
         ]
 
-        with patch("app.services.email_threads.GraphClient") as MockGC:
-            instance = MockGC.return_value
-            instance.get_all_pages = AsyncMock(return_value=internal_msgs)
-
+        with mock_graph_client(return_value=internal_msgs):
             threads = await fetch_threads_for_vendor(card.id, "fake-token", db_session, user_id=test_user.id)
 
         assert threads == []

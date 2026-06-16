@@ -68,12 +68,15 @@ class TestListMaterials:
         assert resp.status_code == 400
         assert "error" in resp.json()
 
-    def test_list_invalid_limit_returns_400(self, client, db_session):
-        resp = client.get("/api/materials?limit=abc")
-        assert resp.status_code == 400
-
-    def test_list_invalid_offset_returns_400(self, client, db_session):
-        resp = client.get("/api/materials?offset=xyz")
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("limit=abc", id="invalid_limit"),
+            pytest.param("offset=xyz", id="invalid_offset"),
+        ],
+    )
+    def test_list_invalid_pagination_returns_400(self, client, db_session, query):
+        resp = client.get(f"/api/materials?{query}")
         assert resp.status_code == 400
 
     def test_list_respects_limit_and_offset(self, client, db_session):
@@ -1350,7 +1353,8 @@ class TestStampManualProvenanceEmptyFields:
 
 
 class TestRenderAddModal:
-    """Lines 75-86 — render_add_modal function body via GET /v2/partials/materials/add-form."""
+    """Lines 75-86 — render_add_modal function body via GET /v2/partials/materials/add-
+    form."""
 
     def test_add_form_partial_returns_html(self, client, db_session):
         resp = client.get("/v2/partials/materials/add-form")
@@ -1358,7 +1362,8 @@ class TestRenderAddModal:
         assert resp.status_code in (200, 302, 422)
 
     def test_render_add_modal_direct(self, db_session):
-        """Call render_add_modal directly with a minimal request to cover lines 75-86."""
+        """Call render_add_modal directly with a minimal request to cover lines
+        75-86."""
         from unittest.mock import MagicMock, patch
 
         scope = {
@@ -1468,7 +1473,8 @@ class TestAddMaterialEndpoint:
         assert resp.status_code == 200
 
     def test_add_punctuation_only_mpn_returns_422(self, client, db_session):
-        """normalize_mpn_key strips all non-alphanumerics → resolve returns None → 422."""
+        """normalize_mpn_key strips all non-alphanumerics → resolve returns None →
+        422."""
         with (
             patch("app.search_service.resolve_material_card", return_value=None),
             patch("app.search_service.run_deterministic_passes"),
@@ -1525,7 +1531,8 @@ class TestEnrichMaterialSourceBranches:
     """Lines 502, 510 — source routing in enrich_material."""
 
     def test_enrich_registered_source_below_trio_source_uses_source(self, client, db_session):
-        """Line 502 — source in SOURCE_TIER with tier < trio_source (95) → ladder_source=source."""
+        """Line 502 — source in SOURCE_TIER with tier < trio_source (95) →
+        ladder_source=source."""
         card = _make_card(db_session, mpn="srctier001", display="SRCTIER001", manufacturer=None)
         # digikey_api is tier 90, which is < trio_source tier 95
         resp = client.post(
@@ -1537,7 +1544,8 @@ class TestEnrichMaterialSourceBranches:
         assert data["ladder_source"] == "digikey_api"
 
     def test_enrich_unregistered_source_demoted_logs_warning(self, client, db_session):
-        """Line 510 — unregistered source (not claude_agent) demoted → warning logged."""
+        """Line 510 — unregistered source (not claude_agent) demoted → warning
+        logged."""
         card = _make_card(db_session, mpn="srcdmote001", display="SRCDMOTE001", manufacturer=None)
         # "digikey" (not "digikey_api") is not in SOURCE_TIER → demoted + warning
         resp = client.post(
@@ -1559,7 +1567,8 @@ class TestEnrichMaterialSourceBranches:
         assert resp.json()["ladder_source"] == "mouser_api"
 
     def test_enrich_ground_truth_source_manual_demotes_and_warns(self, client, db_session):
-        """Line 510 — 'manual' is in SOURCE_TIER at tier 100 (>= trio_source 95) → demoted + warning."""
+        """Line 510 — 'manual' is in SOURCE_TIER at tier 100 (>= trio_source 95) →
+        demoted + warning."""
         card = _make_card(db_session, mpn="gtwarning001", display="GTWARNING001", manufacturer=None)
         resp = client.post(
             f"/api/materials/{card.id}/enrich",
@@ -1594,7 +1603,8 @@ class TestEnrichManufacturerRejection:
     """Lines 544-547, 552 — set_category / set_manufacturer rejection."""
 
     def test_enrich_category_rejected_by_ladder(self, client, db_session):
-        """Lines 544-547 — category rejected when ladder already holds a stronger prior."""
+        """Lines 544-547 — category rejected when ladder already holds a stronger
+        prior."""
         card = _make_card(db_session, mpn="catrej001", display="CATREJ001")
         # Seed a manual/100 category to block incoming ai_guess/40
         card.category = "cpu"
@@ -1715,7 +1725,8 @@ class TestImportPartNumbers:
         assert "skipped" in data
 
     def test_short_mpn_is_skipped(self, client, db_session):
-        """MPN < 3 chars fails normalize_mpn → skipped count incremented (lines 695-698)."""
+        """MPN < 3 chars fails normalize_mpn → skipped count incremented (lines
+        695-698)."""
         with (
             patch("app.file_utils.parse_tabular_file", return_value=[{"mpn": "AB"}]),
             patch("app.file_utils.extract_mpns_with_rows", return_value=[(2, "AB")]),
@@ -1821,7 +1832,8 @@ class TestImportStockIntegrityErrors:
         assert resp.status_code == 200
 
     def test_stock_import_skips_short_mpn_in_loop(self, client, db_session):
-        """Lines 810-812 — MPN that fails normalize_mpn (< 3 chars) after normalize_stock_row."""
+        """Lines 810-812 — MPN that fails normalize_mpn (< 3 chars) after
+        normalize_stock_row."""
         # Provide a CSV row that parse_tabular_file/normalize_stock_row gives us an MPN
         # that then fails the V3 gate
         csv_content = b"mpn,qty\nAB,10\n"
@@ -1833,7 +1845,8 @@ class TestImportStockIntegrityErrors:
         assert data["skipped_rows"] >= 1
 
     def test_stock_import_material_card_integrity_error(self, client, db_session):
-        """Lines 825-831 — IntegrityError on MaterialCard flush → rollback + re-query fallback."""
+        """Lines 825-831 — IntegrityError on MaterialCard flush → rollback + re-query
+        fallback."""
         csv_content = b"mpn,qty\nDUPECARD001,100\n"
         # Pre-create the card so re-query succeeds after rollback
         existing_card = MaterialCard(
@@ -1971,7 +1984,7 @@ class TestAddMaterialDirect:
         assert result.status_code == 422
 
     async def test_add_material_direct_with_manufacturer_and_description(self, db_session):
-        """manufacturer + description written to card (lines 175-189)."""
+        """Manufacturer + description written to card (lines 175-189)."""
         from app.routers.materials import add_material
 
         card = MaterialCard(
@@ -1997,7 +2010,7 @@ class TestAddMaterialDirect:
         assert card.description == "Op-amp"
 
     async def test_add_material_direct_with_category_and_condition(self, db_session):
-        """category + condition written (lines 187-196)."""
+        """Category + condition written (lines 187-196)."""
         from app.routers.materials import add_material
 
         card = MaterialCard(
@@ -2262,7 +2275,8 @@ class TestEnrichMaterialDirectSourceBranches:
         assert "category" in result["rejected_fields"]
 
     async def test_enrich_direct_manufacturer_rejected_by_ladder(self, db_session):
-        """Line 552 — set_manufacturer returns False → manufacturer in rejected_fields."""
+        """Line 552 — set_manufacturer returns False → manufacturer in
+        rejected_fields."""
         from app.routers.materials import enrich_material
         from app.services.spec_tiers import set_manufacturer
 
@@ -2356,7 +2370,8 @@ class TestImportStockDirectIntegrityErrors:
         assert "imported_rows" in result
 
     async def test_short_mpn_in_loop_skipped(self, db_session):
-        """Lines 810-812 — normalize_stock_row returns parsed row with short MPN → skipped."""
+        """Lines 810-812 — normalize_stock_row returns parsed row with short MPN →
+        skipped."""
         from app.routers.materials import import_stock_list_standalone
 
         csv_content = b"mpn,qty\nAB,5\n"
@@ -2388,7 +2403,8 @@ class TestImportStockDirectIntegrityErrors:
         assert result["skipped_rows"] >= 1
 
     async def test_material_card_flush_integrity_error_requery_finds_card(self, db_session):
-        """Lines 825-827 — MaterialCard flush IntegrityError → rollback + re-query finds card."""
+        """Lines 825-827 — MaterialCard flush IntegrityError → rollback + re-query finds
+        card."""
         from app.routers.materials import import_stock_list_standalone
 
         csv_content = b"mpn,qty\nIECARD001,20\n"
@@ -2457,7 +2473,8 @@ class TestImportStockDirectIntegrityErrors:
         assert "imported_rows" in result
 
     async def test_material_card_flush_integrity_error_requery_returns_none(self, db_session):
-        """Lines 829-831 — MaterialCard flush IE + re-query also returns None → skipped."""
+        """Lines 829-831 — MaterialCard flush IE + re-query also returns None →
+        skipped."""
         from app.routers.materials import import_stock_list_standalone
 
         csv_content = b"mpn,qty\nIECARD002,20\n"

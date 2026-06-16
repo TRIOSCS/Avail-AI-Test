@@ -5,6 +5,8 @@ Called by: pytest
 Depends on: app.schemas.quote_builder, app.services.quote_builder_service, conftest.py
 """
 
+import pytest
+
 from app.schemas.quote_builder import QuoteBuilderLine, QuoteBuilderSaveRequest
 
 
@@ -60,9 +62,7 @@ def test_builder_save_request_valid():
 
 
 def test_builder_save_request_empty_lines_rejected():
-    import pytest as _pt
-
-    with _pt.raises(Exception):
+    with pytest.raises(Exception):
         QuoteBuilderSaveRequest(
             lines=[],
             payment_terms="Net 30",
@@ -116,25 +116,19 @@ def _mock_requirement(req_id, mpn, offers_count, target_qty=100, target_price=1.
     }
 
 
-def test_smart_defaults_single_offer_auto_decided():
-    lines = [_mock_requirement(1, "LM358DR", 1)]
+@pytest.mark.parametrize(
+    ("req_id", "mpn", "offers_count", "expected_status", "expected_offer_id"),
+    [
+        pytest.param(1, "LM358DR", 1, "decided", 100, id="single_offer_auto_decided"),
+        pytest.param(2, "LM317T", 3, "needs_review", None, id="multiple_offers_needs_review"),
+        pytest.param(3, "NE555P", 0, "no_offers", None, id="no_offers"),
+    ],
+)
+def test_smart_defaults_status(req_id, mpn, offers_count, expected_status, expected_offer_id):
+    lines = [_mock_requirement(req_id, mpn, offers_count)]
     apply_smart_defaults(lines)
-    assert lines[0]["status"] == "decided"
-    assert lines[0]["selected_offer_id"] == 100
-
-
-def test_smart_defaults_multiple_offers_needs_review():
-    lines = [_mock_requirement(2, "LM317T", 3)]
-    apply_smart_defaults(lines)
-    assert lines[0]["status"] == "needs_review"
-    assert lines[0]["selected_offer_id"] is None
-
-
-def test_smart_defaults_no_offers():
-    lines = [_mock_requirement(3, "NE555P", 0)]
-    apply_smart_defaults(lines)
-    assert lines[0]["status"] == "no_offers"
-    assert lines[0]["selected_offer_id"] is None
+    assert lines[0]["status"] == expected_status
+    assert lines[0]["selected_offer_id"] == expected_offer_id
 
 
 def test_smart_defaults_auto_pick_sets_sell_price():
@@ -208,12 +202,11 @@ def test_excel_export_has_correct_columns():
 from app.models import Company, CustomerSite, Quote, Requirement, Requisition
 
 
-def test_save_quote_from_builder_creates_quote(db_session, test_user):
-    """Uses conftest fixtures for DB session and user."""
-    from app.schemas.quote_builder import QuoteBuilderLine, QuoteBuilderSaveRequest
-    from app.services.quote_builder_service import save_quote_from_builder
+def _seed_requirement(db_session, test_user):
+    """Seed Acme Corp → HQ site → active requisition → one LM358DR requirement.
 
-    # Seed a requisition with customer site
+    Returns (requisition, requirement).
+    """
     company = Company(name="Acme Corp")
     db_session.add(company)
     db_session.flush()
@@ -226,6 +219,15 @@ def test_save_quote_from_builder_creates_quote(db_session, test_user):
     r1 = Requirement(requisition_id=req.id, primary_mpn="LM358DR", manufacturer="TI", target_qty=500)
     db_session.add(r1)
     db_session.commit()
+    return req, r1
+
+
+def test_save_quote_from_builder_creates_quote(db_session, test_user):
+    """Uses conftest fixtures for DB session and user."""
+    from app.schemas.quote_builder import QuoteBuilderLine, QuoteBuilderSaveRequest
+    from app.services.quote_builder_service import save_quote_from_builder
+
+    req, r1 = _seed_requirement(db_session, test_user)
 
     payload = QuoteBuilderSaveRequest(
         lines=[
@@ -258,19 +260,7 @@ def test_save_quote_revision(db_session, test_user):
     from app.schemas.quote_builder import QuoteBuilderLine, QuoteBuilderSaveRequest
     from app.services.quote_builder_service import save_quote_from_builder
 
-    # Seed
-    company = Company(name="Acme Corp")
-    db_session.add(company)
-    db_session.flush()
-    site = CustomerSite(company_id=company.id, site_name="HQ")
-    db_session.add(site)
-    db_session.flush()
-    req = Requisition(name="Test Req", customer_site_id=site.id, created_by=test_user.id, status="active")
-    db_session.add(req)
-    db_session.flush()
-    r1 = Requirement(requisition_id=req.id, primary_mpn="LM358DR", manufacturer="TI", target_qty=500)
-    db_session.add(r1)
-    db_session.commit()
+    req, r1 = _seed_requirement(db_session, test_user)
 
     # First save
     payload1 = QuoteBuilderSaveRequest(

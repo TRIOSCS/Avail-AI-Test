@@ -975,64 +975,33 @@ async def test_batch_refresh_exceeds_max_batch_size_raises_400(db_session: Sessi
     assert "Maximum" in exc.value.detail
 
 
-async def test_batch_assign_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
-    """Covers lines 762-763: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
-    from app.routers.sightings import sightings_batch_assign
+@pytest.mark.parametrize(
+    ("handler_name", "extra_fields"),
+    [
+        # Covers lines 762-763 (assign), 800-801 (status), 857-858 (notes):
+        # len(requirement_ids) > MAX_BATCH_SIZE → 400.
+        pytest.param("sightings_batch_assign", {"buyer_id_field": True}, id="assign"),
+        pytest.param("sightings_batch_status", {"status": "sourcing"}, id="status"),
+        pytest.param("sightings_batch_notes", {"notes": "Some note"}, id="notes"),
+    ],
+)
+async def test_batch_handler_exceeds_max_batch_size_raises_400(
+    handler_name: str, extra_fields: dict, db_session: Session, test_user: User
+):
+    """len(requirement_ids) > MAX_BATCH_SIZE → 400 for assign/status/notes handlers."""
+    import app.routers.sightings as sightings_router
 
-    ids = list(range(1, 52))
-    mock_req = _make_form_request(
-        {
-            "requirement_ids": json.dumps(ids),
-            "buyer_id": str(test_user.id),
-        }
-    )
+    handler = getattr(sightings_router, handler_name)
 
-    with pytest.raises(HTTPException) as exc:
-        await sightings_batch_assign(
-            request=mock_req,
-            db=db_session,
-            user=test_user,
-        )
-    assert exc.value.status_code == 400
-    assert "Maximum" in exc.value.detail
-
-
-async def test_batch_status_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
-    """Covers lines 800-801: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
-    from app.routers.sightings import sightings_batch_status
-
-    ids = list(range(1, 52))
-    mock_req = _make_form_request(
-        {
-            "requirement_ids": json.dumps(ids),
-            "status": "sourcing",
-        }
-    )
+    fields = {"requirement_ids": json.dumps(list(range(1, 52)))}
+    # buyer_id needs the runtime test_user.id, so resolve it here rather than in params.
+    if extra_fields.pop("buyer_id_field", False):
+        fields["buyer_id"] = str(test_user.id)
+    fields.update(extra_fields)
+    mock_req = _make_form_request(fields)
 
     with pytest.raises(HTTPException) as exc:
-        await sightings_batch_status(
-            request=mock_req,
-            db=db_session,
-            user=test_user,
-        )
-    assert exc.value.status_code == 400
-    assert "Maximum" in exc.value.detail
-
-
-async def test_batch_notes_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
-    """Covers lines 857-858: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
-    from app.routers.sightings import sightings_batch_notes
-
-    ids = list(range(1, 52))
-    mock_req = _make_form_request(
-        {
-            "requirement_ids": json.dumps(ids),
-            "notes": "Some note",
-        }
-    )
-
-    with pytest.raises(HTTPException) as exc:
-        await sightings_batch_notes(
+        await handler(
             request=mock_req,
             db=db_session,
             user=test_user,

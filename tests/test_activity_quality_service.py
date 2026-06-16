@@ -13,6 +13,7 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import ActivityLog
@@ -266,57 +267,43 @@ class TestScoreUnscoredActivities:
 
         assert count >= 1
 
-    async def test_aborts_on_auth_error(self, db_session: Session, test_user):
-        """Aborts batch on ClaudeAuthError to avoid burning API calls."""
+    @pytest.mark.parametrize(
+        ("error_name", "subject"),
+        [
+            ("ClaudeAuthError", "Some call"),
+            ("ClaudeRateLimitError", "Rate limited call"),
+            ("ClaudeUnavailableError", "Unavailable error call"),
+        ],
+    )
+    async def test_aborts_on_claude_error(self, db_session: Session, test_user, error_name, subject):
+        """Aborts the batch (scored count 0) on auth/rate-limit/unavailable Claude
+        errors.
+
+        The service branches on type(e).__name__, so the exception class name is load-
+        bearing and built dynamically per case.
+        """
         from app.services.activity_quality_service import score_unscored_activities
 
         log = ActivityLog(
             user_id=test_user.id,
             activity_type="email_received",
             channel="email",
-            subject="Some call",
+            subject=subject,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(log)
         db_session.commit()
 
-        class ClaudeAuthError(Exception):
-            pass
+        error_cls = type(error_name, (Exception,), {})
 
         with patch(
             "app.services.activity_quality_service.score_activity",
             new_callable=AsyncMock,
-            side_effect=ClaudeAuthError("auth failure"),
+            side_effect=error_cls(error_name),
         ):
             count = await score_unscored_activities(db_session, batch_size=10)
 
         # Aborted early — scored count is 0
-        assert count == 0
-
-    async def test_aborts_on_rate_limit_error(self, db_session: Session, test_user):
-        """Aborts batch on ClaudeRateLimitError."""
-        from app.services.activity_quality_service import score_unscored_activities
-
-        log = ActivityLog(
-            user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
-            subject="Rate limited call",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(log)
-        db_session.commit()
-
-        class ClaudeRateLimitError(Exception):
-            pass
-
-        with patch(
-            "app.services.activity_quality_service.score_activity",
-            new_callable=AsyncMock,
-            side_effect=ClaudeRateLimitError("rate limited"),
-        ):
-            count = await score_unscored_activities(db_session, batch_size=10)
-
         assert count == 0
 
     async def test_continues_on_generic_error(self, db_session: Session, test_user):
@@ -373,32 +360,6 @@ class TestScoreUnscoredActivities:
 
         # One succeeded despite the first error
         assert count >= 1
-
-    async def test_aborts_on_unavailable_error(self, db_session: Session, test_user):
-        """Aborts batch on ClaudeUnavailableError."""
-        from app.services.activity_quality_service import score_unscored_activities
-
-        log = ActivityLog(
-            user_id=test_user.id,
-            activity_type="email_received",
-            channel="email",
-            subject="Unavailable error call",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(log)
-        db_session.commit()
-
-        class ClaudeUnavailableError(Exception):
-            pass
-
-        with patch(
-            "app.services.activity_quality_service.score_activity",
-            new_callable=AsyncMock,
-            side_effect=ClaudeUnavailableError("service unavailable"),
-        ):
-            count = await score_unscored_activities(db_session, batch_size=10)
-
-        assert count == 0
 
 
 class TestScoreUnscoredActivitiesNewTypes:
