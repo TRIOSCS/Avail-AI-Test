@@ -20,6 +20,7 @@ def get_builder_data(
     requirement_ids: list[int] | None = None,
 ) -> list[dict]:
     """Load requirements + offers for the quote builder modal."""
+    from app.constants import OfferStatus
     from app.models import Requirement
 
     query = db.query(Requirement).options(joinedload(Requirement.offers)).filter(Requirement.requisition_id == req_id)
@@ -30,27 +31,24 @@ def get_builder_data(
 
     lines = []
     for r in requirements:
-        from app.constants import OfferStatus
-
-        active_offers = [o for o in r.offers if o.status == OfferStatus.ACTIVE]
-        offers_data = []
-        for o in active_offers:
-            offers_data.append(
-                {
-                    "id": o.id,
-                    "vendor_name": o.vendor_name,
-                    "unit_price": float(o.unit_price) if o.unit_price else 0,
-                    "qty_available": o.qty_available or 0,
-                    "lead_time": o.lead_time,
-                    "date_code": o.date_code,
-                    "condition": o.condition,
-                    "packaging": o.packaging,
-                    "moq": o.moq,
-                    "confidence": o.parse_confidence,
-                    "material_card_id": o.material_card_id,
-                    "notes": o.notes,
-                }
-            )
+        offers_data = [
+            {
+                "id": o.id,
+                "vendor_name": o.vendor_name,
+                "unit_price": float(o.unit_price) if o.unit_price else 0,
+                "qty_available": o.qty_available or 0,
+                "lead_time": o.lead_time,
+                "date_code": o.date_code,
+                "condition": o.condition,
+                "packaging": o.packaging,
+                "moq": o.moq,
+                "confidence": o.parse_confidence,
+                "material_card_id": o.material_card_id,
+                "notes": o.notes,
+            }
+            for o in r.offers
+            if o.status == OfferStatus.ACTIVE
+        ]
 
         lines.append(
             {
@@ -220,26 +218,25 @@ def save_quote_from_builder(
     if not req:
         raise ValueError("Requisition not found")
 
-    line_items = []
-    for li in payload.lines:
-        line_items.append(
-            {
-                "mpn": li.mpn,
-                "manufacturer": li.manufacturer,
-                "qty": li.qty,
-                "cost_price": li.cost_price,
-                "sell_price": li.sell_price,
-                "margin_pct": li.margin_pct,
-                "lead_time": li.lead_time,
-                "date_code": li.date_code,
-                "condition": li.condition,
-                "packaging": li.packaging,
-                "moq": li.moq,
-                "offer_id": li.offer_id,
-                "material_card_id": li.material_card_id,
-                "notes": li.notes,
-            }
-        )
+    line_items = [
+        {
+            "mpn": li.mpn,
+            "manufacturer": li.manufacturer,
+            "qty": li.qty,
+            "cost_price": li.cost_price,
+            "sell_price": li.sell_price,
+            "margin_pct": li.margin_pct,
+            "lead_time": li.lead_time,
+            "date_code": li.date_code,
+            "condition": li.condition,
+            "packaging": li.packaging,
+            "moq": li.moq,
+            "offer_id": li.offer_id,
+            "material_card_id": li.material_card_id,
+            "notes": li.notes,
+        }
+        for li in payload.lines
+    ]
 
     total_sell = sum(li["qty"] * li["sell_price"] for li in line_items)
     total_cost = sum(li["qty"] * li["cost_price"] for li in line_items)
@@ -247,16 +244,13 @@ def save_quote_from_builder(
 
     # Rename old quote to Q-XXXX-R{n} so the new revision keeps the canonical number
     revision = 1
-    if payload.quote_id:
-        old_quote = db.get(Quote, payload.quote_id)
-        if old_quote:
-            old_revision = old_quote.revision or 1
-            quote_number = old_quote.quote_number
-            revision = old_revision + 1
-            old_quote.quote_number = f"{quote_number}-R{old_revision}"
-            old_quote.status = QuoteStatus.REVISED
-        else:
-            quote_number = next_quote_number(db)
+    old_quote = db.get(Quote, payload.quote_id) if payload.quote_id else None
+    if old_quote:
+        old_revision = old_quote.revision or 1
+        quote_number = old_quote.quote_number
+        revision = old_revision + 1
+        old_quote.quote_number = f"{quote_number}-R{old_revision}"
+        old_quote.status = QuoteStatus.REVISED
     else:
         quote_number = next_quote_number(db)
 

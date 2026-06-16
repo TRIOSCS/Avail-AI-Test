@@ -153,6 +153,9 @@ def _find_matches(
     company_id only (no offer_id filter). requirement_id and requisition_id are nullable
     — matches without historical requisitions are valid.
     """
+    # Lazy import (avoids an import-time cycle with activity_service); resolved once per call.
+    from .activity_service import _update_last_activity
+
     min_margin = settings.proactive_min_margin_pct
     mpn_upper = normalize_mpn(mpn) or mpn.upper().strip()
 
@@ -302,8 +305,6 @@ def _find_matches(
         )
 
         if cph.company_id:
-            from .activity_service import _update_last_activity
-
             _update_last_activity({"type": "company", "id": cph.company_id}, db)
 
     return matches

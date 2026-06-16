@@ -97,12 +97,14 @@ async def enrich_customer_account(
     # Cooldown check
     if not force and company.customer_enrichment_at:
         cooldown = timedelta(days=settings.customer_enrichment_cooldown_days)
-        if datetime.now(timezone.utc) - company.customer_enrichment_at < cooldown:
-            days_left = (company.customer_enrichment_at + cooldown - datetime.now(timezone.utc)).days
+        next_enrichment_at = company.customer_enrichment_at + cooldown
+        now = datetime.now(timezone.utc)
+        if now < next_enrichment_at:
+            days_left = (next_enrichment_at - now).days
             return {
                 "error": f"Cooldown active — {days_left} days remaining",
                 "contacts_added": 0,
-                "next_enrichment_at": (company.customer_enrichment_at + cooldown).isoformat(),
+                "next_enrichment_at": next_enrichment_at.isoformat(),
             }
 
     domain = _get_company_domain(company)

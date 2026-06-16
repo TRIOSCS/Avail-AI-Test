@@ -111,10 +111,7 @@ for _group, _subs in COMMODITY_TREE.items():
 
 def get_all_commodities() -> list[str]:
     """Return flat list of all sub-category keys."""
-    result = []
-    for subs in COMMODITY_TREE.values():
-        result.extend(subs)
-    return result
+    return [sub for subs in COMMODITY_TREE.values() for sub in subs]
 
 
 # Frozen canonical vocabulary — the ONLY values material_cards.category may hold

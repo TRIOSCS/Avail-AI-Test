@@ -34,6 +34,7 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
+from .scoring_helpers import month_range
 
 # ── Point values ─────────────────────────────────────────────────────
 # Buyer offer pipeline (non-stacking — highest tier only)
@@ -67,13 +68,6 @@ MIN_ACTIVITIES_SALES = 20
 # ══════════════════════════════════════════════════════════════════════
 #  HELPERS
 # ══════════════════════════════════════════════════════════════════════
-
-
-def _month_range(month: date):
-    """Return (start_dt, end_dt) as aware datetimes for the given month."""
-    from app.services.scoring_helpers import month_range
-
-    return month_range(month)
 
 
 def _load_quoted_offer_ids(db: Session) -> set[int]:
@@ -125,7 +119,7 @@ def compute_buyer_multiplier(
 
     Pre-loaded lookup sets can be passed to avoid re-querying per user.
     """
-    start_dt, end_dt = _month_range(month)
+    start_dt, end_dt = month_range(month)
 
     # Load global lookups if not provided
     if quoted_ids is None:
@@ -250,7 +244,7 @@ def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     Quote progression is non-stacking (won replaces sent). Proactive conversion is non-
     stacking (converted replaces sent). New account points are additive.
     """
-    start_dt, end_dt = _month_range(month)
+    start_dt, end_dt = month_range(month)
 
     # ── Quotes: non-stacking (won replaces sent) ──
     quotes_sent = (
@@ -541,44 +535,26 @@ def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[di
         .all()
     )
 
+    # Ranked tiers: each slot requires the next-ranked row to clear its qualify
+    # threshold. A row that fails the current slot's threshold is skipped, not
+    # promoted, so the positional check must use len(winners) as the slot index.
+    tiers = [(QUALIFY_SCORE_1ST, BONUS_1ST), (QUALIFY_SCORE_2ND, BONUS_2ND)]
+
     winners = []
     for snap, user_name in rows:
-        if len(winners) >= 2:
+        if len(winners) >= len(tiers):
             break
 
-        if len(winners) == 0 and snap.avail_score >= QUALIFY_SCORE_1ST:
+        min_score, bonus_amount = tiers[len(winners)]
+        if snap.avail_score >= min_score:
             winners.append(
                 {
                     "user_id": snap.user_id,
                     "user_name": user_name,
-                    "rank": 1,
+                    "rank": len(winners) + 1,
                     "total_points": snap.total_points,
                     "avail_score": snap.avail_score,
-                    "bonus_amount": BONUS_1ST,
-                }
-            )
-        elif len(winners) == 1 and snap.avail_score >= QUALIFY_SCORE_2ND:
-            winners.append(
-                {
-                    "user_id": snap.user_id,
-                    "user_name": user_name,
-                    "rank": 2,
-                    "total_points": snap.total_points,
-                    "avail_score": snap.avail_score,
-                    "bonus_amount": BONUS_2ND,
-                }
-            )
-        elif (
-            len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD
-        ):  # pragma: no cover — unreachable: break at >=2
-            winners.append(
-                {
-                    "user_id": snap.user_id,
-                    "user_name": user_name,
-                    "rank": 3,
-                    "total_points": snap.total_points,
-                    "avail_score": snap.avail_score,
-                    "bonus_amount": BONUS_3RD,
+                    "bonus_amount": bonus_amount,
                 }
             )
 

@@ -36,6 +36,9 @@ from ..config import settings as _settings  # noqa: E402
 
 _TRIOSCS_DOMAINS = _settings.own_domains or frozenset({"trioscs.com"})
 
+# Shared Graph $select field list for message queries
+_MESSAGE_SELECT = "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId"
+
 
 def _cache_get(key: str) -> list | None:
     """Return cached data if still valid, else None."""
@@ -166,9 +169,9 @@ def group_by_thread(messages: list[dict]) -> list[dict]:
                     {
                         "id": m.get("id", ""),
                         "subject": m.get("subject", ""),
-                        "from": m.get("from", {}).get("emailAddress", {}).get("address", ""),
+                        "from": _sender_address(m),
                         "date": m.get("receivedDateTime") or m.get("sentDateTime"),
-                        "direction": _extract_direction(m.get("from", {}).get("emailAddress", {}).get("address", "")),
+                        "direction": _extract_direction(_sender_address(m)),
                     }
                     for m in msgs
                 ],
@@ -202,15 +205,26 @@ def _extract_direction(from_email: str) -> str:
     return "sent" if _is_trioscs_domain(from_email) else "received"
 
 
+def _sender_address(msg: dict) -> str:
+    """Extract the sender email address from a Graph API message."""
+    return msg.get("from", {}).get("emailAddress", {}).get("address", "")
+
+
+def _recipient_addresses(msg: dict) -> list[str]:
+    """Extract the recipient email addresses from a Graph API message."""
+    return [r.get("emailAddress", {}).get("address", "") for r in msg.get("toRecipients", [])]
+
+
+def _filter_external(messages: list[dict]) -> list[dict]:
+    """Drop internal TRIOSCS-to-TRIOSCS messages, keeping vendor-facing ones."""
+    return [m for m in messages if not _is_internal_message(_sender_address(m), _recipient_addresses(m))]
+
+
 def _extract_participants(messages: list[dict]) -> list[str]:
     """Extract unique non-TRIOSCS participant emails from messages."""
     participants = set()
     for msg in messages:
-        from_addr = msg.get("from", {}).get("emailAddress", {}).get("address", "")
-        if from_addr and not _is_trioscs_domain(from_addr):
-            participants.add(from_addr.lower())
-        for recip in msg.get("toRecipients", []):
-            addr = recip.get("emailAddress", {}).get("address", "")
+        for addr in [_sender_address(msg), *_recipient_addresses(msg)]:
             if addr and not _is_trioscs_domain(addr):
                 participants.add(addr.lower())
     return sorted(participants)
@@ -233,7 +247,7 @@ def _detect_needs_response(messages: list[dict]) -> bool:
         reverse=True,
     )
     last_msg = sorted_msgs[0]
-    from_email = last_msg.get("from", {}).get("emailAddress", {}).get("address", "")
+    from_email = _sender_address(last_msg)
 
     if _is_trioscs_domain(from_email):
         return False  # We sent the last message — no response needed
@@ -257,7 +271,7 @@ def _message_to_dict(msg: dict) -> dict:
     """Convert a Graph API message to our response format."""
     from_data = msg.get("from", {}).get("emailAddress", {})
     from_email = from_data.get("address", "")
-    to_list = [r.get("emailAddress", {}).get("address", "") for r in msg.get("toRecipients", [])]
+    to_list = _recipient_addresses(msg)
 
     return {
         "id": msg.get("id", ""),
@@ -272,6 +286,42 @@ def _message_to_dict(msg: dict) -> dict:
 
 
 # ── Thread fetching for requirements ───────────────────────────────────
+
+
+def _collect_threads_by_conversation(messages: list[dict], known: dict[str, dict], matched_via: str) -> dict[str, dict]:
+    """Group messages by conversationId, drop internal ones, and summarize.
+
+    Conversations already present in ``known`` are skipped (a higher-priority
+    tier already matched them). Conversations with only internal messages are
+    omitted. Returns a {conversation_id: thread_summary} dict.
+    """
+    by_conv: dict[str, list[dict]] = {}
+    for m in messages:
+        cid = m.get("conversationId", "")
+        if cid and cid not in known:
+            by_conv.setdefault(cid, []).append(m)
+
+    summaries: dict[str, dict] = {}
+    for cid, msgs in by_conv.items():
+        external_msgs = _filter_external(msgs)
+        if external_msgs:
+            summaries[cid] = _build_thread_summary(cid, external_msgs, matched_via)
+    return summaries
+
+
+async def _fetch_conversation(gc: GraphClient, conv_id: str) -> list[dict]:
+    """Fetch all external (vendor-facing) messages in a single conversation."""
+    messages = await gc.get_all_pages(
+        "/me/messages",
+        params={
+            "$filter": f"conversationId eq '{conv_id}'",
+            "$select": _MESSAGE_SELECT,
+            "$orderby": "receivedDateTime desc",
+            "$top": "50",
+        },
+        max_items=50,
+    )
+    return _filter_external(messages)
 
 
 async def fetch_threads_for_requirement(
@@ -319,28 +369,9 @@ async def fetch_threads_for_requirement(
         conv_id = contact.graph_conversation_id
         if conv_id and conv_id not in threads:
             try:
-                messages = await gc.get_all_pages(
-                    "/me/messages",
-                    params={
-                        "$filter": f"conversationId eq '{conv_id}'",
-                        "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
-                        "$orderby": "receivedDateTime desc",
-                        "$top": "50",
-                    },
-                    max_items=50,
-                )
-                if messages:
-                    # Filter out internal messages
-                    external_msgs = [
-                        m
-                        for m in messages
-                        if not _is_internal_message(
-                            m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                            [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                        )
-                    ]
-                    if external_msgs:
-                        threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
+                external_msgs = await _fetch_conversation(gc, conv_id)
+                if external_msgs:
+                    threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
             except Exception as e:
                 logger.warning(f"Graph query failed for conversationId {conv_id[:20]}: {e}")
 
@@ -357,27 +388,9 @@ async def fetch_threads_for_requirement(
         conv_id = vr.graph_conversation_id
         if conv_id and conv_id not in threads:
             try:
-                messages = await gc.get_all_pages(
-                    "/me/messages",
-                    params={
-                        "$filter": f"conversationId eq '{conv_id}'",
-                        "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
-                        "$orderby": "receivedDateTime desc",
-                        "$top": "50",
-                    },
-                    max_items=50,
-                )
-                if messages:
-                    external_msgs = [
-                        m
-                        for m in messages
-                        if not _is_internal_message(
-                            m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                            [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                        )
-                    ]
-                    if external_msgs:
-                        threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
+                external_msgs = await _fetch_conversation(gc, conv_id)
+                if external_msgs:
+                    threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
             except Exception as e:
                 logger.warning(f"Graph query failed for VR conversationId: {e}")
 
@@ -390,29 +403,12 @@ async def fetch_threads_for_requirement(
                 "/me/messages",
                 params={
                     "$search": f'"subject:{avail_token}"',
-                    "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                    "$select": _MESSAGE_SELECT,
                     "$top": "50",
                 },
                 max_items=50,
             )
-            # Group by conversationId
-            by_conv: dict[str, list[dict]] = {}
-            for m in subject_msgs:
-                cid = m.get("conversationId", "")
-                if cid and cid not in threads:
-                    by_conv.setdefault(cid, []).append(m)
-
-            for cid, msgs in by_conv.items():
-                external_msgs = [
-                    m
-                    for m in msgs
-                    if not _is_internal_message(
-                        m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                        [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                    )
-                ]
-                if external_msgs:
-                    threads[cid] = _build_thread_summary(cid, external_msgs, "subject_token")
+            threads.update(_collect_threads_by_conversation(subject_msgs, threads, "subject_token"))
         except Exception as e:
             logger.warning(f"Graph subject search failed for {avail_token}: {e}")
 
@@ -424,28 +420,12 @@ async def fetch_threads_for_requirement(
                 "/me/messages",
                 params={
                     "$search": f'"{part_number}"',
-                    "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                    "$select": _MESSAGE_SELECT,
                     "$top": "25",
                 },
                 max_items=25,
             )
-            by_conv: dict[str, list[dict]] = {}
-            for m in pn_msgs:
-                cid = m.get("conversationId", "")
-                if cid and cid not in threads:
-                    by_conv.setdefault(cid, []).append(m)
-
-            for cid, msgs in by_conv.items():
-                external_msgs = [
-                    m
-                    for m in msgs
-                    if not _is_internal_message(
-                        m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                        [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                    )
-                ]
-                if external_msgs:
-                    threads[cid] = _build_thread_summary(cid, external_msgs, "part_number")
+            threads.update(_collect_threads_by_conversation(pn_msgs, threads, "part_number"))
         except Exception as e:
             logger.warning(f"Graph part number search failed for {part_number}: {e}")
 
@@ -478,30 +458,12 @@ async def fetch_threads_for_requirement(
                 "/me/messages",
                 params={
                     "$search": f'"from:{domain}"',
-                    "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                    "$select": _MESSAGE_SELECT,
                     "$top": "15",
                 },
                 max_items=15,
             )
-            domain_threads = {}
-            by_conv: dict[str, list[dict]] = {}
-            for m in domain_msgs:
-                cid = m.get("conversationId", "")
-                if cid and cid not in threads:
-                    by_conv.setdefault(cid, []).append(m)
-
-            for cid, msgs in by_conv.items():
-                external_msgs = [
-                    m
-                    for m in msgs
-                    if not _is_internal_message(
-                        m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                        [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                    )
-                ]
-                if external_msgs:
-                    domain_threads[cid] = _build_thread_summary(cid, external_msgs, "vendor_domain")
-            return domain_threads
+            return _collect_threads_by_conversation(domain_msgs, threads, "vendor_domain")
         except Exception as e:
             logger.warning(f"Graph domain search failed for {domain}: {e}")
             return {}
@@ -565,7 +527,7 @@ async def fetch_thread_messages(conversation_id: str, user_token: str) -> list[d
             "/me/messages",
             params={
                 "$filter": f"conversationId eq '{conversation_id}'",
-                "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                "$select": _MESSAGE_SELECT,
                 "$orderby": "receivedDateTime asc",
                 "$top": "50",
             },
@@ -578,7 +540,7 @@ async def fetch_thread_messages(conversation_id: str, user_token: str) -> list[d
     result = []
     for msg in messages:
         msg_dict = _message_to_dict(msg)
-        # Skip internal messages
+        # Skip internal messages (compares against the cleaned recipient list)
         if _is_internal_message(msg_dict["from_email"], msg_dict["to"]):
             continue
         result.append(msg_dict)
@@ -662,31 +624,12 @@ async def fetch_threads_for_vendor(
                 "/me/messages",
                 params={
                     "$search": f'"from:{domain}" OR "to:{domain}"',
-                    "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                    "$select": _MESSAGE_SELECT,
                     "$top": "25",
                 },
                 max_items=50,
             )
-
-            domain_threads = {}
-            by_conv: dict[str, list[dict]] = {}
-            for m in msgs:
-                cid = m.get("conversationId", "")
-                if cid and cid not in threads:
-                    by_conv.setdefault(cid, []).append(m)
-
-            for cid, conv_msgs in by_conv.items():
-                external_msgs = [
-                    m
-                    for m in conv_msgs
-                    if not _is_internal_message(
-                        m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                        [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                    )
-                ]
-                if external_msgs:
-                    domain_threads[cid] = _build_thread_summary(cid, external_msgs, "vendor_domain")
-            return domain_threads
+            return _collect_threads_by_conversation(msgs, threads, "vendor_domain")
         except Exception as e:
             logger.warning(f"Graph vendor search failed for domain {domain}: {e}")
             return {}

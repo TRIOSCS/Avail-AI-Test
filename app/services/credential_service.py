@@ -71,6 +71,21 @@ def decrypt_value(ciphertext: str) -> str:
     return f.decrypt(ciphertext.encode()).decode()
 
 
+def _try_decrypt(encrypted: str | None, var_name: str) -> str | None:
+    """Decrypt one credential blob, logging and returning None on failure.
+
+    Shared by the batch/bulk readers, which all fall back to env vars on a decrypt error
+    rather than surfacing it.
+    """
+    if not encrypted:
+        return None
+    try:
+        return decrypt_value(encrypted)
+    except Exception:
+        logger.error("Credential decrypt fallback for {}", var_name, exc_info=True)
+        return None
+
+
 def mask_value(plaintext: str) -> str:
     """Mask a credential value for display: show last 4 chars only."""
     if not plaintext:
@@ -114,14 +129,7 @@ def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, s
 
     result = {}
     for var_name in src.env_vars or []:
-        val = None
-        if src.credentials:
-            encrypted = src.credentials.get(var_name)
-            if encrypted:
-                try:
-                    val = decrypt_value(encrypted)
-                except Exception:
-                    logger.error("Credential decrypt fallback for {}", var_name, exc_info=True)
+        val = _try_decrypt((src.credentials or {}).get(var_name), var_name)
         if not val:
             val = os.getenv(var_name) or ""
         if val:
@@ -151,14 +159,8 @@ def get_credentials_batch(db: Session, requests: list[tuple[str, str]]) -> dict[
     result: dict[tuple[str, str], str | None] = {}
     for source_name, env_var_name in requests:
         src = sources.get(source_name)
-        val = None
-        if src and src.credentials:
-            encrypted = src.credentials.get(env_var_name)
-            if encrypted:
-                try:
-                    val = decrypt_value(encrypted)
-                except Exception:
-                    logger.error("Credential decrypt fallback for {}", env_var_name, exc_info=True)
+        encrypted = src.credentials.get(env_var_name) if src and src.credentials else None
+        val = _try_decrypt(encrypted, env_var_name)
         if not val:
             val = os.getenv(env_var_name) or None
         result[(source_name, env_var_name)] = val

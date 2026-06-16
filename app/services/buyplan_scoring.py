@@ -181,11 +181,7 @@ def assign_buyer(
             return entered_by, "vendor_ownership"
 
     # Get all active buyers
-    buyers = (
-        db.query(User)
-        .filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), User.is_active == True)  # noqa: E712
-        .all()
-    )
+    buyers = db.query(User).filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), User.is_active.is_(True)).all()
     if not buyers:
         return None, "no_buyers"
 
@@ -194,7 +190,7 @@ def assign_buyer(
     maps = _get_routing_maps()
     brand_map = maps.get("brand_commodity_map", {})
     if vendor_card and vendor_card.commodity_tags:
-        vendor_commodities = set(t.lower() for t in (vendor_card.commodity_tags or []))
+        vendor_commodities = {t.lower() for t in vendor_card.commodity_tags}
     if offer.manufacturer:
         mfr_commodity = brand_map.get(offer.manufacturer.strip().lower())
         if mfr_commodity:

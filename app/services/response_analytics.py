@@ -15,6 +15,7 @@ Depends on: models (VendorCard, VendorResponse, EmailIntelligence, ActivityLog)
 """
 
 from datetime import datetime, timedelta, timezone
+from statistics import median
 
 from loguru import logger
 from sqlalchemy import func
@@ -108,13 +109,8 @@ def compute_vendor_response_metrics(db: Session, vendor_card_id: int, lookback_d
     avg_hours = None
     median_hours = None
     if response_hours:
-        response_hours.sort()
         avg_hours = sum(response_hours) / len(response_hours)
-        mid = len(response_hours) // 2
-        if len(response_hours) % 2 == 0 and len(response_hours) >= 2:
-            median_hours = (response_hours[mid - 1] + response_hours[mid]) / 2
-        else:
-            median_hours = response_hours[mid]
+        median_hours = median(response_hours)
 
     quote_quality_rate = 0.0
     if response_count > 0:

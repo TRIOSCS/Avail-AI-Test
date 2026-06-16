@@ -56,23 +56,12 @@ async def run_ownership_sweep(db: Session) -> dict:
     )
 
     for company in owned:
-        inactivity_limit = (
-            settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
-        )
-        warning_day = inactivity_limit - 7  # 7 days before expiration
+        inactivity_limit, warning_day = _company_limits(company)
 
         days_inactive = _days_since_activity(company, now)
         if days_inactive is None:
             # No activity ever recorded — use created_at as baseline
-            if company.created_at:
-                created = (
-                    company.created_at.replace(tzinfo=timezone.utc)
-                    if company.created_at.tzinfo is None
-                    else company.created_at
-                )
-                days_inactive = (now - created).days
-            else:
-                days_inactive = 999  # Force clear
+            days_inactive = _days_since_created(company.created_at, now)
 
         # Past limit → clear ownership
         if days_inactive >= inactivity_limit:
@@ -163,10 +152,7 @@ def get_accounts_at_risk(db: Session) -> list[dict]:
 
     at_risk = []
     for company, owner in owned:
-        inactivity_limit = (
-            settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
-        )
-        warning_day = inactivity_limit - 7
+        inactivity_limit, warning_day = _company_limits(company)
 
         days_inactive = _days_since_activity(company, now)
         if days_inactive is None:
@@ -232,18 +218,9 @@ def get_my_accounts(user_id: int, db: Session) -> list[dict]:
 
     results = []
     for c in companies:
-        inactivity_limit = settings.strategic_inactivity_days if c.is_strategic else settings.customer_inactivity_days
-        warning_day = inactivity_limit - 7
+        inactivity_limit, warning_day = _company_limits(c)
         days_inactive = _days_since_activity(c, now)
-
-        if days_inactive is None:
-            status = "no_activity"
-        elif days_inactive <= warning_day:
-            status = "green"
-        elif days_inactive <= inactivity_limit:
-            status = "yellow"
-        else:
-            status = "red"
+        status = _health_status(days_inactive, warning_day, inactivity_limit)
 
         results.append(
             {
@@ -342,13 +319,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
     for site in owned:
         days_inactive = _site_days_since_activity(site, now)
         if days_inactive is None:
-            if site.created_at:
-                created = (
-                    site.created_at.replace(tzinfo=timezone.utc) if site.created_at.tzinfo is None else site.created_at
-                )
-                days_inactive = (now - created).days
-            else:
-                days_inactive = 999
+            days_inactive = _days_since_created(site.created_at, now)
 
         if days_inactive >= inactivity_limit:
             site.owner_id = None
@@ -480,14 +451,7 @@ def get_my_sites(user_id: int, db: Session) -> list[dict]:
         co = company_cache[s.company_id]
 
         days_inactive = _site_days_since_activity(s, now)
-        if days_inactive is None:
-            status = "no_activity"
-        elif days_inactive <= warning_day:
-            status = "green"
-        elif days_inactive <= inactivity_limit:
-            status = "yellow"
-        else:
-            status = "red"
+        status = _health_status(days_inactive, warning_day, inactivity_limit)
 
         results.append(
             {
@@ -556,12 +520,7 @@ def get_sites_at_risk(db: Session) -> list[dict]:
 
 def _site_days_since_activity(site: CustomerSite, now: datetime) -> int | None:
     """Calculate days since last activity for a site."""
-    if not site.last_activity_at:
-        return None
-    last = site.last_activity_at
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return (now - last).days
+    return _days_since(site.last_activity_at, now)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -569,17 +528,48 @@ def _site_days_since_activity(site: CustomerSite, now: datetime) -> int | None:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _days_since(last_activity_at: datetime | None, now: datetime) -> int | None:
+    """Whole days between a (possibly naive) timestamp and now, or None if unset."""
+    if not last_activity_at:
+        return None
+    last = last_activity_at
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return (now - last).days
+
+
+def _days_since_created(created_at: datetime | None, now: datetime) -> int:
+    """Days since creation, used as the inactivity baseline when no activity exists.
+
+    Returns 999 (force-clear) when no creation timestamp is available.
+    """
+    days = _days_since(created_at, now)
+    return days if days is not None else 999
+
+
+def _company_limits(company: Company) -> tuple[int, int]:
+    """Return (inactivity_limit, warning_day) for a company (strategic vs standard)."""
+    inactivity_limit = settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
+    return inactivity_limit, inactivity_limit - 7  # warning fires 7 days before expiration
+
+
+def _health_status(days_inactive: int | None, warning_day: int, inactivity_limit: int) -> str:
+    """Map inactivity to a dashboard health color (no_activity/green/yellow/red)."""
+    if days_inactive is None:
+        return "no_activity"
+    if days_inactive <= warning_day:
+        return "green"
+    if days_inactive <= inactivity_limit:
+        return "yellow"
+    return "red"
+
+
 def _days_since_activity(company: Company, now: datetime) -> int | None:
     """Calculate days since last activity for a company.
 
     Uses company.last_activity_at (precomputed field updated on each activity log).
     """
-    if not company.last_activity_at:
-        return None
-    last = company.last_activity_at
-    if last.tzinfo is None:
-        last = last.replace(tzinfo=timezone.utc)
-    return (now - last).days
+    return _days_since(company.last_activity_at, now)
 
 
 def _clear_ownership(company: Company, db: Session):

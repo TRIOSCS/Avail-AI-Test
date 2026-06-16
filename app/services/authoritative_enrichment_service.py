@@ -217,6 +217,37 @@ def apply_authoritative(
     card.enriched_at = datetime.now(timezone.utc)
 
 
+def _apply_evidence_fields(
+    card: MaterialCard,
+    fields: dict[str, Any],
+    *,
+    source: str,
+    confidence: float,
+    prov: dict,
+    fetched_at: str,
+) -> None:
+    """Write non-empty evidence-sourced *fields* onto *card* under one *source* string.
+
+    category/manufacturer route through the F1 ladder at *source*'s registered tier (the
+    ladder decides whether the write lands and rejects off-vocab categories); every other
+    field is a direct write. *prov* (the caller's top-level provenance block) is mutated in
+    place: each field that was actually written gets a per-field provenance entry; a
+    ladder-rejected write gets NO entry. Shared by the web/OEM evidence tiers.
+    """
+    for f, v in fields.items():
+        if not v:
+            continue
+        if f == "category":
+            if not set_category(card, v, source, confidence):
+                continue
+        elif f == "manufacturer":
+            if not set_manufacturer(card, v, source, confidence):
+                continue
+        else:
+            setattr(card, f, v)
+        prov[f] = {"source": source, "confidence": confidence, "fetched_at": fetched_at}
+
+
 def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
     """Write web-sourced fields + provenance onto the card.
 
@@ -229,35 +260,27 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
     a ladder-rejected write gets NO per-field provenance entry.
     """
     now = datetime.now(timezone.utc)
-    fields = {
-        "description": result.description,
-        "manufacturer": result.manufacturer,
-        "category": result.category,
-        "datasheet_url": result.datasheet_url,
-    }
+    iso = now.isoformat()
     prov: dict = {
         "web_sourced": True,
         "confidence": result.confidence,
         "source_urls": result.source_urls,
         "source_domains": result.source_domains,
-        "fetched_at": now.isoformat(),
+        "fetched_at": iso,
     }
-    for f, v in fields.items():
-        if not v:
-            continue
-        if f == "category":
-            if not set_category(card, v, "web_search", result.confidence):
-                continue
-        elif f == "manufacturer":
-            if not set_manufacturer(card, v, "web_search", result.confidence):
-                continue
-        else:
-            setattr(card, f, v)
-        prov[f] = {
-            "source": "web_search",
-            "confidence": result.confidence,
-            "fetched_at": now.isoformat(),
-        }
+    _apply_evidence_fields(
+        card,
+        {
+            "description": result.description,
+            "manufacturer": result.manufacturer,
+            "category": result.category,
+            "datasheet_url": result.datasheet_url,
+        },
+        source="web_search",
+        confidence=result.confidence,
+        prov=prov,
+        fetched_at=iso,
+    )
     card.enrichment_source = "web_search"
     card.enrichment_status = MaterialEnrichmentStatus.WEB_SOURCED
     card.enrichment_provenance = prov
@@ -321,24 +344,19 @@ def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
         "source_domains": result.source_domains,
         "fetched_at": iso,
     }
-    fields = {
-        "description": result.description,
-        "category": result.category,
-        "datasheet_url": result.datasheet_url,
-        "manufacturer": result.manufacturer,
-    }
-    for f, v in fields.items():
-        if not v:
-            continue
-        if f == "category":
-            if not set_category(card, v, "oem_official", result.confidence):
-                continue
-        elif f == "manufacturer":
-            if not set_manufacturer(card, v, "oem_official", result.confidence):
-                continue
-        else:
-            setattr(card, f, v)
-        prov[f] = {"source": "oem_official", "confidence": result.confidence, "fetched_at": iso}
+    _apply_evidence_fields(
+        card,
+        {
+            "description": result.description,
+            "category": result.category,
+            "datasheet_url": result.datasheet_url,
+            "manufacturer": result.manufacturer,
+        },
+        source="oem_official",
+        confidence=result.confidence,
+        prov=prov,
+        fetched_at=iso,
+    )
     card.enrichment_source = "oem_official"
     card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
     card.enrichment_provenance = prov

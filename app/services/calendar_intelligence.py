@@ -7,6 +7,7 @@ Called by: scheduler.py (_job_calendar_scan)
 Depends on: utils/graph_client.py, models/intelligence.py
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -50,8 +51,9 @@ async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_d
 
     gc = GraphClient(token)
 
-    start_time = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).isoformat()
-    end_time = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    start_time = (now - timedelta(days=lookback_days)).isoformat()
+    end_time = now.isoformat()
 
     try:
         events = await gc.get_all_pages(
@@ -158,8 +160,6 @@ def _log_calendar_activity(
 
     contact_emails = [a["email"] for a in vendor_attendees[:5]]
     contact_names = [a["name"] for a in vendor_attendees[:5] if a["name"]]
-
-    import json
 
     notes_data = json.dumps(
         {

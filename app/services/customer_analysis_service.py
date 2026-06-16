@@ -31,8 +31,19 @@ async def analyze_customer_materials(company_id: int, db_session=None):
         if not site_ids:
             return
 
-        parts_list = []
-        seen_mpns = set()
+        parts_list: list[str] = []
+        seen_mpns: set[str] = set()
+
+        def add_rows(rows: list) -> None:
+            """Append ``"<mpn> — <label>"`` for each new (case-insensitive) MPN,
+            stopping at 200."""
+            for mpn, label in rows:
+                key = (mpn or "").lower()
+                if key and key not in seen_mpns:
+                    seen_mpns.add(key)
+                    parts_list.append(f"{mpn} — {label or 'unknown'}")
+                if len(parts_list) >= 200:
+                    break
 
         # 1. Requirements (brand field) from requisitions linked to company sites
         req_rows = (
@@ -44,11 +55,7 @@ async def analyze_customer_materials(company_id: int, db_session=None):
             .limit(200)
             .all()
         )
-        for mpn, brand in req_rows:
-            key = (mpn or "").lower()
-            if key and key not in seen_mpns:
-                seen_mpns.add(key)
-                parts_list.append(f"{mpn} — {brand or 'unknown'}")
+        add_rows(req_rows)
 
         # 2. Sightings (manufacturer field) from those same requisitions
         sighting_rows = (
@@ -61,13 +68,7 @@ async def analyze_customer_materials(company_id: int, db_session=None):
             .limit(200)
             .all()
         )
-        for mpn, mfr in sighting_rows:
-            key = (mpn or "").lower()
-            if key and key not in seen_mpns:
-                seen_mpns.add(key)
-                parts_list.append(f"{mpn} — {mfr or 'unknown'}")
-            if len(parts_list) >= 200:
-                break
+        add_rows(sighting_rows)
 
         if not parts_list:
             return

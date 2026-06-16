@@ -42,20 +42,16 @@ def part_offers_for(requirement: Requirement, db: Session) -> list[Offer]:
     if not mpns:
         return []
 
-    norm_keys: set[str] = set()
+    key_mpns = {normalize_mpn_key(m) for m in mpns}
+
+    norm_keys = set(key_mpns)
     for m in mpns:
-        norm_keys.add(normalize_mpn_key(m))
         disp = normalize_mpn(m)
         if disp:
             norm_keys.add(disp)
     norm_keys.discard("")
 
-    card_ids = {
-        cid
-        for (cid,) in db.query(MaterialCard.id)
-        .filter(MaterialCard.normalized_mpn.in_({normalize_mpn_key(m) for m in mpns}))
-        .all()
-    }
+    card_ids = {cid for (cid,) in db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(key_mpns)).all()}
 
     conds = [Offer.normalized_mpn.in_(norm_keys)]
     if card_ids:

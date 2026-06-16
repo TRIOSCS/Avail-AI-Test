@@ -111,6 +111,33 @@ def _parse_price(value) -> Decimal | None:
         return None
 
 
+def _parse_import_row(raw_row: dict) -> tuple[dict | None, str | None]:
+    """Normalize and validate one import row.
+
+    Returns (fields, None) for a valid row, where fields holds the canonical parsed
+    values (asking_price as Decimal|None), or (None, reason) when the row should be
+    skipped — reason is "blank part_number" or "invalid quantity".
+    """
+    row = _normalize_row(raw_row)
+    part_number = (row.get("part_number") or "").strip()
+    if not part_number:
+        return None, "blank part_number"
+
+    quantity = _parse_quantity(row.get("quantity"))
+    if quantity is None:
+        return None, "invalid quantity"
+
+    fields = {
+        "part_number": part_number,
+        "manufacturer": (row.get("manufacturer") or "").strip() or None,
+        "quantity": quantity,
+        "date_code": (row.get("date_code") or "").strip() or None,
+        "condition": (row.get("condition") or "").strip() or "New",
+        "asking_price": _parse_price(row.get("asking_price")),
+    }
+    return fields, None
+
+
 # ---------------------------------------------------------------------------
 # CRUD operations
 # ---------------------------------------------------------------------------
@@ -224,33 +251,22 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
     errors: list[str] = []
 
     for i, raw_row in enumerate(rows, start=1):
-        row = _normalize_row(raw_row)
-        part_number = (row.get("part_number") or "").strip()
-        if not part_number:
+        fields, error_reason = _parse_import_row(raw_row)
+        if fields is None:
             skipped += 1
-            errors.append(f"Row {i}: blank part_number — skipped")
+            errors.append(f"Row {i}: {error_reason} — skipped")
             continue
 
-        quantity = _parse_quantity(row.get("quantity"))
-        if quantity is None:
-            skipped += 1
-            errors.append(f"Row {i}: invalid quantity — skipped")
-            continue
-
-        asking_price = _parse_price(row.get("asking_price"))
-        manufacturer = (row.get("manufacturer") or "").strip() or None
-        date_code = (row.get("date_code") or "").strip() or None
-        condition = (row.get("condition") or "").strip() or "New"
-
+        part_number = fields["part_number"]
         item = ExcessLineItem(
             excess_list_id=list_id,
             part_number=part_number,
             normalized_part_number=normalize_mpn_key(part_number) or None,
-            manufacturer=manufacturer,
-            quantity=quantity,
-            date_code=date_code,
-            condition=condition,
-            asking_price=asking_price,
+            manufacturer=fields["manufacturer"],
+            quantity=fields["quantity"],
+            date_code=fields["date_code"],
+            condition=fields["condition"],
+            asking_price=fields["asking_price"],
         )
         db.add(item)
         imported += 1
@@ -284,29 +300,19 @@ def preview_import(rows: list[dict]) -> dict:
             if canonical and key not in column_mapping:
                 column_mapping[key] = canonical
 
-        row = _normalize_row(raw_row)
-        part_number = (row.get("part_number") or "").strip()
-        if not part_number:
-            errors.append(f"Row {i}: blank part_number — will be skipped")
+        fields, error_reason = _parse_import_row(raw_row)
+        if fields is None:
+            errors.append(f"Row {i}: {error_reason} — will be skipped")
             continue
 
-        quantity = _parse_quantity(row.get("quantity"))
-        if quantity is None:
-            errors.append(f"Row {i}: invalid quantity — will be skipped")
-            continue
-
-        asking_price = _parse_price(row.get("asking_price"))
-        manufacturer = (row.get("manufacturer") or "").strip() or None
-        date_code = (row.get("date_code") or "").strip() or None
-        condition = (row.get("condition") or "").strip() or "New"
-
+        asking_price = fields["asking_price"]
         valid_rows.append(
             {
-                "part_number": part_number,
-                "manufacturer": manufacturer,
-                "quantity": quantity,
-                "date_code": date_code,
-                "condition": condition,
+                "part_number": fields["part_number"],
+                "manufacturer": fields["manufacturer"],
+                "quantity": fields["quantity"],
+                "date_code": fields["date_code"],
+                "condition": fields["condition"],
                 "asking_price": float(asking_price) if asking_price is not None else None,
             }
         )
@@ -352,6 +358,52 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
 # ---------------------------------------------------------------------------
 # Demand matching
 # ---------------------------------------------------------------------------
+
+
+def _create_excess_offer(
+    db: Session,
+    *,
+    item: ExcessLineItem,
+    req: Requirement,
+    vendor_name: str,
+    norm_key: str,
+    user_id: int,
+    notes: str,
+) -> Offer:
+    """Create an Offer from an excess line item / requirement pair, flush it, and log
+    the OFFER_CREATED activity.
+
+    Returns the persisted Offer.
+    """
+    offer = Offer(
+        requisition_id=req.requisition_id,
+        requirement_id=req.id,
+        excess_line_item_id=item.id,
+        vendor_name=vendor_name,
+        mpn=item.part_number,
+        normalized_mpn=norm_key,
+        manufacturer=item.manufacturer,
+        qty_available=item.quantity,
+        unit_price=item.asking_price,
+        source="excess",
+        condition=item.condition,
+        date_code=item.date_code,
+        entered_by_id=user_id,
+        notes=notes,
+    )
+    db.add(offer)
+    db.flush()
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_CREATED,
+        requisition_id=offer.requisition_id,
+        requirement_id=offer.requirement_id,
+        user_id=user_id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+        details={"offer_id": offer.id, "source": offer.source},
+    )
+    return offer
 
 
 def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
@@ -403,33 +455,14 @@ def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
             if existing:
                 continue
 
-            offer = Offer(
-                requisition_id=req.requisition_id,
-                requirement_id=req.id,
-                excess_line_item_id=item.id,
-                vendor_name=vendor_name,
-                mpn=item.part_number,
-                normalized_mpn=norm_key,
-                manufacturer=item.manufacturer,
-                qty_available=item.quantity,
-                unit_price=item.asking_price,
-                source="excess",
-                condition=item.condition,
-                date_code=item.date_code,
-                entered_by_id=user_id,
-                notes=f"Auto-matched from excess list: {excess_list.title}",
-            )
-            db.add(offer)
-            db.flush()
-            log_activity(
+            _create_excess_offer(
                 db,
-                activity_type=ActivityType.OFFER_CREATED,
-                requisition_id=offer.requisition_id,
-                requirement_id=offer.requirement_id,
+                item=item,
+                req=req,
+                vendor_name=vendor_name,
+                norm_key=norm_key,
                 user_id=user_id,
-                vendor_card_id=offer.vendor_card_id,
-                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-                details={"offer_id": offer.id, "source": offer.source},
+                notes=f"Auto-matched from excess list: {excess_list.title}",
             )
             item_matches += 1
             matches_created += 1
@@ -653,36 +686,16 @@ def create_proactive_matches_for_excess(
         )
 
         # If no offer exists from demand matching, create a standalone one
-        if not offer and requirements:
-            req = requirements[0]
+        if not offer:
             vendor_name = excess_list.company.name if excess_list.company else "Unknown"
-            offer = Offer(
-                requisition_id=req.requisition_id,
-                requirement_id=req.id,
-                excess_line_item_id=item.id,
-                vendor_name=vendor_name,
-                mpn=item.part_number,
-                normalized_mpn=norm_key,
-                manufacturer=item.manufacturer,
-                qty_available=item.quantity,
-                unit_price=item.asking_price,
-                source="excess",
-                condition=item.condition,
-                date_code=item.date_code,
-                entered_by_id=user_id,
-                notes=f"Proactive match from archived excess list: {excess_list.title}",
-            )
-            db.add(offer)
-            db.flush()
-            log_activity(
+            offer = _create_excess_offer(
                 db,
-                activity_type=ActivityType.OFFER_CREATED,
-                requisition_id=offer.requisition_id,
-                requirement_id=offer.requirement_id,
+                item=item,
+                req=requirements[0],
+                vendor_name=vendor_name,
+                norm_key=norm_key,
                 user_id=user_id,
-                vendor_card_id=offer.vendor_card_id,
-                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
-                details={"offer_id": offer.id, "source": offer.source},
+                notes=f"Proactive match from archived excess list: {excess_list.title}",
             )
 
         if not offer:
