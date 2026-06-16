@@ -58,6 +58,9 @@ _RPM_K = re.compile(r"\b(\d{1,2}(?:[.,]\d)?)\s?K(?:\s?RPM)?\b")
 _RPM_FULL = re.compile(r"\b(\d{1,2},?\d{3})\s?RPM\b")
 _RPM_R = re.compile(r"\b(\d{4,5})R\b")
 _FORM_INCH = re.compile(r"\b(\d\.\d)\s?(?:\"|''|[- ]?IN(?:CH(?:ES)?)?\b)")
+# Small-/large-form-factor bay shorthand: SFF → 2.5", LFF → 3.5".
+_SFF = re.compile(r"\bSFF\b")
+_LFF = re.compile(r"\bLFF\b")
 _IFACE_PATTERNS = (
     ("SAS", re.compile(r"\bSAS\b")),
     ("SATA", re.compile(r"\bSATA(?:[- ]?(?:6G|3G|III|II))?\b")),
@@ -107,9 +110,9 @@ def _rpm(text: str) -> str | None:
 
 def _form_factor(text: str, commodity: str) -> str | None:
     sizes = {m.group(1) for m in _FORM_INCH.finditer(text) if m.group(1) in _FF_BY_VALUE}
-    if re.search(r"\bSFF\b", text):
+    if _SFF.search(text):
         sizes.add("2.5")
-    if re.search(r"\bLFF\b", text):
+    if _LFF.search(text):
         sizes.add("3.5")
     if len(sizes) != 1:
         return None  # absent or conflicting (e.g. drive "2.5"" sold with a 3.5" kit)

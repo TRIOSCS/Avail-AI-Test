@@ -34,10 +34,32 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard
 from app.services.desc_extractor import extract_desc
-from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES
+from app.services.desc_extractor._common import DESC_CONFIDENCE, DESC_SOURCE, SPEC_COMMODITIES, SpecDict
 from app.services.desc_extractor.categorizer import categorize_from_desc
 from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
+
+
+def _write_specs(db: Session, card_id: int, specs: SpecDict, source: str, confidence: float, schema_cache: dict) -> int:
+    """Record every (key, value) in *specs* via record_spec; return the count written.
+
+    No pre-gate here: record_spec's F1 tier ladder rejects any write that loses to a
+    higher-(tier, confidence, updated_at) prior (e.g. mpn_decode at tier 85 > 83). The
+    caller owns the surrounding ``begin_nested()`` SAVEPOINT.
+    """
+    written = 0
+    for spec_key, value in specs.items():
+        if record_spec(
+            db,
+            card_id,
+            spec_key,
+            value,
+            source=source,
+            confidence=confidence,
+            schema_cache=schema_cache,
+        ):
+            written += 1
+    return written
 
 
 def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | None = None) -> int:
@@ -57,22 +79,8 @@ def extract_and_record(db: Session, card: MaterialCard, schema_cache: dict | Non
         return 0
     if schema_cache is None:
         schema_cache = load_schema_cache(db, category)
-    written = 0
     with db.begin_nested():
-        # No pre-gate here: record_spec's F1 tier ladder rejects any write that loses to a
-        # higher-(tier, confidence, updated_at) prior (e.g. mpn_decode at tier 85 > 83).
-        for spec_key, value in result.specs.items():
-            if record_spec(
-                db,
-                int(card.id),
-                spec_key,
-                value,
-                source=DESC_SOURCE,
-                confidence=result.confidence,
-                schema_cache=schema_cache,
-            ):
-                written += 1
-    return written
+        return _write_specs(db, int(card.id), result.specs, DESC_SOURCE, result.confidence, schema_cache)
 
 
 def categorize_and_record(
@@ -120,26 +128,15 @@ def categorize_and_record(
             return (False, 0)
         # record_spec needs the now-set category. category + facets are one atomic unit
         # under this savepoint; the freshly-categorized commodity gets desc_parse facets
-        # immediately, in the SAME transaction.
+        # immediately, in the SAME transaction. Facets carry the SAME provenance as the
+        # category they were unlocked by (desc_parse/83 for the own description,
+        # fru_desc_parse/82 for a linked FRU description) — the ladder arbitrates.
         if schema_cache is None:
             schema_cache = load_schema_cache(db, commodity)
         written = 0
         result = extract_desc(text, commodity_hint=commodity)
         if result is not None and result.specs:
-            for spec_key, value in result.specs.items():
-                # Facets carry the SAME provenance as the category they were unlocked by
-                # (desc_parse/83 for the own description, fru_desc_parse/82 for a linked
-                # FRU description). The ladder arbitrates — a higher prior is never clobbered.
-                if record_spec(
-                    db,
-                    int(card.id),
-                    spec_key,
-                    value,
-                    source=source,
-                    confidence=confidence,
-                    schema_cache=schema_cache,
-                ):
-                    written += 1
+            written = _write_specs(db, int(card.id), result.specs, source, confidence, schema_cache)
     return (True, written)
 
 
