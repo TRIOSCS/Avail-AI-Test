@@ -9,6 +9,8 @@ Description corpus strings are REAL fru_links rows from the live FRU matrix inge
 (Qlot/Gabor/CZ sheets).
 """
 
+import contextlib
+
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
@@ -76,6 +78,55 @@ def _link(
     db.add(link)
     db.flush()
     return link
+
+
+def _spy_decode(monkeypatch) -> list[str]:
+    """Patch decode_mpn to record (and still delegate) each MPN it is called with."""
+    import app.services.fru_crosswalk_enrich as mod
+
+    calls: list[str] = []
+    real_decode = mod.decode_mpn
+
+    def counting(mpn, manufacturer=None):
+        calls.append(mpn)
+        return real_decode(mpn, manufacturer)
+
+    monkeypatch.setattr(mod, "decode_mpn", counting)
+    return calls
+
+
+def _count_fru_link_selects(db: Session):
+    """Context manager yielding the list of fru_links SELECT statements executed inside
+    it."""
+    engine = db.get_bind()
+    selects: list[str] = []
+
+    def counter(conn, cursor, statement, parameters, context, executemany):
+        if statement.lstrip().upper().startswith("SELECT") and "fru_links" in statement:
+            selects.append(statement)
+
+    @contextlib.contextmanager
+    def _cm():
+        event.listen(engine, "before_cursor_execute", counter)
+        try:
+            yield selects
+        finally:
+            event.remove(engine, "before_cursor_execute", counter)
+
+    return _cm()
+
+
+@contextlib.contextmanager
+def _capture_warnings():
+    """Capture loguru WARNING-level messages emitted inside the block."""
+    from loguru import logger as loguru_logger
+
+    warnings: list[str] = []
+    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
+    try:
+        yield warnings
+    finally:
+        loguru_logger.remove(sink_id)
 
 
 def test_writer_writes_intersected_specs_with_source_and_confidence(db_session: Session):
@@ -221,21 +272,12 @@ def test_ladder_skips_higher_tier_prior_overwrites_lower(db_session: Session):
 def test_duplicate_links_across_sheets_decode_once(db_session: Session, monkeypatch):
     # Cross-sheet duplicates of the same related model collapse into one decode call
     # (the per-FRU link set), and the single-model intersection still writes.
-    import app.services.fru_crosswalk_enrich as mod
-
     seed_commodity_schemas(db_session)
     card = _card(db_session, "00AJ141", category="hdd")
     _link(db_session, "00AJ141", "ST4000NM0035", sheet="Main")
     _link(db_session, "00AJ141", "ST4000NM0035", sheet="xSeries")
 
-    calls: list[str] = []
-    real_decode = mod.decode_mpn
-
-    def counting(mpn, manufacturer=None):
-        calls.append(mpn)
-        return real_decode(mpn, manufacturer)
-
-    monkeypatch.setattr(mod, "decode_mpn", counting)
+    calls = _spy_decode(monkeypatch)
 
     stats = crosswalk_and_record_specs(db_session, [card.id])
 
@@ -341,8 +383,6 @@ def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
 
 def test_links_resolved_via_exactly_one_select(db_session: Session):
     # The whole batch resolves its links through ONE fru_links SELECT — no N+1.
-    engine = db_session.get_bind()
-
     seed_commodity_schemas(db_session)
     cards = []
     for i, (fru, model) in enumerate(
@@ -351,17 +391,8 @@ def test_links_resolved_via_exactly_one_select(db_session: Session):
         cards.append(_card(db_session, fru, category=None))
         _link(db_session, fru, model, mfg="Samsung" if i == 2 else "Seagate")
 
-    fru_link_selects: list[str] = []
-
-    def counter(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().upper().startswith("SELECT") and "fru_links" in statement:
-            fru_link_selects.append(statement)
-
-    event.listen(engine, "before_cursor_execute", counter)
-    try:
+    with _count_fru_link_selects(db_session) as fru_link_selects:
         stats = crosswalk_and_record_specs(db_session, [c.id for c in cards])
-    finally:
-        event.remove(engine, "before_cursor_execute", counter)
 
     assert len(fru_link_selects) == 1, fru_link_selects
     assert stats["matched"] == 3
@@ -416,8 +447,6 @@ def test_cards_sharing_one_normalized_key_all_enriched(db_session: Session, monk
     # while each unique model decodes exactly once. The intersection (and its
     # dropped-keys count) is computed once per FRU — the conflicting capacity key
     # reports dropped_conflict=1, not once per card sharing the key.
-    import app.services.fru_crosswalk_enrich as mod
-
     seed_commodity_schemas(db_session)
     card_a = _card(db_session, "00AJ141", category="hdd")
     card_b = _card(db_session, "00-AJ-141", category="hdd")
@@ -425,14 +454,7 @@ def test_cards_sharing_one_normalized_key_all_enriched(db_session: Session, monk
     _link(db_session, "00AJ141", "ST4000NM0035")
     _link(db_session, "00AJ141", "ST8000NM0055")
 
-    calls: list[str] = []
-    real_decode = mod.decode_mpn
-
-    def counting(mpn, manufacturer=None):
-        calls.append(mpn)
-        return real_decode(mpn, manufacturer)
-
-    monkeypatch.setattr(mod, "decode_mpn", counting)
+    calls = _spy_decode(monkeypatch)
 
     stats = crosswalk_and_record_specs(db_session, [card_a.id, card_b.id])
     db_session.commit()
@@ -487,8 +509,6 @@ def test_writer_warns_when_crosswalk_key_has_no_schema(db_session: Session):
     # the discard as an aggregate WARNING exactly like mpn_decoder's writer, or a
     # post-deploy schema lag silently zeroes the pass (decoded=N, written=0 with no
     # production-visible explanation).
-    from loguru import logger as loguru_logger
-
     from app.models import CommoditySpecSchema
 
     seed_commodity_schemas(db_session)
@@ -497,12 +517,8 @@ def test_writer_warns_when_crosswalk_key_has_no_schema(db_session: Session):
     card = _card(db_session, "00AJ141", category="hdd")
     _link(db_session, "00AJ141", "ST4000NM0035")
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_warnings() as warnings:
         stats = crosswalk_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("hdd.usage_class" in w and "dropped" in w for w in warnings), warnings
@@ -517,8 +533,6 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     # value is not in its LIVE enum_values (a stale DB row after a failed/lagging
     # reseed). The writer must surface this drop in the same aggregate WARNING as
     # the no-schema case, mirroring mpn_decoder's writer.
-    from loguru import logger as loguru_logger
-
     from app.models import CommoditySpecSchema
 
     seed_commodity_schemas(db_session)
@@ -528,12 +542,8 @@ def test_writer_warns_when_enum_value_outside_live_schema(db_session: Session):
     card = _card(db_session, "00AJ141", category="hdd")
     _link(db_session, "00AJ141", "ST4000NM0035")
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_warnings() as warnings:
         stats = crosswalk_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any('hdd.form_factor=3.5"' in w and "dropped" in w for w in warnings), warnings
@@ -777,24 +787,13 @@ def test_duplicate_descriptions_across_sheets_extract_once(db_session: Session, 
 def test_desc_channel_links_resolved_in_the_same_single_select(db_session: Session):
     # The desc channel rides the decode channel's ONE fru_links SELECT — extending
     # the rel_kind filter must not add a second query.
-    engine = db_session.get_bind()
-
     seed_commodity_schemas(db_session)
     card = _card(db_session, "01LJ787", category=None)
     _link(db_session, "01LJ787", "ST4000NM0035")
     _link(db_session, "01LJ787", "00FJ069", mfg=None, kind="drive_pn", description=_DESC_HDD_1_2TB)
 
-    fru_link_selects: list[str] = []
-
-    def counter(conn, cursor, statement, parameters, context, executemany):
-        if statement.lstrip().upper().startswith("SELECT") and "fru_links" in statement:
-            fru_link_selects.append(statement)
-
-    event.listen(engine, "before_cursor_execute", counter)
-    try:
+    with _count_fru_link_selects(db_session) as fru_link_selects:
         stats = crosswalk_and_record_specs(db_session, [card.id])
-    finally:
-        event.remove(engine, "before_cursor_execute", counter)
 
     assert len(fru_link_selects) == 1, fru_link_selects
     assert stats["written"] == 3
@@ -931,8 +930,6 @@ def test_desc_drop_counts_per_card_on_a_multi_card_fru(db_session: Session):
 def test_desc_channel_surfaces_schema_drift_in_the_aggregate_warning(db_session: Session):
     # A desc-extracted key with no live schema row must surface in the same aggregate
     # WARNING the decode channel uses — record_spec alone drops it at DEBUG only.
-    from loguru import logger as loguru_logger
-
     from app.models import CommoditySpecSchema
 
     seed_commodity_schemas(db_session)
@@ -941,12 +938,8 @@ def test_desc_channel_surfaces_schema_drift_in_the_aggregate_warning(db_session:
     card = _card(db_session, "01LJ065", category="hdd")
     _link(db_session, "01LJ065", "00VN423", mfg=None, kind="drive_pn", description=_DESC_HDD_8TB)
 
-    warnings: list[str] = []
-    sink_id = loguru_logger.add(lambda message: warnings.append(str(message)), level="WARNING")
-    try:
+    with _capture_warnings() as warnings:
         stats = crosswalk_and_record_specs(db_session, [card.id])
-    finally:
-        loguru_logger.remove(sink_id)
     db_session.commit()
 
     assert any("hdd.rpm" in w and "dropped" in w for w in warnings), warnings

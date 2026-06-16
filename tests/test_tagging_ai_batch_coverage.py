@@ -70,6 +70,48 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
+def _succeeded_line(custom_id: str, classifications: list) -> str:
+    """Build one JSONL result line wrapping a succeeded structured_output tool_use."""
+    return json.dumps(
+        {
+            "custom_id": custom_id,
+            "result": {
+                "type": "succeeded",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "structured_output",
+                            "input": {"classifications": classifications},
+                        }
+                    ]
+                },
+            },
+        }
+    )
+
+
+def _write_jsonl(*lines: str) -> str:
+    """Write the given lines (newline-terminated) to a temp .jsonl file; return its
+    path."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+    tmp.write("".join(line + "\n" for line in lines))
+    tmp.close()
+    return tmp.name
+
+
+def _wire_http(mock_http, tmp_path: str, results_url: str) -> None:
+    """Wire mock_http.get (status=ended) and mock_http.stream (serves tmp_path)."""
+    status_resp = MagicMock()
+    status_resp.status_code = 200
+    status_resp.json.return_value = {
+        "processing_status": "ended",
+        "results_url": results_url,
+    }
+    mock_http.get = AsyncMock(return_value=status_resp)
+    mock_http.stream = _make_fake_stream(tmp_path)
+
+
 class TestApplyBatchResultsBlankLines:
     @patch("app.database.SessionLocal")
     @patch("app.http_client.http")
@@ -78,39 +120,12 @@ class TestApplyBatchResultsBlankLines:
         """Line 481: blank lines in JSONL are skipped without counting as errors."""
         mock_session_local.return_value = db_session
 
-        # Write JSONL with blank lines interspersed
-        result_line = json.dumps(
-            {
-                "custom_id": "backfill_0",
-                "result": {
-                    "type": "succeeded",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "name": "structured_output",
-                                "input": {"classifications": []},
-                            }
-                        ]
-                    },
-                },
-            }
-        )
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write("\n")  # Blank line (skipped)
-        tmp.write(result_line + "\n")
-        tmp.write("   \n")  # Whitespace-only line (skipped after strip)
-        tmp.close()
-        tmp_path = tmp.name
+        # JSONL with blank lines interspersed: "" → "\n" (blank, skipped),
+        # the real line, then "   " → "   \n" (whitespace-only, skipped).
+        result_line = _succeeded_line("backfill_0", [])
+        tmp_path = _write_jsonl("", result_line, "   ")
 
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_blank",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_blank")
 
         try:
             result = _run(apply_batch_results_chunked("batch_blank"))
@@ -136,45 +151,13 @@ class TestApplyBatchResultsClassificationsAsDict:
         mock_session_local.return_value = db_session
 
         # Normal case: input is a dict with 'classifications' array
-        result_line = json.dumps(
-            {
-                "custom_id": "backfill_0",
-                "result": {
-                    "type": "succeeded",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "name": "structured_output",
-                                "input": {
-                                    "classifications": [
-                                        {
-                                            "mpn": "LM317T",
-                                            "manufacturer": "Texas Instruments",
-                                            "category": "Regulators",
-                                        }
-                                    ]
-                                },
-                            }
-                        ]
-                    },
-                },
-            }
+        result_line = _succeeded_line(
+            "backfill_0",
+            [{"mpn": "LM317T", "manufacturer": "Texas Instruments", "category": "Regulators"}],
         )
+        tmp_path = _write_jsonl(result_line)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_dict",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_dict")
 
         try:
             result = _run(apply_batch_results_chunked("batch_dict"))
@@ -209,37 +192,10 @@ class TestApplyBatchResultsMidBatchFlush:
             }
             for i in range(100)
         ]
-        result_line = json.dumps(
-            {
-                "custom_id": "backfill_0",
-                "result": {
-                    "type": "succeeded",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "name": "structured_output",
-                                "input": {"classifications": classifications},
-                            }
-                        ]
-                    },
-                },
-            }
-        )
+        result_line = _succeeded_line("backfill_0", classifications)
+        tmp_path = _write_jsonl(result_line)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_100",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_100")
 
         try:
             result = _run(apply_batch_results_chunked("batch_100"))
@@ -262,40 +218,10 @@ class TestApplyBatchResultsProgressLog:
         mock_session_local.return_value = db_session
 
         # Write exactly 500 valid-but-empty-classification lines
-        lines = []
-        for i in range(500):
-            line = json.dumps(
-                {
-                    "custom_id": f"backfill_{i}",
-                    "result": {
-                        "type": "succeeded",
-                        "message": {
-                            "content": [
-                                {
-                                    "type": "tool_use",
-                                    "name": "structured_output",
-                                    "input": {"classifications": []},
-                                }
-                            ]
-                        },
-                    },
-                }
-            )
-            lines.append(line)
+        lines = [_succeeded_line(f"backfill_{i}", []) for i in range(500)]
+        tmp_path = _write_jsonl(*lines)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write("\n".join(lines) + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_500",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_500")
 
         try:
             result = _run(apply_batch_results_chunked("batch_500"))
@@ -317,37 +243,10 @@ class TestApplyBatchResultsExceptionPath:
         mock_session_local.return_value = db_session
 
         # Write a valid-looking JSONL line
-        result_line = json.dumps(
-            {
-                "custom_id": "backfill_0",
-                "result": {
-                    "type": "succeeded",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "name": "structured_output",
-                                "input": {"classifications": []},
-                            }
-                        ]
-                    },
-                },
-            }
-        )
+        result_line = _succeeded_line("backfill_0", [])
+        tmp_path = _write_jsonl(result_line)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_exc",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_exc")
 
         # Patch db.commit to raise (triggers exception path)
         with patch.object(db_session, "commit", side_effect=RuntimeError("Commit failed")):
@@ -368,37 +267,10 @@ class TestApplyBatchResultsOSErrorOnUnlink:
         """Lines 546-547: OSError when os.unlink(tmp_path) is silently caught."""
         mock_session_local.return_value = db_session
 
-        result_line = json.dumps(
-            {
-                "custom_id": "backfill_0",
-                "result": {
-                    "type": "succeeded",
-                    "message": {
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "name": "structured_output",
-                                "input": {"classifications": []},
-                            }
-                        ]
-                    },
-                },
-            }
-        )
+        result_line = _succeeded_line("backfill_0", [])
+        tmp_path = _write_jsonl(result_line)
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
-        tmp.write(result_line + "\n")
-        tmp.close()
-        tmp_path = tmp.name
-
-        status_resp = MagicMock()
-        status_resp.status_code = 200
-        status_resp.json.return_value = {
-            "processing_status": "ended",
-            "results_url": "https://api.anthropic.com/results/batch_oserr",
-        }
-        mock_http.get = AsyncMock(return_value=status_resp)
-        mock_http.stream = _make_fake_stream(tmp_path)
+        _wire_http(mock_http, tmp_path, "https://api.anthropic.com/results/batch_oserr")
 
         # Patch os.unlink to raise OSError inside the finally block
         with patch("os.unlink", side_effect=OSError("file already gone")):

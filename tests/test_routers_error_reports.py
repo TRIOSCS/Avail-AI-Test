@@ -16,6 +16,16 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.models.trouble_ticket import TroubleTicket
 
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _create_report(client, db_session, **payload) -> TroubleTicket:
+    """POST a report via the JSON API and return the persisted TroubleTicket."""
+    resp = client.post("/api/error-reports", json=payload)
+    assert resp.status_code == 200
+    return db_session.get(TroubleTicket, resp.json()["id"])
+
+
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
@@ -78,80 +88,39 @@ class TestCreateErrorReport:
         assert data["id"] > 0
         assert data["status"] == "created"
 
-    def test_submit_without_message_returns_422(self, client):
-        resp = client.post(
-            "/api/error-reports",
-            json={
-                "current_url": "https://example.com",
-            },
-        )
-        assert resp.status_code == 422
-
-    def test_submit_empty_message_rejected(self, client):
-        resp = client.post(
-            "/api/error-reports",
-            json={
-                "message": "",
-            },
-        )
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"current_url": "https://example.com"},  # missing message
+            {"message": ""},  # empty message
+        ],
+        ids=["without_message", "empty_message"],
+    )
+    def test_submit_invalid_message_returns_422(self, client, body):
+        resp = client.post("/api/error-reports", json=body)
         assert resp.status_code == 422
 
     def test_message_stored_as_description(self, client, db_session):
-        resp = client.post(
-            "/api/error-reports",
-            json={
-                "message": "The search results are not showing up correctly",
-            },
-        )
-        assert resp.status_code == 200
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message="The search results are not showing up correctly")
         assert ticket.description == "The search results are not showing up correctly"
 
     def test_title_derived_from_message(self, client, db_session):
         msg = "Short bug report"
-        resp = client.post(
-            "/api/error-reports",
-            json={"message": msg},
-        )
-        assert resp.status_code == 200
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message=msg)
         assert ticket.title == msg[:120]
 
     def test_long_title_truncated(self, client, db_session):
         msg = "A" * 200
-        resp = client.post(
-            "/api/error-reports",
-            json={"message": msg},
-        )
-        assert resp.status_code == 200
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message=msg)
         assert len(ticket.title) == 120
         assert ticket.description == msg
 
     def test_current_url_stored(self, client, db_session):
-        resp = client.post(
-            "/api/error-reports",
-            json={
-                "message": "Page is broken",
-                "current_url": "https://app.example.com/rfq",
-            },
-        )
-        assert resp.status_code == 200
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message="Page is broken", current_url="https://app.example.com/rfq")
         assert ticket.current_page == "https://app.example.com/rfq"
 
     def test_source_set_to_report_button(self, client, db_session):
-        resp = client.post(
-            "/api/error-reports",
-            json={"message": "Something broke"},
-        )
-        assert resp.status_code == 200
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message="Something broke")
         assert ticket.source == "report_button"
 
     def test_submit_via_trouble_tickets_path(self, client):
@@ -164,19 +133,12 @@ class TestCreateErrorReport:
         assert resp.json()["status"] == "created"
 
     def test_ticket_number_derived_from_id(self, client, db_session):
-        resp = client.post(
-            "/api/error-reports",
-            json={"message": "First ticket"},
-        )
-        ticket_id = resp.json()["id"]
-        ticket = db_session.get(TroubleTicket, ticket_id)
+        ticket = _create_report(client, db_session, message="First ticket")
         assert ticket.ticket_number == f"TT-{ticket.id:04d}"
 
     def test_sequential_ticket_numbers(self, client, db_session):
-        resp1 = client.post("/api/error-reports", json={"message": "Ticket one"})
-        resp2 = client.post("/api/error-reports", json={"message": "Ticket two"})
-        t1 = db_session.get(TroubleTicket, resp1.json()["id"])
-        t2 = db_session.get(TroubleTicket, resp2.json()["id"])
+        t1 = _create_report(client, db_session, message="Ticket one")
+        t2 = _create_report(client, db_session, message="Ticket two")
         assert t2.id > t1.id
         assert t2.ticket_number > t1.ticket_number
 

@@ -13,6 +13,8 @@ Depends on: conftest fixtures, app.services.sighting_aggregation,
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ── H8: AI Contact Field Truncation ────────────────────────────────
 
 
@@ -76,8 +78,7 @@ class TestH8ContactTruncation:
 class TestH10RefreshWarning:
     """Verify HX-Trigger header is set when search refresh fails."""
 
-    def test_refresh_failure_sets_hx_trigger(self, client, db_session):
-        """When search_requirement raises, response should have HX-Trigger header."""
+    def _make_requirement(self, db_session, primary_mpn):
         from app.models.sourcing import Requirement, Requisition
 
         req = Requisition(name="Test RFQ", status="active", customer_name="Test Co")
@@ -85,13 +86,18 @@ class TestH10RefreshWarning:
         db_session.flush()
         r = Requirement(
             requisition_id=req.id,
-            primary_mpn="TEST-001",
+            primary_mpn=primary_mpn,
             manufacturer="TestMfr",
             target_qty=100,
             sourcing_status="open",
         )
         db_session.add(r)
         db_session.commit()
+        return r
+
+    def test_refresh_failure_sets_hx_trigger(self, client, db_session):
+        """When search_requirement raises, response should have HX-Trigger header."""
+        r = self._make_requirement(db_session, "TEST-001")
 
         with (
             patch("app.search_service.search_requirement", side_effect=RuntimeError("API down")),
@@ -107,20 +113,7 @@ class TestH10RefreshWarning:
 
     def test_successful_refresh_no_warning(self, client, db_session):
         """When search_requirement succeeds, no warning in HX-Trigger."""
-        from app.models.sourcing import Requirement, Requisition
-
-        req = Requisition(name="Test RFQ", status="active", customer_name="Test Co")
-        db_session.add(req)
-        db_session.flush()
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="TEST-002",
-            manufacturer="TestMfr",
-            target_qty=100,
-            sourcing_status="open",
-        )
-        db_session.add(r)
-        db_session.commit()
+        r = self._make_requirement(db_session, "TEST-002")
 
         with (
             patch(
@@ -143,29 +136,20 @@ class TestH10RefreshWarning:
 class TestH11QtyEstimation:
     """Verify _estimate_qty_with_ai returns dict with approximate flag."""
 
-    def test_empty_list_returns_none_not_approximate(self):
+    @pytest.mark.parametrize(
+        ("qtys", "expected"),
+        [
+            pytest.param([], {"qty": None, "approximate": False}, id="empty_list_none_not_approximate"),
+            pytest.param([None, None], {"qty": None, "approximate": False}, id="all_none_not_approximate"),
+            pytest.param([42], {"qty": 42, "approximate": False}, id="single_value_exact"),
+            pytest.param([100, 200], {"qty": 300, "approximate": False}, id="two_values_sum_exact"),
+        ],
+    )
+    def test_no_ai_needed_returns_exact(self, qtys, expected):
+        """0-2 values resolve deterministically without invoking the AI fallback."""
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
-        result = _estimate_qty_with_ai([])
-        assert result == {"qty": None, "approximate": False}
-
-    def test_all_none_returns_none_not_approximate(self):
-        from app.services.sighting_aggregation import _estimate_qty_with_ai
-
-        result = _estimate_qty_with_ai([None, None])
-        assert result == {"qty": None, "approximate": False}
-
-    def test_single_value_returns_exact(self):
-        from app.services.sighting_aggregation import _estimate_qty_with_ai
-
-        result = _estimate_qty_with_ai([42])
-        assert result == {"qty": 42, "approximate": False}
-
-    def test_two_values_returns_sum_exact(self):
-        from app.services.sighting_aggregation import _estimate_qty_with_ai
-
-        result = _estimate_qty_with_ai([100, 200])
-        assert result == {"qty": 300, "approximate": False}
+        assert _estimate_qty_with_ai(qtys) == expected
 
     def test_three_values_no_api_key_returns_max_approximate(self):
         """Without ANTHROPIC_API_KEY, fallback uses max and marks approximate."""
@@ -226,10 +210,8 @@ class TestH11QtyEstimation:
 class TestH12CredentialDecryptionFallback:
     """Verify credential decryption failure logs and falls back to env var."""
 
-    def test_decrypt_failure_falls_back_to_env(self, db_session):
-        """When decryption fails, get_credential returns env var value."""
+    def _make_source(self, db_session, credentials):
         from app.models import ApiSource
-        from app.services.credential_service import get_credential
 
         src = ApiSource(
             name="test_src",
@@ -238,10 +220,17 @@ class TestH12CredentialDecryptionFallback:
             source_type="aggregator",
             status="active",
             env_vars=["MY_API_KEY"],
-            credentials={"MY_API_KEY": "corrupted-not-valid-fernet-token"},
+            credentials=credentials,
         )
         db_session.add(src)
         db_session.commit()
+        return src
+
+    def test_decrypt_failure_falls_back_to_env(self, db_session):
+        """When decryption fails, get_credential returns env var value."""
+        from app.services.credential_service import get_credential
+
+        self._make_source(db_session, {"MY_API_KEY": "corrupted-not-valid-fernet-token"})
 
         with patch.dict(os.environ, {"MY_API_KEY": "fallback-value"}):
             result = get_credential(db_session, "test_src", "MY_API_KEY")
@@ -252,20 +241,9 @@ class TestH12CredentialDecryptionFallback:
         """When decryption fails, warning is logged about env var fallback."""
         from loguru import logger
 
-        from app.models import ApiSource
         from app.services.credential_service import get_credential
 
-        src = ApiSource(
-            name="test_src",
-            display_name="Test Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_API_KEY"],
-            credentials={"MY_API_KEY": "corrupted-not-valid-fernet-token"},
-        )
-        db_session.add(src)
-        db_session.commit()
+        self._make_source(db_session, {"MY_API_KEY": "corrupted-not-valid-fernet-token"})
 
         messages = []
         handler_id = logger.add(lambda m: messages.append(str(m)), level="WARNING")
@@ -280,20 +258,9 @@ class TestH12CredentialDecryptionFallback:
 
     def test_no_credentials_returns_env_var(self, db_session):
         """When source has no credentials, env var is returned."""
-        from app.models import ApiSource
         from app.services.credential_service import get_credential
 
-        src = ApiSource(
-            name="test_src",
-            display_name="Test Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_API_KEY"],
-            credentials={},
-        )
-        db_session.add(src)
-        db_session.commit()
+        self._make_source(db_session, {})
 
         with patch.dict(os.environ, {"MY_API_KEY": "env-value"}):
             result = get_credential(db_session, "test_src", "MY_API_KEY")
@@ -302,21 +269,10 @@ class TestH12CredentialDecryptionFallback:
 
     def test_successful_decrypt_returns_db_value(self, db_session):
         """When decryption succeeds, DB credential is returned (not env var)."""
-        from app.models import ApiSource
         from app.services.credential_service import encrypt_value, get_credential
 
         encrypted = encrypt_value("my-secret-key")
-        src = ApiSource(
-            name="test_src",
-            display_name="Test Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_API_KEY"],
-            credentials={"MY_API_KEY": encrypted},
-        )
-        db_session.add(src)
-        db_session.commit()
+        self._make_source(db_session, {"MY_API_KEY": encrypted})
 
         with patch.dict(os.environ, {"MY_API_KEY": "should-not-use-this"}):
             result = get_credential(db_session, "test_src", "MY_API_KEY")
@@ -325,20 +281,9 @@ class TestH12CredentialDecryptionFallback:
 
     def test_decrypt_failure_no_env_returns_none(self, db_session):
         """When decryption fails and no env var, returns None."""
-        from app.models import ApiSource
         from app.services.credential_service import get_credential
 
-        src = ApiSource(
-            name="test_src",
-            display_name="Test Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_API_KEY"],
-            credentials={"MY_API_KEY": "corrupted-token"},
-        )
-        db_session.add(src)
-        db_session.commit()
+        self._make_source(db_session, {"MY_API_KEY": "corrupted-token"})
 
         env_backup = os.environ.pop("MY_API_KEY", None)
         try:

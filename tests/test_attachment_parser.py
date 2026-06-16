@@ -26,19 +26,15 @@ from app.services.attachment_parser import (
 class TestMatchHeadersDeterministic:
     """Tests for _match_headers_deterministic -- regex-based column mapping."""
 
-    def test_match_headers_standard(self):
-        """Standard headers map to the correct fields."""
-        headers = ["Part Number", "Manufacturer", "Qty", "Price"]
-        mapping = _match_headers_deterministic(headers)
-
-        assert mapping[0] == "mpn"
-        assert mapping[1] == "manufacturer"
-        assert mapping[2] == "qty"
-        assert mapping[3] == "unit_price"
-
-    def test_match_headers_alternates(self):
-        """Alternate header forms still resolve correctly."""
-        headers = ["MPN", "Mfg", "Quantity", "Unit Price"]
+    @pytest.mark.parametrize(
+        "headers",
+        [
+            pytest.param(["Part Number", "Manufacturer", "Qty", "Price"], id="standard"),
+            pytest.param(["MPN", "Mfg", "Quantity", "Unit Price"], id="alternates"),
+        ],
+    )
+    def test_match_headers_resolves_standard_fields(self, headers):
+        """Standard and alternate header forms map to the correct fields."""
         mapping = _match_headers_deterministic(headers)
 
         assert mapping[0] == "mpn"

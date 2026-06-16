@@ -6,6 +6,7 @@ Called by: pytest
 Depends on: conftest fixtures (client, db_session, test_user, test_requisition)
 """
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -49,15 +50,62 @@ class TestLogActivity:
         assert record.user_id == test_user.id
         assert record.requisition_id == test_requisition.id
 
-    def test_empty_notes_returns_400(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Empty or whitespace-only notes should be rejected with 400."""
+    @pytest.mark.parametrize(
+        ("channel", "notes", "expected"),
+        [
+            pytest.param(
+                "call",
+                "Spoke with rep about pricing",
+                {"activity_type": "call_logged", "direction": "outbound", "channel": "call"},
+                id="call",
+            ),
+            pytest.param(
+                "email",
+                "Sent follow-up email",
+                {"activity_type": "email_sent", "channel": "email"},
+                id="email",
+            ),
+        ],
+    )
+    def test_channel_maps_to_activity(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        channel: str,
+        notes: str,
+        expected: dict,
+    ):
+        """Each channel maps to its canonical activity type / direction."""
         req_id = _get_requirement_id(db_session, test_requisition)
 
         resp = client.post(
             f"/v2/partials/sightings/{req_id}/log-activity",
-            data={"notes": "   ", "channel": "note"},
+            data={"notes": notes, "channel": channel},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+
+        record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
+        assert record is not None
+        for field, value in expected.items():
+            assert getattr(record, field) == value
+
+    @pytest.mark.parametrize(
+        ("data", "case"),
+        [
+            ({"notes": "   ", "channel": "note"}, "whitespace-only notes"),
+            ({"notes": "Some note", "channel": "fax"}, "invalid channel"),
+        ],
+        ids=["empty_notes", "invalid_channel"],
+    )
+    def test_invalid_input_returns_400(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, data: dict, case: str
+    ):
+        """Whitespace-only notes and unknown channels are rejected with 400."""
+        req_id = _get_requirement_id(db_session, test_requisition)
+
+        resp = client.post(f"/v2/partials/sightings/{req_id}/log-activity", data=data)
+        assert resp.status_code == 400, case
 
     def test_missing_notes_returns_422(self, client: TestClient, db_session: Session, test_requisition: Requisition):
         """Missing notes field should return 422 (FastAPI validation)."""
@@ -69,81 +117,34 @@ class TestLogActivity:
         )
         assert resp.status_code == 422
 
-    def test_channel_call(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Channel 'call' creates the canonical call_logged activity type (outbound
-        direction)."""
-        req_id = _get_requirement_id(db_session, test_requisition)
-
-        resp = client.post(
-            f"/v2/partials/sightings/{req_id}/log-activity",
-            data={"notes": "Spoke with rep about pricing", "channel": "call"},
-        )
-        assert resp.status_code == 200
-
-        record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
-        assert record is not None
-        assert record.activity_type == "call_logged"
-        assert record.direction == "outbound"
-        assert record.channel == "call"
-
-    def test_channel_email(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Channel 'email' creates email_sent activity type."""
-        req_id = _get_requirement_id(db_session, test_requisition)
-
-        resp = client.post(
-            f"/v2/partials/sightings/{req_id}/log-activity",
-            data={"notes": "Sent follow-up email", "channel": "email"},
-        )
-        assert resp.status_code == 200
-
-        record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
-        assert record is not None
-        assert record.activity_type == "email_sent"
-        assert record.channel == "email"
-
-    def test_invalid_channel_returns_400(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Invalid channel value should be rejected."""
-        req_id = _get_requirement_id(db_session, test_requisition)
-
-        resp = client.post(
-            f"/v2/partials/sightings/{req_id}/log-activity",
-            data={"notes": "Some note", "channel": "fax"},
-        )
-        assert resp.status_code == 400
-
-    def test_vendor_name_optional(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Vendor name is stored in contact_name when provided."""
-        req_id = _get_requirement_id(db_session, test_requisition)
-
-        resp = client.post(
-            f"/v2/partials/sightings/{req_id}/log-activity",
-            data={
-                "notes": "Got quote from Arrow",
-                "channel": "note",
-                "vendor_name": "Arrow Electronics",
-            },
-        )
-        assert resp.status_code == 200
-
-        record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
-        assert record is not None
-        assert record.contact_name == "Arrow Electronics"
-
-    def test_vendor_name_empty_stored_as_none(
-        self, client: TestClient, db_session: Session, test_requisition: Requisition
+    @pytest.mark.parametrize(
+        ("vendor_name", "notes", "expected_contact_name"),
+        [
+            pytest.param("Arrow Electronics", "Got quote from Arrow", "Arrow Electronics", id="provided"),
+            pytest.param("", "General note", None, id="empty_stored_as_none"),
+        ],
+    )
+    def test_vendor_name_stored_in_contact_name(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_requisition: Requisition,
+        vendor_name: str,
+        notes: str,
+        expected_contact_name: str | None,
     ):
-        """Empty vendor_name should be stored as None, not empty string."""
+        """Vendor name maps to contact_name; an empty value is stored as None."""
         req_id = _get_requirement_id(db_session, test_requisition)
 
         resp = client.post(
             f"/v2/partials/sightings/{req_id}/log-activity",
-            data={"notes": "General note", "channel": "note", "vendor_name": ""},
+            data={"notes": notes, "channel": "note", "vendor_name": vendor_name},
         )
         assert resp.status_code == 200
 
         record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
         assert record is not None
-        assert record.contact_name is None
+        assert record.contact_name == expected_contact_name
 
     def test_nonexistent_requirement_returns_404(
         self, client: TestClient, db_session: Session, test_requisition: Requisition

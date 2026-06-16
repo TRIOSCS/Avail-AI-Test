@@ -281,7 +281,6 @@ def test_re_resolve_swaps_row_on_fresh_success(
     assert rows[0].proposed_avl[0]["mpn"] == "NEW_MPN"
     assert rows[0].llm_confidence == 0.91
     assert all(r.proposed_avl[0]["mpn"] != "GRM188R71H103KA01D" for r in rows)
-    assert rows[0].llm_confidence == 0.91
 
 
 def test_re_resolve_preserves_row_on_resolver_exception(

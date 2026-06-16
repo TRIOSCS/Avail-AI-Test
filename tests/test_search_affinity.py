@@ -61,6 +61,14 @@ def _make_requirement(db: Session, requisition: Requisition, mpn: str = "LM317T"
     return req
 
 
+@pytest.fixture
+def requirement(db_session) -> Requirement:
+    """A persisted Requirement with its parent user + requisition."""
+    user = _make_user(db_session)
+    reqn = _make_requisition(db_session, user)
+    return _make_requirement(db_session, reqn)
+
+
 MOCK_AFFINITY = [
     {
         "vendor_name": "Vendor Alpha",
@@ -116,19 +124,15 @@ MOCK_STATS = [
 
 class TestSearchIncludesVendorAffinity:
     @pytest.mark.asyncio
-    async def test_search_includes_vendor_affinity(self, db_session):
+    async def test_search_includes_vendor_affinity(self, db_session, requirement):
         """Affinity suggestions appear in search results with
         source_type='vendor_affinity'."""
-        user = _make_user(db_session)
-        reqn = _make_requisition(db_session, user)
-        req = _make_requirement(db_session, reqn)
-
         with (
             patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
             patch("app.search_service.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
-            result = await search_requirement(req, db_session)
+            result = await search_requirement(requirement, db_session)
 
         sightings = result["sightings"]
         affinity_results = [s for s in sightings if s.get("source_type") == "vendor_affinity"]
@@ -146,18 +150,14 @@ class TestSearchIncludesVendorAffinity:
 
 class TestAffinityResultFields:
     @pytest.mark.asyncio
-    async def test_affinity_results_have_correct_fields(self, db_session):
+    async def test_affinity_results_have_correct_fields(self, db_session, requirement):
         """Affinity results include source_badge, confidence_pct, and reasoning."""
-        user = _make_user(db_session)
-        reqn = _make_requisition(db_session, user)
-        req = _make_requirement(db_session, reqn)
-
         with (
             patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch,
             patch("app.search_service.find_vendor_affinity", return_value=list(MOCK_AFFINITY)),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
-            result = await search_requirement(req, db_session)
+            result = await search_requirement(requirement, db_session)
 
         affinity_results = [s for s in result["sightings"] if s.get("is_affinity")]
 
@@ -178,12 +178,8 @@ class TestAffinityResultFields:
 
 class TestAffinityDedupWithLiveResults:
     @pytest.mark.asyncio
-    async def test_affinity_dedup_with_live_results(self, db_session):
+    async def test_affinity_dedup_with_live_results(self, db_session, requirement):
         """If a vendor already appears in live results, skip the affinity suggestion."""
-        user = _make_user(db_session)
-        reqn = _make_requisition(db_session, user)
-        req = _make_requirement(db_session, reqn)
-
         # Affinity includes "Arrow" which is already in live results
         affinity_with_dupe = list(MOCK_AFFINITY) + [
             {
@@ -202,7 +198,7 @@ class TestAffinityDedupWithLiveResults:
             patch("app.search_service.find_vendor_affinity", return_value=affinity_with_dupe),
         ):
             mock_fetch.return_value = (list(MOCK_FRESH), list(MOCK_STATS))
-            result = await search_requirement(req, db_session)
+            result = await search_requirement(requirement, db_session)
 
         sightings = result["sightings"]
         affinity_results = [s for s in sightings if s.get("is_affinity")]

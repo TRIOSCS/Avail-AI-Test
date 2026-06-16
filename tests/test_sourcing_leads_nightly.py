@@ -16,6 +16,8 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
+import pytest
+
 
 def _now():
     return datetime.now(timezone.utc)
@@ -25,29 +27,20 @@ def _now():
 
 
 class TestSourceReliability:
-    def test_salesforce_base_85(self):
+    @pytest.mark.parametrize(
+        ("source", "lo", "hi"),
+        [
+            ("salesforce", 80, 93),  # base 85 ± tier
+            ("avail_history", 80, 93),
+            ("digikey", 88, 100),
+            ("unknown_xyz", 55, 65),
+        ],
+        ids=["salesforce_base_85", "avail_history_base_85", "digikey_base_90", "unknown_base_60"],
+    )
+    def test_base_score_in_range(self, source, lo, hi):
         from app.services.sourcing_leads import _source_reliability
 
-        score = _source_reliability("salesforce", None)
-        assert 80 <= score <= 93  # base 85 ± tier
-
-    def test_avail_history_base_85(self):
-        from app.services.sourcing_leads import _source_reliability
-
-        score = _source_reliability("avail_history", None)
-        assert 80 <= score <= 93
-
-    def test_digikey_base_90(self):
-        from app.services.sourcing_leads import _source_reliability
-
-        score = _source_reliability("digikey", None)
-        assert score >= 88
-
-    def test_unknown_base_60(self):
-        from app.services.sourcing_leads import _source_reliability
-
-        score = _source_reliability("unknown_xyz", None)
-        assert 55 <= score <= 65
+        assert lo <= _source_reliability(source, None) <= hi
 
     def test_t1_tier_boosts(self):
         from app.services.sourcing_leads import _source_reliability
@@ -61,30 +54,22 @@ class TestSourceReliability:
 
 
 class TestFreshnessScore:
-    def test_12_hours_returns_95(self):
+    @pytest.mark.parametrize(
+        ("age", "expected"),
+        [
+            (timedelta(hours=12), 95.0),
+            (timedelta(hours=23), 95.0),
+            (timedelta(days=2), 85.0),
+            (timedelta(days=5), 72.0),
+            (None, 45.0),
+        ],
+        ids=["12_hours", "23_hours", "2_days", "5_days", "none"],
+    )
+    def test_freshness_score(self, age, expected):
         from app.services.sourcing_leads import _freshness_score
 
-        assert _freshness_score(_now() - timedelta(hours=12)) == 95.0
-
-    def test_23_hours_returns_95(self):
-        from app.services.sourcing_leads import _freshness_score
-
-        assert _freshness_score(_now() - timedelta(hours=23)) == 95.0
-
-    def test_2_days_returns_85(self):
-        from app.services.sourcing_leads import _freshness_score
-
-        assert _freshness_score(_now() - timedelta(days=2)) == 85.0
-
-    def test_5_days_returns_72(self):
-        from app.services.sourcing_leads import _freshness_score
-
-        assert _freshness_score(_now() - timedelta(days=5)) == 72.0
-
-    def test_none_returns_45(self):
-        from app.services.sourcing_leads import _freshness_score
-
-        assert _freshness_score(None) == 45.0
+        seen_at = None if age is None else _now() - age
+        assert _freshness_score(seen_at) == expected
 
 
 # ── _historical_success_score (lines 139, 155) ────────────────────────

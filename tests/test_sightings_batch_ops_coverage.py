@@ -21,6 +21,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -28,6 +29,17 @@ from fastapi.responses import HTMLResponse as _HTMLResponse
 from sqlalchemy.orm import Session
 
 # ── helpers ──────────────────────────────────────────────────────────
+
+
+@contextmanager
+def _patched_broker():
+    """Patch app.routers.sightings.broker with an AsyncMock publish."""
+    with patch(
+        "app.routers.sightings.broker",
+        new_callable=MagicMock,
+    ) as mock_broker:
+        mock_broker.publish = AsyncMock()
+        yield mock_broker
 
 
 def _make_user(db: Session, role: str = "buyer", suffix: str = ""):
@@ -85,6 +97,42 @@ def _make_requirement_recently_searched(db: Session, user_id: int, mpn: str = "F
     return req, requirement
 
 
+def _make_vendor_card_with_contact(
+    db: Session,
+    normalized_name: str,
+    display_name: str,
+    card_email: str,
+    contact_name: str,
+    contact_email: str,
+    sighting_count: int,
+):
+    """VendorCard with one verified VendorContact, committed."""
+    from app.models import VendorCard, VendorContact
+
+    card = VendorCard(
+        normalized_name=normalized_name,
+        display_name=display_name,
+        emails=[card_email],
+        phones=[],
+        sighting_count=sighting_count,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.flush()
+
+    contact = VendorContact(
+        vendor_card_id=card.id,
+        full_name=contact_name,
+        email=contact_email,
+        source="manual",
+        is_verified=True,
+        confidence=90,
+    )
+    db.add(contact)
+    db.commit()
+    return card, contact
+
+
 # ── batch-refresh: skipped-only path (line 738: level = "info") ───────
 
 
@@ -93,11 +141,7 @@ def test_batch_refresh_all_skipped_returns_info_level(client, db_session, test_u
     _, requirement = _make_requirement_recently_searched(db_session, test_user.id)
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
             data={"requirement_ids": json.dumps([requirement.id])},
@@ -113,11 +157,7 @@ def test_batch_refresh_success_path_level_success(client, db_session, test_user)
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ATMEL001")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.search_service.search_requirement",
             new_callable=AsyncMock,
@@ -136,11 +176,7 @@ def test_batch_refresh_exception_in_search_counts_as_failed(client, db_session, 
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ERRPN")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.search_service.search_requirement",
             new_callable=AsyncMock,
@@ -162,11 +198,7 @@ def test_batch_refresh_broker_publish_called(client, db_session, test_user):
     _, req2 = _make_req_and_requirement(db_session, test_user.id, mpn="PNX002")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.search_service.search_requirement",
             new_callable=AsyncMock,
@@ -183,11 +215,7 @@ def test_batch_refresh_broker_publish_called(client, db_session, test_user):
 
 def test_batch_refresh_nonexistent_id_increments_failed(client, db_session):
     """Non-existent requirement ID increments failed counter (lines 711-712)."""
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
             data={"requirement_ids": "[88888]"},
@@ -365,11 +393,7 @@ def test_mark_unavailable_broker_publish_called(client, db_session, test_user):
     db_session.add(sighting)
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -390,11 +414,7 @@ def test_mark_unavailable_no_matching_sightings_still_succeeds(client, db_sessio
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="NOMATCH01")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -416,11 +436,7 @@ def test_assign_buyer_broker_publish_called(client, db_session, test_user):
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ASGN01")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -441,11 +457,7 @@ def test_assign_buyer_clears_assignment_with_empty_id(client, db_session, test_u
     requirement.assigned_buyer_id = test_user.id
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -504,11 +516,7 @@ def test_advance_status_valid_transition_updates_db(client, db_session, test_use
     requirement.sourcing_status = "open"
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -533,11 +541,7 @@ def test_advance_status_logs_activity(client, db_session, test_user):
     requirement.sourcing_status = "open"
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.routers.sightings.sightings_detail",
             new_callable=AsyncMock,
@@ -560,32 +564,18 @@ def test_advance_status_logs_activity(client, db_session, test_user):
 def test_preview_inquiry_with_vendor_card_and_contact(client, db_session, test_user):
     """Preview-inquiry resolves vendor email from VendorCard+VendorContact (lines
     1153-1159)."""
-    from app.models import VendorCard, VendorContact
-
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="PREV01")
     db_session.commit()
 
-    card = VendorCard(
+    _make_vendor_card_with_contact(
+        db_session,
         normalized_name="previewvendor",
         display_name="Preview Vendor",
-        emails=["sales@previewvendor.com"],
-        phones=[],
+        card_email="sales@previewvendor.com",
+        contact_name="Preview Contact",
+        contact_email="contact@previewvendor.com",
         sighting_count=5,
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(card)
-    db_session.flush()
-
-    contact = VendorContact(
-        vendor_card_id=card.id,
-        full_name="Preview Contact",
-        email="contact@previewvendor.com",
-        source="manual",
-        is_verified=True,
-        confidence=90,
-    )
-    db_session.add(contact)
-    db_session.commit()
 
     with patch(
         "app.email_service._build_html_body",
@@ -689,38 +679,20 @@ def test_send_inquiry_missing_email_body_returns_400(client, db_session, test_us
 def test_send_inquiry_with_vendor_card_resolves_email(client, db_session, test_user):
     """Send-inquiry resolves vendor email from VendorCard+VendorContact (lines
     1220-1227)."""
-    from app.models import VendorCard, VendorContact
-
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="SEND01")
     db_session.commit()
 
-    card = VendorCard(
+    _make_vendor_card_with_contact(
+        db_session,
         normalized_name="sendvendor",
         display_name="Send Vendor",
-        emails=["sales@sendvendor.com"],
-        phones=[],
+        card_email="sales@sendvendor.com",
+        contact_name="Send Contact",
+        contact_email="contact@sendvendor.com",
         sighting_count=1,
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(card)
-    db_session.flush()
 
-    contact = VendorContact(
-        vendor_card_id=card.id,
-        full_name="Send Contact",
-        email="contact@sendvendor.com",
-        source="manual",
-        is_verified=True,
-        confidence=90,
-    )
-    db_session.add(contact)
-    db_session.commit()
-
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
@@ -744,11 +716,7 @@ def test_send_inquiry_failed_sends_warning_toast(client, db_session, test_user):
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="SENDFAIL")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
@@ -773,11 +741,7 @@ def test_send_inquiry_broker_publish_per_requirement(client, db_session, test_us
     _, req2 = _make_req_and_requirement(db_session, test_user.id, mpn="BRKR02")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker() as mock_broker:
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
@@ -802,11 +766,7 @@ def test_send_inquiry_auto_progress_increments_count(client, db_session, test_us
     requirement.sourcing_status = "open"
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
@@ -833,11 +793,7 @@ def test_send_inquiry_success_toast_with_progressed_count(client, db_session, te
     requirement.sourcing_status = "open"
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
@@ -867,11 +823,7 @@ def test_send_inquiry_unknown_vendor_empty_email(client, db_session, test_user):
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="NOVCARD")
     db_session.commit()
 
-    with patch(
-        "app.routers.sightings.broker",
-        new_callable=MagicMock,
-    ) as mock_broker:
-        mock_broker.publish = AsyncMock()
+    with _patched_broker():
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,

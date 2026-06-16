@@ -17,14 +17,27 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import patch
 
+import pytest
+
 from app.models import Requirement
 
-# ── list_requirements 404 ─────────────────────────────────────────────
+# ── req-not-found 404 paths ───────────────────────────────────────────
+# Each endpoint short-circuits to 404 when get_req_for_user returns None.
 
 
-def test_list_requirements_req_not_found(client):
+@pytest.mark.parametrize(
+    ("method", "url", "kwargs"),
+    [
+        ("get", "/api/requisitions/99999/requirements", {}),
+        ("post", "/api/requisitions/99999/search", {"json": {}}),
+        ("get", "/api/requisitions/99999/sightings/cached", {}),
+        ("get", "/api/requisitions/99999/leads", {}),
+    ],
+    ids=["list_requirements", "search_requirements", "get_cached_sightings", "list_requisition_leads"],
+)
+def test_endpoint_req_not_found(client, method, url, kwargs):
     with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
-        resp = client.get("/api/requisitions/99999/requirements")
+        resp = getattr(client, method)(url, **kwargs)
     assert resp.status_code == 404
 
 
@@ -88,34 +101,7 @@ class TestAddRequirements:
         assert resp.status_code == 422
 
 
-# ── search_requirements ───────────────────────────────────────────────
-
-
-def test_search_requirements_req_not_found(client):
-    with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
-        resp = client.post(
-            "/api/requisitions/99999/search",
-            json={},
-        )
-    assert resp.status_code == 404
-
-
-# ── get_cached_sightings ──────────────────────────────────────────────
-
-
-def test_get_cached_sightings_req_not_found(client):
-    with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
-        resp = client.get("/api/requisitions/99999/sightings/cached")
-    assert resp.status_code == 404
-
-
 # ── list_requisition_leads ────────────────────────────────────────────
-
-
-def test_list_requisition_leads_req_not_found(client):
-    with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
-        resp = client.get("/api/requisitions/99999/leads")
-    assert resp.status_code == 404
 
 
 def test_list_requisition_leads_success(client, test_requisition):

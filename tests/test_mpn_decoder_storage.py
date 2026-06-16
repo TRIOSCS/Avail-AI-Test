@@ -129,11 +129,9 @@ def test_wd_ambiguous_era_shapes_return_none(mpn):
     assert decode_mpn(mpn) is None, f"{mpn} is era-ambiguous — must not decode"
 
 
-def test_non_drive_mpn_returns_none():
-    assert decode_mpn("LM358N") is None
-    assert decode_mpn("GARBAGE123") is None
-    assert decode_mpn("") is None
-    assert decode_mpn(None) is None
+@pytest.mark.parametrize("mpn", ["LM358N", "GARBAGE123", "", None])
+def test_non_drive_mpn_returns_none(mpn):
+    assert decode_mpn(mpn) is None
 
 
 @pytest.mark.parametrize("mpn", ["MGK50", "MGJN9", "DT10171-H7R6-4F", "MDR60"])

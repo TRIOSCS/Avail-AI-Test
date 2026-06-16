@@ -22,6 +22,18 @@ from app.services.signature_parser import (
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
 
+def _run(coro):
+    """Run an async coroutine to completion in the current event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+def _mock_redis(get_value):
+    """Build a MagicMock Redis whose .get() returns get_value."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = get_value
+    return mock_r
+
+
 @pytest.fixture()
 def low_confidence_extracts(db_session):
     """Create 5 low-confidence regex-parsed signature extracts."""
@@ -129,17 +141,15 @@ def test_build_prompt_with_missing_fields(low_confidence_extracts):
 @patch("app.services.signature_parser._get_redis")
 def test_batch_parse_skips_when_inflight(mock_redis, db_session, low_confidence_extracts):
     """Returns None when a batch is already inflight (Redis key exists)."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_existing"
-    mock_redis.return_value = mock_r
+    mock_redis.return_value = _mock_redis(b"batch_sig_existing")
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
     assert result is None
 
 
 def test_batch_parse_no_records(db_session):
     """Returns None when no low-confidence records exist."""
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
     assert result is None
 
 
@@ -149,11 +159,9 @@ def test_batch_parse_no_body_still_submits(mock_submit, mock_redis, db_session, 
     """Records without VendorResponse body still get submitted — prompt uses existing
     fields."""
     mock_submit.return_value = "batch_sig_nobody"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No inflight batch
-    mock_redis.return_value = mock_r
+    mock_redis.return_value = _mock_redis(None)  # No inflight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
 
     assert result == "batch_sig_nobody"
     requests = mock_submit.call_args[0][0]
@@ -166,11 +174,10 @@ def test_batch_parse_no_body_still_submits(mock_submit, mock_redis, db_session, 
 def test_batch_parse_submits_batch(mock_submit, mock_redis, db_session, low_confidence_extracts):
     """Submits a batch and stores batch_id in Redis."""
     mock_submit.return_value = "batch_sig_123"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No inflight batch
+    mock_r = _mock_redis(None)  # No inflight batch
     mock_redis.return_value = mock_r
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
 
     assert result == "batch_sig_123"
     mock_submit.assert_called_once()
@@ -196,11 +203,9 @@ def test_batch_parse_skips_high_confidence(
 ):
     """Only picks up records with confidence < 0.7."""
     mock_submit.return_value = "batch_sig_456"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No inflight batch
-    mock_redis.return_value = mock_r
+    mock_redis.return_value = _mock_redis(None)  # No inflight batch
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
 
     assert result == "batch_sig_456"
     requests = mock_submit.call_args[0][0]
@@ -213,11 +218,9 @@ def test_batch_parse_skips_high_confidence(
 def test_batch_parse_skips_non_regex(mock_submit, mock_redis, db_session, low_confidence_extracts, batch_api_extracts):
     """Only picks up records with extraction_method = 'regex'."""
     mock_submit.return_value = "batch_sig_003"
-    mock_r = MagicMock()
-    mock_r.get.return_value = None
-    mock_redis.return_value = mock_r
+    mock_redis.return_value = _mock_redis(None)
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
 
     assert result == "batch_sig_003"
     requests = mock_submit.call_args[0][0]
@@ -229,11 +232,10 @@ def test_batch_parse_skips_non_regex(mock_submit, mock_redis, db_session, low_co
 def test_batch_parse_submit_fails(mock_submit, mock_redis, db_session, low_confidence_extracts):
     """Returns None when claude_batch_submit fails."""
     mock_submit.return_value = None
-    mock_r = MagicMock()
-    mock_r.get.return_value = None  # No inflight batch
+    mock_r = _mock_redis(None)  # No inflight batch
     mock_redis.return_value = mock_r
 
-    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+    result = _run(batch_parse_signatures(db_session))
 
     assert result is None
     mock_r.set.assert_not_called()
@@ -247,18 +249,16 @@ def test_process_results_no_redis(mock_redis, db_session):
     """Returns None when Redis is unavailable."""
     mock_redis.return_value = None
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
     assert result is None
 
 
 @patch("app.services.signature_parser._get_redis")
 def test_process_results_no_batch_id(mock_redis, db_session):
     """Returns None when no batch_id is stored in Redis."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = None
-    mock_redis.return_value = mock_r
+    mock_redis.return_value = _mock_redis(None)
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
     assert result is None
 
 
@@ -266,12 +266,11 @@ def test_process_results_no_batch_id(mock_redis, db_session):
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_still_processing(mock_results, mock_redis, db_session):
     """Returns None when batch is still processing."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_123"
+    mock_r = _mock_redis(b"batch_sig_123")
     mock_redis.return_value = mock_r
     mock_results.return_value = None
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
     assert result is None
     mock_r.delete.assert_not_called()
 
@@ -280,8 +279,7 @@ def test_process_results_still_processing(mock_results, mock_redis, db_session):
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_applies_data(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Applies AI results to EmailSignatureExtract records and clears Redis key."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_123"
+    mock_r = _mock_redis(b"batch_sig_123")
     mock_redis.return_value = mock_r
 
     results_dict = {}
@@ -300,7 +298,7 @@ def test_process_results_applies_data(mock_results, mock_redis, db_session, low_
 
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
 
     assert result["applied"] == 5
     assert result["errors"] == 0
@@ -321,8 +319,7 @@ def test_process_results_applies_data(mock_results, mock_redis, db_session, low_
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_handles_none_entry(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Skips records with None results (errors) without crashing."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_123"
+    mock_r = _mock_redis(b"batch_sig_123")
     mock_redis.return_value = mock_r
 
     extract = low_confidence_extracts[0]
@@ -331,7 +328,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
 
     assert result["applied"] == 0
     assert result["errors"] == 1
@@ -346,8 +343,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_commit_failure_keeps_redis_key(mock_results, mock_redis, db_session, low_confidence_extracts):
     """On commit failure, returns stats but does NOT clear Redis key."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_123"
+    mock_r = _mock_redis(b"batch_sig_123")
     mock_redis.return_value = mock_r
 
     extract = low_confidence_extracts[0]
@@ -367,7 +363,7 @@ def test_process_results_commit_failure_keeps_redis_key(mock_results, mock_redis
 
     # Make commit raise an exception
     with patch.object(db_session, "commit", side_effect=Exception("DB error")):
-        result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+        result = _run(process_signature_batch_results(db_session))
 
     assert result is not None
     assert result["applied"] == 1
@@ -379,8 +375,7 @@ def test_process_results_commit_failure_keeps_redis_key(mock_results, mock_redis
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_partial_fields(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Handles partial results where some fields are null."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_123"
+    mock_r = _mock_redis(b"batch_sig_123")
     mock_redis.return_value = mock_r
 
     extract = low_confidence_extracts[0]
@@ -398,7 +393,7 @@ def test_process_results_partial_fields(mock_results, mock_redis, db_session, lo
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
 
     assert result["applied"] == 1
     db_session.refresh(extract)
@@ -415,8 +410,7 @@ def test_process_results_partial_fields(mock_results, mock_redis, db_session, lo
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_only_updates_nonnull(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Only updates fields where AI returned non-null values."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_001"
+    mock_r = _mock_redis(b"batch_sig_001")
     mock_redis.return_value = mock_r
 
     record = low_confidence_extracts[0]
@@ -436,7 +430,7 @@ def test_process_results_only_updates_nonnull(mock_results, mock_redis, db_sessi
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
 
     assert result["applied"] == 1
     db_session.refresh(record)
@@ -449,8 +443,7 @@ def test_process_results_only_updates_nonnull(mock_results, mock_redis, db_sessi
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_bad_custom_id(mock_results, mock_redis, db_session):
     """Handles malformed custom_id gracefully."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_001"
+    mock_r = _mock_redis(b"batch_sig_001")
     mock_redis.return_value = mock_r
 
     results_dict = {
@@ -460,7 +453,7 @@ def test_process_results_bad_custom_id(mock_results, mock_redis, db_session):
     }
     mock_results.return_value = results_dict
 
-    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    result = _run(process_signature_batch_results(db_session))
 
     assert result["applied"] == 0
     assert result["errors"] == 3
@@ -470,8 +463,7 @@ def test_process_results_bad_custom_id(mock_results, mock_redis, db_session):
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_confidence_all_fields(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Confidence caps at 0.95 when all 8 fields are filled."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_001"
+    mock_r = _mock_redis(b"batch_sig_001")
     mock_redis.return_value = mock_r
 
     record = low_confidence_extracts[0]
@@ -489,7 +481,7 @@ def test_process_results_confidence_all_fields(mock_results, mock_redis, db_sess
     }
     mock_results.return_value = results_dict
 
-    asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    _run(process_signature_batch_results(db_session))
 
     db_session.refresh(record)
     # 8 fields * 0.08 + 0.5 = 1.14 -> capped at 0.95
@@ -500,8 +492,7 @@ def test_process_results_confidence_all_fields(mock_results, mock_redis, db_sess
 @patch("app.services.signature_parser.claude_batch_results")
 def test_process_results_confidence_partial(mock_results, mock_redis, db_session, low_confidence_extracts):
     """Confidence calculation with partial fields."""
-    mock_r = MagicMock()
-    mock_r.get.return_value = b"batch_sig_001"
+    mock_r = _mock_redis(b"batch_sig_001")
     mock_redis.return_value = mock_r
 
     record = low_confidence_extracts[1]  # has phone but no full_name, title, company
@@ -520,7 +511,7 @@ def test_process_results_confidence_partial(mock_results, mock_redis, db_session
     }
     mock_results.return_value = results_dict
 
-    asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    _run(process_signature_batch_results(db_session))
 
     db_session.refresh(record)
     # phone + title = 2 fields => 0.5 + 2*0.08 = 0.66

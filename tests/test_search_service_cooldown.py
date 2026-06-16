@@ -30,6 +30,30 @@ def _mk_card(db: Session, mpn: str, last_searched_at):
     return card
 
 
+def _mk_requirement(db: Session, test_user, *, req_name, primary_mpn, now, customer_name="Test Co", substitutes=None):
+    req = Requisition(
+        name=req_name,
+        customer_name=customer_name,
+        status="active",
+        created_by=test_user.id,
+        created_at=now,
+    )
+    db.add(req)
+    db.flush()
+    # Only set substitutes when provided so the JSON default (list) still applies
+    # when omitted, matching how callers that don't pass substitutes behave.
+    extra = {"substitutes": substitutes} if substitutes is not None else {}
+    item = Requirement(
+        requisition_id=req.id,
+        primary_mpn=primary_mpn,
+        created_at=now,
+        **extra,
+    )
+    db.add(item)
+    db.flush()
+    return item
+
+
 class TestMpnCooldownPartition:
     def test_partitions_stale_and_fresh_mpns(self, db_session: Session):
         now = datetime.now(timezone.utc)
@@ -78,24 +102,14 @@ class TestSearchRequirementCooldown:
         # resolver block would call _fetch_fresh a second time on the AVL.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
-        req = Requisition(
-            name="REQ-CD-1",
-            customer_name="Test Co",
-            status="active",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        item = Requirement(
-            requisition_id=req.id,
+        item = _mk_requirement(
+            db_session,
+            test_user,
+            req_name="REQ-CD-1",
             primary_mpn="STALEMPN",
+            now=now,
             substitutes=[{"mpn": "FRESHMPN"}],
-            created_at=now,
         )
-        db_session.add(item)
-        db_session.flush()
 
         # FRESHMPN already searched 12h ago → should be skipped
         _mk_card(db_session, "FRESHMPN", now - timedelta(hours=12))
@@ -124,21 +138,7 @@ class TestSearchRequirementCooldown:
         # default ever flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
-        req = Requisition(
-            name="REQ-CD-2",
-            customer_name="Test Co",
-            status="active",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="NEWMPN",
-            created_at=now,
-        )
-        db_session.add(item)
+        item = _mk_requirement(db_session, test_user, req_name="REQ-CD-2", primary_mpn="NEWMPN", now=now)
         db_session.commit()
 
         with patch(
@@ -160,21 +160,7 @@ class TestSearchRequirementCooldown:
         # Defensive pin against future flag-default flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
-        req = Requisition(
-            name="REQ-CD-AFFINITY",
-            customer_name="Test Co",
-            status="active",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="CACHEDMPN",
-            created_at=now,
-        )
-        db_session.add(item)
+        item = _mk_requirement(db_session, test_user, req_name="REQ-CD-AFFINITY", primary_mpn="CACHEDMPN", now=now)
         _mk_card(db_session, "CACHEDMPN", now - timedelta(hours=1))
         db_session.commit()
 
@@ -205,22 +191,15 @@ class TestIcsNcEnqueueOnRefresh:
         # resolver default flips on (extra AVL enqueues).
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
-        req = Requisition(
-            name="REQ-CD-3",
-            customer_name="C",
-            status="active",
-            created_by=test_user.id,
-            created_at=now,
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
+        item = _mk_requirement(
+            db_session,
+            test_user,
+            req_name="REQ-CD-3",
             primary_mpn="EM1",
+            now=now,
+            customer_name="C",
             substitutes=[{"mpn": "EM2"}],
-            created_at=now,
         )
-        db_session.add(item)
         db_session.commit()
 
         with (
@@ -241,21 +220,9 @@ class TestIcsNcEnqueueOnRefresh:
         # Defensive pin against future flag-default flips.
         monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
-        req = Requisition(
-            name="REQ-CD-CACHED",
-            customer_name="C",
-            status="active",
-            created_by=test_user.id,
-            created_at=now,
+        item = _mk_requirement(
+            db_session, test_user, req_name="REQ-CD-CACHED", primary_mpn="CACHED1", now=now, customer_name="C"
         )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="CACHED1",
-            created_at=now,
-        )
-        db_session.add(item)
         _mk_card(db_session, "CACHED1", now - timedelta(hours=1))
         db_session.commit()
 

@@ -43,6 +43,18 @@ def _json_request(payload: dict) -> MagicMock:
     return req
 
 
+async def _call_bulk(handler, payload, user, db):
+    """Invoke a bulk_archive/unarchive coroutine with parts_list_partial mocked.
+
+    Returns ``(result, mock_list)`` so callers can assert on both the response and
+    the patched partial.
+    """
+    with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
+        mock_list.return_value = HTMLResponse("<div>ok</div>")
+        result = await handler(request=_json_request(payload), user=user, db=db)
+    return result, mock_list
+
+
 def _make_requisition(db: Session, user: User) -> Requisition:
     req = Requisition(name="N29 Req", status="active", created_by=user.id)
     db.add(req)
@@ -73,10 +85,9 @@ class TestBulkArchiveDirect:
         """Lines 9866–9868: body parsed; empty lists skip both if-branches."""
         from app.routers.htmx_views import bulk_archive
 
-        mock_req = _json_request({"requirement_ids": [], "requisition_ids": []})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_archive(request=mock_req, user=test_user, db=db_session)
+        result, mock_list = await _call_bulk(
+            bulk_archive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
+        )
 
         assert result.status_code == 200
         mock_list.assert_awaited_once()
@@ -88,10 +99,9 @@ class TestBulkArchiveDirect:
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
 
-        mock_req = _json_request({"requirement_ids": [part.id], "requisition_ids": []})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_archive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_archive, {"requirement_ids": [part.id], "requisition_ids": []}, test_user, db_session
+        )
 
         assert result.status_code == 200
         db_session.refresh(part)
@@ -104,10 +114,9 @@ class TestBulkArchiveDirect:
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
 
-        mock_req = _json_request({"requirement_ids": [], "requisition_ids": [req.id]})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_archive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_archive, {"requirement_ids": [], "requisition_ids": [req.id]}, test_user, db_session
+        )
 
         assert result.status_code == 200
         db_session.refresh(req)
@@ -122,10 +131,9 @@ class TestBulkArchiveDirect:
         req = _make_requisition(db_session, test_user)
         part = _make_requirement(db_session, req)
 
-        mock_req = _json_request({"requirement_ids": [part.id], "requisition_ids": [req.id]})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_archive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_archive, {"requirement_ids": [part.id], "requisition_ids": [req.id]}, test_user, db_session
+        )
 
         assert result.status_code == 200
 
@@ -140,10 +148,9 @@ class TestBulkUnarchiveDirect:
         """Lines 9902–9904: body parsed; empty lists skip both if-branches."""
         from app.routers.htmx_views import bulk_unarchive
 
-        mock_req = _json_request({"requirement_ids": [], "requisition_ids": []})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_unarchive(request=mock_req, user=test_user, db=db_session)
+        result, mock_list = await _call_bulk(
+            bulk_unarchive, {"requirement_ids": [], "requisition_ids": []}, test_user, db_session
+        )
 
         assert result.status_code == 200
         mock_list.assert_awaited_once()
@@ -159,10 +166,9 @@ class TestBulkUnarchiveDirect:
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
-        mock_req = _json_request({"requirement_ids": [part.id], "requisition_ids": []})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_unarchive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_unarchive, {"requirement_ids": [part.id], "requisition_ids": []}, test_user, db_session
+        )
 
         assert result.status_code == 200
         db_session.refresh(part)
@@ -178,10 +184,9 @@ class TestBulkUnarchiveDirect:
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
-        mock_req = _json_request({"requirement_ids": [], "requisition_ids": [req.id]})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_unarchive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_unarchive, {"requirement_ids": [], "requisition_ids": [req.id]}, test_user, db_session
+        )
 
         assert result.status_code == 200
         db_session.refresh(req)
@@ -199,9 +204,8 @@ class TestBulkUnarchiveDirect:
         part.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
-        mock_req = _json_request({"requirement_ids": [part.id], "requisition_ids": [req.id]})
-        with patch("app.routers.htmx_views.parts_list_partial", new_callable=AsyncMock) as mock_list:
-            mock_list.return_value = HTMLResponse("<div>ok</div>")
-            result = await bulk_unarchive(request=mock_req, user=test_user, db=db_session)
+        result, _ = await _call_bulk(
+            bulk_unarchive, {"requirement_ids": [part.id], "requisition_ids": [req.id]}, test_user, db_session
+        )
 
         assert result.status_code == 200

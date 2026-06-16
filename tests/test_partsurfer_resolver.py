@@ -38,19 +38,28 @@ def _resp(text: str, status_code: int = 200):
 
 
 @pytest.mark.asyncio
-async def test_dimm_fixture_returns_exact_description():
-    resp = _resp(_fixture("dimm_726719-B21.html"))
+@pytest.mark.parametrize(
+    ("fixture", "spare_pn", "expected"),
+    [
+        pytest.param(
+            "dimm_726719-B21.html",
+            "726719-B21",
+            "HPE 16GB (1X16GB) DUAL RANK X4 DDR4-2133 CAS-15-15-15 REGISTERED MEMORY KIT",
+            id="dimm",
+        ),
+        pytest.param(
+            "ssd_875507-B21.html",
+            "875507-B21",
+            "HPE 240GB SATA 6G READ INTENSIVE SFF RW PM883 SSD",
+            id="ssd",
+        ),
+    ],
+)
+async def test_fixture_returns_exact_description(fixture: str, spare_pn: str, expected: str):
+    resp = _resp(_fixture(fixture))
     with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
-        desc = await partsurfer_resolver.fetch_partsurfer_description("726719-B21")
-    assert desc == "HPE 16GB (1X16GB) DUAL RANK X4 DDR4-2133 CAS-15-15-15 REGISTERED MEMORY KIT"
-
-
-@pytest.mark.asyncio
-async def test_ssd_fixture_returns_exact_description():
-    resp = _resp(_fixture("ssd_875507-B21.html"))
-    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
-        desc = await partsurfer_resolver.fetch_partsurfer_description("875507-B21")
-    assert desc == "HPE 240GB SATA 6G READ INTENSIVE SFF RW PM883 SSD"
+        desc = await partsurfer_resolver.fetch_partsurfer_description(spare_pn)
+    assert desc == expected
 
 
 @pytest.mark.asyncio
@@ -67,19 +76,22 @@ async def test_outbound_request_uses_exact_url_and_contact_ua():
 
 
 @pytest.mark.asyncio
-async def test_not_found_fixture_returns_none():
-    # A real-shaped Search.aspx page with no lblDescription span → None (no guess).
-    resp = _resp(_fixture("notfound.html"))
+@pytest.mark.parametrize(
+    ("resp", "spare_pn"),
+    [
+        # A real-shaped Search.aspx page with no lblDescription span → None (no guess).
+        pytest.param(_resp(_fixture("notfound.html")), "ZZZNOTAPART999", id="not_found_fixture"),
+        # A 404/3xx is a GENUINE no-result (not a throttle) → None, the spare moves on.
+        pytest.param(_resp(_fixture("dimm_726719-B21.html"), status_code=404), "726719-B21", id="genuine_non_200"),
+        # The span is present but empty/whitespace → None (an empty string is not a description).
+        pytest.param(
+            _resp('<span id="ctl00_BodyContentPlaceHolder_lblDescription">   </span>'), "726719-B21", id="empty_lbl"
+        ),
+    ],
+)
+async def test_no_result_returns_none(resp, spare_pn: str):
     with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
-        assert await partsurfer_resolver.fetch_partsurfer_description("ZZZNOTAPART999") is None
-
-
-@pytest.mark.asyncio
-async def test_genuine_non_200_returns_none():
-    # A 404/3xx is a GENUINE no-result (not a throttle) → None, the spare moves on.
-    resp = _resp(_fixture("dimm_726719-B21.html"), status_code=404)
-    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
-        assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
+        assert await partsurfer_resolver.fetch_partsurfer_description(spare_pn) is None
 
 
 @pytest.mark.asyncio
@@ -132,14 +144,6 @@ async def test_text_attribute_raises_returns_none():
             raise ValueError("decode boom")
 
     with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=_BadText())):
-        assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
-
-
-@pytest.mark.asyncio
-async def test_empty_lbldescription_returns_none():
-    # The span is present but empty/whitespace → None (an empty string is not a description).
-    resp = _resp('<span id="ctl00_BodyContentPlaceHolder_lblDescription">   </span>')
-    with patch.object(partsurfer_resolver.http_redirect, "get", new=AsyncMock(return_value=resp)):
         assert await partsurfer_resolver.fetch_partsurfer_description("726719-B21") is None
 
 

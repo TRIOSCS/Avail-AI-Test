@@ -34,18 +34,7 @@ def test_subfilters_renders_for_commodity(client, db_session: Session):
     )
     db_session.add(card)
     db_session.flush()
-    db_session.add(
-        CommoditySpecSchema(
-            commodity="dram",
-            spec_key="ddr_type",
-            display_name="DDR Type",
-            data_type="enum",
-            enum_values=["DDR4", "DDR5"],
-            sort_order=1,
-            is_filterable=True,
-            is_primary=False,
-        )
-    )
+    _seed_ddr_schema(db_session)
     db_session.add(
         MaterialSpecFacet(
             material_card_id=card.id,
@@ -113,19 +102,7 @@ def test_faceted_results_sub_filters_actually_filter(client, db_session: Session
     import json
 
     # Create schema
-    db_session.add(
-        CommoditySpecSchema(
-            commodity="dram",
-            spec_key="ddr_type",
-            display_name="DDR Type",
-            data_type="enum",
-            enum_values=["DDR4", "DDR5"],
-            sort_order=1,
-            is_filterable=True,
-            is_primary=False,
-        )
-    )
-    db_session.flush()
+    _seed_ddr_schema(db_session)
 
     # Create two cards with different spec values
     card_ddr4 = MaterialCard(
@@ -652,6 +629,20 @@ def _seed_ddr_schema(db):
     db.flush()
 
 
+def _seed_capacity_schema(db):
+    db.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="capacity_gb",
+            display_name="Capacity (GB)",
+            data_type="numeric",
+            sort_order=1,
+            is_filterable=True,
+            is_primary=True,
+        )
+    )
+
+
 def test_subfilters_panel_shows_coverage_line(client, db_session: Session):
     """'N of M parts in <commodity> have filterable specs' renders in the panel."""
     _seed_ddr_schema(db_session)
@@ -783,17 +774,7 @@ def test_faceted_row_crosses_chip_neutral_not_indigo(client, db_session: Session
 
 def test_faceted_spec_chip_title_keeps_label_in_commodity_context(client, db_session: Session):
     # Commodity-scoped chips render value-only; the title keeps "Label: value" on hover.
-    db_session.add(
-        CommoditySpecSchema(
-            commodity="dram",
-            spec_key="capacity_gb",
-            display_name="Capacity (GB)",
-            data_type="numeric",
-            sort_order=1,
-            is_filterable=True,
-            is_primary=True,
-        )
-    )
+    _seed_capacity_schema(db_session)
     _op_card(db_session, "chip-hover", category="dram", specs_structured={"capacity_gb": {"value": 32}})
     db_session.commit()
     resp = client.get("/v2/partials/materials/faceted?commodity=dram")
@@ -806,17 +787,7 @@ def test_faceted_spec_chips_without_commodity_use_schema_primaries(client, db_se
 
     value'.
     """
-    db_session.add(
-        CommoditySpecSchema(
-            commodity="dram",
-            spec_key="capacity_gb",
-            display_name="Capacity (GB)",
-            data_type="numeric",
-            sort_order=1,
-            is_filterable=True,
-            is_primary=True,
-        )
-    )
+    _seed_capacity_schema(db_session)
     _op_card(db_session, "chip-known", category="dram", specs_structured={"capacity_gb": {"value": 32}})
     db_session.commit()
 
@@ -855,17 +826,7 @@ def test_faceted_spec_chips_without_commodity_fallback_first_scalars(client, db_
 
 def test_faceted_spec_chips_in_commodity_context_unchanged(client, db_session: Session):
     """With a commodity selected, chips stay value-only (no 'label:' prefix)."""
-    db_session.add(
-        CommoditySpecSchema(
-            commodity="dram",
-            spec_key="capacity_gb",
-            display_name="Capacity (GB)",
-            data_type="numeric",
-            sort_order=1,
-            is_filterable=True,
-            is_primary=True,
-        )
-    )
+    _seed_capacity_schema(db_session)
     _op_card(db_session, "chip-ctx", category="dram", specs_structured={"capacity_gb": {"value": 64}})
     # Raw-scalar primary spec (no {"value": ...} wrapper) — the pre-_spec_scalar code
     # raised AttributeError (HTTP 500) on this shape in commodity context; it must now

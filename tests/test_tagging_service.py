@@ -7,6 +7,8 @@ Depends on: app.services.tagging, app.services.prefix_lookup, app.models.tags
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models.tags import EntityTag, MaterialTag, Tag, TagThresholdConfig
 from app.services.prefix_lookup import lookup_manufacturer_by_prefix
 from app.services.tagging import (
@@ -46,37 +48,37 @@ def _seed_thresholds(db):
 # ── Prefix Lookup ──────────────────────────────────────────────────────
 
 
-def test_prefix_lookup_known_prefix():
-    mfr, conf = lookup_manufacturer_by_prefix("tps65217")
-    assert mfr == "Texas Instruments"
-    assert conf == 0.9
-
-
-def test_prefix_lookup_long_prefix():
-    mfr, conf = lookup_manufacturer_by_prefix("atmega328p")
-    assert mfr == "Microchip Technology"
-    assert conf == 0.9
-
-
-def test_prefix_lookup_unknown():
-    mfr, conf = lookup_manufacturer_by_prefix("zzzxxx123")
-    assert mfr is None
-    assert conf == 0.0
-
-
-def test_prefix_lookup_short_prefix_skipped():
-    """2-char prefixes are now skipped (below min confidence floor)."""
-    mfr, conf = lookup_manufacturer_by_prefix("ad5292")
-    # AD is a 2-char prefix — now returns None (skip) instead of 0.70
-    # But ADM/ADP/ADG are 3-char, so "adm..." would match. "ad5292" has no 3+ match.
-    assert mfr is None
-    assert conf == 0.0
-
-
-def test_prefix_lookup_stm32():
-    mfr, conf = lookup_manufacturer_by_prefix("stm32f407vgt6")
-    assert mfr == "STMicroelectronics"
-    assert conf == 0.9
+@pytest.mark.parametrize(
+    ("mpn", "expected_mfr", "expected_conf"),
+    [
+        ("tps65217", "Texas Instruments", 0.9),
+        ("atmega328p", "Microchip Technology", 0.9),
+        ("stm32f407vgt6", "STMicroelectronics", 0.9),
+        ("nrf52840", "Nordic Semiconductor", 0.9),
+        ("esp32s3", "Espressif Systems", 0.9),
+        ("zzzxxx123", None, 0.0),
+        # 2-char prefixes are now skipped (below min confidence floor). AD/FT/SI all
+        # return None instead of their old sub-floor scores; "ad5292" has no 3+ match.
+        ("ad5292", None, 0.0),
+        ("ft232r", None, 0.0),
+        ("si5351", None, 0.0),
+    ],
+    ids=[
+        "known_prefix",
+        "long_prefix",
+        "stm32",
+        "nordic",
+        "espressif",
+        "unknown",
+        "ad_2char_skipped",
+        "ftdi_2char_skipped",
+        "silicon_labs_2char_skipped",
+    ],
+)
+def test_prefix_lookup(mpn, expected_mfr, expected_conf):
+    mfr, conf = lookup_manufacturer_by_prefix(mpn)
+    assert mfr == expected_mfr
+    assert conf == expected_conf
 
 
 def test_prefix_lookup_most_specific_wins():
@@ -85,63 +87,23 @@ def test_prefix_lookup_most_specific_wins():
     assert mfr == "STMicroelectronics"
 
 
-def test_prefix_lookup_nordic():
-    mfr, conf = lookup_manufacturer_by_prefix("nrf52840")
-    assert mfr == "Nordic Semiconductor"
-    assert conf == 0.9
-
-
-def test_prefix_lookup_espressif():
-    mfr, conf = lookup_manufacturer_by_prefix("esp32s3")
-    assert mfr == "Espressif Systems"
-    assert conf == 0.9
-
-
-def test_prefix_lookup_ftdi_2char_skipped():
-    """FT is a 2-char prefix — now skipped (below min confidence floor)."""
-    mfr, conf = lookup_manufacturer_by_prefix("ft232r")
-    assert mfr is None
-    assert conf == 0.0
-
-
-def test_prefix_lookup_silicon_labs_2char_skipped():
-    """SI is a 2-char prefix — now skipped (below min confidence floor)."""
-    mfr, conf = lookup_manufacturer_by_prefix("si5351")
-    assert mfr is None
-    assert conf == 0.0
-
-
-def test_new_prefix_entries():
+@pytest.mark.parametrize(
+    ("mpn", "expected_mfr"),
+    [
+        ("R7FA2E1A93CFM", "Renesas Electronics"),
+        ("SRR1260A-100M", "Bourns"),
+        ("GD25Q128CSIG", "GigaDevice"),
+        ("MP2315GJ", None),  # Monolithic Power — MP is 2-char prefix, now skipped
+        ("RTL8211F", "Realtek"),
+        ("SX1276IMLTRT", "Semtech"),
+        ("MX25L12835F", "Macronix"),
+    ],
+    ids=["renesas", "bourns", "gigadevice", "monolithic_power_2char", "realtek", "semtech", "macronix"],
+)
+def test_new_prefix_entries(mpn, expected_mfr):
     """Verify new prefix entries from Phase 2 expansion match correctly."""
-    from app.services.prefix_lookup import lookup_manufacturer_by_prefix
-
-    # Renesas
-    mfr, conf = lookup_manufacturer_by_prefix("R7FA2E1A93CFM")
-    assert mfr == "Renesas Electronics"
-
-    # Bourns
-    mfr, conf = lookup_manufacturer_by_prefix("SRR1260A-100M")
-    assert mfr == "Bourns"
-
-    # GigaDevice
-    mfr, conf = lookup_manufacturer_by_prefix("GD25Q128CSIG")
-    assert mfr == "GigaDevice"
-
-    # Monolithic Power — MP is 2-char prefix, now skipped
-    mfr, conf = lookup_manufacturer_by_prefix("MP2315GJ")
-    assert mfr is None  # 2-char prefix below confidence floor
-
-    # Realtek
-    mfr, conf = lookup_manufacturer_by_prefix("RTL8211F")
-    assert mfr == "Realtek"
-
-    # Semtech
-    mfr, conf = lookup_manufacturer_by_prefix("SX1276IMLTRT")
-    assert mfr == "Semtech"
-
-    # Macronix
-    mfr, conf = lookup_manufacturer_by_prefix("MX25L12835F")
-    assert mfr == "Macronix"
+    mfr, _ = lookup_manufacturer_by_prefix(mpn)
+    assert mfr == expected_mfr
 
 
 # ── classify_material_card ─────────────────────────────────────────────

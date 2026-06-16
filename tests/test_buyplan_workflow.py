@@ -11,7 +11,9 @@ Depends on: conftest fixtures, buyplan_workflow module
 """
 
 import asyncio
+from collections.abc import Awaitable
 from datetime import datetime, timedelta, timezone
+from typing import TypeVar
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -43,6 +45,17 @@ from app.services.buyplan_workflow import (
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────
+
+_T = TypeVar("_T")
+
+
+def _run(coro: Awaitable[_T]) -> _T:
+    """Run an async coroutine to completion on a fresh event loop."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _make_plan(db: Session, user: User, quote: Quote, requisition: Requisition, **overrides) -> BuyPlan:
@@ -1125,11 +1138,7 @@ class TestVerifyPOSent:
         _make_line(db_session, plan, po_number=None)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert len(results) == 1
         assert results[0]["skipped"] is True
@@ -1141,11 +1150,7 @@ class TestVerifyPOSent:
         _make_line(db_session, plan, po_number="PO-TEST", buyer_id=None)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert results[0]["reason"] == "no_buyer"
 
@@ -1157,11 +1162,7 @@ class TestVerifyPOSent:
         _make_line(db_session, plan, po_number="PO-TEST", buyer_id=test_user.id)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert results[0]["reason"] == "no_token"
 
@@ -1187,11 +1188,7 @@ class TestVerifyPOSent:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert results[0]["found"] is True
         assert results[0]["message_count"] == 1
@@ -1215,11 +1212,7 @@ class TestVerifyPOSent:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert results[0]["found"] is False
 
@@ -1231,11 +1224,7 @@ class TestVerifyPOSent:
         _make_line(db_session, plan, po_number="PO-ERR", buyer_id=test_user.id)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent(plan, db_session))
 
         assert results[0]["found"] is False
         assert "error" in results[0]
@@ -1251,11 +1240,7 @@ class TestVerifyPOSentV3:
         _make_line(db_session, plan, po_number=None, status=BuyPlanLineStatus.PENDING_VERIFY.value)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results == {}
 
@@ -1266,11 +1251,7 @@ class TestVerifyPOSentV3:
         _make_line(db_session, plan, po_number="PO-1", status=BuyPlanLineStatus.AWAITING_PO.value)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results == {}
 
@@ -1281,11 +1262,7 @@ class TestVerifyPOSentV3:
         _make_line(db_session, plan, po_number="PO-NB", buyer_id=None, status=BuyPlanLineStatus.PENDING_VERIFY.value)
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-NB"]["reason"] == "no_buyer"
 
@@ -1325,13 +1302,9 @@ class TestVerifyPOSentV3:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            # Patch at the v3 import location
-            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
-                results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        # Patch at the v3 import location
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
+            results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-V3"]["verified"] is True
         assert results["PO-V3"]["recipient"] == "vendor@test.com"
@@ -1357,12 +1330,8 @@ class TestVerifyPOSentV3:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
-                results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
+            results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-V3NF"]["verified"] is False
         assert results["PO-V3NF"]["reason"] == "not_found_in_sent"
@@ -1384,12 +1353,8 @@ class TestVerifyPOSentV3:
                 return None
             return original_get(model, ident, **kwargs)
 
-        loop = asyncio.new_event_loop()
-        try:
-            with patch.object(db_session, "get", side_effect=mock_get):
-                results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        with patch.object(db_session, "get", side_effect=mock_get):
+            results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-BNF"]["reason"] == "buyer_not_found"
 
@@ -1414,11 +1379,7 @@ class TestVerifyPOSentV3:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-GE"]["verified"] is False
         assert "graph_error" in results["PO-GE"]["reason"]
@@ -1433,10 +1394,6 @@ class TestVerifyPOSentV3:
         )
         db_session.refresh(plan)
 
-        loop = asyncio.new_event_loop()
-        try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
-        finally:
-            loop.close()
+        results = _run(verify_po_sent_v3(plan, db_session))
 
         assert results["PO-NT"]["reason"] == "no_token"

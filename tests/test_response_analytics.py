@@ -11,6 +11,8 @@ Depends on: app.services.response_analytics, conftest fixtures
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.models import ActivityLog, VendorCard, VendorContact
 from app.models.email_intelligence import EmailIntelligence
 from app.models.offers import VendorResponse
@@ -289,8 +291,15 @@ class TestComputeEmailHealthScore:
         result = compute_email_health_score(db_session, 99999)
         assert result["metrics"]["response_rate"] == 0.0
 
-    def test_response_time_ideal(self, db_session, test_user):
-        """Response time <= 4h scores 100."""
+    @pytest.mark.parametrize(
+        ("response_delay_hours", "expected_score"),
+        [
+            pytest.param(2, 100.0, id="ideal_under_4h"),
+            pytest.param(170, 0.0, id="worst_over_168h"),
+        ],
+    )
+    def test_response_time_boundary_scores(self, db_session, test_user, response_delay_hours, expected_score):
+        """Response time <= 4h scores 100; >= 168h scores 0."""
         card = _make_vendor_card(db_session)
         _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
         now = datetime.now(timezone.utc)
@@ -298,30 +307,13 @@ class TestComputeEmailHealthScore:
             db_session,
             vendor_email="sales@testvendor.com",
             received_at=now,
-            created_at=now - timedelta(hours=2),
+            created_at=now - timedelta(hours=response_delay_hours),
         )
 
         from app.services.response_analytics import compute_email_health_score
 
         result = compute_email_health_score(db_session, card.id)
-        assert result["response_time_score"] == 100.0
-
-    def test_response_time_worst(self, db_session, test_user):
-        """Response time >= 168h scores 0."""
-        card = _make_vendor_card(db_session)
-        _make_activity_log(db_session, test_user.id, card.id, "rfq_sent")
-        now = datetime.now(timezone.utc)
-        _make_vendor_response(
-            db_session,
-            vendor_email="sales@testvendor.com",
-            received_at=now,
-            created_at=now - timedelta(hours=170),
-        )
-
-        from app.services.response_analytics import compute_email_health_score
-
-        result = compute_email_health_score(db_session, card.id)
-        assert result["response_time_score"] == 0.0
+        assert result["response_time_score"] == expected_score
 
     def test_response_time_unknown_defaults_neutral(self, db_session):
         """Unknown response time defaults to 50 (neutral)."""

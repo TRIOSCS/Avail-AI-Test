@@ -10,6 +10,7 @@ Depends on: app/routers/materials.py, app/search_service.py
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialVendorHistory
@@ -17,18 +18,18 @@ from app.models import MaterialCard, MaterialVendorHistory
 # ── Validation tests ──────────────────────────────────────────────────────
 
 
-def test_quick_search_missing_mpn(client):
-    """Should reject request with missing MPN."""
-    resp = client.post("/api/quick-search", json={})
+@pytest.mark.parametrize(
+    ("payload", "expected_error"),
+    [
+        pytest.param({}, "MPN is required", id="missing_mpn"),
+        pytest.param({"mpn": "A"}, "at least 2 characters", id="short_mpn"),
+    ],
+)
+def test_quick_search_rejects_invalid_mpn(client, payload, expected_error):
+    """Should reject requests with a missing or too-short MPN."""
+    resp = client.post("/api/quick-search", json=payload)
     assert resp.status_code == 400
-    assert "MPN is required" in resp.json()["error"]
-
-
-def test_quick_search_short_mpn(client):
-    """Should reject MPN shorter than 2 characters."""
-    resp = client.post("/api/quick-search", json={"mpn": "A"})
-    assert resp.status_code == 400
-    assert "at least 2 characters" in resp.json()["error"]
+    assert expected_error in resp.json()["error"]
 
 
 # ── Successful search (mocked connectors) ────────────────────────────────

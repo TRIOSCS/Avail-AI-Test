@@ -38,59 +38,66 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
+def _call_modal_multi(requisition_ids, user, db):
+    """Invoke the async quote_builder_modal_multi function synchronously."""
+    return _run(
+        quote_builder_modal_multi(
+            request=_make_request(),
+            requisition_ids=requisition_ids,
+            user=user,
+            db=db,
+        )
+    )
+
+
+def _call_modal_multi_capturing(requisition_ids, user, db, found_req):
+    """Run modal_multi with get_req_for_user stubbed to found_req and template_response
+    captured.
+
+    Returns (result, captured_context).
+    """
+    mock_response = HTMLResponse("<html>modal</html>")
+    captured_ctx: dict = {}
+
+    def _fake_template_response(template_name, context):
+        captured_ctx.update(context)
+        return mock_response
+
+    with patch("app.dependencies.get_req_for_user", return_value=found_req):
+        with patch(
+            "app.template_env.template_response",
+            side_effect=_fake_template_response,
+        ):
+            result = _call_modal_multi(requisition_ids, user, db)
+
+    return result, mock_response, captured_ctx
+
+
 class TestQuoteBuilderModalMultiInvalidIds:
     """Lines 80-83: ValueError branch when IDs contain non-numeric text."""
 
-    def test_non_numeric_ids_raise_400(self, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "requisition_ids",
+        ["abc,def", "1,bad,3"],
+        ids=["non_numeric", "mixed_valid_invalid"],
+    )
+    def test_invalid_ids_raise_400(self, requisition_ids, db_session: Session, test_user: User):
         with pytest.raises(HTTPException) as exc_info:
-            _run(
-                quote_builder_modal_multi(
-                    request=_make_request(),
-                    requisition_ids="abc,def",
-                    user=test_user,
-                    db=db_session,
-                )
-            )
-        assert exc_info.value.status_code == 400
-
-    def test_mixed_valid_invalid_ids_raise_400(self, db_session: Session, test_user: User):
-        with pytest.raises(HTTPException) as exc_info:
-            _run(
-                quote_builder_modal_multi(
-                    request=_make_request(),
-                    requisition_ids="1,bad,3",
-                    user=test_user,
-                    db=db_session,
-                )
-            )
+            _call_modal_multi(requisition_ids, test_user, db_session)
         assert exc_info.value.status_code == 400
 
 
 class TestQuoteBuilderModalMultiEmptyIds:
     """Lines 84-85: empty list branch when requisition_ids is blank or whitespace."""
 
-    def test_empty_string_raises_400(self, db_session: Session, test_user: User):
+    @pytest.mark.parametrize(
+        "requisition_ids",
+        ["", "  ,  "],
+        ids=["empty_string", "whitespace_only"],
+    )
+    def test_empty_ids_raise_400(self, requisition_ids, db_session: Session, test_user: User):
         with pytest.raises(HTTPException) as exc_info:
-            _run(
-                quote_builder_modal_multi(
-                    request=_make_request(),
-                    requisition_ids="",
-                    user=test_user,
-                    db=db_session,
-                )
-            )
-        assert exc_info.value.status_code == 400
-
-    def test_whitespace_only_raises_400(self, db_session: Session, test_user: User):
-        with pytest.raises(HTTPException) as exc_info:
-            _run(
-                quote_builder_modal_multi(
-                    request=_make_request(),
-                    requisition_ids="  ,  ",
-                    user=test_user,
-                    db=db_session,
-                )
-            )
+            _call_modal_multi(requisition_ids, test_user, db_session)
         assert exc_info.value.status_code == 400
 
 
@@ -100,14 +107,7 @@ class TestQuoteBuilderModalMultiNotFound:
     def test_req_not_found_raises_404(self, db_session: Session, test_user: User):
         with patch("app.dependencies.get_req_for_user", return_value=None):
             with pytest.raises(HTTPException) as exc_info:
-                _run(
-                    quote_builder_modal_multi(
-                        request=_make_request(),
-                        requisition_ids="99999",
-                        user=test_user,
-                        db=db_session,
-                    )
-                )
+                _call_modal_multi("99999", test_user, db_session)
         assert exc_info.value.status_code == 404
 
 
@@ -123,18 +123,9 @@ class TestQuoteBuilderModalMultiNoCustomerSite:
     ):
         test_requisition.customer_site_id = None
 
-        mock_response = HTMLResponse("<html>modal</html>")
-
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch("app.template_env.template_response", return_value=mock_response):
-                result = _run(
-                    quote_builder_modal_multi(
-                        request=_make_request(),
-                        requisition_ids=str(test_requisition.id),
-                        user=test_user,
-                        db=db_session,
-                    )
-                )
+        result, mock_response, _ = _call_modal_multi_capturing(
+            str(test_requisition.id), test_user, db_session, test_requisition
+        )
 
         assert result is mock_response
 
@@ -152,26 +143,9 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
         test_requisition.customer_site_id = test_customer_site.id
         db_session.flush()
 
-        mock_response = HTMLResponse("<html>modal</html>")
-        captured_ctx: dict = {}
-
-        def _fake_template_response(template_name, context):
-            captured_ctx.update(context)
-            return mock_response
-
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch(
-                "app.template_env.template_response",
-                side_effect=_fake_template_response,
-            ):
-                result = _run(
-                    quote_builder_modal_multi(
-                        request=_make_request(),
-                        requisition_ids=str(test_requisition.id),
-                        user=test_user,
-                        db=db_session,
-                    )
-                )
+        result, mock_response, captured_ctx = _call_modal_multi_capturing(
+            str(test_requisition.id), test_user, db_session, test_requisition
+        )
 
         assert result is mock_response
         assert captured_ctx.get("has_customer_site") is True
@@ -187,26 +161,9 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
         """customer_site_id set but db.get returns None → customer_name stays empty."""
         test_requisition.customer_site_id = 99999  # non-existent
 
-        mock_response = HTMLResponse("<html>modal</html>")
-        captured_ctx: dict = {}
-
-        def _fake_template_response(template_name, context):
-            captured_ctx.update(context)
-            return mock_response
-
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch(
-                "app.template_env.template_response",
-                side_effect=_fake_template_response,
-            ):
-                result = _run(
-                    quote_builder_modal_multi(
-                        request=_make_request(),
-                        requisition_ids=str(test_requisition.id),
-                        user=test_user,
-                        db=db_session,
-                    )
-                )
+        result, mock_response, captured_ctx = _call_modal_multi_capturing(
+            str(test_requisition.id), test_user, db_session, test_requisition
+        )
 
         assert result is mock_response
         assert captured_ctx.get("has_customer_site") is True
@@ -223,25 +180,6 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
         test_requisition.customer_site_id = None
         raw_ids = f"{test_requisition.id},{test_requisition.id + 1}"
 
-        mock_response = HTMLResponse("<html>modal</html>")
-        captured_ctx: dict = {}
-
-        def _fake_template_response(template_name, context):
-            captured_ctx.update(context)
-            return mock_response
-
-        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch(
-                "app.template_env.template_response",
-                side_effect=_fake_template_response,
-            ):
-                _run(
-                    quote_builder_modal_multi(
-                        request=_make_request(),
-                        requisition_ids=raw_ids,
-                        user=test_user,
-                        db=db_session,
-                    )
-                )
+        _, _, captured_ctx = _call_modal_multi_capturing(raw_ids, test_user, db_session, test_requisition)
 
         assert captured_ctx.get("multi_req_ids") == raw_ids

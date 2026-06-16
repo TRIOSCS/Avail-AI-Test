@@ -13,7 +13,47 @@ Depends on: conftest fixtures
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
+import pytest
+
 from tests.conftest import engine  # noqa: F401
+
+
+def _make_vendor_with_response(db, *, slug, response_delay_hours):
+    """Create a VendorCard plus one VendorResponse with a known response time.
+
+    Returns the persisted VendorCard.
+    """
+    from app.models import VendorCard
+    from app.models.offers import VendorResponse
+
+    now = datetime.now(timezone.utc)
+    domain = f"{slug}.com"
+    vendor = VendorCard(
+        normalized_name=f"{slug} vendor",
+        display_name=f"{slug.title()} Vendor",
+        domain=domain,
+        emails=[f"sales@{domain}"],
+        sighting_count=1,
+        total_outreach=2,
+        created_at=now,
+    )
+    db.add(vendor)
+    db.flush()
+
+    db.add(
+        VendorResponse(
+            vendor_name=vendor.display_name,
+            vendor_email=f"sales@{domain}",
+            subject="RE: RFQ 1",
+            received_at=now,
+            created_at=now - timedelta(hours=response_delay_hours),
+            classification="offer",
+            confidence=0.9,
+        )
+    )
+    db.commit()
+    return vendor
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  5A: Response Time Metrics
@@ -392,79 +432,21 @@ class TestResponseTimeInterpolation:
         # Verify it's between 0 and 100 (interpolated, not at boundaries)
         assert 0 < result["response_time_score"] < 100
 
-    def test_response_time_at_or_below_ideal(self, db_session):
-        """Response time <= 4h gives perfect 100.0 score (line 184)."""
-        from app.models import VendorCard
-        from app.models.offers import VendorResponse
+    @pytest.mark.parametrize(
+        ("slug", "response_delay_hours", "expected_score"),
+        [
+            pytest.param("fast", 2, 100.0, id="at_or_below_ideal_line184"),
+            pytest.param("slow", 200, 0.0, id="at_or_above_max_line186"),
+        ],
+    )
+    def test_response_time_boundary(self, db_session, slug, response_delay_hours, expected_score):
+        """Response time <= 4h scores 100.0; >= 168h scores 0.0 (lines 184, 186)."""
         from app.services.response_analytics import compute_email_health_score
 
-        now = datetime.now(timezone.utc)
-
-        vendor = VendorCard(
-            normalized_name="fast vendor",
-            display_name="Fast Vendor",
-            domain="fast.com",
-            emails=["sales@fast.com"],
-            sighting_count=1,
-            total_outreach=2,
-            created_at=now,
-        )
-        db_session.add(vendor)
-        db_session.flush()
-
-        # Response with 2h response time (<= 4h ideal)
-        db_session.add(
-            VendorResponse(
-                vendor_name="Fast Vendor",
-                vendor_email="sales@fast.com",
-                subject="RE: RFQ 1",
-                received_at=now,
-                created_at=now - timedelta(hours=2),
-                classification="offer",
-                confidence=0.9,
-            )
-        )
-        db_session.commit()
+        vendor = _make_vendor_with_response(db_session, slug=slug, response_delay_hours=response_delay_hours)
 
         result = compute_email_health_score(db_session, vendor.id)
-        assert result["response_time_score"] == 100.0
-
-    def test_response_time_at_or_above_max(self, db_session):
-        """Response time >= 168h gives 0.0 score (line 186)."""
-        from app.models import VendorCard
-        from app.models.offers import VendorResponse
-        from app.services.response_analytics import compute_email_health_score
-
-        now = datetime.now(timezone.utc)
-
-        vendor = VendorCard(
-            normalized_name="slow vendor",
-            display_name="Slow Vendor",
-            domain="slow.com",
-            emails=["sales@slow.com"],
-            sighting_count=1,
-            total_outreach=2,
-            created_at=now,
-        )
-        db_session.add(vendor)
-        db_session.flush()
-
-        # Response with 200h response time (>= 168h max)
-        db_session.add(
-            VendorResponse(
-                vendor_name="Slow Vendor",
-                vendor_email="sales@slow.com",
-                subject="RE: RFQ 1",
-                received_at=now,
-                created_at=now - timedelta(hours=200),
-                classification="offer",
-                confidence=0.9,
-            )
-        )
-        db_session.commit()
-
-        result = compute_email_health_score(db_session, vendor.id)
-        assert result["response_time_score"] == 0.0
+        assert result["response_time_score"] == expected_score
 
 
 # ═══════════════════════════════════════════════════════════════════════

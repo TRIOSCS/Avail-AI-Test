@@ -10,30 +10,26 @@ from sqlalchemy.orm import Session
 from app.constants import ApiSourceStatus
 
 
+def make_api_source(name, display_name, status, *, is_active, source_type="broker"):
+    """Build an ApiSource row with the fields these seed tests vary."""
+    from app.models import ApiSource
+
+    return ApiSource(
+        name=name,
+        display_name=display_name,
+        category="search",
+        source_type=source_type,
+        status=status,
+        is_active=is_active,
+    )
+
+
 def test_startup_flips_icsource_to_live(db_session: Session):
     from app.models import ApiSource
     from app.startup import seed_browser_worker_sources
 
-    db_session.add(
-        ApiSource(
-            name="icsource",
-            display_name="ICsource",
-            category="search",
-            source_type="broker",
-            status="disabled",
-            is_active=False,
-        )
-    )
-    db_session.add(
-        ApiSource(
-            name="netcomponents",
-            display_name="NetComponents",
-            category="search",
-            source_type="broker",
-            status="pending",
-            is_active=False,
-        )
-    )
+    db_session.add(make_api_source("icsource", "ICsource", "disabled", is_active=False))
+    db_session.add(make_api_source("netcomponents", "NetComponents", "pending", is_active=False))
     db_session.commit()
 
     seed_browser_worker_sources(db_session)
@@ -52,16 +48,7 @@ def test_seed_is_idempotent(db_session: Session):
     from app.models import ApiSource
     from app.startup import seed_browser_worker_sources
 
-    db_session.add(
-        ApiSource(
-            name="icsource",
-            display_name="ICsource",
-            category="search",
-            source_type="broker",
-            status="disabled",
-            is_active=False,
-        )
-    )
+    db_session.add(make_api_source("icsource", "ICsource", "disabled", is_active=False))
     db_session.commit()
 
     seed_browser_worker_sources(db_session)
@@ -144,36 +131,10 @@ def test_health_monitor_excludes_browser_worker_sources(db_session: Session):
     from app.constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
     from app.models import ApiSource
 
-    db_session.add(
-        ApiSource(
-            name="icsource",
-            display_name="ICsource",
-            category="search",
-            source_type="broker",
-            status=ApiSourceStatus.LIVE.value,
-            is_active=True,
-        )
-    )
-    db_session.add(
-        ApiSource(
-            name="netcomponents",
-            display_name="NetComponents",
-            category="search",
-            source_type="broker",
-            status=ApiSourceStatus.LIVE.value,
-            is_active=True,
-        )
-    )
-    db_session.add(
-        ApiSource(
-            name="digikey",
-            display_name="Digi-Key",
-            category="search",
-            source_type="distributor",
-            status=ApiSourceStatus.LIVE.value,
-            is_active=True,
-        )
-    )
+    live = ApiSourceStatus.LIVE.value
+    db_session.add(make_api_source("icsource", "ICsource", live, is_active=True))
+    db_session.add(make_api_source("netcomponents", "NetComponents", live, is_active=True))
+    db_session.add(make_api_source("digikey", "Digi-Key", live, is_active=True, source_type="distributor"))
     db_session.commit()
 
     rows = (

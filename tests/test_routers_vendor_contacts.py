@@ -12,6 +12,22 @@ from unittest.mock import AsyncMock
 
 from app.models import Contact, Requisition, VendorCard, VendorContact, VendorResponse
 
+
+def make_vendor_card(db_session, normalized_name, display_name, **kwargs):
+    """Create, persist, and return a VendorCard for lookup-waterfall tests.
+
+    Defaults emails/phones to empty lists and sighting_count to 1 so callers only pass
+    the fields a given tier scenario actually varies.
+    """
+    kwargs.setdefault("emails", [])
+    kwargs.setdefault("phones", [])
+    kwargs.setdefault("sighting_count", 1)
+    card = VendorCard(normalized_name=normalized_name, display_name=display_name, **kwargs)
+    db_session.add(card)
+    db_session.commit()
+    return card
+
+
 # ── Contacts CRUD ────────────────────────────────────────────────────────
 
 
@@ -327,16 +343,7 @@ def test_lookup_tier1_cached(client, db_session, test_vendor_card):
 
 def test_lookup_tier2_scrape(client, db_session, monkeypatch):
     """Vendor with website but no emails triggers scrape (tier=2)."""
-    vc = VendorCard(
-        normalized_name="scrapetest co",
-        display_name="ScrapeTest Co",
-        website="https://scrapetest.example.com",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "scrapetest co", "ScrapeTest Co", website="https://scrapetest.example.com")
 
     async def mock_scrape(url):
         return {"emails": ["found@scrapetest.com"], "phones": ["+1-555-9999"]}
@@ -355,15 +362,7 @@ def test_lookup_tier2_scrape(client, db_session, monkeypatch):
 
 def test_lookup_tier3_ai(client, db_session, monkeypatch):
     """Vendor with no website/emails triggers AI lookup (tier=3)."""
-    vc = VendorCard(
-        normalized_name="aitest vendor",
-        display_name="AITest Vendor",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "aitest vendor", "AITest Vendor")
 
     monkeypatch.setattr(
         "app.routers.vendor_contacts.get_credential_cached",
@@ -392,15 +391,7 @@ def test_lookup_tier3_ai(client, db_session, monkeypatch):
 
 def test_lookup_no_api_key(client, db_session, monkeypatch):
     """Vendor with no emails/website and no API key returns tier=0."""
-    vc = VendorCard(
-        normalized_name="nokey vendor",
-        display_name="NoKey Vendor",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "nokey vendor", "NoKey Vendor")
 
     monkeypatch.setattr(
         "app.routers.vendor_contacts.get_credential_cached",
@@ -441,16 +432,7 @@ def test_lookup_creates_card(client, db_session, monkeypatch):
 
 def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
     """Vendor with private URL returns empty contacts from scrape."""
-    vc = VendorCard(
-        normalized_name="ssrf test vendor",
-        display_name="SSRF Test Vendor",
-        website="http://127.0.0.1/evil",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "ssrf test vendor", "SSRF Test Vendor", website="http://127.0.0.1/evil")
 
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
@@ -474,14 +456,7 @@ def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
 def test_lookup_creates_card_integrity_error(client, db_session, monkeypatch):
     """lookup_vendor_contact handles IntegrityError on card creation (race
     condition)."""
-    vc = VendorCard(
-        normalized_name="race vendor",
-        display_name="Race Vendor",
-        emails=["already@race.com"],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "race vendor", "Race Vendor", emails=["already@race.com"])
 
     resp = client.post("/api/vendor-contact", json={"vendor_name": "Race Vendor"})
     assert resp.status_code == 200
@@ -491,16 +466,7 @@ def test_lookup_creates_card_integrity_error(client, db_session, monkeypatch):
 
 def test_lookup_tier2_scrape_no_emails_after_merge(client, db_session, monkeypatch):
     """Tier 2: scrape returns data but merge doesn't produce card.emails."""
-    vc = VendorCard(
-        normalized_name="scrape empty vendor",
-        display_name="Scrape Empty Vendor",
-        website="https://emptyresult.com",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "scrape empty vendor", "Scrape Empty Vendor", website="https://emptyresult.com")
 
     async def mock_scrape(url):
         return {"emails": ["found@scrape.com"], "phones": []}
@@ -517,16 +483,7 @@ def test_lookup_tier2_scrape_no_emails_after_merge(client, db_session, monkeypat
 
 def test_lookup_tier2_scrape_exception(client, db_session, monkeypatch):
     """Tier 2: scrape throws exception, falls through to tier 3."""
-    vc = VendorCard(
-        normalized_name="scrape fail vendor",
-        display_name="Scrape Fail Vendor",
-        website="https://fails.com",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "scrape fail vendor", "Scrape Fail Vendor", website="https://fails.com")
 
     async def mock_scrape(url):
         raise ConnectionError("Timeout")
@@ -542,15 +499,7 @@ def test_lookup_tier2_scrape_exception(client, db_session, monkeypatch):
 
 def test_lookup_tier3_ai_string_emails(client, db_session, monkeypatch):
     """Tier 3: AI returns emails as a string instead of list."""
-    vc = VendorCard(
-        normalized_name="stringemail vendor",
-        display_name="StringEmail Vendor",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "stringemail vendor", "StringEmail Vendor")
 
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
@@ -574,15 +523,7 @@ def test_lookup_tier3_ai_string_emails(client, db_session, monkeypatch):
 
 def test_lookup_tier3_ai_returns_none(client, db_session, monkeypatch):
     """Tier 3: AI returns None/non-dict."""
-    vc = VendorCard(
-        normalized_name="nullai vendor",
-        display_name="NullAI Vendor",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "nullai vendor", "NullAI Vendor")
 
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
@@ -599,15 +540,7 @@ def test_lookup_tier3_ai_returns_none(client, db_session, monkeypatch):
 
 def test_lookup_tier3_ai_exception(client, db_session, monkeypatch):
     """Tier 3: AI lookup throws exception returns tier=0 with error."""
-    vc = VendorCard(
-        normalized_name="ai error vendor",
-        display_name="AI Error Vendor",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "ai error vendor", "AI Error Vendor")
 
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
@@ -626,16 +559,7 @@ def test_lookup_tier3_ai_exception(client, db_session, monkeypatch):
 
 def test_lookup_tier3_ai_with_website_hint(client, db_session, monkeypatch):
     """Tier 3: AI lookup includes website hint when card has a website."""
-    vc = VendorCard(
-        normalized_name="hinted vendor",
-        display_name="Hinted Vendor",
-        website="https://hinted.com",
-        emails=[],
-        phones=[],
-        sighting_count=1,
-    )
-    db_session.add(vc)
-    db_session.commit()
+    make_vendor_card(db_session, "hinted vendor", "Hinted Vendor", website="https://hinted.com")
 
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
@@ -661,14 +585,7 @@ def test_lookup_vendor_contact_integrity_error_race(client, db_session, monkeypa
     from app.vendor_utils import normalize_vendor_name
 
     norm = normalize_vendor_name("Integrity Race Vendor")
-    existing_vc = VendorCard(
-        normalized_name=norm,
-        display_name="Integrity Race Vendor",
-        emails=["exists@race.com"],
-        sighting_count=1,
-    )
-    db_session.add(existing_vc)
-    db_session.commit()
+    make_vendor_card(db_session, norm, "Integrity Race Vendor", emails=["exists@race.com"])
 
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: None)
 

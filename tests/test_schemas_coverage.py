@@ -71,13 +71,10 @@ class TestBuyPlanLineEdit:
         s = BuyPlanLineEdit(requirement_id=1, offer_id=2, quantity=5, sales_note="rush")
         assert s.sales_note == "rush"
 
-    def test_quantity_must_be_positive(self):
+    @pytest.mark.parametrize("quantity", [0, -1], ids=["zero", "negative"])
+    def test_quantity_must_be_positive(self, quantity):
         with pytest.raises(ValidationError):
-            BuyPlanLineEdit(requirement_id=1, offer_id=2, quantity=0)
-
-    def test_quantity_negative_rejected(self):
-        with pytest.raises(ValidationError):
-            BuyPlanLineEdit(requirement_id=1, offer_id=2, quantity=-1)
+            BuyPlanLineEdit(requirement_id=1, offer_id=2, quantity=quantity)
 
     def test_missing_required_fields(self):
         with pytest.raises(ValidationError):
@@ -109,21 +106,23 @@ class TestSOVerificationRequest:
         assert s.action == "approve"
         assert s.rejection_note is None
 
-    def test_reject_with_note(self):
-        s = SOVerificationRequest(action="reject", rejection_note="  wrong SO  ")
-        assert s.rejection_note == "wrong SO"
+    @pytest.mark.parametrize(
+        ("action", "raw_note", "expected"),
+        [
+            ("reject", "  wrong SO  ", "wrong SO"),
+            ("halt", "on hold", "on hold"),
+            ("approve", "  info  ", "info"),
+        ],
+        ids=["reject_with_note", "halt_with_note", "approve_with_note_strips"],
+    )
+    def test_note_stripped(self, action, raw_note, expected):
+        s = SOVerificationRequest(action=action, rejection_note=raw_note)
+        assert s.rejection_note == expected
 
-    def test_halt_with_note(self):
-        s = SOVerificationRequest(action="halt", rejection_note="on hold")
-        assert s.rejection_note == "on hold"
-
-    def test_reject_requires_note(self):
+    @pytest.mark.parametrize("action", ["reject", "halt"])
+    def test_requires_note(self, action):
         with pytest.raises(ValidationError, match="note is required"):
-            SOVerificationRequest(action="reject")
-
-    def test_halt_requires_note(self):
-        with pytest.raises(ValidationError, match="note is required"):
-            SOVerificationRequest(action="halt")
+            SOVerificationRequest(action=action)
 
     def test_reject_blank_note_rejected(self):
         with pytest.raises(ValidationError):
@@ -132,10 +131,6 @@ class TestSOVerificationRequest:
     def test_invalid_action(self):
         with pytest.raises(ValidationError):
             SOVerificationRequest(action="cancel")
-
-    def test_approve_with_note_strips(self):
-        s = SOVerificationRequest(action="approve", rejection_note="  info  ")
-        assert s.rejection_note == "info"
 
 
 class TestPOConfirmation:
@@ -150,15 +145,11 @@ class TestPOConfirmation:
         s = POConfirmation(po_number="  PO-999  ", estimated_ship_date=dt)
         assert s.po_number == "PO-999"
 
-    def test_blank_po_number(self):
+    @pytest.mark.parametrize("po_number", ["   ", ""], ids=["blank", "empty"])
+    def test_missing_po_number(self, po_number):
         dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
         with pytest.raises(ValidationError, match="PO number is required"):
-            POConfirmation(po_number="   ", estimated_ship_date=dt)
-
-    def test_empty_po_number(self):
-        dt = datetime(2026, 6, 1, tzinfo=timezone.utc)
-        with pytest.raises(ValidationError, match="PO number is required"):
-            POConfirmation(po_number="", estimated_ship_date=dt)
+            POConfirmation(po_number=po_number, estimated_ship_date=dt)
 
 
 class TestPOVerificationRequest:
@@ -166,9 +157,17 @@ class TestPOVerificationRequest:
         s = POVerificationRequest(action="approve")
         assert s.action == "approve"
 
-    def test_reject_with_note(self):
-        s = POVerificationRequest(action="reject", rejection_note="wrong amount")
-        assert s.rejection_note == "wrong amount"
+    @pytest.mark.parametrize(
+        ("action", "raw_note", "expected"),
+        [
+            ("reject", "wrong amount", "wrong amount"),
+            ("approve", "  fyi  ", "fyi"),
+        ],
+        ids=["reject_with_note", "approve_with_note_strips"],
+    )
+    def test_note_stripped(self, action, raw_note, expected):
+        s = POVerificationRequest(action=action, rejection_note=raw_note)
+        assert s.rejection_note == expected
 
     def test_reject_without_note(self):
         with pytest.raises(ValidationError, match="note is required"):
@@ -182,10 +181,6 @@ class TestPOVerificationRequest:
         with pytest.raises(ValidationError):
             POVerificationRequest(action="halt")
 
-    def test_approve_with_note_strips(self):
-        s = POVerificationRequest(action="approve", rejection_note="  fyi  ")
-        assert s.rejection_note == "fyi"
-
 
 class TestBuyPlanLineIssue:
     def test_sold_out(self):
@@ -193,9 +188,18 @@ class TestBuyPlanLineIssue:
         assert s.issue_type == "sold_out"
         assert s.note is None
 
-    def test_other_with_note(self):
-        s = BuyPlanLineIssue(issue_type="other", note="custom issue")
-        assert s.note == "custom issue"
+    @pytest.mark.parametrize(
+        ("issue_type", "raw_note", "expected"),
+        [
+            ("other", "custom issue", "custom issue"),
+            ("price_changed", "went up 10%", "went up 10%"),
+            ("other", "  spaces  ", "spaces"),
+        ],
+        ids=["other_with_note", "price_changed", "note_stripped"],
+    )
+    def test_note_round_trip(self, issue_type, raw_note, expected):
+        s = BuyPlanLineIssue(issue_type=issue_type, note=raw_note)
+        assert s.note == expected
 
     def test_other_requires_note(self):
         with pytest.raises(ValidationError, match="note is required"):
@@ -205,10 +209,6 @@ class TestBuyPlanLineIssue:
         with pytest.raises(ValidationError):
             BuyPlanLineIssue(issue_type="other", note="   ")
 
-    def test_price_changed(self):
-        s = BuyPlanLineIssue(issue_type="price_changed", note="went up 10%")
-        assert s.note == "went up 10%"
-
     def test_lead_time_changed(self):
         s = BuyPlanLineIssue(issue_type="lead_time_changed")
         assert s.issue_type == "lead_time_changed"
@@ -217,20 +217,13 @@ class TestBuyPlanLineIssue:
         with pytest.raises(ValidationError):
             BuyPlanLineIssue(issue_type="damaged")
 
-    def test_note_stripped(self):
-        s = BuyPlanLineIssue(issue_type="other", note="  spaces  ")
-        assert s.note == "spaces"
-
 
 class TestVerificationGroupUpdate:
-    def test_add(self):
-        s = VerificationGroupUpdate(user_id=42, action="add")
-        assert s.user_id == 42
-        assert s.action == "add"
-
-    def test_remove(self):
-        s = VerificationGroupUpdate(user_id=1, action="remove")
-        assert s.action == "remove"
+    @pytest.mark.parametrize(("user_id", "action"), [(42, "add"), (1, "remove")])
+    def test_valid_actions(self, user_id, action):
+        s = VerificationGroupUpdate(user_id=user_id, action=action)
+        assert s.user_id == user_id
+        assert s.action == action
 
     def test_invalid_action(self):
         with pytest.raises(ValidationError):
@@ -288,33 +281,20 @@ class TestKnowledgeEntryCreate:
         with pytest.raises(ValidationError):
             KnowledgeEntryCreate(entry_type="fact", content="x", source="twitter")
 
-    def test_content_min_length(self):
+    @pytest.mark.parametrize("content", ["", "x" * 10001], ids=["min_length", "max_length"])
+    def test_invalid_content_length(self, content):
         with pytest.raises(ValidationError):
-            KnowledgeEntryCreate(entry_type="fact", content="")
+            KnowledgeEntryCreate(entry_type="fact", content=content)
 
-    def test_content_max_length(self):
+    @pytest.mark.parametrize("confidence", [0.5, 0.0, 1.0], ids=["range", "zero", "one"])
+    def test_confidence_valid(self, confidence):
+        s = KnowledgeEntryCreate(entry_type="fact", content="x", confidence=confidence)
+        assert s.confidence == confidence
+
+    @pytest.mark.parametrize("confidence", [1.1, -0.1], ids=["too_high", "negative"])
+    def test_confidence_out_of_range(self, confidence):
         with pytest.raises(ValidationError):
-            KnowledgeEntryCreate(entry_type="fact", content="x" * 10001)
-
-    def test_confidence_range(self):
-        s = KnowledgeEntryCreate(entry_type="fact", content="x", confidence=0.5)
-        assert s.confidence == 0.5
-
-    def test_confidence_zero(self):
-        s = KnowledgeEntryCreate(entry_type="fact", content="x", confidence=0.0)
-        assert s.confidence == 0.0
-
-    def test_confidence_one(self):
-        s = KnowledgeEntryCreate(entry_type="fact", content="x", confidence=1.0)
-        assert s.confidence == 1.0
-
-    def test_confidence_too_high(self):
-        with pytest.raises(ValidationError):
-            KnowledgeEntryCreate(entry_type="fact", content="x", confidence=1.1)
-
-    def test_confidence_negative(self):
-        with pytest.raises(ValidationError):
-            KnowledgeEntryCreate(entry_type="fact", content="x", confidence=-0.1)
+            KnowledgeEntryCreate(entry_type="fact", content="x", confidence=confidence)
 
     def test_optional_foreign_keys(self):
         s = KnowledgeEntryCreate(
@@ -365,13 +345,10 @@ class TestAnswerCreate:
         s = AnswerCreate(content="The MOQ is 100")
         assert s.content == "The MOQ is 100"
 
-    def test_empty_content(self):
+    @pytest.mark.parametrize("content", ["", "x" * 10001], ids=["empty", "too_long"])
+    def test_invalid_content_length(self, content):
         with pytest.raises(ValidationError):
-            AnswerCreate(content="")
-
-    def test_max_length(self):
-        with pytest.raises(ValidationError):
-            AnswerCreate(content="x" * 10001)
+            AnswerCreate(content=content)
 
 
 class TestKnowledgeEntryUpdate:
@@ -464,13 +441,14 @@ class TestPhoneCallLog:
         )
         assert s.parts == ["LM358", "NE555"]
 
-    def test_blank_vendor_name(self):
+    @pytest.mark.parametrize(
+        ("vendor_name", "vendor_phone"),
+        [("   ", "555"), ("Acme", "  ")],
+        ids=["blank_vendor_name", "blank_vendor_phone"],
+    )
+    def test_blank_fields_rejected(self, vendor_name, vendor_phone):
         with pytest.raises(ValidationError, match="must not be blank"):
-            PhoneCallLog(requisition_id=1, vendor_name="   ", vendor_phone="555")
-
-    def test_blank_vendor_phone(self):
-        with pytest.raises(ValidationError, match="must not be blank"):
-            PhoneCallLog(requisition_id=1, vendor_name="Acme", vendor_phone="  ")
+            PhoneCallLog(requisition_id=1, vendor_name=vendor_name, vendor_phone=vendor_phone)
 
     def test_strips_whitespace(self):
         s = PhoneCallLog(requisition_id=1, vendor_name="  Acme  ", vendor_phone=" 555 ")
@@ -570,15 +548,11 @@ class TestTaskCreate:
         with pytest.raises(ValidationError, match="at least 24 hours"):
             TaskCreate(title="X", assigned_to_id=1, due_at=soon)
 
-    def test_title_min_length(self):
+    @pytest.mark.parametrize("title", ["", "x" * 256], ids=["min_length", "max_length"])
+    def test_invalid_title_length(self, title):
         future = datetime.now(timezone.utc) + timedelta(hours=48)
         with pytest.raises(ValidationError):
-            TaskCreate(title="", assigned_to_id=1, due_at=future)
-
-    def test_title_max_length(self):
-        future = datetime.now(timezone.utc) + timedelta(hours=48)
-        with pytest.raises(ValidationError):
-            TaskCreate(title="x" * 256, assigned_to_id=1, due_at=future)
+            TaskCreate(title=title, assigned_to_id=1, due_at=future)
 
     def test_naive_datetime_treated_as_utc(self):
         future_naive = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=48)
@@ -738,14 +712,11 @@ class TestPoolFilters:
         assert s.page == 3
         assert s.per_page == 50
 
-    def test_page_minimum(self):
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"page": 0}, {"per_page": 0}, {"per_page": 101}],
+        ids=["page_minimum", "per_page_minimum", "per_page_maximum"],
+    )
+    def test_bounds_rejected(self, kwargs):
         with pytest.raises(ValidationError):
-            PoolFilters(page=0)
-
-    def test_per_page_minimum(self):
-        with pytest.raises(ValidationError):
-            PoolFilters(per_page=0)
-
-    def test_per_page_maximum(self):
-        with pytest.raises(ValidationError):
-            PoolFilters(per_page=101)
+            PoolFilters(**kwargs)
