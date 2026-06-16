@@ -1493,7 +1493,7 @@ owns arbitration in one place:
        MaterialCardAudit action="categorized" per card) and at ingest time by
        source_ingest/clean.py (same grammar, fallback when the source carries no
        mappable Commodity_Code__c). The F1 ladder (fru_desc_parse 82 < desc_parse
-       83 < partsurfer_desc 84 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90)
+       83 < partsurfer_desc 84 = connector_desc 84 < fru_matrix_decode 84 < mpn_decode 85 < vendor 90)
        keeps decode/vendor
        values authoritative and the card's OWN description above its FRU-linked
        prose — no per-writer pre-gate. The phase-2/3 commodities have no MPN
@@ -1526,6 +1526,22 @@ owns arbitration in one place:
        (83) — OEM catalog text beats the card's own desc — but loses to the
        deterministic decoders (mpn_decode 85); it ties fru_matrix_decode (84, a
        different vendor — tie not load-bearing).
+    3.6. enrichment.py::_apply_enrichment_to_card → _harvest_connector_enrichment    —
+       connector-description harvest (no new network — harvests data the connector
+       pipeline ALREADY fetches per call but _try_connector_config previously discarded),
+       gated by settings.connector_desc_harvest_enabled (default ON). Runs after the
+       existing manufacturer/category apply. Three writes: (a) the connector DESCRIPTION
+       → writer.categorize_and_record(source="connector_desc", tier 84, conf 0.90) —
+       categorizes an uncategorized card + fills facets via the SAME desc grammar (serves
+       the dominant server-commodity cohort); (b) STRUCTURED fields package_type→package,
+       pin_count→pin_count, rohs_status→rohs → record_spec at the connector's vendor-API
+       tier (digikey_api/mouser_api/… 90, conf 0.95), schema-gated so they only stick on
+       component-commodity cards whose schema defines the key (no-op elsewhere); (c)
+       datasheet_url → the card.datasheet_url column (feeds the future datasheet sub-project).
+       connector_desc (84) outranks the card's own desc_parse (83) — a distributor's
+       authoritative description beats the card's own prose — and loses to the
+       deterministic decoders (85); structured facets at vendor tier 90 are authoritative.
+       v1 = enrichment path only; the pricing-search path (search_service) is a follow-up.
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source

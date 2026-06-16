@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     # uncategorized HP spares; cheap, free, robots-allowed. Values arbitrate through the F1
     # ladder at partsurfer_desc (tier 84). See app/services/enrichment_worker/partsurfer_resolver.
     partsurfer_desc_enabled: bool = True
+    connector_desc_harvest_enabled: bool = True
     # Cap on live PartSurfer fetches per batch (each is a polite 1-req/2s GET — the worker
     # paces them). Keeps a batch's wall-time bounded; uncategorized HP cards drain over batches.
     partsurfer_fetch_per_batch: int = 5
