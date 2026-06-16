@@ -135,6 +135,7 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                 category_agrees = (card.category or "").lower().strip() == result.commodity
                 did_set_maker = False
                 maker_conflict_pair = None
+                card_written = 0
                 if category_agrees:
                     # Dual-brand W4: the decode's vendor IS the actual maker (the regex gate
                     # is manufacturer-scheme-specific), so write it through the maker ladder
@@ -149,9 +150,6 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
                         incoming_maker = normalize_brand_name(db, result.vendor)
                         if existing_maker != incoming_maker:
                             maker_conflict_pair = f"{existing_maker}->{incoming_maker}"
-                if not category_agrees:
-                    card_written = 0
-                else:
                     card_written = sum(
                         1
                         for spec_key, value in result.specs.items()

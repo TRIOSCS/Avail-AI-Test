@@ -256,6 +256,12 @@ _KIOXIA_ENT_CAP = re.compile(r"(1T92|3T84|7T68|15T3|30T7|\d{3}G)")
 _KIOXIA_ENT_TB = {"1T92": 1920, "3T84": 3840, "7T68": 7680, "15T3": 15360, "30T7": 30720}
 
 
+def _kioxia_cap(token: str, tb_table: dict[str, int]) -> int:
+    # Enterprise <x>T<yz> / client xT0z tokens map via the table; a plain <n>G token
+    # drops its trailing G and reads the leading digits as GB.
+    return tb_table[token] if token in tb_table else int(token[:-1])
+
+
 def _kioxia(mpn: str) -> DecodeResult | None:
     m = _KIOXIA_KXG.match(mpn)
     if m:
@@ -265,8 +271,7 @@ def _kioxia(mpn: str) -> DecodeResult | None:
             specs["interface"] = gen
         cap = _KIOXIA_KXG_CAP.search(mpn, m.end())
         if cap:
-            token = cap.group(1)
-            specs["capacity_gb"] = _KIOXIA_KXG_TB[token] if token in _KIOXIA_KXG_TB else int(token[:-1])
+            specs["capacity_gb"] = _kioxia_cap(cap.group(1), _KIOXIA_KXG_TB)
         return DecodeResult(commodity="ssd", vendor="Kioxia", specs=specs)
 
     m = _KIOXIA_ENT.match(mpn)
@@ -281,8 +286,7 @@ def _kioxia(mpn: str) -> DecodeResult | None:
             specs["form_factor"], specs["interface"] = known
     cap = _KIOXIA_ENT_CAP.search(mpn, m.end())
     if cap:
-        token = cap.group(1)
-        specs["capacity_gb"] = _KIOXIA_ENT_TB[token] if token in _KIOXIA_ENT_TB else int(token[:-1])
+        specs["capacity_gb"] = _kioxia_cap(cap.group(1), _KIOXIA_ENT_TB)
     return DecodeResult(commodity="ssd", vendor="Kioxia", specs=specs) if specs else None
 
 
