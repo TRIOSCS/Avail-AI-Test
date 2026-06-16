@@ -8,7 +8,7 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class SourceCredentialsUpdate(BaseModel):
@@ -18,7 +18,7 @@ class SourceCredentialsUpdate(BaseModel):
     credential keys.
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")
 
 
 class TeamsChannelRouting(BaseModel):
@@ -29,4 +29,4 @@ class TeamsChannelRouting(BaseModel):
     Uses extra="allow" to accept dynamic channel keys.
     """
 
-    model_config = {"extra": "allow"}
+    model_config = ConfigDict(extra="allow")

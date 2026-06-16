@@ -14,6 +14,7 @@ Depends on: pydantic
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Literal
 
@@ -30,6 +31,8 @@ from app.utils.normalization_helpers import (
     normalize_phone_e164,
     normalize_us_state,
 )
+
+_WEBSITE_RE = re.compile(r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}")
 
 # ── Companies ────────────────────────────────────────────────────────
 
@@ -64,9 +67,7 @@ class CompanyCreate(BaseModel):
         v = v.strip()
         if not v.startswith(("http://", "https://")):
             v = "https://" + v
-        import re
-
-        if not re.match(r"^https?://[a-zA-Z0-9][-a-zA-Z0-9.]*\.[a-zA-Z]{2,}", v):
+        if not _WEBSITE_RE.match(v):
             raise ValueError("Please enter a valid website URL")
         return v
 

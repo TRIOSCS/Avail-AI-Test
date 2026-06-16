@@ -14,7 +14,35 @@ Depends on: pydantic
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from pydantic import BaseModel, field_validator
+
+
+def _require_vendor_name(v: str) -> str:
+    """Strip and reject a blank vendor_name."""
+    v = v.strip()
+    if not v:
+        raise ValueError("vendor_name required")
+    return v
+
+
+def _dedupe_cleaned(v: list[str] | None, cleaner: Callable[[str], str | None]) -> list[str] | None:
+    """Apply ``cleaner`` to each item, dropping ``None`` results, preserving order, and
+    de-duplicating.
+
+    Passes ``None`` through unchanged.
+    """
+    if v is None:
+        return None
+    seen: set[str] = set()
+    result: list[str] = []
+    for item in v:
+        cleaned = cleaner(item)
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result
 
 
 class VendorCardUpdate(BaseModel):
@@ -27,34 +55,17 @@ class VendorCardUpdate(BaseModel):
     @field_validator("emails", mode="before")
     @classmethod
     def clean_emails(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return None
-        seen: set[str] = set()
-        result: list[str] = []
-        for e in v:
+        def clean(e: str) -> str | None:
             if not e or "@" not in str(e):
-                continue
-            cleaned = str(e).strip().lower()
-            if cleaned not in seen:
-                seen.add(cleaned)
-                result.append(cleaned)
-        return result
+                return None
+            return str(e).strip().lower()
+
+        return _dedupe_cleaned(v, clean)
 
     @field_validator("phones", mode="before")
     @classmethod
     def clean_phones(cls, v: list[str] | None) -> list[str] | None:
-        if v is None:
-            return None
-        seen: set[str] = set()
-        result: list[str] = []
-        for p in v:
-            if not p or not str(p).strip():
-                continue
-            cleaned = str(p).strip()
-            if cleaned not in seen:
-                seen.add(cleaned)
-                result.append(cleaned)
-        return result
+        return _dedupe_cleaned(v, lambda p: str(p).strip() if p and str(p).strip() else None)
 
 
 class VendorBlacklistToggle(BaseModel):
@@ -82,10 +93,7 @@ class VendorContactLookup(BaseModel):
     @field_validator("vendor_name")
     @classmethod
     def name_required(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("vendor_name required")
-        return v
+        return _require_vendor_name(v)
 
 
 class VendorContactCreate(BaseModel):
@@ -129,10 +137,7 @@ class VendorEmailAdd(BaseModel):
     @field_validator("vendor_name")
     @classmethod
     def name_required(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("vendor_name required")
-        return v
+        return _require_vendor_name(v)
 
     @field_validator("email")
     @classmethod

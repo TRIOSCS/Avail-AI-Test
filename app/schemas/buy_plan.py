@@ -21,6 +21,21 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+
+def _require_and_strip_note(note: str | None, *, required: bool, message: str) -> str | None:
+    """Enforce a conditionally-required note and strip surrounding whitespace.
+
+    Raises ``ValueError`` with ``message`` when ``required`` is set but the note
+    is missing or blank. A present note is returned stripped; ``None`` passes
+    through unchanged.
+    """
+    if required and not (note and note.strip()):
+        raise ValueError(message)
+    if note:
+        return note.strip()
+    return note
+
+
 # ── Request Schemas ──────────────────────────────────────────────────
 
 
@@ -50,10 +65,11 @@ class SOVerificationRequest(BaseModel):
 
     @model_validator(mode="after")
     def note_required_on_reject(self):
-        if self.action in ("reject", "halt") and not (self.rejection_note and self.rejection_note.strip()):
-            raise ValueError("A note is required when rejecting or halting")
-        if self.rejection_note:
-            self.rejection_note = self.rejection_note.strip()
+        self.rejection_note = _require_and_strip_note(
+            self.rejection_note,
+            required=self.action in ("reject", "halt"),
+            message="A note is required when rejecting or halting",
+        )
         return self
 
 
@@ -80,10 +96,11 @@ class POVerificationRequest(BaseModel):
 
     @model_validator(mode="after")
     def note_required_on_reject(self):
-        if self.action == "reject" and not (self.rejection_note and self.rejection_note.strip()):
-            raise ValueError("A note is required when rejecting a PO")
-        if self.rejection_note:
-            self.rejection_note = self.rejection_note.strip()
+        self.rejection_note = _require_and_strip_note(
+            self.rejection_note,
+            required=self.action == "reject",
+            message="A note is required when rejecting a PO",
+        )
         return self
 
 
@@ -95,10 +112,11 @@ class BuyPlanLineIssue(BaseModel):
 
     @model_validator(mode="after")
     def note_required_for_other(self):
-        if self.issue_type == "other" and not (self.note and self.note.strip()):
-            raise ValueError("A note is required for 'other' issue type")
-        if self.note:
-            self.note = self.note.strip()
+        self.note = _require_and_strip_note(
+            self.note,
+            required=self.issue_type == "other",
+            message="A note is required for 'other' issue type",
+        )
         return self
 
 

@@ -20,6 +20,14 @@ from pydantic import BaseModel, Field, field_validator
 from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
 
 
+def _normalize_optional(v: str | None, normalizer) -> str | None:
+    """Apply a normalizer to an optional field, passing through None and falling back to
+    the original value when the normalizer returns None."""
+    if v is None:
+        return v
+    return normalizer(v) or v
+
+
 class ProspectFinderRequest(BaseModel):
     entity_type: Literal["company", "site", "vendor"] = "company"
     entity_id: int | None = None
@@ -57,16 +65,12 @@ class DraftOfferItem(BaseModel):
     @field_validator("condition")
     @classmethod
     def normalize_condition_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_condition(v) or v
+        return _normalize_optional(v, normalize_condition)
 
     @field_validator("packaging")
     @classmethod
     def normalize_packaging_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_packaging(v) or v
+        return _normalize_optional(v, normalize_packaging)
 
 
 class SaveDraftOffersRequest(BaseModel):
