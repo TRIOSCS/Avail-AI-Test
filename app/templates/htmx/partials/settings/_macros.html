@@ -1,0 +1,48 @@
+{# _macros.html — shared markup for the Settings cluster templates.
+   Called by: index.html, data_ops.html (settings/* partials).
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+
+   These macros collapse copy-paste-with-variation that previously lived inline.
+   Whitespace inside each macro body is significant (the Jinja env does NOT
+   trim/lstrip blocks) and is tuned so call sites render byte-for-byte identical
+   to the original inline markup — do not reflow. #}
+
+{# Settings tab button. `tab` is the Alpine tab id + the @click/:class token; `url`
+   is the hx-get target; `label` the visible text; `icon_paths` a list of SVG path
+   `d` strings (the wrapper <svg> is identical across tabs). `extra_attrs` is appended
+   raw to the <button> (e.g. the System tab's hx-indicator + data-loading-disable). #}
+{% macro tab_button(tab, url, label, icon_paths, extra_attrs='') -%}
+<button @click="tab = '{{ tab }}'"
+            :class="tab === '{{ tab }}'
+              ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50'
+              : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
+            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            hx-get="{{ url }}"
+            hx-target="#settings-content"{{ extra_attrs|safe }}>
+      <span class="flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">{% for d in icon_paths %}
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ d }}"/>{% endfor %}
+        </svg>
+        {{ label }}
+      </span>
+    </button>
+{%- endmacro %}
+
+{# One "Keep <name>" dedup merge button. The vendor and company dedup rows render an
+   identical button shape but at different nesting depths. The opening <button> takes
+   its indentation from the call site (so call sites stay naturally indented); `pad` is
+   that same leading whitespace, used to re-indent the continuation/closing lines to
+   pad+8 / pad+2 / pad, matching the original hand-indented markup. `keep_id`/`drop_id`
+   are the ids kept/removed, `keep`/`drop` the names, `endpoint` the hx-post URL,
+   `target` the hx-target selector. #}
+{% macro merge_button(pad, endpoint, target, keep_id, drop_id, keep, drop) -%}
+<button data-loading-disable
+{{ pad }}        hx-post="{{ endpoint }}"
+{{ pad }}        hx-vals='{"keep_id": {{ keep_id }}, "remove_id": {{ drop_id }}}'
+{{ pad }}        hx-target="{{ target }}"
+{{ pad }}        hx-swap="innerHTML"
+{{ pad }}        hx-confirm="Merge '{{ drop }}' into '{{ keep }}'?"
+{{ pad }}        class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+{{ pad }}  Keep "{{ keep|truncate(20) }}"
+{{ pad }}</button>
+{%- endmacro %}

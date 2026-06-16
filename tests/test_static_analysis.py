@@ -121,7 +121,7 @@ _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
 _TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST: set[tuple[str, int]] = {
     ("app/templates/htmx/partials/quote_builder/modal.html", 9),  # has_customer_site|tojson -> true/false
     ("app/templates/htmx/partials/requisitions/rfq_compose.html", 44),  # vendors|map(id)|list|tojson -> [1,2,3]
-    ("app/templates/requisitions2/_table.html", 65),  # requisitions|map(id)|list|tojson -> [1,2,3]
+    ("app/templates/requisitions2/_table.html", 66),  # requisitions|map(id)|list|tojson -> [1,2,3]
 }
 
 # Alpine directive attributes: x-data, x-init, x-bind:x / :x, x-on:x / @x.
