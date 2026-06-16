@@ -608,7 +608,7 @@ class TestVendorRowThreeStates:
         assert "What we learned:" in body
         assert 'class="text-rose-600 font-medium"' in body
         # Action trio hidden
-        assert "Send RFQ" not in body
+        assert "Build RFQ" not in body
         assert "Mark Unavail" not in body
         assert "Convert to offer" not in body
 
@@ -650,7 +650,7 @@ class TestVendorRowThreeStates:
         assert "bg-rose-100 text-rose-700" in body  # Unavailable pill, not Contacted
         assert "We bought them" in body  # reason label renders
         assert "Mark available" in body  # state-1 action present
-        assert "Send RFQ" not in body  # action trio hidden
+        assert "Build RFQ" not in body  # action trio hidden
         assert "Mark Unavail" not in body
 
     def test_state2_expired_record_renders_advisory_hint_and_verify(self, client, db_session):
@@ -681,7 +681,7 @@ class TestVendorRowThreeStates:
         # Expanded grid History entry
         assert "History:" in body
         # Full action trio restored (Mark Unavail doubles as the re-arm)
-        assert "Send RFQ" in body
+        assert "Build RFQ" in body
         assert "Mark Unavail" in body
         assert "Convert to offer" in body
 
@@ -716,7 +716,7 @@ class TestVendorRowThreeStates:
         assert "History:" in body
         assert "Changed:" in body
         # Full action trio restored
-        assert "Send RFQ" in body
+        assert "Build RFQ" in body
         assert "Mark Unavail" in body
         assert "Convert to offer" in body
 
@@ -3738,7 +3738,7 @@ class TestSightingsVendorMatchedMpns:
 
 
 class TestSightingsVendorRowActions:
-    """Send RFQ / Mark Unavail actions live on the always-visible collapsed vendor row,
+    """Build RFQ / Mark Unavail actions live on the always-visible collapsed vendor row,
     not tucked inside the expandable detail (x-show="expanded")."""
 
     def _seed_vendor_row(self, db_session, status="open"):
@@ -3772,13 +3772,13 @@ class TestSightingsVendorRowActions:
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
         body = resp.text
-        assert "Send RFQ" in body
+        assert "Build RFQ" in body
         assert "Mark Unavail" in body
         # The expandable detail is marked by x-show="expanded"; the actions must
         # appear earlier in the markup (i.e. on the always-visible row).
         expanded_marker = 'x-show="expanded"'
         assert expanded_marker in body
-        assert body.index("Send RFQ") < body.index(expanded_marker)
+        assert body.index("Build RFQ") < body.index(expanded_marker)
         assert body.index("Mark Unavail") < body.index(expanded_marker)
 
 
