@@ -1589,7 +1589,17 @@ The single authoritative "which source wins" rule, so source-execution ORDER is 
 load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest write wins").
 
 ```
-SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
+SOURCE_TIER  manual:100
+             · cpu_pollution_fix:96 (deterministic re-classification of the polluted `cpu`
+               catch-all — TRIO's SFDC dump dropped ~67% non-CPUs into category='cpu' at
+               trio_source/95; this beats that DEFAULT, loses to manual/100. Written ONLY by
+               the bulk CLI `app/management/fix_cpu_pollution.py` (dry-run default; --apply
+               commits) on category='cpu' cards, using the precision-first prefix classifier
+               in `app/services/cpu_pollution/` — classify_polluted_mpn maps a definitively
+               non-CPU manufacturer prefix (TE/Samtec connectors, Nichicon/AVX/EPCOS caps,
+               Murata beads, Vishay resistors, TI/74-series/Broadcom logic) to its commodity
+               while a CPU_GUARD blocks any real Intel/AMD identifier from ever being re-homed)
+             · trio_source:95 · {digikey,mouser,nexar,element14,oemsecrets}_api:90
              · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84
              · partsurfer_desc:84 (HP PartSurfer description channel — the OEM's OWN
                verbatim description fetched live via partsurfer_resolver and fed to the
