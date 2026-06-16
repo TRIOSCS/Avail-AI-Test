@@ -17,6 +17,12 @@ from sqlalchemy.orm import Session
 from app.models import VendorCard, VendorContact
 from app.models.enrichment import ProspectContact
 
+
+def _prospect_count(db_session: Session, vendor_id: int) -> int:
+    """Number of ProspectContact rows linked to a vendor card."""
+    return db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_id).count()
+
+
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -148,10 +154,7 @@ class TestFindContactsSearch:
             f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
             data={"title_keywords": ""},
         )
-        count = (
-            db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_with_domain.id).count()
-        )
-        assert count >= 1
+        assert _prospect_count(db_session, vendor_with_domain.id) >= 1
 
     @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
     def test_search_deduplicates_by_email(
@@ -170,10 +173,7 @@ class TestFindContactsSearch:
             f"/v2/partials/vendors/{vendor_with_domain.id}/ai/find-contacts",
             data={},
         )
-        count = (
-            db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_with_domain.id).count()
-        )
-        assert count == 1
+        assert _prospect_count(db_session, vendor_with_domain.id) == 1
 
     @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
     def test_search_handles_error_gracefully(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):

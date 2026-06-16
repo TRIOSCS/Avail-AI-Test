@@ -5,13 +5,19 @@ from datetime import datetime, timezone
 from app.models.price_snapshot import MaterialPriceSnapshot
 
 
-def test_price_snapshot_creation(db_session):
-    """Verify MaterialPriceSnapshot can be created with all fields."""
+def _make_card(db_session, mpn):
+    """Create and flush a MaterialCard, returning it."""
     from app.models import MaterialCard
 
-    card = MaterialCard(normalized_mpn="TEST-MPN-001", display_mpn="TEST-MPN-001")
+    card = MaterialCard(normalized_mpn=mpn, display_mpn=mpn)
     db_session.add(card)
     db_session.flush()
+    return card
+
+
+def test_price_snapshot_creation(db_session):
+    """Verify MaterialPriceSnapshot can be created with all fields."""
+    card = _make_card(db_session, "TEST-MPN-001")
 
     snap = MaterialPriceSnapshot(
         material_card_id=card.id,
@@ -33,12 +39,9 @@ def test_price_snapshot_creation(db_session):
 
 def test_record_price_snapshot(db_session):
     """Verify record_price_snapshot creates a snapshot row."""
-    from app.models import MaterialCard
     from app.services.price_snapshot_service import record_price_snapshot
 
-    card = MaterialCard(normalized_mpn="SNAP-001", display_mpn="SNAP-001")
-    db_session.add(card)
-    db_session.flush()
+    card = _make_card(db_session, "SNAP-001")
 
     record_price_snapshot(
         db=db_session,
@@ -58,12 +61,9 @@ def test_record_price_snapshot(db_session):
 
 def test_record_price_snapshot_skips_none_price(db_session):
     """Verify no snapshot created when price is None."""
-    from app.models import MaterialCard
     from app.services.price_snapshot_service import record_price_snapshot
 
-    card = MaterialCard(normalized_mpn="SNAP-002", display_mpn="SNAP-002")
-    db_session.add(card)
-    db_session.flush()
+    card = _make_card(db_session, "SNAP-002")
 
     record_price_snapshot(
         db=db_session,

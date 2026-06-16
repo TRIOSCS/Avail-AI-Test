@@ -167,11 +167,34 @@ class TestBackfillNormalizedMpnBatchFlush:
 
 
 class TestBackfillProactiveOfferQtyPriceParse:
-    """Lines 801-803: ValueError/TypeError when parsing sell_price/unit_price."""
+    """Lines 778, 801-803: ValueError/TypeError when parsing sell_price/unit_price, and
+    raw_items already being a list."""
 
+    @pytest.mark.parametrize(
+        "raw_items",
+        [
+            # qty=100 > target(5), and prices are non-numeric strings → ValueError,
+            # fallback to 0.0.
+            pytest.param(
+                json.dumps([{"match_id": 10, "qty": 100, "sell_price": "N/A", "unit_price": "bad"}]),
+                id="bad_price_values_fall_back_to_zero",
+            ),
+            # sell_price and unit_price both None → fallback to 0.0.
+            pytest.param(
+                json.dumps([{"match_id": 10, "qty": 100, "sell_price": None, "unit_price": None}]),
+                id="none_price_falls_back_to_zero",
+            ),
+            # raw_items is already a Python list (simulates SQLite returning parsed JSON)
+            # — used as-is (line 778).
+            pytest.param(
+                [{"match_id": 10, "qty": 100, "sell_price": 2.0, "unit_price": 1.0}],
+                id="raw_items_already_a_list",
+            ),
+        ],
+    )
     @patch("app.startup.engine")
-    def test_bad_price_values_fall_back_to_zero(self, mock_engine):
-        """If sell_price/unit_price cannot be cast to float, fallback to 0.0."""
+    def test_offer_qty_backfill_handles_payload(self, mock_engine, raw_items):
+        """The UPDATE is attempted despite bad/None prices or a pre-parsed list."""
         from app.startup import _backfill_proactive_offer_qty
 
         mock_conn = MagicMock()
@@ -180,56 +203,12 @@ class TestBackfillProactiveOfferQtyPriceParse:
         mock_engine.connect.return_value = mock_conn
 
         match_rows = [(10, 5)]  # target_qty=5
-        # qty=100 > target(5), and prices are non-numeric strings → ValueError
-        line_items = json.dumps([{"match_id": 10, "qty": 100, "sell_price": "N/A", "unit_price": "bad"}])
-        offers = [(1, line_items)]
+        offers = [(1, raw_items)]
 
         mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
 
         _backfill_proactive_offer_qty()
 
-        # Should have attempted the UPDATE despite bad prices
-        assert mock_conn.execute.call_count >= 3
-
-    @patch("app.startup.engine")
-    def test_none_price_falls_back_to_zero(self, mock_engine):
-        """If sell_price is None and unit_price is None, fallback to 0.0."""
-        from app.startup import _backfill_proactive_offer_qty
-
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
-
-        match_rows = [(10, 5)]
-        line_items = json.dumps([{"match_id": 10, "qty": 100, "sell_price": None, "unit_price": None}])
-        offers = [(1, line_items)]
-
-        mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
-
-        _backfill_proactive_offer_qty()
-        assert mock_conn.execute.call_count >= 3
-
-    @patch("app.startup.engine")
-    def test_raw_items_already_a_list(self, mock_engine):
-        """Line 778: when raw_items is already a list (not a JSON string), use as-is."""
-        from app.startup import _backfill_proactive_offer_qty
-
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
-
-        match_rows = [(10, 5)]
-        # raw_items is a Python list (simulates SQLite returning parsed JSON)
-        raw_list = [{"match_id": 10, "qty": 100, "sell_price": 2.0, "unit_price": 1.0}]
-        offers = [(1, raw_list)]
-
-        mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
-
-        _backfill_proactive_offer_qty()
-
-        # Changed → UPDATE should be called
         assert mock_conn.execute.call_count >= 3
 
 
@@ -243,12 +222,6 @@ class TestSeedCommoditySchemas:
     def test_calls_seed_function_successfully(self, mock_sl, db_session: Session):
         """Happy path: seed_commodity_schemas is called with the db session."""
         from app.startup import _seed_commodity_schemas
-
-        mock_sl.return_value = db_session
-
-        with patch("app.startup._seed_commodity_schemas") as mock_fn:
-            # Call the real function, but mock the inner import dependency
-            pass
 
         # Call the real function — the commodity_registry.seed_commodity_schemas
         # is a service function; we mock it at the source

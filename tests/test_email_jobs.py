@@ -41,17 +41,35 @@ def _make_user(db: Session, email="sync@trioscs.com", **kw) -> User:
 # ── register_email_jobs ──────────────────────────────────────────────
 
 
+def _make_settings(
+    *,
+    contacts_sync=False,
+    activity_tracking=False,
+    ownership_sweep=False,
+    contact_scoring=False,
+    customer_enrichment=False,
+) -> MagicMock:
+    settings = MagicMock()
+    settings.contacts_sync_enabled = contacts_sync
+    settings.activity_tracking_enabled = activity_tracking
+    settings.ownership_sweep_enabled = ownership_sweep
+    settings.contact_scoring_enabled = contact_scoring
+    settings.customer_enrichment_enabled = customer_enrichment
+    return settings
+
+
 class TestRegisterEmailJobs:
     def test_register_all_enabled(self):
         from app.jobs.email_jobs import register_email_jobs
 
         scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = True
-        settings.activity_tracking_enabled = True
-        settings.ownership_sweep_enabled = True
-        settings.contact_scoring_enabled = True
-        settings.customer_enrichment_enabled = True
+        settings = _make_settings(
+            contacts_sync=True,
+            activity_tracking=True,
+            ownership_sweep=True,
+            contact_scoring=True,
+            customer_enrichment=True,
+        )
         register_email_jobs(scheduler, settings)
         # At minimum: contacts_sync, ownership_sweep, site_ownership_sweep,
         # contact_scoring, contact_status_compute, email_health_update,
@@ -62,12 +80,7 @@ class TestRegisterEmailJobs:
         from app.jobs.email_jobs import register_email_jobs
 
         scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = False
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
+        settings = _make_settings()
         register_email_jobs(scheduler, settings)
         # Always registered: contact_status_compute, email_health, calendar_scan, sent_folder_scan
         assert scheduler.add_job.call_count >= 4
@@ -76,12 +89,7 @@ class TestRegisterEmailJobs:
         from app.jobs.email_jobs import register_email_jobs
 
         scheduler = MagicMock()
-        settings = MagicMock()
-        settings.contacts_sync_enabled = False
-        settings.activity_tracking_enabled = True
-        settings.ownership_sweep_enabled = False
-        settings.contact_scoring_enabled = False
-        settings.customer_enrichment_enabled = False
+        settings = _make_settings(activity_tracking=True)
         register_email_jobs(scheduler, settings)
         # No ownership_sweep or site_ownership_sweep, but logs info
         job_ids = [call.kwargs.get("id") or call.args[2] for call in scheduler.add_job.call_args_list]
@@ -314,123 +322,39 @@ class TestJobContactScoring:
 
 class TestJobContactStatusCompute:
     @pytest.mark.asyncio
-    async def test_status_compute_active(self):
+    @pytest.mark.parametrize(
+        ("initial_status", "created_days_ago", "last_days_ago", "expected_status"),
+        [
+            pytest.param("new", 2, 3, "active", id="active"),
+            pytest.param("active", 100, 60, "quiet", id="quiet"),
+            pytest.param("active", 200, 100, "inactive", id="inactive_old"),
+            # champion is never auto-downgraded; created_at left unset (not read)
+            pytest.param("champion", None, 365, "champion", id="champion_not_downgraded"),
+            # No activity (last_days_ago=None) + old creation → inactive
+            pytest.param("new", 120, None, "inactive", id="no_activity_old_creation"),
+            # No activity but created < 90 days ago → keep 'new'
+            pytest.param("new", 10, None, "new", id="no_activity_new_creation"),
+            # 7-30 day window → no auto-downgrade; created_at left unset (not read)
+            pytest.param("active", None, 15, "active", id="7_to_30_day_window_no_downgrade"),
+        ],
+    )
+    async def test_status_compute(self, initial_status, created_days_ago, last_days_ago, expected_status):
         from app.jobs.email_jobs import _job_contact_status_compute
 
+        now = datetime.now(timezone.utc)
         sc = MagicMock()
-        sc.contact_status = "new"
+        sc.contact_status = initial_status
         sc.is_active = True
-        sc.created_at = datetime.now(timezone.utc) - timedelta(days=2)
-        last_at = datetime.now(timezone.utc) - timedelta(days=3)
+        if created_days_ago is not None:
+            sc.created_at = now - timedelta(days=created_days_ago)
+        last_at = None if last_days_ago is None else now - timedelta(days=last_days_ago)
 
         with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
             await _job_contact_status_compute()
-            assert sc.contact_status == "active"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_quiet(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "active"
-        sc.is_active = True
-        sc.created_at = datetime.now(timezone.utc) - timedelta(days=100)
-        last_at = datetime.now(timezone.utc) - timedelta(days=60)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            assert sc.contact_status == "quiet"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_inactive_old(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "active"
-        sc.is_active = True
-        sc.created_at = datetime.now(timezone.utc) - timedelta(days=200)
-        last_at = datetime.now(timezone.utc) - timedelta(days=100)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            assert sc.contact_status == "inactive"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_champion_not_downgraded(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "champion"
-        sc.is_active = True
-        last_at = datetime.now(timezone.utc) - timedelta(days=365)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            assert sc.contact_status == "champion"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_no_activity_old_creation(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "new"
-        sc.is_active = True
-        sc.created_at = datetime.now(timezone.utc) - timedelta(days=120)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [
-                (sc, None)  # No activity
-            ]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            assert sc.contact_status == "inactive"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_no_activity_new_creation(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "new"
-        sc.is_active = True
-        sc.created_at = datetime.now(timezone.utc) - timedelta(days=10)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, None)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            # Keep 'new' status since created < 90 days ago
-            assert sc.contact_status == "new"
-
-    @pytest.mark.asyncio
-    async def test_status_compute_7_to_30_day_window_no_downgrade(self):
-        from app.jobs.email_jobs import _job_contact_status_compute
-
-        sc = MagicMock()
-        sc.contact_status = "active"
-        sc.is_active = True
-        last_at = datetime.now(timezone.utc) - timedelta(days=15)
-
-        with patch("app.database.SessionLocal") as MockSL:
-            mock_db = MagicMock()
-            mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
-            MockSL.return_value = mock_db
-            await _job_contact_status_compute()
-            # Should not change — in 7-30 day window, no auto-downgrade
-            assert sc.contact_status == "active"
+            assert sc.contact_status == expected_status
 
     @pytest.mark.asyncio
     async def test_status_compute_error(self):
@@ -1286,32 +1210,33 @@ class TestScanSentFolder:
 
 class TestDetectAttachments:
     @pytest.mark.asyncio
-    async def test_detect_file_attachments(self):
-        from app.jobs.email_jobs import detect_attachments
-
-        gc = MagicMock()
-        gc.get_json = AsyncMock(
-            return_value={
-                "value": [
+    @pytest.mark.parametrize(
+        ("value", "expected_names"),
+        [
+            pytest.param(
+                [
                     {"name": "stock.xlsx", "contentType": "application/xlsx", "size": 1024, "isInline": False},
                     {"name": "logo.png", "contentType": "image/png", "size": 512, "isInline": True},  # inline img
                     {"name": "quote.pdf", "contentType": "application/pdf", "size": 2048, "isInline": False},
-                ]
-            }
-        )
-        result = await detect_attachments(gc, "msg-001")
-        assert len(result) == 2  # stock.xlsx + quote.pdf (logo.png is inline image)
-        assert result[0]["name"] == "stock.xlsx"
-        assert result[1]["name"] == "quote.pdf"
-
-    @pytest.mark.asyncio
-    async def test_detect_empty(self):
+                ],
+                ["stock.xlsx", "quote.pdf"],  # logo.png is inline image, dropped
+                id="file_attachments",
+            ),
+            pytest.param([], [], id="empty"),
+            pytest.param(
+                [{"name": "photo.jpg", "contentType": "image/jpeg", "size": 4096, "isInline": False}],
+                ["photo.jpg"],  # non-inline image IS a real attachment
+                id="non_inline_image",
+            ),
+        ],
+    )
+    async def test_detect_attachments(self, value, expected_names):
         from app.jobs.email_jobs import detect_attachments
 
         gc = MagicMock()
-        gc.get_json = AsyncMock(return_value={"value": []})
+        gc.get_json = AsyncMock(return_value={"value": value})
         result = await detect_attachments(gc, "msg-001")
-        assert result == []
+        assert [att["name"] for att in result] == expected_names
 
     @pytest.mark.asyncio
     async def test_detect_error(self):
@@ -1321,23 +1246,6 @@ class TestDetectAttachments:
         gc.get_json = AsyncMock(side_effect=Exception("API error"))
         result = await detect_attachments(gc, "msg-001")
         assert result == []
-
-    @pytest.mark.asyncio
-    async def test_detect_non_inline_image(self):
-        from app.jobs.email_jobs import detect_attachments
-
-        gc = MagicMock()
-        gc.get_json = AsyncMock(
-            return_value={
-                "value": [
-                    {"name": "photo.jpg", "contentType": "image/jpeg", "size": 4096, "isInline": False},
-                ]
-            }
-        )
-        result = await detect_attachments(gc, "msg-001")
-        # Non-inline image IS a real attachment
-        assert len(result) == 1
-        assert result[0]["name"] == "photo.jpg"
 
 
 # ── Regex patterns ───────────────────────────────────────────────────

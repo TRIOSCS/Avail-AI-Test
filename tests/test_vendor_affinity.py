@@ -32,6 +32,18 @@ from app.services.vendor_affinity_service import (
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
+def _make_material_card(db: Session, mpn: str, manufacturer: str | None) -> MaterialCard:
+    card = MaterialCard(
+        normalized_mpn=mpn.lower(),
+        display_mpn=mpn,
+        manufacturer=manufacturer,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
 def _make_user(db: Session) -> User:
     u = User(
         email="affinity-test@trioscs.com",
@@ -77,26 +89,12 @@ def _make_requirement(db: Session, requisition_id: int, mpn: str) -> Requirement
 def test_l1_finds_vendors_by_manufacturer(db_session: Session):
     """L1 returns vendors who supplied other MPNs from the same manufacturer."""
     # Target MPN
-    target_card = MaterialCard(
-        normalized_mpn="lm317t",
-        display_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(target_card)
-    db_session.flush()
+    _make_material_card(db_session, "LM317T", "Texas Instruments")
 
     # Other TI parts with vendor history
     vendor_names = ["Arrow Electronics", "Digi-Key", "Mouser"]
     for i, vname in enumerate(vendor_names):
-        other_card = MaterialCard(
-            normalized_mpn=f"tps{i}000",
-            display_mpn=f"TPS{i}000",
-            manufacturer="Texas Instruments",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(other_card)
-        db_session.flush()
+        other_card = _make_material_card(db_session, f"TPS{i}000", "Texas Instruments")
 
         mvh = MaterialVendorHistory(
             material_card_id=other_card.id,
@@ -124,13 +122,7 @@ def test_l1_no_material_card(db_session: Session):
 
 def test_l1_no_manufacturer(db_session: Session):
     """L1 returns empty list when MaterialCard has no manufacturer."""
-    card = MaterialCard(
-        normalized_mpn="nomaker123",
-        display_mpn="NOMAKER123",
-        manufacturer=None,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
+    _make_material_card(db_session, "NOMAKER123", None)
     db_session.commit()
 
     results = find_affinity_vendors_l1("NOMAKER123", db_session)
@@ -143,14 +135,7 @@ def test_l1_no_manufacturer(db_session: Session):
 def test_l2_finds_vendors_by_commodity(db_session: Session):
     """L2 returns vendors sharing commodity tags with the target MPN's vendors."""
     # Create target MPN's MaterialCard
-    target_card = MaterialCard(
-        normalized_mpn="lm317t",
-        display_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(target_card)
-    db_session.flush()
+    _make_material_card(db_session, "LM317T", "Texas Instruments")
 
     # Create a vendor card that has sightings for this MPN
     vc_source = VendorCard(
@@ -230,13 +215,7 @@ def test_l2_finds_vendors_by_commodity(db_session: Session):
 
 def test_l2_no_tags(db_session: Session):
     """L2 returns empty list when no commodity tags exist for the MPN."""
-    card = MaterialCard(
-        normalized_mpn="notagpart",
-        display_mpn="NOTAGPART",
-        manufacturer="Acme",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(card)
+    _make_material_card(db_session, "NOTAGPART", "Acme")
     db_session.commit()
 
     results = find_affinity_vendors_l2("NOTAGPART", db_session)
@@ -290,14 +269,7 @@ def test_score_empty_list():
 def test_find_vendor_affinity_deduplicates(db_session: Session):
     """When the same vendor appears at L1 and L2, the higher-confidence version is
     kept."""
-    target_card = MaterialCard(
-        normalized_mpn="lm317t",
-        display_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(target_card)
-    db_session.flush()
+    _make_material_card(db_session, "LM317T", "Texas Instruments")
 
     # Create vendor card
     vc = VendorCard(
@@ -310,14 +282,7 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
     db_session.flush()
 
     # L1 data: vendor has history with other TI parts
-    other_card = MaterialCard(
-        normalized_mpn="tps54302",
-        display_mpn="TPS54302",
-        manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(other_card)
-    db_session.flush()
+    other_card = _make_material_card(db_session, "TPS54302", "Texas Instruments")
 
     mvh = MaterialVendorHistory(
         material_card_id=other_card.id,
@@ -377,25 +342,11 @@ def test_find_vendor_affinity_deduplicates(db_session: Session):
 
 def test_find_vendor_affinity_limits_to_10(db_session: Session):
     """Orchestrator returns at most 10 results even with more matches."""
-    target_card = MaterialCard(
-        normalized_mpn="lm317t",
-        display_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(target_card)
-    db_session.flush()
+    _make_material_card(db_session, "LM317T", "Texas Instruments")
 
     # Create 15 vendors with MaterialVendorHistory for TI parts
     for i in range(15):
-        other_card = MaterialCard(
-            normalized_mpn=f"tipart{i:03d}",
-            display_mpn=f"TIPART{i:03d}",
-            manufacturer="Texas Instruments",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(other_card)
-        db_session.flush()
+        other_card = _make_material_card(db_session, f"TIPART{i:03d}", "Texas Instruments")
 
         vname = f"Vendor {i:03d}"
         mvh = MaterialVendorHistory(

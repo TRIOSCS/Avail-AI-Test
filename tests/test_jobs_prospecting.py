@@ -8,6 +8,7 @@ to return the test DB session with close() disabled.
 """
 
 import asyncio
+import importlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -41,61 +42,21 @@ def _clear_scheduler_jobs():
 # ── Prospecting Jobs ──────────────────────────────────────────────────
 
 
-def test_pool_health_report(scheduler_db):
-    """_job_pool_health_report delegates to prospect_scheduler."""
+@pytest.mark.parametrize(
+    ("job_name", "delegate_name"),
+    [
+        ("_job_pool_health_report", "job_pool_health_report"),
+        ("_job_discover_prospects", "job_discover_prospects"),
+        ("_job_enrich_pool", "job_enrich_pool"),
+        ("_job_find_contacts", "job_find_contacts"),
+        ("_job_refresh_scores", "job_refresh_scores"),
+        ("_job_expire_and_resurface", "job_expire_and_resurface"),
+    ],
+)
+def test_job_delegates_to_prospect_scheduler(scheduler_db, job_name, delegate_name):
+    """Each prospecting job delegates to its prospect_scheduler counterpart."""
     mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_pool_health_report", mock_fn):
-        from app.jobs.prospecting_jobs import _job_pool_health_report
-
-        asyncio.run(_job_pool_health_report())
-    mock_fn.assert_called_once()
-
-
-def test_discover_prospects(scheduler_db):
-    """_job_discover_prospects delegates to prospect_scheduler."""
-    mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_discover_prospects", mock_fn):
-        from app.jobs.prospecting_jobs import _job_discover_prospects
-
-        asyncio.run(_job_discover_prospects())
-    mock_fn.assert_called_once()
-
-
-def test_enrich_pool(scheduler_db):
-    """_job_enrich_pool delegates to prospect_scheduler."""
-    mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_enrich_pool", mock_fn):
-        from app.jobs.prospecting_jobs import _job_enrich_pool
-
-        asyncio.run(_job_enrich_pool())
-    mock_fn.assert_called_once()
-
-
-def test_find_contacts(scheduler_db):
-    """_job_find_contacts delegates to prospect_scheduler."""
-    mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_find_contacts", mock_fn):
-        from app.jobs.prospecting_jobs import _job_find_contacts
-
-        asyncio.run(_job_find_contacts())
-    mock_fn.assert_called_once()
-
-
-def test_refresh_scores(scheduler_db):
-    """_job_refresh_scores delegates to prospect_scheduler."""
-    mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_refresh_scores", mock_fn):
-        from app.jobs.prospecting_jobs import _job_refresh_scores
-
-        asyncio.run(_job_refresh_scores())
-    mock_fn.assert_called_once()
-
-
-def test_expire_and_resurface(scheduler_db):
-    """_job_expire_and_resurface delegates to prospect_scheduler."""
-    mock_fn = AsyncMock()
-    with patch("app.services.prospect_scheduler.job_expire_and_resurface", mock_fn):
-        from app.jobs.prospecting_jobs import _job_expire_and_resurface
-
-        asyncio.run(_job_expire_and_resurface())
+    with patch(f"app.services.prospect_scheduler.{delegate_name}", mock_fn):
+        job = getattr(importlib.import_module("app.jobs.prospecting_jobs"), job_name)
+        asyncio.run(job())
     mock_fn.assert_called_once()

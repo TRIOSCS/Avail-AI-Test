@@ -141,6 +141,44 @@ def _email_mining_source(db_session: Session) -> ApiSource:
     return src
 
 
+def _make_m365_vendor_response(db_session, test_user, *, req_name, message_id):
+    """Connect test_user to m365 and create a Requisition + VendorResponse.
+
+    Shared arrange block for the parse-response-attachments tests; the only per-test
+    variations are the requisition name and the message_id.
+    """
+    from app.models import Requisition, VendorResponse
+
+    test_user.m365_connected = True
+    test_user.access_token = "token"
+    db_session.commit()
+
+    req = Requisition(
+        name=req_name,
+        customer_name="Test",
+        status="active",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    vr = VendorResponse(
+        requisition_id=req.id,
+        vendor_name="Test",
+        vendor_email="t@t.com",
+        subject="RE: Test",
+        message_id=message_id,
+        status="new",
+        received_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+    return vr
+
+
 # ---------------------------------------------------------------------------
 # health_summary endpoint
 # ---------------------------------------------------------------------------
@@ -724,35 +762,7 @@ class TestParseAttachmentsNoM365:
 
 class TestParseAttachmentsNoMessageId:
     def test_no_message_id_returns_400(self, sources_client: TestClient, test_user: User, db_session: Session):
-        from app.models import Requisition, VendorResponse
-
-        test_user.m365_connected = True
-        test_user.access_token = "token"
-        db_session.commit()
-
-        req = Requisition(
-            name="REQ-TEST",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        vr = VendorResponse(
-            requisition_id=req.id,
-            vendor_name="Test",
-            vendor_email="t@t.com",
-            subject="RE: Test",
-            message_id=None,
-            status="new",
-            received_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        db_session.commit()
-        db_session.refresh(vr)
+        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-TEST", message_id=None)
 
         resp = sources_client.post(f"/api/email-mining/parse-response-attachments/{vr.id}")
         assert resp.status_code == 400
@@ -765,35 +775,7 @@ class TestParseAttachmentsNoMessageId:
 
 class TestParseAttachmentsGraphError:
     def test_graph_api_error_returns_502(self, sources_client: TestClient, test_user: User, db_session: Session):
-        from app.models import Requisition, VendorResponse
-
-        test_user.m365_connected = True
-        test_user.access_token = "token"
-        db_session.commit()
-
-        req = Requisition(
-            name="REQ-GRAPH",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        vr = VendorResponse(
-            requisition_id=req.id,
-            vendor_name="Test",
-            vendor_email="t@t.com",
-            subject="RE: Test",
-            message_id="msg-graph-001",
-            status="new",
-            received_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        db_session.commit()
-        db_session.refresh(vr)
+        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-GRAPH", message_id="msg-graph-001")
 
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(side_effect=ConnectionError("timeout"))
@@ -888,35 +870,7 @@ class TestParseAttachmentsValidationFails:
     def test_invalid_file_skipped(self, sources_client: TestClient, test_user: User, db_session: Session):
         import base64
 
-        from app.models import Requisition, VendorResponse
-
-        test_user.m365_connected = True
-        test_user.access_token = "token"
-        db_session.commit()
-
-        req = Requisition(
-            name="REQ-VAL",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        vr = VendorResponse(
-            requisition_id=req.id,
-            vendor_name="Test",
-            vendor_email="t@t.com",
-            subject="RE: Test",
-            message_id="msg-val-001",
-            status="new",
-            received_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        db_session.commit()
-        db_session.refresh(vr)
+        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-VAL", message_id="msg-val-001")
 
         fake_content = base64.b64encode(b"fake").decode()
         mock_gc = MagicMock()
@@ -935,35 +889,7 @@ class TestParseAttachmentsValidationFails:
         assert data["rows_parsed"] == 0
 
     def test_no_content_bytes_skipped(self, sources_client: TestClient, test_user: User, db_session: Session):
-        from app.models import Requisition, VendorResponse
-
-        test_user.m365_connected = True
-        test_user.access_token = "token"
-        db_session.commit()
-
-        req = Requisition(
-            name="REQ-NOCB",
-            customer_name="Test",
-            status="active",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-
-        vr = VendorResponse(
-            requisition_id=req.id,
-            vendor_name="Test",
-            vendor_email="t@t.com",
-            subject="RE: Test",
-            message_id="msg-nocb-001",
-            status="new",
-            received_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        db_session.commit()
-        db_session.refresh(vr)
+        vr = _make_m365_vendor_response(db_session, test_user, req_name="REQ-NOCB", message_id="msg-nocb-001")
 
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value={"value": [{"name": "data.csv", "contentBytes": None}]})

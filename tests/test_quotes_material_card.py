@@ -55,6 +55,23 @@ def material_card_2(db_session: Session) -> MaterialCard:
     return mc
 
 
+def _make_sent_quote(db_session, requisition, customer_site, user, quote_number, line_items, subtotal):
+    """Persist a sent Quote for pricing-history tests and return it."""
+    q = Quote(
+        requisition_id=requisition.id,
+        customer_site_id=customer_site.id,
+        quote_number=quote_number,
+        status="sent",
+        sent_at=datetime.now(timezone.utc),
+        line_items=line_items,
+        subtotal=subtotal,
+        created_by_id=user.id,
+    )
+    db_session.add(q)
+    db_session.commit()
+    return q
+
+
 def _mock_quote(line_items=None, **overrides):
     """Build a mock Quote for unit tests (no DB)."""
     q = MagicMock()
@@ -182,18 +199,15 @@ class TestPricingHistory:
         self, client, db_session, test_requisition, test_customer_site, test_user, material_card
     ):
         """Pricing history response includes material_card_id."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        _make_sent_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-PH01",
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
             line_items=[{"mpn": "LM317T", "material_card_id": material_card.id, "sell_price": 2.50, "qty": 100}],
             subtotal=250.0,
-            created_by_id=test_user.id,
         )
-        db_session.add(q)
-        db_session.commit()
 
         resp = client.get("/api/pricing-history/LM317T")
         assert resp.status_code == 200
@@ -207,20 +221,17 @@ class TestPricingHistory:
     ):
         """Pricing history matches line items via material_card_id even with variant MPN
         strings."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        _make_sent_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-PH02",
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
             line_items=[
                 {"mpn": "LM317T/NOPB", "material_card_id": material_card.id, "sell_price": 3.00, "qty": 50},
             ],
             subtotal=150.0,
-            created_by_id=test_user.id,
         )
-        db_session.add(q)
-        db_session.commit()
 
         # Search by the canonical MPN — should still find the variant via card_id
         resp = client.get("/api/pricing-history/LM317T")
@@ -325,18 +336,15 @@ class TestPricingHistoryEdgeCases:
         self, client, db_session, test_requisition, test_customer_site, test_user
     ):
         """Legacy quotes without material_card_id still match via MPN string."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        _make_sent_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-LEG01",
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
             line_items=[{"mpn": "LM317T", "sell_price": 1.75, "qty": 200}],
             subtotal=350.0,
-            created_by_id=test_user.id,
         )
-        db_session.add(q)
-        db_session.commit()
 
         resp = client.get("/api/pricing-history/LM317T")
         assert resp.status_code == 200
@@ -348,21 +356,18 @@ class TestPricingHistoryEdgeCases:
         self, client, db_session, test_requisition, test_customer_site, test_user, material_card
     ):
         """In a multi-item quote, only the matching item is returned."""
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=test_customer_site.id,
+        _make_sent_quote(
+            db_session,
+            test_requisition,
+            test_customer_site,
+            test_user,
             quote_number="Q-2026-MULTI",
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
             line_items=[
                 {"mpn": "UNRELATED-PART", "sell_price": 99.99, "qty": 10},
                 {"mpn": "LM317T", "material_card_id": material_card.id, "sell_price": 3.25, "qty": 50},
             ],
             subtotal=200.0,
-            created_by_id=test_user.id,
         )
-        db_session.add(q)
-        db_session.commit()
 
         resp = client.get("/api/pricing-history/LM317T")
         assert resp.status_code == 200
@@ -376,18 +381,15 @@ class TestPricingHistoryEdgeCases:
     ):
         """avg_price and price_range computed correctly with card-based matching."""
         for i, price in enumerate([2.00, 4.00]):
-            q = Quote(
-                requisition_id=test_requisition.id,
-                customer_site_id=test_customer_site.id,
+            _make_sent_quote(
+                db_session,
+                test_requisition,
+                test_customer_site,
+                test_user,
                 quote_number=f"Q-2026-AGG{i}",
-                status="sent",
-                sent_at=datetime.now(timezone.utc),
                 line_items=[{"mpn": "LM317T", "material_card_id": material_card.id, "sell_price": price, "qty": 100}],
                 subtotal=price * 100,
-                created_by_id=test_user.id,
             )
-            db_session.add(q)
-        db_session.commit()
 
         resp = client.get("/api/pricing-history/LM317T")
         assert resp.status_code == 200

@@ -8,6 +8,7 @@ reconcile command corrects, deletes, or leaves each row per its failure class.
 
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.management.reconcile_decoded_facets import _classify, _facet_matches, reconcile
@@ -313,45 +314,31 @@ def _make_facet(*, value_numeric=None, value_text=None):
     return facet
 
 
-def test_facet_matches_boolean_true():
-    """Line 130: boolean schema — stored 'true' matches a truthy new_value."""
-    facet = _make_facet(value_text="true")
-    schema = _make_schema("boolean")
-    assert _facet_matches(facet, schema, True) is True
-
-
-def test_facet_matches_boolean_false():
-    """Line 130: boolean schema — stored 'false' matches a falsy new_value."""
-    facet = _make_facet(value_text="false")
-    schema = _make_schema("boolean")
-    assert _facet_matches(facet, schema, False) is True
-
-
-def test_facet_matches_boolean_mismatch():
-    """Line 130: boolean schema — stored 'true' does NOT match False."""
-    facet = _make_facet(value_text="true")
-    schema = _make_schema("boolean")
-    assert _facet_matches(facet, schema, False) is False
-
-
-def test_facet_matches_text_equal():
-    """Line 131: text schema (or no schema) — value_text matches str(new_value)."""
-    facet = _make_facet(value_text="GeForce")
-    schema = _make_schema("text")
-    assert _facet_matches(facet, schema, "GeForce") is True
-
-
-def test_facet_matches_text_mismatch():
-    """Line 131: text schema — stored value differs."""
-    facet = _make_facet(value_text="RTX")
-    schema = _make_schema("text")
-    assert _facet_matches(facet, schema, "GeForce") is False
-
-
-def test_facet_matches_no_schema_uses_text_fallback():
-    """When schema is None the function falls through to the text comparison."""
-    facet = _make_facet(value_text="4000")
-    assert _facet_matches(facet, None, 4000) is True  # str(4000) == "4000"
+@pytest.mark.parametrize(
+    ("facet", "data_type", "new_value", "expected"),
+    [
+        # boolean schema (line 130)
+        pytest.param(_make_facet(value_text="true"), "boolean", True, True, id="boolean_true"),
+        pytest.param(_make_facet(value_text="false"), "boolean", False, True, id="boolean_false"),
+        pytest.param(_make_facet(value_text="true"), "boolean", False, False, id="boolean_mismatch"),
+        # text schema / text fallback (line 131)
+        pytest.param(_make_facet(value_text="GeForce"), "text", "GeForce", True, id="text_equal"),
+        pytest.param(_make_facet(value_text="RTX"), "text", "GeForce", False, id="text_mismatch"),
+        # schema is None → falls through to the text comparison (str(4000) == "4000")
+        pytest.param(_make_facet(value_text="4000"), None, 4000, True, id="no_schema_text_fallback"),
+        # numeric schema sub-branches (lines 124, 126-128)
+        pytest.param(
+            _make_facet(value_numeric=None, value_text=None), "numeric", 4000, False, id="numeric_value_numeric_none"
+        ),
+        pytest.param(_make_facet(value_numeric=4000.0), "numeric", 4000, True, id="numeric_match"),
+        pytest.param(_make_facet(value_numeric=80.0), "numeric", 4000, False, id="numeric_mismatch"),
+        # float("not-a-number") raises ValueError → returns False
+        pytest.param(_make_facet(value_numeric="not-a-number"), "numeric", 4000, False, id="numeric_conversion_error"),
+    ],
+)
+def test_facet_matches(facet, data_type, new_value, expected):
+    schema = _make_schema(data_type) if data_type is not None else None
+    assert _facet_matches(facet, schema, new_value) is expected
 
 
 # ── limit parameter (line 156) ───────────────────────────────────────────────
@@ -565,38 +552,6 @@ def test_reconcile_main_apply(db_session: Session, monkeypatch):
     assert reconcile_calls[0]["keys"] == ("capacity_gb",)
     assert not rollback_called  # apply mode skips rollback
     assert len(recorded) == 1 and recorded[0]["mode"] == "apply"
-
-
-# ── _facet_matches: numeric schema sub-branches (lines 124, 127-128) ─────────
-
-
-def test_facet_matches_numeric_value_numeric_none():
-    """Line 124: numeric schema but value_numeric is None → False."""
-    facet = _make_facet(value_numeric=None, value_text=None)
-    schema = _make_schema("numeric")
-    assert _facet_matches(facet, schema, 4000) is False
-
-
-def test_facet_matches_numeric_match():
-    """Lines 126-127: numeric schema — stored value equals new_value within epsilon."""
-    facet = _make_facet(value_numeric=4000.0)
-    schema = _make_schema("numeric")
-    assert _facet_matches(facet, schema, 4000) is True
-
-
-def test_facet_matches_numeric_mismatch():
-    """Lines 126-127: numeric schema — stored value differs from new_value."""
-    facet = _make_facet(value_numeric=80.0)
-    schema = _make_schema("numeric")
-    assert _facet_matches(facet, schema, 4000) is False
-
-
-def test_facet_matches_numeric_conversion_error():
-    """Lines 127-128: numeric schema — TypeError/ValueError on bad value → False."""
-    facet = _make_facet(value_numeric="not-a-number")
-    schema = _make_schema("numeric")
-    # float("not-a-number") raises ValueError → returns False
-    assert _facet_matches(facet, schema, 4000) is False
 
 
 # ── reconcile: orphaned facet (card deleted, lines 167-168) ──────────────────

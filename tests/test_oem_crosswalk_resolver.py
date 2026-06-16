@@ -60,19 +60,39 @@ async def test_gate1_off_domain_is_no_match():
     assert r.payload == fixture("off_domain")  # forensics kept on negative outcomes too
 
 
+@pytest.mark.parametrize(
+    "override",
+    [
+        # Gate 1: the contract is a SINGLE source_url — the page the quote was taken from.
+        # A missing source_url, or an untrusted quote source (even though the model could
+        # have listed an unrelated trusted URL under the old list contract), must fail —
+        # provenance must never be misattributed to a trusted domain.
+        pytest.param({"source_url": None}, id="gate1_missing_source_url"),
+        pytest.param({"source_url": "https://evil.example/spare_lookup"}, id="gate1_off_domain_quote_source"),
+        # Gate 2 — verbatim-quote token gate (adversarial canonical_mpn shapes):
+        #   'Gold 6130' → 'gold6130' is a substring of the collapsed quote but NOT a whole
+        #     token ('Xeon-Gold' + '6130' are separate) — the most plausible CPU-cohort LLM
+        #     failure (marketing model name instead of orderable tray MPN).
+        #   '125W FIO' → '125wfio' exists in the collapsed quote ONLY because separator-
+        #     stripping glues adjacent tokens together.
+        #   '8067303409' is a truncation of the REAL canonical ('CD8067303409000') — a
+        #     substring of the collapsed quote but not a token.
+        pytest.param({"canonical_mpn": "Gold 6130"}, id="gate2_title_fragment"),
+        pytest.param({"canonical_mpn": "125W FIO"}, id="gate2_cross_token_span"),
+        pytest.param({"canonical_mpn": "8067303409"}, id="gate2_truncated_real"),
+        # Gate 2 — canonical_mpn shape guard, applied before the quote is even consulted:
+        #   'AB' (<6 chars) would substring-match virtually any normalized page text.
+        #   >64 chars cannot fit canonical_mpn_raw (String(64)) and is garbage anyway —
+        #     rejected in Python, never left for PostgreSQL to raise DataError on.
+        pytest.param({"canonical_mpn": "AB"}, id="gate2_short_shape_guard"),
+        pytest.param({"canonical_mpn": "X" * 65}, id="gate2_overlong_shape_guard"),
+        # Gate 5: a non-numeric confidence must degrade to no_match, never raise.
+        pytest.param({"confidence": "very sure"}, id="gate5_malformed_confidence"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_gate1_missing_source_url_is_no_match():
-    r = await _resolve({**fixture("resolved_cpu_kit"), "source_url": None})
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate1_gates_the_quote_source_url_itself():
-    # The contract is a SINGLE source_url — the page the quote was taken from. An
-    # untrusted quote source must fail gate 1 even though the model could have listed
-    # an unrelated trusted URL under the old list contract (provenance must never be
-    # misattributed to a trusted domain).
-    r = await _resolve({**fixture("resolved_cpu_kit"), "source_url": "https://evil.example/spare_lookup"})
+async def test_resolved_cpu_kit_override_is_no_match(override):
+    r = await _resolve({**fixture("resolved_cpu_kit"), **override})
     assert r.status == "no_match"
 
 
@@ -85,48 +105,6 @@ async def test_gate2_quote_missing_canonical_is_no_match():
 @pytest.mark.asyncio
 async def test_gate2_quote_missing_spare_is_no_match():
     r = await _resolve(fixture("quote_missing_spare"))
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate2_title_fragment_canonical_is_no_match():
-    # Adversarial: the most plausible LLM failure for the CPU cohort — returning the
-    # marketing model name instead of the orderable tray MPN. 'Gold 6130' collapses to
-    # 'gold6130', a substring of the collapsed quote but NOT a whole token
-    # ('Xeon-Gold' + '6130' are separate tokens) — must be rejected.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "canonical_mpn": "Gold 6130"})
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate2_cross_token_span_canonical_is_no_match():
-    # Adversarial: '125W FIO' → '125wfio' exists in the collapsed quote ONLY because
-    # separator-stripping glues adjacent tokens together — must be rejected.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "canonical_mpn": "125W FIO"})
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate2_truncated_real_canonical_is_no_match():
-    # Adversarial: a truncation of the REAL canonical ('8067303409' ⊂
-    # 'CD8067303409000') is a substring of the collapsed quote but not a token.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "canonical_mpn": "8067303409"})
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate2_short_canonical_fails_shape_guard():
-    # A 2-char "canonical" ('ab') would substring-match virtually any normalized page
-    # text — the ≥6-char shape guard rejects it before the quote is even consulted.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "canonical_mpn": "AB"})
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate2_overlong_canonical_fails_shape_guard():
-    # >64 chars cannot fit canonical_mpn_raw (String(64)) and is garbage anyway —
-    # rejected in Python, never left for PostgreSQL to raise DataError on.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "canonical_mpn": "X" * 65})
     assert r.status == "no_match"
 
 
@@ -183,13 +161,6 @@ async def test_gate4_low_confidence_is_no_match():
 @pytest.mark.asyncio
 async def test_gate5_null_fields_is_no_match():
     r = await _resolve(fixture("null_fields"))
-    assert r.status == "no_match"
-
-
-@pytest.mark.asyncio
-async def test_gate5_malformed_confidence_is_no_match():
-    # A non-numeric confidence must degrade to no_match, never raise.
-    r = await _resolve({**fixture("resolved_cpu_kit"), "confidence": "very sure"})
     assert r.status == "no_match"
 
 

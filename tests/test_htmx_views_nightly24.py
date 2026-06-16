@@ -132,31 +132,17 @@ def _make_buy_plan(db: Session, req: Requisition, user: User):
 
 
 class TestCreateQuoteFromOffersDirect:
-    async def test_creates_quote_from_offer_ids(self, db_session: Session, test_user: User):
-        """Lines 1916–1971: creates Quote + QuoteLines from offer_ids list."""
+    @pytest.mark.parametrize("mpns", [["BC547"], ["BC547", "LM317T"]], ids=["single_offer", "multiple_offers"])
+    async def test_creates_quote_from_offer_ids(self, db_session: Session, test_user: User, mpns):
+        """Lines 1916–1971: creates Quote + QuoteLines from offer_ids list (one line per
+        offer)."""
         from app.routers.htmx_views import create_quote_from_offers
 
         req = _make_req(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user)
+        offer_ids = [str(_make_offer(db_session, req, test_user, mpn).id) for mpn in mpns]
         mock_req = _mock_form_request(
             path=f"/v2/partials/requisitions/{req.id}/create-quote",
-            fields={"offer_ids": [str(offer.id)]},
-        )
-        with patch("app.routers.htmx_views.template_response") as mock_tpl:
-            mock_tpl.return_value = HTMLResponse("quote OK")
-            result = await create_quote_from_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
-        assert result.status_code == 200
-
-    async def test_creates_quote_with_multiple_offers(self, db_session: Session, test_user: User):
-        """Multiple offers create multiple QuoteLines."""
-        from app.routers.htmx_views import create_quote_from_offers
-
-        req = _make_req(db_session, test_user)
-        o1 = _make_offer(db_session, req, test_user, "BC547")
-        o2 = _make_offer(db_session, req, test_user, "LM317T")
-        mock_req = _mock_form_request(
-            path=f"/v2/partials/requisitions/{req.id}/create-quote",
-            fields={"offer_ids": [str(o1.id), str(o2.id)]},
+            fields={"offer_ids": offer_ids},
         )
         with patch("app.routers.htmx_views.template_response") as mock_tpl:
             mock_tpl.return_value = HTMLResponse("quote OK")
@@ -537,12 +523,10 @@ class TestBuyPlanCancelDirect:
 
         req = _make_req(db_session, test_user)
         bp = _make_buy_plan(db_session, req, test_user)
-        form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: {"reason": "test cancel"}.get(key, default)
-        mock_req = MagicMock(spec=Request)
-        mock_req.url.path = f"/v2/partials/buy-plans/{bp.id}/cancel"
-        mock_req.headers = {}
-        mock_req.form = AsyncMock(return_value=form_mock)
+        mock_req = _mock_form_request(
+            path=f"/v2/partials/buy-plans/{bp.id}/cancel",
+            fields={"reason": "test cancel"},
+        )
         with patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("bp detail")
             result = await buy_plan_cancel_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)

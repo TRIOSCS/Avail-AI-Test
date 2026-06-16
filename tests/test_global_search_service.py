@@ -10,6 +10,7 @@ from app.models.crm import Company, CustomerSite, SiteContact
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard, VendorContact
+from app.services.global_search_service import fast_search
 
 
 @pytest.fixture
@@ -79,8 +80,6 @@ def search_db(db_session, test_user):
 
 
 def test_fast_search_returns_structure(search_db):
-    from app.services.global_search_service import fast_search
-
     result = fast_search("LM358", search_db)
     assert "best_match" in result
     assert "groups" in result
@@ -97,94 +96,50 @@ def test_fast_search_returns_structure(search_db):
 
 
 def test_fast_search_finds_requisition_by_name(search_db):
-    from app.services.global_search_service import fast_search
-
     result = fast_search("LM358", search_db)
     req_names = [r["name"] for r in result["groups"]["requisitions"]]
     assert any("LM358" in n for n in req_names)
 
 
-def test_fast_search_finds_company_by_name(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("Acme", search_db)
-    co_names = [r["name"] for r in result["groups"]["companies"]]
-    assert "Acme Electronics" in co_names
-
-
-def test_fast_search_finds_vendor_contact_by_email(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("john@arrow", search_db)
-    vc_emails = [r["email"] for r in result["groups"]["vendor_contacts"]]
-    assert "john@arrow.com" in vc_emails
-
-
-def test_fast_search_finds_part_by_mpn(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("LM358N", search_db)
-    mpns = [r["primary_mpn"] for r in result["groups"]["parts"]]
-    assert "LM358N" in mpns
+@pytest.mark.parametrize(
+    ("query", "group", "field", "expected"),
+    [
+        ("Acme", "companies", "name", "Acme Electronics"),
+        ("john@arrow", "vendor_contacts", "email", "john@arrow.com"),
+        ("LM358N", "parts", "primary_mpn", "LM358N"),
+        ("Arrow", "offers", "vendor_name", "Arrow"),
+        # JSON array fields (emails/phones) are searchable.
+        ("sales@arrow", "vendors", "display_name", "Arrow Electronics"),
+    ],
+    ids=["company_name", "vendor_contact_email", "part_mpn", "offer_vendor_name", "vendor_json_email"],
+)
+def test_fast_search_finds_entity_by_field(search_db, query, group, field, expected):
+    result = fast_search(query, search_db)
+    values = [r[field] for r in result["groups"][group]]
+    assert expected in values
 
 
-def test_fast_search_finds_offer_by_vendor_name(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("Arrow", search_db)
-    vendor_names = [r["vendor_name"] for r in result["groups"]["offers"]]
-    assert "Arrow" in vendor_names
-
-
-def test_fast_search_finds_vendor_by_json_email(search_db):
-    """Verify JSON array fields (emails/phones) are searchable."""
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("sales@arrow", search_db)
-    vendor_names = [r["display_name"] for r in result["groups"]["vendors"]]
-    assert "Arrow Electronics" in vendor_names
-
-
-def test_fast_search_empty_query_returns_empty(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("", search_db)
-    assert result["total_count"] == 0
-
-
-def test_fast_search_short_query_returns_empty(search_db):
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("a", search_db)
+@pytest.mark.parametrize("query", ["", "a"], ids=["empty", "short"])
+def test_fast_search_too_short_returns_empty(search_db, query):
+    result = fast_search(query, search_db)
     assert result["total_count"] == 0
 
 
 def test_fast_search_respects_limit(search_db):
-    from app.services.global_search_service import fast_search
-
     result = fast_search("LM358", search_db)
     for group in result["groups"].values():
         assert len(group) <= 5
 
 
 def test_fast_search_best_match_present(search_db):
-    from app.services.global_search_service import fast_search
-
     result = fast_search("LM358N", search_db)
     assert result["best_match"] is not None
     assert "type" in result["best_match"]
     assert "id" in result["best_match"]
 
 
-def test_fast_search_special_chars_safe(search_db):
-    """SQL injection / wildcard chars don't cause errors."""
-    from app.services.global_search_service import fast_search
-
-    result = fast_search("100%", search_db)
-    assert result["total_count"] == 0  # no match, but no error
-
-    result = fast_search("test_underscore", search_db)
-    assert result["total_count"] == 0
-
-    result = fast_search("O'Reilly", search_db)
+@pytest.mark.parametrize("query", ["100%", "test_underscore", "O'Reilly"])
+def test_fast_search_special_chars_safe(search_db, query):
+    """SQL injection / wildcard chars don't cause errors (no match, but no error)."""
+    result = fast_search(query, search_db)
     assert result["total_count"] == 0

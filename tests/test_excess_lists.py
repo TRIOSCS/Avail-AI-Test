@@ -16,6 +16,8 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models import (
     ActivityLog,
     CustomerSite,
@@ -68,41 +70,26 @@ class TestSightingSourceCompanyId:
 
         assert sighting.source_company_id is None
 
-    def test_sighting_moq_zero_coerced_to_none(self, db_session, test_requisition):
-        """MOQ=0 must be coerced to None by model validator (chk_sight_moq)."""
+    @pytest.mark.parametrize(
+        ("moq", "expected"),
+        [
+            pytest.param(0, None, id="zero_coerced_to_none"),
+            pytest.param(-1, None, id="negative_coerced_to_none"),
+            pytest.param(5, 5, id="positive_kept"),
+        ],
+    )
+    def test_sighting_moq_validator(self, db_session, test_requisition, moq, expected):
+        """MOQ <= 0 must be coerced to None by the model validator (chk_sight_moq);
+        positive kept."""
         requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         sighting = Sighting(
             requirement_id=requirement.id,
             vendor_name="Test Vendor",
             mpn_matched="LM317T",
             source_type="api",
-            moq=0,
+            moq=moq,
         )
-        assert sighting.moq is None
-
-    def test_sighting_moq_negative_coerced_to_none(self, db_session, test_requisition):
-        """Negative MOQ must be coerced to None."""
-        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        sighting = Sighting(
-            requirement_id=requirement.id,
-            vendor_name="Test Vendor",
-            mpn_matched="LM317T",
-            source_type="api",
-            moq=-1,
-        )
-        assert sighting.moq is None
-
-    def test_sighting_moq_positive_kept(self, db_session, test_requisition):
-        """Positive MOQ should be preserved."""
-        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-        sighting = Sighting(
-            requirement_id=requirement.id,
-            vendor_name="Test Vendor",
-            mpn_matched="LM317T",
-            source_type="api",
-            moq=5,
-        )
-        assert sighting.moq == 5
+        assert sighting.moq == expected
 
     def test_sighting_source_company_id(self, db_session, test_requisition, test_company):
         """source_company_id column should persist correctly on Sighting."""

@@ -7,6 +7,8 @@ models, app.services.part_offers, the sightings offer endpoints.
 
 from datetime import date, datetime, timedelta, timezone
 
+import pytest
+
 from app.constants import ActivityType, OfferStatus
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
@@ -174,16 +176,23 @@ def test_create_offer_appears_in_panel_and_logs_activity(client, db_session):
 # ── Task 7: mutation endpoints ──────────────────────────────────────────────
 
 
-def test_approve_pending_offer_via_panel(client, db_session):
+@pytest.mark.parametrize(
+    ("action", "expected_status"),
+    [
+        ("approve", OfferStatus.ACTIVE),
+        ("reject", OfferStatus.REJECTED),
+    ],
+)
+def test_review_pending_offer_via_panel(client, db_session, action, expected_status):
     rq, r = _req(db_session, mpn="LM317T")
     o = _offer(db_session, rq, r, "PendVend", "LM317T", "lm317t", status=OfferStatus.PENDING_REVIEW)
     resp = client.post(
         f"/v2/partials/sightings/{r.id}/offers/{o.id}/review",
-        data={"action": "approve"},
+        data={"action": action},
     )
     assert resp.status_code == 200
     db_session.expire_all()
-    assert db_session.get(Offer, o.id).status == OfferStatus.ACTIVE
+    assert db_session.get(Offer, o.id).status == expected_status
 
 
 def test_delete_offer_via_panel(client, db_session):
@@ -242,18 +251,6 @@ def test_part_offers_empty_when_no_match(db_session):
     """A part with no offers returns an empty list (no query error)."""
     _, r = _req(db_session, mpn="NOOFFERS-XYZ")
     assert part_offers_for(r, db_session) == []
-
-
-def test_reject_pending_offer_via_panel(client, db_session):
-    rq, r = _req(db_session, mpn="LM317T")
-    o = _offer(db_session, rq, r, "PendVend", "LM317T", "lm317t", status=OfferStatus.PENDING_REVIEW)
-    resp = client.post(
-        f"/v2/partials/sightings/{r.id}/offers/{o.id}/review",
-        data={"action": "reject"},
-    )
-    assert resp.status_code == 200
-    db_session.expire_all()
-    assert db_session.get(Offer, o.id).status == OfferStatus.REJECTED
 
 
 def test_reconfirm_offer_via_panel(client, db_session):

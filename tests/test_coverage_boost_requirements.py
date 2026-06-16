@@ -28,6 +28,21 @@ from app.models import Requirement, Requisition, User
 from app.models.sourcing_lead import SourcingLead
 
 
+def _make_requisition(db_session: Session, test_user: User, name: str) -> Requisition:
+    """Create + persist an active requisition owned by the test user."""
+    reqn = Requisition(
+        name=name,
+        status="active",
+        urgency="normal",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+    return reqn
+
+
 @pytest.fixture()
 def req_with_string_subs(db_session: Session, test_user: User) -> tuple:
     """Requisition + Requirement that has legacy string substitutes."""
@@ -221,16 +236,7 @@ class TestRequirementSightingsGaps:
         """Requirement with material_card_id adds it to card_ids (line 1328)."""
         from app.models.intelligence import MaterialCard
 
-        reqn = Requisition(
-            name="Sig Test",
-            status="active",
-            urgency="normal",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(reqn)
-        db_session.commit()
-        db_session.refresh(reqn)
+        reqn = _make_requisition(db_session, test_user, "Sig Test")
 
         card = MaterialCard(
             display_mpn="LM317T",
@@ -260,16 +266,7 @@ class TestRequirementSightingsGaps:
         1337-1338)."""
         from app.models.intelligence import MaterialCard
 
-        reqn = Requisition(
-            name="Sub Test",
-            status="active",
-            urgency="normal",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(reqn)
-        db_session.commit()
-        db_session.refresh(reqn)
+        reqn = _make_requisition(db_session, test_user, "Sub Test")
 
         # MaterialCard for the substitute so the db.query finds it (line 1337)
         sub_card = MaterialCard(
@@ -308,16 +305,7 @@ class TestRequirementOffersGaps:
         1431-1435)."""
         from app.models.intelligence import MaterialCard
 
-        reqn = Requisition(
-            name="Offers Sub Test",
-            status="active",
-            urgency="normal",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(reqn)
-        db_session.commit()
-        db_session.refresh(reqn)
+        reqn = _make_requisition(db_session, test_user, "Offers Sub Test")
 
         sub_card = MaterialCard(
             display_mpn="LM358N",
@@ -353,16 +341,7 @@ class TestListRequirementsContactGap:
         329-331)."""
         from app.models.offers import Contact
 
-        reqn = Requisition(
-            name="Contact Gap Test",
-            status="active",
-            urgency="normal",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(reqn)
-        db_session.commit()
-        db_session.refresh(reqn)
+        reqn = _make_requisition(db_session, test_user, "Contact Gap Test")
 
         contact = Contact(
             requisition_id=reqn.id,

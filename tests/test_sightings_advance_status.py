@@ -27,23 +27,23 @@ def requirement_open(db_session: Session, test_requisition: Requisition) -> Requ
     return req
 
 
+def advance_status(client: TestClient, requirement_id, status=None):
+    """PATCH the advance-status endpoint; omit ``status`` to send an empty body."""
+    data = {} if status is None else {"status": status}
+    return client.patch(f"/v2/partials/sightings/{requirement_id}/advance-status", data=data)
+
+
 class TestAdvanceStatusValid:
     """Valid status transitions update the requirement and create activity."""
 
     def test_open_to_sourcing(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.SOURCING},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
         assert resp.status_code == 200
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.SOURCING
 
     def test_open_to_archived(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.ARCHIVED},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.ARCHIVED)
         assert resp.status_code == 200
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.ARCHIVED
@@ -52,10 +52,7 @@ class TestAdvanceStatusValid:
         requirement_open.sourcing_status = SourcingStatus.SOURCING
         db_session.commit()
 
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.OFFERED},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.OFFERED)
         assert resp.status_code == 200
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.OFFERED
@@ -65,10 +62,7 @@ class TestAdvanceStatusInvalid:
     """Invalid transitions return 409."""
 
     def test_open_to_won_rejected(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.WON},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.WON)
         assert resp.status_code == 409
         # Status should remain unchanged
         db_session.refresh(requirement_open)
@@ -78,10 +72,7 @@ class TestAdvanceStatusInvalid:
         requirement_open.sourcing_status = SourcingStatus.ARCHIVED
         db_session.commit()
 
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.OPEN},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.OPEN)
         assert resp.status_code == 409
 
 
@@ -89,10 +80,7 @@ class TestAdvanceStatusActivityLog:
     """Activity log is created on successful transition."""
 
     def test_activity_log_created(self, client: TestClient, db_session: Session, requirement_open: Requirement):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.SOURCING},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.SOURCING)
         assert resp.status_code == 200
 
         log = (
@@ -110,10 +98,7 @@ class TestAdvanceStatusActivityLog:
     def test_no_activity_log_on_invalid_transition(
         self, client: TestClient, db_session: Session, requirement_open: Requirement
     ):
-        client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.WON},
-        )
+        advance_status(client, requirement_open.id, SourcingStatus.WON)
 
         log_count = (
             db_session.query(ActivityLog)
@@ -130,10 +115,7 @@ class TestAdvanceStatusAuth:
     """Unauthorized users get 401."""
 
     def test_unauthenticated_returns_401(self, unauthenticated_client: TestClient, requirement_open: Requirement):
-        resp = unauthenticated_client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.SOURCING},
-        )
+        resp = advance_status(unauthenticated_client, requirement_open.id, SourcingStatus.SOURCING)
         # FastAPI returns 401 or redirects for unauthenticated users
         assert resp.status_code in (401, 403)
 
@@ -142,25 +124,16 @@ class TestAdvanceStatusEdgeCases:
     """Edge cases: missing status, not found, same status."""
 
     def test_missing_status_returns_400(self, client: TestClient, requirement_open: Requirement):
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={},
-        )
+        resp = advance_status(client, requirement_open.id)
         assert resp.status_code == 400
 
     def test_not_found_returns_404(self, client: TestClient):
-        resp = client.patch(
-            "/v2/partials/sightings/999999/advance-status",
-            data={"status": SourcingStatus.SOURCING},
-        )
+        resp = advance_status(client, 999999, SourcingStatus.SOURCING)
         assert resp.status_code == 404
 
     def test_same_status_is_noop(self, client: TestClient, db_session: Session, requirement_open: Requirement):
         """Transitioning to the same status is a valid no-op."""
-        resp = client.patch(
-            f"/v2/partials/sightings/{requirement_open.id}/advance-status",
-            data={"status": SourcingStatus.OPEN},
-        )
+        resp = advance_status(client, requirement_open.id, SourcingStatus.OPEN)
         assert resp.status_code == 200
         db_session.refresh(requirement_open)
         assert requirement_open.sourcing_status == SourcingStatus.OPEN

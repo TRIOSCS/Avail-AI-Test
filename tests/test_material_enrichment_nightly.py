@@ -102,13 +102,6 @@ async def test_enrich_material_cards_queries_and_batches(db: Session):
     card1 = _make_card(db, "LM317T", manufacturer="TI")
     card2 = _make_card(db, "NE555")
 
-    mock_result = {
-        "parts": [
-            {"mpn": "LM317T", "description": "Voltage regulator", "category": "power_ic", "lifecycle_status": "active"},
-            {"mpn": "NE555", "description": "Timer IC", "category": "standard_logic", "lifecycle_status": "active"},
-        ]
-    }
-
     with patch("app.services.material_enrichment_service._enrich_batch", new_callable=AsyncMock) as mock_batch:
         stats = await enrich_material_cards([card1.id, card2.id], db, batch_size=30)
 
@@ -208,28 +201,22 @@ async def test_enrich_batch_ai_exception_increments_errors(db: Session):
 
 
 @pytest.mark.asyncio
-async def test_enrich_batch_empty_response_increments_errors(db: Session):
-    """Lines 146-148: empty result dict → errors += len(cards)."""
+@pytest.mark.parametrize(
+    ("mpn", "ai_response"),
+    [
+        ("EMPTYRESP", {}),
+        ("NONERESULT", None),
+    ],
+    ids=["empty_dict", "none"],
+)
+async def test_enrich_batch_falsy_response_increments_errors(db: Session, mpn, ai_response):
+    """Lines 146-148: empty/None result → errors += len(cards)."""
     from app.services.material_enrichment_service import _enrich_batch
 
-    card = _make_card(db, "EMPTYRESP")
+    card = _make_card(db, mpn)
     stats = {"enriched": 0, "skipped": 0, "errors": 0}
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={}):
-        await _enrich_batch([card], db, stats)
-
-    assert stats["errors"] == 1
-
-
-@pytest.mark.asyncio
-async def test_enrich_batch_none_response_increments_errors(db: Session):
-    """Lines 146-148: None result → errors += len(cards)."""
-    from app.services.material_enrichment_service import _enrich_batch
-
-    card = _make_card(db, "NONERESULT")
-    stats = {"enriched": 0, "skipped": 0, "errors": 0}
-
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
+    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=ai_response):
         await _enrich_batch([card], db, stats)
 
     assert stats["errors"] == 1

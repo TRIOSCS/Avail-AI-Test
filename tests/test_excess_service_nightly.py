@@ -12,6 +12,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -20,6 +21,35 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+_SENTINEL = object()
+
+
+@contextmanager
+def _patch_graph(post_json=None, find_message=_SENTINEL):
+    """Patch GraphClient (and optionally _find_sent_message) and yield the GraphClient
+    mock.
+
+    ``post_json`` becomes the ``return_value``/``side_effect`` of ``gc.post_json``
+    (a value → return_value, an exception/list → side_effect). When ``find_message`` is
+    provided, ``_find_sent_message`` is patched to return it.
+    """
+    gc_instance = AsyncMock()
+    if isinstance(post_json, BaseException) or isinstance(post_json, list):
+        gc_instance.post_json = AsyncMock(side_effect=post_json)
+    else:
+        gc_instance.post_json = AsyncMock(return_value=post_json)
+
+    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+        if find_message is _SENTINEL:
+            yield gc_instance
+        else:
+            with patch(
+                "app.services.excess_service._find_sent_message",
+                new_callable=AsyncMock,
+                return_value=find_message,
+            ):
+                yield gc_instance
 
 
 def _make_company(db: Session, name: str = "Test Corp"):
@@ -86,27 +116,18 @@ async def test_send_bid_solicitation_bundled_creates_sent_records(db_session: Se
     item2 = _make_line_item(db_session, excess_list.id, "NE555", qty=200)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "graph-msg-123"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item1.id, item2.id],
-                recipient_email="buyer@test.com",
-                recipient_name="Test Buyer",
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=True,
-            )
+    with _patch_graph(find_message={"id": "graph-msg-123"}):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item1.id, item2.id],
+            recipient_email="buyer@test.com",
+            recipient_name="Test Buyer",
+            contact_id=1,
+            user_id=user.id,
+            token="fake-token",
+            bundled=True,
+        )
 
     assert len(result) == 2
     for s in result:
@@ -137,27 +158,18 @@ async def test_send_bid_solicitation_bundled_single_item(db_session: Session):
     item = _make_line_item(db_session, excess_list.id, "STM32F103")
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "msg-abc"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="vendor@supply.com",
-                recipient_name="Vendor Joe",
-                contact_id=2,
-                user_id=user.id,
-                token="tok",
-                bundled=True,
-            )
+    with _patch_graph(find_message={"id": "msg-abc"}) as gc_instance:
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="vendor@supply.com",
+            recipient_name="Vendor Joe",
+            contact_id=2,
+            user_id=user.id,
+            token="tok",
+            bundled=True,
+        )
 
     assert len(result) == 1
     assert result[0].status == BidSolicitationStatus.SENT
@@ -180,27 +192,18 @@ async def test_send_bid_solicitation_bundled_no_message_id_when_find_returns_non
     item = _make_line_item(db_session, excess_list.id, "TL431")
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = None
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="x@y.com",
-                recipient_name=None,
-                contact_id=3,
-                user_id=user.id,
-                token="tok2",
-                bundled=True,
-            )
+    with _patch_graph(find_message=None):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="x@y.com",
+            recipient_name=None,
+            contact_id=3,
+            user_id=user.id,
+            token="tok2",
+            bundled=True,
+        )
 
     assert result[0].status == BidSolicitationStatus.SENT
     assert result[0].graph_message_id is None
@@ -226,27 +229,18 @@ async def test_send_bid_solicitation_split_creates_one_solicitation_per_item(
     item3 = _make_line_item(db_session, excess_list.id, "2N3904", qty=1000)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "split-msg-id"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item1.id, item2.id, item3.id],
-                recipient_email="buyer@split.com",
-                recipient_name="Split Buyer",
-                contact_id=4,
-                user_id=user.id,
-                token="split-token",
-                bundled=False,
-            )
+    with _patch_graph(find_message={"id": "split-msg-id"}) as gc_instance:
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item1.id, item2.id, item3.id],
+            recipient_email="buyer@split.com",
+            recipient_name="Split Buyer",
+            contact_id=4,
+            user_id=user.id,
+            token="split-token",
+            bundled=False,
+        )
 
     # One BidSolicitation per item
     assert len(result) == 3
@@ -279,27 +273,18 @@ async def test_send_bid_solicitation_split_uses_part_number_in_subject(db_sessio
     item = _make_line_item(db_session, excess_list.id, "LM741", qty=250)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "m1"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="v@vendor.com",
-                recipient_name=None,
-                contact_id=5,
-                user_id=user.id,
-                token="tok3",
-                bundled=False,
-            )
+    with _patch_graph(find_message={"id": "m1"}):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="v@vendor.com",
+            recipient_name=None,
+            contact_id=5,
+            user_id=user.id,
+            token="tok3",
+            bundled=False,
+        )
 
     subject = result[0].subject or ""
     assert "LM741" in subject
@@ -318,27 +303,18 @@ async def test_send_bid_solicitation_split_no_find_message_id(db_session: Sessio
     item = _make_line_item(db_session, excess_list.id, "IRF540N", qty=50)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = None
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="z@zz.com",
-                recipient_name=None,
-                contact_id=6,
-                user_id=user.id,
-                token="tok4",
-                bundled=False,
-            )
+    with _patch_graph(find_message=None):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="z@zz.com",
+            recipient_name=None,
+            contact_id=6,
+            user_id=user.id,
+            token="tok4",
+            bundled=False,
+        )
 
     assert result[0].status == BidSolicitationStatus.SENT
     assert result[0].graph_message_id is None
@@ -361,8 +337,7 @@ async def test_send_bid_solicitation_invalid_item_not_in_list_raises_404(db_sess
     item_on_b = _make_line_item(db_session, list_b.id, "WRONG_PART", qty=10)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+    with _patch_graph() as gc_instance:
         with pytest.raises(HTTPException) as exc_info:
             await send_bid_solicitation(
                 db_session,
@@ -391,8 +366,7 @@ async def test_send_bid_solicitation_nonexistent_item_raises_404(db_session: Ses
     excess_list = _make_excess_list(db_session, co.id, user.id)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+    with _patch_graph():
         with pytest.raises(HTTPException) as exc_info:
             await send_bid_solicitation(
                 db_session,
@@ -420,8 +394,7 @@ async def test_send_bid_solicitation_second_item_invalid_raises_404(db_session: 
     item_valid = _make_line_item(db_session, list_a.id, "VALID_PART", qty=10)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+    with _patch_graph() as gc_instance:
         with pytest.raises(HTTPException) as exc_info:
             await send_bid_solicitation(
                 db_session,
@@ -455,10 +428,7 @@ async def test_send_bid_solicitation_bundled_email_failure_marks_failed(db_sessi
     item2 = _make_line_item(db_session, excess_list.id, "ATmega2560", qty=25)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(side_effect=Exception("Graph API timeout"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+    with _patch_graph(post_json=Exception("Graph API timeout")):
         result = await send_bid_solicitation(
             db_session,
             list_id=excess_list.id,
@@ -488,10 +458,7 @@ async def test_send_bid_solicitation_split_email_failure_marks_item_failed(db_se
     item = _make_line_item(db_session, excess_list.id, "MOSFET", qty=75)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(side_effect=RuntimeError("SMTP connection refused"))
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
+    with _patch_graph(post_json=RuntimeError("SMTP connection refused")):
         result = await send_bid_solicitation(
             db_session,
             list_id=excess_list.id,
@@ -522,27 +489,21 @@ async def test_send_bid_solicitation_split_partial_failure(db_session: Session):
     db_session.commit()
 
     # First call succeeds, second raises
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(side_effect=[None, Exception("Rate limit exceeded")])
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "ok-msg"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item1.id, item2.id],
-                recipient_email="partial@buyer.com",
-                recipient_name="Partial Buyer",
-                contact_id=9,
-                user_id=user.id,
-                token="partial-token",
-                bundled=False,
-            )
+    with _patch_graph(
+        post_json=[None, Exception("Rate limit exceeded")],
+        find_message={"id": "ok-msg"},
+    ):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item1.id, item2.id],
+            recipient_email="partial@buyer.com",
+            recipient_name="Partial Buyer",
+            contact_id=9,
+            user_id=user.id,
+            token="partial-token",
+            bundled=False,
+        )
 
     assert len(result) == 2
     assert result[0].status == BidSolicitationStatus.SENT
@@ -564,32 +525,23 @@ async def test_send_bid_solicitation_bundled_custom_subject_and_message(db_sessi
     item = _make_line_item(db_session, excess_list.id, "CUSTOM_PART", qty=10)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
     custom_subject = "Custom Bid Subject"
     custom_message = "Please reply with your very best price."
 
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "custom-msg"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="custom@vendor.com",
-                recipient_name="Custom Vendor",
-                contact_id=10,
-                user_id=user.id,
-                token="custom-token",
-                subject=custom_subject,
-                message=custom_message,
-                bundled=True,
-            )
+    with _patch_graph(find_message={"id": "custom-msg"}):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="custom@vendor.com",
+            recipient_name="Custom Vendor",
+            contact_id=10,
+            user_id=user.id,
+            token="custom-token",
+            subject=custom_subject,
+            message=custom_message,
+            bundled=True,
+        )
 
     assert result[0].status == BidSolicitationStatus.SENT
     # Custom subject is embedded in the tagged subject
@@ -609,28 +561,19 @@ async def test_send_bid_solicitation_split_custom_subject(db_session: Session):
     item = _make_line_item(db_session, excess_list.id, "SPLIT_CUSTOM", qty=10)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "sc-msg"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="sc@vendor.com",
-                recipient_name=None,
-                contact_id=11,
-                user_id=user.id,
-                token="sc-token",
-                subject="My Custom Subject",
-                bundled=False,
-            )
+    with _patch_graph(find_message={"id": "sc-msg"}):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="sc@vendor.com",
+            recipient_name=None,
+            contact_id=11,
+            user_id=user.id,
+            token="sc-token",
+            subject="My Custom Subject",
+            bundled=False,
+        )
 
     assert "My Custom Subject" in result[0].subject
     assert "EXCESS-BID" in result[0].subject
@@ -651,27 +594,18 @@ async def test_send_bid_solicitation_bundled_no_recipient_name(db_session: Sessi
     item = _make_line_item(db_session, excess_list.id, "NO_NAME_PART", qty=5)
     db_session.commit()
 
-    gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(return_value=None)
-
-    with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
-        with patch(
-            "app.services.excess_service._find_sent_message",
-            new_callable=AsyncMock,
-        ) as mock_find:
-            mock_find.return_value = {"id": "nn-msg"}
-
-            result = await send_bid_solicitation(
-                db_session,
-                list_id=excess_list.id,
-                line_item_ids=[item.id],
-                recipient_email="noname@vendor.com",
-                recipient_name=None,
-                contact_id=12,
-                user_id=user.id,
-                token="nn-token",
-                bundled=True,
-            )
+    with _patch_graph(find_message={"id": "nn-msg"}):
+        result = await send_bid_solicitation(
+            db_session,
+            list_id=excess_list.id,
+            line_item_ids=[item.id],
+            recipient_email="noname@vendor.com",
+            recipient_name=None,
+            contact_id=12,
+            user_id=user.id,
+            token="nn-token",
+            bundled=True,
+        )
 
     assert result[0].status == BidSolicitationStatus.SENT
     assert result[0].recipient_name is None

@@ -18,12 +18,16 @@ import os
 
 os.environ["TESTING"] = "1"
 
+import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from fastapi import HTTPException
 from starlette.requests import Request
 
+import app.routers.v13_features.activity as mod
+from app.config import settings
 from app.models import ActivityLog
 
 # ── Graph Webhook ────────────────────────────────────────────────────
@@ -85,7 +89,6 @@ class TestGraphWebhook:
 class TestTeamsWebhook:
     def test_mvp_mode_returns_404(self, client, monkeypatch):
         """Teams webhook returns 404 when MVP mode is enabled."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", True)
         resp = client.post("/api/webhooks/teams", json={})
@@ -93,7 +96,6 @@ class TestTeamsWebhook:
 
     def test_validation_token_returns_plaintext(self, client, monkeypatch):
         """ValidationToken query param returns it as plain text."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         resp = client.post("/api/webhooks/teams?validationToken=teams-token")
@@ -102,7 +104,6 @@ class TestTeamsWebhook:
 
     def test_invalid_json_returns_400(self, client, monkeypatch):
         """Malformed JSON returns 400."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         resp = client.post(
@@ -114,7 +115,6 @@ class TestTeamsWebhook:
 
     def test_no_valid_notifications_returns_403(self, client, monkeypatch):
         """Empty validated list returns 403."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         with patch("app.services.webhook_service.validate_notifications", return_value=[]):
@@ -123,7 +123,6 @@ class TestTeamsWebhook:
 
     def test_handler_exception_returns_500(self, client, monkeypatch):
         """Teams handler exception returns 500."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "x"}]):
@@ -136,7 +135,6 @@ class TestTeamsWebhook:
 
     def test_valid_teams_notification_accepted(self, client, monkeypatch):
         """Valid teams notification returns accepted."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "x"}]):
@@ -155,7 +153,6 @@ class TestTeamsWebhook:
 class TestAcsWebhook:
     def test_acs_not_configured_returns_503(self, client, monkeypatch):
         """ACS webhook returns 503 when acs_connection_string is not set."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", None)
         resp = client.post("/api/webhooks/acs", json=[])
@@ -163,7 +160,6 @@ class TestAcsWebhook:
 
     def test_invalid_json_returns_400(self, client, monkeypatch):
         """Malformed JSON returns 400."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         resp = client.post(
@@ -175,7 +171,6 @@ class TestAcsWebhook:
 
     def test_eventgrid_validation_handshake(self, client, monkeypatch):
         """EventGrid subscription validation handshake returns validation code."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [
@@ -188,44 +183,46 @@ class TestAcsWebhook:
         assert resp.status_code == 200
         assert resp.json()["validationResponse"] == "validation-code-123"
 
-    def test_call_completed_event_handled(self, client, monkeypatch, db_session):
-        """CallCompleted event triggers log_call_activity."""
-        from app.config import settings
-
+    @pytest.mark.parametrize(
+        ("event_type", "event_data", "call_data", "activity_id"),
+        [
+            (
+                "Microsoft.Communication.CallCompleted",
+                {"foo": "bar"},
+                {
+                    "direction": "inbound",
+                    "to_phone": "+15551234567",
+                    "duration_seconds": 120,
+                    "call_connection_id": "conn-123",
+                },
+                1,
+            ),
+            (
+                "Microsoft.Communication.CallDisconnected",
+                {},
+                {
+                    "direction": "outbound",
+                    "to_phone": "+15559876543",
+                    "duration_seconds": 60,
+                    "call_connection_id": "conn-456",
+                },
+                2,
+            ),
+        ],
+        ids=["call_completed", "call_disconnected"],
+    )
+    def test_call_event_handled(self, client, monkeypatch, db_session, event_type, event_data, call_data, activity_id):
+        """CallCompleted / CallDisconnected events trigger log_call_activity."""
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
-        mock_call_data = {
-            "direction": "inbound",
-            "to_phone": "+15551234567",
-            "duration_seconds": 120,
-            "call_connection_id": "conn-123",
-        }
-        payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {"foo": "bar"}}]
-        with patch("app.services.acs_service.handle_call_completed", return_value=mock_call_data):
-            with patch("app.services.activity_service.log_call_activity", return_value=MagicMock(id=1)):
+        payload = [{"type": event_type, "data": event_data}]
+        with patch("app.services.acs_service.handle_call_completed", return_value=call_data):
+            with patch("app.services.activity_service.log_call_activity", return_value=MagicMock(id=activity_id)):
                 resp = client.post("/api/webhooks/acs", json=payload)
         assert resp.status_code == 200
         assert resp.json()["status"] == "accepted"
 
-    def test_call_disconnected_event_handled(self, client, monkeypatch):
-        """CallDisconnected event is also processed."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
-        mock_call_data = {
-            "direction": "outbound",
-            "to_phone": "+15559876543",
-            "duration_seconds": 60,
-            "call_connection_id": "conn-456",
-        }
-        payload = [{"type": "Microsoft.Communication.CallDisconnected", "data": {}}]
-        with patch("app.services.acs_service.handle_call_completed", return_value=mock_call_data):
-            with patch("app.services.activity_service.log_call_activity", return_value=MagicMock(id=2)):
-                resp = client.post("/api/webhooks/acs", json=payload)
-        assert resp.status_code == 200
-
     def test_call_event_no_call_data_skipped(self, client, monkeypatch):
         """If handle_call_completed returns None, skip logging."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
@@ -235,7 +232,6 @@ class TestAcsWebhook:
 
     def test_non_call_event_accepted(self, client, monkeypatch):
         """Non-call events are accepted without processing."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [{"type": "SomethingElse", "data": {}}]
@@ -249,7 +245,6 @@ class TestAcsWebhook:
 class TestInitiateCall:
     def test_acs_not_configured_returns_503(self, client, monkeypatch):
         """Returns 503 when ACS not configured."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", None)
         resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
@@ -257,7 +252,6 @@ class TestInitiateCall:
 
     def test_missing_to_phone_returns_422(self, client, monkeypatch):
         """Returns 422 when to_phone is missing."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         resp = client.post("/api/calls/initiate", json={})
@@ -265,7 +259,6 @@ class TestInitiateCall:
 
     def test_invalid_json_returns_400(self, client, monkeypatch):
         """Malformed JSON returns 400."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         resp = client.post(
@@ -277,7 +270,6 @@ class TestInitiateCall:
 
     def test_initiate_call_success(self, client, monkeypatch):
         """Successful call initiation returns result."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
@@ -290,7 +282,6 @@ class TestInitiateCall:
 
     def test_initiate_call_failure_returns_500(self, client, monkeypatch):
         """Failed call initiation returns 500."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
@@ -634,37 +625,26 @@ class TestActivityStatus:
         assert resp.status_code == 200
         assert resp.json()["status"] == "no_activity"
 
-    def test_vendor_activity_status_green(self, client, test_vendor_card, monkeypatch):
-        """Vendor with recent activity returns green."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_warning_days", 30)
-        with patch("app.services.activity_service.days_since_last_vendor_activity", return_value=5):
+    @pytest.mark.parametrize(
+        ("setting_overrides", "days", "expected_status"),
+        [
+            ({"customer_warning_days": 30}, 5, "green"),
+            ({"customer_warning_days": 10, "vendor_protection_warn_days": 60}, 20, "yellow"),
+            ({"customer_warning_days": 10, "vendor_protection_warn_days": 30}, 90, "red"),
+        ],
+        ids=["green", "yellow", "red"],
+    )
+    def test_vendor_activity_status_thresholds(
+        self, client, test_vendor_card, monkeypatch, setting_overrides, days, expected_status
+    ):
+        """Vendor activity status maps days-since-activity to green/yellow/red
+        thresholds."""
+        for key, value in setting_overrides.items():
+            monkeypatch.setattr(settings, key, value)
+        with patch("app.services.activity_service.days_since_last_vendor_activity", return_value=days):
             resp = client.get(f"/api/vendors/{test_vendor_card.id}/activity-status")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "green"
-
-    def test_vendor_activity_status_yellow(self, client, test_vendor_card, monkeypatch):
-        """Vendor with moderate inactivity returns yellow."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_warning_days", 10)
-        monkeypatch.setattr(settings, "vendor_protection_warn_days", 60)
-        with patch("app.services.activity_service.days_since_last_vendor_activity", return_value=20):
-            resp = client.get(f"/api/vendors/{test_vendor_card.id}/activity-status")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "yellow"
-
-    def test_vendor_activity_status_red(self, client, test_vendor_card, monkeypatch):
-        """Vendor with high inactivity returns red."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_warning_days", 10)
-        monkeypatch.setattr(settings, "vendor_protection_warn_days", 30)
-        with patch("app.services.activity_service.days_since_last_vendor_activity", return_value=90):
-            resp = client.get(f"/api/vendors/{test_vendor_card.id}/activity-status")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "red"
+        assert resp.json()["status"] == expected_status
 
     def test_company_activity_status_not_found(self, client):
         """GET company activity status for non-existent company returns 404."""
@@ -680,7 +660,6 @@ class TestActivityStatus:
 
     def test_company_activity_status_green(self, client, test_company, monkeypatch):
         """Company with recent activity returns green."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "customer_warning_days", 30)
         with patch("app.services.activity_service.days_since_last_activity", return_value=5):
@@ -688,35 +667,29 @@ class TestActivityStatus:
         assert resp.status_code == 200
         assert resp.json()["status"] == "green"
 
-    def test_company_activity_status_yellow(self, client, test_company, monkeypatch, db_session):
-        """Non-strategic company with moderate inactivity returns yellow."""
-        from app.config import settings
-
+    @pytest.mark.parametrize(
+        ("inactivity_days", "days", "expected_status"),
+        [
+            (60, 30, "yellow"),
+            (45, 90, "red"),
+        ],
+        ids=["yellow", "red"],
+    )
+    def test_company_activity_status_nonstrategic_thresholds(
+        self, client, test_company, monkeypatch, db_session, inactivity_days, days, expected_status
+    ):
+        """Non-strategic company maps days-since-activity to yellow/red thresholds."""
         monkeypatch.setattr(settings, "customer_warning_days", 10)
-        monkeypatch.setattr(settings, "customer_inactivity_days", 60)
+        monkeypatch.setattr(settings, "customer_inactivity_days", inactivity_days)
         test_company.is_strategic = False
         db_session.commit()
-        with patch("app.services.activity_service.days_since_last_activity", return_value=30):
+        with patch("app.services.activity_service.days_since_last_activity", return_value=days):
             resp = client.get(f"/api/companies/{test_company.id}/activity-status")
         assert resp.status_code == 200
-        assert resp.json()["status"] == "yellow"
-
-    def test_company_activity_status_red(self, client, test_company, monkeypatch, db_session):
-        """Company with high inactivity returns red."""
-        from app.config import settings
-
-        monkeypatch.setattr(settings, "customer_warning_days", 10)
-        monkeypatch.setattr(settings, "customer_inactivity_days", 45)
-        test_company.is_strategic = False
-        db_session.commit()
-        with patch("app.services.activity_service.days_since_last_activity", return_value=90):
-            resp = client.get(f"/api/companies/{test_company.id}/activity-status")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "red"
+        assert resp.json()["status"] == expected_status
 
     def test_company_activity_status_strategic(self, client, test_company, monkeypatch, db_session):
         """Strategic company uses strategic_inactivity_days threshold."""
-        from app.config import settings
 
         monkeypatch.setattr(settings, "customer_warning_days", 10)
         monkeypatch.setattr(settings, "strategic_inactivity_days", 90)
@@ -760,9 +733,6 @@ class TestGraphWebhookDirect:
 
     async def test_payload_validate_and_accepted(self, db_session):
         """Route body: parse payload, validate_notifications, handle_notification."""
-        import json
-
-        import app.routers.v13_features.activity as mod
 
         body = json.dumps({"value": [{"id": "1"}]}).encode()
         request = _make_request(body=body)
@@ -774,11 +744,6 @@ class TestGraphWebhookDirect:
 
     async def test_no_valid_notifications_raises_403(self, db_session):
         """validate_notifications returns empty -> 403."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
 
         body = json.dumps({"value": []}).encode()
         request = _make_request(body=body)
@@ -790,11 +755,6 @@ class TestGraphWebhookDirect:
 
     async def test_handle_notification_exception_raises_500(self, db_session):
         """handle_notification raises -> 500."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
 
         body = json.dumps({"value": [{"id": "x"}]}).encode()
         request = _make_request(body=body)
@@ -810,9 +770,6 @@ class TestGraphWebhookDirect:
 
     async def test_invalid_json_raises_400(self, db_session):
         """Non-JSON body -> 400."""
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
 
         request = _make_request(body=b"not-json")
         with pytest.raises(HTTPException) as exc_info:
@@ -821,7 +778,6 @@ class TestGraphWebhookDirect:
 
     async def test_validation_token_returns_plaintext(self, db_session):
         """ValidationToken query param returns PlainTextResponse."""
-        import app.routers.v13_features.activity as mod
 
         request = _make_request(query_string=b"validationToken=my-token")
         result = await mod.graph_webhook(request, db_session)
@@ -833,10 +789,6 @@ class TestTeamsWebhookDirect:
 
     async def test_mvp_mode_raises_404(self, db_session, monkeypatch):
         """MVP mode -> 404."""
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", True)
         request = _make_request()
@@ -846,8 +798,6 @@ class TestTeamsWebhookDirect:
 
     async def test_validation_token(self, db_session, monkeypatch):
         """ValidationToken query -> plain text."""
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         request = _make_request(query_string=b"validationToken=teams-tkn")
@@ -856,12 +806,6 @@ class TestTeamsWebhookDirect:
 
     async def test_no_valid_notifications_raises_403(self, db_session, monkeypatch):
         """Empty validated list -> 403."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         request = _make_request(body=json.dumps({"value": []}).encode())
@@ -872,12 +816,6 @@ class TestTeamsWebhookDirect:
 
     async def test_handler_exception_raises_500(self, db_session, monkeypatch):
         """Teams handler exception -> 500."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         request = _make_request(body=json.dumps({"value": [{"id": "x"}]}).encode())
@@ -892,10 +830,6 @@ class TestTeamsWebhookDirect:
 
     async def test_accepted(self, db_session, monkeypatch):
         """Valid teams notification -> accepted."""
-        import json
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
         request = _make_request(body=json.dumps({"value": [{"id": "x"}]}).encode())
@@ -910,10 +844,6 @@ class TestAcsWebhookDirect:
 
     async def test_not_configured_raises_503(self, db_session, monkeypatch):
         """ACS not configured -> 503."""
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", None)
         request = _make_request()
@@ -923,10 +853,6 @@ class TestAcsWebhookDirect:
 
     async def test_eventgrid_validation_handshake(self, db_session, monkeypatch):
         """EventGrid handshake returns validationResponse."""
-        import json
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [
@@ -941,10 +867,6 @@ class TestAcsWebhookDirect:
 
     async def test_call_completed_with_data(self, db_session, monkeypatch):
         """CallCompleted event logs the call."""
-        import json
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {"foo": "bar"}}]
@@ -963,10 +885,6 @@ class TestAcsWebhookDirect:
 
     async def test_call_completed_no_call_data(self, db_session, monkeypatch):
         """CallCompleted with no call_data skips logging."""
-        import json
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
@@ -982,10 +900,6 @@ class TestInitiateCallDirect:
 
     async def test_not_configured_raises_503(self, test_user, monkeypatch):
         """ACS not configured -> 503."""
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", None)
         request = _make_request()
@@ -995,12 +909,6 @@ class TestInitiateCallDirect:
 
     async def test_missing_to_phone_raises_422(self, test_user, monkeypatch):
         """Missing to_phone -> 422."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         request = _make_request(body=json.dumps({}).encode())
@@ -1010,10 +918,6 @@ class TestInitiateCallDirect:
 
     async def test_initiate_call_success(self, test_user, monkeypatch):
         """Successful call initiation returns result dict."""
-        import json
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
@@ -1026,12 +930,6 @@ class TestInitiateCallDirect:
 
     async def test_initiate_call_failure_raises_500(self, test_user, monkeypatch):
         """initiate_call returns None -> 500."""
-        import json
-
-        from fastapi import HTTPException
-
-        import app.routers.v13_features.activity as mod
-        from app.config import settings
 
         monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
         monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")

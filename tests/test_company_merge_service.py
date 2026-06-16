@@ -10,12 +10,21 @@ from app.models import Company, CustomerSite
 from app.services.company_merge_service import merge_companies
 
 
-def test_merge_moves_sites(db_session):
-    """Non-empty sites from removed company are moved to kept company."""
-    keep = Company(name="Acme Corp", is_active=True)
-    remove = Company(name="Acme Corporation", is_active=True)
+def _make_pair(db_session, keep_kwargs, remove_kwargs):
+    """Create a keep/remove Company pair, add + flush them, and return both.
+
+    Flush assigns ids without committing; every caller commits later.
+    """
+    keep = Company(is_active=True, **keep_kwargs)
+    remove = Company(is_active=True, **remove_kwargs)
     db_session.add_all([keep, remove])
     db_session.flush()
+    return keep, remove
+
+
+def test_merge_moves_sites(db_session):
+    """Non-empty sites from removed company are moved to kept company."""
+    keep, remove = _make_pair(db_session, {"name": "Acme Corp"}, {"name": "Acme Corporation"})
 
     site = CustomerSite(company_id=remove.id, site_name="West Coast Office", contact_email="a@acme.com")
     db_session.add(site)
@@ -31,10 +40,7 @@ def test_merge_moves_sites(db_session):
 
 def test_merge_deletes_empty_hq(db_session):
     """Empty HQ sites from removed company are deleted, not moved."""
-    keep = Company(name="Widget Co", is_active=True)
-    remove = Company(name="Widget Company", is_active=True)
-    db_session.add_all([keep, remove])
-    db_session.flush()
+    keep, remove = _make_pair(db_session, {"name": "Widget Co"}, {"name": "Widget Company"})
 
     empty_hq = CustomerSite(company_id=remove.id, site_name="HQ")
     db_session.add(empty_hq)
@@ -50,10 +56,11 @@ def test_merge_deletes_empty_hq(db_session):
 
 def test_merge_combines_tags(db_session):
     """Tags from both companies are merged and deduplicated."""
-    keep = Company(name="A Corp", is_active=True, brand_tags=["tag1"], commodity_tags=["c1"])
-    remove = Company(name="A Corporation", is_active=True, brand_tags=["tag1", "tag2"], commodity_tags=["c2"])
-    db_session.add_all([keep, remove])
-    db_session.commit()
+    keep, remove = _make_pair(
+        db_session,
+        {"name": "A Corp", "brand_tags": ["tag1"], "commodity_tags": ["c1"]},
+        {"name": "A Corporation", "brand_tags": ["tag1", "tag2"], "commodity_tags": ["c2"]},
+    )
 
     merge_companies(keep.id, remove.id, db_session)
     db_session.commit()
@@ -67,10 +74,11 @@ def test_merge_combines_tags(db_session):
 
 def test_merge_appends_notes(db_session):
     """Notes from removed company are appended to kept company."""
-    keep = Company(name="B Corp", is_active=True, notes="Original notes")
-    remove = Company(name="B Corporation", is_active=True, notes="Extra info")
-    db_session.add_all([keep, remove])
-    db_session.commit()
+    keep, remove = _make_pair(
+        db_session,
+        {"name": "B Corp", "notes": "Original notes"},
+        {"name": "B Corporation", "notes": "Extra info"},
+    )
 
     merge_companies(keep.id, remove.id, db_session)
     db_session.commit()
@@ -83,10 +91,11 @@ def test_merge_appends_notes(db_session):
 
 def test_merge_fills_missing_fields(db_session):
     """Missing fields on kept company are filled from removed company."""
-    keep = Company(name="C Corp", is_active=True, domain=None, industry="Tech")
-    remove = Company(name="C Corporation", is_active=True, domain="ccorp.com", industry=None)
-    db_session.add_all([keep, remove])
-    db_session.commit()
+    keep, remove = _make_pair(
+        db_session,
+        {"name": "C Corp", "domain": None, "industry": "Tech"},
+        {"name": "C Corporation", "domain": "ccorp.com", "industry": None},
+    )
 
     merge_companies(keep.id, remove.id, db_session)
     db_session.commit()
@@ -98,10 +107,7 @@ def test_merge_fills_missing_fields(db_session):
 
 def test_merge_deletes_removed_company(db_session):
     """The removed company is deleted after merge."""
-    keep = Company(name="D Corp", is_active=True)
-    remove = Company(name="D Corporation", is_active=True)
-    db_session.add_all([keep, remove])
-    db_session.commit()
+    keep, remove = _make_pair(db_session, {"name": "D Corp"}, {"name": "D Corporation"})
     remove_id = remove.id
 
     merge_companies(keep.id, remove.id, db_session)
@@ -132,10 +138,7 @@ def test_merge_missing_company_raises(db_session):
 
 def test_merge_renames_colliding_sites(db_session):
     """Sites with duplicate names get prefixed with removed company name."""
-    keep = Company(name="E Corp", is_active=True)
-    remove = Company(name="E Corporation", is_active=True)
-    db_session.add_all([keep, remove])
-    db_session.flush()
+    keep, remove = _make_pair(db_session, {"name": "E Corp"}, {"name": "E Corporation"})
 
     keep_site = CustomerSite(company_id=keep.id, site_name="Main Office", contact_email="x@e.com")
     remove_site = CustomerSite(company_id=remove.id, site_name="Main Office", contact_email="y@e.com")

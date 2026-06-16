@@ -11,6 +11,7 @@ Depends on: conftest fixtures (db_session, test_user, test_requisition, client)
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -392,19 +393,19 @@ class TestGetSavedSightings:
 
 
 class TestToggleQuoteSelection:
-    def test_toggle_on(self, client, db_session, test_user, test_requisition):
+    @pytest.mark.parametrize(
+        ("initial", "expected"),
+        [
+            pytest.param(False, True, id="on"),
+            pytest.param(True, False, id="off"),
+        ],
+    )
+    def test_toggle(self, initial, expected, client, db_session, test_user, test_requisition):
         req_item = test_requisition.requirements[0]
-        offer = _make_offer(db_session, test_requisition, req_item, test_user, selected_for_quote=False)
+        offer = _make_offer(db_session, test_requisition, req_item, test_user, selected_for_quote=initial)
         resp = client.post(f"/api/offers/{offer.id}/toggle-quote-selection")
         assert resp.status_code == 200
-        assert resp.json()["selected_for_quote"] is True
-
-    def test_toggle_off(self, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        offer = _make_offer(db_session, test_requisition, req_item, test_user, selected_for_quote=True)
-        resp = client.post(f"/api/offers/{offer.id}/toggle-quote-selection")
-        assert resp.status_code == 200
-        assert resp.json()["selected_for_quote"] is False
+        assert resp.json()["selected_for_quote"] is expected
 
     def test_toggle_not_found(self, client):
         resp = client.post("/api/offers/99999/toggle-quote-selection")
@@ -732,24 +733,19 @@ class TestAnnotateBuyerOutcomes:
         _annotate_buyer_outcomes(test_requisition, results, db_session)
         assert results[str(req_item.id)]["sightings"][0]["buyer_outcome"] == "offer_logged"
 
-    def test_non_dict_sighting_skipped(self, db_session, test_user, test_requisition):
+    @pytest.mark.parametrize(
+        "make_results",
+        [
+            pytest.param(lambda rid: {str(rid): {"sightings": ["not_a_dict"]}}, id="non_dict_sighting_skipped"),
+            pytest.param(lambda rid: {str(rid): "not_a_dict"}, id="non_dict_group_skipped"),
+        ],
+    )
+    def test_non_dict_skipped(self, make_results, db_session, test_user, test_requisition):
         from app.routers.requisitions.requirements import _annotate_buyer_outcomes
 
         req_item = test_requisition.requirements[0]
-        results = {
-            str(req_item.id): {
-                "sightings": ["not_a_dict"],
-            }
-        }
-        _annotate_buyer_outcomes(test_requisition, results, db_session)
         # Should not raise, non-dict entries are skipped
-
-    def test_non_dict_group_skipped(self, db_session, test_user, test_requisition):
-        from app.routers.requisitions.requirements import _annotate_buyer_outcomes
-
-        req_item = test_requisition.requirements[0]
-        results = {str(req_item.id): "not_a_dict"}
-        _annotate_buyer_outcomes(test_requisition, results, db_session)
+        _annotate_buyer_outcomes(test_requisition, make_results(req_item.id), db_session)
 
 
 class TestAttachLeadData:

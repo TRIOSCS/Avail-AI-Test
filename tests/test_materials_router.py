@@ -20,6 +20,7 @@ import io
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -27,6 +28,21 @@ from app.models import (
     MaterialCard,
     MaterialVendorHistory,
 )
+
+# ── Helpers ─────────────────────────────────────────────────────────────
+
+
+def _make_deleted_card(db_session: Session, normalized_mpn: str, display_mpn: str) -> MaterialCard:
+    """Persist a soft-deleted MaterialCard and return it."""
+    card = MaterialCard(
+        normalized_mpn=normalized_mpn,
+        display_mpn=display_mpn,
+        deleted_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.commit()
+    return card
+
 
 # ── List Materials ──────────────────────────────────────────────────────
 
@@ -70,13 +86,7 @@ class TestListMaterials:
         assert resp.status_code == 400
 
     def test_list_excludes_deleted(self, client: TestClient, db_session: Session):
-        card = MaterialCard(
-            normalized_mpn="deleted001",
-            display_mpn="DELETED001",
-            deleted_at=datetime.now(timezone.utc),
-        )
-        db_session.add(card)
-        db_session.commit()
+        _make_deleted_card(db_session, "deleted001", "DELETED001")
         resp = client.get("/api/materials?q=deleted001")
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
@@ -97,13 +107,7 @@ class TestGetMaterial:
         assert resp.status_code == 404
 
     def test_get_deleted_material(self, client: TestClient, db_session: Session):
-        card = MaterialCard(
-            normalized_mpn="gone001",
-            display_mpn="GONE001",
-            deleted_at=datetime.now(timezone.utc),
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _make_deleted_card(db_session, "gone001", "GONE001")
         resp = client.get(f"/api/materials/{card.id}")
         assert resp.status_code == 404
 
@@ -187,13 +191,7 @@ class TestUpdateMaterial:
         assert resp.status_code == 404
 
     def test_update_deleted_card(self, client: TestClient, db_session: Session):
-        card = MaterialCard(
-            normalized_mpn="upddel",
-            display_mpn="UPDDEL",
-            deleted_at=datetime.now(timezone.utc),
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _make_deleted_card(db_session, "upddel", "UPDDEL")
         resp = client.put(f"/api/materials/{card.id}", json={"manufacturer": "TI"})
         assert resp.status_code == 404
 
@@ -265,13 +263,7 @@ class TestDeleteMaterial:
 
     @patch("app.services.audit_service.log_audit")
     def test_delete_already_deleted(self, mock_audit, client: TestClient, db_session: Session):
-        card = MaterialCard(
-            normalized_mpn="deldel",
-            display_mpn="DELDEL",
-            deleted_at=datetime.now(timezone.utc),
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _make_deleted_card(db_session, "deldel", "DELDEL")
         resp = client.delete(f"/api/materials/{card.id}")
         assert resp.status_code == 400
 
@@ -282,13 +274,7 @@ class TestDeleteMaterial:
 class TestRestoreMaterial:
     @patch("app.services.audit_service.log_audit")
     def test_restore(self, mock_audit, client: TestClient, db_session: Session):
-        card = MaterialCard(
-            normalized_mpn="restme",
-            display_mpn="RESTME",
-            deleted_at=datetime.now(timezone.utc),
-        )
-        db_session.add(card)
-        db_session.commit()
+        card = _make_deleted_card(db_session, "restme", "RESTME")
         resp = client.post(f"/api/materials/{card.id}/restore")
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
@@ -396,21 +382,13 @@ class TestImportStockList:
         assert resp.status_code == 400
         assert "Invalid file type" in resp.json().get("detail", resp.json().get("error", ""))
 
-    def test_missing_vendor_name(self, client: TestClient):
+    @pytest.mark.parametrize("vendor_name", ["", "A" * 256], ids=["missing_vendor_name", "vendor_name_too_long"])
+    def test_invalid_vendor_name(self, client: TestClient, vendor_name):
         f = io.BytesIO(b"mpn,qty,price\nLM317T,100,0.50\n")
         resp = client.post(
             "/api/materials/import-stock",
             files={"file": ("test.csv", f, "text/csv")},
-            data={"vendor_name": ""},
-        )
-        assert resp.status_code == 400
-
-    def test_vendor_name_too_long(self, client: TestClient):
-        f = io.BytesIO(b"mpn,qty,price\nLM317T,100,0.50\n")
-        resp = client.post(
-            "/api/materials/import-stock",
-            files={"file": ("test.csv", f, "text/csv")},
-            data={"vendor_name": "A" * 256},
+            data={"vendor_name": vendor_name},
         )
         assert resp.status_code == 400
 

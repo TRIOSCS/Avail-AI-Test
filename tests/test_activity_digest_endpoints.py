@@ -9,12 +9,21 @@ layer.
 import pytest
 
 
+def _patch_digest(monkeypatch, payload):
+    """Patch get_or_build_digest at its source module to return a fixed payload."""
+
+    async def fake(*a, **k):
+        return payload
+
+    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+
+
 @pytest.mark.asyncio
 async def test_requisition_digest_endpoint_renders(client, test_requisition, monkeypatch):
     """Ready-state digest renders headline and next_step."""
-
-    async def fake(*a, **k):
-        return {
+    _patch_digest(
+        monkeypatch,
+        {
             "state": "ready",
             "headline": "3 vendors contacted",
             "narrative": "Summary.",
@@ -22,9 +31,8 @@ async def test_requisition_digest_endpoint_renders(client, test_requisition, mon
             "next_step": "Call vendor X",
             "status_signal": "needs_attention",
             "generated_at": None,
-        }
-
-    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+        },
+    )
 
     resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/activity-digest")
     assert resp.status_code == 200
@@ -35,11 +43,7 @@ async def test_requisition_digest_endpoint_renders(client, test_requisition, mon
 @pytest.mark.asyncio
 async def test_digest_endpoint_insufficient_state(client, test_requisition, monkeypatch):
     """Insufficient-state digest shows the 'not enough activity' message."""
-
-    async def fake(*a, **k):
-        return {"state": "insufficient"}
-
-    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+    _patch_digest(monkeypatch, {"state": "insufficient"})
 
     resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/activity-digest")
     assert resp.status_code == 200
@@ -49,11 +53,7 @@ async def test_digest_endpoint_insufficient_state(client, test_requisition, monk
 @pytest.mark.asyncio
 async def test_digest_endpoint_404_for_missing_requisition(client, monkeypatch):
     """Non-existent requisition returns 404 (get_requisition_or_404 guard)."""
-
-    async def fake(*a, **k):  # pragma: no cover
-        return {"state": "ready"}
-
-    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+    _patch_digest(monkeypatch, {"state": "ready"})  # pragma: no cover
 
     resp = client.get("/v2/partials/requisitions/999999/activity-digest")
     assert resp.status_code == 404
@@ -62,11 +62,7 @@ async def test_digest_endpoint_404_for_missing_requisition(client, monkeypatch):
 @pytest.mark.asyncio
 async def test_digest_endpoint_generating_state(client, test_requisition, monkeypatch):
     """Generating state renders a polling placeholder."""
-
-    async def fake(*a, **k):
-        return {"state": "generating"}
-
-    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+    _patch_digest(monkeypatch, {"state": "generating"})
 
     resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/activity-digest")
     assert resp.status_code == 200
@@ -76,9 +72,9 @@ async def test_digest_endpoint_generating_state(client, test_requisition, monkey
 @pytest.mark.asyncio
 async def test_customer_digest_endpoint_renders(client, test_company, monkeypatch):
     """Ready-state customer digest renders headline and status signal."""
-
-    async def fake(*a, **k):
-        return {
+    _patch_digest(
+        monkeypatch,
+        {
             "state": "ready",
             "headline": "Account summary",
             "narrative": "Recent engagement.",
@@ -86,9 +82,8 @@ async def test_customer_digest_endpoint_renders(client, test_company, monkeypatc
             "next_step": None,
             "status_signal": "on_track",
             "generated_at": None,
-        }
-
-    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+        },
+    )
 
     resp = client.get(f"/v2/partials/customers/{test_company.id}/activity-digest")
     assert resp.status_code == 200

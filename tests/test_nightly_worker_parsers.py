@@ -15,37 +15,29 @@ os.environ["TESTING"] = "1"
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 # ── ICS result_parser ──────────────────────────────────────────────────
 
 
 class TestIcsParseQuantity:
-    def test_none_returns_none(self):
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("", None),
+            (None, None),
+            ("100", 100),
+            ("1,000", 1000),
+            ("10,000,000", 10000000),
+            ("500+", 500),
+            ("N/A", None),
+            ("POA", None),
+        ],
+    )
+    def test_parse_quantity(self, raw, expected):
         from app.services.ics_worker.result_parser import parse_quantity
 
-        assert parse_quantity("") is None
-        assert parse_quantity(None) is None
-
-    def test_plain_int(self):
-        from app.services.ics_worker.result_parser import parse_quantity
-
-        assert parse_quantity("100") == 100
-
-    def test_with_commas(self):
-        from app.services.ics_worker.result_parser import parse_quantity
-
-        assert parse_quantity("1,000") == 1000
-        assert parse_quantity("10,000,000") == 10000000
-
-    def test_with_plus_suffix(self):
-        from app.services.ics_worker.result_parser import parse_quantity
-
-        assert parse_quantity("500+") == 500
-
-    def test_invalid_returns_none(self):
-        from app.services.ics_worker.result_parser import parse_quantity
-
-        assert parse_quantity("N/A") is None
-        assert parse_quantity("POA") is None
+        assert parse_quantity(raw) == expected
 
 
 class TestIcsExtractCompanyInfo:
@@ -214,31 +206,21 @@ class TestIcsParseResultsHtml:
 
 
 class TestNcParseQuantity:
-    def test_empty_returns_none(self):
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            ("", None),
+            (None, None),
+            ("250", 250),
+            ("5,000", 5000),
+            ("1000+", 1000),
+            ("POA", None),
+        ],
+    )
+    def test_parse_quantity(self, raw, expected):
         from app.services.nc_worker.result_parser import parse_quantity
 
-        assert parse_quantity("") is None
-        assert parse_quantity(None) is None
-
-    def test_plain_int(self):
-        from app.services.nc_worker.result_parser import parse_quantity
-
-        assert parse_quantity("250") == 250
-
-    def test_with_commas(self):
-        from app.services.nc_worker.result_parser import parse_quantity
-
-        assert parse_quantity("5,000") == 5000
-
-    def test_with_plus(self):
-        from app.services.nc_worker.result_parser import parse_quantity
-
-        assert parse_quantity("1000+") == 1000
-
-    def test_invalid(self):
-        from app.services.nc_worker.result_parser import parse_quantity
-
-        assert parse_quantity("POA") is None
+        assert parse_quantity(raw) == expected
 
 
 class TestNcParsePriceBreaks:
@@ -465,6 +447,13 @@ class TestNcParseResultsHtml:
 # ── ICS CircuitBreaker ─────────────────────────────────────────────────
 
 
+def _make_page(url: str, content: str) -> MagicMock:
+    page = MagicMock()
+    page.url = url
+    page.evaluate = AsyncMock(return_value=content)
+    return page
+
+
 class TestIcsCircuitBreaker:
     def test_initial_state(self):
         from app.services.ics_worker.circuit_breaker import CircuitBreaker
@@ -474,50 +463,71 @@ class TestIcsCircuitBreaker:
         assert cb.consecutive_failures == 0
         assert cb.captcha_count == 0
 
-    async def test_healthy_page(self):
+    @pytest.mark.parametrize(
+        "url, content, expected_status, expected_open",
+        [
+            (
+                "https://www.icsource.com/search",
+                "search results listing 100 parts",
+                "HEALTHY",
+                False,
+            ),
+            (
+                "https://www.icsource.com/login.aspx",
+                "please login",
+                "SESSION_EXPIRED",
+                False,
+            ),
+            (
+                "https://www.google.com/search",
+                "some content",
+                "UNEXPECTED_REDIRECT",
+                True,
+            ),
+            (
+                "https://www.icsource.com/search",
+                "too many requests please wait",
+                "RATE_LIMITED",
+                True,
+            ),
+            (
+                "https://www.icsource.com/search",
+                "access denied by firewall",
+                "ACCESS_DENIED",
+                True,
+            ),
+        ],
+        ids=[
+            "healthy",
+            "session_expired",
+            "unexpected_redirect",
+            "rate_limited",
+            "access_denied",
+        ],
+    )
+    async def test_check_page_health_status(self, url, content, expected_status, expected_open):
         from app.services.ics_worker.circuit_breaker import CircuitBreaker
 
         cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/search"
-        page.evaluate = AsyncMock(return_value="search results listing 100 parts")
+        status = await cb.check_page_health(_make_page(url, content))
+        assert status == expected_status
+        assert cb.is_open is expected_open
+
+    async def test_healthy_page_resets_failures(self):
+        from app.services.ics_worker.circuit_breaker import CircuitBreaker
+
+        cb = CircuitBreaker()
+        page = _make_page("https://www.icsource.com/search", "search results listing 100 parts")
 
         status = await cb.check_page_health(page)
         assert status == "HEALTHY"
-        assert cb.is_open is False
         assert cb.consecutive_failures == 0
-
-    async def test_session_expired_login_url(self):
-        from app.services.ics_worker.circuit_breaker import CircuitBreaker
-
-        cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/login.aspx"
-        page.evaluate = AsyncMock(return_value="please login")
-
-        status = await cb.check_page_health(page)
-        assert status == "SESSION_EXPIRED"
-        assert cb.is_open is False
-
-    async def test_unexpected_redirect_trips_breaker(self):
-        from app.services.ics_worker.circuit_breaker import CircuitBreaker
-
-        cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.google.com/search"
-        page.evaluate = AsyncMock(return_value="some content")
-
-        status = await cb.check_page_health(page)
-        assert status == "UNEXPECTED_REDIRECT"
-        assert cb.is_open is True
 
     async def test_captcha_warning_first_time(self):
         from app.services.ics_worker.circuit_breaker import CircuitBreaker
 
         cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/search"
-        page.evaluate = AsyncMock(return_value="please verify you are human captcha")
+        page = _make_page("https://www.icsource.com/search", "please verify you are human captcha")
 
         status = await cb.check_page_health(page)
         assert status == "CAPTCHA_WARNING"
@@ -528,37 +538,11 @@ class TestIcsCircuitBreaker:
         from app.services.ics_worker.circuit_breaker import CircuitBreaker
 
         cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/search"
-        page.evaluate = AsyncMock(return_value="captcha verify")
+        page = _make_page("https://www.icsource.com/search", "captcha verify")
 
         await cb.check_page_health(page)
         status = await cb.check_page_health(page)
         assert status == "CAPTCHA_WARNING"
-        assert cb.is_open is True
-
-    async def test_rate_limited_trips_breaker(self):
-        from app.services.ics_worker.circuit_breaker import CircuitBreaker
-
-        cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/search"
-        page.evaluate = AsyncMock(return_value="too many requests please wait")
-
-        status = await cb.check_page_health(page)
-        assert status == "RATE_LIMITED"
-        assert cb.is_open is True
-
-    async def test_access_denied_trips_breaker(self):
-        from app.services.ics_worker.circuit_breaker import CircuitBreaker
-
-        cb = CircuitBreaker()
-        page = MagicMock()
-        page.url = "https://www.icsource.com/search"
-        page.evaluate = AsyncMock(return_value="access denied by firewall")
-
-        status = await cb.check_page_health(page)
-        assert status == "ACCESS_DENIED"
         assert cb.is_open is True
 
     async def test_page_evaluate_exception_accumulates_failures(self):

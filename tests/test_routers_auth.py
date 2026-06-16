@@ -100,24 +100,18 @@ def test_login_url_encodes_scope(auth_client):
     assert " " not in location.split("?", 1)[1], "Query string contains unencoded spaces"
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("/auth/callback?code=test-code&state=wrong-state", id="state_mismatch"),
+        pytest.param("/auth/callback?code=test-code", id="state_missing"),
+    ],
+)
 @patch("app.routers.auth.http")
-def test_callback_validates_state(mock_http, auth_client):
-    """Callback rejects request when state param doesn't match session."""
-    resp = auth_client.get(
-        "/auth/callback?code=test-code&state=wrong-state",
-        follow_redirects=False,
-    )
-    assert resp.status_code in (302, 307)
-    mock_http.post.assert_not_called()
-
-
-@patch("app.routers.auth.http")
-def test_callback_missing_state_rejected(mock_http, auth_client):
-    """Callback rejects request when state param is missing entirely."""
-    resp = auth_client.get(
-        "/auth/callback?code=test-code",
-        follow_redirects=False,
-    )
+def test_callback_rejects_bad_state(mock_http, auth_client, url):
+    """Callback rejects request when state param is wrong or missing (no token
+    exchange)."""
+    resp = auth_client.get(url, follow_redirects=False)
     assert resp.status_code in (302, 307)
     mock_http.post.assert_not_called()
 

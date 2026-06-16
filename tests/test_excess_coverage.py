@@ -16,6 +16,7 @@ import pytest
 
 from app.models import Company
 from app.models.excess import Bid, ExcessLineItem, ExcessList
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from tests.conftest import engine
 
 os.environ["TESTING"] = "1"
@@ -437,39 +438,24 @@ class TestApiPolishEmail:
         assert resp.status_code == 200
         assert "text" in resp.json()
 
-    def test_polish_handles_claude_unavailable(self, client):
-        from app.utils.claude_errors import ClaudeUnavailableError
-
+    @pytest.mark.parametrize(
+        ("side_effect", "return_value", "input_text"),
+        [
+            pytest.param(ClaudeUnavailableError("unavailable"), None, "original text", id="claude_unavailable"),
+            pytest.param(ClaudeError("error"), None, "fallback text", id="claude_error"),
+            pytest.param(None, None, "original text", id="none_response"),
+        ],
+    )
+    def test_polish_falls_back_to_original_text(self, client, side_effect, return_value, input_text):
         with patch("app.routers.excess.claude_text", new_callable=AsyncMock) as mock_claude:
-            mock_claude.side_effect = ClaudeUnavailableError("unavailable")
+            mock_claude.side_effect = side_effect
+            mock_claude.return_value = return_value
             resp = client.post(
                 "/api/excess-lists/polish-email",
-                json={"text": "original text"},
+                json={"text": input_text},
             )
         assert resp.status_code == 200
-        assert resp.json()["text"] == "original text"
-
-    def test_polish_handles_claude_error(self, client):
-        from app.utils.claude_errors import ClaudeError
-
-        with patch("app.routers.excess.claude_text", new_callable=AsyncMock) as mock_claude:
-            mock_claude.side_effect = ClaudeError("error")
-            resp = client.post(
-                "/api/excess-lists/polish-email",
-                json={"text": "fallback text"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["text"] == "fallback text"
-
-    def test_polish_handles_none_response(self, client):
-        with patch("app.routers.excess.claude_text", new_callable=AsyncMock) as mock_claude:
-            mock_claude.return_value = None
-            resp = client.post(
-                "/api/excess-lists/polish-email",
-                json={"text": "original text"},
-            )
-        assert resp.status_code == 200
-        assert resp.json()["text"] == "original text"
+        assert resp.json()["text"] == input_text
 
 
 # ── Proactive Matches ──────────────────────────────────────────────────
