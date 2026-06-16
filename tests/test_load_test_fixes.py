@@ -86,38 +86,32 @@ def _make_quote(db, req, site, user, offer_ids, quote_number="Q-TEST-001"):
 # ── Fix 1: Migration file exists ────────────────────────────────────────
 
 
+def _load_migration_015():
+    import importlib.util
+
+    path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "alembic",
+        "versions",
+        "015_performance_indexes.py",
+    )
+    assert os.path.exists(path)
+    spec = importlib.util.spec_from_file_location("migration_015", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 class TestPerformanceIndexes:
     def test_migration_file_exists(self):
         """Migration 015 should exist with is_stale column."""
-        import importlib.util
-
-        path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "alembic",
-            "versions",
-            "015_performance_indexes.py",
-        )
-        assert os.path.exists(path)
-        spec = importlib.util.spec_from_file_location("migration_015", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = _load_migration_015()
         assert mod.revision == "015_performance_indexes"
         assert mod.down_revision == "014_multiplier_score_snapshot"
 
     def test_migration_has_upgrade_and_downgrade(self):
-        import importlib.util
-
-        path = os.path.join(
-            os.path.dirname(__file__),
-            "..",
-            "alembic",
-            "versions",
-            "015_performance_indexes.py",
-        )
-        spec = importlib.util.spec_from_file_location("migration_015", path)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
+        mod = _load_migration_015()
         assert callable(mod.upgrade)
         assert callable(mod.downgrade)
 
@@ -400,6 +394,3 @@ class TestProactiveOfferExpiry:
         from app.jobs.offers_jobs import _job_proactive_offer_expiry
 
         assert callable(_job_proactive_offer_expiry)
-
-
-# ── Fix 5: Buyer-brief optimized ────────────────────────────────────────

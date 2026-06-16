@@ -115,31 +115,23 @@ class TestListSuggested:
         assert data["total"] == 1
         assert data["items"][0]["name"] == "High"
 
-    def test_filter_readiness_call_now(self, client, db_session):
+    @pytest.mark.parametrize(
+        ("readiness_level", "expected_name"),
+        [
+            ("call_now", "Hot"),
+            ("nurture", "Warm"),
+            ("monitor", "Cold"),
+        ],
+        ids=["call_now", "nurture", "monitor"],
+    )
+    def test_filter_readiness_level(self, client, db_session, readiness_level, expected_name):
         _make_prospect(db_session, name="Hot", domain="hot.com", readiness_score=80)
         _make_prospect(db_session, name="Warm", domain="warm.com", readiness_score=50)
         _make_prospect(db_session, name="Cold", domain="cold.com", readiness_score=20)
-        resp = client.get("/api/prospects/suggested?readiness_level=call_now")
+        resp = client.get(f"/api/prospects/suggested?readiness_level={readiness_level}")
         data = resp.json()
         assert data["total"] == 1
-        assert data["items"][0]["name"] == "Hot"
-
-    def test_filter_readiness_nurture(self, client, db_session):
-        _make_prospect(db_session, name="Hot", domain="hot.com", readiness_score=80)
-        _make_prospect(db_session, name="Warm", domain="warm.com", readiness_score=50)
-        _make_prospect(db_session, name="Cold", domain="cold.com", readiness_score=20)
-        resp = client.get("/api/prospects/suggested?readiness_level=nurture")
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["items"][0]["name"] == "Warm"
-
-    def test_filter_readiness_monitor(self, client, db_session):
-        _make_prospect(db_session, name="Hot", domain="hot.com", readiness_score=80)
-        _make_prospect(db_session, name="Cold", domain="cold.com", readiness_score=20)
-        resp = client.get("/api/prospects/suggested?readiness_level=monitor")
-        data = resp.json()
-        assert data["total"] == 1
-        assert data["items"][0]["name"] == "Cold"
+        assert data["items"][0]["name"] == expected_name
 
     def test_sort_readiness_desc(self, client, db_session):
         _make_prospect(db_session, name="Low", domain="low.com", readiness_score=20)
@@ -1009,13 +1001,10 @@ class TestAddProspectManuallyService:
         result = add_prospect_manually("dupetest.com", test_user.id, db_session)
         assert result["is_new"] is False
 
-    def test_empty_domain_raises(self, db_session, test_user):
+    @pytest.mark.parametrize("domain", ["", "   "], ids=["empty", "whitespace_only"])
+    def test_blank_domain_raises(self, db_session, test_user, domain):
         with pytest.raises(ValueError, match="Domain is required"):
-            add_prospect_manually("", test_user.id, db_session)
-
-    def test_whitespace_only_raises(self, db_session, test_user):
-        with pytest.raises(ValueError, match="Domain is required"):
-            add_prospect_manually("   ", test_user.id, db_session)
+            add_prospect_manually(domain, test_user.id, db_session)
 
 
 # ── list_batches endpoint ────────────────────────────────────────────

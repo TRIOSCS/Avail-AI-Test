@@ -20,6 +20,7 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -103,7 +104,16 @@ class TestUpdateRequirement:
         )
         assert resp.status_code == 404
 
-    def test_update_with_need_by_date(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    @pytest.mark.parametrize(
+        "need_by_date",
+        [
+            pytest.param("2026-12-31", id="valid_date"),
+            pytest.param("not-a-date", id="invalid_date"),
+        ],
+    )
+    def test_update_need_by_date(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, need_by_date: str
+    ):
         item = _make_requirement(db_session, test_requisition)
         resp = client.put(
             f"/v2/partials/requisitions/{test_requisition.id}/requirements/{item.id}",
@@ -111,20 +121,7 @@ class TestUpdateRequirement:
                 "primary_mpn": "LM317T",
                 "manufacturer": "TI",
                 "target_qty": "5",
-                "need_by_date": "2026-12-31",
-            },
-        )
-        assert resp.status_code == 200
-
-    def test_update_with_invalid_date(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        item = _make_requirement(db_session, test_requisition)
-        resp = client.put(
-            f"/v2/partials/requisitions/{test_requisition.id}/requirements/{item.id}",
-            data={
-                "primary_mpn": "LM317T",
-                "manufacturer": "TI",
-                "target_qty": "5",
-                "need_by_date": "not-a-date",
+                "need_by_date": need_by_date,
             },
         )
         assert resp.status_code == 200

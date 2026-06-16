@@ -23,6 +23,25 @@ from app.services.credential_service import (
     mask_value,
 )
 
+# ── Helpers ───────────────────────────────────────────────────────────
+
+
+def _add_api_source(db_session, name, key, plaintext):
+    """Persist an ApiSource holding one encrypted credential under ``key``."""
+    src = ApiSource(
+        name=name,
+        display_name=f"{name} display",
+        category="api",
+        source_type="aggregator",
+        status="active",
+        env_vars=[key],
+        credentials={key: encrypt_value(plaintext)},
+    )
+    db_session.add(src)
+    db_session.commit()
+    return src
+
+
 # ── encrypt / decrypt ────────────────────────────────────────────────
 
 
@@ -34,16 +53,16 @@ class TestEncryptDecrypt:
         encrypted = encrypt_value(plaintext)
         assert encrypted != plaintext
 
-    def test_round_trip(self):
-        plaintext = "sk-ant-api03-XXXXXX"
+    @pytest.mark.parametrize(
+        "plaintext",
+        [
+            pytest.param("sk-ant-api03-XXXXXX", id="ascii"),
+            pytest.param("pässwörd-with-üñíçödé", id="unicode"),
+            pytest.param("", id="empty_string"),
+        ],
+    )
+    def test_round_trip(self, plaintext):
         assert decrypt_value(encrypt_value(plaintext)) == plaintext
-
-    def test_round_trip_unicode(self):
-        plaintext = "pässwörd-with-üñíçödé"
-        assert decrypt_value(encrypt_value(plaintext)) == plaintext
-
-    def test_round_trip_empty_string(self):
-        assert decrypt_value(encrypt_value("")) == ""
 
     def test_decrypt_corrupted_token_raises(self):
         with pytest.raises((InvalidToken, Exception)):
@@ -95,18 +114,7 @@ class TestGetCredential:
     """DB-first, env-fallback credential retrieval."""
 
     def test_returns_decrypted_db_value(self, db_session):
-        encrypted = encrypt_value("db-secret-value")
-        src = ApiSource(
-            name="test_src",
-            display_name="Test Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_KEY"],
-            credentials={"MY_KEY": encrypted},
-        )
-        db_session.add(src)
-        db_session.commit()
+        _add_api_source(db_session, "test_src", "MY_KEY", "db-secret-value")
 
         result = get_credential(db_session, "test_src", "MY_KEY")
         assert result == "db-secret-value"
@@ -123,18 +131,7 @@ class TestGetCredential:
 
     def test_db_takes_priority_over_env(self, db_session, monkeypatch):
         monkeypatch.setenv("MY_KEY", "env-value")
-        encrypted = encrypt_value("db-value")
-        src = ApiSource(
-            name="priority_src",
-            display_name="Priority Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["MY_KEY"],
-            credentials={"MY_KEY": encrypted},
-        )
-        db_session.add(src)
-        db_session.commit()
+        _add_api_source(db_session, "priority_src", "MY_KEY", "db-value")
 
         result = get_credential(db_session, "priority_src", "MY_KEY")
         assert result == "db-value"
@@ -147,18 +144,7 @@ class TestCredentialIsSet:
     """Boolean check for credential existence."""
 
     def test_true_when_db_credential_exists(self, db_session):
-        encrypted = encrypt_value("some-value")
-        src = ApiSource(
-            name="check_src",
-            display_name="Check Source",
-            category="api",
-            source_type="aggregator",
-            status="active",
-            env_vars=["CHECK_KEY"],
-            credentials={"CHECK_KEY": encrypted},
-        )
-        db_session.add(src)
-        db_session.commit()
+        _add_api_source(db_session, "check_src", "CHECK_KEY", "some-value")
 
         assert credential_is_set(db_session, "check_src", "CHECK_KEY") is True
 

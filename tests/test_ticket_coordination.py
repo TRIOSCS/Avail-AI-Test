@@ -40,6 +40,24 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
             app.dependency_overrides.pop(dep, None)
 
 
+def _add_report_button_ticket(
+    db_session: Session, *, ticket_number: str, title: str, description: str
+) -> TroubleTicket:
+    """Persist a report-button trouble ticket and return it."""
+    ticket = TroubleTicket(
+        ticket_number=ticket_number,
+        submitted_by=1,
+        title=title,
+        description=description,
+        source="report_button",
+        status="submitted",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(ticket)
+    db_session.commit()
+    return ticket
+
+
 def test_create_ticket(admin_client):
     """Submit a trouble ticket via POST."""
     resp = admin_client.post(
@@ -61,17 +79,12 @@ def test_list_tickets_empty(admin_client):
 
 def test_list_tickets_with_data(admin_client, db_session):
     """List returns tickets created via the report button."""
-    t = TroubleTicket(
+    _add_report_button_ticket(
+        db_session,
         ticket_number="TT-COORD-001",
-        submitted_by=1,
         title="Test ticket",
         description="Test description",
-        source="report_button",
-        status="submitted",
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(t)
-    db_session.commit()
     resp = admin_client.get("/api/trouble-tickets")
     assert resp.status_code == 200
     assert len(resp.json()["items"]) >= 1
@@ -79,17 +92,12 @@ def test_list_tickets_with_data(admin_client, db_session):
 
 def test_get_ticket_by_id(admin_client, db_session):
     """Get a single ticket by ID."""
-    t = TroubleTicket(
+    t = _add_report_button_ticket(
+        db_session,
         ticket_number="TT-COORD-002",
-        submitted_by=1,
         title="Detail test",
         description="Detail description",
-        source="report_button",
-        status="submitted",
-        created_at=datetime.now(timezone.utc),
     )
-    db_session.add(t)
-    db_session.commit()
     db_session.refresh(t)
 
     resp = admin_client.get(f"/api/trouble-tickets/{t.id}")

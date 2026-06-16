@@ -24,6 +24,7 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -42,6 +43,13 @@ from app.models import (
 )
 from app.models.notification import Notification
 from app.models.strategic import StrategicVendor
+from app.utils.claude_errors import ClaudeUnavailableError
+
+
+def _run(coro):
+    """Run an async coroutine to completion on the current event loop."""
+    return asyncio.get_event_loop().run_until_complete(coro)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # 1. Buyer Leaderboard
@@ -203,9 +211,7 @@ class TestProspectDiscoveryEmail:
             ]
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            mine_unknown_domains(graph_client, db_session, days_back=90)
-        )
+        result = _run(mine_unknown_domains(graph_client, db_session, days_back=90))
         # newcompany.com has 2 emails (passes threshold), lonely.com has 1 (filtered out)
         assert len(result) == 1
         assert result[0]["domain"] == "newcompany.com"
@@ -223,9 +229,7 @@ class TestProspectDiscoveryEmail:
             ]
         )
 
-        result = asyncio.get_event_loop().run_until_complete(
-            mine_unknown_domains(graph_client, db_session, days_back=90)
-        )
+        result = _run(mine_unknown_domains(graph_client, db_session, days_back=90))
         assert len(result) == 0
 
     def test_mine_unknown_domains_api_error(self, db_session: Session):
@@ -235,9 +239,7 @@ class TestProspectDiscoveryEmail:
         graph_client = AsyncMock()
         graph_client.list_messages = AsyncMock(side_effect=Exception("API down"))
 
-        result = asyncio.get_event_loop().run_until_complete(
-            mine_unknown_domains(graph_client, db_session, days_back=90)
-        )
+        result = _run(mine_unknown_domains(graph_client, db_session, days_back=90))
         assert result == []
 
     def test_enrich_email_domains_with_data(self):
@@ -250,7 +252,7 @@ class TestProspectDiscoveryEmail:
         async def mock_enrich(domain):
             return {"name": "NewCo Inc", "industry": "Electronics", "website": "https://newco.com"}
 
-        result = asyncio.get_event_loop().run_until_complete(enrich_email_domains(domains, enrich_fn=mock_enrich))
+        result = _run(enrich_email_domains(domains, enrich_fn=mock_enrich))
         assert len(result) == 1
         assert result[0].name == "NewCo Inc"
         assert result[0].discovery_source == "email_history"
@@ -267,9 +269,7 @@ class TestProspectDiscoveryEmail:
         async def apollo_enrich(domain):
             return {"name": "Fallback Corp", "industry": "Tech"}
 
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_email_domains(domains, enrich_fn=fail_enrich, apollo_enrich_fn=apollo_enrich)
-        )
+        result = _run(enrich_email_domains(domains, enrich_fn=fail_enrich, apollo_enrich_fn=apollo_enrich))
         assert len(result) == 1
         assert result[0].name == "Fallback Corp"
 
@@ -278,9 +278,7 @@ class TestProspectDiscoveryEmail:
         from app.services.prospect_discovery_email import enrich_email_domains
 
         domains = [{"domain": "nope.com", "email_count": 2, "sample_senders": []}]
-        result = asyncio.get_event_loop().run_until_complete(
-            enrich_email_domains(domains, enrich_fn=None, apollo_enrich_fn=None)
-        )
+        result = _run(enrich_email_domains(domains, enrich_fn=None, apollo_enrich_fn=None))
         assert len(result) == 0
 
     def test_run_email_mining_batch_no_domains(self, db_session: Session):
@@ -290,9 +288,7 @@ class TestProspectDiscoveryEmail:
         graph_client = AsyncMock()
         graph_client.list_messages = AsyncMock(return_value=[])
 
-        result = asyncio.get_event_loop().run_until_complete(
-            run_email_mining_batch("batch-1", graph_client, db_session)
-        )
+        result = _run(run_email_mining_batch("batch-1", graph_client, db_session))
         assert result == []
 
 
@@ -431,9 +427,7 @@ class TestAutoAttribution:
         mock_result = {"matches": [{"activity_id": 1, "entity_type": "company", "entity_id": 10, "confidence": 0.95}]}
 
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching(activities, companies, vendors)
-            )
+            result = _run(_call_claude_for_matching(activities, companies, vendors))
 
         assert 1 in result
         assert result[1]["entity_type"] == "company"
@@ -451,7 +445,7 @@ class TestAutoAttribution:
         )
 
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=json_str):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
 
         assert 1 in result
 
@@ -467,7 +461,7 @@ class TestAutoAttribution:
             new_callable=AsyncMock,
             side_effect=ClaudeUnavailableError("no key"),
         ):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
 
         assert result == {}
 
@@ -484,7 +478,7 @@ class TestAiGate:
         """Empty parts list returns empty list."""
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
-        result = asyncio.get_event_loop().run_until_complete(classify_parts_batch([]))
+        result = _run(classify_parts_batch([]))
         assert result == []
 
     def test_classify_parts_batch_success(self):
@@ -500,7 +494,7 @@ class TestAiGate:
         }
 
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
-            result = asyncio.get_event_loop().run_until_complete(classify_parts_batch(parts))
+            result = _run(classify_parts_batch(parts))
 
         assert len(result) == 1
         assert result[0]["search_ics"] is True
@@ -512,7 +506,7 @@ class TestAiGate:
         parts = [{"mpn": "TEST123", "manufacturer": "Test", "description": "Part"}]
 
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API down")):
-            result = asyncio.get_event_loop().run_until_complete(classify_parts_batch(parts))
+            result = _run(classify_parts_batch(parts))
 
         assert result is None
 
@@ -520,7 +514,7 @@ class TestAiGate:
         """No pending items -> returns immediately."""
         from app.services.ics_worker.ai_gate import process_ai_gate
 
-        asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+        _run(process_ai_gate(db_session))
         # No error = success
 
     def test_process_ai_gate_cached_item(self, db_session: Session, test_user: User):
@@ -569,7 +563,7 @@ class TestAiGate:
         with _cache_lock:
             _classification_cache[("stm32f407vg", "stmicro")] = ("semiconductor", "search", "MCU chip")
 
-        asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+        _run(process_ai_gate(db_session))
 
         db_session.refresh(item)
         assert item.status == "queued"
@@ -616,7 +610,7 @@ class TestAiGate:
         db_session.commit()
 
         with patch("app.services.ics_worker.ai_gate.classify_parts_batch", new_callable=AsyncMock, return_value=None):
-            asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+            _run(process_ai_gate(db_session))
 
         db_session.refresh(item)
         assert item.status == "queued"
@@ -928,50 +922,24 @@ class TestAutoDedup:
         with patch("app.services.auto_dedup_service._run_coro_sync", return_value=False):
             assert _ai_confirm_company_merge("A", "B", "a.com", "b.com", 94) is False
 
-    def test_ask_claude_merge_true(self):
-        """_ask_claude_merge returns True when same_entity=True and confidence>=0.85."""
+    @pytest.mark.parametrize(
+        ("patch_kwargs", "expected"),
+        [
+            ({"return_value": {"same_entity": True, "confidence": 0.9}}, True),
+            ({"return_value": {"same_entity": True, "confidence": 0.5}}, False),
+            ({"side_effect": ClaudeUnavailableError("no key")}, False),
+            ({"return_value": None}, False),
+        ],
+        ids=["true", "low_confidence", "unavailable", "none_result"],
+    )
+    def test_ask_claude_merge(self, patch_kwargs, expected):
+        """_ask_claude_merge returns True only when same_entity and confidence>=0.85;
+        otherwise False (low confidence, None result, or ClaudeUnavailableError)."""
         from app.services.auto_dedup_service import _ask_claude_merge
 
-        with patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value={"same_entity": True, "confidence": 0.9},
-        ):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("test"))
-        assert result is True
-
-    def test_ask_claude_merge_low_confidence(self):
-        """_ask_claude_merge returns False when confidence < 0.85."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        with patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            return_value={"same_entity": True, "confidence": 0.5},
-        ):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("test"))
-        assert result is False
-
-    def test_ask_claude_merge_unavailable(self):
-        """_ask_claude_merge returns False on ClaudeUnavailableError."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-        from app.utils.claude_errors import ClaudeUnavailableError
-
-        with patch(
-            "app.utils.claude_client.claude_structured",
-            new_callable=AsyncMock,
-            side_effect=ClaudeUnavailableError("no key"),
-        ):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("test"))
-        assert result is False
-
-    def test_ask_claude_merge_none_result(self):
-        """_ask_claude_merge returns False when result is None."""
-        from app.services.auto_dedup_service import _ask_claude_merge
-
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("test"))
-        assert result is False
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, **patch_kwargs):
+            result = _run(_ask_claude_merge("test"))
+        assert result is expected
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -1192,7 +1160,7 @@ class TestReenrich:
         mock_enrich.return_value = {"enriched": 0}
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            asyncio.get_event_loop().run_until_complete(main(limit=10, batch_size=5))
+            _run(main(limit=10, batch_size=5))
 
         mock_enrich.assert_called_once()
 
@@ -1211,7 +1179,7 @@ class TestReenrich:
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            asyncio.get_event_loop().run_until_complete(main(limit=10, batch_size=5))
+            _run(main(limit=10, batch_size=5))
 
         mock_enrich.assert_called_once()
         # record_spec should be called for the voltage spec
@@ -1229,7 +1197,7 @@ class TestReenrich:
         # specs_structured is None by default
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            asyncio.get_event_loop().run_until_complete(main(limit=10, batch_size=5))
+            _run(main(limit=10, batch_size=5))
 
         mock_record_spec.assert_not_called()
 
@@ -1248,7 +1216,7 @@ class TestReenrich:
         db_session.commit()
 
         with patch("app.database.SessionLocal", return_value=db_session):
-            asyncio.get_event_loop().run_until_complete(main(limit=10, batch_size=5))
+            _run(main(limit=10, batch_size=5))
 
         # Plain string "3.3V" is not a dict, so spec_data.get("value") won't work
         # The code handles this: value = spec_data if not isinstance(spec_data, dict)
@@ -1425,7 +1393,7 @@ class TestAutoAttributionExtra:
 
         activities = [{"id": 1, "email": "a@b.com", "phone": "", "name": "X", "subject": "Y"}]
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
         assert result == {}
 
     def test_call_claude_invalid_json_string(self):
@@ -1434,7 +1402,7 @@ class TestAutoAttributionExtra:
 
         activities = [{"id": 1, "email": "a@b.com", "phone": "", "name": "X", "subject": "Y"}]
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value="not json{"):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
         assert result == {}
 
     def test_call_claude_wrong_format(self):
@@ -1443,7 +1411,7 @@ class TestAutoAttributionExtra:
 
         activities = [{"id": 1, "email": "a@b.com", "phone": "", "name": "X", "subject": "Y"}]
         with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"wrong": True}):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
         assert result == {}
 
     def test_call_claude_error(self):
@@ -1455,7 +1423,7 @@ class TestAutoAttributionExtra:
         with patch(
             "app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=ClaudeError("fail")
         ):
-            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
+            result = _run(_call_claude_for_matching(activities, [], []))
         assert result == {}
 
 
@@ -1671,7 +1639,7 @@ class TestAutoDedupExtra:
         with patch(
             "app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=ClaudeError("fail")
         ):
-            result = asyncio.get_event_loop().run_until_complete(_ask_claude_merge("test"))
+            result = _run(_ask_claude_merge("test"))
         assert result is False
 
 
@@ -1725,7 +1693,7 @@ class TestAiGateExtra:
             new_callable=AsyncMock,
             return_value=classifications,
         ):
-            asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+            _run(process_ai_gate(db_session))
 
         db_session.refresh(item)
         assert item.status == "queued"
@@ -1787,7 +1755,7 @@ class TestAiGateExtra:
             new_callable=AsyncMock,
             return_value=classifications,
         ):
-            asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+            _run(process_ai_gate(db_session))
 
         db_session.refresh(item)
         assert item.status == "gated_out"
@@ -1839,7 +1807,7 @@ class TestAiGateExtra:
             new_callable=AsyncMock,
             return_value=[],
         ):
-            asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+            _run(process_ai_gate(db_session))
 
         db_session.refresh(item)
         # Item stays pending since no classification was returned for it
@@ -1859,7 +1827,7 @@ class TestAiGateExtra:
         ai_gate_mod._last_api_failure = time.monotonic()
 
         # Should return early without processing
-        asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
+        _run(process_ai_gate(db_session))
 
         # Reset
         ai_gate_mod._last_api_failure = 0.0
@@ -1871,7 +1839,7 @@ class TestAiGateExtra:
         parts = [{"mpn": "TEST", "manufacturer": "X", "description": "Part"}]
 
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"unexpected": True}):
-            result = asyncio.get_event_loop().run_until_complete(classify_parts_batch(parts))
+            result = _run(classify_parts_batch(parts))
         assert result is None
 
 

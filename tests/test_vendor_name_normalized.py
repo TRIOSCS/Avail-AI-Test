@@ -9,6 +9,7 @@ Verifies:
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -205,8 +206,6 @@ def test_contact_query_by_normalized(db_session: Session, requisition, user):
     db_session.add(contact)
     db_session.commit()
 
-    from sqlalchemy import func
-
     # New pattern: direct equality on normalized column
     count = (
         db_session.query(func.count(Contact.id))
@@ -278,8 +277,6 @@ def test_engagement_scorer_uses_normalized(db_session: Session, requisition, use
             )
         )
     db_session.commit()
-
-    from sqlalchemy import func
 
     outreach = (
         db_session.query(func.count(Contact.id))

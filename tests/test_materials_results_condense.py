@@ -5,6 +5,7 @@ Renders the partial directly via Jinja (mirrors tests/test_oem_badges.py) so the
 contract is asserted without seeding vendor-sighting stats.
 """
 
+import pytest
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 
@@ -86,15 +87,18 @@ def test_status_cell_merges_trust_lifecycle_condition():
     assert html.count("<th ") == 7  # trailing space: doesn't match <thead>
 
 
-def test_best_price_two_decimals_at_or_above_one_dollar():
-    html = _render(_best_price=42.5, _best_currency="USD")
-    assert "$42.50" in html
-    assert "$42.5000" not in html
-
-
-def test_best_price_four_decimals_below_one_dollar():
-    html = _render(_best_price=0.0123, _best_currency="USD")
-    assert "$0.0123" in html
+@pytest.mark.parametrize(
+    ("price", "expected", "forbidden"),
+    [
+        pytest.param(42.5, "$42.50", "$42.5000", id="two_decimals_at_or_above_one_dollar"),
+        pytest.param(0.0123, "$0.0123", None, id="four_decimals_below_one_dollar"),
+    ],
+)
+def test_best_price_decimal_precision(price, expected, forbidden):
+    html = _render(_best_price=price, _best_currency="USD")
+    assert expected in html
+    if forbidden is not None:
+        assert forbidden not in html
 
 
 def test_count_is_match_framed_with_query():

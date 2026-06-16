@@ -103,8 +103,6 @@ class TestRequireFreshToken:
 
     async def test_raises_401_when_truly_expired(self, db_session, test_user):
         """Token past expiry → 401, m365_connected set to False."""
-        from fastapi import HTTPException
-
         test_user.access_token = "expired-token"
         test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
         test_user.m365_connected = True
@@ -119,8 +117,6 @@ class TestRequireFreshToken:
 
     async def test_raises_401_when_no_access_token(self, db_session, test_user):
         """User with no access_token → 401."""
-        from fastapi import HTTPException
-
         test_user.access_token = None
         db_session.commit()
 
@@ -131,8 +127,6 @@ class TestRequireFreshToken:
 
     async def test_raises_401_when_no_session(self, db_session):
         """No session → 401."""
-        from fastapi import HTTPException
-
         request = _mock_request({})
         with pytest.raises(HTTPException) as exc_info:
             await require_fresh_token(request, db_session)

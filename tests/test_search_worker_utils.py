@@ -14,6 +14,8 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 
 class TestSearchSchedulerIsBusinessHours:
     """SearchScheduler.is_business_hours() covers all weekday branches (lines 48-61)."""
@@ -28,79 +30,27 @@ class TestSearchSchedulerIsBusinessHours:
         config = SimpleNamespace(**config_dict)
         return SearchScheduler(config, "ICS")
 
-    def test_saturday_always_off(self):
-        """Saturday (weekday 5) is always outside business hours."""
-        scheduler = self._make_scheduler()
-
-        # Saturday at noon
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 5, hour=12)
-            result = scheduler.is_business_hours()
-        assert result is False
-
-    def test_sunday_before_6pm_off(self):
-        """Sunday before 6 PM is outside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 6, hour=10)
-            result = scheduler.is_business_hours()
-        assert result is False
-
-    def test_sunday_after_6pm_on(self):
-        """Sunday at or after 6 PM is inside business hours."""
+    @pytest.mark.parametrize(
+        ("weekday", "hour", "expected"),
+        [
+            pytest.param(5, 12, False, id="saturday_always_off"),
+            pytest.param(6, 10, False, id="sunday_before_6pm_off"),
+            pytest.param(6, 18, True, id="sunday_after_6pm_on"),
+            pytest.param(4, 16, True, id="friday_before_5pm_on"),
+            pytest.param(4, 17, False, id="friday_at_5pm_off"),
+            pytest.param(0, 9, True, id="monday_always_on"),
+            pytest.param(1, 14, True, id="tuesday_always_on"),
+            pytest.param(2, 11, True, id="wednesday_always_on"),
+            pytest.param(3, 15, True, id="thursday_always_on"),
+        ],
+    )
+    def test_is_business_hours_by_weekday(self, weekday, hour, expected):
+        """is_business_hours() resolves each weekday/hour combination correctly."""
         scheduler = self._make_scheduler()
         with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 6, hour=18)
+            mock_dt.now.return_value = MagicMock(weekday=lambda: weekday, hour=hour)
             result = scheduler.is_business_hours()
-        assert result is True
-
-    def test_friday_before_5pm_on(self):
-        """Friday before 5 PM is inside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 4, hour=16)
-            result = scheduler.is_business_hours()
-        assert result is True
-
-    def test_friday_at_5pm_off(self):
-        """Friday at or after 5 PM is outside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 4, hour=17)
-            result = scheduler.is_business_hours()
-        assert result is False
-
-    def test_monday_always_on(self):
-        """Monday (weekday 0) is always inside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 0, hour=9)
-            result = scheduler.is_business_hours()
-        assert result is True
-
-    def test_tuesday_always_on(self):
-        """Tuesday (weekday 1) is always inside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 1, hour=14)
-            result = scheduler.is_business_hours()
-        assert result is True
-
-    def test_wednesday_always_on(self):
-        """Wednesday (weekday 2) is always inside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 2, hour=11)
-            result = scheduler.is_business_hours()
-        assert result is True
-
-    def test_thursday_always_on(self):
-        """Thursday (weekday 3) is always inside business hours."""
-        scheduler = self._make_scheduler()
-        with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:
-            mock_dt.now.return_value = MagicMock(weekday=lambda: 3, hour=15)
-            result = scheduler.is_business_hours()
-        assert result is True
+        assert result is expected
 
     def test_force_business_hours_env_var(self):
         """FORCE_BUSINESS_HOURS=1 always returns True."""
@@ -146,8 +96,16 @@ class TestSearchSchedulerIsBusinessHours:
 class TestHumanBehaviorHumanType:
     """HumanBehavior.human_type() typing loop (line 41)."""
 
-    async def test_human_type_types_each_character(self):
-        """human_type() calls page.keyboard.type for each character."""
+    @pytest.mark.parametrize(
+        ("text", "expected_calls"),
+        [
+            pytest.param("AB", 2, id="types_each_character"),
+            pytest.param("", 0, id="empty_string"),
+            pytest.param("X", 1, id="single_char"),
+        ],
+    )
+    async def test_human_type_calls_keyboard_per_character(self, text, expected_calls):
+        """human_type() calls page.keyboard.type once per character."""
         from app.services.search_worker_base.human_behavior import HumanBehavior
 
         page = MagicMock()
@@ -158,41 +116,9 @@ class TestHumanBehaviorHumanType:
         locator.click = AsyncMock()
 
         with patch("asyncio.sleep", new=AsyncMock()):
-            await HumanBehavior.human_type(page, locator, "AB")
+            await HumanBehavior.human_type(page, locator, text)
 
-        assert page.keyboard.type.call_count == 2
-
-    async def test_human_type_empty_string(self):
-        """human_type() with empty string doesn't call keyboard.type."""
-        from app.services.search_worker_base.human_behavior import HumanBehavior
-
-        page = MagicMock()
-        page.keyboard = MagicMock()
-        page.keyboard.type = AsyncMock()
-
-        locator = MagicMock()
-        locator.click = AsyncMock()
-
-        with patch("asyncio.sleep", new=AsyncMock()):
-            await HumanBehavior.human_type(page, locator, "")
-
-        page.keyboard.type.assert_not_called()
-
-    async def test_human_type_single_char(self):
-        """human_type() with single character calls keyboard.type once."""
-        from app.services.search_worker_base.human_behavior import HumanBehavior
-
-        page = MagicMock()
-        page.keyboard = MagicMock()
-        page.keyboard.type = AsyncMock()
-
-        locator = MagicMock()
-        locator.click = AsyncMock()
-
-        with patch("asyncio.sleep", new=AsyncMock()):
-            await HumanBehavior.human_type(page, locator, "X")
-
-        assert page.keyboard.type.call_count == 1
+        assert page.keyboard.type.call_count == expected_calls
 
 
 class TestHumanBehaviorHumanClick:

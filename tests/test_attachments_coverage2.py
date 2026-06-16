@@ -166,55 +166,21 @@ class TestAttachRequisitionFromOneDriveLine123:
         assert data["onedrive_url"] == "https://od.example.com/component_spec.pdf"
         assert data["content_type"] == "application/pdf"
 
-    def test_token_expired_error_code_returns_401(self, client, test_requisition):
-        """Graph returns TokenExpired → 401."""
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "TokenExpired"}})
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-item-001"},
-            )
-        assert resp.status_code == 401
+    @pytest.mark.parametrize(
+        ("graph_error", "expected_status"),
+        [
+            pytest.param({"error": {"code": "TokenExpired"}}, 401, id="token_expired_401"),
+            pytest.param({"error": {"code": "AccessDenied"}}, 403, id="access_denied_uppercase_403"),
+            pytest.param({"error": "string-error-not-dict"}, 404, id="non_dict_error_404"),
+        ],
+    )
+    def test_graph_error_code_maps_to_status(self, client, test_requisition, graph_error, expected_status):
+        """Graph error codes map to HTTP status (incl.
 
-    def test_access_denied_uppercase_returns_403(self, client, test_requisition):
-        """Graph returns AccessDenied (uppercase) → 403."""
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "AccessDenied"}})
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-        ):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
-                json={"item_id": "od-item-001"},
-            )
-        assert resp.status_code == 403
-
-    def test_non_dict_error_value_returns_404(self, client, test_requisition):
-        """Graph returns error as a non-dict string → falls through to 404.
-
-        Covers the `else ""` branch of the isinstance check on line 138.
+        the non-dict `else ""` branch).
         """
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": "string-error-not-dict"})
+        gc_mock.get_json = AsyncMock(return_value=graph_error)
         with (
             patch(
                 "app.scheduler.get_valid_token",
@@ -230,7 +196,7 @@ class TestAttachRequisitionFromOneDriveLine123:
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
                 json={"item_id": "od-item-001"},
             )
-        assert resp.status_code == 404
+        assert resp.status_code == expected_status
 
 
 # ── Lines 125-155 via direct async handler call ──────────────────────────────
@@ -313,14 +279,24 @@ class TestAttachOneDriveDirectHandler:
 
         assert exc_info.value.status_code == 401
 
-    async def test_direct_graph_auth_error_raises_401(self, db_session, test_requisition, test_user):
-        """Direct handler: Graph auth error → 401 — lines 137-140."""
+    @pytest.mark.parametrize(
+        ("error_code", "expected_status"),
+        [
+            pytest.param("InvalidAuthenticationToken", 401, id="auth_error_401"),
+            pytest.param("accessDenied", 403, id="access_denied_403"),
+            pytest.param("someOtherError", 404, id="unknown_error_404"),
+        ],
+    )
+    async def test_direct_graph_error_code_raises(
+        self, db_session, test_requisition, test_user, error_code, expected_status
+    ):
+        """Direct handler: Graph error codes raise the mapped HTTPException status."""
         from fastapi import HTTPException, Request
 
         from app.routers.requisitions.attachments import attach_requisition_from_onedrive
 
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "InvalidAuthenticationToken"}})
+        gc_mock.get_json = AsyncMock(return_value={"error": {"code": error_code}})
 
         mock_request = MagicMock(spec=Request)
         mock_request.json = AsyncMock(return_value={"item_id": "od-001"})
@@ -344,73 +320,7 @@ class TestAttachOneDriveDirectHandler:
                 db=db_session,
             )
 
-        assert exc_info.value.status_code == 401
-
-    async def test_direct_graph_access_denied_raises_403(self, db_session, test_requisition, test_user):
-        """Direct handler: Graph accessDenied → 403 — line 141-143."""
-        from fastapi import HTTPException, Request
-
-        from app.routers.requisitions.attachments import attach_requisition_from_onedrive
-
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "accessDenied"}})
-
-        mock_request = MagicMock(spec=Request)
-        mock_request.json = AsyncMock(return_value={"item_id": "od-001"})
-
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-            pytest.raises(HTTPException) as exc_info,
-        ):
-            await attach_requisition_from_onedrive(
-                req_id=test_requisition.id,
-                request=mock_request,
-                user=test_user,
-                db=db_session,
-            )
-
-        assert exc_info.value.status_code == 403
-
-    async def test_direct_item_not_found_raises_404(self, db_session, test_requisition, test_user):
-        """Direct handler: unknown error code → 404 — line 143."""
-        from fastapi import HTTPException, Request
-
-        from app.routers.requisitions.attachments import attach_requisition_from_onedrive
-
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "someOtherError"}})
-
-        mock_request = MagicMock(spec=Request)
-        mock_request.json = AsyncMock(return_value={"item_id": "od-001"})
-
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.utils.graph_client.GraphClient",
-                return_value=gc_mock,
-            ),
-            pytest.raises(HTTPException) as exc_info,
-        ):
-            await attach_requisition_from_onedrive(
-                req_id=test_requisition.id,
-                request=mock_request,
-                user=test_user,
-                db=db_session,
-            )
-
-        assert exc_info.value.status_code == 404
+        assert exc_info.value.status_code == expected_status
 
     async def test_direct_missing_item_id_raises_400(self, db_session, test_requisition, test_user):
         """Direct handler: item_id missing → 400 — lines 125-127."""
@@ -447,8 +357,9 @@ class TestDeleteRequisitionAttachmentLine178:
             resp = client.delete(f"/api/requisition-attachments/{att.id}")
         assert resp.status_code == 401
 
-    def test_onedrive_delete_returns_401(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 401 during delete → 401 re-raised — line 187-188."""
+    @pytest.mark.parametrize("status", [401, 403], ids=["onedrive_401", "onedrive_403"])
+    def test_onedrive_delete_reraises_status(self, client, db_session, test_requisition, test_user, status):
+        """OneDrive 401/403 during delete is re-raised — lines 187-190."""
         att = _make_req_att(db_session, test_requisition.id, test_user.id)
         with (
             patch(
@@ -459,29 +370,11 @@ class TestDeleteRequisitionAttachmentLine178:
             patch(
                 "app.http_client.http.delete",
                 new_callable=AsyncMock,
-                return_value=_mock_resp(401),
+                return_value=_mock_resp(status),
             ),
         ):
             resp = client.delete(f"/api/requisition-attachments/{att.id}")
-        assert resp.status_code == 401
-
-    def test_onedrive_delete_returns_403(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 403 during delete → 403 re-raised — lines 189-190."""
-        att = _make_req_att(db_session, test_requisition.id, test_user.id)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(403),
-            ),
-        ):
-            resp = client.delete(f"/api/requisition-attachments/{att.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == status
 
 
 # ── Line 215: list_requirement_attachments — get_req_for_user returns None ───
@@ -572,9 +465,10 @@ class TestDeleteRequirementAttachmentLines309And319:
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
         assert resp.status_code == 401
 
-    def test_onedrive_delete_returns_401(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 401 during requirement attachment delete → 401 — line
-        309."""
+    @pytest.mark.parametrize("status", [401, 403], ids=["onedrive_401", "onedrive_403"])
+    def test_onedrive_delete_reraises_status(self, client, db_session, test_requisition, test_user, status):
+        """OneDrive 401/403 during requirement attachment delete is re-raised — lines
+        309, 319."""
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att(db_session, requirement.id, test_user.id)
         with (
@@ -586,28 +480,8 @@ class TestDeleteRequirementAttachmentLines309And319:
             patch(
                 "app.http_client.http.delete",
                 new_callable=AsyncMock,
-                return_value=_mock_resp(401),
+                return_value=_mock_resp(status),
             ),
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
-        assert resp.status_code == 401
-
-    def test_onedrive_delete_returns_403(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 403 during requirement attachment delete → 403 — line
-        319."""
-        requirement = _make_requirement(db_session, test_requisition.id)
-        att = _make_reqmt_att(db_session, requirement.id, test_user.id)
-        with (
-            patch(
-                "app.scheduler.get_valid_token",
-                new_callable=AsyncMock,
-                return_value="tok",
-            ),
-            patch(
-                "app.http_client.http.delete",
-                new_callable=AsyncMock,
-                return_value=_mock_resp(403),
-            ),
-        ):
-            resp = client.delete(f"/api/requirement-attachments/{att.id}")
-        assert resp.status_code == 403
+        assert resp.status_code == status

@@ -1,18 +1,29 @@
+import pytest
+
 from app.services.enrichment_worker.trusted_domains import is_trusted_domain
 
 
-def test_authorized_distributor():
-    assert is_trusted_domain("https://www.digikey.com/en/products/detail/x")
-    assert is_trusted_domain("https://www.mouser.com/ProductDetail/x")
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://www.digikey.com/en/products/detail/x", id="distributor-digikey"),
+        pytest.param("https://www.mouser.com/ProductDetail/x", id="distributor-mouser"),
+        pytest.param("https://www.ti.com/product/LM317", id="manufacturer-suffix-www"),
+        pytest.param("https://st.com/foo", id="manufacturer-apex"),
+    ],
+)
+def test_trusted_urls_accepted(url):
+    assert is_trusted_domain(url)
 
 
-def test_manufacturer_suffix():
-    assert is_trusted_domain("https://www.ti.com/product/LM317")
-    assert is_trusted_domain("https://st.com/foo")
-
-
-def test_rejects_lookalike_and_untrusted():
-    assert not is_trusted_domain("https://evil-st.com/foo")  # suffix spoof
-    assert not is_trusted_domain("https://www.ebay.com/itm/123")
-    assert not is_trusted_domain("ftp://www.ti.com/x")  # non-http
-    assert not is_trusted_domain("not a url")
+@pytest.mark.parametrize(
+    "url",
+    [
+        pytest.param("https://evil-st.com/foo", id="suffix-spoof"),
+        pytest.param("https://www.ebay.com/itm/123", id="untrusted-marketplace"),
+        pytest.param("ftp://www.ti.com/x", id="non-http-scheme"),
+        pytest.param("not a url", id="unparseable"),
+    ],
+)
+def test_untrusted_urls_rejected(url):
+    assert not is_trusted_domain(url)

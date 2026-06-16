@@ -33,40 +33,23 @@ async def test_crossref_accept():
     assert r.linkage_source_domain == "support.lenovo.com"
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"source_urls": ["https://reddit.com/r/homelab"]}, id="untrusted_domain"),
+        # quote lacks the resolved MPN → linkage not sourced
+        pytest.param({"linkage_quote": "Lenovo FRU 01HW917 memory module"}, id="linkage_missing_resolved"),
+        pytest.param(
+            {"linkage_quote": "Samsung M393A2K40EB3-CWE 16GB DDR4 RDIMM"},
+            id="linkage_missing_oem_code",
+        ),
+        pytest.param({"resolved_mpn": "01HW917", "linkage_quote": "01HW917 01HW917"}, id="echo_mpn"),
+        pytest.param({"confidence": 0.5}, id="low_confidence"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_crossref_reject_untrusted_domain():
-    r = await _xr({**XR_OK, "source_urls": ["https://reddit.com/r/homelab"]})
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_crossref_reject_linkage_missing_resolved():
-    # quote lacks the resolved MPN → linkage not sourced
-    r = await _xr({**XR_OK, "linkage_quote": "Lenovo FRU 01HW917 memory module"})
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_crossref_reject_linkage_missing_oem_code():
-    r = await _xr({**XR_OK, "linkage_quote": "Samsung M393A2K40EB3-CWE 16GB DDR4 RDIMM"})
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_crossref_reject_echo_mpn():
-    r = await _xr(
-        {
-            **XR_OK,
-            "resolved_mpn": "01HW917",
-            "linkage_quote": "01HW917 01HW917",
-        }
-    )
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_crossref_reject_low_confidence():
-    r = await _xr({**XR_OK, "confidence": 0.5})
+async def test_crossref_reject(overrides):
+    r = await _xr({**XR_OK, **overrides})
     assert r.status == "failed"
 
 
@@ -101,21 +84,17 @@ async def test_desc_accept():
     assert r.source_domains == ["support.lenovo.com"]
 
 
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        pytest.param({"source_urls": ["https://www.ebay.com/itm/123"]}, id="untrusted_domain"),
+        pytest.param({"exact_mpn_found": "01HW918"}, id="mpn_mismatch"),
+        pytest.param({"description": "RAM"}, id="short_description"),
+    ],
+)
 @pytest.mark.asyncio
-async def test_desc_reject_untrusted_domain():
-    r = await _desc({**DESC_OK, "source_urls": ["https://www.ebay.com/itm/123"]})
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_desc_reject_mpn_mismatch():
-    r = await _desc({**DESC_OK, "exact_mpn_found": "01HW918"})
-    assert r.status == "failed"
-
-
-@pytest.mark.asyncio
-async def test_desc_reject_short_description():
-    r = await _desc({**DESC_OK, "description": "RAM"})
+async def test_desc_reject(overrides):
+    r = await _desc({**DESC_OK, **overrides})
     assert r.status == "failed"
 
 

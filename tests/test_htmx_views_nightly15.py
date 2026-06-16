@@ -20,6 +20,7 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -257,25 +258,16 @@ class TestSendFollowUp:
 
 
 class TestReviewResponse:
-    def test_mark_reviewed(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    @pytest.mark.parametrize("status", ["reviewed", "rejected"])
+    def test_mark_status(self, client: TestClient, db_session: Session, test_requisition: Requisition, status: str):
         vr = _make_vendor_response(db_session, test_requisition)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/responses/{vr.id}/review",
-            data={"status": "reviewed"},
+            data={"status": status},
         )
         assert resp.status_code == 200
         db_session.refresh(vr)
-        assert vr.status == "reviewed"
-
-    def test_mark_rejected(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        vr = _make_vendor_response(db_session, test_requisition)
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/responses/{vr.id}/review",
-            data={"status": "rejected"},
-        )
-        assert resp.status_code == 200
-        db_session.refresh(vr)
-        assert vr.status == "rejected"
+        assert vr.status == status
 
     def test_invalid_status(self, client: TestClient, db_session: Session, test_requisition: Requisition):
         vr = _make_vendor_response(db_session, test_requisition)

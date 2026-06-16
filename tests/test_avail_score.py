@@ -9,6 +9,7 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
+from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -131,20 +132,20 @@ def _make_quote(
 
 
 class TestTier:
-    def test_tier_highest(self):
-        assert _tier(100, [(90, 10), (80, 8), (70, 6)]) == 10
+    TIERS = [(90, 10), (80, 8), (70, 6)]
 
-    def test_tier_middle(self):
-        assert _tier(85, [(90, 10), (80, 8), (70, 6)]) == 8
-
-    def test_tier_lowest(self):
-        assert _tier(50, [(90, 10), (80, 8), (70, 6)]) == 0
-
-    def test_tier_exact_boundary(self):
-        assert _tier(80, [(90, 10), (80, 8), (70, 6)]) == 8
-
-    def test_tier_empty(self):
-        assert _tier(100, []) == 0
+    @pytest.mark.parametrize(
+        "value, tiers, expected",
+        [
+            pytest.param(100, TIERS, 10, id="highest"),
+            pytest.param(85, TIERS, 8, id="middle"),
+            pytest.param(50, TIERS, 0, id="lowest"),
+            pytest.param(80, TIERS, 8, id="exact_boundary"),
+            pytest.param(100, [], 0, id="empty"),
+        ],
+    )
+    def test_tier(self, value, tiers, expected):
+        assert _tier(value, tiers) == expected
 
 
 # ── Unit tests: _rank_and_bonus ─────────────────────────────────────
@@ -595,6 +596,24 @@ class TestGetAvailScores:
 # ── API Endpoint Tests ──────────────────────────────────────────────
 
 
+@contextmanager
+def _api_client(db_session, current_user):
+    """Build a TestClient with get_db + require_user overridden, cleaning up after."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: db_session
+    app.dependency_overrides[require_user] = lambda: current_user
+    try:
+        yield TestClient(app)
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+
+
 @pytest.mark.skipif(
     os.environ.get("MVP_MODE", "true").lower() == "true",
     reason="Performance router disabled in MVP mode",
@@ -602,99 +621,47 @@ class TestGetAvailScores:
 class TestAvailScoreAPI:
     def test_get_avail_scores_buyer(self, db_session):
         """GET /api/performance/avail-scores?role=buyer returns data."""
-        from app.dependencies import require_user
-        from app.main import app
-
         buyer = _make_user(db_session, "API Buyer", "buyer", "apibuyer")
         db_session.commit()
         compute_all_avail_scores(db_session, MONTH)
 
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: buyer
-        client = TestClient(app)
-
-        resp = client.get("/api/performance/avail-scores?role=buyer&month=2026-02")
+        with _api_client(db_session, buyer) as client:
+            resp = client.get("/api/performance/avail-scores?role=buyer&month=2026-02")
         assert resp.status_code == 200
         data = resp.json()
         assert data["role"] == "buyer"
         assert len(data["entries"]) == 1
 
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
-
     def test_get_avail_scores_sales(self, db_session):
         """GET /api/performance/avail-scores?role=sales returns data."""
-        from app.dependencies import require_user
-        from app.main import app
-
         sales = _make_user(db_session, "API Sales", "sales", "apisales")
         db_session.commit()
         compute_all_avail_scores(db_session, MONTH)
 
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: sales
-        client = TestClient(app)
-
-        resp = client.get("/api/performance/avail-scores?role=sales&month=2026-02")
+        with _api_client(db_session, sales) as client:
+            resp = client.get("/api/performance/avail-scores?role=sales&month=2026-02")
         assert resp.status_code == 200
         data = resp.json()
         assert data["role"] == "sales"
         assert len(data["entries"]) >= 1
 
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
-
     def test_invalid_role_rejected(self, db_session):
         """Invalid role returns 422."""
-        from app.dependencies import require_user
-        from app.main import app
-
         user = _make_user(db_session, "Bad Role", "buyer", "badrole")
         db_session.commit()
 
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: user
-        client = TestClient(app)
-
-        resp = client.get("/api/performance/avail-scores?role=invalid")
+        with _api_client(db_session, user) as client:
+            resp = client.get("/api/performance/avail-scores?role=invalid")
         assert resp.status_code == 422
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
 
     def test_refresh_requires_admin(self, db_session):
         """POST refresh requires admin role."""
-        from app.dependencies import require_user
-        from app.main import app
-
         buyer = _make_user(db_session, "NonAdmin", "buyer", "nonadmin")
         db_session.commit()
 
-        from fastapi.testclient import TestClient
-
-        from app.database import get_db
-
-        app.dependency_overrides[get_db] = lambda: db_session
-        app.dependency_overrides[require_user] = lambda: buyer
-        client = TestClient(app)
-
-        resp = client.post("/api/performance/avail-scores/refresh")
+        with _api_client(db_session, buyer) as client:
+            resp = client.post("/api/performance/avail-scores/refresh")
         assert resp.status_code == 403
-
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
 
 
 # ── Edge cases ──────────────────────────────────────────────────────

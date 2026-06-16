@@ -69,6 +69,14 @@ def basic_sighting(db_session: Session, req_pair: tuple) -> Sighting:
     return s
 
 
+def _sync_one_lead(db_session: Session, item: Requirement, sighting: Sighting) -> SourcingLead:
+    """Sync a single sighting into a lead and return the persisted lead."""
+    from app.services.sourcing_leads import sync_leads_for_sightings
+
+    sync_leads_for_sightings(db_session, item, [sighting])
+    return db_session.query(SourcingLead).first()
+
+
 @pytest.fixture()
 def vendor_card(db_session: Session) -> VendorCard:
     vc = VendorCard(
@@ -155,45 +163,35 @@ class TestUtilityFunctions:
 
         assert _freshness_score(None) == 45.0
 
-    def test_match_type_exact(self):
+    @pytest.mark.parametrize(
+        ("requested", "matched", "substitutes", "expected"),
+        [
+            pytest.param("LM317T", "LM317T", None, "exact", id="exact"),
+            # "ABCDE" contains "ABC" so it's a normalized prefix match
+            pytest.param("ABC", "ABCDE", None, "normalized", id="normalized"),
+            pytest.param("LM317T", "LM7805", [{"mpn": "LM7805"}], "cross_ref", id="cross_ref"),
+            pytest.param("LM317T", "XYZ999", None, "fuzzy", id="fuzzy"),
+        ],
+    )
+    def test_match_type(self, requested, matched, substitutes, expected):
         from app.services.sourcing_leads import _match_type_for_parts
 
-        assert _match_type_for_parts("LM317T", "LM317T") == "exact"
+        assert _match_type_for_parts(requested, matched, substitutes=substitutes) == expected
 
-    def test_match_type_normalized(self):
-        from app.services.sourcing_leads import _match_type_for_parts
-
-        # "ABCDE" contains "ABC" so it's a normalized prefix match
-        assert _match_type_for_parts("ABC", "ABCDE") == "normalized"
-
-    def test_match_type_cross_ref(self):
-        from app.services.sourcing_leads import _match_type_for_parts
-
-        subs = [{"mpn": "LM7805"}]
-        assert _match_type_for_parts("LM317T", "LM7805", substitutes=subs) == "cross_ref"
-
-    def test_match_type_fuzzy(self):
-        from app.services.sourcing_leads import _match_type_for_parts
-
-        assert _match_type_for_parts("LM317T", "XYZ999") == "fuzzy"
-
-    def test_suggested_next_action_low_safety(self):
+    @pytest.mark.parametrize(
+        ("confidence", "safety", "contactability", "expected_substr", "case_insensitive"),
+        [
+            pytest.param(80.0, 40.0, 80.0, "Verify", False, id="low_safety"),
+            pytest.param(80.0, 80.0, 20.0, "contact", True, id="low_contactability"),
+            pytest.param(80.0, 80.0, 80.0, "Contact now", False, id="high_confidence"),
+        ],
+    )
+    def test_suggested_next_action(self, confidence, safety, contactability, expected_substr, case_insensitive):
         from app.services.sourcing_leads import _suggested_next_action
 
-        result = _suggested_next_action(80.0, 40.0, 80.0)
-        assert "Verify" in result
-
-    def test_suggested_next_action_low_contactability(self):
-        from app.services.sourcing_leads import _suggested_next_action
-
-        result = _suggested_next_action(80.0, 80.0, 20.0)
-        assert "contact" in result.lower()
-
-    def test_suggested_next_action_high_confidence(self):
-        from app.services.sourcing_leads import _suggested_next_action
-
-        result = _suggested_next_action(80.0, 80.0, 80.0)
-        assert "Contact now" in result
+        result = _suggested_next_action(confidence, safety, contactability)
+        haystack = result.lower() if case_insensitive else result
+        assert expected_substr in haystack
 
     def test_source_category_mapping(self):
         from app.services.sourcing_leads import _source_category
@@ -490,20 +488,18 @@ class TestGetRequisitionLeads:
 
 class TestUpdateLeadStatus:
     def test_invalid_status_raises(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
-        from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+        from app.services.sourcing_leads import update_lead_status
 
         _, item = req_pair
-        sync_leads_for_sightings(db_session, item, [basic_sighting])
-        lead = db_session.query(SourcingLead).first()
+        lead = _sync_one_lead(db_session, item, basic_sighting)
         with pytest.raises(ValueError):
             update_lead_status(db_session, lead.id, "INVALID_STATUS")
 
     def test_valid_status_update(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
-        from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+        from app.services.sourcing_leads import update_lead_status
 
         _, item = req_pair
-        sync_leads_for_sightings(db_session, item, [basic_sighting])
-        lead = db_session.query(SourcingLead).first()
+        lead = _sync_one_lead(db_session, item, basic_sighting)
         updated = update_lead_status(db_session, lead.id, "contacted")
         assert updated.buyer_status == "contacted"
 
@@ -516,11 +512,10 @@ class TestUpdateLeadStatus:
     def test_has_stock_propagates_to_vendor_card(
         self, db_session: Session, req_pair: tuple, basic_sighting: Sighting, vendor_card: VendorCard
     ):
-        from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+        from app.services.sourcing_leads import update_lead_status
 
         _, item = req_pair
-        sync_leads_for_sightings(db_session, item, [basic_sighting])
-        lead = db_session.query(SourcingLead).first()
+        lead = _sync_one_lead(db_session, item, basic_sighting)
         original_wins = vendor_card.total_wins or 0
         update_lead_status(db_session, lead.id, "has_stock")
         db_session.refresh(vendor_card)

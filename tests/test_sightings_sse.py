@@ -7,6 +7,8 @@ Depends on: conftest.py fixtures, app.services.sse_broker, app.routers.sightings
 import json
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_sighting_summary import VendorSightingSummary
 
@@ -38,99 +40,58 @@ def _seed_data(db_session):
     return req, r, s
 
 
-class TestSSEPublishOnAdvanceStatus:
-    """Verify advance-status endpoint publishes sighting-updated SSE event."""
+def _seed_sighting(db_session, requirement_id):
+    """Create an actual sighting to mark unavailable."""
+    s = Sighting(
+        requirement_id=requirement_id,
+        vendor_name="SSE Vendor",
+        mpn_matched="SSE-TEST-001",
+    )
+    db_session.add(s)
+    db_session.commit()
 
-    def test_publishes_on_status_change(self, client, db_session):
+
+class TestSSEPublishOnMutation:
+    """Each sightings mutation endpoint publishes a sighting-updated SSE event carrying
+    the requirement_id."""
+
+    @pytest.mark.parametrize(
+        ("method", "path_suffix", "data", "extra_setup", "asserts_event_name"),
+        [
+            ("patch", "advance-status", {"status": "sourcing"}, None, True),
+            ("post", "log-activity", {"notes": "Test note", "channel": "note", "vendor_name": ""}, None, True),
+            (
+                "post",
+                "mark-unavailable",
+                {"vendor_name": "SSE Vendor", "reason": "sold_elsewhere"},
+                _seed_sighting,
+                False,
+            ),
+            ("patch", "assign", {"assigned_buyer_id": "1"}, None, False),
+            ("post", "refresh", None, None, False),
+        ],
+        ids=["advance_status", "log_activity", "mark_unavailable", "assign_buyer", "refresh"],
+    )
+    def test_publishes_sighting_updated(
+        self, client, db_session, method, path_suffix, data, extra_setup, asserts_event_name
+    ):
         _, r, _ = _seed_data(db_session)
+        if extra_setup is not None:
+            extra_setup(db_session, r.id)
+
         with patch("app.routers.sightings.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
-            resp = client.patch(
-                f"/v2/partials/sightings/{r.id}/advance-status",
-                data={"status": "sourcing"},
-            )
+            request = getattr(client, method)
+            url = f"/v2/partials/sightings/{r.id}/{path_suffix}"
+            resp = request(url, data=data) if data is not None else request(url)
+
             assert resp.status_code == 200
             mock_broker.publish.assert_called_once()
             call_args = mock_broker.publish.call_args
-            assert call_args[0][1] == "sighting-updated"
-            data = json.loads(call_args[0][2])
-            assert data["requirement_id"] == r.id
-
-
-class TestSSEPublishOnLogActivity:
-    """Verify log-activity endpoint publishes sighting-updated SSE event."""
-
-    def test_publishes_on_activity_log(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.broker") as mock_broker:
-            mock_broker.publish = AsyncMock()
-            resp = client.post(
-                f"/v2/partials/sightings/{r.id}/log-activity",
-                data={"notes": "Test note", "channel": "note", "vendor_name": ""},
-            )
-            assert resp.status_code == 200
-            mock_broker.publish.assert_called_once()
-            call_args = mock_broker.publish.call_args
-            assert call_args[0][1] == "sighting-updated"
-            data = json.loads(call_args[0][2])
-            assert data["requirement_id"] == r.id
-
-
-class TestSSEPublishOnMarkUnavailable:
-    """Verify mark-unavailable endpoint publishes sighting-updated SSE event."""
-
-    def test_publishes_on_mark_unavailable(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        # Create an actual sighting to mark
-        s = Sighting(
-            requirement_id=r.id,
-            vendor_name="SSE Vendor",
-            mpn_matched="SSE-TEST-001",
-        )
-        db_session.add(s)
-        db_session.commit()
-
-        with patch("app.routers.sightings.broker") as mock_broker:
-            mock_broker.publish = AsyncMock()
-            resp = client.post(
-                f"/v2/partials/sightings/{r.id}/mark-unavailable",
-                data={"vendor_name": "SSE Vendor", "reason": "sold_elsewhere"},
-            )
-            assert resp.status_code == 200
-            mock_broker.publish.assert_called_once()
-            data = json.loads(mock_broker.publish.call_args[0][2])
-            assert data["requirement_id"] == r.id
-
-
-class TestSSEPublishOnAssignBuyer:
-    """Verify assign-buyer endpoint publishes sighting-updated SSE event."""
-
-    def test_publishes_on_assign(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.broker") as mock_broker:
-            mock_broker.publish = AsyncMock()
-            resp = client.patch(
-                f"/v2/partials/sightings/{r.id}/assign",
-                data={"assigned_buyer_id": "1"},
-            )
-            assert resp.status_code == 200
-            mock_broker.publish.assert_called_once()
-            data = json.loads(mock_broker.publish.call_args[0][2])
-            assert data["requirement_id"] == r.id
-
-
-class TestSSEPublishOnRefresh:
-    """Verify single refresh endpoint publishes sighting-updated SSE event."""
-
-    def test_publishes_on_refresh(self, client, db_session):
-        _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.broker") as mock_broker:
-            mock_broker.publish = AsyncMock()
-            resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-            assert resp.status_code == 200
-            mock_broker.publish.assert_called_once()
-            data = json.loads(mock_broker.publish.call_args[0][2])
-            assert data["requirement_id"] == r.id
+            if asserts_event_name:
+                assert call_args[0][1] == "sighting-updated"
+            data_published = json.loads(call_args[0][2])
+            assert data_published["requirement_id"] == r.id
 
 
 class TestSSEPublishOnBatchRefresh:

@@ -18,11 +18,57 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+import pytest
+
 from app.constants import RequisitionStatus
 from app.models import Requisition, User
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def _make_req(db_session, created_by, *, name="Req", status=RequisitionStatus.ACTIVE, **kw) -> Requisition:
+    req = Requisition(
+        name=name,
+        customer_name="Test Co",
+        status=status,
+        created_by=created_by,
+        created_at=datetime.now(timezone.utc),
+        **kw,
+    )
+    db_session.add(req)
+    return req
+
+
+@contextmanager
+def _client_as(db_session, user):
+    """Yield a TestClient whose auth/role dependencies all resolve to ``user``."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_user
+    from app.main import app
+
+    def override_db():
+        yield db_session
+
+    def override_user():
+        return user
+
+    app.dependency_overrides[get_db] = override_db
+    app.dependency_overrides[require_user] = override_user
+    app.dependency_overrides[require_admin] = override_user
+    app.dependency_overrides[require_buyer] = override_user
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_admin, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
+
 
 # ── Requisition Counts ───────────────────────────────────────────────
 
@@ -39,10 +85,6 @@ class TestRequisitionCounts:
 
     def test_counts_as_sales_user(self, db_session):
         """Sales user only counts own requisitions."""
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_user
-        from app.main import app
-
         sales = User(
             email="salescounts@test.com",
             name="Sales Counts",
@@ -53,39 +95,13 @@ class TestRequisitionCounts:
         db_session.add(sales)
         db_session.commit()
 
-        # Create req by sales user
-        req = Requisition(
-            name="Sales Req",
-            customer_name="Test Co",
-            status="active",
-            created_by=sales.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        _make_req(db_session, sales.id, name="Sales Req", status="active")
         db_session.commit()
 
-        def override_db():
-            yield db_session
-
-        def override_sales():
-            return sales
-
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_user] = override_sales
-        app.dependency_overrides[require_admin] = override_sales
-        app.dependency_overrides[require_buyer] = override_sales
-
-        from fastapi.testclient import TestClient
-
-        try:
-            with TestClient(app) as c:
-                resp = c.get("/api/requisitions/counts")
-            assert resp.status_code == 200
-            data = resp.json()
-            assert data["total"] >= 1
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer]:
-                app.dependency_overrides.pop(dep, None)
+        with _client_as(db_session, sales) as c:
+            resp = c.get("/api/requisitions/counts")
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 1
 
 
 # ── List Requisitions ────────────────────────────────────────────────
@@ -99,49 +115,28 @@ class TestListRequisitions:
         data = resp.json()
         assert "requisitions" in data or "items" in data
 
-    def test_list_with_search_query(self, client, test_requisition):
-        """GET /api/requisitions?q=test searches by name."""
-        resp = client.get("/api/requisitions?q=REQ-TEST")
+    @pytest.mark.parametrize(
+        "query",
+        [
+            pytest.param("?q=REQ-TEST", id="search_query"),
+            pytest.param("?status=active", id="single_status"),
+            pytest.param("?status=active,draft", id="multiple_statuses"),
+            pytest.param("?sort=name&order=asc", id="sort_asc"),
+            pytest.param("?sort=invalid_col", id="sort_invalid_defaults_to_created_at"),
+            pytest.param("?limit=10&offset=0", id="limit_offset"),
+        ],
+    )
+    def test_list_with_query_params(self, client, test_requisition, query):
+        """Filtering/sorting/pagination query params all return 200."""
+        resp = client.get(f"/api/requisitions{query}")
         assert resp.status_code == 200
 
     def test_list_with_archive_status(self, client, db_session, test_user):
         """GET /api/requisitions?status=archive returns archived reqs."""
-        archived = Requisition(
-            name="Archived Req",
-            customer_name="Test Co",
-            status=RequisitionStatus.ARCHIVED,
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(archived)
+        _make_req(db_session, test_user.id, name="Archived Req", status=RequisitionStatus.ARCHIVED)
         db_session.commit()
 
         resp = client.get("/api/requisitions?status=archive")
-        assert resp.status_code == 200
-
-    def test_list_with_single_status(self, client, test_requisition):
-        """GET /api/requisitions?status=active filters to single status."""
-        resp = client.get("/api/requisitions?status=active")
-        assert resp.status_code == 200
-
-    def test_list_with_multiple_statuses(self, client, test_requisition):
-        """GET /api/requisitions?status=active,draft filters to multiple statuses."""
-        resp = client.get("/api/requisitions?status=active,draft")
-        assert resp.status_code == 200
-
-    def test_list_sort_asc(self, client, test_requisition):
-        """GET /api/requisitions with sort=name&order=asc works."""
-        resp = client.get("/api/requisitions?sort=name&order=asc")
-        assert resp.status_code == 200
-
-    def test_list_sort_invalid_defaults_to_created_at(self, client, test_requisition):
-        """Invalid sort column falls back to created_at."""
-        resp = client.get("/api/requisitions?sort=invalid_col")
-        assert resp.status_code == 200
-
-    def test_list_with_limit_offset(self, client, test_requisition):
-        """GET /api/requisitions with limit/offset returns paginated results."""
-        resp = client.get("/api/requisitions?limit=10&offset=0")
         assert resp.status_code == 200
 
 
@@ -237,20 +232,18 @@ class TestUpdateRequisition:
         )
         assert resp.status_code == 400
 
-    def test_update_valid_urgency(self, client, test_requisition):
-        """Update with valid urgency works."""
-        resp = client.put(
-            f"/api/requisitions/{test_requisition.id}",
-            json={"urgency": "hot"},
-        )
-        assert resp.status_code == 200
-
-    def test_update_opportunity_value(self, client, test_requisition):
-        """Update opportunity_value field works."""
-        resp = client.put(
-            f"/api/requisitions/{test_requisition.id}",
-            json={"opportunity_value": 5000.00},
-        )
+    @pytest.mark.parametrize(
+        "body",
+        [
+            pytest.param({"urgency": "hot"}, id="valid_urgency"),
+            pytest.param({"opportunity_value": 5000.00}, id="opportunity_value"),
+            pytest.param({"deadline": "2026-12-31"}, id="deadline"),
+            pytest.param({"deadline": ""}, id="empty_deadline_sets_null"),
+        ],
+    )
+    def test_update_field_succeeds(self, client, test_requisition, body):
+        """Valid single-field updates return 200."""
+        resp = client.put(f"/api/requisitions/{test_requisition.id}", json=body)
         assert resp.status_code == 200
 
     def test_update_customer_site_id(self, client, test_requisition, test_customer_site):
@@ -258,22 +251,6 @@ class TestUpdateRequisition:
         resp = client.put(
             f"/api/requisitions/{test_requisition.id}",
             json={"customer_site_id": test_customer_site.id},
-        )
-        assert resp.status_code == 200
-
-    def test_update_deadline(self, client, test_requisition):
-        """Update deadline works."""
-        resp = client.put(
-            f"/api/requisitions/{test_requisition.id}",
-            json={"deadline": "2026-12-31"},
-        )
-        assert resp.status_code == 200
-
-    def test_update_empty_deadline_sets_null(self, client, test_requisition):
-        """Update with empty deadline sets it to None."""
-        resp = client.put(
-            f"/api/requisitions/{test_requisition.id}",
-            json={"deadline": ""},
         )
         assert resp.status_code == 200
 
@@ -295,14 +272,7 @@ class TestToggleArchive:
 
     def test_unarchive_archived_req(self, client, db_session, test_user):
         """Unarchiving an archived req sets status back to active."""
-        req = Requisition(
-            name="Archived to Restore",
-            customer_name="Test Co",
-            status=RequisitionStatus.ARCHIVED,
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        req = _make_req(db_session, test_user.id, name="Archived to Restore", status=RequisitionStatus.ARCHIVED)
         db_session.commit()
 
         resp = client.put(f"/api/requisitions/{req.id}/archive")
@@ -326,14 +296,7 @@ class TestBulkArchive:
         db_session.add(other_user)
         db_session.flush()
 
-        req = Requisition(
-            name="Other Bulk Req",
-            customer_name="Test Co",
-            status=RequisitionStatus.ACTIVE,
-            created_by=other_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        _make_req(db_session, other_user.id, name="Other Bulk Req")
         db_session.commit()
 
         resp = client.put("/api/requisitions/bulk-archive")
@@ -354,17 +317,7 @@ class TestBulkArchive:
         db_session.add(other)
         db_session.flush()
 
-        reqs = []
-        for i in range(3):
-            r = Requisition(
-                name=f"Bulk IDs Req {i}",
-                customer_name="Test Co",
-                status=RequisitionStatus.ACTIVE,
-                created_by=other.id,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(r)
-            reqs.append(r)
+        reqs = [_make_req(db_session, other.id, name=f"Bulk IDs Req {i}") for i in range(3)]
         db_session.commit()
 
         resp = client.put("/api/requisitions/bulk-archive")
@@ -392,14 +345,7 @@ class TestBatchArchive:
 
     def test_batch_archive_already_archived_ids(self, client, db_session, test_user):
         """Batch archive of already-archived req returns 0 archived."""
-        req = Requisition(
-            name="Already Archived",
-            customer_name="Test Co",
-            status=RequisitionStatus.ARCHIVED,
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        req = _make_req(db_session, test_user.id, name="Already Archived", status=RequisitionStatus.ARCHIVED)
         db_session.commit()
         resp = client.put(
             "/api/requisitions/batch-archive",
@@ -410,10 +356,6 @@ class TestBatchArchive:
 
     def test_batch_archive_sales_role_own_reqs(self, db_session):
         """Sales user can only batch-archive own reqs."""
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_user
-        from app.main import app
-
         sales = User(
             email="salesbatch@test.com",
             name="Sales Batch",
@@ -424,51 +366,17 @@ class TestBatchArchive:
         db_session.add(sales)
         db_session.flush()
 
-        req = Requisition(
-            name="Sales Batch Req",
-            customer_name="Test Co",
-            status=RequisitionStatus.ACTIVE,
-            created_by=sales.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        req = _make_req(db_session, sales.id, name="Sales Batch Req")
         db_session.commit()
 
-        def override_db():
-            yield db_session
-
-        def override_sales():
-            return sales
-
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_user] = override_sales
-        app.dependency_overrides[require_admin] = override_sales
-        app.dependency_overrides[require_buyer] = override_sales
-
-        from fastapi.testclient import TestClient
-
-        try:
-            with TestClient(app) as c:
-                resp = c.put("/api/requisitions/batch-archive", json={"ids": [req.id]})
-            assert resp.status_code == 200
-            assert resp.json()["archived_count"] >= 1
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer]:
-                app.dependency_overrides.pop(dep, None)
+        with _client_as(db_session, sales) as c:
+            resp = c.put("/api/requisitions/batch-archive", json={"ids": [req.id]})
+        assert resp.status_code == 200
+        assert resp.json()["archived_count"] >= 1
 
     def test_batch_archive_returns_ids(self, client, db_session, test_user):
         """Batch-archive response includes archived_ids matching the requested IDs."""
-        reqs = []
-        for i in range(3):
-            r = Requisition(
-                name=f"Batch IDs Req {i}",
-                customer_name="Test Co",
-                status=RequisitionStatus.ACTIVE,
-                created_by=test_user.id,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(r)
-            reqs.append(r)
+        reqs = [_make_req(db_session, test_user.id, name=f"Batch IDs Req {i}") for i in range(3)]
         db_session.commit()
         ids = [r.id for r in reqs]
 
@@ -515,17 +423,7 @@ class TestBatchAssign:
         db_session.add(target)
         db_session.flush()
 
-        reqs = []
-        for i in range(3):
-            r = Requisition(
-                name=f"Assign IDs Req {i}",
-                customer_name="Test Co",
-                status=RequisitionStatus.ACTIVE,
-                created_by=test_user.id,
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(r)
-            reqs.append(r)
+        reqs = [_make_req(db_session, test_user.id, name=f"Assign IDs Req {i}") for i in range(3)]
         db_session.commit()
         ids = [r.id for r in reqs]
 
@@ -562,10 +460,6 @@ class TestDismissNewOffers:
 class TestClaimRequisition:
     def test_claim_wrong_role_returns_403(self, db_session):
         """Non-buyer role cannot claim requisition."""
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_user
-        from app.main import app
-
         sales = User(
             email="salesnoclaim@test.com",
             name="Sales No Claim",
@@ -576,36 +470,12 @@ class TestClaimRequisition:
         db_session.add(sales)
         db_session.flush()
 
-        req = Requisition(
-            name="Claim Test Req",
-            customer_name="Test Co",
-            status=RequisitionStatus.ACTIVE,
-            created_by=sales.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
+        req = _make_req(db_session, sales.id, name="Claim Test Req")
         db_session.commit()
 
-        def override_db():
-            yield db_session
-
-        def override_sales():
-            return sales
-
-        app.dependency_overrides[get_db] = override_db
-        app.dependency_overrides[require_user] = override_sales
-        app.dependency_overrides[require_admin] = override_sales
-        app.dependency_overrides[require_buyer] = override_sales
-
-        from fastapi.testclient import TestClient
-
-        try:
-            with TestClient(app) as c:
-                resp = c.post(f"/api/requisitions/{req.id}/claim")
-            assert resp.status_code == 403
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer]:
-                app.dependency_overrides.pop(dep, None)
+        with _client_as(db_session, sales) as c:
+            resp = c.post(f"/api/requisitions/{req.id}/claim")
+        assert resp.status_code == 403
 
     def test_claim_req_not_found(self, client):
         """Claim non-existent requisition returns 404."""

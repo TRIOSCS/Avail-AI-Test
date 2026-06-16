@@ -7,11 +7,24 @@ Called by: pytest
 Depends on: app.services.teams_notifications, unittest.mock
 """
 
+from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from loguru import logger
+
+
+@contextmanager
+def _capture_logs(level):
+    """Capture loguru messages at the given level into a list yielded to the caller."""
+    captured = []
+    sink_id = logger.add(lambda msg: captured.append(str(msg)), level=level)
+    try:
+        yield captured
+    finally:
+        logger.remove(sink_id)
+
 
 # ---------------------------------------------------------------------------
 # post_teams_channel
@@ -21,9 +34,7 @@ from loguru import logger
 @pytest.mark.asyncio
 async def test_post_teams_channel_skips_when_no_webhook():
     """Silently returns when TEAMS_WEBHOOK_URL is not configured."""
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="DEBUG")
-    try:
+    with _capture_logs("DEBUG") as captured:
         with patch(
             "app.services.teams_notifications.get_credential_cached",
             return_value=None,
@@ -32,8 +43,6 @@ async def test_post_teams_channel_skips_when_no_webhook():
 
             await post_teams_channel("hello")
         assert any("not configured" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.mark.asyncio
@@ -70,9 +79,7 @@ async def test_post_teams_channel_accepts_202():
     """202 Accepted is also treated as success (no warning logged)."""
     mock_resp = MagicMock(status_code=202, text="accepted")
     mock_http_post = AsyncMock(return_value=mock_resp)
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
-    try:
+    with _capture_logs("WARNING") as captured:
         with (
             patch(
                 "app.services.teams_notifications.get_credential_cached",
@@ -86,8 +93,6 @@ async def test_post_teams_channel_accepts_202():
             await post_teams_channel("test 202")
 
         assert not any("webhook returned" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.mark.asyncio
@@ -95,9 +100,7 @@ async def test_post_teams_channel_logs_warning_on_bad_status():
     """Non-200/202 status codes are logged as warnings."""
     mock_resp = MagicMock(status_code=400, text="Bad Request")
     mock_http_post = AsyncMock(return_value=mock_resp)
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
-    try:
+    with _capture_logs("WARNING") as captured:
         with (
             patch(
                 "app.services.teams_notifications.get_credential_cached",
@@ -111,17 +114,13 @@ async def test_post_teams_channel_logs_warning_on_bad_status():
             await post_teams_channel("fail")
 
         assert any("webhook returned" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.mark.asyncio
 async def test_post_teams_channel_catches_exception():
     """Network errors are caught and logged, not raised."""
     mock_http_post = AsyncMock(side_effect=ConnectionError("network down"))
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="ERROR")
-    try:
+    with _capture_logs("ERROR") as captured:
         with (
             patch(
                 "app.services.teams_notifications.get_credential_cached",
@@ -135,8 +134,6 @@ async def test_post_teams_channel_catches_exception():
             await post_teams_channel("boom")
 
         assert any("channel post failed" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 # ---------------------------------------------------------------------------
@@ -153,15 +150,11 @@ def _make_user(email="buyer@trioscs.com", access_token="tok-123"):
 async def test_send_teams_dm_skips_no_token_no_db():
     """Skips DM when user has no access_token and no db session provided."""
     user = _make_user(access_token=None)
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="DEBUG")
-    try:
+    with _capture_logs("DEBUG") as captured:
         from app.services.teams_notifications import send_teams_dm
 
         await send_teams_dm(user, "hello")
         assert any("No token" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.mark.asyncio
@@ -169,9 +162,7 @@ async def test_send_teams_dm_skips_when_token_refresh_returns_none():
     """Skips DM when get_valid_token returns None (expired, no refresh)."""
     user = _make_user(access_token=None)
     mock_db = MagicMock()
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="DEBUG")
-    try:
+    with _capture_logs("DEBUG") as captured:
         with (
             patch(
                 "app.services.teams_notifications.GraphClient",
@@ -187,8 +178,6 @@ async def test_send_teams_dm_skips_when_token_refresh_returns_none():
 
             await send_teams_dm(user, "hello", db=mock_db)
         assert any("No valid token" in m for m in captured)
-    finally:
-        logger.remove(sink_id)
 
 
 @pytest.mark.asyncio
@@ -285,9 +274,7 @@ async def test_send_teams_dm_skips_message_when_no_chat_id():
 async def test_send_teams_dm_catches_exception():
     """Graph API errors are caught and logged as warnings."""
     user = _make_user()
-    captured = []
-    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
-    try:
+    with _capture_logs("WARNING") as captured:
         with patch(
             "app.utils.graph_client.GraphClient",
             side_effect=RuntimeError("graph unavailable"),
@@ -297,5 +284,3 @@ async def test_send_teams_dm_catches_exception():
             await send_teams_dm(user, "boom")
 
         assert any("failed" in m and "Chat permissions" in m for m in captured)
-    finally:
-        logger.remove(sink_id)

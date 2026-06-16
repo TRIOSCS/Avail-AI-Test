@@ -87,7 +87,6 @@ class TestActivityDigestEdgeCases:
                 "status_signal": "on_track",
             }
 
-        monkeypatch_svc = svc
         with (
             patch.object(svc, "_get_redis", return_value=None),
             patch("app.utils.claude_client.claude_structured", fake_cs),

@@ -143,6 +143,14 @@ def _make_proactive_match(
     return pm
 
 
+def _seed_proactive_match(db: Session, req: Requisition, user: User) -> ProactiveMatch:
+    """Build the full company → site → offer → ProactiveMatch chain for `user`."""
+    company = _make_company(db)
+    site = _make_site(db, company)
+    offer = _make_offer(db, req, user)
+    return _make_proactive_match(db, offer, user, site)
+
+
 # ── Section 1: Find Crosses ───────────────────────────────────────────
 
 
@@ -229,13 +237,10 @@ class TestProactivePrepare:
 
     def test_valid_matches_renders_prepare_template(self, client, db_session, test_requisition, test_user):
         """Valid match_ids for the current user → renders prepare template."""
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        offer = _make_offer(db_session, test_requisition, test_user)
-        pm = _make_proactive_match(db_session, offer, test_user, site)
+        pm = _seed_proactive_match(db_session, test_requisition, test_user)
 
         resp = client.post(
-            f"/v2/proactive/prepare/{site.id}",
+            f"/v2/proactive/prepare/{pm.customer_site_id}",
             data={"match_ids": str(pm.id)},
             follow_redirects=False,
         )
@@ -263,10 +268,7 @@ class TestProactiveDraft:
 
     def test_ai_draft_success_returns_js_html(self, client, db_session, test_requisition, test_user):
         """AI draft succeeds → HTML contains script to populate form."""
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        offer = _make_offer(db_session, test_requisition, test_user)
-        pm = _make_proactive_match(db_session, offer, test_user, site)
+        pm = _seed_proactive_match(db_session, test_requisition, test_user)
 
         ai_response = {
             "subject": "Parts Available — Acme Corp",
@@ -288,10 +290,7 @@ class TestProactiveDraft:
 
     def test_ai_draft_failure_returns_retry_html(self, client, db_session, test_requisition, test_user):
         """AI draft exception → retry HTML returned, no 500."""
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        offer = _make_offer(db_session, test_requisition, test_user)
-        pm = _make_proactive_match(db_session, offer, test_user, site)
+        pm = _seed_proactive_match(db_session, test_requisition, test_user)
 
         with patch(
             "app.services.proactive_email.draft_proactive_email",
@@ -519,10 +518,7 @@ class TestProactiveScorecardBadge:
 
     def test_badge_with_new_matches_returns_count_span(self, client, db_session, test_requisition, test_user):
         """With new ProactiveMatches → response contains the count badge."""
-        company = _make_company(db_session)
-        site = _make_site(db_session, company)
-        offer = _make_offer(db_session, test_requisition, test_user)
-        _make_proactive_match(db_session, offer, test_user, site)
+        _seed_proactive_match(db_session, test_requisition, test_user)
 
         resp = client.get("/v2/partials/proactive/badge")
         assert resp.status_code == 200

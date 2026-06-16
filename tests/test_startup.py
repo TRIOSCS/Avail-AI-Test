@@ -32,6 +32,50 @@ def _make_sqlite_engine():
     )
 
 
+_CREATE_REQUIREMENTS = "CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)"
+_CREATE_MATERIAL_CARDS = "CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)"
+_CREATE_MPN_SIGHTINGS = "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+_CREATE_OFFERS = "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+_CREATE_VENDOR_SIGHTINGS = (
+    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+)
+
+
+def _mock_engine_conn(mock_engine):
+    """Wire a mock engine so ``engine.connect()`` yields a context-manager conn."""
+    mock_conn = MagicMock()
+    mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+    mock_conn.__exit__ = MagicMock(return_value=False)
+    mock_engine.connect.return_value = mock_conn
+    return mock_conn
+
+
+def _make_proactive_offer_engine(offer_insert_sql, offer_params=None):
+    """SQLite engine with proactive_matches/requirements/proactive_offers seeded.
+
+    Requirement id=1 has target_qty=50 and proactive_match id=10. The single
+    proactive_offers row is inserted via the caller-supplied statement/params.
+    """
+    eng = _make_sqlite_engine()
+    with eng.connect() as conn:
+        conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
+        conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
+        conn.execute(
+            sqltext(
+                "CREATE TABLE proactive_offers "
+                "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
+            )
+        )
+        conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
+        conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
+        if offer_params is None:
+            conn.execute(sqltext(offer_insert_sql))
+        else:
+            conn.execute(sqltext(offer_insert_sql), offer_params)
+        conn.commit()
+    return eng
+
+
 class TestStartupGuard:
     def test_testing_mode_skips_migrations(self):
         """TESTING=1 -> run_startup_migrations does nothing."""
@@ -40,26 +84,23 @@ class TestStartupGuard:
 
 
 class TestExec:
-    def test_pg_ddl_fails_on_sqlite_gracefully(self, db_session):
-        """PG-specific DDL fails on SQLite but _exec swallows the error."""
+    @pytest.mark.parametrize(
+        ("sql", "params"),
+        [
+            pytest.param("CREATE EXTENSION IF NOT EXISTS pg_trgm", None, id="pg_ddl_fails_gracefully"),
+            pytest.param("SELECT 1", None, id="success"),
+            pytest.param("SELECT :val", {"val": 42}, id="with_params"),
+        ],
+    )
+    def test_exec_handles_statement(self, db_session, sql, params):
+        """_exec runs valid SQLite statements and swallows PG-only DDL errors."""
         from tests.conftest import engine
 
         with engine.connect() as conn:
-            _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
-
-    def test_exec_success(self, db_session):
-        """_exec succeeds with a valid SQLite statement."""
-        from tests.conftest import engine
-
-        with engine.connect() as conn:
-            _exec(conn, "SELECT 1")
-
-    def test_exec_with_params(self, db_session):
-        """_exec passes params correctly."""
-        from tests.conftest import engine
-
-        with engine.connect() as conn:
-            _exec(conn, "SELECT :val", {"val": 42})
+            if params is None:
+                _exec(conn, sql)
+            else:
+                _exec(conn, sql, params)
 
 
 class TestCreateDefaultUser:
@@ -265,10 +306,7 @@ class TestBackfillProactiveOfferQty:
         """When no matches have target_qty, returns early."""
         from app.startup import _backfill_proactive_offer_qty
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
+        mock_conn = _mock_engine_conn(mock_engine)
         mock_conn.execute.return_value.fetchall.return_value = []
 
         _backfill_proactive_offer_qty()
@@ -277,14 +315,9 @@ class TestBackfillProactiveOfferQty:
     @patch("app.startup.engine")
     def test_fixes_offer_quantities(self, mock_engine, db_session):
         """Recalculates offer totals when target_qty < qty_available."""
-        import json
-
         from app.startup import _backfill_proactive_offer_qty
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
+        mock_conn = _mock_engine_conn(mock_engine)
 
         match_rows = [(10, 50)]
         line_items = json.dumps([{"match_id": 10, "qty": 100, "sell_price": 1.0, "unit_price": 0.5}])
@@ -298,14 +331,9 @@ class TestBackfillProactiveOfferQty:
     @patch("app.startup.engine")
     def test_no_change_when_qty_matches(self, mock_engine, db_session):
         """No UPDATE when qty already <= target_qty."""
-        import json
-
         from app.startup import _backfill_proactive_offer_qty
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
+        mock_conn = _mock_engine_conn(mock_engine)
 
         match_rows = [(10, 100)]
         line_items = json.dumps([{"match_id": 10, "qty": 50, "sell_price": 1.0, "unit_price": 0.5}])
@@ -324,10 +352,7 @@ class TestBackfillProactiveOfferQty:
 
         from app.startup import _backfill_proactive_offer_qty
 
-        mock_conn = MagicMock()
-        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
-        mock_conn.__exit__ = MagicMock(return_value=False)
-        mock_engine.connect.return_value = mock_conn
+        mock_conn = _mock_engine_conn(mock_engine)
         mock_conn.execute.side_effect = OperationalError("select", {}, Exception("DB gone"))
         mock_conn.rollback = MagicMock()
 
@@ -337,22 +362,9 @@ class TestBackfillProactiveOfferQty:
         """Offers with null line_items are skipped."""
         from app.startup import _backfill_proactive_offer_qty
 
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
-            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE proactive_offers "
-                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-                )
-            )
-            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
-            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
-            conn.execute(
-                sqltext("INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, NULL, 0, 0)")
-            )
-            conn.commit()
+        eng = _make_proactive_offer_engine(
+            "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, NULL, 0, 0)"
+        )
 
         with patch("app.startup.engine", eng):
             _backfill_proactive_offer_qty()
@@ -361,34 +373,19 @@ class TestBackfillProactiveOfferQty:
         """Line items with match_id not in target_map use original qty."""
         from app.startup import _backfill_proactive_offer_qty
 
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
-            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE proactive_offers "
-                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-                )
-            )
-            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
-            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
-            items = json.dumps(
-                [
-                    {
-                        "match_id": 999,
-                        "qty": 200,
-                        "unit_price": 5.0,
-                    }
-                ]
-            )
-            conn.execute(
-                sqltext(
-                    "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1000, 1000)"
-                ),
-                {"items": items},
-            )
-            conn.commit()
+        items = json.dumps(
+            [
+                {
+                    "match_id": 999,
+                    "qty": 200,
+                    "unit_price": 5.0,
+                }
+            ]
+        )
+        eng = _make_proactive_offer_engine(
+            "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1000, 1000)",
+            {"items": items},
+        )
 
         with patch("app.startup.engine", eng):
             _backfill_proactive_offer_qty()
@@ -401,35 +398,20 @@ class TestBackfillProactiveOfferQty:
         """Offers with qty > target_qty get corrected (real SQLite tables)."""
         from app.startup import _backfill_proactive_offer_qty
 
-        eng = _make_sqlite_engine()
-        with eng.connect() as conn:
-            conn.execute(sqltext("CREATE TABLE proactive_matches (id INTEGER PRIMARY KEY, requirement_id INTEGER)"))
-            conn.execute(sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, target_qty INTEGER)"))
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE proactive_offers "
-                    "(id INTEGER PRIMARY KEY, line_items TEXT, total_sell REAL, total_cost REAL)"
-                )
-            )
-            conn.execute(sqltext("INSERT INTO requirements (id, target_qty) VALUES (1, 50)"))
-            conn.execute(sqltext("INSERT INTO proactive_matches (id, requirement_id) VALUES (10, 1)"))
-            items = json.dumps(
-                [
-                    {
-                        "match_id": 10,
-                        "qty": 200,
-                        "unit_price": 5.0,
-                        "sell_price": 7.0,
-                    }
-                ]
-            )
-            conn.execute(
-                sqltext(
-                    "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1400, 1000)"
-                ),
-                {"items": items},
-            )
-            conn.commit()
+        items = json.dumps(
+            [
+                {
+                    "match_id": 10,
+                    "qty": 200,
+                    "unit_price": 5.0,
+                    "sell_price": 7.0,
+                }
+            ]
+        )
+        eng = _make_proactive_offer_engine(
+            "INSERT INTO proactive_offers (id, line_items, total_sell, total_cost) VALUES (1, :items, 1400, 1000)",
+            {"items": items},
+        )
 
         with patch("app.startup.engine", eng):
             _backfill_proactive_offer_qty()
@@ -601,12 +583,8 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.execute(
                 sqltext("INSERT INTO requirements (id, primary_mpn, normalized_mpn) VALUES (1, 'LM-317T', NULL)")
             )
@@ -627,9 +605,7 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.commit()
         with patch("app.startup.engine", eng):
             _backfill_normalized_mpn()
@@ -639,9 +615,7 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
             conn.commit()
         with patch("app.startup.engine", eng):
             _backfill_normalized_mpn()
@@ -651,12 +625,8 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.execute(sqltext("INSERT INTO requirements (id, primary_mpn, normalized_mpn) VALUES (1, '---', NULL)"))
             conn.execute(
                 sqltext("INSERT INTO material_cards (id, display_mpn, normalized_mpn) VALUES (1, '---', NULL)")
@@ -673,12 +643,8 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.execute(
                 sqltext("INSERT INTO material_cards (id, display_mpn, normalized_mpn) VALUES (1, 'LM317T', 'lm317t')")
             )
@@ -697,12 +663,8 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.execute(
                 sqltext("INSERT INTO requirements (id, primary_mpn, normalized_mpn) VALUES (1, 'LM317T', 'lm317t')")
             )
@@ -716,12 +678,8 @@ class TestBackfillNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE requirements (id INTEGER PRIMARY KEY, primary_mpn TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(
-                sqltext("CREATE TABLE material_cards (id INTEGER PRIMARY KEY, display_mpn TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_REQUIREMENTS))
+            conn.execute(sqltext(_CREATE_MATERIAL_CARDS))
             conn.execute(sqltext("INSERT INTO requirements (id, primary_mpn, normalized_mpn) VALUES (1, '', NULL)"))
             conn.execute(sqltext("INSERT INTO material_cards (id, display_mpn, normalized_mpn) VALUES (1, '', NULL)"))
             conn.commit()
@@ -788,10 +746,8 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext(_CREATE_MPN_SIGHTINGS))
+            conn.execute(sqltext(_CREATE_OFFERS))
             conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM-317T', NULL)"))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (2, 'RC-0805 FR', NULL)")
@@ -819,10 +775,8 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext(_CREATE_MPN_SIGHTINGS))
+            conn.execute(sqltext(_CREATE_OFFERS))
             conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '  ', NULL)"))
             conn.execute(sqltext("INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '---', NULL)"))
             conn.commit()
@@ -842,10 +796,8 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext(_CREATE_MPN_SIGHTINGS))
+            conn.execute(sqltext(_CREATE_OFFERS))
             conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '!!!', NULL)"))
             conn.execute(sqltext("INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '!!!', NULL)"))
             conn.commit()
@@ -865,10 +817,8 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
-            )
-            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext(_CREATE_MPN_SIGHTINGS))
+            conn.execute(sqltext(_CREATE_OFFERS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM317', 'lm317')")
             )
@@ -884,7 +834,7 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(sqltext("CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"))
+            conn.execute(sqltext(_CREATE_OFFERS))
             conn.execute(sqltext("INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, 'LM317', NULL)"))
             conn.commit()
 
@@ -901,9 +851,7 @@ class TestBackfillSightingOfferNormalizedMpn:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext("CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)")
-            )
+            conn.execute(sqltext(_CREATE_MPN_SIGHTINGS))
             conn.execute(sqltext("INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM317', NULL)"))
             conn.commit()
 
@@ -924,11 +872,7 @@ class TestBackfillSightingVendorNormalized:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
-                )
-            )
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme Inc.', NULL)")
             )
@@ -970,11 +914,7 @@ class TestBackfillSightingVendorNormalized:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
-                )
-            )
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', 'acme')")
             )
@@ -992,11 +932,7 @@ class TestBackfillSightingVendorNormalized:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
-                )
-            )
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, '???', NULL)")
             )
@@ -1027,11 +963,7 @@ class TestBackfillSightingVendorNormalized:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
-                )
-            )
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', NULL)")
             )
@@ -1056,11 +988,7 @@ class TestBackfillSightingVendorNormalized:
 
         eng = _make_sqlite_engine()
         with eng.connect() as conn:
-            conn.execute(
-                sqltext(
-                    "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
-                )
-            )
+            conn.execute(sqltext(_CREATE_VENDOR_SIGHTINGS))
             conn.execute(
                 sqltext("INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', NULL)")
             )

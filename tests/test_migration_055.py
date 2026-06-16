@@ -194,27 +194,21 @@ class TestNormalizePhones:
         update_calls = _calls_matching(conn.execute.call_args_list, "UPDATE")
         assert len(update_calls) == 0
 
-    def test_skips_when_normalized_equals_raw(self):
-        """If format_phone_e164 returns the same value as input, no UPDATE issued."""
-        row = _ns(id=1, phone="5551234567")
+    @pytest.mark.parametrize(
+        "raw,normalized",
+        [
+            pytest.param("5551234567", "5551234567", id="normalized_equals_raw"),
+            pytest.param("not-a-phone", None, id="normalized_is_none"),
+        ],
+    )
+    def test_skips_when_no_change(self, raw, normalized):
+        """No UPDATE when normalization yields the same value or None (unparseable)."""
+        row = _ns(id=1, phone=raw)
         conn = MagicMock()
         results = [[row]] + [[] for _ in range(5)]
         conn.execute.return_value.fetchall.side_effect = results
 
-        with patch("app.utils.phone_utils.format_phone_e164", return_value="5551234567"):
-            _normalize_phones(conn)
-
-        update_calls = _calls_matching(conn.execute.call_args_list, "UPDATE")
-        assert len(update_calls) == 0
-
-    def test_skips_when_normalized_is_none(self):
-        """If format_phone_e164 returns None (unparseable), no UPDATE issued."""
-        row = _ns(id=1, phone="not-a-phone")
-        conn = MagicMock()
-        results = [[row]] + [[] for _ in range(5)]
-        conn.execute.return_value.fetchall.side_effect = results
-
-        with patch("app.utils.phone_utils.format_phone_e164", return_value=None):
+        with patch("app.utils.phone_utils.format_phone_e164", return_value=normalized):
             _normalize_phones(conn)
 
         update_calls = _calls_matching(conn.execute.call_args_list, "UPDATE")

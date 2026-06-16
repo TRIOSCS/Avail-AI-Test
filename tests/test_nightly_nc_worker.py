@@ -541,59 +541,25 @@ class TestNcScheduler:
         finally:
             del os.environ["FORCE_BUSINESS_HOURS"]
 
-    def test_is_business_hours_saturday(self):
+    @pytest.mark.parametrize(
+        ("weekday", "hour", "expected"),
+        [
+            pytest.param(5, 10, False, id="saturday"),
+            pytest.param(6, 10, False, id="sunday_morning"),
+            pytest.param(6, 20, True, id="sunday_evening"),
+            pytest.param(4, 10, True, id="friday_on"),
+            pytest.param(4, 18, False, id="friday_off"),
+            pytest.param(2, 14, True, id="wednesday"),
+        ],
+    )
+    def test_is_business_hours(self, weekday, hour, expected):
         scheduler = self._make_scheduler()
         with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
             mock_now = MagicMock()
-            mock_now.weekday.return_value = 5
-            mock_now.hour = 10
+            mock_now.weekday.return_value = weekday
+            mock_now.hour = hour
             mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is False
-
-    def test_is_business_hours_sunday_morning(self):
-        scheduler = self._make_scheduler()
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 6
-            mock_now.hour = 10
-            mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is False
-
-    def test_is_business_hours_sunday_evening(self):
-        scheduler = self._make_scheduler()
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 6
-            mock_now.hour = 20
-            mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is True
-
-    def test_is_business_hours_friday_on(self):
-        scheduler = self._make_scheduler()
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4
-            mock_now.hour = 10
-            mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is True
-
-    def test_is_business_hours_friday_off(self):
-        scheduler = self._make_scheduler()
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 4
-            mock_now.hour = 18
-            mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is False
-
-    def test_is_business_hours_wednesday(self):
-        scheduler = self._make_scheduler()
-        with patch("app.services.nc_worker.scheduler.datetime") as mock_dt:
-            mock_now = MagicMock()
-            mock_now.weekday.return_value = 2
-            mock_now.hour = 14
-            mock_dt.now.return_value = mock_now
-            assert scheduler.is_business_hours() is True
+            assert scheduler.is_business_hours() is expected
 
     def test_next_delay_increments_count(self):
         scheduler = self._make_scheduler()
@@ -695,6 +661,28 @@ class TestNcSightingWriter:
             yield session
             session.rollback()
 
+    @staticmethod
+    def _make_requirement(db, *, req_name, mpn, normalized_mpn, target_qty):
+        from app.models import MaterialCard, Requirement, Requisition
+
+        req = Requisition(name=req_name, status="active")
+        db.add(req)
+        db.flush()
+
+        mc = MaterialCard(display_mpn=mpn, normalized_mpn=normalized_mpn)
+        db.add(mc)
+        db.flush()
+
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            target_qty=target_qty,
+            material_card_id=mc.id,
+        )
+        db.add(requirement)
+        db.flush()
+        return requirement
+
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_no_requirement(self, mock_rebuild, db):
         from app.services.nc_worker.sighting_writer import save_nc_sightings
@@ -706,25 +694,11 @@ class TestNcSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_empty_list(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.nc_worker.sighting_writer import save_nc_sightings
 
-        req = Requisition(name="NC Test1", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="LM324", normalized_mpn="lm324_nc_empty")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM324",
-            target_qty=50,
-            material_card_id=mc.id,
+        requirement = self._make_requirement(
+            db, req_name="NC Test1", mpn="LM324", normalized_mpn="lm324_nc_empty", target_qty=50
         )
-        db.add(requirement)
-        db.flush()
 
         queue_item = MagicMock(requirement_id=requirement.id)
         result = save_nc_sightings(db, queue_item, [])
@@ -733,26 +707,12 @@ class TestNcSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_skips_no_vendor(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.nc_worker.result_parser import NcSighting
         from app.services.nc_worker.sighting_writer import save_nc_sightings
 
-        req = Requisition(name="NC Test2", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="AB456", normalized_mpn="ab456_nc_skip")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="AB456",
-            target_qty=10,
-            material_card_id=mc.id,
+        requirement = self._make_requirement(
+            db, req_name="NC Test2", mpn="AB456", normalized_mpn="ab456_nc_skip", target_qty=10
         )
-        db.add(requirement)
-        db.flush()
 
         sighting = NcSighting(part_number="AB456", vendor_name="", quantity=100)
         queue_item = MagicMock(requirement_id=requirement.id)
@@ -761,26 +721,12 @@ class TestNcSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_creates_sighting_with_price_breaks(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.nc_worker.result_parser import NcSighting, PriceBreak
         from app.services.nc_worker.sighting_writer import save_nc_sightings
 
-        req = Requisition(name="NC Test3", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="TDA2030", normalized_mpn="tda2030_nc_create")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="TDA2030",
-            target_qty=200,
-            material_card_id=mc.id,
+        requirement = self._make_requirement(
+            db, req_name="NC Test3", mpn="TDA2030", normalized_mpn="tda2030_nc_create", target_qty=200
         )
-        db.add(requirement)
-        db.flush()
 
         sighting = NcSighting(
             part_number="TDA2030",
@@ -802,26 +748,12 @@ class TestNcSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_deduplicates(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.nc_worker.result_parser import NcSighting
         from app.services.nc_worker.sighting_writer import save_nc_sightings
 
-        req = Requisition(name="NC Test4", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="DUP002", normalized_mpn="dup002_nc")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="DUP002",
-            target_qty=5,
-            material_card_id=mc.id,
+        requirement = self._make_requirement(
+            db, req_name="NC Test4", mpn="DUP002", normalized_mpn="dup002_nc", target_qty=5
         )
-        db.add(requirement)
-        db.flush()
 
         s1 = NcSighting(part_number="DUP002", vendor_name="VendorDup", quantity=50)
         s2 = NcSighting(part_number="DUP002", vendor_name="VendorDup", quantity=50)
@@ -831,26 +763,12 @@ class TestNcSightingWriter:
 
     @patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings")
     def test_save_nc_sightings_no_price_breaks(self, mock_rebuild, db):
-        from app.models import MaterialCard, Requirement, Requisition
         from app.services.nc_worker.result_parser import NcSighting
         from app.services.nc_worker.sighting_writer import save_nc_sightings
 
-        req = Requisition(name="NC Test5", status="active")
-        db.add(req)
-        db.flush()
-
-        mc = MaterialCard(display_mpn="TMP36", normalized_mpn="tmp36_nc_noprice")
-        db.add(mc)
-        db.flush()
-
-        requirement = Requirement(
-            requisition_id=req.id,
-            primary_mpn="TMP36",
-            target_qty=10,
-            material_card_id=mc.id,
+        requirement = self._make_requirement(
+            db, req_name="NC Test5", mpn="TMP36", normalized_mpn="tmp36_nc_noprice", target_qty=10
         )
-        db.add(requirement)
-        db.flush()
 
         sighting = NcSighting(
             part_number="TMP36",

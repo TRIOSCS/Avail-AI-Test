@@ -8,6 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 # ── Email Thread Viewer ──────────────────────────────────────────────
@@ -28,18 +29,17 @@ class TestThreadViewer:
 
 
 class TestEmailReply:
-    def test_reply_missing_fields(self, client: TestClient):
+    @pytest.mark.parametrize(
+        "data",
+        [
+            pytest.param({"to": "", "body": ""}, id="missing_fields"),
+            pytest.param({"to": "john@arrow.com", "body": ""}, id="missing_body"),
+        ],
+    )
+    def test_reply_rejects_incomplete(self, client: TestClient, data):
         resp = client.post(
             "/v2/partials/emails/reply",
-            data={"to": "", "body": ""},
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 400
-
-    def test_reply_missing_body(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/emails/reply",
-            data={"to": "john@arrow.com", "body": ""},
+            data=data,
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 400

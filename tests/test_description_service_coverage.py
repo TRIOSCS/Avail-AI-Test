@@ -11,11 +11,24 @@ import os
 
 os.environ["TESTING"] = "1"
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from tests.conftest import TestSessionLocal
+
+
+@contextmanager
+def _testing_disabled():
+    """Temporarily remove TESTING so real function bodies run, then restore it."""
+    saved = os.environ.pop("TESTING", None)
+    try:
+        yield
+    finally:
+        if saved is not None:
+            os.environ["TESTING"] = saved
+
 
 # ── _collect_db_descriptions via patched SessionLocal ─────────────
 
@@ -296,8 +309,7 @@ def test_collect_db_descriptions_limits_to_five_sources():
 
 def test_backfill_descriptions_runs_when_not_testing():
     """backfill_descriptions processes requirements when TESTING is unset."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     from app.services.description_service import backfill_descriptions
 
@@ -318,6 +330,7 @@ def test_backfill_descriptions_runs_when_not_testing():
     }
 
     with (
+        _testing_disabled(),
         patch.dict(os.environ, {}, clear=False),
         patch("app.services.description_service.SessionLocal", return_value=mock_db),
         patch(
@@ -326,13 +339,7 @@ def test_backfill_descriptions_runs_when_not_testing():
             return_value=mock_result,
         ),
     ):
-        # Temporarily remove TESTING to test the real function body
-        saved = os.environ.pop("TESTING", None)
-        try:
-            backfill_descriptions([1])
-        finally:
-            if saved is not None:
-                os.environ["TESTING"] = saved
+        backfill_descriptions([1])
 
     mock_db.commit.assert_called_once()
     assert mock_req.description == "IC VOLT REG ADJ 1.5A TO-220"
@@ -340,8 +347,7 @@ def test_backfill_descriptions_runs_when_not_testing():
 
 def test_backfill_descriptions_skips_existing_description():
     """backfill_descriptions skips requirements that already have a description."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     from app.services.description_service import backfill_descriptions
 
@@ -355,18 +361,14 @@ def test_backfill_descriptions_skips_existing_description():
     mock_db.get.return_value = mock_req
 
     with (
+        _testing_disabled(),
         patch("app.services.description_service.SessionLocal", return_value=mock_db),
         patch(
             "app.services.description_service.generate_verified_description",
             new_callable=AsyncMock,
         ) as mock_gen,
     ):
-        saved = os.environ.pop("TESTING", None)
-        try:
-            backfill_descriptions([1])
-        finally:
-            if saved is not None:
-                os.environ["TESTING"] = saved
+        backfill_descriptions([1])
 
     # generate_verified_description should NOT be called since description exists
     mock_gen.assert_not_called()
@@ -374,8 +376,7 @@ def test_backfill_descriptions_skips_existing_description():
 
 def test_backfill_descriptions_skips_missing_requirement():
     """backfill_descriptions skips non-existent requirement IDs gracefully."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     from app.services.description_service import backfill_descriptions
 
@@ -383,26 +384,21 @@ def test_backfill_descriptions_skips_missing_requirement():
     mock_db.get.return_value = None  # Requirement not found
 
     with (
+        _testing_disabled(),
         patch("app.services.description_service.SessionLocal", return_value=mock_db),
         patch(
             "app.services.description_service.generate_verified_description",
             new_callable=AsyncMock,
         ) as mock_gen,
     ):
-        saved = os.environ.pop("TESTING", None)
-        try:
-            backfill_descriptions([999])
-        finally:
-            if saved is not None:
-                os.environ["TESTING"] = saved
+        backfill_descriptions([999])
 
     mock_gen.assert_not_called()
 
 
 def test_backfill_descriptions_handles_exception_gracefully():
     """backfill_descriptions catches exceptions and continues."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     from app.services.description_service import backfill_descriptions
 
@@ -416,6 +412,7 @@ def test_backfill_descriptions_handles_exception_gracefully():
     mock_db.get.return_value = mock_req
 
     with (
+        _testing_disabled(),
         patch("app.services.description_service.SessionLocal", return_value=mock_db),
         patch(
             "app.services.description_service.generate_verified_description",
@@ -423,20 +420,14 @@ def test_backfill_descriptions_handles_exception_gracefully():
             side_effect=Exception("AI service unavailable"),
         ),
     ):
-        saved = os.environ.pop("TESTING", None)
-        try:
-            # Should not raise even when generate_verified_description fails
-            backfill_descriptions([1])
-        finally:
-            if saved is not None:
-                os.environ["TESTING"] = saved
+        # Should not raise even when generate_verified_description fails
+        backfill_descriptions([1])
 
 
 def test_backfill_descriptions_updates_material_card():
     """backfill_descriptions updates linked MaterialCard when card has no
     description."""
-    import os
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import AsyncMock
 
     from app.services.description_service import backfill_descriptions
 
@@ -455,6 +446,7 @@ def test_backfill_descriptions_updates_material_card():
     mock_result = {"description": "IC MCU 32-BIT", "confidence": 0.90, "sources_used": 2}
 
     with (
+        _testing_disabled(),
         patch("app.services.description_service.SessionLocal", return_value=mock_db),
         patch(
             "app.services.description_service.generate_verified_description",
@@ -462,12 +454,7 @@ def test_backfill_descriptions_updates_material_card():
             return_value=mock_result,
         ),
     ):
-        saved = os.environ.pop("TESTING", None)
-        try:
-            backfill_descriptions([1])
-        finally:
-            if saved is not None:
-                os.environ["TESTING"] = saved
+        backfill_descriptions([1])
 
     assert mock_card.description == "IC MCU 32-BIT"
 

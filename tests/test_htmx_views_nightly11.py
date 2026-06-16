@@ -15,9 +15,11 @@ os.environ["TESTING"] = "1"
 import io
 import json
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -93,35 +95,53 @@ def make_knowledge_entry(db_session: Session, user: User, **kw) -> KnowledgeEntr
     return e
 
 
+@contextmanager
+def admin_client(db_session: Session, admin_user: User):
+    """Yield a TestClient with every auth dependency overridden to act as admin_user."""
+    from app.database import get_db
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+    from app.main import app
+
+    def _override_db():
+        yield db_session
+
+    def _override_admin():
+        return admin_user
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_admin
+    app.dependency_overrides[require_admin] = _override_admin
+    app.dependency_overrides[require_buyer] = _override_admin
+    app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
+
+    try:
+        with TestClient(app) as client:
+            yield client
+    finally:
+        for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+            app.dependency_overrides.pop(dep, None)
+
+
 # ── Section 1: Prospecting list partial ───────────────────────────────────
 
 
 class TestProspectingListPartial:
     """Covers GET /v2/partials/prospecting."""
 
-    def test_prospecting_list_returns_200(self, client: TestClient, db_session: Session):
-        make_prospect(db_session)
-        resp = client.get("/v2/partials/prospecting")
-        assert resp.status_code == 200
-
-    def test_prospecting_list_with_query(self, client: TestClient, db_session: Session):
-        make_prospect(db_session, name="SearchableProspect Corp")
-        resp = client.get("/v2/partials/prospecting?q=SearchableProspect")
-        assert resp.status_code == 200
-
-    def test_prospecting_list_with_status_filter(self, client: TestClient, db_session: Session):
-        make_prospect(db_session, status="claimed")
-        resp = client.get("/v2/partials/prospecting?status=claimed")
-        assert resp.status_code == 200
-
-    def test_prospecting_list_sort_fit_desc(self, client: TestClient, db_session: Session):
-        make_prospect(db_session)
-        resp = client.get("/v2/partials/prospecting?sort=fit_desc")
-        assert resp.status_code == 200
-
-    def test_prospecting_list_sort_recent_desc(self, client: TestClient, db_session: Session):
-        make_prospect(db_session)
-        resp = client.get("/v2/partials/prospecting?sort=recent_desc")
+    @pytest.mark.parametrize(
+        ("prospect_kwargs", "query"),
+        [
+            ({}, ""),
+            ({"name": "SearchableProspect Corp"}, "?q=SearchableProspect"),
+            ({"status": "claimed"}, "?status=claimed"),
+            ({}, "?sort=fit_desc"),
+            ({}, "?sort=recent_desc"),
+        ],
+        ids=["plain", "with_query", "with_status_filter", "sort_fit_desc", "sort_recent_desc"],
+    )
+    def test_prospecting_list_returns_200(self, client: TestClient, db_session: Session, prospect_kwargs, query):
+        make_prospect(db_session, **prospect_kwargs)
+        resp = client.get(f"/v2/partials/prospecting{query}")
         assert resp.status_code == 200
 
     def test_prospecting_list_pagination(self, client: TestClient, db_session: Session):
@@ -242,20 +262,18 @@ class TestSettingsPartials:
     """Covers GET /v2/partials/settings, /settings/sources, /settings/profile,
     /settings/system."""
 
-    def test_settings_index(self, client: TestClient):
-        resp = client.get("/v2/partials/settings")
-        assert resp.status_code == 200
-
-    def test_settings_with_tab_param(self, client: TestClient):
-        resp = client.get("/v2/partials/settings?tab=sources")
-        assert resp.status_code == 200
-
-    def test_settings_sources_tab(self, client: TestClient):
-        resp = client.get("/v2/partials/settings/sources")
-        assert resp.status_code == 200
-
-    def test_settings_profile_tab(self, client: TestClient):
-        resp = client.get("/v2/partials/settings/profile")
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/settings",
+            "/v2/partials/settings?tab=sources",
+            "/v2/partials/settings/sources",
+            "/v2/partials/settings/profile",
+        ],
+        ids=["index", "with_tab_param", "sources_tab", "profile_tab"],
+    )
+    def test_settings_tab_returns_200(self, client: TestClient, path):
+        resp = client.get(path)
         assert resp.status_code == 200
 
     def test_settings_system_tab_non_admin_returns_403(self, client: TestClient, db_session: Session, test_user: User):
@@ -296,20 +314,17 @@ class TestProactiveListAndDismiss:
     """Covers GET /v2/partials/proactive and POST /v2/partials/proactive/batch-
     dismiss."""
 
-    def test_proactive_list_matches_tab(self, client: TestClient, db_session: Session):
+    @pytest.mark.parametrize(
+        "path",
+        ["/v2/partials/proactive", "/v2/partials/proactive?tab=sent"],
+        ids=["matches_tab", "sent_tab"],
+    )
+    def test_proactive_list_tab(self, client: TestClient, db_session: Session, path):
         with patch(
             "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
         ):
             with patch("app.services.proactive_service.get_sent_offers", return_value=[]):
-                resp = client.get("/v2/partials/proactive")
-                assert resp.status_code == 200
-
-    def test_proactive_list_sent_tab(self, client: TestClient, db_session: Session):
-        with patch(
-            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
-        ):
-            with patch("app.services.proactive_service.get_sent_offers", return_value=[]):
-                resp = client.get("/v2/partials/proactive?tab=sent")
+                resp = client.get(path)
                 assert resp.status_code == 200
 
     def test_proactive_list_returns_list_when_service_returns_list(self, client: TestClient):
@@ -796,145 +811,45 @@ class TestAdminImportVendors:
     def test_import_vendors_no_file_returns_400(
         self, client: TestClient, db_session: Session, test_user: User, admin_user: User
     ):
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        def _override_admin():
-            return admin_user
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = _override_admin
-        app.dependency_overrides[require_admin] = _override_admin
-        app.dependency_overrides[require_buyer] = _override_admin
-        app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
-
-        try:
-            with TestClient(app) as admin_client:
-                resp = admin_client.post("/v2/partials/admin/import/vendors")
-                assert resp.status_code == 400
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
-                app.dependency_overrides.pop(dep, None)
+        with admin_client(db_session, admin_user) as admin:
+            resp = admin.post("/v2/partials/admin/import/vendors")
+            assert resp.status_code == 400
 
     def test_import_vendors_csv_success(self, client: TestClient, db_session: Session, admin_user: User):
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        def _override_admin():
-            return admin_user
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = _override_admin
-        app.dependency_overrides[require_admin] = _override_admin
-        app.dependency_overrides[require_buyer] = _override_admin
-        app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
-
         csv_content = b"name,email,phone,website\nNewVendorCSV Inc,sales@newvendor.com,555-1234,https://newvendor.com\n"
 
-        try:
-            with TestClient(app) as admin_client:
-                resp = admin_client.post(
-                    "/v2/partials/admin/import/vendors",
-                    files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-                )
-                assert resp.status_code == 200
-                assert "Imported" in resp.text
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
-                app.dependency_overrides.pop(dep, None)
+        with admin_client(db_session, admin_user) as admin:
+            resp = admin.post(
+                "/v2/partials/admin/import/vendors",
+                files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
+            )
+            assert resp.status_code == 200
+            assert "Imported" in resp.text
 
     def test_import_vendors_skips_duplicates(
         self, client: TestClient, db_session: Session, admin_user: User, test_vendor_card: VendorCard
     ):
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        def _override_admin():
-            return admin_user
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = _override_admin
-        app.dependency_overrides[require_admin] = _override_admin
-        app.dependency_overrides[require_buyer] = _override_admin
-        app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
-
         # Use normalized name that already exists ("arrow electronics")
         csv_content = b"name,email\nArrow Electronics,sales@arrow.com\n"
 
-        try:
-            with TestClient(app) as admin_client:
-                resp = admin_client.post(
-                    "/v2/partials/admin/import/vendors",
-                    files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
-                )
-                assert resp.status_code == 200
-                assert "Imported 0" in resp.text
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
-                app.dependency_overrides.pop(dep, None)
+        with admin_client(db_session, admin_user) as admin:
+            resp = admin.post(
+                "/v2/partials/admin/import/vendors",
+                files={"file": ("vendors.csv", io.BytesIO(csv_content), "text/csv")},
+            )
+            assert resp.status_code == 200
+            assert "Imported 0" in resp.text
 
     def test_admin_data_ops_returns_200_for_admin(self, client: TestClient, db_session: Session, admin_user: User):
         """Admin users can access data-ops panel."""
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        def _override_admin():
-            return admin_user
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = _override_admin
-        app.dependency_overrides[require_admin] = _override_admin
-        app.dependency_overrides[require_buyer] = _override_admin
-        app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
-
-        try:
-            with TestClient(app) as admin_client:
-                resp = admin_client.get("/v2/partials/admin/data-ops")
-                assert resp.status_code == 200
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
-                app.dependency_overrides.pop(dep, None)
+        with admin_client(db_session, admin_user) as admin:
+            resp = admin.get("/v2/partials/admin/data-ops")
+            assert resp.status_code == 200
 
     def test_admin_api_health(self, client: TestClient, db_session: Session, admin_user: User):
-        from app.database import get_db
-        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
-        from app.main import app
-
-        def _override_db():
-            yield db_session
-
-        def _override_admin():
-            return admin_user
-
-        app.dependency_overrides[get_db] = _override_db
-        app.dependency_overrides[require_user] = _override_admin
-        app.dependency_overrides[require_admin] = _override_admin
-        app.dependency_overrides[require_buyer] = _override_admin
-        app.dependency_overrides[require_fresh_token] = AsyncMock(return_value="mock-token")
-
-        try:
-            with TestClient(app) as admin_client:
-                resp = admin_client.get("/v2/partials/admin/api-health")
-                assert resp.status_code == 200
-        finally:
-            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
-                app.dependency_overrides.pop(dep, None)
+        with admin_client(db_session, admin_user) as admin:
+            resp = admin.get("/v2/partials/admin/api-health")
+            assert resp.status_code == 200
 
 
 # ── Section 17: Admin vendor/company merge ────────────────────────────────
