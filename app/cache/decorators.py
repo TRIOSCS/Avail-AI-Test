@@ -18,6 +18,9 @@ from app.utils import json_helpers as json
 
 from .intel_cache import get_cached, set_cached
 
+# Kwargs never folded into the cache key (request-scoped, non-serializable).
+_KEY_EXCLUDED = frozenset({"db", "user", "request"})
+
 
 def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | None = None):
     """Decorator that caches an endpoint's return value.
@@ -35,11 +38,10 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             # Build cache key from specified params
-            excluded = {"db", "user", "request"}
             if key_params is not None:
                 key_dict = {k: kwargs.get(k) for k in key_params}
             else:
-                key_dict = {k: v for k, v in kwargs.items() if k not in excluded}
+                key_dict = {k: v for k, v in kwargs.items() if k not in _KEY_EXCLUDED}
 
             # Include user.id in key for per-user caching
             user = kwargs.get("user")
