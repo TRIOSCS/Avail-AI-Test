@@ -291,6 +291,14 @@ _KING_FORM = {
 _KING_RANK_COUNT = {"S": "1", "D": "2", "Q": "4"}
 
 
+def _set_rank(specs: dict, match: re.Match) -> None:
+    # Shared by Kingston/Crucial: their rank tokens both capture [SDQ] then [48].
+    # Emit only ranks the seeded enum allows (record_spec re-validates anyway).
+    value = f"{_KING_RANK_COUNT[match.group(1)]}Rx{match.group(2)}"
+    if value in _ALLOWED_RANKS:
+        specs["rank"] = value
+
+
 def _kingston(mpn: str) -> DecodeResult | None:
     if not _KINGSTON.match(mpn):
         return None
@@ -330,9 +338,7 @@ def _kingston(mpn: str) -> DecodeResult | None:
                 specs["voltage"] = V135 if low_voltage else V15
         rank = _KING_RANK.search(mpn, rank_from)
         if rank:
-            value = f"{_KING_RANK_COUNT[rank.group(1)]}Rx{rank.group(2)}"
-            if value in _ALLOWED_RANKS:
-                specs["rank"] = value
+            _set_rank(specs, rank)
     if gen:
         specs["ddr_type"] = gen
     elif km is None:
@@ -386,9 +392,7 @@ def _crucial(mpn: str) -> DecodeResult | None:
             specs["ecc"] = True
         rank = _CRUCIAL_RANK.match(mpn, m.end())
         if rank:
-            value = f"{_KING_RANK_COUNT[rank.group(1)]}Rx{rank.group(2)}"
-            if value in _ALLOWED_RANKS:
-                specs["rank"] = value
+            _set_rank(specs, rank)
     st = _CRUCIAL_SPEED_TOKEN.search(mpn)
     if st and st.group(1) in _CRUCIAL_SPEED:
         specs["speed_mhz"] = _CRUCIAL_SPEED[st.group(1)]

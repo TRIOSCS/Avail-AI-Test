@@ -254,6 +254,13 @@ _TOSHIBA_PREFIX = {
 _TB_TOKEN = re.compile(r"(\d{1,2})T[A-Z]?(?:\b|$)")
 
 
+def _set_tb_capacity(specs: dict, mpn: str) -> None:
+    # Toshiba/HGST express capacity as an explicit <n>T token (MG08ACA16TE = 16 TB).
+    cap = _TB_TOKEN.search(mpn)
+    if cap:
+        specs["capacity_gb"] = int(cap.group(1)) * 1000  # TB → GB
+
+
 def _toshiba(mpn: str) -> DecodeResult | None:
     m = _TOSHIBA.match(mpn)
     if not m:
@@ -264,9 +271,7 @@ def _toshiba(mpn: str) -> DecodeResult | None:
         specs["form_factor"] = info[0]
         if info[1]:
             specs["usage_class"] = info[1]
-    cap = _TB_TOKEN.search(mpn)
-    if cap:
-        specs["capacity_gb"] = int(cap.group(1)) * 1000  # TB → GB
+    _set_tb_capacity(specs, mpn)
     return DecodeResult(commodity="hdd", vendor="Toshiba", specs=specs) if specs else None
 
 
@@ -297,9 +302,7 @@ def _hgst(mpn: str) -> DecodeResult | None:
     specs: dict = {"form_factor": info[0]}
     if info[1]:
         specs["usage_class"] = info[1]
-    cap = _TB_TOKEN.search(mpn)
-    if cap:
-        specs["capacity_gb"] = int(cap.group(1)) * 1000
+    _set_tb_capacity(specs, mpn)
     return DecodeResult(commodity="hdd", vendor="HGST", specs=specs)
 
 
