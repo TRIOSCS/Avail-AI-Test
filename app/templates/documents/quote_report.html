@@ -1,12 +1,32 @@
-{% extends "documents/_report.html" %}
-{% block title %}Quote {{ quote.quote_number }}{% endblock %}
-{% block styles_before_footer %}  .totals { margin-top: 16px; text-align: right; }
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Quote {{ quote.quote_number }}</title>
+<style>
+  @page { size: letter; margin: 1in 0.75in; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
+  h1 { font-size: 18pt; color: #1a365d; margin-bottom: 4px; }
+  h2 { font-size: 13pt; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
+  .subtitle { color: #718096; font-size: 10pt; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10pt; }
+  th { background: #edf2f7; color: #2d3748; text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e0; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f7fafc; }
+  .meta-table { width: auto; margin-bottom: 16px; }
+  .meta-table td { border: none; padding: 2px 12px 2px 0; }
+  .meta-label { font-weight: bold; color: #4a5568; }
+  .totals { margin-top: 16px; text-align: right; }
   .totals td { border: none; padding: 3px 8px; }
   .totals .total-label { font-weight: bold; }
-{% endblock %}
-{% block heading %}Quote {{ quote.quote_number }}{% endblock %}
-{% block subtitle %}Quote Report{% endblock %}
-{% block content %}  <h2>Quote Details</h2>
+  .footer { margin-top: 24px; font-size: 9pt; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Quote {{ quote.quote_number }}</h1>
+  <p class="subtitle">Quote Report — Generated {{ generated_at }}</p>
+
+  <h2>Quote Details</h2>
   <table class="meta-table">
     <tr><td class="meta-label">Customer</td><td>{{ (customer_site.site_name | e) if customer_site else '—' }}</td></tr>
     <tr><td class="meta-label">Company</td><td>{{ (company.name | e) if company else '—' }}</td></tr>
@@ -59,4 +79,9 @@
   <h2>Notes</h2>
   <p>{{ quote.notes | e }}</p>
   {% endif %}
-{% endblock %}
+
+  <div class="footer">
+    AVAIL — Trio Supply Chain Solutions | Confidential | {{ generated_at }}
+  </div>
+</body>
+</html>
