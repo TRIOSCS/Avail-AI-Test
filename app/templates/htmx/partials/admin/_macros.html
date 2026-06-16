@@ -1,0 +1,33 @@
+{# _macros.html — Cluster-local Jinja2 macros for the admin partials.
+
+   Scoped to app/templates/htmx/partials/admin/. These collapse
+   copy-paste-with-variation inside this cluster and are intentionally separate
+   from shared/_macros.html: the markup here uses a different palette/structure,
+   so the shared components are NOT drop-in equivalents.
+
+   Usage:
+     {% from "htmx/partials/admin/_macros.html" import data_ops_count_card %}
+     {{ data_ops_count_card("Vendors", vendor_count) }}
+#}
+
+{# ── Data Ops Count Card ──────────────────────────────────────────────
+   One entry in the Data Operations summary grid: a label over a
+   comma-grouped integer count. Output is byte-identical to the inline
+   markup it replaced in data_ops.html.
+#}
+{% macro data_ops_count_card(label, count) -%}
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">{{ label }}</p>
+      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(count) }}</p>
+    </div>
+{%- endmacro %}
+
+
+{# ── Pending Spec-Code Table Header Cell ──────────────────────────────
+   One <th> in the pending-mappings table head. Every column shares the
+   same classes; only the label differs. Output is byte-identical to the
+   inline <th> markup it replaced in spec_codes_pending.html.
+#}
+{% macro spec_code_th(label) -%}
+<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">{{ label }}</th>
+{%- endmacro %}

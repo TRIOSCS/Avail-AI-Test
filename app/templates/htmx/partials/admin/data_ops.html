@@ -1,24 +1,16 @@
 {# data_ops.html — Admin data operations panel.
    Receives: vendor_count (int), company_count (int), material_count (int).
    Called by: htmx_views.py admin_data_ops route.
-   Depends on: HTMX, Tailwind CSS.
+   Depends on: HTMX, Tailwind CSS, admin/_macros.html (data_ops_count_card).
 #}
+{% from "htmx/partials/admin/_macros.html" import data_ops_count_card -%}
 <div class="max-w-3xl mx-auto">
   <h2 class="text-lg font-bold text-gray-900 mb-4">Data Operations</h2>
 
   <div class="grid grid-cols-3 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
-      <p class="text-xs text-gray-500">Vendors</p>
-      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(vendor_count) }}</p>
-    </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
-      <p class="text-xs text-gray-500">Companies</p>
-      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(company_count) }}</p>
-    </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
-      <p class="text-xs text-gray-500">Materials</p>
-      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(material_count) }}</p>
-    </div>
+    {{ data_ops_count_card("Vendors", vendor_count) }}
+    {{ data_ops_count_card("Companies", company_count) }}
+    {{ data_ops_count_card("Materials", material_count) }}
   </div>
 
   {# Vendor CSV Import #}

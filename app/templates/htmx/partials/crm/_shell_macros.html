@@ -1,0 +1,20 @@
+{# _shell_macros.html — Jinja macros for the CRM shell tab bar.
+   Used by: crm/shell.html (tab buttons).
+   Depends on: Alpine.js, HTMX, brand palette.
+
+   tab_button() renders one Pattern-C tab button. The @click and :class
+   Alpine attributes are mechanically derived from `name` (the active/inactive
+   class strings are constant across every tab); `url`, `label`, and `trigger`
+   are passed through verbatim so each button keeps its own hx-get / hx-trigger.
+#}
+{% macro tab_button(name, url, label, trigger) -%}
+<button @click="tab = '{{ name }}'"
+            :class="tab === '{{ name }}' ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50' : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
+            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            hx-get="{{ url|safe }}"
+            hx-target="#crm-tab-content"
+            hx-swap="innerHTML"
+            hx-trigger="{{ trigger }}">
+      {{ label }}
+    </button>
+{%- endmacro %}

@@ -1,0 +1,23 @@
+{# _panel_macros.html — Cluster-local Jinja2 macros for the lead detail panel.
+   Extracted from lead_panel.html, the only caller. Output-neutral: the macros
+   reproduce, byte for byte, the markup the inline copy-paste produced.
+   Called by: partials/sourcing/lead_panel.html
+   Depends on: nothing (pure markup helpers).
+
+   collapse_header renders the toggle button + chevron used by every collapsible
+   section (Evidence, Source Attribution, Safety Review, Activity). `title` is the
+   already-rendered heading HTML and `button_class` is the section's button classes;
+   the chevron's Alpine `:class` binding is identical across all sections.
+
+   The body is emitted at a canonical indentation (the <button> at column 0). Each
+   call site positions the first line and pipes the result through `| indent(n, false)`
+   to reach its nesting depth, so the rendered bytes match the former inline markup. #}
+
+{% macro collapse_header(title, button_class) -%}
+<button @click="open = !open" class="{{ button_class }}">
+  <h3 class="text-xs font-semibold text-gray-900">{{ title }}</h3>
+  <svg class="w-4 h-4 text-gray-400 transition-transform" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+  </svg>
+</button>
+{%- endmacro %}
