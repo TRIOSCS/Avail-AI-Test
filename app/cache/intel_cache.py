@@ -23,6 +23,16 @@ _redis_init_attempted = False
 _REDIS_PREFIX = "intel:"
 
 
+def _rkey(cache_key: str) -> str:
+    """Namespace a cache key for Redis storage."""
+    return f"{_REDIS_PREFIX}{cache_key}"
+
+
+def _ttl_seconds(ttl_days: float) -> int:
+    """Convert a fractional-day TTL to whole seconds for Redis EXPIRE/SETEX."""
+    return int(ttl_days * 86400)
+
+
 def _get_redis():
     """Lazy-init Redis connection.
 
@@ -72,7 +82,7 @@ def get_cached(cache_key: str) -> dict | None:
     r = _get_redis()
     if r:
         try:
-            data = r.get(f"{_REDIS_PREFIX}{cache_key}")
+            data = r.get(_rkey(cache_key))
             if data:
                 return json.loads(data)
             return None
@@ -100,13 +110,13 @@ def get_cached(cache_key: str) -> dict | None:
 
 def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
     """Store data in cache with TTL."""
-    ttl_seconds = int(ttl_days * 86400)
+    ttl_seconds = _ttl_seconds(ttl_days)
 
     # Try Redis first
     r = _get_redis()
     if r:
         try:
-            r.setex(f"{_REDIS_PREFIX}{cache_key}", ttl_seconds, json.dumps(data))
+            r.setex(_rkey(cache_key), ttl_seconds, json.dumps(data))
             return  # Success — skip PG write
         except Exception as e:
             logger.warning("Redis write error for {}: {}", cache_key, e)
@@ -173,8 +183,8 @@ def incr_count(cache_key: str, amount: int = 1, ttl_days: float = 1.0) -> int:
     r = _get_redis()
     if r:
         try:
-            new = int(r.incrby(f"{_REDIS_PREFIX}{cache_key}", amount))
-            r.expire(f"{_REDIS_PREFIX}{cache_key}", int(ttl_days * 86400))
+            new = int(r.incrby(_rkey(cache_key), amount))
+            r.expire(_rkey(cache_key), _ttl_seconds(ttl_days))
             return new
         except Exception as e:
             logger.warning("Redis incr error for {}: {} — falling back to read-modify-write", cache_key, e)
@@ -199,8 +209,8 @@ def incr_hash_count(cache_key: str, field: str, amount: int = 1, ttl_days: float
     r = _get_redis()
     if r:
         try:
-            new = int(r.hincrby(f"{_REDIS_PREFIX}{cache_key}", field, amount))
-            r.expire(f"{_REDIS_PREFIX}{cache_key}", int(ttl_days * 86400))
+            new = int(r.hincrby(_rkey(cache_key), field, amount))
+            r.expire(_rkey(cache_key), _ttl_seconds(ttl_days))
             return new
         except Exception as e:
             logger.warning("Redis hash-incr error for {}: {} — falling back to read-modify-write", cache_key, e)
