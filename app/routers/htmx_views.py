@@ -287,38 +287,26 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         return template_response(
             "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
         )
-    if "/buy-plans" in path:
-        current_view = "buy-plans"
-    elif "/excess" in path:
-        current_view = "excess"
-    elif "/quotes" in path:
-        current_view = "quotes"
-    elif "/prospecting" in path:
-        current_view = "prospecting"
-    elif "/proactive" in path:
-        current_view = "proactive"
-    elif "/settings" in path:
-        current_view = "settings"
-    elif "/materials" in path:
-        current_view = "materials"
-    elif "/follow-ups" in path:
-        current_view = "follow-ups"
-    elif "/trouble-tickets" in path:
-        current_view = "trouble-tickets"
-    elif "/crm" in path:
-        current_view = "crm"
-    elif "/vendors" in path:
-        current_view = "vendors"
-    elif "/customers" in path:
-        current_view = "customers"
-    elif "/search" in path:
-        current_view = "search"
-    elif "/sightings" in path:
-        current_view = "sightings"
-    elif "/requisitions" in path:
-        current_view = "requisitions"
-    else:
-        current_view = "requisitions"
+    # First matching segment wins — order is load-bearing (e.g. /buy-plans before
+    # /requisitions). Anything unmatched defaults to the requisitions view.
+    _VIEW_SEGMENTS = (
+        "buy-plans",
+        "excess",
+        "quotes",
+        "prospecting",
+        "proactive",
+        "settings",
+        "materials",
+        "follow-ups",
+        "trouble-tickets",
+        "crm",
+        "vendors",
+        "customers",
+        "search",
+        "sightings",
+        "requisitions",
+    )
+    current_view = next((seg for seg in _VIEW_SEGMENTS if f"/{seg}" in path), "requisitions")
 
     # Determine the correct partial URL for initial content load
     if current_view == "requisitions":
@@ -337,39 +325,22 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = f"/v2/partials/search?mpn={quote(mpn_qs)}" if mpn_qs else "/v2/partials/search"
     else:
         partial_url = f"/v2/partials/{current_view}"
-    # Pass path params for detail views
-    if current_view == "requisitions" and "/requisitions/" in path:
-        parts = path.split("/requisitions/")
+    # Detail views: a trailing numeric id (/{view}/{id}) overrides the list partial with
+    # the detail partial. Each split key equals the current_view, so at most one applies.
+    _DETAIL_VIEWS = (
+        "requisitions",
+        "vendors",
+        "customers",
+        "buy-plans",
+        "excess",
+        "quotes",
+        "prospecting",
+        "trouble-tickets",
+    )
+    if current_view in _DETAIL_VIEWS and f"/{current_view}/" in path:
+        parts = path.split(f"/{current_view}/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/requisitions/{parts[1]}"
-    elif current_view == "vendors" and "/vendors/" in path:
-        parts = path.split("/vendors/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/vendors/{parts[1]}"
-    elif current_view == "customers" and "/customers/" in path:
-        parts = path.split("/customers/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/customers/{parts[1]}"
-    elif current_view == "buy-plans" and "/buy-plans/" in path:
-        parts = path.split("/buy-plans/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/buy-plans/{parts[1]}"
-    elif current_view == "excess" and "/excess/" in path:
-        parts = path.split("/excess/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/excess/{parts[1]}"
-    elif current_view == "quotes" and "/quotes/" in path:
-        parts = path.split("/quotes/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/quotes/{parts[1]}"
-    elif current_view == "prospecting" and "/prospecting/" in path:
-        parts = path.split("/prospecting/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/prospecting/{parts[1]}"
-    elif current_view == "trouble-tickets" and "/trouble-tickets/" in path:
-        parts = path.split("/trouble-tickets/")
-        if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/trouble-tickets/{parts[1]}"
+            partial_url = f"/v2/partials/{current_view}/{parts[1]}"
 
     ctx = _base_ctx(request, user, current_view)
     ctx["partial_url"] = partial_url
