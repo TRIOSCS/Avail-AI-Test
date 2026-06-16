@@ -97,8 +97,11 @@ def _first_nonempty(row: dict, columns: tuple[str, ...]) -> str | None:
     """Return the first non-empty/non-whitespace value across *columns* in *row*."""
     for col in columns:
         value = row.get(col)
-        if value is not None and str(value).strip():
-            return str(value).strip()
+        if value is None:
+            continue
+        stripped = str(value).strip()
+        if stripped:
+            return stripped
     return None
 
 
@@ -145,7 +148,10 @@ def _row_to_record(cells: list[str], mapping: dict[str, int], source_file: str) 
         if idx is None or idx >= len(cells):
             return None
         value = cells[idx]
-        return str(value).strip() if value is not None and str(value).strip() else None
+        if value is None:
+            return None
+        stripped = str(value).strip()
+        return stripped or None
 
     raw_mpn = cell("mpn")
     if not raw_mpn:
