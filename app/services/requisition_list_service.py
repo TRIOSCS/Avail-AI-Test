@@ -133,6 +133,19 @@ def _build_pagination(page: int, per_page: int, total: int) -> PaginationContext
     )
 
 
+def _customer_display_for_req(db: Session, req: Requisition) -> str:
+    """Resolve a requisition's customer display label.
+
+    Prefers "Company — Site" from the linked CustomerSite, falling back to the
+    requisition's free-form customer_name (or empty string).
+    """
+    if req.customer_site_id:
+        site = db.query(CustomerSite).filter(CustomerSite.id == req.customer_site_id).first()
+        if site and site.company:
+            return f"{site.company.name} — {site.site_name}"
+    return req.customer_name or ""
+
+
 def list_requisitions(
     db: Session,
     filters: ReqListFilters,
@@ -616,11 +629,7 @@ def get_requisition_detail(
         return None
 
     # Load customer display name
-    customer_display = req.customer_name or ""
-    if req.customer_site_id:
-        site = db.query(CustomerSite).filter(CustomerSite.id == req.customer_site_id).first()
-        if site and site.company:
-            customer_display = f"{site.company.name} — {site.site_name}"
+    customer_display = _customer_display_for_req(db, req)
 
     # Creator name
     creator_name = ""
@@ -702,11 +711,7 @@ def get_row_context(db: Session, req: Requisition, user) -> dict:
     creator = db.query(User).filter(User.id == req.created_by).first()
     creator_name = creator.name or creator.email if creator else ""
     # Customer display
-    customer_display = req.customer_name or ""
-    if req.customer_site_id:
-        site = db.query(CustomerSite).filter(CustomerSite.id == req.customer_site_id).first()
-        if site and site.company:
-            customer_display = f"{site.company.name} — {site.site_name}"
+    customer_display = _customer_display_for_req(db, req)
     return {
         "req": {
             "id": req.id,

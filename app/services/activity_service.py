@@ -94,6 +94,11 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     return None
 
 
+def _phone_digits(phone: str | None) -> str:
+    """Return only the digit characters of a phone string ("" if none)."""
+    return "".join(c for c in (phone or "") if c.isdigit())
+
+
 def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     """Match a phone number to a company or vendor card.
 
@@ -102,7 +107,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     """
     if not phone:
         return None
-    digits = "".join(c for c in phone if c.isdigit())
+    digits = _phone_digits(phone)
     if len(digits) < 7:
         return None
     suffix = digits[-10:]  # last 10 digits for matching
@@ -126,7 +131,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
             .all()
         )
     for site in sites:
-        site_digits = "".join(c for c in (site.contact_phone or "") if c.isdigit())
+        site_digits = _phone_digits(site.contact_phone)
         if site_digits and site_digits[-10:] == suffix:
             return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
 
@@ -147,7 +152,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
         card_map = {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()} if card_ids else {}
         for vc in vcs:
-            vc_digits = "".join(c for c in (vc.phone or "") if c.isdigit())
+            vc_digits = _phone_digits(vc.phone)
             if vc_digits and vc_digits[-10:] == suffix:
                 card = card_map.get(vc.vendor_card_id)
                 if card:
@@ -159,6 +164,29 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 # ═══════════════════════════════════════════════════════════════════════
 #  ACTIVITY LOGGING
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _match_entity_links(match: dict | None) -> dict:
+    """Translate a contact-match dict into ActivityLog entity-link kwargs.
+
+    Returns company_id / vendor_card_id / vendor_contact_id / customer_site_id with only
+    the matched side populated (the other side stays None).
+    """
+    if match and match["type"] == "company":
+        return {
+            "company_id": match["id"],
+            "vendor_card_id": None,
+            "vendor_contact_id": None,
+            "customer_site_id": match.get("site_id"),
+        }
+    if match and match["type"] == "vendor":
+        return {
+            "company_id": None,
+            "vendor_card_id": match["id"],
+            "vendor_contact_id": match.get("vendor_contact_id"),
+            "customer_site_id": None,
+        }
+    return {"company_id": None, "vendor_card_id": None, "vendor_contact_id": None, "customer_site_id": None}
 
 
 def log_email_activity(
@@ -190,10 +218,7 @@ def log_email_activity(
         user_id=user_id,
         activity_type=activity_type,
         channel=Channel.EMAIL,
-        company_id=match["id"] if match and match["type"] == "company" else None,
-        vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
-        vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
-        customer_site_id=match.get("site_id") if match and match["type"] == "company" else None,
+        **_match_entity_links(match),
         contact_email=email_addr,
         contact_name=contact_name,
         subject=subject,
@@ -265,10 +290,7 @@ def log_call_activity(
         user_id=user_id,
         activity_type=activity_type,
         channel=Channel.PHONE,
-        company_id=match["id"] if match and match["type"] == "company" else None,
-        vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
-        vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
-        customer_site_id=match.get("site_id") if match and match["type"] == "company" else None,
+        **_match_entity_links(match),
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
@@ -299,6 +321,12 @@ def log_call_activity(
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _is_meaningful_or_unscored():
+    """Filter clause keeping rows the AI quality pass marked meaningful (True) or has
+    not yet scored (None) — i.e. hide only is_meaningful=False."""
+    return ActivityLog.is_meaningful.is_(True) | ActivityLog.is_meaningful.is_(None)
+
+
 def get_company_activities(
     company_id: int, db: Session, limit: int = 50, meaningful_only: bool = False
 ) -> list[ActivityLog]:
@@ -311,7 +339,7 @@ def get_company_activities(
     """
     q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
     if meaningful_only:
-        q = q.filter((ActivityLog.is_meaningful.is_(True)) | (ActivityLog.is_meaningful.is_(None)))
+        q = q.filter(_is_meaningful_or_unscored())
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
@@ -350,7 +378,7 @@ def get_requisition_activities(
     """
     q = db.query(ActivityLog).filter(ActivityLog.requisition_id == requisition_id)
     if meaningful_only:
-        q = q.filter((ActivityLog.is_meaningful.is_(True)) | (ActivityLog.is_meaningful.is_(None)))
+        q = q.filter(_is_meaningful_or_unscored())
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
@@ -532,8 +560,7 @@ def log_company_call(
     db.add(record)
     db.flush()
 
-    now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
+    bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
     return record
 
@@ -557,8 +584,7 @@ def log_company_note(
     db.add(record)
     db.flush()
 
-    now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
+    bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: note -> company {company_id} by user {user_id}")
     return record
 
@@ -708,11 +734,7 @@ def log_site_contact_note(
     db.add(record)
     db.flush()
 
-    now = datetime.now(timezone.utc)
-    db.query(Company).filter(Company.id == company_id).update({"last_activity_at": now}, synchronize_session=False)
-    db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
-        {"last_activity_at": now}, synchronize_session=False
-    )
+    bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
     return record
 

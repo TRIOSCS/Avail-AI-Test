@@ -1,7 +1,9 @@
 """Prefix lookup — maps MPN prefixes to canonical manufacturer names.
 
-Sorted longest-first for most-specific matching. Returns (manufacturer, confidence)
-where confidence is 0.9 for prefixes >= 3 chars and 0.7 for 2-char prefixes.
+Sorted longest-first for most-specific matching. Returns (manufacturer, 0.9) for a
+prefix >= 3 chars; 2-char prefixes are too ambiguous and are skipped (no match).
+2-char entries are kept in PREFIX_TABLE only as longest-first anchors (e.g. "SN"
+after "SN7"/"SN6"), never returned on their own.
 
 Called by: app.services.tagging (classify_material_card)
 Depends on: nothing (pure data + logic)
@@ -298,8 +300,8 @@ def lookup_manufacturer_by_prefix(normalized_mpn: str) -> tuple[str | None, floa
         normalized_mpn: Lowercase MPN string.
 
     Returns:
-        (manufacturer_name, confidence) or (None, 0.0) if no match.
-        Confidence is 0.9 for prefixes >= 3 chars, 0.7 for 2-char prefixes.
+        (manufacturer_name, 0.9) for a prefix >= 3 chars, or (None, 0.0) if no match.
+        2-char prefixes are too ambiguous to return, so they never match.
     """
     upper_mpn = normalized_mpn.upper()
     for prefix, manufacturer in _SORTED_PREFIXES:

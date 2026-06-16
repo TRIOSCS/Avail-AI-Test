@@ -93,6 +93,16 @@ Score quality 0-100:
 """
 
 
+def _mark_no_data(log: ActivityLog, db: Session) -> None:
+    """Stamp an activity as assessed-with-no-data so it is never retried."""
+    log.quality_score = 0.0
+    log.quality_classification = "no_data"
+    log.is_meaningful = False
+    log.summary = "No interaction details available"
+    log.quality_assessed_at = datetime.now(timezone.utc)
+    db.flush()
+
+
 async def score_activity(activity_id: int, db: Session) -> None:
     """Score a single ActivityLog entry with AI quality classification."""
     log = db.get(ActivityLog, activity_id)
@@ -120,12 +130,7 @@ async def score_activity(activity_id: int, db: Session) -> None:
             parts.append(f"Notes: {log.notes[:500]}")
         if not parts:
             # Nothing to analyze — mark as assessed to prevent infinite retry
-            log.quality_score = 0.0
-            log.quality_classification = "no_data"
-            log.is_meaningful = False
-            log.summary = "No interaction details available"
-            log.quality_assessed_at = datetime.now(timezone.utc)
-            db.flush()
+            _mark_no_data(log, db)
             return
         prompt = (
             "A batch of vendor sightings was added from an automated search run "
@@ -153,12 +158,7 @@ async def score_activity(activity_id: int, db: Session) -> None:
 
         if not parts:
             # Nothing to analyze — mark as assessed to prevent infinite retry
-            log.quality_score = 0.0
-            log.quality_classification = "no_data"
-            log.is_meaningful = False
-            log.summary = "No interaction details available"
-            log.quality_assessed_at = datetime.now(timezone.utc)
-            db.flush()
+            _mark_no_data(log, db)
             return
 
         prompt = "Classify this business interaction:\n\n" + "\n".join(parts)

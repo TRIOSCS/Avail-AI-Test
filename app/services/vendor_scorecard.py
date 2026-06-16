@@ -35,6 +35,32 @@ W_PO_CONVERSION = 0.25
 W_REVIEW_RATING = 0.25
 
 
+def _load_quoted_offer_ids(db: Session) -> set[int]:
+    """Offer ids referenced by sent/won/lost quote line items."""
+    quoted_offer_ids: set[int] = set()
+    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
+        for item in items or []:
+            oid = item.get("offer_id")
+            if oid:
+                quoted_offer_ids.add(oid)
+    return quoted_offer_ids
+
+
+def _load_po_offer_ids(db: Session) -> set[int]:
+    """Offer ids tied to completed buy plans."""
+    po_offer_ids: set[int] = set()
+    for (offer_id,) in (
+        db.query(BuyPlanLine.offer_id)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(BuyPlan.status.in_(["completed"]))
+        .filter(BuyPlanLine.offer_id.isnot(None))
+        .limit(10000)
+        .all()
+    ):
+        po_offer_ids.add(offer_id)
+    return po_offer_ids
+
+
 def compute_vendor_scorecard(
     db: Session,
     vendor_card_id: int,
@@ -108,14 +134,7 @@ def compute_vendor_scorecard(
     offers_in_quotes = 0
     if total_offers > 0:
         if quoted_offer_ids is None:
-            quoted_offer_ids = set()
-            for (items,) in (
-                db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all()
-            ):
-                for item in items or []:
-                    oid = item.get("offer_id")
-                    if oid:
-                        quoted_offer_ids.add(oid)
+            quoted_offer_ids = _load_quoted_offer_ids(db)
 
         for o in offers_in_window:
             if o.id in quoted_offer_ids:
@@ -126,16 +145,7 @@ def compute_vendor_scorecard(
     offers_to_po = 0
     if total_offers > 0:
         if po_offer_ids is None:
-            po_offer_ids = set()
-            for (offer_id,) in (
-                db.query(BuyPlanLine.offer_id)
-                .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
-                .filter(BuyPlan.status.in_(["completed"]))
-                .filter(BuyPlanLine.offer_id.isnot(None))
-                .limit(10000)
-                .all()
-            ):
-                po_offer_ids.add(offer_id)
+            po_offer_ids = _load_po_offer_ids(db)
 
         for o in offers_in_window:
             if o.id in po_offer_ids:
@@ -220,23 +230,8 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     skipped = 0
 
     # ── Preload quote and buy-plan offer-id lookups ONCE ──
-    quoted_offer_ids: set[int] = set()
-    for (items,) in db.query(Quote.line_items).filter(Quote.status.in_(["sent", "won", "lost"])).limit(10000).all():
-        for item in items or []:
-            oid = item.get("offer_id")
-            if oid:
-                quoted_offer_ids.add(oid)
-
-    po_offer_ids: set[int] = set()
-    for (offer_id,) in (
-        db.query(BuyPlanLine.offer_id)
-        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(BuyPlan.status.in_(["completed"]))
-        .filter(BuyPlanLine.offer_id.isnot(None))
-        .limit(10000)
-        .all()
-    ):
-        po_offer_ids.add(offer_id)
+    quoted_offer_ids = _load_quoted_offer_ids(db)
+    po_offer_ids = _load_po_offer_ids(db)
 
     # Process vendor IDs in chunks of 500 to avoid loading all at once
     CHUNK_SIZE = 500

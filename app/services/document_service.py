@@ -11,6 +11,19 @@ _jinja_env = Environment(
 )
 
 
+def _render_pdf(template_name: str, **context) -> bytes:
+    """Render a document template to PDF, injecting the shared ``generated_at``
+    stamp."""
+    from weasyprint import HTML
+
+    template = _jinja_env.get_template(template_name)
+    html = template.render(
+        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        **context,
+    )
+    return HTML(string=html).write_pdf()
+
+
 def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
     """Generate a PDF summary of a requisition with its requirements and offers."""
     from app.models import Offer, Requirement, Requisition
@@ -23,17 +36,12 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
 
     offers = db.query(Offer).filter_by(requisition_id=requisition_id).order_by(Offer.created_at.desc()).all()
 
-    template = _jinja_env.get_template("rfq_summary.html")
-    html = template.render(
+    return _render_pdf(
+        "rfq_summary.html",
         requisition=requisition,
         requirements=requirements,
         offers=offers,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
-
-    from weasyprint import HTML
-
-    return HTML(string=html).write_pdf()
 
 
 def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
@@ -49,15 +57,10 @@ def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
 
     line_items = quote.line_items or []
 
-    template = _jinja_env.get_template("quote_report.html")
-    html = template.render(
+    return _render_pdf(
+        "quote_report.html",
         quote=quote,
         customer_site=customer_site,
         company=company,
         line_items=line_items,
-        generated_at=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
     )
-
-    from weasyprint import HTML
-
-    return HTML(string=html).write_pdf()

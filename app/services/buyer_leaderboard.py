@@ -173,18 +173,11 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
             snap = BuyerLeaderboardSnapshot(user_id=entry["user_id"], month=month_start)
             db.add(snap)
 
-        snap.offers_logged = entry["offers_logged"]
-        snap.offers_quoted = entry["offers_quoted"]
-        snap.offers_in_buyplan = entry["offers_in_buyplan"]
-        snap.offers_po_confirmed = entry["offers_po_confirmed"]
-        snap.stock_lists_uploaded = entry["stock_lists_uploaded"]
-        snap.points_offers = entry["points_offers"]
-        snap.points_quoted = entry["points_quoted"]
-        snap.points_buyplan = entry["points_buyplan"]
-        snap.points_po = entry["points_po"]
-        snap.points_stock = entry["points_stock"]
-        snap.total_points = entry["total_points"]
-        snap.rank = entry["rank"]
+        # Copy every entry metric onto the snapshot (entry keys mirror snapshot
+        # attributes 1:1, except user_id which is the upsert key set above).
+        for key, value in entry.items():
+            if key != "user_id":
+                setattr(snap, key, value)
         snap.updated_at = datetime.now(timezone.utc)
 
     db.commit()

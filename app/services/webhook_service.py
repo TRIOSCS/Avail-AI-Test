@@ -304,10 +304,9 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
             continue
 
         # Timing-safe clientState comparison
-        if sub.client_state:
-            if not hmac.compare_digest(sub.client_state, client_state or ""):
-                logger.warning(f"Client state mismatch for {sub_id}, ignoring")
-                continue
+        if sub.client_state and not hmac.compare_digest(sub.client_state, client_state or ""):
+            logger.warning(f"Client state mismatch for {sub_id}, ignoring")
+            continue
 
         # Replay protection
         resource = notif.get("resource", "")
@@ -414,24 +413,24 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
         subject = msg.get("subject", "")
 
         from_addr = _extract_email(msg.get("from"))
-        user_email = user.email.lower()
-
-        if from_addr and from_addr.lower() == user_email:
+        if not from_addr:
             continue
-        else:
-            from_name = _extract_name(msg.get("from"))
-            if from_addr:
-                log_email_activity(
-                    user_id=user.id,
-                    direction="received",
-                    email_addr=from_addr,
-                    subject=subject,
-                    external_id=message_id,
-                    contact_name=from_name,
-                    db=db,
-                )
-                if user.id not in users_with_inbound:
-                    users_with_inbound[user.id] = (user, token)
+
+        # Skip our own outbound messages
+        if from_addr.lower() == user.email.lower():
+            continue
+
+        log_email_activity(
+            user_id=user.id,
+            direction="received",
+            email_addr=from_addr,
+            subject=subject,
+            external_id=message_id,
+            contact_name=_extract_name(msg.get("from")),
+            db=db,
+        )
+        if user.id not in users_with_inbound:
+            users_with_inbound[user.id] = (user, token)
 
     db.commit()
 

@@ -84,6 +84,62 @@ def _redact_api_keys(text: str | None) -> str | None:
 # Known good MPN for testing — universally available across all distributors
 DEEP_TEST_MPN = "LM317"
 
+# Per-exception failure descriptors: how to format the stored error message and what to
+# write in the warning log. Each entry → (msg_prefix, max chars of str(e) kept, log phrase).
+# Untyped exceptions fall back to _GENERIC_FAILURE (raw text, no prefix).
+_FAILURE_BY_EXC = {
+    ConnectorAuthError: ("Auth error — rotate credentials: ", 380, "auth error"),
+    ConnectorRateLimitError: ("Rate limited — auto-recovers when window expires: ", 340, "rate-limited"),
+    ConnectorQuotaError: ("Quota exhausted — upgrade plan or wait for cycle: ", 340, "quota exhausted"),
+}
+_GENERIC_FAILURE = ("", 500, "failed")
+
+
+def _record_failure(
+    source: ApiSource,
+    db: Session,
+    *,
+    exc: Exception,
+    old_status: str,
+    now: datetime,
+    elapsed_ms: int,
+    endpoint: str,
+    check_type: str,
+    timestamp_field: str,
+    log_prefix: str,
+) -> dict:
+    """Apply the shared 'check failed' mutations and write the usage log.
+
+    Builds the typed error message, sets the source to ERROR, records error +
+    timestamps, bumps the 24h error count, fires the live→error transition alert, logs a
+    warning, and persists an ApiUsageLog row. Returns the {success, elapsed_ms, error}
+    dict callers add their extra keys to.
+    """
+    prefix, limit, log_phrase = _FAILURE_BY_EXC.get(type(exc), _GENERIC_FAILURE)
+    error_msg = f"{prefix}{str(exc)[:limit]}"
+
+    source.status = ApiSourceStatus.ERROR.value
+    source.last_error = error_msg
+    source.last_error_at = now
+    setattr(source, timestamp_field, now)
+    source.error_count_24h = (source.error_count_24h or 0) + 1
+    _check_status_transition(source, old_status, "error", db, error_msg)
+
+    log = ApiUsageLog(
+        source_id=source.id,
+        timestamp=now,
+        endpoint=endpoint,
+        response_ms=elapsed_ms,
+        success=False,
+        error_message=error_msg,
+        check_type=check_type,
+    )
+    db.add(log)
+    db.flush()
+
+    logger.warning("{} {} for {}: {}", log_prefix, log_phrase, source.name, error_msg)
+    return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
+
 
 def _get_connector(source: ApiSource, db: Session):
     """Get a connector instance for the given source.
@@ -188,101 +244,20 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
 
         return {"success": True, "elapsed_ms": elapsed_ms, "error": None}
 
-    except ConnectorAuthError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Auth error — rotate credentials: {str(e)[:380]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_ping_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="ping",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="ping",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Health ping auth error for {}: {}", source.name, error_msg)
-        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
-
-    except ConnectorRateLimitError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Rate limited — auto-recovers when window expires: {str(e)[:340]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_ping_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="ping",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="ping",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Health ping rate-limited for {}: {}", source.name, error_msg)
-        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
-
-    except ConnectorQuotaError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Quota exhausted — upgrade plan or wait for cycle: {str(e)[:340]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_ping_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="ping",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="ping",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Health ping quota exhausted for {}: {}", source.name, error_msg)
-        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
-
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = str(e)[:500]
-
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_ping_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-
-        # Log failed ping to ApiUsageLog
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
+        return _record_failure(
+            source,
+            db,
+            exc=e,
+            old_status=old_status,
+            now=now,
+            elapsed_ms=elapsed_ms,
             endpoint="ping",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
             check_type="ping",
+            timestamp_field="last_ping_at",
+            log_prefix="Health ping",
         )
-        db.add(log)
-        db.flush()
-
-        logger.warning("Health ping failed for {}: {}", source.name, error_msg)
-        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
 
 
 async def deep_test_source(source: ApiSource, db: Session) -> dict:
@@ -337,100 +312,21 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
 
         return {"success": True, "results_count": len(results), "elapsed_ms": elapsed_ms, "error": None}
 
-    except ConnectorAuthError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Auth error — rotate credentials: {str(e)[:380]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_deep_test_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="deep_test",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="deep",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Deep test auth error for {}: {}", source.name, error_msg)
-        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
-
-    except ConnectorRateLimitError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Rate limited — auto-recovers when window expires: {str(e)[:340]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_deep_test_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="deep_test",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="deep",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Deep test rate-limited for {}: {}", source.name, error_msg)
-        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
-
-    except ConnectorQuotaError as e:
-        elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = f"Quota exhausted — upgrade plan or wait for cycle: {str(e)[:340]}"
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_deep_test_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
-            endpoint="deep_test",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
-            check_type="deep",
-        )
-        db.add(log)
-        db.flush()
-        logger.warning("Deep test quota exhausted for {}: {}", source.name, error_msg)
-        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
-
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
-        error_msg = str(e)[:500]
-
-        source.status = ApiSourceStatus.ERROR.value
-        source.last_error = error_msg
-        source.last_error_at = now
-        source.last_deep_test_at = now
-        source.error_count_24h = (source.error_count_24h or 0) + 1
-        _check_status_transition(source, old_status, "error", db, error_msg)
-
-        log = ApiUsageLog(
-            source_id=source.id,
-            timestamp=now,
+        result = _record_failure(
+            source,
+            db,
+            exc=e,
+            old_status=old_status,
+            now=now,
+            elapsed_ms=elapsed_ms,
             endpoint="deep_test",
-            response_ms=elapsed_ms,
-            success=False,
-            error_message=error_msg,
             check_type="deep",
+            timestamp_field="last_deep_test_at",
+            log_prefix="Deep test",
         )
-        db.add(log)
-        db.flush()
-
-        logger.warning("Deep test failed for {}: {}", source.name, error_msg)
-        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
+        return {**result, "results_count": 0}
 
 
 async def run_health_checks(check_type: str = "ping") -> dict:

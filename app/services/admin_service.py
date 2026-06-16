@@ -101,19 +101,21 @@ def _load_config_cache(db: Session) -> dict[str, str]:
     return _config_cache
 
 
-def get_config_value(db: Session, key: str) -> str | None:
-    """Get a single config value with in-memory caching (5-min TTL)."""
-    global _config_cache, _config_cache_ts
+def _ensure_config_cache_fresh(db: Session) -> None:
+    """Reload the config cache if it has gone stale (TTL expired)."""
     if time.time() - _config_cache_ts > _CONFIG_CACHE_TTL:
         _load_config_cache(db)
+
+
+def get_config_value(db: Session, key: str) -> str | None:
+    """Get a single config value with in-memory caching (5-min TTL)."""
+    _ensure_config_cache_fresh(db)
     return _config_cache.get(key)
 
 
 def get_config_values(db: Session, keys: list[str]) -> dict[str, str]:
     """Get multiple config values with in-memory caching."""
-    global _config_cache, _config_cache_ts
-    if time.time() - _config_cache_ts > _CONFIG_CACHE_TTL:
-        _load_config_cache(db)
+    _ensure_config_cache_fresh(db)
     return {k: _config_cache[k] for k in keys if k in _config_cache}
 
 
@@ -181,46 +183,42 @@ def get_system_health(db: Session) -> dict:
         ("offers", Offer),
         ("quotes", Quote),
     ]:
+        label = TABLE_LABELS.get(key, key.replace("_", " ").title())
         try:
-            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = (
-                db.query(sqlfunc.count(model.id)).scalar() or 0
-            )
+            counts[label] = db.query(sqlfunc.count(model.id)).scalar() or 0
         except Exception:
-            counts[TABLE_LABELS.get(key, key.replace("_", " ").title())] = -1
+            counts[label] = -1
 
     # Per-user scheduler status
-    users = db.query(User).all()
-    scheduler_status = []
-    for u in users:
-        scheduler_status.append(
-            {
-                "id": u.id,
-                "email": u.email,
-                "m365_connected": u.m365_connected,
-                "has_refresh_token": bool(u.refresh_token),
-                "token_expires_at": u.token_expires_at.isoformat() if u.token_expires_at else None,
-                "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
-                "last_contacts_sync": u.last_contacts_sync.isoformat() if u.last_contacts_sync else None,
-            }
-        )
+    scheduler_status = [
+        {
+            "id": u.id,
+            "email": u.email,
+            "m365_connected": u.m365_connected,
+            "has_refresh_token": bool(u.refresh_token),
+            "token_expires_at": u.token_expires_at.isoformat() if u.token_expires_at else None,
+            "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
+            "last_contacts_sync": u.last_contacts_sync.isoformat() if u.last_contacts_sync else None,
+        }
+        for u in db.query(User).all()
+    ]
 
     # Connector health from api_sources
     connectors = []
     try:
-        sources = db.query(ApiSource).order_by(ApiSource.name).all()
-        for s in sources:
-            connectors.append(
-                {
-                    "name": s.name,
-                    "display_name": s.display_name,
-                    "status": s.status,
-                    "category": s.category,
-                    "last_success": s.last_success.isoformat() if s.last_success else None,
-                    "last_error": s.last_error,
-                    "total_searches": s.total_searches,
-                    "total_results": s.total_results,
-                }
-            )
+        connectors = [
+            {
+                "name": s.name,
+                "display_name": s.display_name,
+                "status": s.status,
+                "category": s.category,
+                "last_success": s.last_success.isoformat() if s.last_success else None,
+                "last_error": s.last_error,
+                "total_searches": s.total_searches,
+                "total_results": s.total_results,
+            }
+            for s in db.query(ApiSource).order_by(ApiSource.name).all()
+        ]
     except Exception as e:
         logger.warning("Admin health: connector stats query failed: {}", e)
 

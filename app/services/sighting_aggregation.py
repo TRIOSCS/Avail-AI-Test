@@ -168,43 +168,31 @@ def rebuild_vendor_summaries(
         newest = max((s.created_at for s in group if s.created_at), default=None)
         has_contact = any(s.vendor_email or s.vendor_phone for s in group) or bool(vendor_phones.get(vn))
 
+        fields = {
+            "vendor_phone": vendor_phones.get(vn),
+            "estimated_qty": estimated_qty,
+            "avg_price": round(avg_price, 4) if avg_price else None,
+            "best_price": round(best_price, 4) if best_price else None,
+            "listing_count": len(group),
+            "source_types": sources,
+            "score": round(max_score, 1) if max_score else None,
+            "tier": _score_to_tier(max_score),
+            "updated_at": datetime.now(timezone.utc),
+            "vendor_card_id": vendor_card_ids.get(vn),
+            "newest_sighting_at": newest,
+            "best_lead_time_days": min(lead_times) if lead_times else None,
+            "min_moq": min(moqs) if moqs else None,
+            "has_contact_info": has_contact,
+        }
+
         # Upsert summary
         existing = db.query(VendorSightingSummary).filter_by(requirement_id=requirement_id, vendor_name=vn).first()
         if existing:
-            existing.vendor_phone = vendor_phones.get(vn)
-            existing.estimated_qty = estimated_qty
-            existing.avg_price = round(avg_price, 4) if avg_price else None
-            existing.best_price = round(best_price, 4) if best_price else None
-            existing.listing_count = len(group)
-            existing.source_types = sources
-            existing.score = round(max_score, 1) if max_score else None
-            existing.tier = _score_to_tier(max_score)
-            existing.updated_at = datetime.now(timezone.utc)
-            existing.vendor_card_id = vendor_card_ids.get(vn)
-            existing.newest_sighting_at = newest
-            existing.best_lead_time_days = min(lead_times) if lead_times else None
-            existing.min_moq = min(moqs) if moqs else None
-            existing.has_contact_info = has_contact
+            for key, value in fields.items():
+                setattr(existing, key, value)
             results.append(existing)
         else:
-            summary = VendorSightingSummary(
-                requirement_id=requirement_id,
-                vendor_name=vn,
-                vendor_phone=vendor_phones.get(vn),
-                estimated_qty=estimated_qty,
-                avg_price=round(avg_price, 4) if avg_price else None,
-                best_price=round(best_price, 4) if best_price else None,
-                listing_count=len(group),
-                source_types=sources,
-                score=round(max_score, 1) if max_score else None,
-                tier=_score_to_tier(max_score),
-                updated_at=datetime.now(timezone.utc),
-                vendor_card_id=vendor_card_ids.get(vn),
-                newest_sighting_at=newest,
-                best_lead_time_days=min(lead_times) if lead_times else None,
-                min_moq=min(moqs) if moqs else None,
-                has_contact_info=has_contact,
-            )
+            summary = VendorSightingSummary(requirement_id=requirement_id, vendor_name=vn, **fields)
             db.add(summary)
             results.append(summary)
 

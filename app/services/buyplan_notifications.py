@@ -106,6 +106,30 @@ def _lines_html(plan: BuyPlan) -> tuple[str, float]:
     return rows, total
 
 
+def _lines_table(plan: BuyPlan) -> tuple[str, float]:
+    """Build the full 6-column plan-lines HTML table (MPN/Vendor/Qty/Unit/Total/Lead).
+
+    Returns (table_html, total_cost). Shared by the submit and stock-sale emails.
+    """
+    rows, total = _lines_html(plan)
+    table = (
+        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
+        f'<thead><tr style="background:#f3f4f6">'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
+        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
+        f"</tr></thead><tbody>{rows}</tbody>"
+        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
+        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
+        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+    )
+    return table, total
+
+
 def _wrap_email(title: str, body_inner: str) -> str:
     """Wrap content in the standard AVAIL email template."""
     return (
@@ -192,7 +216,7 @@ def log_buyplan_activity(
 async def notify_submitted(plan: BuyPlan, db: Session):
     """Notify managers that a buy plan needs approval."""
     ctx = _plan_context(plan, db)
-    rows, total = _lines_html(plan)
+    table, total = _lines_table(plan)
 
     notes_html = ""
     if plan.salesperson_notes:
@@ -204,19 +228,7 @@ async def notify_submitted(plan: BuyPlan, db: Session):
         f"Quote: <strong>{html_mod.escape(ctx['quote_number'])}</strong> | "
         f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
         f"{notes_html}"
-        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
-        f'<thead><tr style="background:#f3f4f6">'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
-        f"</tr></thead><tbody>{rows}</tbody>"
-        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
-        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
-        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
-        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+        f"{table}"
     )
     html_body = _wrap_email("Buy Plan — Approval Required", body)
 
@@ -474,7 +486,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     from ..utils.graph_client import GraphClient
 
     ctx = _plan_context(plan, db)
-    rows, total = _lines_html(plan)
+    table, total = _lines_table(plan)
 
     approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
     approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
@@ -486,19 +498,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
         f'<p style="margin:0"><strong>Submitted by:</strong> {html_mod.escape(ctx["submitter_name"])}</p>'
         f'<p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html_mod.escape(str(plan.sales_order_number or "N/A"))}</p>'
         f"</div>"
-        f'<table style="border-collapse:collapse;width:100%;margin:16px 0">'
-        f'<thead><tr style="background:#f3f4f6">'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>'
-        f'<th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead</th>'
-        f"</tr></thead><tbody>{rows}</tbody>"
-        f'<tfoot><tr style="background:#f3f4f6;font-weight:bold">'
-        f'<td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>'
-        f'<td style="padding:8px 10px;border:1px solid #e5e7eb">${total:,.2f}</td>'
-        f'<td style="padding:8px 10px;border:1px solid #e5e7eb"></td></tr></tfoot></table>'
+        f"{table}"
     )
     html_body = _wrap_email("Stock Sale Approved — No PO Required", body)
 
