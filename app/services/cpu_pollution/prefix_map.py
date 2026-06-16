@@ -14,7 +14,10 @@ import re
 
 # (anchored regex on the UPPERCASED MPN, canonical commodity key). First match wins.
 PREFIX_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"^[0-9]?-?[0-9]{6,8}-[0-9]"), "connectors"),  # TE Connectivity (N-NNNNNNN-N / NNNNNNN-N)
+    # TE Connectivity: a 7-digit core + single trailing digit (NNNNNNN-N or N-NNNNNNN-N).
+    # The 7-digit core is the discriminator from HP CPU spares (6-digit core + 3-digit suffix,
+    # e.g. 726719-001) — those MUST stay in `cpu` (OEM-spare cohort), never become connectors.
+    (re.compile(r"^([0-9]-)?[0-9]{7}-[0-9]"), "connectors"),
     (re.compile(r"^(SSW|CLT|CLP|SMM|SSM|SLW|TSW|HLE|FLE|BSW)-"), "connectors"),  # Samtec series
     (re.compile(r"^NRWA"), "capacitors"),  # Nichicon Al electrolytic
     (re.compile(r"^TAJ"), "capacitors"),  # AVX/Kyocera tantalum

@@ -66,6 +66,23 @@ def test_real_cpu_is_never_reclassified(cpu_mpn):
     assert classify_polluted_mpn(cpu_mpn) is None
 
 
+@pytest.mark.parametrize(
+    "oem_spare",
+    [
+        "726719-001",  # HP CPU spare (6-digit core + 3-digit suffix) — NOT a TE connector
+        "619559-001",  # HP CPU spare
+        "L15335-001",  # HP L-series spare
+        "338-BJEU",  # Dell CPU spare
+        "0A36527",  # Lenovo/IBM FRU
+    ],
+)
+def test_oem_cpu_spares_are_not_reclassified(oem_spare):
+    # OEM CPU spares ARE (probably) CPUs but unkeyable — they stay in `cpu` (out of scope),
+    # and MUST NOT be mistaken for TE connectors by the numeric-dash rule. (Precision guard:
+    # the TE 7-digit-core rule must reject the HP 6-digit-core+3-suffix shape.)
+    assert classify_polluted_mpn(oem_spare) is None
+
+
 def test_unrecognized_and_empty_return_none():
     assert classify_polluted_mpn("ZZQW9981XYZ") is None
     assert classify_polluted_mpn("") is None
