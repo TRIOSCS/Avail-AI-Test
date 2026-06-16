@@ -55,6 +55,7 @@ _LEGACY_CATEGORY_TIER = 50
 _SOURCE_TIER_SQL_CASE = (
     "CASE c.specs_structured -> f.spec_key ->> 'source' "
     "WHEN 'manual' THEN 100 "
+    "WHEN 'cpu_pollution_fix' THEN 96 "
     "WHEN 'trio_source' THEN 95 "
     "WHEN 'digikey_api' THEN 90 "
     "WHEN 'mouser_api' THEN 90 "
