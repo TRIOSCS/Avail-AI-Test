@@ -1,9 +1,8 @@
 """tests/test_run_fru_crosswalk_nightly.py — Extra coverage for missing lines.
 
-Covers: fru_descs path in collect_creatable_cards (lines 211, 225),
-run_create limit (line 263), IntegrityError in run_create (lines 284-288),
-measure_drive_pn sample cap (line 332 break), and main() CLI paths
-(lines 370-408, 412).
+Covers: fru_descs path in collect_creatable_cards (lines 211, 225), run_create limit
+(line 263), IntegrityError in run_create (lines 284-288), measure_drive_pn sample cap
+(line 332 break), and main() CLI paths (lines 370-408, 412).
 """
 
 import os
@@ -62,7 +61,8 @@ def _link(
 
 
 def test_collect_includes_fru_enrichable_by_description_only(db_session: Session):
-    """A DRIVE_PN link with a decodable description covers the extract_desc branch (line 225)."""
+    """A DRIVE_PN link with a decodable description covers the extract_desc branch (line
+    225)."""
     seed_commodity_schemas(db_session)
     # DRIVE_PN kind → fru_models is empty for this fru_norm
     # description → fru_descs is populated (line 211)
@@ -85,7 +85,8 @@ def test_collect_includes_fru_enrichable_by_description_only(db_session: Session
 
 
 def test_collect_skips_fru_when_description_does_not_extract(db_session: Session):
-    """A DRIVE_PN link with a non-extractable description is not enrichable (covers False branch)."""
+    """A DRIVE_PN link with a non-extractable description is not enrichable (covers
+    False branch)."""
     seed_commodity_schemas(db_session)
     _link(
         db_session,
@@ -159,7 +160,8 @@ def test_run_create_handles_integrity_error_on_race_condition(db_session: Sessio
 
 
 def test_measure_drive_pn_stops_after_sample_limit(db_session: Session):
-    """With sample=1, the loop breaks after 1 decoded part (exercises the break path)."""
+    """With sample=1, the loop breaks after 1 decoded part (exercises the break
+    path)."""
     seed_commodity_schemas(db_session)
     # Two drive_pn links with decodable related parts
     for i, mpn in enumerate(["ST4000NM0035", "ST8000NM0055"]):
@@ -183,7 +185,7 @@ def test_measure_drive_pn_stops_after_sample_limit(db_session: Session):
 
 
 def test_main_default_all_phases_dry_run(monkeypatch):
-    """main() with no args runs both phases in dry-run mode."""
+    """Main() with no args runs both phases in dry-run mode."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk"])
 
     mock_db = MagicMock()
@@ -210,7 +212,7 @@ def test_main_default_all_phases_dry_run(monkeypatch):
 
 
 def test_main_drain_only(monkeypatch):
-    """main() 'drain' phase only calls run_drain, not run_create."""
+    """Main() 'drain' phase only calls run_drain, not run_create."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk", "drain"])
 
     mock_db = MagicMock()
@@ -228,7 +230,7 @@ def test_main_drain_only(monkeypatch):
 
 
 def test_main_create_only(monkeypatch):
-    """main() 'create' phase only calls run_create, not run_drain."""
+    """Main() 'create' phase only calls run_create, not run_drain."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk", "create"])
 
     mock_db = MagicMock()
@@ -252,7 +254,7 @@ def test_main_create_only(monkeypatch):
 
 
 def test_main_apply_does_not_rollback(monkeypatch):
-    """main() --apply skips the rollback at the end."""
+    """Main() --apply skips the rollback at the end."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk", "--apply"])
 
     mock_db = MagicMock()
@@ -277,7 +279,7 @@ def test_main_apply_does_not_rollback(monkeypatch):
 
 
 def test_main_measure_drive_pn_flag(monkeypatch):
-    """main() --measure-drive-pn calls measure_drive_pn_misreads and returns early."""
+    """Main() --measure-drive-pn calls measure_drive_pn_misreads and returns early."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk", "--measure-drive-pn"])
 
     mock_db = MagicMock()
@@ -308,7 +310,7 @@ def test_main_measure_drive_pn_flag(monkeypatch):
 
 
 def test_main_closes_session_on_exception(monkeypatch):
-    """main() closes db in finally even when run_drain raises."""
+    """Main() closes db in finally even when run_drain raises."""
     monkeypatch.setattr(sys, "argv", ["run_fru_crosswalk"])
 
     mock_db = MagicMock()

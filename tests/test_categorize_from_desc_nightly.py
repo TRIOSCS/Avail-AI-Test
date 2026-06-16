@@ -1,7 +1,7 @@
 """tests/test_categorize_from_desc_nightly.py — Extra coverage for missing lines.
 
-Covers: _alnum_norm(None/empty) guard, no-grammar-match counter, exception
-handler, _print_report output, and main() CLI paths (dry-run + --apply).
+Covers: _alnum_norm(None/empty) guard, no-grammar-match counter, exception handler,
+_print_report output, and main() CLI paths (dry-run + --apply).
 """
 
 import os
@@ -43,7 +43,8 @@ def _card(db: Session, mpn: str, description: str | None, category=None) -> Mate
 
 
 def test_run_dry_run_counts_no_grammar_match(db_session: Session):
-    """A real description that the grammar can't classify increments no_grammar_match."""
+    """A real description that the grammar can't classify increments
+    no_grammar_match."""
     seed_commodity_schemas(db_session)
     # This description is long enough to be "real" (>= 15 chars, differs from MPN)
     # but matches no commodity category grammar.
@@ -116,7 +117,8 @@ def _make_mock_db(summary: dict) -> MagicMock:
 
 
 def test_main_dry_run_calls_run_and_print_report(monkeypatch):
-    """main() without --apply calls run(apply=False) and _print_report, then rollback."""
+    """Main() without --apply calls run(apply=False) and _print_report, then
+    rollback."""
     monkeypatch.setattr(sys, "argv", ["categorize_from_desc"])
 
     mock_db = MagicMock()
@@ -146,7 +148,7 @@ def test_main_dry_run_calls_run_and_print_report(monkeypatch):
 
 
 def test_main_apply_calls_run_without_rollback(monkeypatch):
-    """main() with --apply calls run(apply=True) and does NOT call rollback."""
+    """Main() with --apply calls run(apply=True) and does NOT call rollback."""
     monkeypatch.setattr(sys, "argv", ["categorize_from_desc", "--apply"])
 
     mock_db = MagicMock()
@@ -175,7 +177,7 @@ def test_main_apply_calls_run_without_rollback(monkeypatch):
 
 
 def test_main_with_limit_passes_limit_to_run(monkeypatch):
-    """main() --limit N forwards the limit to run()."""
+    """Main() --limit N forwards the limit to run()."""
     monkeypatch.setattr(sys, "argv", ["categorize_from_desc", "--limit", "50"])
 
     mock_db = MagicMock()
@@ -202,7 +204,7 @@ def test_main_with_limit_passes_limit_to_run(monkeypatch):
 
 
 def test_main_closes_session_even_on_exception(monkeypatch):
-    """main() calls db.close() in finally even if run() raises."""
+    """Main() calls db.close() in finally even if run() raises."""
     monkeypatch.setattr(sys, "argv", ["categorize_from_desc"])
 
     mock_db = MagicMock()

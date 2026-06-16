@@ -1,8 +1,8 @@
 """tests/test_vendor_duplicates.py — Unit tests for app/services/vendor_duplicates.py.
 
-Covers: _fuzzy_match_pg_trgm (pg-path formatting), check_vendor_duplicate
-exact-match short-circuit, postgresql-dialect routing, pg_trgm error fallback,
-and SQLite (Python-side) fuzzy path.
+Covers: _fuzzy_match_pg_trgm (pg-path formatting), check_vendor_duplicate exact-match
+short-circuit, postgresql-dialect routing, pg_trgm error fallback, and SQLite (Python-
+side) fuzzy path.
 """
 
 import os
