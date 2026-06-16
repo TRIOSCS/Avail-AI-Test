@@ -483,7 +483,7 @@ crm.offers functions directly (no logic duplication) and re-render the panel:
   POST .../offers/{id}/mark-sold -> mark_offer_sold
   DELETE .../offers/{id}         -> delete_offer
 
-"Convert to offer" sits on the collapsed vendor row (next to Send RFQ / Mark
+"Convert to offer" sits on the collapsed vendor row (next to Build RFQ / Mark
 Unavail) and opens the modal prefilled from the VendorSightingSummary. The modal
 and the requisitions add-offer form share one field grid
 (offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
