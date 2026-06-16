@@ -224,13 +224,22 @@ def is_cpu_pollution(text: str) -> bool:
     return any(p.search(cleaned) for p in _POLLUTION)
 
 
+def _add_alt_num(found: set[str], text: str, pos: int, prefix: str) -> None:
+    """Add a dangling slash-alternate model string (``prefix`` + the alternate's number)
+    to *found* when one starts at *pos* — e.g. "GOLD 6230R/6240R" adds ``GOLD
+    6240R``."""
+    alt = _ALT_NUM.match(text, pos)
+    if alt:
+        found.add(f"{prefix}{alt.group(1)}")
+
+
 def _models(text: str) -> set[str]:
     """All normalized model strings found (any class).
 
     A dangling slash-alternate right after a model token ("E5-2620 V3/V4", "GOLD
-    6230R/6240R") expands to a SECOND model string — the row names two CPUs, so
-    unique- or-omit skips the table merge exactly as it does when both tokens are
-    lexically complete.
+    6230R/6240R") expands to a SECOND model string — the row names two CPUs, so unique-
+    or-omit skips the table merge exactly as it does when both tokens are lexically
+    complete.
     """
     found: set[str] = set()
     for m in _XEON_E.finditer(text):
@@ -240,27 +249,19 @@ def _models(text: str) -> set[str]:
         alt_vn = _ALT_VN.match(text, m.end())
         if alt_vn:
             found.add(f"{base} V{alt_vn.group(1)}")
-        alt_num = _ALT_NUM.match(text, m.end())
-        if alt_num:
-            found.add(f"E{series}-{alt_num.group(1)}")
+        _add_alt_num(found, text, m.end(), f"E{series}-")
     if not _METAL_BRAND.search(text):  # Pentium/Athlon Gold-Silver never read as Scalable
         for m in _XEON_SCALABLE.finditer(text):
             found.add(f"{m.group(1)} {m.group(2)}")
-            alt_num = _ALT_NUM.match(text, m.end())
-            if alt_num:
-                found.add(f"{m.group(1)} {alt_num.group(1)}")
+            _add_alt_num(found, text, m.end(), f"{m.group(1)} ")
     for m in _XEON_SCALABLE_HP.finditer(text):
         found.add(f"{_HP_SCALABLE_LETTER[m.group(1)]} {m.group(2)}")
     for m in _CORE_I_MODEL.finditer(text):
         found.add(f"I{m.group(1)}-{m.group(2)}{m.group(3)}")
-        alt_num = _ALT_NUM.match(text, m.end())
-        if alt_num:
-            found.add(f"I{m.group(1)}-{alt_num.group(1)}")
+        _add_alt_num(found, text, m.end(), f"I{m.group(1)}-")
     for m in _EPYC_MODEL.finditer(text):
         found.add(f"EPYC {m.group(1)}")
-        alt_num = _ALT_NUM.match(text, m.end())
-        if alt_num:
-            found.add(f"EPYC {alt_num.group(1)}")
+        _add_alt_num(found, text, m.end(), "EPYC ")
     for m in _RYZEN_MODEL.finditer(text):
         found.add(f"RYZEN {m.group(1)} {m.group(2)}")
     return found
