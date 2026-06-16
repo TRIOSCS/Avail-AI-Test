@@ -4,6 +4,7 @@
    Called by: quote_builder.py quote_builder_modal endpoint.
    Depends on: Alpine.js quoteBuilder component, brand palette, compact-table CSS.
 #}
+{%- import "htmx/partials/quote_builder/_macros.html" as qb %}
 
 <div class="flex flex-col h-full"
      x-data="quoteBuilder([], {{ req.id }}, {{ has_customer_site | tojson }}, '{{ requirement_ids }}', '{{ multi_req_ids | default("", true) }}')"
@@ -129,9 +130,9 @@
 
       {# Keyboard hints #}
       <div class="px-4 py-2 border-t border-brand-100 text-[10px] text-gray-400 flex gap-3 flex-shrink-0">
-        <span><kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">j</kbd>/<kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">k</kbd> Nav</span>
-        <span><kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">1</kbd>-<kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">9</kbd> Offer</span>
-        <span><kbd class="px-1 py-0.5 bg-gray-100 rounded text-[9px] font-mono border border-gray-200">Enter</kbd> Confirm</span>
+        <span>{{ qb.kbd("j") }}/{{ qb.kbd("k") }} Nav</span>
+        <span>{{ qb.kbd("1") }}-{{ qb.kbd("9") }} Offer</span>
+        <span>{{ qb.kbd("Enter") }} Confirm</span>
       </div>
     </div>
 
@@ -149,38 +150,14 @@
         <div class="bg-gray-50 rounded-lg border border-brand-100 px-4 py-3">
           <h3 class="text-[10px] font-semibold uppercase tracking-wider text-brand-400 mb-2">Customer Requirements</h3>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-x-6 gap-y-1.5">
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Qty Needed</span>
-              <p class="text-sm font-mono font-semibold text-gray-900" x-text="activeLine.target_qty?.toLocaleString() || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Target Price</span>
-              <p class="text-sm font-mono font-semibold text-gray-900" x-text="activeLine.target_price ? '$' + activeLine.target_price.toFixed(4) : '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Date Codes</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.date_codes || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Condition</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.condition || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Packaging</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.packaging || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Firmware</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.firmware || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">HW Codes</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.hardware_codes || '—'"></p>
-            </div>
-            <div>
-              <span class="text-[10px] text-gray-400 uppercase tracking-wide">Customer PN</span>
-              <p class="text-sm font-mono text-gray-900" x-text="activeLine.customer_pn || '—'"></p>
-            </div>
+            {{ qb.spec_field("Qty Needed", "activeLine.target_qty?.toLocaleString() || '—'", emphasis=True) }}
+            {{ qb.spec_field("Target Price", "activeLine.target_price ? '$' + activeLine.target_price.toFixed(4) : '—'", emphasis=True) }}
+            {{ qb.spec_field("Date Codes", "activeLine.date_codes || '—'") }}
+            {{ qb.spec_field("Condition", "activeLine.condition || '—'") }}
+            {{ qb.spec_field("Packaging", "activeLine.packaging || '—'") }}
+            {{ qb.spec_field("Firmware", "activeLine.firmware || '—'") }}
+            {{ qb.spec_field("HW Codes", "activeLine.hardware_codes || '—'") }}
+            {{ qb.spec_field("Customer PN", "activeLine.customer_pn || '—'") }}
           </div>
           <template x-if="activeLine.sale_notes" x-cloak>
             <div class="mt-2 pt-2 border-t border-brand-100">
