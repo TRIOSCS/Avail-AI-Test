@@ -15,6 +15,7 @@ Depends on: all ics_worker modules, database
 import asyncio
 import hashlib
 import signal
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -38,6 +39,22 @@ def _handle_shutdown(signum, frame):
 
 signal.signal(signal.SIGTERM, _handle_shutdown)
 signal.signal(signal.SIGINT, _handle_shutdown)
+
+
+@contextmanager
+def _db_session():
+    """Open a short-lived DB session and guarantee it is closed.
+
+    Wraps the ``db = SessionLocal(); try: ... finally: db.close()`` boilerplate the
+    main loop repeats on every status/heartbeat write.
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def update_worker_status(db: Session, **kwargs):
@@ -97,12 +114,9 @@ async def main():
     logger.info("ICS worker starting...")
 
     # Recover stale items from previous crash
-    db = SessionLocal()
-    try:
+    with _db_session() as db:
         recover_stale_searches(db)
         update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
-    finally:
-        db.close()
 
     # Start browser session
     session = IcsSessionManager(config)
@@ -110,22 +124,16 @@ async def main():
         await session.start()
     except Exception as e:
         logger.error("ICS worker: failed to start browser session: {}", e)
-        db = SessionLocal()
-        try:
+        with _db_session() as db:
             update_worker_status(db, is_running=False)
-        finally:
-            db.close()
         return
 
     if not session.is_logged_in:
         if not await session.login():
             logger.error("ICS worker: initial login failed, exiting")
             await session.stop()
-            db = SessionLocal()
-            try:
+            with _db_session() as db:
                 update_worker_status(db, is_running=False)
-            finally:
-                db.close()
             return
 
     logger.info("ICS worker: browser session ready")
@@ -139,11 +147,8 @@ async def main():
             try:
                 # Refresh liveness heartbeat every tick — runs on ALL paths
                 # (idle, cap-sleep, breaker-open, off-hours), not just searches.
-                db = SessionLocal()
-                try:
+                with _db_session() as db:
                     _record_heartbeat(db)
-                finally:
-                    db.close()
 
                 now_eastern = datetime.now(EASTERN)
 
@@ -157,8 +162,7 @@ async def main():
                             sightings_today,
                         )
                         # Update daily stats in worker status
-                        db = SessionLocal()
-                        try:
+                        with _db_session() as db:
                             update_worker_status(
                                 db,
                                 daily_stats_json={
@@ -169,8 +173,6 @@ async def main():
                                 searches_today=0,
                                 sightings_today=0,
                             )
-                        finally:
-                            db.close()
                     searches_today = 0
                     sightings_today = 0
                     last_stats_date = today_date
@@ -191,15 +193,12 @@ async def main():
                 if breaker.should_stop():
                     info = breaker.get_trip_info()
                     logger.error("ICS worker: circuit breaker open ({}), sleeping 1hr", info["trip_reason"])
-                    db = SessionLocal()
-                    try:
+                    with _db_session() as db:
                         update_worker_status(
                             db,
                             circuit_breaker_open=True,
                             circuit_breaker_reason=info["trip_reason"],
                         )
-                    finally:
-                        db.close()
                     await asyncio.sleep(60 * 60)
                     continue
 
@@ -212,13 +211,11 @@ async def main():
                     continue
 
                 # Run AI gate for any pending items
-                db = SessionLocal()
-                try:
-                    await process_ai_gate(db)
-                except Exception as e:
-                    logger.error("ICS worker: AI gate error: {}", e)
-                finally:
-                    db.close()
+                with _db_session() as db:
+                    try:
+                        await process_ai_gate(db)
+                    except Exception as e:
+                        logger.error("ICS worker: AI gate error: {}", e)
 
                 # Get next queued item
                 db = SessionLocal()
@@ -329,11 +326,8 @@ async def main():
             sightings_today,
         )
         await session.stop()
-        db = SessionLocal()
-        try:
+        with _db_session() as db:
             update_worker_status(db, is_running=False)
-        finally:
-            db.close()
 
 
 if __name__ == "__main__":  # pragma: no cover

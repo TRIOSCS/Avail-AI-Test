@@ -38,7 +38,8 @@ class CircuitBreaker(CircuitBreakerBase):
             return "UNEXPECTED_REDIRECT"
 
         # Login page = session expired (normal, handled by session_manager)
-        if "login.aspx" in url.lower() or "login" in url.lower().split("/")[-1]:
+        url_lower = url.lower()
+        if "login.aspx" in url_lower or "login" in url_lower.split("/")[-1]:
             return "SESSION_EXPIRED"
 
         # Captcha detection
