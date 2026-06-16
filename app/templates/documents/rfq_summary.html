@@ -1,32 +1,12 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<title>RFQ Summary — {{ requisition.name }}</title>
-<style>
-  @page { size: letter; margin: 1in 0.75in; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
-  h1 { font-size: 18pt; color: #1a365d; margin-bottom: 4px; }
-  h2 { font-size: 13pt; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
-  .subtitle { color: #718096; font-size: 10pt; margin-bottom: 16px; }
-  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10pt; }
-  th { background: #edf2f7; color: #2d3748; text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e0; }
-  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
-  tr:nth-child(even) td { background: #f7fafc; }
-  .meta-table { width: auto; margin-bottom: 16px; }
-  .meta-table td { border: none; padding: 2px 12px 2px 0; }
-  .meta-label { font-weight: bold; color: #4a5568; }
-  .footer { margin-top: 24px; font-size: 9pt; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
-  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9pt; font-weight: bold; }
+{% extends "documents/_report.html" %}
+{% block title %}RFQ Summary — {{ requisition.name }}{% endblock %}
+{% block styles_after_footer %}  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9pt; font-weight: bold; }
   .badge-active { background: #c6f6d5; color: #276749; }
   .badge-closed { background: #fed7d7; color: #9b2c2c; }
-</style>
-</head>
-<body>
-  <h1>{{ requisition.name | e }}</h1>
-  <p class="subtitle">RFQ Summary Report — Generated {{ generated_at }}</p>
-
-  <h2>Requisition Details</h2>
+{% endblock %}
+{% block heading %}{{ requisition.name | e }}{% endblock %}
+{% block subtitle %}RFQ Summary Report{% endblock %}
+{% block content %}  <h2>Requisition Details</h2>
   <table class="meta-table">
     <tr><td class="meta-label">Customer</td><td>{{ (requisition.customer_name | e) or '—' }}</td></tr>
     <tr><td class="meta-label">Status</td><td><span class="badge badge-{{ 'active' if requisition.status in ('active','open','sourcing') else 'closed' }}">{{ requisition.status }}</span></td></tr>
@@ -73,9 +53,4 @@
     </tbody>
   </table>
   {% endif %}
-
-  <div class="footer">
-    AVAIL — Trio Supply Chain Solutions | Confidential | {{ generated_at }}
-  </div>
-</body>
-</html>
+{% endblock %}
