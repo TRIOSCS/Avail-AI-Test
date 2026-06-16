@@ -52,12 +52,17 @@ def parse_quantity(text: str) -> int | None:
         return None
 
 
+def _empty_company() -> dict:
+    """Empty company-info dict (keys: name, email, phone, company_id)."""
+    return {"name": "", "email": "", "phone": "", "company_id": ""}
+
+
 def _extract_company_info(block) -> dict:
     """Extract company info from a .flex or company info block.
 
     Returns dict with keys: name, email, phone, company_id.
     """
-    info = {"name": "", "email": "", "phone": "", "company_id": ""}
+    info = _empty_company()
 
     # Company name — usually in a bold/link element
     name_el = block.find("a", href=re.compile(r"OpenProfile", re.I))
@@ -101,7 +106,7 @@ def parse_results_html(html: str) -> list[IcsSighting]:
     soup = BeautifulSoup(html, "html.parser")
     sightings = []
     current_date = ""
-    current_company = {"name": "", "email": "", "phone": "", "company_id": ""}
+    current_company = _empty_company()
 
     # Strategy: iterate through all elements, tracking context
     # Look for date groups, company blocks, and result rows
@@ -130,12 +135,13 @@ def parse_results_html(html: str) -> list[IcsSighting]:
                 # Extract cell texts
                 cell_texts = [c.get_text(strip=True) for c in cells]
 
-                # ICsource columns: Part#, Comments, Qty, Price, MFG, D/C, Stock
-                part_number = cell_texts[0] if len(cell_texts) > 0 else ""
-                description = cell_texts[1] if len(cell_texts) > 1 else ""
-                qty_text = cell_texts[2] if len(cell_texts) > 2 else ""
-                price = cell_texts[3] if len(cell_texts) > 3 else ""
-                manufacturer = cell_texts[4] if len(cell_texts) > 4 else ""
+                # ICsource columns: Part#, Comments, Qty, Price, MFG, D/C, Stock.
+                # The `< 5` guard above guarantees indices 0-4 exist.
+                part_number = cell_texts[0]
+                description = cell_texts[1]
+                qty_text = cell_texts[2]
+                price = cell_texts[3]
+                manufacturer = cell_texts[4]
                 date_code = cell_texts[5] if len(cell_texts) > 5 else ""
 
                 # Stock column — check for checkmark image or text
