@@ -70,3 +70,55 @@ def test_unrecognized_and_empty_return_none():
     assert classify_polluted_mpn("ZZQW9981XYZ") is None
     assert classify_polluted_mpn("") is None
     assert classify_polluted_mpn(None) is None
+
+
+from sqlalchemy.orm import Session
+
+from app.models import MaterialCard
+from app.services.commodity_registry import seed_commodity_schemas
+
+
+def _cpu_card(db: Session, mpn: str) -> MaterialCard:
+    card = MaterialCard(normalized_mpn=mpn.lower(), display_mpn=mpn, category="cpu")
+    card.category_source = "trio_source"
+    card.category_tier = 95
+    db.add(card)
+    db.flush()
+    return card
+
+
+def test_cli_dry_run_changes_nothing_but_reports(db_session: Session):
+    from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
+    seed_commodity_schemas(db_session)
+    te = _cpu_card(db_session, "5-1437720-3")
+    db_session.commit()
+    stats = reclassify_cpu_pollution(db_session, apply=False)
+    db_session.refresh(te)
+    assert stats["reclassified"] == 1
+    assert stats["by_commodity"] == {"connectors": 1}
+    assert te.category == "cpu"  # dry-run: unchanged
+
+
+def test_cli_apply_reclassifies_pollution_only(db_session: Session):
+    from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
+    seed_commodity_schemas(db_session)
+    te = _cpu_card(db_session, "5-1437720-3")  # TE connector
+    cpu = _cpu_card(db_session, "SR3QS")  # real Intel CPU
+    dram = MaterialCard(normalized_mpn="d1", display_mpn="5-9999999-9", category="dram")
+    dram.category_source = "trio_source"
+    dram.category_tier = 95
+    db_session.add(dram)
+    db_session.flush()
+    db_session.commit()
+
+    stats = reclassify_cpu_pollution(db_session, apply=True)
+    for c in (te, cpu, dram):
+        db_session.refresh(c)
+    assert te.category == "connectors"
+    assert te.category_source == "cpu_pollution_fix"
+    assert te.category_tier == 96
+    assert cpu.category == "cpu"  # real CPU untouched
+    assert dram.category == "dram"  # non-cpu bucket untouched (CLI scopes to category='cpu')
+    assert stats["reclassified"] == 1
