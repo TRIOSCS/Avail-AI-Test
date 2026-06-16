@@ -69,6 +69,12 @@ DESC_CONFIDENCE = 0.90  # deterministic token grammar. Arbitration is by the F1 
 PARTSURFER_DESC_SOURCE = "partsurfer_desc"
 PARTSURFER_DESC_CONFIDENCE = 0.90
 
+# Distributor-connector description: the same desc grammar run over a DigiKey/Mouser/
+# element14/OEMSecrets/Nexar product description we ALREADY fetch (not the card's own).
+# Outranks desc_parse (spec_tiers.SOURCE_TIER: connector_desc=84 > desc_parse 83).
+CONNECTOR_DESC_SOURCE = "connector_desc"
+CONNECTOR_DESC_CONFIDENCE = 0.90
+
 # The only commodities the extractor fills specs for — single source of truth shared
 # by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
 # set). The PSU-vs-CPU wattage guard is structural: only extract_psu can emit the
