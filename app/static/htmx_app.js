@@ -86,33 +86,49 @@ Alpine.plugin(resize);     // x-resize
 window.htmx = htmx;
 window.Alpine = Alpine;
 
+// ── Shared helpers ───────────────────────────────────────────
+// starlette_csrf sets the csrftoken cookie on every response and requires the
+// matching x-csrftoken header on POST/PUT/PATCH/DELETE.
+function csrfToken() {
+    return document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+}
+
+// Set the global toast store ({ message, type, show }) in one call. `show` is a
+// boolean field, not a method.
+function showToast(message, type = 'info') {
+    const toast = Alpine.store('toast');
+    toast.message = message;
+    toast.type = type;
+    toast.show = true;
+}
+
+// Append to a capped (last-10) Alpine store log used by trouble tickets.
+function pushCappedLog(storeName, entry) {
+    const log = Alpine.store(storeName).entries;
+    log.push({ ...entry, ts: new Date().toISOString() });
+    if (log.length > 10) log.shift();
+}
+
 // ── Global Alpine stores ─────────────────────────────────────
 Alpine.store('toast', { message: '', type: 'info', show: false });
 
 Alpine.store('errorLog', { entries: [] });
 window.onerror = function(msg, src, line, col) {
-    var log = Alpine.store('errorLog').entries;
-    log.push({ msg: String(msg), src: src, line: line, col: col, ts: new Date().toISOString() });
-    if (log.length > 10) log.shift();
+    pushCappedLog('errorLog', { msg: String(msg), src: src, line: line, col: col });
 };
 window.onunhandledrejection = function(e) {
-    var log = Alpine.store('errorLog').entries;
-    log.push({ msg: String(e.reason), ts: new Date().toISOString() });
-    if (log.length > 10) log.shift();
+    pushCappedLog('errorLog', { msg: String(e.reason) });
 };
 
 // ── Network log capture for trouble tickets ──────────────────
 Alpine.store('networkLog', { entries: [] });
 
 htmx.on('htmx:afterRequest', function(evt) {
-    var log = Alpine.store('networkLog').entries;
-    log.push({
+    pushCappedLog('networkLog', {
         url: evt.detail.pathInfo.requestPath,
         method: evt.detail.requestConfig.verb.toUpperCase(),
         status: evt.detail.xhr.status,
-        ts: new Date().toISOString()
     });
-    if (log.length > 10) log.shift();
 });
 
 Alpine.store('shortlist', {
@@ -159,9 +175,9 @@ htmx.config.timeout = 15000;  // 15s timeout — prevents requests from hanging 
 // starlette_csrf middleware requires x-csrftoken header on POST/PUT/PATCH/DELETE.
 // The csrftoken cookie is set by the middleware on every response.
 document.body.addEventListener('htmx:configRequest', (evt) => {
-    const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
-    if (csrfCookie) {
-        evt.detail.headers['x-csrftoken'] = csrfCookie;
+    const csrf = csrfToken();
+    if (csrf) {
+        evt.detail.headers['x-csrftoken'] = csrf;
     }
 });
 
@@ -185,13 +201,8 @@ document.body.addEventListener('click', (evt) => {
         origin: 'cdm_workspace',
     };
     const headers = { 'Content-Type': 'application/json' };
-    const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
-    if (csrfCookie) headers['x-csrftoken'] = csrfCookie;
-    const showOutreachToast = (message, type) => {
-        Alpine.store('toast').message = message;
-        Alpine.store('toast').type = type;
-        Alpine.store('toast').show = true;
-    };
+    const csrf = csrfToken();
+    if (csrf) headers['x-csrftoken'] = csrf;
     // Refresh the CDM account list (if on the workspace) so the logged touch
     // is immediately visible in the staleness sort/labels. This refresh is
     // SYSTEM-initiated mid-workflow: unlike a user filter change it must not
@@ -224,7 +235,7 @@ document.body.addEventListener('click', (evt) => {
         keepalive: true,
     }).then(async (resp) => {
         if (!resp.ok) {
-            showOutreachToast(
+            showToast(
                 resp.status === 429
                     ? 'Outreach NOT logged — rate limit hit, wait a minute'
                     : 'Outreach NOT logged (error ' + resp.status + ')',
@@ -247,7 +258,7 @@ document.body.addEventListener('click', (evt) => {
                 // Logged, but the server dropped stale entity links — the touch
                 // exists yet won't show on this account, so don't claim success
                 // (and skip the list refresh: nothing changed for this view).
-                showOutreachToast(
+                showToast(
                     'Outreach logged, but the ' + droppedLinks.join('/') +
                     ' link no longer exists — refresh the page',
                     'warning'
@@ -255,7 +266,7 @@ document.body.addEventListener('click', (evt) => {
                 return;
             }
             const labels = { phone: 'Call', email: 'Email', teams: 'Teams message', wechat: 'WeChat message' };
-            showOutreachToast(
+            showToast(
                 (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
                 'success'
             );
@@ -265,15 +276,13 @@ document.body.addEventListener('click', (evt) => {
         }
     }).catch((err) => {
         console.error('[outreach-log] failed', err);
-        showOutreachToast('Outreach NOT logged — network error', 'error');
+        showToast('Outreach NOT logged — network error', 'error');
     });
 });
 
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
-    Alpine.store('toast').message = 'Request failed. Please try again.';
-    Alpine.store('toast').type = 'error';
-    Alpine.store('toast').show = true;
+    showToast('Request failed. Please try again.', 'error');
 });
 
 // ── Server-driven toast bridge ───────────────────────────────
@@ -285,10 +294,7 @@ document.body.addEventListener('showToast', (evt) => {
     const d = evt.detail;
     const msg = typeof d === 'string' ? d : (d && d.message) || '';
     if (!msg) return;
-    const type = (d && d.type) || 'info';
-    Alpine.store('toast').message = msg;
-    Alpine.store('toast').type = type;
-    Alpine.store('toast').show = true;
+    showToast(msg, (d && d.type) || 'info');
 });
 
 // Stale-response guard: HTMX swaps can arrive out of order when the user
@@ -328,9 +334,7 @@ htmx.on('htmx:afterRequest', function(evt) {
 
 // ── Clear stuck loading/swapping states after errors or timeouts ──
 htmx.on('htmx:timeout', (evt) => {
-    Alpine.store('toast').message = 'Request timed out. Please try again.';
-    Alpine.store('toast').type = 'error';
-    Alpine.store('toast').show = true;
+    showToast('Request timed out. Please try again.', 'error');
 });
 
 // Safety net: after ANY request ends (success, error, or abort), force-clear
@@ -342,9 +346,7 @@ htmx.on('htmx:afterRequest', function(evt) {
 htmx.on('htmx:sendError', function(evt) {
     var elt = evt.detail.elt;
     if (elt) elt.classList.remove('htmx-request', 'htmx-swapping');
-    Alpine.store('toast').message = 'Network error. Check your connection.';
-    Alpine.store('toast').type = 'error';
-    Alpine.store('toast').show = true;
+    showToast('Network error. Check your connection.', 'error');
 });
 
 // ── 401 → redirect to login ─────────────────────────────────
@@ -385,6 +387,17 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
     _startX: 0,
     _startWidth: 0,
 
+    // Shared resize math for both mouse and touch drags: clamp leftWidth to 20–70%
+    // based on the pointer's distance from the drag start.
+    _applyDrag(clientX) {
+        if (!this._resizing) return;
+        const container = document.getElementById('split-' + panelId);
+        if (!container) return;
+        const dx = clientX - this._startX;
+        const newPct = this._startWidth + (dx / container.offsetWidth) * 100;
+        this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
+    },
+
     startResize(e) {
         this._resizing = true;
         this._startX = e.clientX;
@@ -392,15 +405,7 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
         document.body.style.cursor = 'col-resize';
         document.body.style.userSelect = 'none';
 
-        const onMove = (ev) => {
-            if (!this._resizing) return;
-            const container = document.getElementById('split-' + panelId);
-            if (!container) return;
-            const dx = ev.clientX - this._startX;
-            const containerW = container.offsetWidth;
-            const newPct = this._startWidth + (dx / containerW) * 100;
-            this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
-        };
+        const onMove = (ev) => this._applyDrag(ev.clientX);
 
         const onUp = () => {
             this._resizing = false;
@@ -421,16 +426,7 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
         this._startX = touch.clientX;
         this._startWidth = this.leftWidth;
 
-        const onTouchMove = (ev) => {
-            if (!this._resizing) return;
-            const t = ev.touches[0];
-            const container = document.getElementById('split-' + panelId);
-            if (!container) return;
-            const dx = t.clientX - this._startX;
-            const containerW = container.offsetWidth;
-            const newPct = this._startWidth + (dx / containerW) * 100;
-            this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
-        };
+        const onTouchMove = (ev) => this._applyDrag(ev.touches[0].clientX);
 
         const onTouchEnd = () => {
             this._resizing = false;
@@ -964,9 +960,7 @@ Alpine.data('materialsFilter', () => ({
     if (this.q) params.set('q', this.q);
     // Persist the trust ladder only when it differs from the default set, so
     // clean URLs stay clean. An empty selection is meaningful → always written.
-    const isDefault = this.statuses.length === this.DEFAULT_STATUSES.length
-      && this.DEFAULT_STATUSES.every(s => this.statuses.includes(s));
-    if (!isDefault) params.set('statuses', this.statuses.join(','));
+    if (this.confidenceNarrowed) params.set('statuses', this.statuses.join(','));
     if (this.lifecycle.length > 0) params.set('lifecycle', this.lifecycle.join(','));
     if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
     if (this.condition.length > 0) params.set('condition', this.condition.join(','));
@@ -1668,12 +1662,11 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
       };
     });
     try {
-      const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
       const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/save`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-CSRFToken': csrfToken,
+          'X-CSRFToken': csrfToken(),
         },
         body: JSON.stringify({
           lines: linePayload,
@@ -1685,9 +1678,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
         this.quoteId = data.quote_id;
         this.quoteNumber = data.quote_number;
         this.saved = true;
-        Alpine.store('toast').message = `Quote ${data.quote_number} saved`;
-        Alpine.store('toast').type = 'success';
-        Alpine.store('toast').show = true;
+        showToast(`Quote ${data.quote_number} saved`, 'success');
       } else {
         this.saveError = data.error || data.detail || 'Save failed';
       }
@@ -1909,10 +1900,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     spinner?.classList.add('htmx-request');
     try {
       // starlette_csrf requires the x-csrftoken header on POST (mirrors confirmSend).
-      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
       const resp = await fetch('/v2/partials/sightings/composer-vendor', {
         method: 'POST',
-        headers: { 'x-csrftoken': csrf },
+        headers: { 'x-csrftoken': csrfToken() },
         body: form,
       });
       if (!resp.ok) {
@@ -2012,10 +2002,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     try {
       // Raw fetch so we can read the result headers below. starlette_csrf requires the
       // x-csrftoken header on POST (mirrors quoteBuilder).
-      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
       const resp = await fetch('/v2/partials/sightings/send-inquiry', {
         method: 'POST',
-        headers: { 'x-csrftoken': csrf },
+        headers: { 'x-csrftoken': csrfToken() },
         body: this._form(),
       });
       if (!resp.ok) throw new Error('HTTP ' + resp.status);

@@ -128,13 +128,13 @@ document.addEventListener('alpine:init', () => {
     },
 
     onTableSwap(event) {
-      if (event.detail && event.detail.target && event.detail.target.id === 'rq2-table') {
+      if (event.detail?.target?.id === 'rq2-table') {
         this.selectedIds = new Set();
       }
     },
 
     showToast(event) {
-      const msg = event.detail && event.detail.message ? event.detail.message : 'Done';
+      const msg = event.detail?.message || 'Done';
       this.toasts.push(msg);
       setTimeout(() => {
         const idx = this.toasts.indexOf(msg);
