@@ -123,7 +123,7 @@ async def enrich_contacts_websearch(
             try:
                 validated_contact = EnrichedContact.model_validate(item)
                 raw_contacts.append(validated_contact.model_dump())
-            except (ValidationError, Exception):
+            except Exception:
                 if isinstance(item, dict) and item.get("full_name"):
                     raw_contacts.append(item)
 
@@ -132,15 +132,10 @@ async def enrich_contacts_websearch(
             continue
 
         email = (c.get("email") or "").strip().lower() or None
-        confidence = "low"
 
-        # Confidence assessment
-        if email and domain and domain in email:
-            confidence = "medium"  # Email matches company domain
-        elif email:
-            confidence = "medium"
-        elif c.get("linkedin_url"):
-            confidence = "low"
+        # A verified email (whether or not it matches the company domain) earns
+        # "medium"; anything weaker (a LinkedIn URL only, or nothing) stays "low".
+        confidence = "medium" if email else "low"
 
         contacts.append(
             {
@@ -271,18 +266,21 @@ async def draft_rfq(
     Returns:
         Email body string, or None on failure
     """
+
+    def format_parts(items: list[dict]) -> str:
+        return "\n".join(
+            f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
+            + (f" (target: ${p['target_price']})" if p.get("target_price") else "")
+            for p in items[:20]
+        )
+
     # If buyer provided their own draft, clean it up instead of generating from scratch
     if user_draft:
         user_draft = user_draft[:12000]
-        parts_str = "\n".join(
-            f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
-            + (f" (target: ${p['target_price']})" if p.get("target_price") else "")
-            for p in parts[:20]
-        )
         cleanup_prompt = (
             f"Clean up this buyer's RFQ email draft. Fix grammar/formatting, "
             f"ensure all parts are referenced, preserve the buyer's tone.\n\n"
-            f"Parts:\n{parts_str}\n\n"
+            f"Parts:\n{format_parts(parts)}\n\n"
             f"Buyer's draft:\n{user_draft}"
         )
         from app.utils.llm_router import routed_text as _routed_text
@@ -300,11 +298,7 @@ async def draft_rfq(
             f"- Best past price for this part: {vendor_history.get('best_price', 'unknown')}\n"
         )
 
-    parts_str = "\n".join(
-        f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
-        + (f" (target: ${p['target_price']})" if p.get("target_price") else "")
-        for p in parts[:20]
-    )
+    parts_str = format_parts(parts)
 
     prompt = (
         f"Vendor: {vendor_name}\n"

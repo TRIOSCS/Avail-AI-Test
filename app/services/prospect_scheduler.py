@@ -36,6 +36,25 @@ def _ensure_utc(dt: datetime | None) -> datetime | None:
     return dt
 
 
+def _has_strong_intent(signals: dict) -> bool:
+    """True when the readiness signals carry a strong/moderate intent strength."""
+    intent = signals.get("intent", {})
+    return isinstance(intent, dict) and intent.get("strength") in ("strong", "moderate")
+
+
+def _persist_discovery_results(db: Session, batch: DiscoveryBatch, results: list) -> int:
+    """Add discovery results to the session as ProspectAccount rows; return the count.
+
+    Each result may be a Pydantic model (has ``model_dump``) or a plain dict. Caller is
+    responsible for committing.
+    """
+    for r in results:
+        pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
+        pa.discovery_batch_id = batch.id
+        db.add(pa)
+    return len(results)
+
+
 # ── Discovery Slice Rotation ─────────────────────────────────────────
 
 DISCOVERY_ROTATION = [
@@ -141,11 +160,7 @@ async def job_discover_prospects() -> dict:
 
             existing_domains = {d[0] for d in db.query(ProspectAccount.domain).limit(10000).all() if d[0]}
             results = await run_explorium_discovery_batch(batch_id, existing_domains)
-            for r in results:
-                pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
-                pa.discovery_batch_id = batch.id
-                db.add(pa)
-            explorium_count = len(results)
+            explorium_count = _persist_discovery_results(db, batch, results)
             db.commit()
         except Exception as e:
             logger.exception("Explorium discovery failed: {}", e)
@@ -158,11 +173,7 @@ async def job_discover_prospects() -> dict:
 
             graph = get_graph_client()
             email_results = await run_email_mining_batch(batch_id, graph, db)
-            for r in email_results:
-                pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
-                pa.discovery_batch_id = batch.id
-                db.add(pa)
-            email_count = len(email_results)
+            email_count = _persist_discovery_results(db, batch, email_results)
             db.commit()
         except Exception as e:
             logger.exception("Email mining failed: {}", e)
@@ -361,9 +372,7 @@ async def job_expire_and_resurface() -> dict:
             if (p.readiness_score or 0) > 60:
                 continue
             # Don't expire active intent signals
-            signals = p.readiness_signals or {}
-            intent = signals.get("intent", {})
-            if isinstance(intent, dict) and intent.get("strength") in ("strong", "moderate"):
+            if _has_strong_intent(p.readiness_signals or {}):
                 continue
 
             p.status = "expired"
@@ -385,11 +394,8 @@ async def job_expire_and_resurface() -> dict:
         resurfaced_count = 0
         for p in resurface_candidates:
             signals = p.readiness_signals or {}
-            intent = signals.get("intent", {})
             hiring = signals.get("hiring", {})
-            has_fresh_signals = (isinstance(intent, dict) and intent.get("strength") in ("strong", "moderate")) or (
-                isinstance(hiring, dict) and hiring.get("type")
-            )
+            has_fresh_signals = _has_strong_intent(signals) or (isinstance(hiring, dict) and hiring.get("type"))
             if has_fresh_signals and (p.readiness_score or 0) >= 40:
                 p.status = ProspectAccountStatus.SUGGESTED
                 p.dismissed_by = None

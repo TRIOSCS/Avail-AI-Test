@@ -43,6 +43,11 @@ _SYSTEM = (
 )
 
 
+def _empty_stats() -> dict:
+    """Zeroed spec-enrichment stats dict (single source of truth for the shape)."""
+    return {"cards_processed": 0, "specs_written": 0, "cards_with_specs": 0, "errors": 0, "skipped_no_schema": 0}
+
+
 def build_spec_prompt(category: str, cards: list[dict]) -> str:
     """Build a commodity-specific spec extraction prompt."""
     schema = COMMODITY_SPECS[category]
@@ -149,7 +154,7 @@ async def enrich_card_specs(
         query = query.filter(MaterialCard.specs_enriched_at.is_(None))
     cards = query.all()
 
-    stats = {"cards_processed": 0, "specs_written": 0, "cards_with_specs": 0, "errors": 0, "skipped_no_schema": 0}
+    stats = _empty_stats()
 
     by_cat: dict[str, list[MaterialCard]] = {}
     for c in cards:
@@ -289,5 +294,5 @@ async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int
     )
     card_ids = [r[0] for r in rows]
     if not card_ids:
-        return {"cards_processed": 0, "specs_written": 0, "cards_with_specs": 0, "errors": 0, "skipped_no_schema": 0}
+        return _empty_stats()
     return await enrich_card_specs(card_ids, db, force=False, batch_size=batch_size)

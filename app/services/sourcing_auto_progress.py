@@ -55,7 +55,6 @@ def auto_progress_status(
         )
         return False
 
-    old_status = requirement.sourcing_status
     requirement.sourcing_status = target_status
 
     # Log status change
@@ -66,14 +65,14 @@ def auto_progress_status(
             user_id=user_id,
             activity_type=ActivityType.STATUS_CHANGED,
             channel=Channel.SYSTEM,
-            notes=f"Auto-progressed from {old_status} to {target_status}",
+            notes=f"Auto-progressed from {current} to {target_status}",
         )
     )
 
     logger.info(
         "Auto-progressed requirement {}: {} → {}",
         requirement.id,
-        old_status,
+        current,
         target_status,
     )
     return True

@@ -64,14 +64,13 @@ async def run_customer_enrichment_batch(
             logger.info("All credit budgets exhausted — stopping batch early at {}/{}", processed, len(gaps))
             break
 
+        processed += 1
         try:
             result = await enrich_customer_account(gap["company_id"], db, force=False)
-            processed += 1
             if result.get("ok") and result.get("contacts_added", 0) > 0:
                 enriched += 1
             db.flush()
         except Exception as e:
-            processed += 1
             errors.append(f"Company {gap['company_id']}: {str(e)[:100]}")
             logger.warning("Batch enrichment error for company {}: {}", gap["company_id"], e)
 

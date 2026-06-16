@@ -70,6 +70,17 @@ class ResolverResult:
     citations: list[dict] = field(default_factory=list)
     source: ResolverSource = "none"
 
+    @classmethod
+    def from_pending(cls, pending: OemSpecCodePending) -> ResolverResult:
+        """Build a ``pending``/``source="llm"`` result from a persisted pending row."""
+        return cls(
+            status="pending",
+            avl=list(pending.proposed_avl or []),
+            confidence=pending.llm_confidence,
+            citations=list(pending.citations or []),
+            source="llm",
+        )
+
 
 _SYSTEM_PROMPT = """You are a parts-engineering expert with deep knowledge of IBM,
 Cisco, HP, and Dell internal spec codes for electronic components. Given an OEM
@@ -189,16 +200,7 @@ class SpecCodeResolver:
         if allow_pending_reuse:
             pending = self._db.query(OemSpecCodePending).filter_by(oem=norm_oem, spec_code=norm_code).one_or_none()
             if pending is not None:
-                return (
-                    ResolverResult(
-                        status="pending",
-                        avl=list(pending.proposed_avl or []),
-                        confidence=pending.llm_confidence,
-                        citations=list(pending.citations or []),
-                        source="llm",
-                    ),
-                    None,
-                )
+                return ResolverResult.from_pending(pending), None
 
         # 3. Blacklist — accumulated rejected MPNs feed into the LLM prompt
         blacklist_mpns = self._load_blacklist(norm_oem, norm_code)
@@ -284,13 +286,7 @@ class SpecCodeResolver:
                 .one_or_none()
             )
             if winner is not None:
-                return ResolverResult(
-                    status="pending",
-                    avl=list(winner.proposed_avl or []),
-                    confidence=winner.llm_confidence,
-                    citations=list(winner.citations or []),
-                    source="llm",
-                )
+                return ResolverResult.from_pending(winner)
         return result
 
     def _load_blacklist(self, oem: str, spec_code: str) -> list[str]:

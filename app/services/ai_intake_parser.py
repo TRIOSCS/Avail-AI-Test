@@ -7,6 +7,7 @@ Depends on: app/utils/llm_router.py and normalization helpers
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -170,13 +171,8 @@ def _normalize_top_level(result: dict[str, Any]) -> None:
         result["confidence"] = 0.0
 
     for key in ("summary", "requisition_name", "customer_name", "vendor_name", "notes"):
-        value = result.get(key)
-        if value is None:
-            continue
-        if not isinstance(value, str):
-            value = str(value)
-        value = " ".join(value.split()).strip()
-        result[key] = value or None
+        if result.get(key) is not None:
+            result[key] = _clean_scalar(result.get(key))
 
     if not result.get("summary"):
         req_count = len(result.get("requirements") or [])
@@ -197,7 +193,7 @@ def _normalize_requirements(result: dict[str, Any]) -> None:
     for row in raw_rows:
         if not isinstance(row, dict):
             continue
-        mpn = normalize_mpn((row.get("mpn") or "").strip()) or (row.get("mpn") or "").strip().upper()
+        mpn = _row_mpn(row)
         if not mpn:
             continue
 
@@ -234,7 +230,7 @@ def _normalize_offers(result: dict[str, Any]) -> None:
     for row in raw_rows:
         if not isinstance(row, dict):
             continue
-        mpn = normalize_mpn((row.get("mpn") or "").strip()) or (row.get("mpn") or "").strip().upper()
+        mpn = _row_mpn(row)
         if not mpn:
             continue
 
@@ -346,8 +342,6 @@ def _heuristic_parse(text: str) -> dict[str, Any] | None:
     Scans each line for part-number-like tokens followed by optional quantity and price
     columns. Returns a minimal result dict.
     """
-    import re
-
     mpn_pattern = re.compile(r"^[\s\"']*([A-Z0-9][A-Z0-9\-\.\/\+]{2,30}[A-Z0-9])")
     lines = text.strip().split("\n")
     rows: list[dict[str, Any]] = []
@@ -443,3 +437,9 @@ def _clean_scalar(value: Any) -> str | None:
         return None
     value = " ".join(str(value).split()).strip()
     return value or None
+
+
+def _row_mpn(row: dict[str, Any]) -> str:
+    """Normalize a row's MPN, falling back to the raw uppercased value."""
+    raw = (row.get("mpn") or "").strip()
+    return normalize_mpn(raw) or raw.upper()

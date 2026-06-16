@@ -62,24 +62,35 @@ def check_orphaned_offers(db: Session) -> int:
     ) or 0
 
 
+# Models that carry a material_card_id FK, paired with their report key.
+_LINKED_MODELS = [
+    (Requirement, "requirements"),
+    (Sighting, "sightings"),
+    (Offer, "offers"),
+]
+
+
+def _dangling_query(db: Session, model, select):
+    """Query for ``model`` rows whose material_card_id points at a missing card.
+
+    ``select`` is the column expression to select (e.g. ``func.count(model.id)``
+    for a tally, or ``model`` to load the rows themselves).
+    """
+    return (
+        db.query(select)
+        .outerjoin(MaterialCard, model.material_card_id == MaterialCard.id)
+        .filter(
+            model.material_card_id.isnot(None),
+            MaterialCard.id.is_(None),
+        )
+    )
+
+
 def check_dangling_fks(db: Session) -> dict:
     """Count records pointing to non-existent material cards."""
     results = {}
-    for model, name in [
-        (Requirement, "requirements"),
-        (Sighting, "sightings"),
-        (Offer, "offers"),
-    ]:
-        count = (
-            db.query(func.count(model.id))
-            .outerjoin(MaterialCard, model.material_card_id == MaterialCard.id)
-            .filter(
-                model.material_card_id.isnot(None),
-                MaterialCard.id.is_(None),
-            )
-            .scalar()
-        ) or 0
-        results[name] = count
+    for model, name in _LINKED_MODELS:
+        results[name] = _dangling_query(db, model, func.count(model.id)).scalar() or 0
     return results
 
 
@@ -200,20 +211,8 @@ def clear_dangling_fks(db: Session) -> dict:
     re-linked to the correct (or a new) card.
     """
     cleared = {}
-    for model, name in [
-        (Requirement, "requirements"),
-        (Sighting, "sightings"),
-        (Offer, "offers"),
-    ]:
-        danglers = (
-            db.query(model)
-            .outerjoin(MaterialCard, model.material_card_id == MaterialCard.id)
-            .filter(
-                model.material_card_id.isnot(None),
-                MaterialCard.id.is_(None),
-            )
-            .all()
-        )
+    for model, name in _LINKED_MODELS:
+        danglers = _dangling_query(db, model, model).all()
         for rec in danglers:
             rec.material_card_id = None
         cleared[name] = len(danglers)

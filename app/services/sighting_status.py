@@ -152,16 +152,20 @@ def compute_vendor_statuses(
     # contacted > sighting. unavailable outranks contacted: contacted is a step
     # and unavailable is its answer — a mark made after contacting must be
     # visible. offer-in still dominates everything but blacklisted.
+    # Normalize the offer/contacted vendor names once (the DB rows carry raw
+    # names) rather than rebuilding the sets on every vendor iteration.
+    offer_norms = {normalize_vendor_name(ov) for ov in offer_vendors}
+    contacted_norms = {normalize_vendor_name(cv) for cv in contacted_vendors}
     result: dict[str, str] = {}
     for vn in vendor_names:
         norm = normalized[vn]
         if norm in bl_cards:
             result[vn] = "blacklisted"
-        elif vn in offer_vendors or norm in {normalize_vendor_name(ov) for ov in offer_vendors}:
+        elif vn in offer_vendors or norm in offer_norms:
             result[vn] = "offer-in"
         elif norm in unavail_norms:
             result[vn] = "unavailable"
-        elif vn in contacted_vendors or norm in {normalize_vendor_name(cv) for cv in contacted_vendors}:
+        elif vn in contacted_vendors or norm in contacted_norms:
             result[vn] = "contacted"
         else:
             result[vn] = "sighting"

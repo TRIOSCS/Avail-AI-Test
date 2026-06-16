@@ -68,6 +68,29 @@ _CONNECTOR_CONFIGS = [
 _IGNORED_MANUFACTURERS = {"", "unknown", "n/a", "various", "none", "other", "generic"}
 
 
+def _manufacturers_agree(a: str, b: str) -> bool:
+    """Fuzzy manufacturer-name match: exact, or either name contains the other."""
+    a = (a or "").lower().strip()
+    b = (b or "").lower().strip()
+    return a == b or a in b or b in a
+
+
+def _nexar_manufacturer(data: dict) -> str | None:
+    """Extract the first result's manufacturer name from a Nexar GraphQL payload.
+
+    Returns the trimmed name, or None when there is no result or it is a junk/placeholder
+    manufacturer (per ``_IGNORED_MANUFACTURERS``).
+    """
+    results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+    if not results:
+        return None
+    part = results[0].get("part", {})
+    mfr = ((part.get("manufacturer") or {}).get("name") or "").strip()
+    if not mfr or mfr.lower() in _IGNORED_MANUFACTURERS:
+        return None
+    return mfr
+
+
 async def enrich_material_card(mpn: str, db: Session) -> dict | None:
     """Query all available connectors for manufacturer data on a single MPN.
 
@@ -218,6 +241,37 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
         tag_material_card(card.id, tags_to_apply, db)
 
 
+def _run_boost_loop(db: Session, base_query, confidence: float, source: str, label: str, batch_size: int) -> int:
+    """Page through a tag-id query and bulk-upgrade each batch to (confidence, source).
+
+    ``base_query`` selects ``MaterialTag.id`` with all phase-specific filters EXCEPT the
+    ``MaterialTag.id > last_id`` keyset cursor, which this loop appends per batch. Returns
+    the total number of tags upgraded.
+    """
+    from app.models.tags import MaterialTag
+
+    boosted = 0
+    last_id = 0
+
+    while True:
+        rows = base_query.filter(MaterialTag.id > last_id).order_by(MaterialTag.id).limit(batch_size).all()
+        if not rows:
+            break
+
+        mt_ids = list({r.id for r in rows})
+        last_id = max(mt_ids)
+
+        boosted += (
+            db.query(MaterialTag)
+            .filter(MaterialTag.id.in_(mt_ids))
+            .update({"confidence": confidence, "source": source}, synchronize_session="fetch")
+        )
+        db.commit()
+        logger.info(f"{label}: {boosted} tags upgraded so far")
+
+    return boosted
+
+
 def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
     """Boost confidence for AI tags confirmed by internal data (no API calls).
 
@@ -231,50 +285,37 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
     """
     from sqlalchemy import func
 
+    from app.models.sourcing import Sighting
     from app.models.tags import MaterialTag, Tag
 
-    total_boosted = 0
-    last_id = 0
+    # A sighting manufacturer confirms a brand tag when the two names match exactly or
+    # one contains the other (the SQL twin of ``_manufacturers_agree``).
+    sighting_confirms_tag = or_(
+        func.lower(Sighting.manufacturer) == func.lower(Tag.name),
+        func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
+        func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
+    )
 
-    while True:
-        # Find AI-classified brand tags where card manufacturer confirms the tag
-        rows = (
-            db.query(MaterialTag.id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-            .filter(
-                Tag.tag_type == "brand",
-                MaterialTag.source == "ai_classified",
-                MaterialTag.confidence < 0.9,
-                MaterialTag.confidence > 0.3,  # Skip "Unknown"
-                MaterialCard.manufacturer.isnot(None),
-                MaterialCard.manufacturer != "",
-                func.lower(MaterialCard.manufacturer) == func.lower(Tag.name),
-                MaterialTag.id > last_id,
-            )
-            .order_by(MaterialTag.id)
-            .limit(batch_size)
-            .all()
-        )
-
-        if not rows:
-            break
-
-        mt_ids = [r.id for r in rows]
-        last_id = mt_ids[-1]
-
-        updated = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update(
-                {"confidence": 0.90, "source": "ai_confirmed_internal"},
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        total_boosted += updated
-        logger.info(f"Confidence boost: {total_boosted} tags upgraded so far (batch ending at id {last_id})")
-
+    # Phase 1: card manufacturer confirms an AI-classified brand tag.
+    total_boosted = _run_boost_loop(
+        db,
+        db.query(MaterialTag.id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+        .filter(
+            Tag.tag_type == "brand",
+            MaterialTag.source == "ai_classified",
+            MaterialTag.confidence < 0.9,
+            MaterialTag.confidence > 0.3,  # Skip "Unknown"
+            MaterialCard.manufacturer.isnot(None),
+            MaterialCard.manufacturer != "",
+            func.lower(MaterialCard.manufacturer) == func.lower(Tag.name),
+        ),
+        confidence=0.90,
+        source="ai_confirmed_internal",
+        label="Confidence boost",
+        batch_size=batch_size,
+    )
     logger.info(f"Internal confidence boost complete: {total_boosted} tags upgraded to 0.90")
 
     # Phase 2 (fuzzy boost to 0.85) and Phase 3 (commodity boost to 0.85) removed —
@@ -282,108 +323,52 @@ def boost_confidence_internal(db: Session, batch_size: int = 5000) -> dict:
     fuzzy_boosted = 0
     commodity_boosted = 0
 
-    # Phase 4: Sighting-confirmed — sighting manufacturer confirms existing brand tag
-    from app.models.sourcing import Sighting
-
-    sighting_boosted = 0
-    last_id = 0
-
-    while True:
-        # Find brand tags (0.30-0.89) where a sighting manufacturer matches the tag name
-        rows = (
-            db.query(MaterialTag.id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-            .join(Sighting, Sighting.material_card_id == MaterialCard.id)
-            .filter(
-                Tag.tag_type == "brand",
-                MaterialTag.confidence < 0.9,
-                MaterialTag.confidence > 0.3,
-                Sighting.manufacturer.isnot(None),
-                Sighting.manufacturer != "",
-                or_(
-                    func.lower(Sighting.manufacturer) == func.lower(Tag.name),
-                    func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
-                    func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
-                ),
-                MaterialTag.id > last_id,
-            )
-            .order_by(MaterialTag.id)
-            .limit(batch_size)
-            .all()
-        )
-
-        if not rows:
-            break
-
-        mt_ids = list({r.id for r in rows})
-        last_id = max(mt_ids)
-
-        updated = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update(
-                {"confidence": 0.90, "source": "sighting_confirmed"},
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        sighting_boosted += updated
-        logger.info(f"Sighting-confirmed boost: {sighting_boosted} tags upgraded so far")
-
+    # Phase 4: Sighting-confirmed — sighting manufacturer confirms existing brand tag (0.30-0.89).
+    sighting_boosted = _run_boost_loop(
+        db,
+        db.query(MaterialTag.id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+        .join(Sighting, Sighting.material_card_id == MaterialCard.id)
+        .filter(
+            Tag.tag_type == "brand",
+            MaterialTag.confidence < 0.9,
+            MaterialTag.confidence > 0.3,
+            Sighting.manufacturer.isnot(None),
+            Sighting.manufacturer != "",
+            sighting_confirms_tag,
+        ),
+        confidence=0.90,
+        source="sighting_confirmed",
+        label="Sighting-confirmed boost",
+        batch_size=batch_size,
+    )
     if sighting_boosted:
         logger.info(f"Sighting-confirmed boost: {sighting_boosted} tags upgraded to 0.90")
 
-    # Phase 5: Multi-source agreement — AI + sighting independently agree → 0.95
-    # Find AI-classified tags (any confidence) where sighting also confirms the same manufacturer
-    multi_boosted = 0
-    last_id = 0
-
-    while True:
-        rows = (
-            db.query(MaterialTag.id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
-            .join(Sighting, Sighting.material_card_id == MaterialCard.id)
-            .filter(
-                Tag.tag_type == "brand",
-                MaterialTag.source.in_(
-                    ["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]
-                ),
-                MaterialTag.confidence < 0.95,
-                MaterialTag.confidence >= 0.7,
-                Sighting.manufacturer.isnot(None),
-                Sighting.manufacturer != "",
-                or_(
-                    func.lower(Sighting.manufacturer) == func.lower(Tag.name),
-                    func.lower(Sighting.manufacturer).contains(func.lower(Tag.name)),
-                    func.lower(Tag.name).contains(func.lower(Sighting.manufacturer)),
-                ),
-                MaterialTag.id > last_id,
-            )
-            .order_by(MaterialTag.id)
-            .limit(batch_size)
-            .all()
-        )
-
-        if not rows:
-            break
-
-        mt_ids = list({r.id for r in rows})
-        last_id = max(mt_ids)
-
-        updated = (
-            db.query(MaterialTag)
-            .filter(MaterialTag.id.in_(mt_ids))
-            .update(
-                {"confidence": 0.95, "source": "multi_source_confirmed"},
-                synchronize_session="fetch",
-            )
-        )
-        db.commit()
-        multi_boosted += updated
-        logger.info(f"Multi-source boost: {multi_boosted} tags upgraded so far")
-
+    # Phase 5: Multi-source agreement — AI + sighting independently agree → 0.95.
+    multi_boosted = _run_boost_loop(
+        db,
+        db.query(MaterialTag.id)
+        .join(Tag, MaterialTag.tag_id == Tag.id)
+        .join(MaterialCard, MaterialCard.id == MaterialTag.material_card_id)
+        .join(Sighting, Sighting.material_card_id == MaterialCard.id)
+        .filter(
+            Tag.tag_type == "brand",
+            MaterialTag.source.in_(
+                ["ai_classified", "ai_confirmed_internal", "ai_confirmed_fuzzy", "sighting_confirmed"]
+            ),
+            MaterialTag.confidence < 0.95,
+            MaterialTag.confidence >= 0.7,
+            Sighting.manufacturer.isnot(None),
+            Sighting.manufacturer != "",
+            sighting_confirms_tag,
+        ),
+        confidence=0.95,
+        source="multi_source_confirmed",
+        label="Multi-source boost",
+        batch_size=batch_size,
+    )
     if multi_boosted:
         logger.info(f"Multi-source boost: {multi_boosted} tags upgraded to 0.95")
 
@@ -453,27 +438,17 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
         for row in batch:
             try:
                 data = await connector._run_query(connector.AGGREGATE_QUERY, row.normalized_mpn)
-                results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+                nexar_mfr = _nexar_manufacturer(data)
 
-                if not results:
+                if not nexar_mfr:
                     no_result += 1
                     continue
-
-                part = results[0].get("part", {})
-                nexar_mfr = ((part.get("manufacturer") or {}).get("name") or "").strip().lower()
-
-                if not nexar_mfr or nexar_mfr in _IGNORED_MANUFACTURERS:
-                    no_result += 1
-                    continue
-
-                ai_mfr = (row.tag_name or "").lower().strip()
-                is_match = nexar_mfr == ai_mfr or nexar_mfr in ai_mfr or ai_mfr in nexar_mfr
 
                 mt = db.get(MaterialTag, row.mt_id)
                 if not mt:
                     continue
 
-                if is_match:
+                if _manufacturers_agree(nexar_mfr, row.tag_name):
                     mt.confidence = 0.95
                     mt.source = "ai_confirmed_nexar"
                     confirmed += 1
@@ -484,7 +459,7 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
                         _apply_enrichment_to_card(
                             card,
                             {
-                                "manufacturer": nexar_mfr.title(),
+                                "manufacturer": nexar_mfr.lower().title(),
                                 "source": "nexar",
                                 "confidence": 0.95,
                                 "category": None,
@@ -553,16 +528,9 @@ async def nexar_backfill_untagged(db: Session, limit: int = 5000) -> dict:
     for i, row in enumerate(untagged):
         try:
             data = await connector._run_query(connector.AGGREGATE_QUERY, row.normalized_mpn)
-            results = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+            nexar_mfr = _nexar_manufacturer(data)
 
-            if not results:
-                no_result += 1
-                continue
-
-            part = results[0].get("part", {})
-            nexar_mfr = ((part.get("manufacturer") or {}).get("name") or "").strip()
-
-            if not nexar_mfr or nexar_mfr.lower() in _IGNORED_MANUFACTURERS:
+            if not nexar_mfr:
                 no_result += 1
                 continue
 
@@ -643,14 +611,8 @@ async def cross_validate_batch(db: Session, limit: int = 500, concurrency: int =
             no_result += 1
             continue
 
-        connector_mfr = result["manufacturer"].lower().strip()
-        ai_mfr = (row.tag_name or "").lower().strip()
-
-        # Check if connector confirms the AI classification
-        # Fuzzy match: either one contains the other, or exact match
-        is_confirmed = connector_mfr == ai_mfr or connector_mfr in ai_mfr or ai_mfr in connector_mfr
-
-        if is_confirmed:
+        # Check if connector confirms the AI classification (exact or substring match)
+        if _manufacturers_agree(result["manufacturer"], row.tag_name):
             # Upgrade the existing tag confidence
             mt = db.get(MaterialTag, row.mt_id)
             if mt and mt.confidence < result["confidence"]:

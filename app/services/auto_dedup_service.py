@@ -81,18 +81,15 @@ def _dedup_vendors(db: Session) -> int:
 
     merged = 0
     merged_ids = set()
-    seen_pairs = set()
 
+    # Inner loop walks only cards[i+1:], so every unordered pair is visited exactly
+    # once — no explicit seen-pair guard is needed.
     for i, a in enumerate(cards):
         if a.id in merged_ids:
             continue
         for b in cards[i + 1 :]:
             if b.id in merged_ids:
                 continue
-            pair_key = (min(a.id, b.id), max(a.id, b.id))
-            if pair_key in seen_pairs:  # pragma: no cover — defensive; loop structure prevents repeats
-                continue
-            seen_pairs.add(pair_key)
 
             score = fuzz.token_sort_ratio(a.normalized_name or "", b.normalized_name or "")
             if score < 92:
@@ -100,9 +97,10 @@ def _dedup_vendors(db: Session) -> int:
 
             # Decide which to keep (more sightings wins)
             if (a.sighting_count or 0) >= (b.sighting_count or 0):
-                keep_id, remove_id = a.id, b.id
+                keep, remove = a, b
             else:
-                keep_id, remove_id = b.id, a.id
+                keep, remove = b, a
+            keep_id, remove_id = keep.id, remove.id
 
             should_merge = False
             if score >= 98:
@@ -110,8 +108,8 @@ def _dedup_vendors(db: Session) -> int:
                 logger.info(
                     "Auto-merging vendors (score={}): '{}' into '{}'",
                     score,
-                    b.display_name if remove_id == b.id else a.display_name,
-                    a.display_name if keep_id == a.id else b.display_name,
+                    remove.display_name,
+                    keep.display_name,
                 )
             elif score >= 92:
                 should_merge = _ai_confirm_vendor_merge(a.display_name, b.display_name, score)

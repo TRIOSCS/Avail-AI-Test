@@ -126,11 +126,12 @@ def _freshness_score(created_at: datetime | None) -> float:
 
 def _contactability_score(sighting: Sighting, vendor_card: VendorCard | None) -> float:
     score = 0.0
+    raw = sighting.raw_data or {}
     if sighting.vendor_email:
         score += 45
     if sighting.vendor_phone:
         score += 35
-    if (sighting.raw_data or {}).get("website") or (sighting.raw_data or {}).get("vendor_url"):
+    if raw.get("website") or raw.get("vendor_url"):
         score += 20
     if vendor_card:
         if vendor_card.emails:
@@ -335,13 +336,10 @@ def _signal_type_for_source(source_type: str) -> str:
 def _reliability_band(score: float) -> str:
     """Reliability band for evidence items per evidence.schema.yaml.
 
-    Separate from confidence_band — this rates the source itself, not the lead.
+    Separate from confidence_band semantically — this rates the source itself, not the
+    lead — but shares the same high/medium/low thresholds.
     """
-    if score >= 75:
-        return "high"
-    if score >= 50:
-        return "medium"
-    return "low"
+    return _confidence_band(score)
 
 
 def _match_type_for_parts(requested: str, matched: str, substitutes: list | None = None) -> str:

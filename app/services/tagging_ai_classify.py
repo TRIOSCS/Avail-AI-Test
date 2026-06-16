@@ -49,6 +49,9 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
     prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
+    def _all_unknown() -> list[dict]:
+        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
+
     try:
         result = await claude_json(
             prompt,
@@ -59,14 +62,14 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
         )
     except ClaudeUnavailableError:
         logger.info("Claude not configured — skipping AI classification")
-        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
+        return _all_unknown()
     except ClaudeError as e:
         logger.warning("Claude AI failed for classification: {}", e)
-        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
+        return _all_unknown()
 
     if not result or not isinstance(result, list):
         logger.warning("AI classification returned invalid response")
-        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
+        return _all_unknown()
 
     # Validate and normalize response
     classified = []
@@ -128,8 +131,6 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
             unknown += 1
         else:
             matched += 1
-
-        if not is_unknown:
             card = db.get(MaterialCard, card_id)
             if card and not card.manufacturer:
                 card.manufacturer = manufacturer
