@@ -133,9 +133,8 @@ class DigiKeyConnector(BaseConnector):
             url = prod.get("ProductUrl") or prod.get("productUrl") or ""
 
             # Price — use unit price or first price break
-            price = None
             price_breaks = prod.get("StandardPricing") or prod.get("standardPricing") or []
-            if price_breaks and isinstance(price_breaks, list):
+            if isinstance(price_breaks, list) and price_breaks:
                 # Find the smallest qty price break
                 best = min(
                     price_breaks,
@@ -161,6 +160,14 @@ class DigiKeyConnector(BaseConnector):
             )
             rohs = map_rohs(rohs_raw)
 
+            # Normalize the product URL to an absolute DigiKey link
+            if url.startswith("http"):
+                click_url = url
+            elif url:
+                click_url = f"https://www.digikey.com{url}"
+            else:
+                click_url = ""
+
             results.append(
                 {
                     "vendor_name": "DigiKey",
@@ -172,7 +179,7 @@ class DigiKeyConnector(BaseConnector):
                     "source_type": "digikey",
                     "is_authorized": True,
                     "confidence": 5 if qty else 3,
-                    "click_url": url if url.startswith("http") else f"https://www.digikey.com{url}" if url else "",
+                    "click_url": click_url,
                     "vendor_sku": dk_pn,
                     "vendor_url": "https://www.digikey.com",
                     "description": detail_desc,

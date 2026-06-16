@@ -65,30 +65,19 @@ class EbayConnector(BaseConnector):
             "fieldgroups": "MATCHING_ITEMS",
         }
 
-        r = await http.get(
-            self.SEARCH_URL,
-            headers={
-                "Authorization": f"Bearer {token}",
+        def headers(bearer: str) -> dict:
+            return {
+                "Authorization": f"Bearer {bearer}",
                 "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
                 "Content-Type": "application/json",
-            },
-            params=params,
-            timeout=self.timeout,
-        )
+            }
+
+        r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 
         if r.status_code == 401:
             self._token = None
             token = await self._get_token()
-            r = await http.get(
-                self.SEARCH_URL,
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-                    "Content-Type": "application/json",
-                },
-                params=params,
-                timeout=self.timeout,
-            )
+            r = await http.get(self.SEARCH_URL, headers=headers(token), params=params, timeout=self.timeout)
 
         if r.status_code == 404:
             return []

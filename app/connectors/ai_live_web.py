@@ -32,6 +32,8 @@ _STOCK_SIGNAL_WORDS = (
     "quantity",
     "pieces",
 )
+# Evidence must quote a stock/qty-like token to be credible.
+_EVIDENCE_TOKEN_RE = re.compile(r"(in stock|available|qty|quantity|\d+\s*(pcs|pieces|units)?)", re.I)
 _SEARCH_SCHEMA_HINT = {
     "offers": [
         {
@@ -76,10 +78,8 @@ class AIWebSearchConnector(BaseConnector):
 
     @staticmethod
     def _has_current_stock_signal(item: dict, evidence_note: str) -> bool:
-        explicit = item.get("in_stock_explicit")
-        if isinstance(explicit, bool):
-            if explicit:
-                return True
+        if item.get("in_stock_explicit") is True:
+            return True
         evidence_l = (evidence_note or "").lower()
         return any(token in evidence_l for token in _STOCK_SIGNAL_WORDS)
 
@@ -147,12 +147,11 @@ class AIWebSearchConnector(BaseConnector):
             price = safe_float(item.get("unit_price"))
             currency = (item.get("currency") or "USD").strip().upper()[:3] or "USD"
             lead_time = (item.get("lead_time") or "").strip() or None
-            condition = (item.get("condition") or "").strip().lower() or None
+            raw_condition = (item.get("condition") or "").strip().lower()
+            condition = raw_condition if raw_condition in {"new", "used", "refurbished"} else None
             vendor_url = self._normalize_vendor_url(item.get("vendor_url") or "")
             evidence_note = (item.get("evidence_note") or "").strip()
             listing_age_days = safe_int(item.get("listing_age_days"))
-            if condition not in {"new", "used", "refurbished"}:
-                condition = None
 
             # Quality gate — keep only credible current stock postings.
             if qty is None or qty <= 0:
@@ -172,7 +171,7 @@ class AIWebSearchConnector(BaseConnector):
                 continue
 
             # Extra sanity: evidence should include a stock/qty-like token.
-            if not re.search(r"(in stock|available|qty|quantity|\d+\s*(pcs|pieces|units)?)", evidence_note, re.I):
+            if not _EVIDENCE_TOKEN_RE.search(evidence_note):
                 dropped += 1
                 continue
 
