@@ -1,8 +1,10 @@
 {# spec_codes_pending.html — Admin pending OEM spec-code approval queue.
    Receives: rows (list[OemSpecCodePending]), user (User).
    Called by: app/routers/admin/spec_codes.py list_pending endpoint.
-   Depends on: HTMX, json-enc extension, Tailwind CSS with brand palette.
+   Depends on: HTMX, json-enc extension, Tailwind CSS with brand palette,
+               admin/_macros.html (spec_code_th).
 #}
+{% from "htmx/partials/admin/_macros.html" import spec_code_th -%}
 <div class="max-w-7xl mx-auto">
   <header class="mb-6">
     <h2 class="text-lg font-bold text-gray-900">Pending OEM Spec-Code Mappings</h2>
@@ -21,13 +23,13 @@
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OEM</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Spec code</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Proposed AVL</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Citations</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used in</th>
-              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              {{ spec_code_th("OEM") }}
+              {{ spec_code_th("Spec code") }}
+              {{ spec_code_th("Proposed AVL") }}
+              {{ spec_code_th("Confidence") }}
+              {{ spec_code_th("Citations") }}
+              {{ spec_code_th("Used in") }}
+              {{ spec_code_th("Actions") }}
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100" id="spec-codes-pending-tbody">

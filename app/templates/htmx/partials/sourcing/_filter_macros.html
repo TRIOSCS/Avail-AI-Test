@@ -1,0 +1,31 @@
+{# _filter_macros.html — Cluster-local Jinja2 macros for the sourcing filter bar.
+   Extracted from filter_bar.html, which is the only caller. Output-neutral: the
+   macros reproduce, byte for byte, the markup the inline copy-paste loops produced.
+   Called by: partials/sourcing/filter_bar.html
+   Depends on: nothing (pure markup helpers).
+
+   filter_pill_group renders one labelled row of pill links. Every link points at
+   the sourcing partial with the full filter query string, where exactly one
+   parameter (`param`) is overridden by the option value and the rest stay at their
+   current f_* value. `selected` is the value that paints a pill active.
+
+   The body is emitted at a canonical indentation (the opening <div> at column 0,
+   its children two spaces deeper). Each call site positions the first line and pipes
+   the result through `| indent(n, false)` to reach its own nesting depth, so the
+   rendered bytes match the former inline markup exactly. #}
+
+{% macro filter_pill_group(label, param, options, selected, requirement_id, target,
+                           f_confidence, f_safety, f_freshness, f_source, f_status,
+                           f_contactability, f_corroborated, f_sort) -%}
+<div class="flex items-center gap-1.5">
+  <span class="text-[11px] text-gray-500 font-medium">{{ label }}:</span>
+  {% for val, opt_label in options %}
+  <a hx-get="/v2/partials/sourcing/{{ requirement_id }}?confidence={{ val if param == 'confidence' else f_confidence }}&safety={{ val if param == 'safety' else f_safety }}&freshness={{ val if param == 'freshness' else f_freshness }}&source={{ f_source }}&status={{ val if param == 'status' else f_status }}&contactability={{ val if param == 'contactability' else f_contactability }}&corroborated={{ val if param == 'corroborated' else f_corroborated }}&sort={{ f_sort }}"
+     hx-target="{{ target }}" hx-push-url="true"
+     class="px-2 py-0.5 text-[11px] rounded-full border cursor-pointer
+       {{ 'bg-brand-500 text-white border-brand-500' if val == selected else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
+    {{ opt_label }}
+  </a>
+  {% endfor %}
+</div>
+{%- endmacro %}
