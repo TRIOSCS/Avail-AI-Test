@@ -16,10 +16,8 @@ def dumps(obj, *, sort_keys: bool = False, default=None) -> str:
     Mirrors json.dumps() signature for the params we use. Returns str (not bytes) for
     compatibility with Redis and SQL.
     """
-    opts = 0
-    if sort_keys:
-        opts |= orjson.OPT_SORT_KEYS
-    return orjson.dumps(obj, option=opts or None, default=default).decode()
+    option = orjson.OPT_SORT_KEYS if sort_keys else 0
+    return orjson.dumps(obj, option=option, default=default).decode()
 
 
 def loads(s):

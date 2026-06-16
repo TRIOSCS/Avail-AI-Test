@@ -37,6 +37,25 @@ _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 # ── Helper Functions ─────────────────────────────────────────────────────
 
 
+def _record_alternate_name(card: VendorCard, vendor_name: str, db: Session, *, context: str) -> None:
+    """Append vendor_name to a matched card's alternate_names and commit.
+
+    No-op if the name already appears (as an alternate or as the display name). Rolls
+    back and logs on commit failure rather than propagating, since the matched card is
+    still usable without the alternate-name update.
+    """
+    alts = list(card.alternate_names or [])
+    if vendor_name in alts or vendor_name == card.display_name:
+        return
+    alts.append(vendor_name)
+    card.alternate_names = alts
+    try:
+        db.commit()
+    except Exception:
+        logger.exception("Failed to commit {} vendor alt name for '{}'", context, vendor_name)
+        db.rollback()
+
+
 def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None) -> VendorCard:
     """Find existing VendorCard by normalized name, domain, or fuzzy match, or create
     new.
@@ -58,15 +77,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
         domain_lower = domain.strip().lower()
         card = db.query(VendorCard).filter(sqlfunc.lower(VendorCard.domain) == domain_lower).first()
         if card:
-            alts = list(card.alternate_names or [])
-            if vendor_name not in alts and vendor_name != card.display_name:
-                alts.append(vendor_name)
-                card.alternate_names = alts
-                try:
-                    db.commit()
-                except Exception:
-                    logger.exception("Failed to commit domain-matched vendor alt name for '{}'", vendor_name)
-                    db.rollback()
+            _record_alternate_name(card, vendor_name, db, context="domain-matched")
             logger.info(
                 "Domain-matched vendor '{}' to '{}' (domain={})",
                 vendor_name,
@@ -89,15 +100,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
             if trgm_rows and trgm_rows[0].sim >= 0.6:
                 card = db.get(VendorCard, trgm_rows[0].id)
                 if card:
-                    alts = list(card.alternate_names or [])
-                    if vendor_name not in alts and vendor_name != card.display_name:
-                        alts.append(vendor_name)
-                        card.alternate_names = alts
-                        try:
-                            db.commit()
-                        except Exception:
-                            logger.exception("Failed to commit pg_trgm matched vendor alt name for '{}'", vendor_name)
-                            db.rollback()
+                    _record_alternate_name(card, vendor_name, db, context="pg_trgm matched")
                     logger.info(
                         "pg_trgm matched vendor '{}' to '{}' (sim={:.2f})",
                         vendor_name,
@@ -124,15 +127,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
         if best_score >= 82 and best_card_id:
             card = db.get(VendorCard, best_card_id)
             if card:
-                alts = list(card.alternate_names or [])
-                if vendor_name not in alts and vendor_name != card.display_name:
-                    alts.append(vendor_name)
-                    card.alternate_names = alts
-                    try:
-                        db.commit()
-                    except Exception:
-                        logger.exception("Failed to commit fuzzy-matched vendor alt name for '{}'", vendor_name)
-                        db.rollback()
+                _record_alternate_name(card, vendor_name, db, context="fuzzy-matched")
                 logger.info(
                     "Fuzzy-matched vendor '{}' to '{}' (score={})",
                     vendor_name,

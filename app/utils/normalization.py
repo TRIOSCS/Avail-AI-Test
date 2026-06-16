@@ -53,6 +53,14 @@ _CURRENCY_CODE_RE = re.compile(
     re.IGNORECASE,
 )
 
+# K/M shorthand multipliers, shared by price and quantity parsing.
+_KM_MULTIPLIERS = {
+    "k": 1_000,
+    "K": 1_000,
+    "m": 1_000_000,
+    "M": 1_000_000,
+}
+
 
 def normalize_price(raw: Any) -> float | None:
     """Parse price string to float.
@@ -97,8 +105,7 @@ def normalize_price(raw: Any) -> float | None:
     m = re.match(r"^([\d.]+)\s*([kKmM])$", s)
     if m:
         num = float(m.group(1))
-        mult = {"k": 1_000, "K": 1_000, "m": 1_000_000, "M": 1_000_000}
-        return num * mult.get(m.group(2), 1)
+        return num * _KM_MULTIPLIERS.get(m.group(2), 1)
 
     try:
         val = float(s)
@@ -131,12 +138,7 @@ def detect_currency(raw: Any) -> str:
 
 # ── Quantity normalization ────────────────────────────────────────────
 
-_QTY_MULTIPLIERS = {
-    "k": 1_000,
-    "K": 1_000,
-    "m": 1_000_000,
-    "M": 1_000_000,
-}
+_QTY_MULTIPLIERS = _KM_MULTIPLIERS
 
 
 def normalize_quantity(raw: Any) -> int | None:

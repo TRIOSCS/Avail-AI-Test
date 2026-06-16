@@ -90,10 +90,7 @@ def format_phone_display(raw: str) -> str:
     cc = digits[:cc_len]
     rest = digits[cc_len:]
     # Split rest into groups of 4
-    groups = []
-    while rest:
-        groups.append(rest[:4])
-        rest = rest[4:]
+    groups = [rest[i : i + 4] for i in range(0, len(rest), 4)]
     return f"+{cc} {' '.join(groups)}"
 
 

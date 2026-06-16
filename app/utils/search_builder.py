@@ -70,7 +70,6 @@ class SearchBuilder:
                     model.search_vector.isnot(None),
                     sqltext("search_vector @@ plainto_tsquery('english', :q)"),
                 )
-                .params(q=self.q)
                 .order_by(sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"))
                 .params(q=self.q)
             )
