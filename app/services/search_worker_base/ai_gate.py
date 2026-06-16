@@ -106,6 +106,11 @@ class AIGate:
         self._classification_cache: dict[tuple[str, str], tuple[str, str, str]] = {}
         self._cache_lock = threading.Lock()
 
+    @staticmethod
+    def _cache_key(item) -> tuple[str, str]:
+        """Classification cache key for a queue item: (normalized_mpn, lowercased manufacturer)."""
+        return (item.normalized_mpn, (item.manufacturer or "").lower())
+
     async def classify_parts_batch(self, parts: list[dict]) -> list[dict] | None:
         """Classify up to 30 parts using Claude Haiku.
 
@@ -153,10 +158,13 @@ class AIGate:
         queue status to 'queued' (search) or 'gated_out' (skip). Respects a 5-minute
         cooldown after API failures.
         """
-        if self._last_api_failure and (time.monotonic() - self._last_api_failure) < _GATE_COOLDOWN_SECONDS:
-            remaining = int(_GATE_COOLDOWN_SECONDS - (time.monotonic() - self._last_api_failure))
-            logger.debug("AI gate: in cooldown after API failure ({}s remaining)", remaining)
-            return
+        if self._last_api_failure:
+            elapsed = time.monotonic() - self._last_api_failure
+            if elapsed < _GATE_COOLDOWN_SECONDS:
+                logger.debug(
+                    "AI gate: in cooldown after API failure ({}s remaining)", int(_GATE_COOLDOWN_SECONDS - elapsed)
+                )
+                return
 
         model = self.queue_model
         pending = db.query(model).filter(model.status == "pending").order_by(model.created_at.asc()).limit(30).all()
@@ -166,7 +174,7 @@ class AIGate:
 
         uncached = []
         for item in pending:
-            cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
+            cache_key = self._cache_key(item)
             with self._cache_lock:
                 cached = self._classification_cache.get(cache_key)
             if cached:
@@ -181,15 +189,13 @@ class AIGate:
                 uncached.append(item)
 
         if uncached:
-            parts = [
-                {"mpn": item.mpn, "manufacturer": item.manufacturer or "", "description": item.description or ""}
-                for item in uncached
-            ]
-
             # Split into batches of 30
-            for batch_start in range(0, len(parts), 30):
-                batch = parts[batch_start : batch_start + 30]
+            for batch_start in range(0, len(uncached), 30):
                 batch_items = uncached[batch_start : batch_start + 30]
+                batch = [
+                    {"mpn": item.mpn, "manufacturer": item.manufacturer or "", "description": item.description or ""}
+                    for item in batch_items
+                ]
 
                 results = await self.classify_parts_batch(batch)
                 if results is None:
@@ -227,7 +233,7 @@ class AIGate:
                     item.updated_at = datetime.now(timezone.utc)
 
                     # Cache the classification
-                    cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
+                    cache_key = self._cache_key(item)
                     with self._cache_lock:
                         self._classification_cache[cache_key] = (commodity, decision, reason)
 

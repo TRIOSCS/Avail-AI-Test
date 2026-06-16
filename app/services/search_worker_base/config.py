@@ -34,14 +34,14 @@ def build_worker_config(prefix: str, defaults: dict | None = None):
 
     Returns a new object with all fields set as attributes.
     """
-    merged_defaults = {f[0]: f[1] for f in _COMMON_FIELDS}
+    merged_defaults = {suffix: default for suffix, default, _typ in _COMMON_FIELDS}
     if defaults:
         merged_defaults.update(defaults)
 
     obj_dict = {}
-    for suffix, default, typ in _COMMON_FIELDS:
+    for suffix, _default, typ in _COMMON_FIELDS:
         env_key = f"{prefix}_{suffix}"
-        raw = os.environ.get(env_key, merged_defaults.get(suffix, default))
+        raw = os.environ.get(env_key, merged_defaults[suffix])
         obj_dict[env_key] = typ(raw)
 
     return obj_dict

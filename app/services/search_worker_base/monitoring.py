@@ -10,6 +10,7 @@ Depends on: sentry_sdk, loguru
 
 import hashlib
 import re
+from contextlib import contextmanager
 from datetime import datetime
 
 from loguru import logger
@@ -27,9 +28,7 @@ _known_html_hashes: dict[str, set[str]] = {}
 
 def _get_hash_set(component_name: str) -> set[str]:
     """Return the hash set for a given component, creating it if needed."""
-    if component_name not in _known_html_hashes:
-        _known_html_hashes[component_name] = set()
-    return _known_html_hashes[component_name]
+    return _known_html_hashes.setdefault(component_name, set())
 
 
 def log_daily_report(
@@ -58,16 +57,26 @@ Circuit breaker:     {circuit_breaker_status}
     logger.info(report)
 
 
+@contextmanager
+def _sentry_scope(component_name: str, context: dict | None):
+    """Yield a Sentry scope tagged with the worker component and extra context.
+
+    Raises ImportError if the Sentry SDK is not installed — callers handle it so the
+    missing-SDK log message can stay specific to what was being sent.
+    """
+    import sentry_sdk
+
+    with sentry_sdk.new_scope() as scope:
+        scope.set_tag("component", f"{component_name.lower()}_worker")
+        for key, value in (context or {}).items():
+            scope.set_extra(key, value)
+        yield sentry_sdk
+
+
 def capture_sentry_error(error: Exception, context: dict | None = None, component_name: str = "worker"):
     """Send an error to Sentry with worker context."""
     try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("component", f"{component_name.lower()}_worker")
-            if context:
-                for key, value in context.items():
-                    scope.set_extra(key, value)
+        with _sentry_scope(component_name, context) as sentry_sdk:
             sentry_sdk.capture_exception(error)
     except ImportError:
         logger.warning("Sentry SDK not available, logging error only: {}", error)
@@ -78,13 +87,7 @@ def capture_sentry_message(
 ):
     """Send a message to Sentry with worker context."""
     try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("component", f"{component_name.lower()}_worker")
-            if context:
-                for key, value in context.items():
-                    scope.set_extra(key, value)
+        with _sentry_scope(component_name, context) as sentry_sdk:
             sentry_sdk.capture_message(message, level=level)
     except ImportError:
         logger.warning("Sentry SDK not available: {}", message)
