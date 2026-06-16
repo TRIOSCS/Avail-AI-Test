@@ -154,10 +154,10 @@ async def _get_or_detect_mapping(
     Caching by (vendor_domain, file_fingerprint) so repeat files from the same vendor
     don't re-invoke AI.
     """
+    from app.models import ColumnMappingCache
+
     # Step 1: Check cache
     if db and vendor_domain and file_fingerprint:
-        from app.models import ColumnMappingCache
-
         cached = (
             db.query(ColumnMappingCache)
             .filter_by(
@@ -189,33 +189,23 @@ async def _get_or_detect_mapping(
 
     # Step 4: Cache the result
     if db and vendor_domain and file_fingerprint and mapping:
-        from app.models import ColumnMappingCache
-
-        cache_entry = ColumnMappingCache(
-            vendor_domain=vendor_domain,
-            file_fingerprint=file_fingerprint,
-            mapping={str(k): v for k, v in mapping.items()},  # JSON needs string keys
-            confidence=0.9 if has_mpn else 0.7,
-            created_at=datetime.now(timezone.utc),
-        )
+        json_mapping = {str(k): v for k, v in mapping.items()}  # JSON needs string keys
+        confidence = 0.9 if has_mpn else 0.7
         try:
             from sqlalchemy.dialects.postgresql import insert
 
             stmt = (
                 insert(ColumnMappingCache.__table__)
                 .values(
-                    vendor_domain=cache_entry.vendor_domain,
-                    file_fingerprint=cache_entry.file_fingerprint,
-                    mapping=cache_entry.mapping,
-                    confidence=cache_entry.confidence,
-                    created_at=cache_entry.created_at,
+                    vendor_domain=vendor_domain,
+                    file_fingerprint=file_fingerprint,
+                    mapping=json_mapping,
+                    confidence=confidence,
+                    created_at=datetime.now(timezone.utc),
                 )
                 .on_conflict_do_update(
                     index_elements=["vendor_domain", "file_fingerprint"],
-                    set_={
-                        "mapping": cache_entry.mapping,
-                        "confidence": cache_entry.confidence,
-                    },
+                    set_={"mapping": json_mapping, "confidence": confidence},
                 )
             )
             db.execute(stmt)
@@ -255,10 +245,9 @@ def _parse_csv(file_bytes: bytes, filename: str) -> tuple[list[str], list[list[s
     """Parse CSV/TSV file with encoding detection, return (headers, rows)."""
     import csv
 
-    from app.utils.file_validation import detect_encoding
+    from app.utils.file_validation import decode_text
 
-    encoding = detect_encoding(file_bytes)
-    text = file_bytes.decode(encoding, errors="replace")
+    text = decode_text(file_bytes)
 
     # Auto-detect delimiter
     delimiter = "\t" if filename.lower().endswith(".tsv") else ","

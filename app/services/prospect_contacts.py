@@ -145,7 +145,8 @@ def _is_new_hire(started_at: str | None) -> bool:
         return False
     try:
         start_date = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        six_months_ago = datetime.now(timezone.utc).replace(month=max(1, datetime.now(timezone.utc).month - 6))
+        now = datetime.now(timezone.utc)
+        six_months_ago = now.replace(month=max(1, now.month - 6))
         return start_date >= six_months_ago
     except (ValueError, TypeError):
         return False

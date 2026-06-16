@@ -35,9 +35,8 @@ async def initiate_call(to_phone: str, from_phone: str, callback_url: str, conne
             source_caller_id_number=PhoneNumberIdentifier(from_phone),
         )
 
-        # Run synchronous SDK call in executor to avoid blocking event loop
-        loop = asyncio.get_event_loop()
-        call_result = await loop.run_in_executor(None, lambda: client.create_call(call_invite, callback_url))
+        # Run synchronous SDK call in a worker thread to avoid blocking event loop
+        call_result = await asyncio.to_thread(client.create_call, call_invite, callback_url)
         return {
             "call_connection_id": call_result.call_connection_id,
             "status": "initiated",

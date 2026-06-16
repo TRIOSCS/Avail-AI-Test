@@ -80,6 +80,24 @@ _SIGNATURE_DELIMITERS = [
     re.compile(r"^sent from my", re.IGNORECASE | re.MULTILINE),
 ]
 
+# Contact fields the AI/batch paths read, write, and validate (excludes `email`,
+# which is sourced from the sender address, and the derived `confidence`).
+_AI_FIELDS = (
+    "full_name",
+    "title",
+    "company_name",
+    "phone",
+    "mobile",
+    "website",
+    "address",
+    "linkedin_url",
+)
+
+
+def _ai_confidence(fields_found: int) -> float:
+    """Confidence for an AI/batch extraction, scaling with populated field count."""
+    return min(0.5 + (fields_found * 0.08), 0.95)
+
 
 def _extract_signature_block(body: str) -> str:
     """Extract the signature portion of an email body (last ~15 lines after
@@ -265,7 +283,7 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
         }
 
         fields_found = sum(1 for v in result.values() if v)
-        result["confidence"] = min(0.5 + (fields_found * 0.08), 0.95)
+        result["confidence"] = _ai_confidence(fields_found)
         return result
     except Exception as e:
         logger.warning("AI signature parsing failed: {}", e)
@@ -305,16 +323,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
         existing.updated_at = datetime.now(timezone.utc)
         # Only overwrite if new extract has higher confidence
         if extract.get("confidence", 0) > (existing.confidence or 0):
-            for field in (
-                "full_name",
-                "title",
-                "company_name",
-                "phone",
-                "mobile",
-                "website",
-                "address",
-                "linkedin_url",
-            ):
+            for field in _AI_FIELDS:
                 val = extract.get(field)
                 if val:
                     setattr(existing, field, val)
@@ -356,17 +365,8 @@ _BATCH_LIMIT = 200
 
 _SIGNATURE_SCHEMA = {
     "type": "object",
-    "properties": {
-        "full_name": {"type": ["string", "null"]},
-        "title": {"type": ["string", "null"]},
-        "company_name": {"type": ["string", "null"]},
-        "phone": {"type": ["string", "null"]},
-        "mobile": {"type": ["string", "null"]},
-        "website": {"type": ["string", "null"]},
-        "address": {"type": ["string", "null"]},
-        "linkedin_url": {"type": ["string", "null"]},
-    },
-    "required": ["full_name", "title", "company_name", "phone", "mobile", "website", "address", "linkedin_url"],
+    "properties": {field: {"type": ["string", "null"]} for field in _AI_FIELDS},
+    "required": list(_AI_FIELDS),
 }
 
 _BATCH_SYSTEM_PROMPT = "You extract contact information from email signatures. Return ONLY valid JSON."
@@ -493,7 +493,6 @@ async def process_signature_batch_results(db) -> dict | None:
         return None
 
     stats = {"applied": 0, "errors": 0}
-    _FIELDS = ("full_name", "title", "company_name", "phone", "mobile", "website", "address", "linkedin_url")
 
     for custom_id, parsed in results.items():
         if parsed is None:
@@ -518,14 +517,13 @@ async def process_signature_batch_results(db) -> dict | None:
             continue
 
         try:
-            for field in _FIELDS:
+            for field in _AI_FIELDS:
                 val = parsed.get(field)
                 if val:
                     setattr(record, field, val)
 
-            # Calculate confidence — same formula as parse_signature_ai
-            fields_found = sum(1 for f in _FIELDS if getattr(record, f, None))
-            record.confidence = min(0.5 + (fields_found * 0.08), 0.95)
+            fields_found = sum(1 for f in _AI_FIELDS if getattr(record, f, None))
+            record.confidence = _ai_confidence(fields_found)
             record.extraction_method = "batch_api"
             record.updated_at = datetime.now(timezone.utc)
             stats["applied"] += 1

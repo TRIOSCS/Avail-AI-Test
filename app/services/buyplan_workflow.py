@@ -841,7 +841,7 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             # Search sent folder for PO number
             messages = await client.search_sent_messages(
                 query=line.po_number,
-                user_id=str(buyer.azure_id) if buyer else None,
+                user_id=str(buyer.azure_id),
             )
 
             found = len(messages) > 0
@@ -858,7 +858,7 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
                 }
             )
         except Exception as e:
-            logger.error(f"PO verification failed for line {line.id}: {e}")
+            logger.error("PO verification failed for line {}: {}", line.id, e)
             results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
 
     # Use centralized completion check (respects SO verification requirement)

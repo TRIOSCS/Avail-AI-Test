@@ -21,6 +21,7 @@ def month_range(month: date) -> tuple[datetime, datetime]:
         month_end = month_start.replace(year=month_start.year + 1, month=1)
     else:
         month_end = month_start.replace(month=month_start.month + 1)
-    start_dt = datetime(month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc)
-    end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
+    midnight = datetime.min.time()
+    start_dt = datetime.combine(month_start, midnight, tzinfo=timezone.utc)
+    end_dt = datetime.combine(month_end, midnight, tzinfo=timezone.utc)
     return start_dt, end_dt

@@ -139,22 +139,18 @@ async def generate_verified_description(
             "verified": False,
         }
 
-    # Determine confidence based on distinct source count
+    # Determine confidence based on distinct source count (num_sources >= 1 here)
     if num_sources >= 3:
         base_confidence = 0.98
     elif num_sources == 2:
         base_confidence = 0.90
-    elif num_sources == 1:
-        base_confidence = 0.75
     else:
-        base_confidence = 0.50
+        base_confidence = 0.75
 
     # Build the AI prompt for cross-referencing and standardization
     from app.utils.claude_client import claude_text
 
-    source_block = ""
-    for s in sources:
-        source_block += f"  - [{s['source']}]: {s['description']}\n"
+    source_block = "".join(f"  - [{s['source']}]: {s['description']}\n" for s in sources)
 
     prompt = (
         f"You are verifying an electronic component description by cross-referencing "

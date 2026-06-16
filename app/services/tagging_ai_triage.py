@@ -9,6 +9,8 @@ Depends on: app.http_client, app.services.credential_service
 """
 
 import json
+import os
+import re
 import tempfile
 
 from loguru import logger
@@ -44,8 +46,6 @@ def triage_internal_parts(mpns: list[str]) -> list[dict]:
 
     Called by: app.services.tagging_ai_triage.submit_triage_batch
     """
-    import re
-
     results = []
     for mpn in mpns:
         upper = mpn.upper().strip()
@@ -115,8 +115,7 @@ async def submit_triage_batch(db: Session, limit: int = 50000) -> dict:
     remaining = []
 
     for card_id, mpn in candidates:
-        results = triage_internal_parts([mpn])
-        if results and results[0]["is_internal"]:
+        if triage_internal_parts([mpn])[0]["is_internal"]:
             card = db.get(MaterialCard, card_id)
             if card:
                 card.is_internal_part = True
@@ -302,8 +301,6 @@ async def apply_triage_results(batch_id: str) -> dict:
         db.rollback()
     finally:
         db.close()
-        import os
-
         try:
             os.unlink(tmp_path)
         except OSError:

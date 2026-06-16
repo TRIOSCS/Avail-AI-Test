@@ -78,21 +78,36 @@ def transition_requirement(
     return True
 
 
+def _advance_requirements(
+    requirement_ids: list[int],
+    target: str,
+    from_statuses: tuple[str, ...],
+    db: Session,
+    actor: User | None,
+) -> int:
+    """Advance each requirement currently in *from_statuses* to *target*.
+
+    Returns count of requirements that changed status. Illegal transitions are skipped,
+    not raised.
+    """
+    changed = 0
+    requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+    for req in requirements:
+        if (req.sourcing_status or "open") in from_statuses:
+            try:
+                if transition_requirement(req, target, db, actor):
+                    changed += 1
+            except ValueError as e:
+                logger.debug("Skipping requirement {} transition to {}: {}", req.id, target, e)
+    return changed
+
+
 def on_rfq_sent(requirement_ids: list[int], db: Session, actor: User | None = None) -> int:
     """Mark requirements as 'sourcing' when RFQs are sent for them.
 
     Returns count of requirements that changed status.
     """
-    changed = 0
-    requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
-    for req in requirements:
-        if (req.sourcing_status or "open") == "open":
-            try:
-                if transition_requirement(req, "sourcing", db, actor):
-                    changed += 1
-            except ValueError as e:
-                logger.debug("Skipping requirement {} transition to sourcing: {}", req.id, e)
-    return changed
+    return _advance_requirements(requirement_ids, "sourcing", ("open",), db, actor)
 
 
 def on_offer_created(requirement: Requirement, db: Session, actor: User | None = None) -> bool:
@@ -115,17 +130,7 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
 
     Returns count of requirements that changed status.
     """
-    changed = 0
-    requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
-    for req in requirements:
-        current = req.sourcing_status or "open"
-        if current in ("open", "sourcing", "offered"):
-            try:
-                if transition_requirement(req, "quoted", db, actor):
-                    changed += 1
-            except ValueError as e:
-                logger.debug("Skipping requirement {} transition to quoted: {}", req.id, e)
-    return changed
+    return _advance_requirements(requirement_ids, "quoted", ("open", "sourcing", "offered"), db, actor)
 
 
 def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> bool:

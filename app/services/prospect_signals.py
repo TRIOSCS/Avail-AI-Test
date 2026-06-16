@@ -23,6 +23,29 @@ from app.services.prospect_scoring import (
 # ── Signal Enrichment ────────────────────────────────────────────────
 
 
+def _store_signal(prospect_id: int, key: str, value: object, db: Session, *, label: str) -> None:
+    """Store one signal under ``key`` in readiness_signals, recalc, and commit.
+
+    Idempotent: re-storing the same key just overwrites it. Preserves an
+    existing ``source`` and defaults it to "backfill" on first write.
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        logger.warning("enrich_with_{}: prospect {} not found", key, prospect_id)
+        return
+
+    signals = dict(prospect.readiness_signals or {})
+    signals[key] = value
+    signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
+    signals["source"] = signals.get("source", "backfill")
+    prospect.readiness_signals = signals
+
+    _recalculate_readiness(prospect)
+    prospect.last_enriched_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("{} signals stored for prospect {}", label, prospect_id)
+
+
 def enrich_with_intent(prospect_id: int, intent_data: dict, db: Session) -> None:
     """Store intent topic data in readiness_signals JSONB under 'intent' key.
 
@@ -30,21 +53,7 @@ def enrich_with_intent(prospect_id: int, intent_data: dict, db: Session) -> None
     procurement solutions, supply chain management, component sourcing.
     Recalculates readiness_score after update.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        logger.warning("enrich_with_intent: prospect {} not found", prospect_id)
-        return
-
-    signals = dict(prospect.readiness_signals or {})
-    signals["intent"] = intent_data
-    signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
-    signals["source"] = signals.get("source", "backfill")
-    prospect.readiness_signals = signals
-
-    _recalculate_readiness(prospect)
-    prospect.last_enriched_at = datetime.now(timezone.utc)
-    db.commit()
-    logger.info("Intent signals stored for prospect {}", prospect_id)
+    _store_signal(prospect_id, "intent", intent_data, db, label="Intent")
 
 
 def enrich_with_hiring(prospect_id: int, workforce_data: dict, db: Session) -> None:
@@ -52,21 +61,7 @@ def enrich_with_hiring(prospect_id: int, workforce_data: dict, db: Session) -> N
 
     Looks for procurement/engineering department growth, active hiring.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        logger.warning("enrich_with_hiring: prospect {} not found", prospect_id)
-        return
-
-    signals = dict(prospect.readiness_signals or {})
-    signals["hiring"] = workforce_data
-    signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
-    signals["source"] = signals.get("source", "backfill")
-    prospect.readiness_signals = signals
-
-    _recalculate_readiness(prospect)
-    prospect.last_enriched_at = datetime.now(timezone.utc)
-    db.commit()
-    logger.info("Hiring signals stored for prospect {}", prospect_id)
+    _store_signal(prospect_id, "hiring", workforce_data, db, label="Hiring")
 
 
 def enrich_with_events(prospect_id: int, events: list[dict], db: Session) -> None:
@@ -74,21 +69,7 @@ def enrich_with_events(prospect_id: int, events: list[dict], db: Session) -> Non
 
     Event types: new_funding_round, new_product, new_office, M&A.
     """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        logger.warning("enrich_with_events: prospect {} not found", prospect_id)
-        return
-
-    signals = dict(prospect.readiness_signals or {})
-    signals["events"] = events
-    signals["enriched_at"] = datetime.now(timezone.utc).isoformat()
-    signals["source"] = signals.get("source", "backfill")
-    prospect.readiness_signals = signals
-
-    _recalculate_readiness(prospect)
-    prospect.last_enriched_at = datetime.now(timezone.utc)
-    db.commit()
-    logger.info("Event signals stored for prospect {}", prospect_id)
+    _store_signal(prospect_id, "events", events, db, label="Event")
 
 
 def _recalculate_readiness(prospect: ProspectAccount) -> None:
@@ -197,9 +178,12 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
                         ]
                     )
                 ]
-                strength = (
-                    "strong" if len(component_topics) >= 3 else "moderate" if len(component_topics) >= 1 else "weak"
-                )
+                if len(component_topics) >= 3:
+                    strength = "strong"
+                elif component_topics:
+                    strength = "moderate"
+                else:
+                    strength = "weak"
                 new_signals["intent"] = {
                     "strength": strength,
                     "topics": intent_topics,
@@ -257,6 +241,41 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
 
 
 # ── Similar Customer Matching ────────────────────────────────────────
+
+# Region → set of recognized HQ country codes/names (all uppercase).
+REGION_COUNTRIES = {
+    "US": {"US", "USA", "UNITED STATES"},
+    "EU": {
+        "DE",
+        "GB",
+        "FR",
+        "NL",
+        "SE",
+        "IT",
+        "ES",
+        "CH",
+        "AT",
+        "BE",
+        "GERMANY",
+        "UNITED KINGDOM",
+        "FRANCE",
+        "NETHERLANDS",
+    },
+    "ASIA": {
+        "CN",
+        "JP",
+        "KR",
+        "TW",
+        "SG",
+        "IN",
+        "CHINA",
+        "JAPAN",
+        "SOUTH KOREA",
+        "TAIWAN",
+        "SINGAPORE",
+        "INDIA",
+    },
+}
 
 
 def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]:
@@ -324,50 +343,8 @@ def find_similar_customers(prospect: ProspectAccount, db: Session) -> list[dict]
 
         # Region match
         if prospect.region and company.hq_country:
-            prospect_region = prospect.region.upper()
-            country = company.hq_country.upper()
-            region_match = (
-                (prospect_region == "US" and country in ("US", "USA", "UNITED STATES"))
-                or (
-                    prospect_region == "EU"
-                    and country
-                    in (
-                        "DE",
-                        "GB",
-                        "FR",
-                        "NL",
-                        "SE",
-                        "IT",
-                        "ES",
-                        "CH",
-                        "AT",
-                        "BE",
-                        "GERMANY",
-                        "UNITED KINGDOM",
-                        "FRANCE",
-                        "NETHERLANDS",
-                    )
-                )
-                or (
-                    prospect_region == "ASIA"
-                    and country
-                    in (
-                        "CN",
-                        "JP",
-                        "KR",
-                        "TW",
-                        "SG",
-                        "IN",
-                        "CHINA",
-                        "JAPAN",
-                        "SOUTH KOREA",
-                        "TAIWAN",
-                        "SINGAPORE",
-                        "INDIA",
-                    )
-                )
-            )
-            if region_match:
+            countries = REGION_COUNTRIES.get(prospect.region.upper(), set())
+            if company.hq_country.upper() in countries:
                 match_reasons.append(f"Same region: {prospect.region}")
                 score += 5
 
@@ -532,13 +509,8 @@ def _template_fallback_writeup(prospect: ProspectAccount) -> str:
     signals = prospect.readiness_signals or {}
     similar = prospect.similar_customers or []
 
-    # Size description
     size = prospect.employee_count_range or "unknown-size"
-
-    # Industry
     industry = prospect.industry or "unknown industry"
-
-    # Location
     location = prospect.hq_location or "undisclosed location"
 
     # Segment reason from fit_reasoning

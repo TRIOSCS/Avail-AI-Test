@@ -221,16 +221,15 @@ def generate_ai_summary(plan: BuyPlan) -> str:
         return "Empty buy plan — no lines generated."
 
     line_count = len(lines)
-    vendor_ids = set()
-    for line in lines:
-        if line.offer_id:
-            vendor_ids.add(line.offer_id)  # proxy — unique offers ≈ unique vendors
 
-    # Count unique vendors from offers
+    # Count unique vendors by name, falling back to offer_id (proxy — unique offers ≈ vendors)
     vendor_names = set()
+    vendor_ids = set()
     for line in lines:
         if line.offer and line.offer.vendor_name:
             vendor_names.add(line.offer.vendor_name.lower())
+        if line.offer_id:
+            vendor_ids.add(line.offer_id)
     vendor_count = len(vendor_names) or len(vendor_ids)
 
     # Average margin
