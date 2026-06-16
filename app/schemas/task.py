@@ -11,6 +11,16 @@ from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field, field_validator
 
 
+def _require_due_at_24h(v: datetime) -> datetime:
+    """Reject due dates less than 24 hours out; returns ``v`` unchanged if valid."""
+    now = datetime.now(timezone.utc)
+    # Make naive datetimes UTC for comparison
+    check = v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
+    if check < now + timedelta(hours=24):
+        raise ValueError("Due date must be at least 24 hours from now")
+    return v
+
+
 class TaskCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
     description: str | None = None
@@ -20,12 +30,7 @@ class TaskCreate(BaseModel):
     @field_validator("due_at")
     @classmethod
     def due_at_min_24h(cls, v: datetime) -> datetime:
-        now = datetime.now(timezone.utc)
-        # Make naive datetimes UTC for comparison
-        check = v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
-        if check < now + timedelta(hours=24):
-            raise ValueError("Due date must be at least 24 hours from now")
-        return v
+        return _require_due_at_24h(v)
 
 
 class TaskUpdate(BaseModel):
@@ -39,11 +44,7 @@ class TaskUpdate(BaseModel):
     def due_at_min_24h(cls, v: datetime | None) -> datetime | None:
         if v is None:
             return v
-        now = datetime.now(timezone.utc)
-        check = v.replace(tzinfo=timezone.utc) if v.tzinfo is None else v
-        if check < now + timedelta(hours=24):
-            raise ValueError("Due date must be at least 24 hours from now")
-        return v
+        return _require_due_at_24h(v)
 
 
 class TaskComplete(BaseModel):

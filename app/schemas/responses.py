@@ -199,6 +199,12 @@ class SimpleOkIdResponse(BaseModel):
 # ── Bulk Requisition Endpoints ─────────────────────────────────────────
 
 
+def _assert_count_matches(count_label: str, count: int, ids_label: str, ids: list[int]) -> None:
+    """Raise ValueError if a `*_count` field disagrees with its `*_ids` list length."""
+    if count != len(ids):
+        raise ValueError(f"{count_label} ({count}) != len({ids_label}) ({len(ids)})")
+
+
 class BulkArchiveResponse(BaseModel):
     """Response shape for `/api/requisitions/bulk-archive` and `/batch-archive`.
 
@@ -215,8 +221,7 @@ class BulkArchiveResponse(BaseModel):
 
     @model_validator(mode="after")
     def _count_matches_ids(self) -> Self:
-        if self.archived_count != len(self.archived_ids):
-            raise ValueError(f"archived_count ({self.archived_count}) != len(archived_ids) ({len(self.archived_ids)})")
+        _assert_count_matches("archived_count", self.archived_count, "archived_ids", self.archived_ids)
         return self
 
 
@@ -230,8 +235,7 @@ class BatchAssignResponse(BaseModel):
 
     @model_validator(mode="after")
     def _count_matches_ids(self) -> Self:
-        if self.assigned_count != len(self.assigned_ids):
-            raise ValueError(f"assigned_count ({self.assigned_count}) != len(assigned_ids) ({len(self.assigned_ids)})")
+        _assert_count_matches("assigned_count", self.assigned_count, "assigned_ids", self.assigned_ids)
         return self
 
 

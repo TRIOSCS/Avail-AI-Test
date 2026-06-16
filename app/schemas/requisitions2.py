@@ -9,7 +9,6 @@ Depends on: pydantic
 
 from datetime import date
 from enum import Enum
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -53,10 +52,10 @@ class ReqListFilters(BaseModel):
 
     q: str = ""
     status: ReqStatus = ReqStatus.active
-    owner: Optional[int] = None
-    urgency: Optional[Urgency] = None
-    date_from: Optional[date] = None
-    date_to: Optional[date] = None
+    owner: int | None = None
+    urgency: Urgency | None = None
+    date_from: date | None = None
+    date_to: date | None = None
     sort: SortColumn = SortColumn.created_at
     order: SortOrder = SortOrder.desc
     page: int = Field(default=1, ge=1)

@@ -36,6 +36,22 @@ def _validate_deadline(v: str | None) -> str | None:
     raise ValueError(f"Invalid date: '{v}'. Use YYYY-MM-DD format and ensure the date is valid.")
 
 
+def _normalize_optional(v: str | None, normalizer) -> str | None:
+    """Apply a normalizer to an optional field, passing through None and falling back to
+    the original value when the normalizer returns None."""
+    if v is None:
+        return v
+    return normalizer(v) or v
+
+
+def _normalize_mpn_list(v):
+    """Normalize each MPN in a list, dropping falsy entries; pass non-lists through
+    unchanged."""
+    if isinstance(v, list):
+        return [normalize_mpn(s) or s for s in v if s]
+    return v
+
+
 # ── Batch Operations ─────────────────────────────────────────────────
 
 
@@ -128,23 +144,17 @@ class RequirementCreate(BaseModel):
     def parse_substitutes(cls, v):
         if isinstance(v, str):
             v = [s.strip() for s in v.replace("\n", ",").split(",") if s.strip()]
-        if isinstance(v, list):
-            return [normalize_mpn(s) or s for s in v if s]
-        return v
+        return _normalize_mpn_list(v)
 
     @field_validator("condition")
     @classmethod
     def normalize_condition_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_condition(v) or v
+        return _normalize_optional(v, normalize_condition)
 
     @field_validator("packaging")
     @classmethod
     def normalize_packaging_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_packaging(v) or v
+        return _normalize_optional(v, normalize_packaging)
 
 
 class RequirementUpdate(BaseModel):
@@ -180,23 +190,17 @@ class RequirementUpdate(BaseModel):
     @field_validator("substitutes", mode="before")
     @classmethod
     def normalize_substitutes(cls, v):
-        if isinstance(v, list):
-            return [normalize_mpn(s) or s for s in v if s]
-        return v
+        return _normalize_mpn_list(v)
 
     @field_validator("condition")
     @classmethod
     def normalize_condition_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_condition(v) or v
+        return _normalize_optional(v, normalize_condition)
 
     @field_validator("packaging")
     @classmethod
     def normalize_packaging_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_packaging(v) or v
+        return _normalize_optional(v, normalize_packaging)
 
 
 class SightingUnavailableIn(BaseModel):
