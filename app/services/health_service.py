@@ -4,7 +4,12 @@ Called by: main.py health endpoint
 Depends on: config.py settings
 """
 
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
 from loguru import logger
+
+from ..config import settings
 
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
 
@@ -14,11 +19,6 @@ def check_backup_freshness() -> str:
 
     Returns "ok", "stale", or "unknown".
     """
-    from datetime import datetime, timedelta, timezone
-    from pathlib import Path
-
-    from ..config import settings
-
     ts_path = Path(BACKUP_TIMESTAMP_FILE)
     if not ts_path.exists():
         return "unknown"

@@ -18,6 +18,28 @@ from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
 
+
+def _split_hq_location(hq_location: str | None) -> tuple[str | None, str | None]:
+    """Split a 'City, State' HQ location into (city, state).
+
+    Returns (None, None) when there's no comma to split on. Mirrors the prior
+    inline logic: the first comma-delimited field is the city and the second is
+    the state (any further fields are ignored).
+    """
+    if not hq_location or "," not in hq_location:
+        return None, None
+    parts = hq_location.split(",")
+    return parts[0].strip(), parts[1].strip()
+
+
+def _format_similar_names(similar: list, limit: int) -> str:
+    """Join the first `limit` similar customers into a comma-separated string.
+
+    Each entry may be a dict (use its ``name``) or a bare string/value.
+    """
+    return ", ".join(s.get("name", s) if isinstance(s, dict) else str(s) for s in similar[:limit])
+
+
 # ── Claim ────────────────────────────────────────────────────────────
 
 
@@ -76,21 +98,14 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             )
         else:
             # Create new Company from prospect data
+            hq_city, hq_state = _split_hq_location(prospect.hq_location)
             company = Company(
                 name=prospect.name,
                 domain=prospect.domain,
                 website=prospect.website,
                 industry=prospect.industry,
-                hq_city=(
-                    prospect.hq_location.split(",")[0].strip()
-                    if prospect.hq_location and "," in prospect.hq_location
-                    else None
-                ),
-                hq_state=(
-                    prospect.hq_location.split(",")[1].strip()
-                    if prospect.hq_location and "," in prospect.hq_location
-                    else None
-                ),
+                hq_city=hq_city,
+                hq_state=hq_state,
                 employee_size=prospect.employee_count_range,
                 is_active=True,
                 account_owner_id=user_id,
@@ -99,8 +114,6 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             db.add(company)
             db.flush()
             # Auto-create default HQ site so company appears in pickers
-            from app.models.crm import CustomerSite
-
             default_site = CustomerSite(company_id=company.id, site_name="HQ")
             db.add(default_site)
             db.flush()
@@ -166,19 +179,12 @@ def reveal_contacts(prospect: ProspectAccount, db: Session) -> list[dict]:
     # Create or find a CustomerSite for this company (HQ site)
     site = db.query(CustomerSite).filter(CustomerSite.company_id == prospect.company_id).first()
     if not site:
+        hq_city, hq_state = _split_hq_location(prospect.hq_location)
         site = CustomerSite(
             company_id=prospect.company_id,
             site_name=f"{prospect.name} - HQ",
-            city=(
-                prospect.hq_location.split(",")[0].strip()
-                if prospect.hq_location and "," in prospect.hq_location
-                else None
-            ),
-            state=(
-                prospect.hq_location.split(",")[1].strip()
-                if prospect.hq_location and "," in prospect.hq_location and len(prospect.hq_location.split(",")) > 1
-                else None
-            ),
+            city=hq_city,
+            state=hq_state,
             is_active=True,
         )
         db.add(site)
@@ -247,7 +253,7 @@ async def generate_account_briefing(prospect_id: int, db: Session) -> str | None
     similar = prospect.similar_customers or []
 
     # Build context for the AI
-    similar_names = ", ".join(s.get("name", s) if isinstance(s, dict) else str(s) for s in similar[:5])
+    similar_names = _format_similar_names(similar, 5)
 
     prompt = f"""Generate a concise account briefing for a salesperson about to contact this prospect.
 
@@ -314,7 +320,7 @@ def _template_briefing(prospect: ProspectAccount, signals: dict, similar: list) 
         parts.append(f"**Hiring Signal:** Recruiting {hiring['type']} — indicates growth/expansion.")
 
     if similar:
-        names = ", ".join(s.get("name", s) if isinstance(s, dict) else str(s) for s in similar[:3])
+        names = _format_similar_names(similar, 3)
         parts.append(f"\n**Similar Customers:** {names}")
         parts.append("Reference these relationships to build credibility on the first call.")
 

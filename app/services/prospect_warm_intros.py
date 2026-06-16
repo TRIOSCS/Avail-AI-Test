@@ -51,6 +51,13 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
         "sighting_count": 0,
     }
 
+    def mark_warm() -> None:
+        """Promote a still-cold prospect to a warm intro (never downgrades a hot
+        one)."""
+        if not result["has_warm_intro"]:
+            result["has_warm_intro"] = True
+            result["warmth"] = "warm"
+
     # 1. VendorCard domain match
     vc = db.query(VendorCard).filter(VendorCard.domain == domain).first()
     if vc:
@@ -109,9 +116,8 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
                 "company": row.company_name,
             }
         )
-        if not result["has_warm_intro"]:
-            result["has_warm_intro"] = True
-            result["warmth"] = "warm"
+    if internal:
+        mark_warm()
 
     # 3. Sighting count from this domain
     try:
@@ -121,9 +127,8 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
             db.query(func.count(Sighting.id)).filter(Sighting.vendor_email.ilike(domain_pattern)).scalar() or 0
         )
         result["sighting_count"] = sighting_count
-        if sighting_count > 0 and not result["has_warm_intro"]:
-            result["has_warm_intro"] = True
-            result["warmth"] = "warm"
+        if sighting_count > 0:
+            mark_warm()
     except Exception as e:
         logger.warning("Warm intro sighting lookup failed: {}", e)
 

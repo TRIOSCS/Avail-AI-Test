@@ -123,11 +123,7 @@ BRAND_LIST = [
 ]
 
 # Compile brand patterns (case-insensitive, word-boundary)
-_BRAND_PATTERNS = {}
-for brand in BRAND_LIST:
-    # Escape special regex chars and create word-boundary pattern
-    escaped = re.escape(brand)
-    _BRAND_PATTERNS[brand] = re.compile(rf"\b{escaped}\b", re.IGNORECASE)
+_BRAND_PATTERNS = {brand: re.compile(rf"\b{re.escape(brand)}\b", re.IGNORECASE) for brand in BRAND_LIST}
 
 # ── Commodity category mapping ───────────────────────────────────────
 
@@ -268,10 +264,7 @@ def commodity_slug_to_display(slug: str) -> str:
 
 
 # Flatten keywords for quick lookup
-_COMMODITY_KEYWORDS = {}
-for category, keywords in COMMODITY_MAP.items():
-    for kw in keywords:
-        _COMMODITY_KEYWORDS[kw.lower()] = category
+_COMMODITY_KEYWORDS = {kw.lower(): category for category, keywords in COMMODITY_MAP.items() for kw in keywords}
 
 
 def detect_brands_from_text(text: str) -> list[str]:
@@ -282,11 +275,7 @@ def detect_brands_from_text(text: str) -> list[str]:
     if not text:
         return []
 
-    found = []
-    for brand, pattern in _BRAND_PATTERNS.items():
-        if pattern.search(text):
-            found.append(brand)
-    return found
+    return [brand for brand, pattern in _BRAND_PATTERNS.items() if pattern.search(text)]
 
 
 def detect_commodities_from_text(text: str) -> list[str]:
@@ -298,12 +287,7 @@ def detect_commodities_from_text(text: str) -> list[str]:
         return []
 
     text_lower = text.lower()
-    categories = set()
-
-    for keyword, category in _COMMODITY_KEYWORDS.items():
-        if keyword in text_lower:
-            categories.add(category)
-
+    categories = {category for keyword, category in _COMMODITY_KEYWORDS.items() if keyword in text_lower}
     return sorted(categories)
 
 
@@ -330,31 +314,22 @@ def analyze_vendor_specialties(vendor_card_id: int, db) -> dict:
     )
     for s in sightings:
         if s.manufacturer:
-            brands = detect_brands_from_text(s.manufacturer)
-            for b in brands:
-                brand_counter[b] += 1
+            brand_counter.update(detect_brands_from_text(s.manufacturer))
         if s.mpn_matched:
-            commodities = detect_commodities_from_text(s.mpn_matched)
-            for c in commodities:
-                commodity_counter[c] += 1
+            commodity_counter.update(detect_commodities_from_text(s.mpn_matched))
 
     # 2. From offers
     offers = db.query(Offer.manufacturer, Offer.mpn).filter(Offer.vendor_card_id == vendor_card_id).limit(500).all()
     for o in offers:
         if o.manufacturer:
-            brands = detect_brands_from_text(o.manufacturer)
-            for b in brands:
+            for b in detect_brands_from_text(o.manufacturer):
                 brand_counter[b] += 2  # Weight offers more
         if o.mpn:
-            commodities = detect_commodities_from_text(o.mpn)
-            for c in commodities:
-                commodity_counter[c] += 1
+            commodity_counter.update(detect_commodities_from_text(o.mpn))
 
     # 3. From existing vendor card data
     for field in [card.display_name, card.industry or ""]:
-        brands = detect_brands_from_text(field)
-        for b in brands:
-            brand_counter[b] += 1
+        brand_counter.update(detect_brands_from_text(field))
 
     # Top results
     brand_tags = [b for b, _ in brand_counter.most_common(15)]

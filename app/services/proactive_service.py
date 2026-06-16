@@ -302,13 +302,12 @@ async def send_proactive_offer(
             </tr>"""
 
         contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
-        greeting = (
-            f"Hi {html.escape(str(contacts[0].full_name))},"
-            if len(contacts) == 1 and contacts[0].full_name
-            else f"Hi {html.escape(str(contact_names))},"
-            if contact_names
-            else "Hello,"
-        )
+        if len(contacts) == 1 and contacts[0].full_name:
+            greeting = f"Hi {html.escape(str(contacts[0].full_name))},"
+        elif contact_names:
+            greeting = f"Hi {html.escape(str(contact_names))},"
+        else:
+            greeting = "Hello,"
 
         notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
         salesperson_name = user.name or user.email.split("@")[0]
@@ -382,27 +381,30 @@ async def send_proactive_offer(
     # Upsert throttle entries only if the email was actually sent
     if send_succeeded:
         now = datetime.now(timezone.utc)
-        for m in matches:
-            existing_throttle = (
-                db.query(ProactiveThrottle)
-                .filter(
-                    ProactiveThrottle.mpn == m.mpn,
-                    ProactiveThrottle.customer_site_id == site_id,
-                )
-                .first()
+        # Batch-load existing throttles for these MPNs (one query instead of N).
+        mpns = {m.mpn for m in matches}
+        throttle_by_mpn = {
+            t.mpn: t
+            for t in db.query(ProactiveThrottle).filter(
+                ProactiveThrottle.mpn.in_(mpns),
+                ProactiveThrottle.customer_site_id == site_id,
             )
+        }
+        for m in matches:
+            existing_throttle = throttle_by_mpn.get(m.mpn)
             if existing_throttle:
                 existing_throttle.last_offered_at = now
                 existing_throttle.proactive_offer_id = po.id
             else:
-                db.add(
-                    ProactiveThrottle(
-                        mpn=m.mpn,
-                        customer_site_id=site_id,
-                        last_offered_at=now,
-                        proactive_offer_id=po.id,
-                    )
+                new_throttle = ProactiveThrottle(
+                    mpn=m.mpn,
+                    customer_site_id=site_id,
+                    last_offered_at=now,
+                    proactive_offer_id=po.id,
                 )
+                db.add(new_throttle)
+                # Mirror autoflush: a later match with the same MPN updates this row.
+                throttle_by_mpn[m.mpn] = new_throttle
 
     db.commit()
     return _proactive_offer_to_dict(po)
@@ -590,6 +592,13 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     def _capped(col):
         return case((col > CAP, 0), else_=col)
 
+    # Capped sum of a column, restricted to rows in a given status.
+    def _summed_when(status, col):
+        return func.coalesce(
+            func.sum(case((ProactiveOffer.status == status, _capped(func.coalesce(col, 0))))),
+            0,
+        )
+
     # Base filter
     base_filter = []
     if salesperson_id:
@@ -600,39 +609,9 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         db.query(
             func.count(ProactiveOffer.id).label("sent"),
             func.count(case((ProactiveOffer.status == ProactiveOfferStatus.CONVERTED, 1))).label("converted"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
-                            _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
-                        )
-                    )
-                ),
-                0,
-            ).label("converted_revenue"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
-                            _capped(func.coalesce(ProactiveOffer.total_cost, 0)),
-                        )
-                    )
-                ),
-                0,
-            ).label("converted_cost"),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            ProactiveOffer.status == ProactiveOfferStatus.SENT,
-                            _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
-                        )
-                    )
-                ),
-                0,
-            ).label("pending_revenue"),
+            _summed_when(ProactiveOfferStatus.CONVERTED, ProactiveOffer.total_sell).label("converted_revenue"),
+            _summed_when(ProactiveOfferStatus.CONVERTED, ProactiveOffer.total_cost).label("converted_cost"),
+            _summed_when(ProactiveOfferStatus.SENT, ProactiveOffer.total_sell).label("pending_revenue"),
             func.count(ProactiveOffer.converted_quote_id).label("quoted"),
         )
         .filter(*base_filter)
@@ -680,39 +659,9 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
                 ProactiveOffer.salesperson_id,
                 func.count(ProactiveOffer.id).label("sent"),
                 func.count(case((ProactiveOffer.status == ProactiveOfferStatus.CONVERTED, 1))).label("converted"),
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
-                                _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
-                            )
-                        )
-                    ),
-                    0,
-                ).label("rev"),
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
-                                _capped(func.coalesce(ProactiveOffer.total_cost, 0)),
-                            )
-                        )
-                    ),
-                    0,
-                ).label("cost"),
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                ProactiveOffer.status == ProactiveOfferStatus.SENT,
-                                _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
-                            )
-                        )
-                    ),
-                    0,
-                ).label("pending"),
+                _summed_when(ProactiveOfferStatus.CONVERTED, ProactiveOffer.total_sell).label("rev"),
+                _summed_when(ProactiveOfferStatus.CONVERTED, ProactiveOffer.total_cost).label("cost"),
+                _summed_when(ProactiveOfferStatus.SENT, ProactiveOffer.total_sell).label("pending"),
                 func.count(ProactiveOffer.converted_quote_id).label("quoted"),
             )
             .group_by(ProactiveOffer.salesperson_id)

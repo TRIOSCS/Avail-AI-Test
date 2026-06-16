@@ -91,19 +91,9 @@ ICP_SEGMENTS = {
     },
 }
 
-ALL_NAICS_CODES = []
-for seg in ICP_SEGMENTS.values():
-    ALL_NAICS_CODES.extend(seg["naics_codes"])
-
-ALL_NAICS_4DIGIT = set()
-for seg in ICP_SEGMENTS.values():
-    for code in seg["naics_codes"]:
-        ALL_NAICS_4DIGIT.add(code[:4])
-
-ALL_NAICS_3DIGIT = set()
-for seg in ICP_SEGMENTS.values():
-    for code in seg["naics_codes"]:
-        ALL_NAICS_3DIGIT.add(code[:3])
+ALL_NAICS_CODES = [code for seg in ICP_SEGMENTS.values() for code in seg["naics_codes"]]
+ALL_NAICS_4DIGIT = {code[:4] for code in ALL_NAICS_CODES}
+ALL_NAICS_3DIGIT = {code[:3] for code in ALL_NAICS_CODES}
 
 # ── Fit Score Weights ────────────────────────────────────────────────
 
@@ -357,27 +347,26 @@ def calculate_readiness_score(prospect_data: dict, signals: dict) -> tuple[int, 
     }
 
     # 2. Recent company events (0-25)
+    # No events = no signal (score stays 0, not neutral — absence of events is informative).
     events = signals.get("events", [])
     event_score = 0
     event_details = []
     if isinstance(events, list):
         for ev in events:
-            ev_type = ev.get("type", "") if isinstance(ev, dict) else ""
-            if "funding" in ev_type.lower():
+            ev_type = (ev.get("type", "") if isinstance(ev, dict) else "").lower()
+            if "funding" in ev_type:
                 event_score = max(event_score, 25)
                 event_details.append("funding")
-            elif "product" in ev_type.lower() or "launch" in ev_type.lower():
+            elif "product" in ev_type or "launch" in ev_type:
                 event_score = max(event_score, 20)
                 event_details.append("new_product")
-            elif "expansion" in ev_type.lower() or "office" in ev_type.lower():
+            elif "expansion" in ev_type or "office" in ev_type:
                 event_score = max(event_score, 20)
                 event_details.append("expansion")
-            elif "acquisition" in ev_type.lower() or "m&a" in ev_type.lower() or "merger" in ev_type.lower():
+            elif "acquisition" in ev_type or "m&a" in ev_type or "merger" in ev_type:
                 event_score = max(event_score, 15)
                 event_details.append("m&a")
     event_score = min(event_score, READINESS_WEIGHT_EVENTS)
-    if not events:
-        event_score = 0  # no events = no signal (not neutral — absence of events is informative)
     total += event_score
     breakdown["events"] = {
         "score": event_score,

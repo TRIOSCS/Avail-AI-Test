@@ -41,6 +41,15 @@ RECENCY_IDEAL_DAYS = 7  # Contacted within 7 days = perfect
 RECENCY_MAX_DAYS = 365  # Over a year = zero score
 
 
+def _decay_score(value: float, ideal: float, maximum: float) -> float:
+    """Map a metric to 0-100: 100 at/below ``ideal``, 0 at/above ``maximum``, linear between."""
+    if value <= ideal:
+        return 100.0
+    if value >= maximum:
+        return 0.0
+    return max(0.0, 100 * (1 - (value - ideal) / (maximum - ideal)))
+
+
 def compute_engagement_score(
     total_outreach: int,
     total_responses: int,
@@ -75,12 +84,13 @@ def compute_engagement_score(
         }
 
     # ── 1. Response Rate (0-100) ──
-    response_rate = min(total_responses / total_outreach, 1.0) if total_outreach > 0 else 0
+    # total_outreach >= MIN_OUTREACH_FOR_SCORE here, so it is always positive.
+    response_rate = min(total_responses / total_outreach, 1.0)
     response_score = response_rate * 100
 
     # ── 2. Ghost Rate penalty (0-100, inverted: 0 ghosts = 100) ──
-    ghost_rate = 1.0 - response_rate if total_outreach > 0 else None
-    ghost_score = (1.0 - ghost_rate) * 100 if ghost_rate is not None else 0
+    ghost_rate = 1.0 - response_rate
+    ghost_score = (1.0 - ghost_rate) * 100
 
     # ── 3. Recency (0-100) ──
     recency_score = 0.0
@@ -88,29 +98,12 @@ def compute_engagement_score(
         if last_contact_at.tzinfo is None:
             last_contact_at = last_contact_at.replace(tzinfo=timezone.utc)
         days_since = max((now - last_contact_at).total_seconds() / 86400, 0)
-        if days_since <= RECENCY_IDEAL_DAYS:
-            recency_score = 100.0
-        elif days_since >= RECENCY_MAX_DAYS:
-            recency_score = 0.0
-        else:
-            # Linear decay from ideal to max
-            recency_score = max(
-                0,
-                100 * (1 - (days_since - RECENCY_IDEAL_DAYS) / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS)),
-            )
+        recency_score = _decay_score(days_since, RECENCY_IDEAL_DAYS, RECENCY_MAX_DAYS)
 
     # ── 4. Response Velocity (0-100) ──
     velocity_score = 0.0
     if avg_velocity_hours is not None and avg_velocity_hours >= 0:
-        if avg_velocity_hours <= VELOCITY_IDEAL_HOURS:
-            velocity_score = 100.0
-        elif avg_velocity_hours >= VELOCITY_MAX_HOURS:
-            velocity_score = 0.0
-        else:
-            velocity_score = max(
-                0,
-                100 * (1 - (avg_velocity_hours - VELOCITY_IDEAL_HOURS) / (VELOCITY_MAX_HOURS - VELOCITY_IDEAL_HOURS)),
-            )
+        velocity_score = _decay_score(avg_velocity_hours, VELOCITY_IDEAL_HOURS, VELOCITY_MAX_HOURS)
 
     # ── 5. Win Rate (0-100) ──
     win_rate = min(total_wins / total_responses, 1.0) if total_responses > 0 else 0
@@ -128,7 +121,7 @@ def compute_engagement_score(
     return {
         "engagement_score": round(engagement_score, 1),
         "response_rate": round(response_rate, 3),
-        "ghost_rate": round(ghost_rate, 3) if ghost_rate is not None else None,
+        "ghost_rate": round(ghost_rate, 3),
         "recency_score": round(recency_score, 1),
         "velocity_score": round(velocity_score, 1),
         "win_rate": round(win_rate, 3),
@@ -208,7 +201,6 @@ async def compute_all_engagement_scores(db: Session) -> dict:
     # ── Compute average response velocity per vendor ──
     # Velocity = avg time between outbound Contact.created_at and VendorResponse.received_at
     # Matched via contact_id FK, attributed to vendor card via Contact.vendor_name
-    velocity_map = {}
     matched_pairs = (
         db.query(
             Contact.vendor_name,
@@ -237,9 +229,8 @@ async def compute_all_engagement_scores(db: Session) -> dict:
             if hours < 720:  # Ignore >30 days as outliers
                 vendor_velocities.setdefault(norm, []).append(hours)
 
-    for norm, hours_list in vendor_velocities.items():
-        if hours_list:
-            velocity_map[norm] = sum(hours_list) / len(hours_list)
+    # Every list was built via setdefault().append(), so all are non-empty.
+    velocity_map = {norm: sum(hours_list) / len(hours_list) for norm, hours_list in vendor_velocities.items()}
 
     # ── Gather win counts (won offers) per vendor ──
     win_rows = (
