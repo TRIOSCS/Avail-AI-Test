@@ -130,6 +130,15 @@ class Settings(BaseSettings):
     # zero-LLM. Runs between mpn-decode (0.95) and the AI spec reader (0.85). Safe to leave
     # on — values are enum-validated by record_spec. See app/services/desc_extractor.
     desc_parse_enabled: bool = True
+    # PartSurfer description enrichment: for UNCATEGORIZED HP/HPE cards, fetch the OEM's own
+    # verbatim description live from partsurfer.hpe.com (robots-allowed, 1 GET / 2s) and feed
+    # it into the desc grammar to categorize the card. Default ON — it's the win for the ~70k
+    # uncategorized HP spares; cheap, free, robots-allowed. Values arbitrate through the F1
+    # ladder at partsurfer_desc (tier 84). See app/services/enrichment_worker/partsurfer_resolver.
+    partsurfer_desc_enabled: bool = True
+    # Cap on live PartSurfer fetches per batch (each is a polite 1-req/2s GET — the worker
+    # paces them). Keeps a batch's wall-time bounded; uncategorized HP cards drain over batches.
+    partsurfer_fetch_per_batch: int = 5
     # Deterministic FRU crosswalk decode (IBM/Lenovo FRU → approved mfg models): zero-network,
     # zero-LLM — strict-intersects the regex-gated decodes of a FRU's mfg_model links. Runs
     # between mpn-decode (0.95) and desc-parse (0.90) at 0.93. Safe to leave on — values are
