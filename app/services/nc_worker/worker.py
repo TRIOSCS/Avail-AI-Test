@@ -16,6 +16,7 @@ import asyncio
 import hashlib
 import signal
 import time
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -39,6 +40,23 @@ def _handle_shutdown(signum, frame):
 
 signal.signal(signal.SIGTERM, _handle_shutdown)
 signal.signal(signal.SIGINT, _handle_shutdown)
+
+
+@contextmanager
+def _db_session():
+    """Yield a short-lived DB session, always closing it on exit.
+
+    Wraps the repeated ``SessionLocal() / try / finally db.close()`` boilerplate used
+    throughout the main loop. Imports ``SessionLocal`` lazily so tests can patch
+    ``app.database.SessionLocal``.
+    """
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 
 def update_worker_status(db: Session, **kwargs):
@@ -101,12 +119,9 @@ def main():
     logger.info("NC worker starting...")
 
     # Recover stale items from previous crash
-    db = SessionLocal()
-    try:
+    with _db_session() as db:
         recover_stale_searches(db)
         update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
-    finally:
-        db.close()
 
     # Start HTTP session and login
     session = NcSessionManager(config)
@@ -114,22 +129,16 @@ def main():
         session.start()
     except Exception as e:
         logger.error("NC worker: failed to start session: {}", e)
-        db = SessionLocal()
-        try:
+        with _db_session() as db:
             update_worker_status(db, is_running=False)
-        finally:
-            db.close()
         return
 
     if not session.is_logged_in:
         if not session.login():
             logger.error("NC worker: initial login failed, exiting")
             session.stop()
-            db = SessionLocal()
-            try:
+            with _db_session() as db:
                 update_worker_status(db, is_running=False)
-            finally:
-                db.close()
             return
 
     logger.info("NC worker: session ready")
@@ -143,11 +152,8 @@ def main():
             try:
                 # Refresh liveness heartbeat on EVERY tick, before any branch,
                 # so monitors don't false-alarm during idle/sleep/breaker paths.
-                db = SessionLocal()
-                try:
+                with _db_session() as db:
                     _record_heartbeat(db)
-                finally:
-                    db.close()
 
                 now_eastern = datetime.now(EASTERN)
 
@@ -160,8 +166,7 @@ def main():
                             searches_today,
                             sightings_today,
                         )
-                        db = SessionLocal()
-                        try:
+                        with _db_session() as db:
                             update_worker_status(
                                 db,
                                 daily_stats_json={
@@ -172,8 +177,6 @@ def main():
                                 searches_today=0,
                                 sightings_today=0,
                             )
-                        finally:
-                            db.close()
                     searches_today = 0
                     sightings_today = 0
                     last_stats_date = today_date
@@ -194,15 +197,12 @@ def main():
                 if breaker.should_stop():
                     info = breaker.get_trip_info()
                     logger.error("NC worker: circuit breaker open ({})", info["trip_reason"])
-                    db = SessionLocal()
-                    try:
+                    with _db_session() as db:
                         update_worker_status(
                             db,
                             circuit_breaker_open=True,
                             circuit_breaker_reason=info["trip_reason"],
                         )
-                    finally:
-                        db.close()
                     time.sleep(60 * 60)
                     continue
 
@@ -215,13 +215,11 @@ def main():
                     continue
 
                 # Run AI gate for any pending items
-                db = SessionLocal()
-                try:
-                    asyncio.run(run_ai_gate(db))
-                except Exception as e:
-                    logger.error("NC worker: AI gate error: {}", e)
-                finally:
-                    db.close()
+                with _db_session() as db:
+                    try:
+                        asyncio.run(run_ai_gate(db))
+                    except Exception as e:
+                        logger.error("NC worker: AI gate error: {}", e)
 
                 # Get next queued item
                 db = SessionLocal()
@@ -338,11 +336,8 @@ def main():
         session.stop()
         if session.has_browser:
             asyncio.run(session.stop_browser())
-        db = SessionLocal()
-        try:
+        with _db_session() as db:
             update_worker_status(db, is_running=False)
-        finally:
-            db.close()
 
 
 if __name__ == "__main__":  # pragma: no cover
