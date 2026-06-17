@@ -115,6 +115,10 @@ class BuyPlan(Base):
     completed_at = Column(UTCDateTime)
     case_report = Column(Text)
 
+    # Set once CPH has been recorded from this plan's lines (idempotency guard for
+    # the buy-plan→customer_part_history feed and its backfill).
+    purchase_history_recorded_at = Column(UTCDateTime)
+
     # ── Cancellation / halt
     cancelled_at = Column(UTCDateTime)
     cancelled_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
