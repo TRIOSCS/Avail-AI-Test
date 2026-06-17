@@ -72,8 +72,8 @@ def _link(
 
 def test_collect_creatable_desc_only_fru(db_session: Session):
     """A FRU link with an extractable description but no decodable mfg_model model
-    triggers fru_descs append (line 213) and the any(extract_desc...) branch (line 227).
-    """
+    triggers fru_descs append (line 213) and the any(extract_desc...) branch (line
+    227)."""
     seed_commodity_schemas(db_session)
     # drive_pn link with a rich description but no mfg (so _decodes returns False) —
     # the description "HDD; 1200GB; 2.5; 10K; SAS" should pass extract_desc.
@@ -100,7 +100,7 @@ def test_collect_creatable_desc_only_fru(db_session: Session):
 
 
 def test_run_create_with_limit(db_session: Session):
-    """limit=1 slices the plan keys, so only 1 card is counted as creatable."""
+    """Limit=1 slices the plan keys, so only 1 card is counted as creatable."""
     seed_commodity_schemas(db_session)
     _link(db_session, "00AAA01", "ST4000NM0035")
     db_session.flush()
@@ -113,7 +113,8 @@ def test_run_create_with_limit(db_session: Session):
 
 
 def test_run_create_integrity_error_skips(db_session: Session, monkeypatch):
-    """When db.flush() raises IntegrityError the card is counted as skipped, not created."""
+    """When db.flush() raises IntegrityError the card is counted as skipped, not
+    created."""
     seed_commodity_schemas(db_session)
     _link(db_session, "00AAA01", "ST4000NM0035")
     db_session.flush()
@@ -129,7 +130,8 @@ def test_run_create_integrity_error_skips(db_session: Session, monkeypatch):
 
 
 def test_measure_drive_pn_break_on_sample_limit(db_session: Session):
-    """Two decodable drive_pn links with sample=1 hits the break (line 334) on the 2nd."""
+    """Two decodable drive_pn links with sample=1 hits the break (line 334) on the
+    2nd."""
     seed_commodity_schemas(db_session)
     # Both ST4000NM0035 and ST8000NM0055 decode (Seagate HDDs).
     _link(db_session, "49Y7001", "ST4000NM0035", kind=FruLinkKind.DRIVE_PN.value, mfg="Seagate")
@@ -172,7 +174,8 @@ def test_main_measure_drive_pn_flag():
 
 
 def test_main_dry_run_all_phases():
-    """Default dry-run all-phases calls both run_drain and run_create, then db.rollback()."""
+    """Default dry-run all-phases calls both run_drain and run_create, then
+    db.rollback()."""
     mock_db = MagicMock()
     with (
         patch("argparse.ArgumentParser.parse_args", return_value=_mock_args()),
@@ -189,7 +192,7 @@ def test_main_dry_run_all_phases():
 
 
 def test_main_drain_only():
-    """phase='drain' calls run_drain but NOT run_create."""
+    """Phase='drain' calls run_drain but NOT run_create."""
     mock_db = MagicMock()
     with (
         patch("argparse.ArgumentParser.parse_args", return_value=_mock_args(phase="drain")),

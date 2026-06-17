@@ -1,9 +1,10 @@
-"""tests/test_categorize_from_desc_nightly.py — Covers exception handler, _print_report, and main().
+"""tests/test_categorize_from_desc_nightly.py — Covers exception handler, _print_report,
+and main().
 
 Targets lines 174-177, 199-211, 215-237, 241 in app/management/categorize_from_desc.py.
 
-Called by: pytest test suite
-Depends on: conftest.db_session, app.management.categorize_from_desc
+Called by: pytest test suite Depends on: conftest.db_session,
+app.management.categorize_from_desc
 """
 
 import os
@@ -31,7 +32,8 @@ def _card(db: Session, mpn: str, description: str | None, category=None) -> Mate
 
 
 def test_exception_in_loop_increments_failed(db_session: Session):
-    """Patch categorize_and_record to raise — verifies the except block increments failed."""
+    """Patch categorize_and_record to raise — verifies the except block increments
+    failed."""
     seed_commodity_schemas(db_session)
     _card(db_session, "BOOM1", 'HD, 450GB, 15KRPM, 3.5", Fibre Channel')
     db_session.commit()
@@ -64,7 +66,8 @@ def test_print_report_runs_without_error():
 
 
 def test_print_report_empty_by_category():
-    """_print_report with no categories — for-loop body (line 209-210) still runs cleanly."""
+    """_print_report with no categories — for-loop body (line 209-210) still runs
+    cleanly."""
     summary = {
         "mode": "apply",
         "cards_examined": 0,
@@ -95,7 +98,7 @@ _FAKE_SUMMARY = {
 
 
 def test_main_dry_run_calls_rollback():
-    """main() with no --apply flag must call db.rollback() and db.close()."""
+    """Main() with no --apply flag must call db.rollback() and db.close()."""
     fake_db = MagicMock()
     fake_session_cls = MagicMock(return_value=fake_db)
 
@@ -118,7 +121,7 @@ def test_main_dry_run_calls_rollback():
 
 
 def test_main_apply_skips_rollback():
-    """main() with --apply must NOT call db.rollback() and must call db.close()."""
+    """Main() with --apply must NOT call db.rollback() and must call db.close()."""
     fake_db = MagicMock()
     fake_session_cls = MagicMock(return_value=fake_db)
 
@@ -143,7 +146,7 @@ def test_main_apply_skips_rollback():
 
 
 def test_main_closes_db_on_exception():
-    """main() must call db.close() in finally even when run() raises."""
+    """Main() must call db.close() in finally even when run() raises."""
     fake_db = MagicMock()
     fake_session_cls = MagicMock(return_value=fake_db)
 

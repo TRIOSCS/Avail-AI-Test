@@ -45,7 +45,7 @@ def test_exception_in_set_category_skips_card(db_session: Session):
 
 
 def test_main_dry_run_calls_reclassify_and_closes_db():
-    """main() with --apply omitted calls reclassify with apply=False and closes db."""
+    """Main() with --apply omitted calls reclassify with apply=False and closes db."""
     mock_args = MagicMock()
     mock_args.apply = False
     mock_args.limit = None
@@ -66,7 +66,7 @@ def test_main_dry_run_calls_reclassify_and_closes_db():
 
 
 def test_main_apply_passes_apply_true():
-    """main() with --apply=True forwards apply=True to reclassify_cpu_pollution."""
+    """Main() with --apply=True forwards apply=True to reclassify_cpu_pollution."""
     mock_args = MagicMock()
     mock_args.apply = True
     mock_args.limit = None
@@ -87,7 +87,7 @@ def test_main_apply_passes_apply_true():
 
 
 def test_main_closes_db_even_on_exception():
-    """main() finally block closes db even when reclassify_cpu_pollution raises."""
+    """Main() finally block closes db even when reclassify_cpu_pollution raises."""
     mock_args = MagicMock()
     mock_args.apply = False
     mock_args.limit = None

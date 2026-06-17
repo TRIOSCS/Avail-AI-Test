@@ -1,10 +1,10 @@
 """tests/test_vendor_duplicates.py — Tests for app/services/vendor_duplicates.py.
 
 Covers: _fuzzy_match_pg_trgm (lines 31-39), PostgreSQL dialect path (lines 102-108),
-        exact-match short-circuit, and no-bind fallback.
+exact-match short-circuit, and no-bind fallback.
 
-Called by: pytest autodiscovery
-Depends on: conftest.db_session, app.models.VendorCard, app.services.vendor_duplicates
+Called by: pytest autodiscovery Depends on: conftest.db_session, app.models.VendorCard,
+app.services.vendor_duplicates
 """
 
 import os
@@ -81,7 +81,8 @@ class TestCheckVendorDuplicatePostgresDialect:
         assert result == expected
 
     def test_postgresql_dialect_falls_back_on_operational_error(self):
-        """OperationalError from pg_trgm triggers rollback + Python fallback (lines 105-108)."""
+        """OperationalError from pg_trgm triggers rollback + Python fallback (lines
+        105-108)."""
         mock_db = self._make_mock_db("postgresql")
         err = OperationalError("pg_trgm not installed", None, None)
 
