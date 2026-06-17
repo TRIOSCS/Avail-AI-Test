@@ -5327,7 +5327,7 @@ async def delete_quote_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a draft quote and return refreshed quotes list."""
+    """Delete a draft quote and redirect to the requisitions page."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -5338,9 +5338,7 @@ async def delete_quote_htmx(
     db.commit()
     logger.info("Quote {} deleted by {}", quote_id, user.email)
 
-    from fastapi.responses import RedirectResponse
-
-    return RedirectResponse(url="/v2/requisitions", status_code=307)
+    return HTMLResponse(status_code=200, headers={"HX-Redirect": "/v2/requisitions"})
 
 
 @router.post("/v2/partials/quotes/{quote_id}/reopen", response_class=HTMLResponse)

@@ -76,3 +76,12 @@ def test_reqs_page_has_no_quotes_nav_link(client):
     resp = client.get("/v2/requisitions")
     assert resp.status_code == 200
     assert 'href="/v2/quotes"' not in resp.text
+
+
+def test_delete_quote_htmx_returns_hx_redirect(client, db_session, test_user):
+    """DELETE handler must return 200 with HX-Redirect, not a 307 redirect."""
+    reqn, _ = _req_with_part(db_session, test_user)
+    q = _quote(db_session, requisition_id=reqn.id, number="Q-DEL-1", status="draft")
+    resp = client.delete(f"/v2/partials/quotes/{q.id}")
+    assert resp.status_code == 200
+    assert resp.headers["HX-Redirect"] == "/v2/requisitions"
