@@ -8363,6 +8363,24 @@ async def build_buy_plan_htmx(
 # unless explicitly selected via the filter pills.
 _PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
 
+# A background enrichment 'running' longer than this is treated as failed (its worker
+# died mid-job) so the detail poller self-heals and stops instead of looping forever.
+_ENRICH_STALE_SECONDS = 180
+
+
+def _enrich_is_stale(started_iso) -> bool:
+    """True when a 'running' enrich job started longer than _ENRICH_STALE_SECONDS
+    ago."""
+    if not started_iso:
+        return False
+    try:
+        started = datetime.fromisoformat(started_iso)
+    except (ValueError, TypeError):
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds() > _ENRICH_STALE_SECONDS
+
 
 def _prospect_toast(response, message: str, kind: str = "success") -> None:
     """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
@@ -8434,7 +8452,16 @@ def _status_visible_under_filter(new_status: str, flt_status: str) -> bool:
     return new_status in _PROSPECT_DEFAULT_STATUSES
 
 
-def _prospect_action_response(request, user, db, prospect, *, message, kind, flt_status=""):
+def _prospect_action_response(
+    request: Request,
+    user: User,
+    db: Session,
+    prospect,
+    *,
+    message: str,
+    kind: str,
+    flt_status: str = "",
+) -> HTMLResponse:
     """Build the response for a claim/dismiss/release action.
 
     Detail-view actions (HX-Target=main-content) return the full refreshed detail. Grid
@@ -8769,6 +8796,7 @@ async def enrich_prospect_htmx(
         from ..utils.async_helpers import safe_background_task
 
         ed["enrich_status"] = "running"
+        ed["enrich_started_at"] = datetime.now(timezone.utc).isoformat()
         prospect.enrichment_data = ed
         db.commit()
         await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
@@ -8796,7 +8824,10 @@ async def enrich_status_partial(
         # Stop the poll rather than 404 — htmx won't cancel an `every 2s` poll on a 4xx.
         return HTMLResponse("", status_code=286)
 
-    state = (prospect.enrichment_data or {}).get("enrich_status") or "done"
+    ed = prospect.enrichment_data or {}
+    state = ed.get("enrich_status") or "done"
+    if state == "running" and _enrich_is_stale(ed.get("enrich_started_at")):
+        state = "error"  # worker died mid-job — stop the poll
     resp = template_response(
         "htmx/partials/prospecting/enrich_status.html",
         {"request": request, "prospect": prospect, "enrich_state": state},

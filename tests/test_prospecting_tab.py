@@ -378,6 +378,17 @@ class TestEnrichStatus:
         resp = client.get("/v2/partials/prospecting/99999/enrich-status")
         assert resp.status_code == 286
 
+    def test_status_stale_running_self_heals_and_stops(self, client, db_session):
+        # A 'running' job whose worker died (started long ago) is treated as failed so
+        # the poller stops instead of looping forever.
+        from datetime import timedelta
+
+        old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running", "enrich_started_at": old})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286
+        assert "failed" in resp.text.lower()
+
 
 # ── Phase 2: live grid consistency (OOB card removal + stats refresh) ─────
 
