@@ -4661,7 +4661,7 @@ def _company_quotes_query(db: Session, company):
         conds.append(Quote.requisition_id.in_(req_ids))
     if not conds:
         return None
-    return db.query(Quote).filter(or_(*conds))
+    return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
 
 
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)

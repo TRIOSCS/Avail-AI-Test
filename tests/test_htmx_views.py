@@ -1385,18 +1385,8 @@ class TestBuyPlans:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Quotes
+# Quotes (standalone list retired; see test_quotes_relocation.py)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestQuotesList:
-    """Standalone quotes list endpoint was retired (quotes-relocation).
-
-    /v2/partials/quotes no longer exists — quotes are surfaced via the Reqs workspace
-    Quotes tab (/v2/partials/parts/{id}/tab/quotes) and the CRM account Quotes tab
-    (/v2/partials/customers/{id}/tab/quotes). These tests are covered by
-    test_quotes_relocation.py.
-    """
 
 
 # ══════════════════════════════════════════════════════════════════════════
