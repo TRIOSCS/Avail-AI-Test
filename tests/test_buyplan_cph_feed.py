@@ -12,6 +12,22 @@ from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.intelligence import ProactiveMatch
 from app.models.purchase_history import CustomerPartHistory
 
+# ── Task 5: retired offer/quote-won CPH hooks ────────────────────────
+
+
+def test_offer_won_does_not_write_cph():
+    """Legacy avail_offer CPH hook is retired — only buy_plan feeds CPH now."""
+    import app.routers.crm.offers as offers_mod
+
+    assert not hasattr(offers_mod, "_record_offer_won_history")
+
+
+def test_quote_won_does_not_write_cph():
+    """Legacy avail_quote_won CPH hook is retired — only buy_plan feeds CPH now."""
+    import app.routers.crm.quotes as quotes_mod
+
+    assert not hasattr(quotes_mod, "_record_quote_won_history")
+
 
 def test_buyplan_has_recorded_at_column():
     bp = BuyPlan(quote_id=1, requisition_id=1)
