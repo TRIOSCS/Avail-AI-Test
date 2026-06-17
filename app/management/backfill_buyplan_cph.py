@@ -20,13 +20,11 @@ def backfill(db: Session) -> int:
         .filter(BuyPlan.status == BuyPlanStatus.COMPLETED.value, BuyPlan.purchase_history_recorded_at.is_(None))
         .all()
     )
-    done = 0
     for plan in plans:
         record_buyplan_purchase_history(db, plan, refresh=False)
         db.commit()
-        done += 1
-    logger.info("BUYPLAN_CPH backfill: recorded {} completed plans", done)
-    return done
+    logger.info("BUYPLAN_CPH backfill: recorded {} completed plans", len(plans))
+    return len(plans)
 
 
 if __name__ == "__main__":

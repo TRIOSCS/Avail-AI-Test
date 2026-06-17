@@ -115,16 +115,15 @@ def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
                 "avg_price_num": (float(cph.avg_unit_price) * cnt) if cph.avg_unit_price else 0.0,
                 "avg_price_den": cnt if cph.avg_unit_price else 0,
                 "last_unit_price": float(cph.last_unit_price) if cph.last_unit_price else None,
-                "_newest": cph.last_purchased_at,
             }
             continue
         agg["count"] += cnt
         if cph.avg_unit_price:
             agg["avg_price_num"] += float(cph.avg_unit_price) * cnt
             agg["avg_price_den"] += cnt
-        newest = agg["_newest"]
-        if cph.last_purchased_at and (newest is None or cph.last_purchased_at > newest):
-            agg["_newest"] = cph.last_purchased_at
+        if cph.last_purchased_at and (
+            agg["last_purchased_at"] is None or cph.last_purchased_at > agg["last_purchased_at"]
+        ):
             agg["last_purchased_at"] = cph.last_purchased_at
             if cph.last_unit_price:
                 agg["last_unit_price"] = float(cph.last_unit_price)
