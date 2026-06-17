@@ -325,3 +325,55 @@ class TestEnrichmentJob:
             await run_enrichment_job(p.id, db=db_session)  # must not raise
         db_session.refresh(p)
         assert (p.enrichment_data or {}).get("enrich_status") == "error"
+
+
+class TestEnrichRoute:
+    def test_enrich_spawns_bg_and_returns_poller(self, client, db_session):
+        p = make_prospect(db_session)
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock) as sbt,
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text  # returned the poller
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "running"
+        job.assert_called_once_with(p.id)
+        sbt.assert_called_once()
+
+    def test_enrich_while_running_does_not_respawn(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running"})
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text
+        job.assert_not_called()
+
+
+class TestEnrichStatus:
+    def test_status_running_keeps_polling(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 200
+        assert "every 2s" in resp.text
+
+    def test_status_done_reloads_detail_and_stops(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "done"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286  # htmx stop-polling
+        assert f"/v2/partials/prospecting/{p.id}" in resp.text  # reloads the detail
+        assert "every 2s" not in resp.text  # poller gone
+
+    def test_status_error_stops(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "error"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286
+        assert "failed" in resp.text.lower()
+
+    def test_status_missing_prospect_returns_286(self, client):
+        resp = client.get("/v2/partials/prospecting/99999/enrich-status")
+        assert resp.status_code == 286

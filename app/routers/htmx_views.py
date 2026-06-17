@@ -8397,6 +8397,8 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     ctx["contacts"] = prospect.contacts_preview or []
     ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
     ctx["similar_customers"] = prospect.similar_customers or []
+    # Resume the enrich poller if a background enrichment is in flight.
+    ctx["enrich_state"] = "running" if (prospect.enrichment_data or {}).get("enrich_status") == "running" else None
     return ctx
 
 
@@ -8707,41 +8709,59 @@ async def enrich_prospect_htmx(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Run free enrichment (SAM.gov + news) + warm-intro detection — returns refreshed
-    detail."""
+    """Kick off enrichment in the BACKGROUND and return a status poller.
+
+    The SAM.gov/news/warm-intro work runs off the request path (run_enrichment_job via
+    safe_background_task); the detail page polls /enrich-status until it lands.
+    """
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    ok = True
-    try:
-        from ..services.prospect_free_enrichment import run_free_enrichment
 
-        # Pass the request session so the service reuses it (no second SessionLocal /
-        # stale-read window) and the row is current after commit.
-        await run_free_enrichment(prospect_id, db=db)
-        db.refresh(prospect)
-    except Exception as exc:
-        ok = False
-        logger.warning("Enrichment failed for prospect {}: {}", prospect_id, exc)
-    try:
-        from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
+    ed = dict(prospect.enrichment_data or {})
+    if ed.get("enrich_status") != "running":
+        from ..services.prospect_free_enrichment import run_enrichment_job
+        from ..utils.async_helpers import safe_background_task
 
-        warm = detect_warm_intros(prospect, db)
-        one_liner = generate_one_liner(prospect, warm)
-        ed = dict(prospect.enrichment_data or {})
-        ed["warm_intro"] = warm
-        ed["one_liner"] = one_liner
+        ed["enrich_status"] = "running"
         prospect.enrichment_data = ed
         db.commit()
-    except Exception as exc:
-        ok = False
-        logger.warning("Warm intro detection failed for prospect {}: {}", prospect_id, exc)
-    resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    _prospect_toast(
-        resp,
-        f"Enriched {prospect.name}" if ok else "Enrichment partially failed — see details",
-        "success" if ok else "warning",
+        await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
+
+    return template_response(
+        "htmx/partials/prospecting/enrich_status.html",
+        {"request": request, "prospect": prospect, "enrich_state": "running"},
     )
+
+
+@router.get("/v2/partials/prospecting/{prospect_id}/enrich-status", response_class=HTMLResponse)
+async def enrich_status_partial(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Poll endpoint for background enrichment.
+
+    HTTP 200 while running (htmx keeps polling); HTTP 286 when done/error (htmx swaps
+    the final fragment and STOPS).
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        # Stop the poll rather than 404 — htmx won't cancel an `every 2s` poll on a 4xx.
+        return HTMLResponse("", status_code=286)
+
+    state = (prospect.enrichment_data or {}).get("enrich_status") or "done"
+    resp = template_response(
+        "htmx/partials/prospecting/enrich_status.html",
+        {"request": request, "prospect": prospect, "enrich_state": state},
+    )
+    if state != "running":
+        resp.status_code = 286  # htmx stop-polling status — the final fragment still swaps
+        if state == "error":
+            _prospect_toast(resp, "Enrichment failed — try again", "warning")
+        else:
+            _prospect_toast(resp, f"Enriched {prospect.name}", "success")
     return resp
 
 
