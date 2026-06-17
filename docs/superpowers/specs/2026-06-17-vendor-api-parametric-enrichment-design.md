@@ -142,6 +142,40 @@ backfill_vendor_specs (demand-ordered select)
 - Spend stays $0 (free quotas); throughput bounded by Mouser+Element14 daily caps, demand-first
   so value lands early; campaign completes the high-demand subset well within the 6-month window.
 
+## Revision 1 — 2026-06-17, post-harvest (SUPERSEDES the Mouser-ProductAttributes parts above)
+
+The Task-2 harvest (measure gate, run before any code) invalidated the core assumption that
+**Mouser** returns structured parametrics. Measured reality:
+- **Mouser `ProductAttributes` = only `Packaging` + `Standard Pack Qty`** — no capacitance/voltage/etc.
+  Mouser's search API does not carry structured parametrics.
+- **Mouser `Description` is rich + consistent** — e.g. `"...MLCC...16V 0.1uF X7R 0402 10%"`,
+  `"...Thick Film Resistors - SMD 0402 Zero ohms 5%"`. Carries capacitance/voltage/dielectric/
+  package/tolerance/resistance in prose. Good quota (no rate-limit across 16 calls).
+- **Element14 `attributes` ARE structured parametrics** (`Capacitance: 0.1`, `Capacitance
+  Tolerance: ± 10%`, …) — clean, but **hard rate limit** (throttled after ~2-3 calls) + some MPN
+  misses → low-throughput supplement only.
+
+**Revised source strategy (approved):**
+1. **Backbone — Mouser description parsing.** No Mouser connector change. Mouser's category +
+   description already flow through the shipped `connector_desc` harvest (F1 ladder tier 84).
+   The work is to **extend `app/services/desc_extractor/` to passive commodities** (capacitors,
+   resistors, mosfets, and the other high-demand non-storage commodities) so the grammar parses
+   capacitance/voltage/dielectric/package/tolerance/resistance from the description. This
+   upgrades the EXISTING harvest path for free — no new tier, writes at `connector_desc` 84
+   (or the card's own `desc_parse` 83 when the card already carries the distributor description).
+2. **Supplement — Element14 structured attributes.** Extend `element14.py:_parse` to map its
+   `attributes` (`attributeLabel`/`attributeValue`) → seeded facet keys, written at tier 90
+   (`element14_api`). Run only on a bounded top-demand slice within its rate limit.
+
+**Component changes vs. the original plan:**
+- Original Component 1 (extend **Mouser** `_parse` for ProductAttributes) → **DROPPED** (no data).
+- New Component 1a: **passive-commodity `desc_extractor` modules** + register them in the
+  extractor's dispatch + `SPEC_COMMODITIES`. (Reuses the storage/memory module pattern.)
+- New Component 1b: **Element14 `_parse` attribute mapping** (the supplement).
+- Component 2 (writer) + Component 3 (backfill CLI) stand. The backfill, for a Mouser-sourced
+  card, just ensures the category+description are present so the (now passive-aware) desc grammar
+  fires; for the Element14 slice it writes structured specs at tier 90.
+
 ## Open decisions — all resolved
 
 - Connectors: **Mouser + Element14** (the credentialed, working ones). ✓

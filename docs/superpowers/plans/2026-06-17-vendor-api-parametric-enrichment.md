@@ -10,6 +10,18 @@
 
 **Spec:** `docs/superpowers/specs/2026-06-17-vendor-api-parametric-enrichment-design.md`
 
+> ⚠️ **REVISED 2026-06-17 (post Task-2 harvest).** The measure-gate found Mouser's
+> `ProductAttributes` carry NO parametrics (only Packaging). See spec **Revision 1**. Net plan
+> change: **Task 3 (map Mouser ProductAttributes) is DROPPED.** Replace with:
+> **Task 3' — extend `app/services/desc_extractor/` to passive commodities** (capacitors,
+> resistors, mosfets, …) so the grammar parses capacitance/voltage/dielectric/package/tolerance/
+> resistance from the distributor *description* (Mouser's description is rich + good quota; it
+> already flows via the shipped `connector_desc` harvest at tier 84 — no Mouser connector change).
+> **Task 4 stands** (extend `element14.py:_parse` to map structured `attributes`→facets, tier 90,
+> bounded slice — Element14 rate-limits hard). Tasks 5-7 stand. Build Task 3' as one TDD module
+> per commodity (mirror `desc_extractor/storage.py`/`memory.py` + register in the dispatch and
+> `SPEC_COMMODITIES`), highest-demand commodity first (capacitors → resistors → mosfets).
+
 **Reference signatures (do not re-derive):**
 - `set_category(card, value, source, confidence, *, write=True) -> bool` (`spec_tiers.py:671`) — normalizes commodity, ladder-arbitrated.
 - `record_spec(db, card_id, spec_key, value, *, source, confidence, unit=None, schema_cache=None) -> bool` (`spec_write_service.py:171`) — validates/normalizes, syncs facets, ladder-arbitrated, no commit.
