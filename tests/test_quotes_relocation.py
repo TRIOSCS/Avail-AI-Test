@@ -109,9 +109,11 @@ def _make_material_card(db_session):
     NULL)."""
     from app.models.intelligence import MaterialCard
 
+    # Unique per call so the helper is safe even if a test creates several cards.
+    mpn = f"CARD-MPN-{db_session.query(MaterialCard).count() + 1}"
     card = MaterialCard(
-        normalized_mpn="CARD-MPN-UNIQUE",
-        display_mpn="CARD-MPN-UNIQUE",
+        normalized_mpn=mpn,
+        display_mpn=mpn,
     )
     db_session.add(card)
     db_session.commit()
