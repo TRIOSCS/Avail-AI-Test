@@ -1576,7 +1576,7 @@ class TestCaseReport:
             status=BuyPlanLineStatus.VERIFIED.value,
             po_number="PO-CASE",
             po_confirmed_at=now - timedelta(days=1),
-            issue_type="price_change",
+            issue_type="price_changed",
             issue_note="Price went up 10%",
             po_rejection_note="Wrong PO format",
         )
@@ -1588,7 +1588,7 @@ class TestCaseReport:
         assert "Submit" in report
         assert "Approve" in report
         assert "SO rejected" in report
-        assert "price_change" in report
+        assert "price_changed" in report
         assert "PO rejected" in report
         assert "better_offer" in report
 

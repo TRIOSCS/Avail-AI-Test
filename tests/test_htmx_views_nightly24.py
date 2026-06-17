@@ -529,8 +529,10 @@ class TestBuyPlanCancelDirect:
         )
         with patch("app.routers.htmx_views.buy_plan_detail_partial", new_callable=AsyncMock) as mock_detail:
             mock_detail.return_value = HTMLResponse("bp detail")
-            result = await buy_plan_cancel_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)
+            with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock) as mock_notify:
+                result = await buy_plan_cancel_partial(request=mock_req, plan_id=bp.id, user=test_user, db=db_session)
         assert result.status_code == 200
+        mock_notify.assert_awaited_once()  # cancel dispatches notify_cancelled
 
     async def test_buy_plan_cancel_not_found(self, db_session: Session, test_user: User):
         """buy_plan not found → 404."""

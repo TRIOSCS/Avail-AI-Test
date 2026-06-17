@@ -2,7 +2,7 @@
 
 Auto-builds draft buy plans from won quotes: scoring, auto-split, buyer assignment.
 
-Called by: routers/crm/buy_plans.py
+Called by: routers/htmx_views.py
 Depends on: buyplan_scoring, models
 """
 
@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
+from ..constants import OfferStatus, QuoteStatus
 from ..models import (
     Offer,
     Quote,
@@ -54,7 +55,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
         raise ValueError(f"Quote {quote_id} not found")
 
     # Guard: quote must be in actionable state
-    if quote.status not in ("won", "sent"):
+    if quote.status not in (QuoteStatus.WON.value, QuoteStatus.SENT.value):
         raise ValueError(f"Quote must be won or sent to build a buy plan (current: {quote.status})")
 
     # Guard: prevent duplicate buy plans for same quote
@@ -62,7 +63,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
         db.query(BuyPlan)
         .filter(
             BuyPlan.quote_id == quote_id,
-            BuyPlan.status.notin_(["cancelled"]),
+            BuyPlan.status.notin_([BuyPlanStatus.CANCELLED.value]),
         )
         .first()
     )
@@ -131,7 +132,7 @@ def _build_lines_for_requirement(
         .options(joinedload(Offer.vendor_card))
         .filter(
             Offer.requirement_id == requirement.id,
-            Offer.status == "active",
+            Offer.status == OfferStatus.ACTIVE.value,
         )
         .all()
     )
@@ -349,7 +350,7 @@ def _check_better_offer(
         db.query(Offer)
         .filter(
             Offer.requirement_id == line.requirement_id,
-            Offer.status == "active",
+            Offer.status == OfferStatus.ACTIVE.value,
             Offer.id != selected.id,
         )
         .all()

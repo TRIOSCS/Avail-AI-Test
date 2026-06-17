@@ -179,6 +179,9 @@ authoritative reference. Static-analysis tests in
 | prospecting_refresh | Daily | Web search for new prospects |
 | maintenance | Daily | DB ANALYZE, cache cleanup, integrity checks |
 | quality | Daily | Vendor scorecards, engagement scoring |
+| po_verification | 15 min | Scan buyer sent-mail for PO confirmations on active buy plans |
+| stock_autocomplete | Daily | Auto-complete stuck stock-sale buy plans (case report + notification) |
+| buyplan_nudge | 30 min | Remind buyer (PO unconfirmed >4h) / ops (PO unverified >2h); idempotent via `buy_plan_lines.last_nudge_at` |
 
 ## Management Commands (`app/management/`)
 

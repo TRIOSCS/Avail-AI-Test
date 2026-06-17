@@ -959,17 +959,22 @@ buyplan_builder.py
     v
 buyplan_workflow.py (state machine)
     |
-    |  DRAFT --> SUBMITTED --> APPROVED --> PO_SENT --> COMPLETE
-    |                |              |
-    |                v              v
-    |            REJECTED        HALTED
+    |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
+    |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
+    |                       v                    v
+    |                 draft (reject)         halted (SO halt)
     |
-    +---> buyplan_notifications.py
-    |       +---> teams_notifications.py --> Teams webhook
-    |       +---> DB: INSERT notifications
-    |       +---> email (approval token link)
+    |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
+    |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
+    |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
+    |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
     |
-    +---> activity_service.py --> DB: INSERT activity_log
+    +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
+    |       +---> teams_notifications.py --> Teams webhook / DM
+    |       +---> DB: INSERT activity_log (linked via buy_plan_id FK)
+    |
+    +---> inventory_jobs.py: buyplan_nudge (30 min) re-pings buyer (PO unconfirmed >4h) and
+            ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
 **Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
@@ -2938,7 +2943,7 @@ the current implementation.
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
-| Buy Plans | 6 | CRUD, external approval via token |
+| Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
@@ -2968,7 +2973,7 @@ the current implementation.
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
 | Vendor Mgmt | 9 | vendor_analysis, vendor_affinity, vendor_scorecard, vendor_duplicates |
-| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
+| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring, buyplan_notifications, status_machine |
 | Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |

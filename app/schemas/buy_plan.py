@@ -10,7 +10,7 @@ Business Rules:
 - Manager approval supports line-level vendor overrides
 - Offer comparison shows all feasible offers per requirement
 
-Called by: routers/crm/buy_plans.py, routers/htmx_views.py
+Called by: routers/htmx_views.py
 Depends on: pydantic, models/buy_plan.py (enum values)
 """
 
@@ -125,12 +125,3 @@ class VerificationGroupUpdate(BaseModel):
 
     user_id: int
     action: Literal["add", "remove"]
-
-
-class BuyPlanTokenApproval(BaseModel):
-    sales_order_number: str
-    notes: str | None = None
-
-
-class BuyPlanTokenReject(BaseModel):
-    reason: str = ""
