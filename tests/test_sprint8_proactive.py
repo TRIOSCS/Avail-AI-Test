@@ -150,7 +150,7 @@ class TestProspectingStats:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Prospecting Stats" in resp.text
+        assert "Buyer-ready" in resp.text
 
 
 # ── Add Domain ──────────────────────────────────────────────────────
@@ -163,4 +163,6 @@ class TestAddDomain:
             data={"domain": ""},
             headers={"HX-Request": "true"},
         )
-        assert resp.status_code == 400
+        # Empty domain returns an inline error chip (200), not a 400.
+        assert resp.status_code == 200
+        assert "domain" in resp.text.lower()

@@ -88,6 +88,7 @@ from ..services.part_history_service import (
     requirements_for_card,
     sightings_for_card,
 )
+from ..services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
@@ -8340,6 +8341,47 @@ async def build_buy_plan_htmx(
 # ── Prospecting partials ──────────────────────────────────────────────
 
 
+# Statuses shown in the default ("All") view — dismissed/converted are hidden
+# unless explicitly selected via the filter pills.
+_PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
+
+
+def _prospect_toast(response, message: str, kind: str = "success") -> None:
+    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
+def _wants_detail(request: Request) -> bool:
+    """True when an action came from the detail view (targets #main-content) rather than
+    from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
+    return request.headers.get("HX-Target") == "main-content"
+
+
+def _prospect_card_ctx(request: Request, user: User, prospect) -> dict:
+    """Context for rendering a single prospect card (snapshot + contact summary maps,
+    keyed by id so _card.html renders identically in the grid and in OOB swaps)."""
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["snapshots"] = {prospect.id: build_priority_snapshot(prospect)}
+    ctx["contact_stats_map"] = {prospect.id: contacts_summary(prospect.contacts_preview)}
+    return ctx
+
+
+def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
+    """Context for the detail partial — surfaces the buyer-ready snapshot, signal tags,
+    contacts, and similar customers the scoring services compute."""
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["enrichment"] = prospect.enrichment_data or {}
+    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
+    ctx["snapshot"] = build_priority_snapshot(prospect)
+    ctx["signal_tags"] = build_signal_tags(prospect.readiness_signals)
+    ctx["contacts"] = prospect.contacts_preview or []
+    ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
+    ctx["similar_customers"] = prospect.similar_customers or []
+    return ctx
+
+
 @router.get("/v2/partials/prospecting", response_class=HTMLResponse)
 async def prospecting_list_partial(
     request: Request,
@@ -8351,28 +8393,65 @@ async def prospecting_list_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return prospecting list as HTML partial."""
-    query = db.query(ProspectAccount)
+    """Return the prospecting card grid as an HTML partial.
+
+    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
+    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
+    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    """
+    base = db.query(ProspectAccount)
     if status:
-        query = query.filter(ProspectAccount.status == status)
+        base = base.filter(ProspectAccount.status == status)
     else:
-        query = query.filter(ProspectAccount.status.in_(["suggested", "claimed", "dismissed"]))
+        base = base.filter(ProspectAccount.status.in_(_PROSPECT_DEFAULT_STATUSES))
     if q.strip():
         sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
-    total = query.count()
-    if sort == "fit_desc":
-        query = query.order_by(ProspectAccount.fit_score.desc())
-    elif sort == "recent_desc":
-        query = query.order_by(ProspectAccount.created_at.desc())
+        base = base.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+
+    total = base.count()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    offset = (page - 1) * per_page
+
+    if sort == "buyer_ready_desc":
+        # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
+        rows = base.all()
+        snapshots = {p.id: build_priority_snapshot(p) for p in rows}
+        rows.sort(
+            key=lambda p: (
+                -snapshots[p.id]["buyer_ready_score"],
+                -(p.fit_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        prospects = rows[offset : offset + per_page]
     else:
-        query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
-    prospects = query.offset((page - 1) * per_page).limit(per_page).all()
-    total_pages = (total + per_page - 1) // per_page
+        if sort == "fit_desc":
+            base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
+        elif sort == "recent_desc":
+            base = base.order_by(ProspectAccount.created_at.desc())
+        else:
+            base = base.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
+        prospects = base.offset(offset).limit(per_page).all()
+
+    snapshots = {p.id: build_priority_snapshot(p) for p in prospects}
+    contact_stats_map = {p.id: contacts_summary(p.contacts_preview) for p in prospects}
+
+    # Per-status counts for the filter pills (respect the active search, not the active
+    # status filter, so each pill shows its own stable total).
+    count_q = db.query(ProspectAccount.status, sqlfunc.count(ProspectAccount.id))
+    if q.strip():
+        sb = SearchBuilder(q.strip())
+        count_q = count_q.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+    status_counts = dict(count_q.group_by(ProspectAccount.status).all())
+    all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
             "prospects": prospects,
+            "snapshots": snapshots,
+            "contact_stats_map": contact_stats_map,
             "q": q,
             "status": status,
             "sort": sort,
@@ -8380,6 +8459,8 @@ async def prospecting_list_partial(
             "per_page": per_page,
             "total": total,
             "total_pages": total_pages,
+            "status_counts": status_counts,
+            "all_total": all_total,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
@@ -8392,45 +8473,78 @@ async def prospecting_stats(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return prospecting stats summary panel."""
-    from ..models.prospect_account import ProspectAccount
+    """Return the prospecting stats summary panel.
 
-    total = db.query(sqlfunc.count(ProspectAccount.id)).scalar() or 0
-    buyer_ready = (
-        db.query(sqlfunc.count(ProspectAccount.id)).filter(ProspectAccount.readiness_score >= 70).scalar() or 0
+    "Buyer ready" uses the canonical is_buyer_ready from build_priority_snapshot — the
+    same definition the list ranking uses — so the KPI never contradicts the grid.
+    """
+    suggested_q = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
+    suggested = suggested_q.all()
+    total = len(suggested)
+    buyer_ready = sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"])
+    call_now = sum(1 for p in suggested if (p.readiness_score or 0) >= 70)
+    claimed = (
+        db.query(sqlfunc.count(ProspectAccount.id))
+        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
+        .scalar()
+        or 0
     )
 
     return template_response(
         "htmx/partials/prospecting/stats.html",
-        {"request": request, "total": total, "buyer_ready": buyer_ready},
+        {
+            "request": request,
+            "total": total,
+            "buyer_ready": buyer_ready,
+            "call_now": call_now,
+            "claimed": claimed,
+        },
     )
 
 
 @router.post("/v2/partials/prospecting/add-domain", response_class=HTMLResponse)
 async def add_prospect_domain(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Submit a domain for prospecting."""
+    """Manually submit a domain to the prospect pool.
+
+    Returns an inline result chip.
+    """
+    from ..services.prospect_claim import add_prospect_manually
+
     form = await request.form()
-    domain = form.get("domain", "").strip()
+    domain = (form.get("domain") or "").strip()
     if not domain:
-        raise HTTPException(400, "Domain is required")
+        resp = HTMLResponse(
+            '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
+            "Enter a domain (e.g. acme.com).</div>"
+        )
+        _prospect_toast(resp, "Enter a domain first", "error")
+        return resp
 
     try:
-        from ..services.prospect_claim import add_prospect_manually
-
-        prospect = add_prospect_manually(domain, user.id, db)
-        return HTMLResponse(
-            f'<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">'
-            f"Prospect added: {domain} (ID {prospect.id})</div>"
-        )
-    except (ImportError, ValueError, RuntimeError):
-        return HTMLResponse(
+        result = add_prospect_manually(domain, user.id, db)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("Manual prospect add failed for {!r}: {}", domain, exc)
+        resp = HTMLResponse(
             '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
-            "Error: Could not add prospect. Please try again.</div>"
+            f"Could not add {html_mod.escape(domain)}.</div>"
         )
+        _prospect_toast(resp, "Could not add prospect", "error")
+        return resp
+
+    # Service returns a dict ({prospect_id, name, domain, status, is_new}), not an ORM row.
+    pid = result["prospect_id"]
+    name = html_mod.escape(result.get("name") or domain)
+    verb = "Added" if result.get("is_new") else "Already in pool"
+    resp = template_response(
+        "htmx/partials/prospecting/add_result.html",
+        {"request": request, "pid": pid, "name": name, "verb": verb, "is_new": result.get("is_new")},
+    )
+    _prospect_toast(resp, f"{verb}: {result.get('name') or domain}", "success" if result.get("is_new") else "info")
+    return resp
 
 
 @router.get("/v2/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
@@ -8451,78 +8565,145 @@ async def prospecting_detail_partial(
     )
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    ctx["enrichment"] = prospect.enrichment_data or {}
-    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
-    return template_response("htmx/partials/prospecting/detail.html", ctx)
+    return template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
 async def claim_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Claim a prospect — returns updated card for OOB swap."""
-    from ..services.prospect_claim import claim_prospect
+    """Claim a prospect.
 
+    Enforces the site cap + ownership (in the service) and triggers background deep
+    enrichment. Returns the refreshed detail or card per the call site.
+    """
+    from ..services.prospect_claim import claim_prospect, trigger_deep_enrichment_bg
+    from ..utils.async_helpers import safe_background_task
+
+    error = None
     try:
         claim_prospect(prospect_id, user.id, db)
-    except (LookupError, ValueError) as e:
-        raise HTTPException(400, str(e))
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    if not error:
+        await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
+
     prospect = (
         db.query(ProspectAccount)
-        .options(
-            joinedload(ProspectAccount.claimed_by_user),
-        )
+        .options(joinedload(ProspectAccount.claimed_by_user))
         .filter(ProspectAccount.id == prospect_id)
         .first()
     )
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    return template_response("htmx/partials/prospecting/_card.html", ctx)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Claimed {prospect.name}", "error" if error else "success")
+    return resp
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
 async def dismiss_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Dismiss a prospect — returns updated card for OOB swap."""
+    """Dismiss a SUGGESTED prospect (claimed prospects use the Release action instead).
 
+    Returns the refreshed detail or card per the call site.
+    """
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    prospect.status = ProspectAccountStatus.DISMISSED
-    prospect.dismissed_by = user.id
-    prospect.dismissed_at = datetime.now(timezone.utc)
-    db.commit()
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    return template_response("htmx/partials/prospecting/_card.html", ctx)
+
+    error = None
+    if prospect.status != ProspectAccountStatus.SUGGESTED:
+        error = "Only suggested prospects can be dismissed."
+    else:
+        form = await request.form()
+        reason = (form.get("reason") or "other").strip()[:255]  # dismiss_reason is String(255)
+        prospect.status = ProspectAccountStatus.DISMISSED
+        prospect.dismissed_by = user.id
+        prospect.dismissed_at = datetime.now(timezone.utc)
+        prospect.dismiss_reason = reason
+        db.commit()
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Dismissed {prospect.name}", "error" if error else "success")
+    return resp
+
+
+@router.post("/v2/partials/prospecting/{prospect_id}/release", response_class=HTMLResponse)
+async def release_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Release a claimed prospect back to the pool: status -> SUGGESTED, clear the claim,
+    and relinquish Company ownership. Only the claimer or an admin may release."""
+    from ..services.prospect_claim import release_prospect
+
+    error = None
+    try:
+        release_prospect(prospect_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = (
+        db.query(ProspectAccount)
+        .options(joinedload(ProspectAccount.claimed_by_user))
+        .filter(ProspectAccount.id == prospect_id)
+        .first()
+    )
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Released {prospect.name} back to the pool", "error" if error else "success")
+    return resp
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
 async def enrich_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Run free enrichment on a prospect — returns refreshed detail."""
+    """Run free enrichment (SAM.gov + news) + warm-intro detection — returns refreshed
+    detail."""
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
+    ok = True
     try:
         from ..services.prospect_free_enrichment import run_free_enrichment
 
-        await run_free_enrichment(prospect_id)
+        # Pass the request session so the service reuses it (no second SessionLocal /
+        # stale-read window) and the row is current after commit.
+        await run_free_enrichment(prospect_id, db=db)
         db.refresh(prospect)
     except Exception as exc:
+        ok = False
         logger.warning("Enrichment failed for prospect {}: {}", prospect_id, exc)
     try:
         from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
@@ -8535,12 +8716,15 @@ async def enrich_prospect_htmx(
         prospect.enrichment_data = ed
         db.commit()
     except Exception as exc:
+        ok = False
         logger.warning("Warm intro detection failed for prospect {}: {}", prospect_id, exc)
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    ctx["enrichment"] = prospect.enrichment_data or {}
-    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
-    return template_response("htmx/partials/prospecting/detail.html", ctx)
+    resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    _prospect_toast(
+        resp,
+        f"Enriched {prospect.name}" if ok else "Enrichment partially failed — see details",
+        "success" if ok else "warning",
+    )
+    return resp
 
 
 # ── Settings partials ────────────────────────────────────────────────

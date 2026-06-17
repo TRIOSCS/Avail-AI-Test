@@ -162,9 +162,11 @@ class TestProspectingListPartial:
 class TestProspectingAddDomain:
     """Covers POST /v2/partials/prospecting/add-domain."""
 
-    def test_add_domain_empty_returns_400(self, client: TestClient):
+    def test_add_domain_empty_returns_error_chip(self, client: TestClient):
+        # Empty domain returns an inline error chip (200), not a 400 — the form swaps it in.
         resp = client.post("/v2/partials/prospecting/add-domain", data={"domain": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "domain" in resp.text.lower()
 
     def test_add_domain_success(self, client: TestClient):
         with patch("app.routers.htmx_views.add_prospect_domain.__wrapped__", None, create=True):
@@ -183,7 +185,7 @@ class TestProspectingAddDomain:
                 data={"domain": "baddomain.com"},
             )
             assert resp.status_code == 200
-            assert "Error" in resp.text
+            assert "Could not add" in resp.text
 
 
 # ── Section 3: Prospecting detail, claim, dismiss, enrich ─────────────────
@@ -224,11 +226,14 @@ class TestProspectingDetailClaimDismiss:
             resp = client.post(f"/v2/partials/prospecting/{p.id}/claim")
             assert resp.status_code == 200
 
-    def test_claim_already_claimed_raises_400(self, client: TestClient, db_session: Session):
+    def test_claim_already_claimed_shows_error_toast(self, client: TestClient, db_session: Session):
+        # A claim ValueError (cap/ownership/already-claimed) returns 200 with an error
+        # toast so the UI stays intact, rather than a hard 400 that htmx won't swap.
         p = make_prospect(db_session)
         with patch("app.services.prospect_claim.claim_prospect", side_effect=ValueError("already claimed")):
             resp = client.post(f"/v2/partials/prospecting/{p.id}/claim")
-            assert resp.status_code == 400
+            assert resp.status_code == 200
+            assert "already claimed" in resp.headers.get("HX-Trigger", "")
 
     def test_enrich_prospect_success(self, client: TestClient, db_session: Session):
         p = make_prospect(db_session)

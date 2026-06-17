@@ -2872,7 +2872,7 @@ the current implementation.
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 12 | Suggested prospects, claim, dismiss, enrich |
+| Prospects | 8 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
