@@ -1267,3 +1267,26 @@ class TestCancelBuyPlan:
     def test_cancel_not_found(self, db_session: Session, test_user: User):
         with pytest.raises(ValueError, match="not found"):
             cancel_buy_plan(99999, test_user, db_session)
+
+
+class TestVerifyPoRejectClearsNudge:
+    """Review fix: PO-reject re-activates the line, so last_nudge_at must reset."""
+
+    def test_reject_clears_last_nudge_at(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
+        line = _make_line(
+            db_session,
+            plan,
+            status=BuyPlanLineStatus.PENDING_VERIFY.value,
+            po_number="PO-1",
+            last_nudge_at=datetime.now(timezone.utc),
+        )
+        _make_verification_member(db_session, test_user)
+
+        verify_po(plan.id, line.id, "reject", test_user, db_session, rejection_note="wrong vendor")
+
+        db_session.refresh(line)
+        assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+        assert line.last_nudge_at is None

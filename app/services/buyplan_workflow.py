@@ -261,6 +261,9 @@ def verify_po(
         line.po_number = None
         line.estimated_ship_date = None
         line.po_confirmed_at = None
+        # Reset the nudge clock: the line is actionable again, so the buyer is re-nudged
+        # to re-issue the PO without waiting out a stale (ops-stamped) nudge window.
+        line.last_nudge_at = None
         logger.info("PO rejected for line {}: {}", line_id, rejection_note)
     else:
         raise ValueError(f"Invalid PO verification action: {action}")

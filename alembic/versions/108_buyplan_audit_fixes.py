@@ -57,4 +57,5 @@ def downgrade() -> None:
         "buy_plans_v3",
         sa.Column("approval_token", sa.String(length=100), nullable=True),
     )
-    op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"], unique=True)
+    # Non-unique, matching the original DDL (migrations 001/075 created it non-unique).
+    op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"])

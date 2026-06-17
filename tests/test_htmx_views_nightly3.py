@@ -496,11 +496,15 @@ class TestBuyPlanWorkflow:
         plan = _buy_plan(db_session, quote, req)
         db_session.commit()
 
-        resp = client.post(
-            f"/v2/partials/buy-plans/{plan.id}/cancel",
-            data={"reason": "Customer withdrew"},
-        )
+        from unittest.mock import AsyncMock, patch
+
+        with patch("app.services.buyplan_notifications.run_notify_bg", new_callable=AsyncMock) as mock_notify:
+            resp = client.post(
+                f"/v2/partials/buy-plans/{plan.id}/cancel",
+                data={"reason": "Customer withdrew"},
+            )
         assert resp.status_code == 200
+        mock_notify.assert_awaited_once()  # cancel dispatches notify_cancelled
 
     def test_buy_plan_cancel_already_cancelled(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)

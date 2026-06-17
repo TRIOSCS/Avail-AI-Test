@@ -139,6 +139,22 @@ class TestBuyerNudge:
         scheduler_db.refresh(line)
         assert line.last_nudge_at is None
 
+    def test_refires_after_window(self, scheduler_db, test_user, test_quote, test_requisition):
+        # last_nudge 5h ago (> 4h buyer window) -> re-nudged
+        plan = _active_plan(scheduler_db, test_user, test_quote, test_requisition, approved_hours_ago=6)
+        line = _line(
+            scheduler_db, plan, BuyPlanLineStatus.AWAITING_PO.value, buyer_id=test_user.id, last_nudge_hours_ago=5
+        )
+        scheduler_db.commit()
+        before = line.last_nudge_at
+
+        with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
+            _run_job()
+
+        scheduler_db.refresh(line)
+        assert line.last_nudge_at > before  # advanced to ~now
+        assert _nudge_logs(scheduler_db, line.id)
+
 
 # ── Ops nudge ────────────────────────────────────────────────────────────
 
@@ -171,3 +187,41 @@ class TestOpsNudge:
         scheduler_db.refresh(line)
         assert line.last_nudge_at is None
         assert not _nudge_logs(scheduler_db, line.id)
+
+    def test_refires_after_window(self, scheduler_db, test_user, test_quote, test_requisition):
+        plan = _active_plan(scheduler_db, test_user, test_quote, test_requisition)
+        line = _line(
+            scheduler_db,
+            plan,
+            BuyPlanLineStatus.PENDING_VERIFY.value,
+            buyer_id=test_user.id,
+            po_confirmed_hours_ago=4,
+            last_nudge_hours_ago=3,
+        )
+        scheduler_db.add(VerificationGroupMember(user_id=test_user.id, is_active=True))
+        scheduler_db.commit()
+        before = line.last_nudge_at
+
+        _run_job()
+
+        scheduler_db.refresh(line)
+        assert line.last_nudge_at > before  # > 2h ops window -> re-nudged
+
+    def test_skips_recent_nudge(self, scheduler_db, test_user, test_quote, test_requisition):
+        plan = _active_plan(scheduler_db, test_user, test_quote, test_requisition)
+        line = _line(
+            scheduler_db,
+            plan,
+            BuyPlanLineStatus.PENDING_VERIFY.value,
+            buyer_id=test_user.id,
+            po_confirmed_hours_ago=3,
+            last_nudge_hours_ago=1,
+        )
+        scheduler_db.add(VerificationGroupMember(user_id=test_user.id, is_active=True))
+        scheduler_db.commit()
+        before = line.last_nudge_at
+
+        _run_job()
+
+        scheduler_db.refresh(line)
+        assert line.last_nudge_at == before  # within 2h ops window -> not re-nudged
