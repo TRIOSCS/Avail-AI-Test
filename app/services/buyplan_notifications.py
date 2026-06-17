@@ -11,10 +11,10 @@ Handles notifications for all buy plan state transitions:
 - Completed → email + Teams + in-app to salesperson
 - Resubmit → email + in-app to managers
 - Stock Sale Approved → email to logistics/accounting + in-app + Teams
-- Token Approved → in-app + Teams (no user session, approved via email token)
-- Token Rejected → in-app (rejected via email token)
+- Cancelled → in-app + Teams to submitter (lines cascade-cancelled)
+- Nudge (buyer / ops) → reminder when a line sits unconfirmed past its SLA
 
-Called by: routers/crm/buy_plans.py, routers/htmx_views.py, buyplan_service.py
+Called by: routers/htmx_views.py, jobs/inventory_jobs.py, buyplan_service.py
 Depends on: models, config, utils/graph_client, teams_notifications
 """
 
@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..constants import UserRole
 from ..models import ActivityLog, User
-from ..models.buy_plan import BuyPlan
+from ..models.buy_plan import BuyPlan, BuyPlanLine
 from ..utils.async_helpers import safe_background_task
 
 # ── Background runner ────────────────────────────────────────────────
@@ -143,8 +143,8 @@ def _wrap_email(title: str, body_inner: str) -> str:
 
 async def _send_email(user: User, subject: str, html_body: str, db: Session):
     """Send an email to a single user via Graph API."""
-    from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient
+    from ..utils.token_manager import get_valid_token
 
     try:
         token = await get_valid_token(user, db)
@@ -204,6 +204,7 @@ def log_buyplan_activity(
             activity_type=activity_type,
             channel="system",
             requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
             subject=f"Buy Plan #{plan.id}: {detail}" if detail else f"Buy Plan #{plan.id}",
             notes=f"plan_id={plan.id} status={plan.status}",
         )
@@ -249,6 +250,7 @@ async def notify_submitted(plan: BuyPlan, db: Session):
                 activity_type="buyplan_pending",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"Buy Plan #{plan.id} needs approval — {ctx['submitter_name']}",
             )
         )
@@ -270,8 +272,7 @@ async def notify_approved(plan: BuyPlan, db: Session):
 
     # Collect unique buyers
     buyer_ids = {ln.buyer_id for ln in (plan.lines or []) if ln.buyer_id}
-    buyers = [db.get(User, bid) for bid in buyer_ids]
-    buyers = [b for b in buyers if b]
+    buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
     # Email each buyer with their assigned lines
     for buyer in buyers:
@@ -306,6 +307,7 @@ async def notify_approved(plan: BuyPlan, db: Session):
                 activity_type="buyplan_approved",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"Buy plan #{plan.id} approved — create POs ({len(my_lines)} lines)",
             )
         )
@@ -318,6 +320,7 @@ async def notify_approved(plan: BuyPlan, db: Session):
                 activity_type="buyplan_approved",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"Your buy plan #{plan.id} was approved",
             )
         )
@@ -386,6 +389,7 @@ async def notify_so_verified(plan: BuyPlan, db: Session):
                 activity_type="buyplan_approved",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"SO# {plan.sales_order_number} verified — proceed with POs (plan #{plan.id})",
             )
         )
@@ -437,6 +441,7 @@ async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
                 activity_type="buyplan_pending",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"PO {po_num} needs verification — {mpn} (plan #{plan.id})",
             )
         )
@@ -482,8 +487,8 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     For stock sales that auto-complete, sends an email to the stock_sale_notify_emails
     list and creates an in-app notification for the submitter. Also posts to Teams.
     """
-    from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient
+    from ..utils.token_manager import get_valid_token
 
     ctx = _plan_context(plan, db)
     table, total = _lines_table(plan)
@@ -537,6 +542,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                 activity_type="buyplan_completed",
                 channel="system",
                 requisition_id=plan.requisition_id,
+                buy_plan_id=plan.id,
                 subject=f"Stock sale #{plan.id} approved and completed — no PO required",
             )
         )
@@ -551,73 +557,107 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     )
 
 
-async def notify_token_approved(plan: BuyPlan, db: Session):
-    """Notification when a buy plan is approved via email token (no user session).
-
-    Creates in-app notification for submitter and posts to Teams channel. Unlike normal
-    approval, there is no logged-in user context — the approval came from clicking an
-    approve link in an email.
-    """
+async def notify_cancelled(plan: BuyPlan, db: Session):
+    """Notify the submitter (in-app + Teams DM) and the channel that a plan was
+    cancelled."""
     ctx = _plan_context(plan, db)
-    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
-    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+    canceller = db.get(User, plan.cancelled_by_id) if plan.cancelled_by_id else None
+    canceller_name = (canceller.name or canceller.email) if canceller else "\u2014"
+    reason = plan.cancellation_reason or "No reason given"
 
-    # In-app notification to submitter
     if ctx["submitter"]:
         db.add(
             ActivityLog(
                 user_id=ctx["submitter"].id,
-                activity_type="buyplan_approved",
+                activity_type="buyplan_cancelled",
                 channel="system",
                 requisition_id=plan.requisition_id,
-                subject=f"Buy plan #{plan.id} approved via email by {approver_name}",
+                buy_plan_id=plan.id,
+                subject=f"Buy plan #{plan.id} cancelled by {canceller_name}: {reason}",
             )
         )
-
-    # In-app notification to approver
-    if approver:
-        db.add(
-            ActivityLog(
-                user_id=approver.id,
-                activity_type="buyplan_approved",
-                channel="system",
-                requisition_id=plan.requisition_id,
-                subject=f"You approved buy plan #{plan.id} via email token",
-            )
-        )
-
     db.commit()
 
-    # Teams channel post
-    _, total = _lines_html(plan)
+    if ctx["submitter"]:
+        await _teams_dm(
+            ctx["submitter"],
+            f"Buy Plan #{plan.id} was cancelled by {canceller_name}: {reason}",
+            db,
+        )
     await _teams_channel(
-        f"**Buy Plan #{plan.id} — Approved via Email Token**\n\n"
-        f"Approved by: {approver_name}\n"
-        f"Customer: {ctx['customer_name']} | Total: ${total:,.2f}"
+        f"**Buy Plan #{plan.id} \u2014 Cancelled**\n\n"
+        f"Cancelled by: {canceller_name}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '\u2014'}\n"
+        f"Reason: {reason}"
     )
 
 
-async def notify_token_rejected(plan: BuyPlan, db: Session):
-    """Notification when a buy plan is rejected via email token (no user session).
+async def notify_nudge_buyer(plan: BuyPlan, line: BuyPlanLine, db: Session):
+    """Remind the assigned buyer that a line still has no confirmed PO.
 
-    Creates in-app notification for submitter. Unlike normal rejection, there is no
-    logged-in user context — the rejection came from clicking a reject link.
+    In-app + Teams DM. Does NOT commit \u2014 the nudge job stamps last_nudge_at and commits.
+    Called by: jobs/inventory_jobs.py _job_buyplan_nudge.
     """
-    ctx = _plan_context(plan, db)
-    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
-    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+    buyer = db.get(User, line.buyer_id) if line.buyer_id else None
+    if not buyer:
+        logger.warning("Nudge buyer: line {} has no buyer, skipping", line.id)
+        return False
 
-    # In-app notification to submitter
-    if ctx["submitter"]:
-        reason = plan.cancellation_reason or plan.approval_notes or "No reason given"
+    offer = line.offer
+    mpn = offer.mpn if offer else "\u2014"
+    vendor = offer.vendor_name if offer else "\u2014"
+    ctx = _plan_context(plan, db)
+
+    db.add(
+        ActivityLog(
+            user_id=buyer.id,
+            activity_type="buyplan_pending",
+            channel="system",
+            requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
+            subject=f"Reminder \u2014 PO still needed for {mpn} (plan #{plan.id})",
+            notes=f"nudge line_id={line.id} status=awaiting_po",
+        )
+    )
+    await _teams_dm(
+        buyer,
+        f"**Reminder \u2014 PO Required**\n\n"
+        f"Plan #{plan.id} | {mpn} from {vendor}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '\u2014'}\n"
+        f"This line has been awaiting a PO for over {settings.buyplan_nudge_buyer_hours}h.",
+        db,
+    )
+
+    return True
+
+
+async def notify_nudge_ops(plan: BuyPlan, line: BuyPlanLine, db: Session):
+    """Remind the ops verification group that a confirmed PO still needs verification.
+
+    In-app to each active ops member (no Teams DM \u2014 group-level, would be spammy).
+    Does NOT commit \u2014 the nudge job stamps last_nudge_at and commits.
+    Called by: jobs/inventory_jobs.py _job_buyplan_nudge.
+    """
+    from ..models.buy_plan import VerificationGroupMember
+
+    ops_members = db.query(VerificationGroupMember).filter(VerificationGroupMember.is_active.is_(True)).all()
+    if not ops_members:
+        logger.warning("Nudge ops: line {} \u2014 no active ops members, skipping", line.id)
+        return False
+
+    offer = line.offer
+    mpn = offer.mpn if offer else "\u2014"
+    po_num = line.po_number or "\u2014"
+    for m in ops_members:
         db.add(
             ActivityLog(
-                user_id=ctx["submitter"].id,
-                activity_type="buyplan_rejected",
+                user_id=m.user_id,
+                activity_type="buyplan_pending",
                 channel="system",
                 requisition_id=plan.requisition_id,
-                subject=f"Buy plan #{plan.id} rejected via email by {approver_name}: {reason}",
+                buy_plan_id=plan.id,
+                subject=f"Reminder \u2014 PO {po_num} ({mpn}) needs verification (plan #{plan.id})",
+                notes=f"nudge line_id={line.id} status=pending_verify",
             )
         )
-
-    db.commit()
+    return True

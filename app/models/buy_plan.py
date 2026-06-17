@@ -18,7 +18,7 @@ Business Rules:
   - Ops verification runs in parallel with buy execution
   - First ops member to act wins (no double-verify)
 
-Called by: services/buyplan_workflow.py, routers/crm/buy_plans.py
+Called by: services/buyplan_workflow.py, routers/htmx_views.py
 Depends on: models.base, models.quotes, models.sourcing, models.offers, models.auth
 """
 
@@ -129,10 +129,6 @@ class BuyPlan(Base):
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)
 
-    # ── Token-based approval
-    approval_token = Column(String(100), unique=True)
-    token_expires_at = Column(UTCDateTime)
-
     # ── Timestamps
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -147,6 +143,8 @@ class BuyPlan(Base):
     submitted_by = relationship("User", foreign_keys=[submitted_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
     so_verified_by = relationship("User", foreign_keys=[so_verified_by_id])
+    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
+    halted_by = relationship("User", foreign_keys=[halted_by_id])
     lines = relationship(
         "BuyPlanLine",
         back_populates="buy_plan",
@@ -168,7 +166,6 @@ class BuyPlan(Base):
         Index("ix_bpv3_requisition", "requisition_id"),
         Index("ix_bpv3_submitted_by", "submitted_by_id"),
         Index("ix_bpv3_status_created", "status", "created_at"),
-        Index("ix_bpv3_token", "approval_token"),
     )
 
 
@@ -232,17 +229,28 @@ class BuyPlanLine(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # ── Nudge tracking
+    last_nudge_at = Column(UTCDateTime, nullable=True)
+
     # ── Relationships
     buy_plan = relationship("BuyPlan", back_populates="lines")
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     offer = relationship("Offer", foreign_keys=[offer_id])
     buyer = relationship("User", foreign_keys=[buyer_id])
+    po_verified_by = relationship("User", foreign_keys=[po_verified_by_id])
 
     @validates("status")
     def _validate_status(self, _key, value):
         valid = {e.value for e in BuyPlanLineStatus}
         if value and value not in valid:
             raise ValueError(f"Invalid buy plan line status: {value!r}. Valid: {valid}")
+        return value
+
+    @validates("issue_type")
+    def _validate_issue_type(self, _key, value):
+        valid = {e.value for e in LineIssueType}
+        if value and value not in valid:
+            raise ValueError(f"Invalid line issue type: {value!r}. Valid: {valid}")
         return value
 
     __table_args__ = (
@@ -252,6 +260,7 @@ class BuyPlanLine(Base):
         Index("ix_bpl_buyer", "buyer_id"),
         Index("ix_bpl_offer", "offer_id"),
         Index("ix_bpl_plan_requirement", "buy_plan_id", "requirement_id"),
+        Index("ix_bpl_nudge_status", "status", "last_nudge_at"),
     )
 
 

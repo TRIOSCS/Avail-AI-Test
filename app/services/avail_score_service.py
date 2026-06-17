@@ -22,7 +22,7 @@ from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import UserRole
+from ..constants import BuyPlanStatus, UserRole
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -140,7 +140,7 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
         .all()
     ):
         bp_offer_ids.add(offer_id)
-        if bp_status in ("completed",):
+        if bp_status in (BuyPlanStatus.COMPLETED.value,):
             po_confirmed_offer_ids.add(offer_id)
 
     # User's offers this month

@@ -30,6 +30,7 @@ from app.services.buyplan_workflow import (
     _recalculate_financials,
     _should_auto_approve,
     approve_buy_plan,
+    cancel_buy_plan,
     check_completion,
     confirm_po,
     detect_favoritism,
@@ -40,7 +41,6 @@ from app.services.buyplan_workflow import (
     submit_buy_plan,
     verify_po,
     verify_po_sent,
-    verify_po_sent_v3,
     verify_so,
 )
 
@@ -138,8 +138,6 @@ class TestSubmitBuyPlan:
 
         assert result.status == BuyPlanStatus.PENDING.value
         assert result.auto_approved is not True
-        assert result.approval_token is not None
-        assert result.token_expires_at is not None
 
     def test_submit_pending_critical_flags(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -538,7 +536,7 @@ class TestFlagLineIssue:
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
         line = _make_line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
 
-        result = flag_line_issue(plan.id, line.id, "price_change", test_user, db_session)
+        result = flag_line_issue(plan.id, line.id, "price_changed", test_user, db_session)
 
         assert result.status == BuyPlanLineStatus.ISSUE.value
 
@@ -722,7 +720,6 @@ class TestResetAndResubmit:
         result = resubmit_buy_plan(plan.id, "SO-RESUB2", test_user, db_session)
 
         assert result.status == BuyPlanStatus.PENDING.value
-        assert result.approval_token is not None
 
     def test_resubmit_not_draft(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -1154,7 +1151,7 @@ class TestVerifyPOSent:
 
         assert results[0]["reason"] == "no_buyer"
 
-    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None)
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None)
     def test_skip_no_token(
         self, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1166,7 +1163,7 @@ class TestVerifyPOSent:
 
         assert results[0]["reason"] == "no_token"
 
-    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
     @patch("app.utils.graph_client.GraphClient")
     def test_po_found(
         self, MockGC, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -1193,7 +1190,7 @@ class TestVerifyPOSent:
         assert results[0]["found"] is True
         assert results[0]["message_count"] == 1
 
-    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
     @patch("app.utils.graph_client.GraphClient")
     def test_po_not_found(
         self, MockGC, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
@@ -1216,7 +1213,7 @@ class TestVerifyPOSent:
 
         assert results[0]["found"] is False
 
-    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, side_effect=Exception("API down"))
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, side_effect=Exception("API down"))
     def test_graph_api_error(
         self, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1230,170 +1227,66 @@ class TestVerifyPOSent:
         assert "error" in results[0]
 
 
-class TestVerifyPOSentV3:
-    """Tests for verify_po_sent_v3() async function."""
+class TestCancelBuyPlan:
+    """Tests for cancel_buy_plan() — BUG-3: service-layer cancel with line cascade."""
 
-    def test_skip_no_po_number(
+    def test_cancel_active_cascades_open_lines(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(db_session, plan, po_number=None, status=BuyPlanLineStatus.PENDING_VERIFY.value)
-        db_session.refresh(plan)
+        awaiting = _make_line(db_session, plan, status=BuyPlanLineStatus.AWAITING_PO.value)
+        pending = _make_line(db_session, plan, status=BuyPlanLineStatus.PENDING_VERIFY.value)
+        verified = _make_line(db_session, plan, status=BuyPlanLineStatus.VERIFIED.value)
 
-        results = _run(verify_po_sent_v3(plan, db_session))
+        result = cancel_buy_plan(plan.id, test_user, db_session, reason="customer pulled out")
 
-        assert results == {}
+        assert result.status == BuyPlanStatus.CANCELLED.value
+        assert result.cancelled_by_id == test_user.id
+        assert result.cancellation_reason == "customer pulled out"
+        assert result.cancelled_at is not None
+        for ln in (awaiting, pending, verified):
+            db_session.refresh(ln)
+        assert awaiting.status == BuyPlanLineStatus.CANCELLED.value
+        assert pending.status == BuyPlanLineStatus.CANCELLED.value
+        assert verified.status == BuyPlanLineStatus.VERIFIED.value  # terminal line untouched
 
-    def test_skip_wrong_status(
+    def test_cancel_rejects_completed(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.COMPLETED.value)
+        with pytest.raises(ValueError, match="Cannot cancel"):
+            cancel_buy_plan(plan.id, test_user, db_session)
+
+    def test_cancel_rejects_already_cancelled(
+        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
+    ):
+        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.CANCELLED.value)
+        with pytest.raises(ValueError, match="Cannot cancel"):
+            cancel_buy_plan(plan.id, test_user, db_session)
+
+    def test_cancel_not_found(self, db_session: Session, test_user: User):
+        with pytest.raises(ValueError, match="not found"):
+            cancel_buy_plan(99999, test_user, db_session)
+
+
+class TestVerifyPoRejectClearsNudge:
+    """Review fix: PO-reject re-activates the line, so last_nudge_at must reset."""
+
+    def test_reject_clears_last_nudge_at(
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(db_session, plan, po_number="PO-1", status=BuyPlanLineStatus.AWAITING_PO.value)
-        db_session.refresh(plan)
-
-        results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results == {}
-
-    def test_skip_no_buyer_v3(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(db_session, plan, po_number="PO-NB", buyer_id=None, status=BuyPlanLineStatus.PENDING_VERIFY.value)
-        db_session.refresh(plan)
-
-        results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results["PO-NB"]["reason"] == "no_buyer"
-
-    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.utils.graph_client.GraphClient")
-    def test_v3_verified(
-        self,
-        MockGC,
-        mock_token_fn,
-        db_session: Session,
-        test_user: User,
-        test_quote: Quote,
-        test_requisition: Requisition,
-    ):
-        mock_client = MagicMock()
-        mock_client.search_sent_messages = AsyncMock(
-            return_value=[
-                {
-                    "id": "msg1",
-                    "toRecipients": [{"emailAddress": {"address": "vendor@test.com"}}],
-                    "sentDateTime": "2026-03-28T10:00:00Z",
-                }
-            ]
-        )
-        MockGC.return_value = mock_client
-
-        plan = _make_plan(
+        line = _make_line(
             db_session,
-            test_user,
-            test_quote,
-            test_requisition,
-            status=BuyPlanStatus.ACTIVE.value,
-            so_status=SOVerificationStatus.APPROVED.value,
+            plan,
+            status=BuyPlanLineStatus.PENDING_VERIFY.value,
+            po_number="PO-1",
+            last_nudge_at=datetime.now(timezone.utc),
         )
-        _make_line(
-            db_session, plan, po_number="PO-V3", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
-        )
-        db_session.refresh(plan)
+        _make_verification_member(db_session, test_user)
 
-        # Patch at the v3 import location
-        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
-            results = _run(verify_po_sent_v3(plan, db_session))
+        verify_po(plan.id, line.id, "reject", test_user, db_session, rejection_note="wrong vendor")
 
-        assert results["PO-V3"]["verified"] is True
-        assert results["PO-V3"]["recipient"] == "vendor@test.com"
-
-    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.utils.graph_client.GraphClient")
-    def test_v3_not_found(
-        self,
-        MockGC,
-        mock_token_fn,
-        db_session: Session,
-        test_user: User,
-        test_quote: Quote,
-        test_requisition: Requisition,
-    ):
-        mock_client = MagicMock()
-        mock_client.search_sent_messages = AsyncMock(return_value=[])
-        MockGC.return_value = mock_client
-
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(
-            db_session, plan, po_number="PO-V3NF", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
-        )
-        db_session.refresh(plan)
-
-        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"):
-            results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results["PO-V3NF"]["verified"] is False
-        assert results["PO-V3NF"]["reason"] == "not_found_in_sent"
-
-    def test_v3_buyer_not_found(
-        self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(
-            db_session, plan, po_number="PO-BNF", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
-        )
-        db_session.refresh(plan)
-
-        # Mock db.get(User, buyer_id) to return None so the code hits the "buyer_not_found" path
-        original_get = db_session.get
-
-        def mock_get(model, ident, **kwargs):
-            if model is User:
-                return None
-            return original_get(model, ident, **kwargs)
-
-        with patch.object(db_session, "get", side_effect=mock_get):
-            results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results["PO-BNF"]["reason"] == "buyer_not_found"
-
-    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.utils.graph_client.GraphClient")
-    def test_v3_graph_error(
-        self,
-        MockGC,
-        mock_token_fn,
-        db_session: Session,
-        test_user: User,
-        test_quote: Quote,
-        test_requisition: Requisition,
-    ):
-        mock_client = MagicMock()
-        mock_client.search_sent_messages = AsyncMock(side_effect=Exception("Graph error"))
-        MockGC.return_value = mock_client
-
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(
-            db_session, plan, po_number="PO-GE", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
-        )
-        db_session.refresh(plan)
-
-        results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results["PO-GE"]["verified"] is False
-        assert "graph_error" in results["PO-GE"]["reason"]
-
-    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None)
-    def test_v3_no_token(
-        self, mock_token_fn, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
-    ):
-        plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(
-            db_session, plan, po_number="PO-NT", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
-        )
-        db_session.refresh(plan)
-
-        results = _run(verify_po_sent_v3(plan, db_session))
-
-        assert results["PO-NT"]["reason"] == "no_token"
+        db_session.refresh(line)
+        assert line.status == BuyPlanLineStatus.AWAITING_PO.value
+        assert line.last_nudge_at is None

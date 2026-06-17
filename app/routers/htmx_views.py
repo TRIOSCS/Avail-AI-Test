@@ -6078,6 +6078,7 @@ async def buy_plans_list_partial(
                 "line_count": len(p.lines) if p.lines else 0,
                 "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
                 "auto_approved": p.auto_approved or False,
+                "is_stock_sale": p.is_stock_sale or False,
                 "created_at": str(p.created_at) if p.created_at else None,
             }
         )
@@ -6342,22 +6343,41 @@ async def buy_plan_cancel_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Cancel a buy plan — returns refreshed detail."""
+    """Cancel a buy plan — delegates to the service (line cascade + notification)."""
+    from ..services.buyplan_notifications import notify_cancelled, run_notify_bg
+    from ..services.buyplan_workflow import cancel_buy_plan
 
-    bp = db.get(BuyPlan, plan_id)
-    if not bp:
+    if not db.get(BuyPlan, plan_id):
         raise HTTPException(404, "Buy plan not found")
-    if bp.status in ("completed", "cancelled"):
-        raise HTTPException(400, f"Cannot cancel plan in '{bp.status}' status")
 
     form = await request.form()
-    bp.status = BuyPlanStatus.CANCELLED.value
-    bp.cancelled_at = datetime.now(timezone.utc)
-    bp.cancelled_by_id = user.id
-    bp.cancellation_reason = form.get("reason")
-    db.commit()
+    try:
+        plan = cancel_buy_plan(plan_id, user, db, reason=form.get("reason"))
+        db.commit()
+        await run_notify_bg(notify_cancelled, plan.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+# ── Settings: Ops verification group ─────────────────────────────────
+
+
+@router.get("/v2/partials/settings/ops-group", response_class=HTMLResponse)
+async def settings_ops_group_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Ops verification group management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+    from .admin.buy_plan_ops import ops_group_context
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(ops_group_context(db))
+    return template_response("htmx/partials/settings/ops_group.html", ctx)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
@@ -8352,6 +8372,7 @@ async def build_buy_plan_htmx(
     ctx = _base_ctx(request, user, "buy-plans")
     ctx["bp"] = plan
     ctx["lines"] = bp_lines
+    ctx["user"] = user
     ctx["is_ops_member"] = _is_ops_member(user, db)
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
 
