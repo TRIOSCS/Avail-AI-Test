@@ -2199,6 +2199,105 @@ def _parse_iso_date(v: str | None) -> date | None:
         return None
 
 
+def _qual_dict(
+    usage: str,
+    refurbished_by: str,
+    refurb_process: str,
+    cert_doc: str,
+    part_condition: str,
+    provenance_story: str,
+    terms: str,
+    lead_time_reason: str,
+) -> "dict | None":
+    """Build the qualification JSON blob from submitted form values.
+
+    Returns None when all fields are blank (no qualification data to store).
+    """
+    q = {
+        "usage": usage or None,
+        "refurbished_by": refurbished_by or None,
+        "refurb_process": refurb_process or None,
+        "cert_doc": cert_doc or None,
+        "part_condition": part_condition or None,
+        "provenance_story": provenance_story or None,
+        "terms": terms or None,
+        "lead_time_reason": lead_time_reason or None,
+        "requests": [],
+    }
+    _qual_keys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    return q if any(q[k] for k in _qual_keys) else None
+
+
+def _echo_prefill(
+    vendor_name: str,
+    mpn: str,
+    manufacturer: str,
+    qty_available: str,
+    unit_price: str,
+    lead_time: str,
+    date_code: str,
+    condition: str,
+    packaging: str,
+    firmware: str,
+    hardware_code: str,
+    moq: str,
+    spq: str,
+    warranty: str,
+    country_of_origin: str,
+    valid_until: str,
+    notes: str,
+    usage: str,
+    refurbished_by: str,
+    refurb_process: str,
+    cert_doc: str,
+    part_condition: str,
+    provenance_story: str,
+    terms: str,
+    lead_time_reason: str,
+) -> dict:
+    """Re-build a prefill dict from submitted form values so the modal preserves what
+    the buyer typed on a validation error re-render.
+
+    Keys match the input name= attributes in _offer_form_fields.html.
+    """
+    return {
+        "vendor_name": vendor_name,
+        "mpn": mpn,
+        "manufacturer": manufacturer,
+        "qty_available": qty_available,
+        "unit_price": unit_price,
+        "lead_time": lead_time,
+        "date_code": date_code,
+        "condition": condition,
+        "packaging": packaging,
+        "firmware": firmware,
+        "hardware_code": hardware_code,
+        "moq": moq,
+        "spq": spq,
+        "warranty": warranty,
+        "country_of_origin": country_of_origin,
+        "valid_until": valid_until,
+        "notes": notes,
+        "usage": usage,
+        "refurbished_by": refurbished_by,
+        "refurb_process": refurb_process,
+        "cert_doc": cert_doc,
+        "part_condition": part_condition,
+        "provenance_story": provenance_story,
+        "terms": terms,
+        "lead_time_reason": lead_time_reason,
+    }
+
+
 @router.get("/v2/partials/sightings/{requirement_id}/offer-form", response_class=HTMLResponse)
 async def sightings_offer_form(
     request: Request,
@@ -2252,6 +2351,14 @@ async def sightings_create_offer(
     country_of_origin: str = Form(""),
     valid_until: str = Form(""),
     notes: str = Form(""),
+    usage: str = Form(""),
+    refurbished_by: str = Form(""),
+    refurb_process: str = Form(""),
+    cert_doc: str = Form(""),
+    part_condition: str = Form(""),
+    provenance_story: str = Form(""),
+    terms: str = Form(""),
+    lead_time_reason: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
@@ -2288,6 +2395,16 @@ async def sightings_create_offer(
             valid_until=_parse_iso_date(valid_until),
             notes=notes or None,
             source="manual",
+            qualification=_qual_dict(
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            ),
         )
     except ValidationError as e:
         # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
@@ -2295,7 +2412,47 @@ async def sightings_create_offer(
 
     # The canonical create_offer fires the offer-hook release itself
     # (maybe_release_on_offer) — no route-level call needed here.
-    await create_offer(requirement.requisition_id, payload, user=user, db=db)
+    try:
+        await create_offer(requirement.requisition_id, payload, user=user, db=db)
+    except HTTPException as e:
+        if e.status_code == 422:
+            errors = [(e.detail or {}).get("error")] if isinstance(e.detail, dict) else [str(e.detail)]
+            prefill = _echo_prefill(
+                vendor_name,
+                mpn,
+                manufacturer,
+                qty_available,
+                unit_price,
+                lead_time,
+                date_code,
+                condition,
+                packaging,
+                firmware,
+                hardware_code,
+                moq,
+                spq,
+                warranty,
+                country_of_origin,
+                valid_until,
+                notes,
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            )
+            ctx = {
+                "request": request,
+                "requirement": requirement,
+                "offer": None,
+                "prefill": prefill,
+                "errors": errors,
+            }
+            return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+        raise
     db.commit()
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
@@ -2439,6 +2596,14 @@ async def sightings_update_offer(
     country_of_origin: str = Form(""),
     valid_until: str = Form(""),
     notes: str = Form(""),
+    usage: str = Form(""),
+    refurbished_by: str = Form(""),
+    refurb_process: str = Form(""),
+    cert_doc: str = Form(""),
+    part_condition: str = Form(""),
+    provenance_story: str = Form(""),
+    terms: str = Form(""),
+    lead_time_reason: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
@@ -2468,10 +2633,61 @@ async def sightings_update_offer(
             country_of_origin=country_of_origin or None,
             valid_until=_parse_iso_date(valid_until),
             notes=notes or None,
+            qualification=_qual_dict(
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            ),
         )
     except ValidationError as e:
         raise RequestValidationError(e.errors()) from e
 
-    await update_offer(offer_id, payload, user=user, db=db)
+    try:
+        await update_offer(offer_id, payload, user=user, db=db)
+    except HTTPException as e:
+        if e.status_code == 422:
+            errors = [(e.detail or {}).get("error")] if isinstance(e.detail, dict) else [str(e.detail)]
+            offer = db.get(Offer, offer_id)
+            prefill = _echo_prefill(
+                vendor_name,
+                mpn,
+                manufacturer,
+                qty_available,
+                unit_price,
+                lead_time,
+                date_code,
+                condition,
+                packaging,
+                firmware,
+                hardware_code,
+                moq,
+                spq,
+                warranty,
+                country_of_origin,
+                valid_until,
+                notes,
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            )
+            ctx = {
+                "request": request,
+                "requirement": requirement,
+                "offer": offer,
+                "prefill": prefill,
+                "errors": errors,
+            }
+            return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+        raise
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")

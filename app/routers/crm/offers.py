@@ -388,6 +388,15 @@ async def create_offer(
         notes=payload.notes,
         status=payload.status,
     )
+    from fastapi import HTTPException as _HTTPException
+
+    from app.services.offer_qualification import QualificationError, apply_qualification
+
+    offer.qualification = payload.qualification or None
+    try:
+        apply_qualification(offer)
+    except QualificationError as e:
+        raise _HTTPException(status_code=422, detail={"error": "; ".join(e.errors)})
     db.add(offer)
     old_status = req.status
     if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING):
@@ -600,6 +609,17 @@ async def update_offer(
     record_changes(db, "offer", offer_id, user.id, old_dict, new_dict, trackable)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    from fastapi import HTTPException as _HTTPException
+
+    from app.services.offer_qualification import QualificationError, apply_qualification
+
+    if "qualification" in changes:
+        offer.qualification = changes["qualification"] or None
+    try:
+        apply_qualification(offer)
+    except QualificationError as e:
+        raise _HTTPException(status_code=422, detail={"error": "; ".join(e.errors)})
 
     # CPH hook: record purchase history when offer status changes to 'won'
     if old_dict.get("status") != OfferStatus.WON and offer.status == OfferStatus.WON:

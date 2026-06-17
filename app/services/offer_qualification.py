@@ -33,6 +33,15 @@ _VALID_CONDITIONS = {"new", "new_no_pkg", "pulls", "refurb"}
 
 _USAGE_HUMAN = {"boards": "boards", "systems": "systems"}
 _WHO_HUMAN = {"supplier": "the supplier", "third_party": "a third party"}
+# Normalized storage token → display label for use in the qualification note.
+# Keys are the values produced by app.utils.normalization.normalize_packaging.
+_PKG_DISPLAY = {
+    "tray": "Trays",
+    "reel": "Reels",
+    "tube": "Tubes",
+    "box": "Boxes",
+    "bag": "Antistatic bags",
+}
 
 _REQUEST_TEMPLATES = {
     "images": "Please provide images of all angles, markings, contact points, and packaging for {mpn}.",
@@ -65,11 +74,30 @@ def _s(data: dict, key: str) -> str:
     return str(data.get(key) or "").strip()
 
 
+def _is_acceptable_packaging(pkg: str) -> bool:
+    """Return True if *pkg* is an acceptable packaging token.
+
+    Accepts the display-string form ("Trays") and the storage-normalized form ("tray")
+    that app.utils.normalization produces so callers don't need to re-humanise a stored
+    value.
+    """
+    from app.utils.normalization import normalize_packaging as _norm_pkg
+
+    lower = pkg.lower()
+    if lower in ("bulk", "loose"):
+        return False
+    if any(lower == c.lower() for c in PACKAGING_CHIPS):
+        return True
+    # Storage-normalized form: "tray", "reel", "tube", "box", "bag" etc.
+    norm = _norm_pkg(pkg)
+    return norm is not None and any(_norm_pkg(c) == norm for c in PACKAGING_CHIPS)
+
+
 def _require_packaging(data: dict, errors: list[str]) -> None:
     pkg = _s(data, "packaging")
     if not pkg:
         errors.append("Packaging is required; 'bulk' is not acceptable.")
-    elif pkg.lower() in ("bulk", "loose") or pkg not in PACKAGING_CHIPS:
+    elif not _is_acceptable_packaging(pkg):
         errors.append(f"Packaging must be one of {', '.join(PACKAGING_CHIPS)} — 'bulk' is not acceptable.")
 
 
@@ -95,7 +123,9 @@ def validate_essentials(condition: str | None, data: dict) -> list[str]:
 
 
 def compose_note(condition: str | None, data: dict) -> str:
-    pkg = _s(data, "packaging")
+    _raw_pkg = _s(data, "packaging")
+    # Humanise a storage-normalised token ("tray" → "Trays"); leave display strings intact.
+    pkg = _PKG_DISPLAY.get(_raw_pkg.lower(), _raw_pkg) if _raw_pkg else ""
     if condition == "new":
         return "New — parts are in the original manufacturer's packaging."
     if condition == "new_no_pkg":

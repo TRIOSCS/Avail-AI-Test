@@ -2128,6 +2128,7 @@ async def add_offer(
 
     from datetime import date as date_type
 
+    from ..services.offer_qualification import QualificationError, apply_qualification, normalize_offer_condition
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
 
@@ -2143,7 +2144,7 @@ async def add_offer(
         unit_price=_safe_float(form.get("unit_price")),
         lead_time=form.get("lead_time") or None,
         date_code=form.get("date_code") or None,
-        condition=form.get("condition") or None,
+        condition=normalize_offer_condition(form.get("condition")) or form.get("condition") or None,
         moq=_safe_int(form.get("moq")),
         manufacturer=form.get("manufacturer") or None,
         spq=_safe_int(form.get("spq")),
@@ -2160,6 +2161,26 @@ async def add_offer(
         entered_by_id=user.id,
         created_at=datetime.now(timezone.utc),
     )
+    _qkeys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    qual = {k: (form.get(k) or None) for k in _qkeys}
+    qual["requests"] = []
+    offer.qualification = qual if any(qual[k] for k in _qkeys) else None
+    try:
+        apply_qualification(offer)
+    except QualificationError as e:
+        return HTMLResponse(
+            f'<div class="text-sm text-rose-600 p-2">{"; ".join(e.errors)}</div>',
+            status_code=400,
+        )
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
     # Offer hook: a manually entered offer is user-initiated proof of availability —
@@ -2305,6 +2326,34 @@ async def edit_offer(
     if req_id_val:
         offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
 
+    from ..services.offer_qualification import QualificationError, apply_qualification, normalize_offer_condition
+
+    _qkeys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    submitted_qual = {k: (form.get(k) or None) for k in _qkeys}
+    if any(submitted_qual.values()):
+        merged = dict(offer.qualification or {})
+        merged.update(submitted_qual)
+        merged.setdefault("requests", [])
+        offer.qualification = merged
+    cond_raw = form.get("condition", "").strip()
+    if cond_raw:
+        offer.condition = normalize_offer_condition(cond_raw) or cond_raw
+    try:
+        apply_qualification(offer)
+    except QualificationError as e:
+        return HTMLResponse(
+            f'<div class="text-sm text-rose-600 p-2">{"; ".join(e.errors)}</div>',
+            status_code=400,
+        )
     offer.updated_at = now
     offer.updated_by_id = user.id
     db.commit()
