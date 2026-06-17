@@ -106,3 +106,49 @@ def test_part_quotes_tab_empty_state(client, db_session, test_user):
     resp = client.get(f"/v2/partials/parts/{part.id}/tab/quotes")
     assert resp.status_code == 200
     assert "No quotes" in resp.text
+
+
+def _company_with_site(db_session, *, name="Acme Corp"):
+    from app.models.crm import Company, CustomerSite
+
+    company = Company(name=name, is_active=True)
+    db_session.add(company)
+    db_session.commit()
+    db_session.refresh(company)
+    site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+    return company, site
+
+
+def test_company_quotes_tab_unions_site_and_requisition(client, db_session, test_user):
+    company, site = _company_with_site(db_session)
+    reqn, _ = _req_with_part(db_session, test_user, company_id=company.id)
+    # Quote linked only via the customer site:
+    _quote(db_session, requisition_id=reqn.id, number="Q-SITE-1", site_id=site.id)
+    # Quote linked only via the requisition (site is NULL) — must still appear:
+    _quote(db_session, requisition_id=reqn.id, number="Q-REQONLY-1", site_id=None)
+    resp = client.get(f"/v2/partials/customers/{company.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "Q-SITE-1" in resp.text
+    assert "Q-REQONLY-1" in resp.text  # regression guard for the union fix
+
+
+def test_company_quotes_tab_empty_state(client, db_session, test_user):
+    company, _ = _company_with_site(db_session)
+    resp = client.get(f"/v2/partials/customers/{company.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "No quotes" in resp.text
+
+
+def test_company_unknown_tab_still_404(client, db_session, test_user):
+    company, _ = _company_with_site(db_session)
+    assert client.get(f"/v2/partials/customers/{company.id}/tab/bogus").status_code == 404
+
+
+def test_company_detail_shows_quotes_tab_button(client, db_session, test_user):
+    company, _ = _company_with_site(db_session)
+    resp = client.get(f"/v2/partials/customers/{company.id}")
+    assert resp.status_code == 200
+    assert "tab/quotes" in resp.text

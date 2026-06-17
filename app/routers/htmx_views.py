@@ -4635,6 +4635,35 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def _company_quotes_query(db: Session, company):
+    """Quotes belonging to an account: union of quotes linked via the
+    company's customer sites OR via the company's requisitions (the latter
+    catches quotes whose customer_site_id is NULL). Returns a Query, or None
+    when the account can own no quotes (no sites and no requisitions).
+    Called by: company_detail_partial (count), company_tab (quotes + activity).
+    """
+    site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company.id).all()]
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    conds = []
+    if site_ids:
+        conds.append(Quote.customer_site_id.in_(site_ids))
+    if req_ids:
+        conds.append(Quote.requisition_id.in_(req_ids))
+    if not conds:
+        return None
+    return db.query(Quote).filter(or_(*conds))
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4676,12 +4705,16 @@ async def company_detail_partial(
         or 0
     )
 
+    _cq = _company_quotes_query(db, company)
+    quote_count = _cq.count() if _cq is not None else 0
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
+            "quote_count": quote_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
@@ -4705,7 +4738,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4773,6 +4806,13 @@ async def company_tab(
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
         return HTMLResponse(html)
 
+    elif tab == "quotes":
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).all() if cq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "quotes": quotes})
+        return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
     else:  # activity
         from sqlalchemy import or_ as or_clause
 
@@ -4809,17 +4849,10 @@ async def company_tab(
             for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
                 req_map[r.id] = r
 
-        # Quotes linked to company's sites
-        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
-        quotes = []
-        if site_ids:
-            quotes = (
-                db.query(Quote)
-                .filter(Quote.customer_site_id.in_(site_ids))
-                .order_by(Quote.created_at.desc().nullslast())
-                .limit(20)
-                .all()
-            )
+        # Quotes for this account — union of site-linked and requisition-linked
+        # (matches the Quotes tab; site link alone misses NULL-site quotes).
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).limit(20).all() if cq is not None else []
 
         # Direct activity logs on this company + its requisitions
         activity_filters = [ActivityLog.company_id == company.id]
