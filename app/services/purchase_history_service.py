@@ -153,4 +153,33 @@ def record_buyplan_purchase_history(db: Session, plan, *, refresh: bool = True) 
         len(affected),
         company_id,
     )
+    if refresh and affected:
+        refresh_matches_for_cards(db, affected)
     return affected
+
+
+def refresh_matches_for_cards(db: Session, card_ids: list[int], *, per_card_limit: int = 5) -> int:
+    """Re-run proactive matching for live offers of the given cards (immediate
+    surfacing).
+
+    Best-effort. Bounded to the newest `per_card_limit` offers per card so completion
+    stays cheap. Engine dedup prevents duplicate matches.
+    """
+    from app.models import Offer
+    from app.services.proactive_matching import find_matches_for_offer
+
+    created = 0
+    for card_id in set(card_ids):
+        offers = (
+            db.query(Offer.id)
+            .filter(Offer.material_card_id == card_id, Offer.is_stale.isnot(True))
+            .order_by(Offer.created_at.desc())
+            .limit(per_card_limit)
+            .all()
+        )
+        for (offer_id,) in offers:
+            try:
+                created += len(find_matches_for_offer(offer_id, db))
+            except Exception:  # noqa: BLE001
+                logger.exception("BUYPLAN_CPH: match refresh failed for offer {}", offer_id)
+    return created

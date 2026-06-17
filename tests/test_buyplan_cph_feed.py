@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
-from app.models import Company, CustomerSite, MaterialCard, Quote, Requirement, Requisition, User
+from app.models import Company, CustomerSite, MaterialCard, Offer, Quote, Requirement, Requisition, User
 from app.models.buy_plan import BuyPlan, BuyPlanLine
+from app.models.intelligence import ProactiveMatch
 from app.models.purchase_history import CustomerPartHistory
 
 
@@ -151,3 +152,29 @@ def test_check_completion_records_cph(db_session):
     db_session.commit()
     assert db_session.get(type(plan), plan.id).status == BuyPlanStatus.COMPLETED.value
     assert db_session.query(CustomerPartHistory).filter_by(company_id=company.id, source="buy_plan").count() == 1
+
+
+# ── Task 4: immediate proactive re-match on completion ───────────────
+
+
+def test_refresh_creates_match_when_live_offer_exists(db_session):
+    from app.services.purchase_history_service import record_buyplan_purchase_history
+
+    plan, company, cards = _completed_plan(
+        db_session, line_specs=[(BuyPlanLineStatus.VERIFIED.value, 12.50, 100, True)]
+    )
+    # live vendor stock for the purchased part, below the customer's historical price
+    off = Offer(
+        requisition_id=plan.requisition_id,
+        material_card_id=cards[0].id,
+        vendor_name="Avnet",
+        mpn=cards[0].display_mpn,
+        qty_available=500,
+        unit_price=Decimal("8.00"),
+        status="active",
+    )
+    db_session.add(off)
+    db_session.commit()
+    record_buyplan_purchase_history(db_session, plan)  # refresh=True by default
+    db_session.commit()
+    assert db_session.query(ProactiveMatch).filter_by(company_id=company.id, material_card_id=cards[0].id).count() == 1
