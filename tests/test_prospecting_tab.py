@@ -280,3 +280,150 @@ class TestStats:
         assert resp.status_code == 200
         assert "Buyer-ready" in resp.text
         assert "Suggested" in resp.text
+
+
+# ── Phase 1: background enrichment + polling ──────────────────────────────
+
+
+class TestEnrichmentJob:
+    async def test_run_enrichment_job_marks_done(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with (
+            patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, return_value={}),
+            patch("app.services.prospect_warm_intros.detect_warm_intros", return_value={"has_warm_intro": False}),
+            patch("app.services.prospect_warm_intros.generate_one_liner", return_value="opener"),
+        ):
+            await run_enrichment_job(p.id, db=db_session)
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "done"
+        assert (p.enrichment_data or {}).get("one_liner") == "opener"
+
+    async def test_run_enrichment_job_marks_error(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with patch(
+            "app.services.prospect_free_enrichment.run_free_enrichment",
+            new_callable=AsyncMock,
+            return_value={"error": "sam down"},
+        ):
+            await run_enrichment_job(p.id, db=db_session)  # must not raise
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "error"
+
+    async def test_run_enrichment_job_swallows_exceptions(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with patch(
+            "app.services.prospect_free_enrichment.run_free_enrichment",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            await run_enrichment_job(p.id, db=db_session)  # must not raise
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "error"
+
+
+class TestEnrichRoute:
+    def test_enrich_spawns_bg_and_returns_poller(self, client, db_session):
+        p = make_prospect(db_session)
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock) as sbt,
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text  # returned the poller
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "running"
+        job.assert_called_once_with(p.id)
+        sbt.assert_called_once()
+
+    def test_enrich_while_running_does_not_respawn(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running"})
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job") as job,
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text
+        job.assert_not_called()
+
+
+class TestEnrichStatus:
+    def test_status_running_keeps_polling(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 200
+        assert "every 2s" in resp.text
+
+    def test_status_done_reloads_detail_and_stops(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "done"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286  # htmx stop-polling
+        assert f"/v2/partials/prospecting/{p.id}" in resp.text  # reloads the detail
+        assert "every 2s" not in resp.text  # poller gone
+
+    def test_status_error_stops(self, client, db_session):
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "error"})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286
+        assert "failed" in resp.text.lower()
+
+    def test_status_missing_prospect_returns_286(self, client):
+        resp = client.get("/v2/partials/prospecting/99999/enrich-status")
+        assert resp.status_code == 286
+
+    def test_status_stale_running_self_heals_and_stops(self, client, db_session):
+        # A 'running' job whose worker died (started long ago) is treated as failed so
+        # the poller stops instead of looping forever.
+        from datetime import timedelta
+
+        old = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+        p = make_prospect(db_session, enrichment_data={"enrich_status": "running", "enrich_started_at": old})
+        resp = client.get(f"/v2/partials/prospecting/{p.id}/enrich-status")
+        assert resp.status_code == 286
+        assert "failed" in resp.text.lower()
+
+
+# ── Phase 2: live grid consistency (OOB card removal + stats refresh) ─────
+
+
+class TestGridConsistency:
+    def test_dismiss_in_suggested_filter_removes_card(self, client, db_session):
+        p = make_prospect(db_session, status="suggested", name="ToDismiss")
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            data={"flt_status": "suggested"},
+            headers={"HX-Target": f"prospect-{p.id}"},  # grid action
+        )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' not in resp.text  # card removed (left the filter)
+        assert 'id="prospect-stats"' in resp.text  # stats OOB-refreshed
+
+    def test_claim_in_all_filter_keeps_card(self, client, db_session):
+        p = make_prospect(db_session, status="suggested", name="ToClaim")
+        with patch("app.services.prospect_claim.trigger_deep_enrichment_bg", new_callable=AsyncMock):
+            resp = client.post(
+                f"/v2/partials/prospecting/{p.id}/claim",
+                data={"flt_status": ""},  # default All view shows suggested+claimed
+                headers={"HX-Target": f"prospect-{p.id}"},
+            )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' in resp.text  # card kept (claimed still visible)
+        assert "Claimed" in resp.text
+        assert 'id="prospect-stats"' in resp.text
+
+    def test_detail_action_returns_detail_no_oob(self, client, db_session):
+        p = make_prospect(db_session, status="suggested")
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            headers={"HX-Target": "main-content"},  # detail action
+        )
+        assert resp.status_code == 200
+        assert "Buyer-ready score" in resp.text  # full detail returned
+        assert 'id="prospect-stats"' not in resp.text  # no grid OOB on the detail path

@@ -114,7 +114,7 @@ authoritative reference. Static-analysis tests in
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
-| Prospecting | 6 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth) |
+| Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |

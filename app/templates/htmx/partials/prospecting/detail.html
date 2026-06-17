@@ -63,15 +63,10 @@
         </button>
         {% endif %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/enrich"
-                hx-target="#main-content"
-                hx-indicator="#enrich-spinner"
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors flex items-center gap-1.5">
-          <span id="enrich-spinner" class="htmx-indicator">
-            <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-            </svg>
-          </span>
+                hx-target="#enrich-status-zone"
+                hx-swap="innerHTML"
+                {% if enrich_state == 'running' %}disabled{% endif %}
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors disabled:opacity-50">
           Enrich
         </button>
         {% if prospect.status == 'claimed' %}
@@ -84,6 +79,11 @@
         </a>
         {% endif %}
       </div>
+    </div>
+
+    {# Background-enrichment status zone — resumes the poller if a job is in flight #}
+    <div id="enrich-status-zone" class="mt-3 empty:hidden">
+      {% if enrich_state %}{% include "htmx/partials/prospecting/enrich_status.html" %}{% endif %}
     </div>
   </div>
 
@@ -238,7 +238,7 @@
     </div>
     {% endif %}
 
-    {% if enrichment.get('news') %}
+    {% if enrichment.get('recent_news') %}
     <div class="mb-4">
       <h3 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
         <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -247,12 +247,14 @@
         News Mentions
       </h3>
       <ul class="text-sm text-gray-600 space-y-1.5">
-        {% for item in enrichment.news %}
+        {% for item in enrichment.recent_news %}
         <li class="flex items-start gap-2">
           <span class="text-gray-300 mt-1">&bull;</span>
           <div>
-            <span>{{ item.get('headline', '') }}</span>
-            <span class="text-gray-400 text-xs ml-1">{{ item.get('date', '') }}</span>
+            {% if item.get('link') %}
+            <a href="{{ item.link }}" target="_blank" rel="noopener" class="hover:text-brand-600 hover:underline">{{ item.get('title', '') }}</a>
+            {% else %}<span>{{ item.get('title', '') }}</span>{% endif %}
+            <span class="text-gray-400 text-xs ml-1">{{ item.get('pub_date', '') }}</span>
           </div>
         </li>
         {% endfor %}
