@@ -52,6 +52,9 @@ class MaterialCard(Base):
     condition = Column(String(20), index=True)
     pin_count = Column(Integer)
     datasheet_url = Column(String(1000))
+    # Auto-datasheet capture: stamps drive the dossier UI + 30-day negative cache.
+    datasheet_captured_at = Column(UTCDateTime, nullable=True)
+    datasheet_searched_at = Column(UTCDateTime, nullable=True)
     cross_references = Column(JSONB, default=list)  # [{mpn, manufacturer}]
     specs_summary = Column(Text)  # Key electrical specs in plain text
     specs_structured = Column(
@@ -136,6 +139,13 @@ class MaterialCard(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    datasheets = relationship(
+        "MaterialCardDatasheet",
+        back_populates="material_card",
+        cascade="all, delete-orphan",
+        order_by="desc(MaterialCardDatasheet.captured_at)",
+    )
+
     __table_args__ = (
         # Partial index for the review-queue filter (conflicted cards are a tiny
         # minority — a full index would be ~all-false dead weight). sqlite_where keeps
@@ -184,6 +194,32 @@ class MaterialCard(Base):
                 "category_normalizer and arbitrates via the F1 ladder)"
             )
         return value
+
+
+class MaterialCardDatasheet(Base):
+    """A permanent datasheet copy stored in OneDrive, attached to a MaterialCard.
+
+    Unlike MaterialCard.datasheet_url (an external link that rots when vendors pull EOL
+    datasheets), this is our own copy: download → verify → store in OneDrive.
+    """
+
+    __tablename__ = "material_card_datasheets"
+
+    id = Column(Integer, primary_key=True)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    source = Column(String(50))  # "connector" | "web"
+    original_url = Column(Text)  # where the copy came from (provenance/audit)
+    verified = Column(Boolean, nullable=False, default=False)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    captured_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    material_card = relationship("MaterialCard", back_populates="datasheets")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
 
 class MaterialVendorHistory(Base):
