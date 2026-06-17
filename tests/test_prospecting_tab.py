@@ -280,3 +280,48 @@ class TestStats:
         assert resp.status_code == 200
         assert "Buyer-ready" in resp.text
         assert "Suggested" in resp.text
+
+
+# ── Phase 1: background enrichment + polling ──────────────────────────────
+
+
+class TestEnrichmentJob:
+    async def test_run_enrichment_job_marks_done(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with (
+            patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock, return_value={}),
+            patch("app.services.prospect_warm_intros.detect_warm_intros", return_value={"has_warm_intro": False}),
+            patch("app.services.prospect_warm_intros.generate_one_liner", return_value="opener"),
+        ):
+            await run_enrichment_job(p.id, db=db_session)
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "done"
+        assert (p.enrichment_data or {}).get("one_liner") == "opener"
+
+    async def test_run_enrichment_job_marks_error(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with patch(
+            "app.services.prospect_free_enrichment.run_free_enrichment",
+            new_callable=AsyncMock,
+            return_value={"error": "sam down"},
+        ):
+            await run_enrichment_job(p.id, db=db_session)  # must not raise
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "error"
+
+    async def test_run_enrichment_job_swallows_exceptions(self, db_session):
+        from app.services.prospect_free_enrichment import run_enrichment_job
+
+        p = make_prospect(db_session)
+        with patch(
+            "app.services.prospect_free_enrichment.run_free_enrichment",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ):
+            await run_enrichment_job(p.id, db=db_session)  # must not raise
+        db_session.refresh(p)
+        assert (p.enrichment_data or {}).get("enrich_status") == "error"

@@ -273,6 +273,60 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
             db.close()
 
 
+async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> None:
+    """Full background enrichment pass for one prospect, recording enrich_status.
+
+    Runs free enrichment (SAM.gov + news) then warm-intro detection, and stamps
+    ``enrichment_data['enrich_status']`` = ``'done'`` (or ``'error'``). Fire-and-forget
+    safe: opens its own session when ``db`` is None and never raises — the prospecting
+    tab spawns it via ``safe_background_task`` and polls the status endpoint.
+    """
+    from app.database import SessionLocal
+    from app.services.prospect_warm_intros import detect_warm_intros, generate_one_liner
+
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
+    assert db is not None
+    try:
+        result = await run_free_enrichment(prospect_id, db=db)
+        status = "error" if isinstance(result, dict) and result.get("error") else "done"
+
+        prospect = db.get(ProspectAccount, prospect_id)
+        if prospect is None:
+            return
+        try:
+            warm = detect_warm_intros(prospect, db)
+            one_liner = generate_one_liner(prospect, warm)
+        except Exception as exc:  # noqa: BLE001 — warm-intro is best-effort; free enrichment may have succeeded
+            logger.warning("Warm-intro step failed for prospect {}: {}", prospect_id, exc)
+            warm, one_liner = {}, ""
+
+        ed = dict(prospect.enrichment_data or {})
+        ed["warm_intro"] = warm
+        ed["one_liner"] = one_liner
+        ed["enrich_status"] = status
+        prospect.enrichment_data = ed
+        flag_modified(prospect, "enrichment_data")
+        db.commit()
+    except Exception as exc:  # noqa: BLE001 — fire-and-forget must never propagate
+        logger.warning("Enrichment job failed for prospect {}: {}", prospect_id, exc)
+        db.rollback()
+        try:
+            prospect = db.get(ProspectAccount, prospect_id)
+            if prospect is not None:
+                ed = dict(prospect.enrichment_data or {})
+                ed["enrich_status"] = "error"
+                prospect.enrichment_data = ed
+                flag_modified(prospect, "enrichment_data")
+                db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+    finally:
+        if owns_session:
+            db.close()
+
+
 async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
     """Run free enrichment across qualifying prospects.
 
