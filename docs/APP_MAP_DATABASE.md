@@ -208,6 +208,7 @@
 | status | String 30 | draft -> pending -> active -> completed (also halted / cancelled) |
 | so_status | String 30 | pending -> approved / rejected (ops SO-verify track) |
 | total_cost / total_revenue / total_margin_pct | Numeric | |
+| purchase_history_recorded_at | UTCDateTime, nullable | Idempotency stamp set by `record_buyplan_purchase_history` when CPH rows have been written for this plan (migration `bp_cph_recorded_at`). NULL = not yet recorded; non-NULL = safe to skip on retry/backfill. |
 
 **`buy_plan_lines`** — Individual line items for purchasing
 | Column | Type | Notes |
@@ -377,7 +378,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 **`material_price_snapshots`** — Historical pricing data points
 
-**`customer_part_history`** — What parts each customer has bought (for proactive matching)
+**`customer_part_history`** — What parts each customer has bought (for proactive matching). The `source` column now takes the value `"buy_plan"` for rows written by `record_buyplan_purchase_history` (buy-plan completion hook); prior values (`salesforce_import`, `avail_offer`, `avail_quote_won`, `acctivate_po`) remain valid for legacy/import rows.
 
 **`fru_links`** — IBM/Lenovo FRU crosswalk: one row per FRU ↔ related-PN edge (migration 094)
 | Column | Type | Notes |

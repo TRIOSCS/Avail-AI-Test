@@ -58,6 +58,7 @@ from .utils.async_helpers import safe_background_task
 from .utils.normalization import (
     MAX_SUBSTITUTES,
     detect_currency,
+    fuzzy_mpn_match,
     normalize_condition,
     normalize_date_code,
     normalize_lead_time,
@@ -1312,6 +1313,68 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     return connectors, source_stats_map, disabled_sources
 
 
+# Canonical display names for the live-market connectors (used by the dossier
+# degraded-state banner). Keys must match _CONNECTOR_SOURCE_MAP values.
+_MARKET_SOURCE_DISPLAY = {
+    "nexar": "Nexar",
+    "brokerbin": "BrokerBin",
+    "ebay": "eBay",
+    "digikey": "DigiKey",
+    "mouser": "Mouser",
+    "oemsecrets": "OEMSecrets",
+    "sourcengine": "Sourcengine",
+    "element14": "element14",
+}
+
+
+def get_market_source_health(db: Session) -> dict:
+    """Summarize live-market connector health for the dossier degraded-state banner.
+
+    Reuses _build_connectors so the truth is identical to what an actual search runs.
+    Returns::
+
+        {
+          "available": int,          # market connectors that will run
+          "total": int,              # configured market sources (available + down)
+          "down": [{name, display, reason}],          # health_monitor flagged ERROR
+          "unconfigured": [{name, display, reason}],   # no API key set
+        }
+
+    `down` sources are the actionable ones — auth/quota errors the operator must fix
+    by rotating credentials (or restoring quota) in Settings → Sources. `disabled`
+    sources are intentional operator choices and are NOT surfaced as a problem.
+
+    Called by: routers/part_dossier.dossier_market (banner context).
+    """
+    connectors, source_stats_map, _disabled = _build_connectors(db)
+
+    available = [
+        _CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "")
+        for c in connectors
+        if _CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") in _MARKET_SOURCE_DISPLAY
+    ]
+
+    down: list[dict] = []
+    unconfigured: list[dict] = []
+    for name, stat in source_stats_map.items():
+        if name not in _MARKET_SOURCE_DISPLAY:
+            continue
+        entry = {"name": name, "display": _MARKET_SOURCE_DISPLAY[name], "reason": stat.get("error") or ""}
+        status = stat.get("status")
+        if status in (SourceRunStatus.ERROR_SKIPPED.value, SourceRunStatus.ERROR.value):
+            down.append(entry)
+        elif status == SourceRunStatus.SKIPPED.value:
+            unconfigured.append(entry)
+        # SourceRunStatus.DISABLED → intentional; not a degraded-state problem.
+
+    return {
+        "available": len(available),
+        "total": len(available) + len(down),
+        "down": down,
+        "unconfigured": unconfigured,
+    }
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Run all enabled connectors against pns and return (results, source_stats).
 
@@ -2517,6 +2580,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
     channel = f"search:{search_id}"
     accumulated: list[dict] = []
     total_results = 0
+    off_target_total = 0  # hits excluded by the relevance guard (different MPN)
     sources_completed = 0
     t_start = time.time()
 
@@ -2552,7 +2616,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                 await active_broker.publish(
                     channel,
                     "done",
-                    json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0}),
+                    json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0, "off_target": 0}),
                 )
                 return
 
@@ -2589,13 +2653,26 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
 
                     try:
                         hits, elapsed_ms = task.result()
-                        hit_count = len(hits)
 
-                        # Score and normalize each hit
-                        scored_hits = []
+                        # Relevance guard: keep only hits whose matched MPN is the
+                        # searched part (or a close revision of it). Keyword-matching
+                        # connectors — e.g. component distributors hit with a storage
+                        # FRU — return rows under a DIFFERENT mpn; those are catalog
+                        # noise, not offers for this part, so we exclude them rather
+                        # than render a $100 component as an "offer" for an HDD.
+                        # Cross-references (alternate/FRU part numbers) live in the
+                        # "What we know" panel, not the live-market offer list.
+                        on_target = []
                         for r in hits:
                             r.setdefault("mpn_matched", mpn)
-                            scored_hits.append(_score_raw_hit(r, vendor_score_map))
+                            if fuzzy_mpn_match(mpn, r.get("mpn_matched")):
+                                on_target.append(r)
+                            else:
+                                off_target_total += 1
+                        hit_count = len(on_target)
+
+                        # Score and normalize each on-target hit
+                        scored_hits = [_score_raw_hit(r, vendor_score_map) for r in on_target]
 
                         # Incremental dedup against accumulated results
                         new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
@@ -2692,6 +2769,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                         "total_results": total_results,
                         "sources": sources_completed,
                         "elapsed_seconds": elapsed_total,
+                        "off_target": off_target_total,
                     },
                     default=str,
                 ),
@@ -2717,6 +2795,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                         "total_results": total_results,
                         "sources": sources_completed,
                         "elapsed_seconds": round(time.time() - t_start, 1),
+                        "off_target": off_target_total,
                         "error": str(e)[:500],
                     },
                     default=str,

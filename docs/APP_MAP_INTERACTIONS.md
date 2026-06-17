@@ -305,10 +305,13 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
     |     bumps search_count/last_searched_at on an EXISTING card only (never
     |     creates one — unknown PN stays "New to us" / "Known via FRU crosswalk").
     +-- GET /v2/partials/search/dossier/market?mpn=  part_dossier.dossier_market
-    |     cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
-    |     vendor rows in the dark terminal frame + "↻ Refresh market"; cache MISS
+    |     A degraded-source banner (dossier_market_banner.html) renders above both
+    |     branches when live-market sources are down (auth/quota) — see market_health
+    |     below. cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
+    |     vendor rows in the light market card + "↻ Refresh market"; cache MISS
     |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
-    |     search/run SSE flow (results_shell.html) inside the terminal frame.
+    |     search/run SSE flow (results_shell.html). The banner sits OUTSIDE that
+    |     hx-post div so it survives the cache-miss SSE swap.
     +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
     +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
 ```
@@ -316,9 +319,27 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
 New router `app/routers/part_dossier.py` (GET-only; reuses data/services, no route
 moves). `stream_search_mpn` now also writes the pointer key `search:{normalize_mpn_key
 (mpn)}:latest = search_id` (TTL 900s) so the dossier market cache-hit path can find the
-freshest run. The search-flow `vendor_card.html` + `results_shell.html` are re-skinned in
-place to the dark terminal row/frame (their ONLY consumer is now the dossier market).
-Page-level + per-row RFQ/offer actions (the quick-source endpoints) are a follow-up task.
+freshest run. The search-flow templates (`dossier_shell` "Live market" section,
+`dossier_market`, `results_shell`, `vendor_card`, `shortlist_bar`,
+`requisition_picker_modal`) use the **light brand-card skin** matching the rest of the
+site — the earlier dark "terminal" look was the visual outlier and has been removed.
+Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
+
+**Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
+`_build_connectors` to partition the live-market connectors into available / `down`
+(health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
+→ Sources) / `unconfigured` (no API key). `dossier_market` passes the result as
+`market_health`; the banner names each down source with its specific error as a hover
+tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
+`market_health=None` and never breaks the market section.
+
+**Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
+`fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
+symmetrically). Keyword-match noise from catalog distributors (a different MPN — e.g. a
+component returned for a storage FRU) is excluded before scoring/dedup/cache; the dropped
+count rides the `done` SSE event as `off_target` and surfaces as a footnote in
+`#search-stats`. Cross-references (alternate/FRU part numbers) belong in "What we know",
+not the live-market offer list.
 
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
 
@@ -892,6 +913,23 @@ ai_offer_service.py (if confidence >= 0.8)
 
 ## 5. Quote Building
 
+**Where quotes are surfaced.** The standalone Quotes nav tab was retired
+(PR quotes-relocation). Bare `/v2/quotes` 307-redirects to
+`/v2/requisitions`. Quotes are now accessed in two places:
+
+- **Reqs workspace Quotes tab** — `GET /v2/partials/parts/{requirement_id}/tab/quotes`
+  (reuses `requisitions/tabs/quotes.html`). Reached from the requirement
+  detail panel inside the Reqs workspace.
+- **CRM account Quotes tab** — `GET /v2/partials/customers/{id}/tab/quotes`
+  (renders `customers/tabs/quotes_tab.html` with an Alpine status filter).
+  The account quote set is the **union** of site-linked quotes (via the
+  company's active sites) and requisition-linked quotes (via requirements on
+  requisitions whose `site_id` matches no active site, or whose site is NULL)
+  — computed by the shared `_company_quotes_query(db, company)` helper so
+  neither surface can drift from the other.
+
+The quote detail page `/v2/quotes/{id}` is unchanged.
+
 ```
 Browser (select offers -> build quote)
     |
@@ -939,7 +977,52 @@ buyplan_workflow.py (state machine)
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
+**Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
+(app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
+`record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)
+inside a best-effort try/except so a CPH failure never rolls back the completion.
+
+```
+check_completion (buyplan_workflow.py)
+    |
+    v  [plan transitions to COMPLETE]
+record_buyplan_purchase_history (purchase_history_service.py)
+    |
+    +---> Idempotency guard: plan.purchase_history_recorded_at IS NOT NULL → skip
+    |
+    +---> For each VERIFIED buy_plan_line:
+    |       +---> resolve material_card_id (from requirement, then from offer)
+    |       +---> upsert_purchase(db, company_id, material_card_id,
+    |                             source="buy_plan", unit_sell, quantity,
+    |                             purchased_at=plan.completed_at,
+    |                             source_ref=sales_order_number)
+    |             --> DB: UPSERT customer_part_history
+    |
+    +---> plan.purchase_history_recorded_at = now(); db.flush()  [idempotency stamp]
+    |
+    +---> refresh_matches_for_cards(db, affected_card_ids)  [immediate re-match]
+              |
+              +---> For each affected card: DB: SELECT newest offers (capped at 5)
+              +---> find_matches_for_offer(db, offer) → proactive_matching.py
+              +---> DB: INSERT proactive_matches (engine dedup prevents duplicates)
+```
+
+The buy plan is the **single source of truth** for CPH. The prior offer-won and
+quote-won hooks that previously wrote CPH rows have been retired; all confirmed
+customer purchases now flow through buy-plan completion. Historical rows written
+by the old hooks are preserved (their `source` values remain valid).
+
+Historical completed plans that predate this feature are backfilled one-time via
+`python -m app.management.backfill_buyplan_cph`. The command records CPH for every
+COMPLETED buy plan whose `purchase_history_recorded_at` is NULL, committing per plan.
+It is idempotent and safe to re-run — plans that already have the stamp are skipped.
+
 ## 7. Proactive Matching
+
+`customer_part_history` (CPH) is the backbone for proactive matching. As of the
+buy-plan CPH feed (§ 6 above), CPH rows are fed by buy-plan completion rather than
+offer/quote won hooks (those hooks have been retired). The matching engine itself
+is unchanged.
 
 ```
 APScheduler (daily) OR user trigger
@@ -949,6 +1032,7 @@ proactive_matching.py
     |
     +---> DB: SELECT offers WHERE status='active' AND recent
     +---> DB: SELECT customer_part_history (who bought this MPN?)
+    |         (source="buy_plan" for all new rows; legacy values also present)
     +---> DB: CHECK proactive_throttle (not offered recently?)
     +---> DB: CHECK proactive_do_not_offer (not blacklisted?)
     +---> Score: match_score = f(purchase_count, recency, margin)
@@ -961,6 +1045,13 @@ User sends:
     +---> DB: INSERT proactive_throttle
     +---> activity_service.py --> DB: INSERT activity_log
 ```
+
+**Immediate re-match on completion.** `refresh_matches_for_cards` (called from
+`record_buyplan_purchase_history`) runs `find_matches_for_offer` against the
+newest active offers for every card touched by the completed buy plan, so new
+proactive matches surface on the Proactive tab without waiting for the daily cron.
+Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
+duplicate matches.
 
 ## 8. Activity Digest (AI Timeline Summary)
 
@@ -2606,6 +2697,8 @@ BROWSER (HTMX + Alpine.js)
   0. Bottom navigation (mobile_nav.html):
      Reqs | Sightings | Materials | Search | ...
      "Materials" tab links to /v2/materials, loads /v2/partials/materials/workspace
+     Quotes has NO top-level nav tab — surfaced via the Reqs and CRM account
+     tab strips (see § 5 Quote Building).
 
   1. Page load:
      base_page.html -> hx-get="/v2/partials/X" on load
@@ -2849,14 +2942,14 @@ the current implementation.
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
-| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
+| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 12 | Suggested prospects, claim, dismiss, enrich |
+| Prospects | 8 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |

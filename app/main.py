@@ -523,7 +523,6 @@ from .routers.htmx_views import router as htmx_views_router
 from .routers.materials import router as materials_router
 from .routers.part_dossier import router as part_dossier_router
 from .routers.proactive import router as proactive_router
-from .routers.prospect_suggested import router as prospect_suggested_router
 from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.requisitions2 import router as requisitions2_router
@@ -547,7 +546,6 @@ app.include_router(error_reports_router)
 app.include_router(materials_router)
 app.include_router(part_dossier_router)
 app.include_router(proactive_router)
-app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
 app.include_router(requisitions2_router)
 app.include_router(sightings_router)

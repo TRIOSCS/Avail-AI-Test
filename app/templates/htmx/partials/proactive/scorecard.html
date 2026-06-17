@@ -1,6 +1,7 @@
 {#
   scorecard.html — Proactive selling metrics panel.
-  Receives: stats (dict with total_sent, total_converted, conversion_rate, total_revenue).
+  Receives: stats (dict with total_sent, total_converted, conversion_rate, converted_revenue).
+           conversion_rate is already a whole-number percent (e.g. 33.3 → "33%").
   Called by: htmx_views.py proactive_scorecard route.
   Depends on: Tailwind CSS with brand palette.
 #}
@@ -22,11 +23,11 @@
     </div>
     <div class="bg-brand-50 rounded-lg p-3 text-center border border-brand-100">
       <p class="text-xs text-brand-600 font-medium mb-1">Conv. Rate</p>
-      <p class="text-2xl font-bold text-brand-700">{{ "%.0f%%"|format(stats.get('conversion_rate', 0) * 100) }}</p>
+      <p class="text-2xl font-bold text-brand-700">{{ "%.0f%%"|format(stats.get('conversion_rate', 0)) }}</p>
     </div>
     <div class="bg-gray-50 rounded-lg p-3 text-center border border-gray-200">
       <p class="text-xs text-gray-500 font-medium mb-1">Revenue</p>
-      <p class="text-2xl font-bold text-gray-900">${{ "{:,.0f}".format(stats.get('total_revenue', 0)) }}</p>
+      <p class="text-2xl font-bold text-gray-900">${{ "{:,.0f}".format(stats.get('converted_revenue', 0)) }}</p>
     </div>
   </div>
 </div>

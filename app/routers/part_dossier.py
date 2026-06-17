@@ -1,15 +1,15 @@
 """routers/part_dossier.py — the visible Part Dossier ("The Bench") GET routes.
 
 Serves the one-PN sourcing dossier at /v2/search?mpn=<PN>: an instant-from-DB hero +
-specs + history (reused), with the live market terminal streaming in below. All routes
-are server-rendered HTML fragments swapped by HTMX — NOT a SPA.
+specs + history (reused), with the live market streaming in below. All routes are
+server-rendered HTML fragments swapped by HTMX — NOT a SPA.
 
 The four section endpoints are lazy-loaded by dossier_shell.html. Hero does the
 light-footprint write (bump search_count / last_searched_at on an existing card only —
 a bare search never creates a card). Market consults the search:{key}:latest Redis
 pointer (written by search_service.stream_search_mpn) to render cached vendor rows on a
-cache hit, else fires the existing /v2/partials/search/run SSE flow inside the dark
-terminal frame.
+cache hit, else fires the existing /v2/partials/search/run SSE flow; a degraded-source
+banner (get_market_source_health) renders above both branches.
 
 Called by: app/main.py (include_router); dossier_shell.html lazy-load divs.
 Depends on: services.part_history_service.get_part_history, services.fru_matrix_service
@@ -144,16 +144,18 @@ async def dossier_market(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Live-market terminal. Cache hit → cached vendor rows + freshness stamp; cache
-    miss (or ``refresh=1``) → terminal frame whose body auto-fires the existing
-    /v2/partials/search/run SSE flow.
+    """Live-market section (light brand card). Cache hit → cached vendor rows +
+    freshness stamp; cache miss (or ``refresh=1``) → a frame whose body auto-fires the
+    existing /v2/partials/search/run SSE flow.
 
-    The SSE engine is reused UNCHANGED — the cache-miss branch just embeds it in the dark
-    terminal frame. The pointer key search:{key}:latest is written at the end of
-    stream_search_mpn (TTL 900s). ``refresh=1`` (the "↻ Refresh market" button) skips the
-    cache so the connector sweep re-runs.
+    The SSE engine is reused UNCHANGED — the cache-miss branch just embeds it. A
+    degraded-source banner (``market_health``) is rendered above both branches so a
+    sparse market reads as "N sources unavailable" rather than looking empty. The
+    pointer key search:{key}:latest is written at the end of stream_search_mpn (TTL
+    900s). ``refresh=1`` (the "↻ Refresh market" button) skips the cache so the
+    connector sweep re-runs.
     """
-    from ..search_service import _get_search_redis
+    from ..search_service import _get_search_redis, get_market_source_health
 
     display_mpn = mpn.strip().upper()
     key = normalize_mpn_key(mpn)
@@ -175,12 +177,23 @@ async def dossier_market(
         except Exception:
             logger.warning("dossier_market cache lookup failed mpn={} key={}", mpn, key, exc_info=True)
 
+    # Degraded-state banner: which live-market sources are down (auth/quota). Rendered
+    # above both the cache-hit and cache-miss branches so a sparse market reads as
+    # "N sources unavailable" instead of looking mysteriously empty. Best-effort — a
+    # health-check failure must never break the market section itself.
+    try:
+        market_health = get_market_source_health(db)
+    except Exception:
+        logger.warning("dossier_market source-health lookup failed mpn={}", mpn, exc_info=True)
+        market_health = None
+
     ctx = _ctx(request, user)
     ctx.update(
         {
             "mpn": display_mpn,
             "cached_search_id": cached_search_id,
             "cached_rows": cached_rows,
+            "market_health": market_health,
         }
     )
     return template_response("htmx/partials/search/dossier_market.html", ctx)

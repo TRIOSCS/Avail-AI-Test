@@ -322,26 +322,8 @@ class TestBuyPlanDetail:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Quotes list
+# Quotes list (standalone list retired; see test_quotes_relocation.py)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestQuotesList:
-    @pytest.mark.parametrize(
-        "url",
-        ["/v2/partials/quotes", "/v2/partials/quotes?status=draft"],
-        ids=["all", "with_status"],
-    )
-    def test_quotes_list(self, client: TestClient, url: str):
-        resp = client.get(url)
-        assert resp.status_code == 200
-
-    def test_quotes_list_with_search(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        quote = _make_quote(db_session, req, test_user, quote_number="Q-SEARCH-001")
-        db_session.commit()
-        resp = client.get("/v2/partials/quotes?q=SEARCH")
-        assert resp.status_code == 200
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -32,7 +32,8 @@ class TestRevisionMetadata:
         assert len(_mod.revision) <= 32
 
     def test_down_revision(self):
-        assert _mod.down_revision == "107_is_scratch_requisitions"
+        # Re-chained onto bp_cph_recorded_at at merge (#343 landed first); see migration header.
+        assert _mod.down_revision == "bp_cph_recorded_at"
 
 
 class TestExecution:

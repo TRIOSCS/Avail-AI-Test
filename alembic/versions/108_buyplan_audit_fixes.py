@@ -13,7 +13,7 @@ Called by: alembic (upgrade/downgrade).
 Depends on: buy_plans_v3, buy_plan_lines tables.
 
 Revision ID: 108_buyplan_audit_fixes
-Revises: 107_is_scratch_requisitions
+Revises: bp_cph_recorded_at
 Create Date: 2026-06-17
 """
 
@@ -22,7 +22,9 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "108_buyplan_audit_fixes"
-down_revision = "107_is_scratch_requisitions"
+# Re-chained onto bp_cph_recorded_at (#343 landed on main first; both originally chained
+# off 107). Chain: 107 -> bp_cph_recorded_at -> 108. Single head; no column overlap.
+down_revision = "bp_cph_recorded_at"
 branch_labels = None
 depends_on = None
 

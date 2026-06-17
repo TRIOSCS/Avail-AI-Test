@@ -1,0 +1,12 @@
+{#
+  prospecting/add_result.html — inline result chip after a manual domain add.
+  Receives: pid (int), name (str, pre-escaped), verb (str), is_new (bool).
+#}
+<div class="{{ 'bg-emerald-50 border-emerald-200 text-emerald-700' if is_new else 'bg-brand-50 border-brand-200 text-brand-600' }} border rounded p-2 text-sm flex items-center justify-between gap-2">
+  <span>{{ verb }}: <strong>{{ name }}</strong></span>
+  <a href="/v2/prospecting/{{ pid }}"
+     hx-get="/v2/partials/prospecting/{{ pid }}"
+     hx-target="#main-content"
+     hx-push-url="/v2/prospecting/{{ pid }}"
+     class="shrink-0 underline hover:no-underline">View</a>
+</div>

@@ -549,25 +549,9 @@ class TestMaterialsPartials:
 
 
 class TestQuotesPartials:
-    def test_quotes_list_empty(self, client, db_session: Session):
-        resp = client.get("/v2/partials/quotes")
-        assert resp.status_code == 200
-
-    def test_quotes_list_with_query(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        _quote(db_session, req, test_user, quote_number="Q-FINDME")
-        db_session.commit()
-
-        resp = client.get("/v2/partials/quotes?q=FINDME")
-        assert resp.status_code == 200
-
-    def test_quotes_list_with_status_filter(self, client, db_session: Session, test_user: User):
-        req = _req(db_session, test_user)
-        _quote(db_session, req, test_user)
-        db_session.commit()
-
-        resp = client.get("/v2/partials/quotes?status=draft")
-        assert resp.status_code == 200
+    # /v2/partials/quotes standalone list was retired (quotes-relocation).
+    # Quotes are now surfaced via /v2/partials/parts/{id}/tab/quotes and
+    # /v2/partials/customers/{id}/tab/quotes. See test_quotes_relocation.py.
 
     def test_quote_detail(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
@@ -880,8 +864,10 @@ class TestProspectingPartials:
         assert resp.status_code == 200
 
     def test_add_prospect_domain_empty(self, client, db_session: Session):
+        # Empty domain returns an inline error chip (200), not a 400.
         resp = client.post("/v2/partials/prospecting/add-domain", data={"domain": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "domain" in resp.text.lower()
 
 
 # ── Settings Partials ─────────────────────────────────────────────────

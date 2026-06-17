@@ -88,6 +88,7 @@ from ..services.part_history_service import (
     requirements_for_card,
     sightings_for_card,
 )
+from ..services.prospect_priority import build_priority_snapshot, build_signal_tags, contacts_summary
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
@@ -253,6 +254,20 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 # ── Full page entry points ──────────────────────────────────────────────
 
 
+@router.get("/v2/quotes")
+async def quotes_list_redirect():
+    """Standalone Quotes list retired — quotes now live on the requirement (Reqs
+    workspace Quotes tab) and the CRM account (Quotes tab).
+
+    Kept as a
+    redirect so stale bookmarks/links land somewhere sensible.
+    Called by: browser navigation to the old /v2/quotes URL.
+    """
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/v2/requisitions", status_code=307)
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -265,7 +280,6 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
-@router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
@@ -4622,6 +4636,35 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def _company_quotes_query(db: Session, company):
+    """Quotes belonging to an account: union of quotes linked via the
+    company's customer sites OR via the company's requisitions (the latter
+    catches quotes whose customer_site_id is NULL). Returns a Query, or None
+    when the account can own no quotes (no sites and no requisitions).
+    Called by: company_detail_partial (count), company_tab (quotes + activity).
+    """
+    site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company.id).all()]
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    conds = []
+    if site_ids:
+        conds.append(Quote.customer_site_id.in_(site_ids))
+    if req_ids:
+        conds.append(Quote.requisition_id.in_(req_ids))
+    if not conds:
+        return None
+    return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4663,12 +4706,16 @@ async def company_detail_partial(
         or 0
     )
 
+    _cq = _company_quotes_query(db, company)
+    quote_count = _cq.count() if _cq is not None else 0
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
+            "quote_count": quote_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
@@ -4692,7 +4739,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4760,6 +4807,13 @@ async def company_tab(
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
         return HTMLResponse(html)
 
+    elif tab == "quotes":
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).all() if cq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "quotes": quotes})
+        return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
     else:  # activity
         from sqlalchemy import or_ as or_clause
 
@@ -4796,17 +4850,10 @@ async def company_tab(
             for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
                 req_map[r.id] = r
 
-        # Quotes linked to company's sites
-        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
-        quotes = []
-        if site_ids:
-            quotes = (
-                db.query(Quote)
-                .filter(Quote.customer_site_id.in_(site_ids))
-                .order_by(Quote.created_at.desc().nullslast())
-                .limit(20)
-                .all()
-            )
+        # Quotes for this account — union of site-linked and requisition-linked
+        # (matches the Quotes tab; site link alone misses NULL-site quotes).
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).limit(20).all() if cq is not None else []
 
         # Direct activity logs on this company + its requisitions
         activity_filters = [ActivityLog.company_id == company.id]
@@ -5314,7 +5361,7 @@ async def delete_quote_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a draft quote and return refreshed quotes list."""
+    """Delete a draft quote and redirect to the requisitions page."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -5325,7 +5372,7 @@ async def delete_quote_htmx(
     db.commit()
     logger.info("Quote {} deleted by {}", quote_id, user.email)
 
-    return await quotes_list_partial(request=request, user=user, db=db, limit=50, offset=0)
+    return HTMLResponse(status_code=200, headers={"HX-Redirect": "/v2/requisitions"})
 
 
 @router.post("/v2/partials/quotes/{quote_id}/reopen", response_class=HTMLResponse)
@@ -7968,34 +8015,6 @@ async def update_material_card(
 # ── Quotes partials ───────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/quotes", response_class=HTMLResponse)
-async def quotes_list_partial(
-    request: Request,
-    q: str = "",
-    status: str = "",
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return quotes list as HTML partial."""
-    query = db.query(Quote).options(
-        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        joinedload(Quote.requisition),
-        joinedload(Quote.created_by),
-    )
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(Quote.quote_number))
-    if status:
-        query = query.filter(Quote.status == status)
-    total = query.count()
-    quotes = query.order_by(Quote.created_at.desc()).offset(offset).limit(limit).all()
-    ctx = _base_ctx(request, user, "quotes")
-    ctx.update({"quotes": quotes, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
-    return template_response("htmx/partials/quotes/list.html", ctx)
-
-
 @router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
 async def quote_detail_partial(
     request: Request,
@@ -8361,6 +8380,47 @@ async def build_buy_plan_htmx(
 # ── Prospecting partials ──────────────────────────────────────────────
 
 
+# Statuses shown in the default ("All") view — dismissed/converted are hidden
+# unless explicitly selected via the filter pills.
+_PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
+
+
+def _prospect_toast(response, message: str, kind: str = "success") -> None:
+    """Attach a showToast HX-Trigger so the Alpine $store.toast surfaces feedback."""
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": message, "type": kind}})
+
+
+def _wants_detail(request: Request) -> bool:
+    """True when an action came from the detail view (targets #main-content) rather than
+    from an in-grid card (targets #prospect-<id>) — so we return the right partial."""
+    return request.headers.get("HX-Target") == "main-content"
+
+
+def _prospect_card_ctx(request: Request, user: User, prospect) -> dict:
+    """Context for rendering a single prospect card (snapshot + contact summary maps,
+    keyed by id so _card.html renders identically in the grid and in OOB swaps)."""
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["snapshots"] = {prospect.id: build_priority_snapshot(prospect)}
+    ctx["contact_stats_map"] = {prospect.id: contacts_summary(prospect.contacts_preview)}
+    return ctx
+
+
+def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
+    """Context for the detail partial — surfaces the buyer-ready snapshot, signal tags,
+    contacts, and similar customers the scoring services compute."""
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["enrichment"] = prospect.enrichment_data or {}
+    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
+    ctx["snapshot"] = build_priority_snapshot(prospect)
+    ctx["signal_tags"] = build_signal_tags(prospect.readiness_signals)
+    ctx["contacts"] = prospect.contacts_preview or []
+    ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
+    ctx["similar_customers"] = prospect.similar_customers or []
+    return ctx
+
+
 @router.get("/v2/partials/prospecting", response_class=HTMLResponse)
 async def prospecting_list_partial(
     request: Request,
@@ -8372,28 +8432,65 @@ async def prospecting_list_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return prospecting list as HTML partial."""
-    query = db.query(ProspectAccount)
+    """Return the prospecting card grid as an HTML partial.
+
+    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
+    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
+    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    """
+    base = db.query(ProspectAccount)
     if status:
-        query = query.filter(ProspectAccount.status == status)
+        base = base.filter(ProspectAccount.status == status)
     else:
-        query = query.filter(ProspectAccount.status.in_(["suggested", "claimed", "dismissed"]))
+        base = base.filter(ProspectAccount.status.in_(_PROSPECT_DEFAULT_STATUSES))
     if q.strip():
         sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
-    total = query.count()
-    if sort == "fit_desc":
-        query = query.order_by(ProspectAccount.fit_score.desc())
-    elif sort == "recent_desc":
-        query = query.order_by(ProspectAccount.created_at.desc())
+        base = base.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+
+    total = base.count()
+    total_pages = max(1, (total + per_page - 1) // per_page)
+    offset = (page - 1) * per_page
+
+    if sort == "buyer_ready_desc":
+        # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
+        rows = base.all()
+        snapshots = {p.id: build_priority_snapshot(p) for p in rows}
+        rows.sort(
+            key=lambda p: (
+                -snapshots[p.id]["buyer_ready_score"],
+                -(p.fit_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        prospects = rows[offset : offset + per_page]
     else:
-        query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
-    prospects = query.offset((page - 1) * per_page).limit(per_page).all()
-    total_pages = (total + per_page - 1) // per_page
+        if sort == "fit_desc":
+            base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
+        elif sort == "recent_desc":
+            base = base.order_by(ProspectAccount.created_at.desc())
+        else:
+            base = base.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
+        prospects = base.offset(offset).limit(per_page).all()
+
+    snapshots = {p.id: build_priority_snapshot(p) for p in prospects}
+    contact_stats_map = {p.id: contacts_summary(p.contacts_preview) for p in prospects}
+
+    # Per-status counts for the filter pills (respect the active search, not the active
+    # status filter, so each pill shows its own stable total).
+    count_q = db.query(ProspectAccount.status, sqlfunc.count(ProspectAccount.id))
+    if q.strip():
+        sb = SearchBuilder(q.strip())
+        count_q = count_q.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
+    status_counts = dict(count_q.group_by(ProspectAccount.status).all())
+    all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
             "prospects": prospects,
+            "snapshots": snapshots,
+            "contact_stats_map": contact_stats_map,
             "q": q,
             "status": status,
             "sort": sort,
@@ -8401,6 +8498,8 @@ async def prospecting_list_partial(
             "per_page": per_page,
             "total": total,
             "total_pages": total_pages,
+            "status_counts": status_counts,
+            "all_total": all_total,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
@@ -8413,45 +8512,78 @@ async def prospecting_stats(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return prospecting stats summary panel."""
-    from ..models.prospect_account import ProspectAccount
+    """Return the prospecting stats summary panel.
 
-    total = db.query(sqlfunc.count(ProspectAccount.id)).scalar() or 0
-    buyer_ready = (
-        db.query(sqlfunc.count(ProspectAccount.id)).filter(ProspectAccount.readiness_score >= 70).scalar() or 0
+    "Buyer ready" uses the canonical is_buyer_ready from build_priority_snapshot — the
+    same definition the list ranking uses — so the KPI never contradicts the grid.
+    """
+    suggested_q = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
+    suggested = suggested_q.all()
+    total = len(suggested)
+    buyer_ready = sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"])
+    call_now = sum(1 for p in suggested if (p.readiness_score or 0) >= 70)
+    claimed = (
+        db.query(sqlfunc.count(ProspectAccount.id))
+        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
+        .scalar()
+        or 0
     )
 
     return template_response(
         "htmx/partials/prospecting/stats.html",
-        {"request": request, "total": total, "buyer_ready": buyer_ready},
+        {
+            "request": request,
+            "total": total,
+            "buyer_ready": buyer_ready,
+            "call_now": call_now,
+            "claimed": claimed,
+        },
     )
 
 
 @router.post("/v2/partials/prospecting/add-domain", response_class=HTMLResponse)
 async def add_prospect_domain(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Submit a domain for prospecting."""
+    """Manually submit a domain to the prospect pool.
+
+    Returns an inline result chip.
+    """
+    from ..services.prospect_claim import add_prospect_manually
+
     form = await request.form()
-    domain = form.get("domain", "").strip()
+    domain = (form.get("domain") or "").strip()
     if not domain:
-        raise HTTPException(400, "Domain is required")
+        resp = HTMLResponse(
+            '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
+            "Enter a domain (e.g. acme.com).</div>"
+        )
+        _prospect_toast(resp, "Enter a domain first", "error")
+        return resp
 
     try:
-        from ..services.prospect_claim import add_prospect_manually
-
-        prospect = add_prospect_manually(domain, user.id, db)
-        return HTMLResponse(
-            f'<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">'
-            f"Prospect added: {domain} (ID {prospect.id})</div>"
-        )
-    except (ImportError, ValueError, RuntimeError):
-        return HTMLResponse(
+        result = add_prospect_manually(domain, user.id, db)
+    except (ValueError, RuntimeError) as exc:
+        logger.warning("Manual prospect add failed for {!r}: {}", domain, exc)
+        resp = HTMLResponse(
             '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
-            "Error: Could not add prospect. Please try again.</div>"
+            f"Could not add {html_mod.escape(domain)}.</div>"
         )
+        _prospect_toast(resp, "Could not add prospect", "error")
+        return resp
+
+    # Service returns a dict ({prospect_id, name, domain, status, is_new}), not an ORM row.
+    pid = result["prospect_id"]
+    name = html_mod.escape(result.get("name") or domain)
+    verb = "Added" if result.get("is_new") else "Already in pool"
+    resp = template_response(
+        "htmx/partials/prospecting/add_result.html",
+        {"request": request, "pid": pid, "name": name, "verb": verb, "is_new": result.get("is_new")},
+    )
+    _prospect_toast(resp, f"{verb}: {result.get('name') or domain}", "success" if result.get("is_new") else "info")
+    return resp
 
 
 @router.get("/v2/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
@@ -8472,78 +8604,145 @@ async def prospecting_detail_partial(
     )
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    ctx["enrichment"] = prospect.enrichment_data or {}
-    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
-    return template_response("htmx/partials/prospecting/detail.html", ctx)
+    return template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
 async def claim_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Claim a prospect — returns updated card for OOB swap."""
-    from ..services.prospect_claim import claim_prospect
+    """Claim a prospect.
 
+    Enforces the site cap + ownership (in the service) and triggers background deep
+    enrichment. Returns the refreshed detail or card per the call site.
+    """
+    from ..services.prospect_claim import claim_prospect, trigger_deep_enrichment_bg
+    from ..utils.async_helpers import safe_background_task
+
+    error = None
     try:
         claim_prospect(prospect_id, user.id, db)
-    except (LookupError, ValueError) as e:
-        raise HTTPException(400, str(e))
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    if not error:
+        await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
+
     prospect = (
         db.query(ProspectAccount)
-        .options(
-            joinedload(ProspectAccount.claimed_by_user),
-        )
+        .options(joinedload(ProspectAccount.claimed_by_user))
         .filter(ProspectAccount.id == prospect_id)
         .first()
     )
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    return template_response("htmx/partials/prospecting/_card.html", ctx)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Claimed {prospect.name}", "error" if error else "success")
+    return resp
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
 async def dismiss_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Dismiss a prospect — returns updated card for OOB swap."""
+    """Dismiss a SUGGESTED prospect (claimed prospects use the Release action instead).
 
+    Returns the refreshed detail or card per the call site.
+    """
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    prospect.status = ProspectAccountStatus.DISMISSED
-    prospect.dismissed_by = user.id
-    prospect.dismissed_at = datetime.now(timezone.utc)
-    db.commit()
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    return template_response("htmx/partials/prospecting/_card.html", ctx)
+
+    error = None
+    if prospect.status != ProspectAccountStatus.SUGGESTED:
+        error = "Only suggested prospects can be dismissed."
+    else:
+        form = await request.form()
+        reason = (form.get("reason") or "other").strip()[:255]  # dismiss_reason is String(255)
+        prospect.status = ProspectAccountStatus.DISMISSED
+        prospect.dismissed_by = user.id
+        prospect.dismissed_at = datetime.now(timezone.utc)
+        prospect.dismiss_reason = reason
+        db.commit()
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Dismissed {prospect.name}", "error" if error else "success")
+    return resp
+
+
+@router.post("/v2/partials/prospecting/{prospect_id}/release", response_class=HTMLResponse)
+async def release_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Release a claimed prospect back to the pool: status -> SUGGESTED, clear the claim,
+    and relinquish Company ownership. Only the claimer or an admin may release."""
+    from ..services.prospect_claim import release_prospect
+
+    error = None
+    try:
+        release_prospect(prospect_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = (
+        db.query(ProspectAccount)
+        .options(joinedload(ProspectAccount.claimed_by_user))
+        .filter(ProspectAccount.id == prospect_id)
+        .first()
+    )
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
+    _prospect_toast(resp, error or f"Released {prospect.name} back to the pool", "error" if error else "success")
+    return resp
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
 async def enrich_prospect_htmx(
     request: Request,
     prospect_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Run free enrichment on a prospect — returns refreshed detail."""
+    """Run free enrichment (SAM.gov + news) + warm-intro detection — returns refreshed
+    detail."""
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
+    ok = True
     try:
         from ..services.prospect_free_enrichment import run_free_enrichment
 
-        await run_free_enrichment(prospect_id)
+        # Pass the request session so the service reuses it (no second SessionLocal /
+        # stale-read window) and the row is current after commit.
+        await run_free_enrichment(prospect_id, db=db)
         db.refresh(prospect)
     except Exception as exc:
+        ok = False
         logger.warning("Enrichment failed for prospect {}: {}", prospect_id, exc)
     try:
         from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
@@ -8556,12 +8755,15 @@ async def enrich_prospect_htmx(
         prospect.enrichment_data = ed
         db.commit()
     except Exception as exc:
+        ok = False
         logger.warning("Warm intro detection failed for prospect {}: {}", prospect_id, exc)
-    ctx = _base_ctx(request, user, "prospecting")
-    ctx["prospect"] = prospect
-    ctx["enrichment"] = prospect.enrichment_data or {}
-    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
-    return template_response("htmx/partials/prospecting/detail.html", ctx)
+    resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    _prospect_toast(
+        resp,
+        f"Enriched {prospect.name}" if ok else "Enrichment partially failed — see details",
+        "success" if ok else "warning",
+    )
+    return resp
 
 
 # ── Settings partials ────────────────────────────────────────────────
@@ -9840,6 +10042,50 @@ async def part_tab_req_details(
         }
     )
     return template_response("htmx/partials/parts/tabs/req_details.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/quotes", response_class=HTMLResponse)
+async def part_tab_quotes(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition quote history for the selected part: every quote LINE
+    whose MPN matches this part (primary + substitutes) OR whose material_card
+    matches this part's canonical card — across ALL requisitions/customers."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Part not found")
+
+    from ..utils.normalization import parse_substitute_mpns
+
+    mpns: set[str] = set()
+    if requirement.primary_mpn:
+        mpns.add(requirement.primary_mpn.upper())
+    for sub in parse_substitute_mpns(requirement.substitutes or [], requirement.primary_mpn or ""):
+        if sub.get("mpn"):
+            mpns.add(sub["mpn"].upper())
+
+    conds = []
+    if mpns:
+        conds.append(sqlfunc.upper(QuoteLine.mpn).in_(mpns))
+    if requirement.material_card_id:
+        conds.append(QuoteLine.material_card_id == requirement.material_card_id)
+
+    quote_lines = []
+    if conds:
+        quote_lines = (
+            db.query(QuoteLine)
+            .join(Quote, QuoteLine.quote_id == Quote.id)
+            .options(joinedload(QuoteLine.quote).joinedload(Quote.requisition))
+            .filter(or_(*conds))
+            .order_by(Quote.created_at.desc().nullslast())
+            .all()
+        )
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": requirement, "quote_lines": quote_lines})
+    return template_response("htmx/partials/parts/tabs/quotes.html", ctx)
 
 
 @router.get("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)

@@ -339,8 +339,7 @@ class TestQuotesRoutes:
     @pytest.mark.parametrize(
         "path",
         [
-            "/v2/partials/quotes",
-            "/v2/partials/quotes?q=Q-001&status=draft",
+            # /v2/partials/quotes (standalone list) was retired — see test_quotes_relocation.py
             "/v2/partials/quotes/recent-terms",
             "/v2/partials/pricing-history/LM317T",
         ],
@@ -394,8 +393,10 @@ class TestProspectingRoutes:
         assert client.get(path).status_code == 200
 
     def test_prospecting_add_domain_empty(self, client: TestClient):
+        # Empty domain returns an inline error chip (200), not a 400.
         resp = client.post("/v2/partials/prospecting/add-domain", data={})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "domain" in resp.text.lower()
 
     def test_prospecting_add_domain_valid(self, client: TestClient):
         with patch("app.services.prospect_claim.add_prospect_manually") as mock_add:
@@ -409,10 +410,10 @@ class TestProspectingRoutes:
         resp = client.get("/v2/partials/prospecting/99999")
         assert resp.status_code == 404
 
-    def test_prospecting_claim_400(self, client: TestClient):
-        # claim_prospect raises LookupError → 400, not 404
+    def test_prospecting_claim_404(self, client: TestClient):
+        # claim_prospect raises LookupError for a missing prospect → 404
         resp = client.post("/v2/partials/prospecting/99999/claim")
-        assert resp.status_code == 400
+        assert resp.status_code == 404
 
     @pytest.mark.parametrize("action", ["dismiss", "enrich"])
     def test_prospecting_post_404(self, client: TestClient, action: str):
