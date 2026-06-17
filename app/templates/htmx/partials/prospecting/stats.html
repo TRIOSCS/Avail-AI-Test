@@ -1,18 +1,24 @@
-{# stats.html — Prospecting stats summary panel.
-   Receives: total (int), buyer_ready (int).
+{# stats.html — Prospecting KPI panel (lazy-loaded into list.html).
+   Receives: total (suggested count), buyer_ready (canonical is_buyer_ready count),
+             call_now (readiness>=70), claimed (int).
    Called by: htmx_views.py prospecting_stats route.
-   Depends on: Tailwind CSS.
+   Depends on: Tailwind CSS with brand palette.
 #}
-<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-  <h3 class="text-sm font-semibold text-gray-900 mb-3">Prospecting Stats</h3>
-  <div class="grid grid-cols-2 gap-4">
-    <div class="text-center">
-      <p class="text-xs text-gray-500">Total Prospects</p>
-      <p class="text-xl font-bold text-gray-900">{{ total }}</p>
-    </div>
-    <div class="text-center">
-      <p class="text-xs text-gray-500">Buyer Ready</p>
-      <p class="text-xl font-bold text-emerald-600">{{ buyer_ready }}</p>
-    </div>
+<div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+  <div class="bg-white rounded-lg border border-brand-200 p-4 text-center">
+    <p class="text-xs text-gray-500">Suggested</p>
+    <p class="text-2xl font-bold text-gray-900">{{ total }}</p>
+  </div>
+  <div class="bg-white rounded-lg border border-emerald-200 p-4 text-center">
+    <p class="text-xs text-gray-500">Buyer-ready</p>
+    <p class="text-2xl font-bold text-emerald-600">{{ buyer_ready }}</p>
+  </div>
+  <div class="bg-white rounded-lg border border-brand-200 p-4 text-center">
+    <p class="text-xs text-gray-500">Call now</p>
+    <p class="text-2xl font-bold text-brand-600">{{ call_now }}</p>
+  </div>
+  <div class="bg-white rounded-lg border border-brand-200 p-4 text-center">
+    <p class="text-xs text-gray-500">Claimed</p>
+    <p class="text-2xl font-bold text-gray-900">{{ claimed }}</p>
   </div>
 </div>

@@ -4,6 +4,8 @@ Deterministic scoring: same input = same output. No external API calls.
 Missing data = neutral (mid-range) scores, never zero.
 """
 
+from datetime import datetime, timezone
+
 from loguru import logger
 
 # ── ICP Segment Definitions ──────────────────────────────────────────
@@ -497,8 +499,9 @@ def apply_historical_bonus(fit: int, readiness: int, historical_context: dict) -
         try:
             # Accept year or ISO date
             year = int(str(last_activity)[:4])
-            # "Recent" = within ~2 years of reference (2026)
-            if year >= 2024:
+            # "Recent" = activity within the last ~2 years, computed relative to
+            # now so the window slides instead of pinning to a fixed year.
+            if year >= datetime.now(timezone.utc).year - 2:
                 readiness_bonus += 10
         except (ValueError, TypeError):
             pass

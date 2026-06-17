@@ -114,7 +114,7 @@ authoritative reference. Static-analysis tests in
 | Quotes | 9 | partials/quotes/ |
 | Sightings | 7 | partials/sightings/ |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
-| Prospecting | 5 | partials/prospecting/ |
+| Prospecting | 6 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth) |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |

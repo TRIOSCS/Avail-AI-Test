@@ -8,7 +8,7 @@ Checks if Trio has interacted with a prospect's domain before via:
 
 Returns warm intro data and generates a "why this account" one-liner.
 
-Called by: prospect_suggested router (serialization), prospect_signals (enrichment)
+Called by: the prospecting tab (htmx_views), prospect_signals (enrichment)
 Depends on: models (VendorCard, SiteContact, EmailSignatureExtract, Sighting)
 """
 

@@ -880,8 +880,10 @@ class TestProspectingPartials:
         assert resp.status_code == 200
 
     def test_add_prospect_domain_empty(self, client, db_session: Session):
+        # Empty domain returns an inline error chip (200), not a 400.
         resp = client.post("/v2/partials/prospecting/add-domain", data={"domain": ""})
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        assert "domain" in resp.text.lower()
 
 
 # ── Settings Partials ─────────────────────────────────────────────────

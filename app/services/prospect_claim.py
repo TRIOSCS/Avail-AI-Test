@@ -11,12 +11,26 @@ Handles what happens when a salesperson claims a prospect:
 from datetime import datetime, timezone
 
 from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.constants import ProspectAccountStatus
 from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
+
+# Max active sites a single owner may hold. Enforced here in the service so every
+# claim entry point (HTMX tab + any future caller) inherits the cap identically.
+SITE_CAP = 200
+
+
+def _active_site_count(db: Session, user_id: int) -> int:
+    return (
+        db.query(func.count(CustomerSite.id))
+        .filter(CustomerSite.owner_id == user_id, CustomerSite.is_active.is_(True))
+        .scalar()
+        or 0
+    )
 
 
 def _split_hq_location(hq_location: str | None) -> tuple[str | None, str | None]:
@@ -67,6 +81,11 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     if not user:
         raise LookupError("User not found")
 
+    if _active_site_count(db, user_id) >= SITE_CAP:
+        raise ValueError(
+            f"You hold {SITE_CAP} or more active sites (the cap). Release inactive sites before claiming new ones."
+        )
+
     warning = None
     path = None
 
@@ -74,6 +93,8 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
         # PATH A: SF-migrated — update existing Company
         company = db.query(Company).filter(Company.id == prospect.company_id).with_for_update().first()
         if company:
+            if company.account_owner_id and company.account_owner_id != user_id:
+                raise ValueError(f"Company '{company.name}' is already owned by another user.")
             company.account_owner_id = user_id
         path = "existing_company"
     else:
@@ -86,6 +107,8 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
 
         if existing:
             # Domain collision: link to existing Company instead of creating
+            if existing.account_owner_id and existing.account_owner_id != user_id:
+                raise ValueError(f"Company '{existing.name}' (same domain) is already owned by another user.")
             existing.account_owner_id = user_id
             prospect.company_id = existing.id
             path = "domain_collision"
@@ -154,6 +177,49 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     if warning:
         result["warning"] = warning
     return result
+
+
+def release_prospect(prospect_id: int, user_id: int, db: Session, *, is_admin: bool = False) -> dict:
+    """Release a claimed prospect back to the suggested pool.
+
+    The inverse of claim_prospect: status -> SUGGESTED, clear claimed_by/claimed_at,
+    and relinquish ownership of the linked Company (account_owner_id -> NULL). The
+    Company row itself is kept (re-claiming re-owns it). Only the claimer or an admin
+    may release; only CLAIMED prospects can be released.
+
+    Returns: {prospect_id, company_name, status}
+    Raises: LookupError if missing, ValueError on bad status / ownership.
+    """
+    prospect = db.query(ProspectAccount).filter(ProspectAccount.id == prospect_id).with_for_update().first()
+    if not prospect:
+        raise LookupError("Prospect not found")
+
+    if prospect.status != ProspectAccountStatus.CLAIMED:
+        raise ValueError("Only a claimed prospect can be released")
+
+    if not is_admin and prospect.claimed_by != user_id:
+        raise ValueError("Only the owner or an admin can release this prospect")
+
+    if prospect.company_id:
+        company = db.query(Company).filter(Company.id == prospect.company_id).with_for_update().first()
+        if company and company.account_owner_id == prospect.claimed_by:
+            company.account_owner_id = None
+
+    prospect.status = ProspectAccountStatus.SUGGESTED
+    prospect.claimed_by = None
+    prospect.claimed_at = None
+    ed = dict(prospect.enrichment_data or {})
+    ed.pop("claim_enrichment_status", None)
+    prospect.enrichment_data = ed
+    db.commit()
+
+    logger.info("Prospect {} ({}) released back to the pool by user {}", prospect.name, prospect.id, user_id)
+
+    return {
+        "prospect_id": prospect.id,
+        "company_name": prospect.name,
+        "status": "suggested",
+    }
 
 
 # ── Contact Reveal ───────────────────────────────────────────────────

@@ -1,7 +1,9 @@
 {#
-  prospecting/detail.html — Prospect detail with scores, enrichment data, and actions.
-  Receives: prospect (ProspectAccount ORM), enrichment (dict), warm_intro (dict).
-  Called by: htmx_views.py prospecting_detail_partial endpoint.
+  prospecting/detail.html — Prospect detail with scores, buyer-ready explainability,
+  contacts, similar wins, enrichment data, and actions.
+  Receives: prospect (ORM), enrichment (dict), warm_intro (dict), snapshot (dict),
+            signal_tags (list), contacts (list), contact_stats (dict), similar_customers (list).
+  Called by: htmx_views.py prospecting_detail_partial / claim / dismiss / release / enrich.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}{% import "htmx/partials/prospecting/_macros.html" as score %}
 
@@ -52,9 +54,9 @@
           Dismiss
         </button>
         {% elif prospect.status == 'claimed' %}
-        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/release"
                 hx-target="#main-content"
-                hx-confirm="Release this prospect back to the pool?"
+                hx-confirm="Release this prospect back to the pool? This clears your claim and company ownership."
                 data-loading-disable
                 class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
           Release
@@ -85,18 +87,43 @@
     </div>
   </div>
 
+  {# Buyer-ready summary — the headline explainability #}
+  {% if snapshot %}
+  <div class="bg-white border {{ 'border-emerald-300' if snapshot.is_buyer_ready else 'border-brand-200' }} rounded-lg p-5 mb-6">
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-3">
+        <span class="text-sm font-medium text-gray-500">Buyer-ready score</span>
+        <span class="text-2xl font-bold {{ score.score_text_color(snapshot.buyer_ready_score) }}">{{ snapshot.buyer_ready_score }}<span class="text-sm text-gray-400">/100</span></span>
+      </div>
+      {% if snapshot.is_buyer_ready %}
+      <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full bg-emerald-100 text-emerald-700">
+        <svg class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.286 3.957a1 1 0 00.95.69h4.162c.969 0 1.371 1.24.588 1.81l-3.367 2.446a1 1 0 00-.364 1.118l1.287 3.957c.3.922-.755 1.688-1.54 1.118l-3.366-2.446a1 1 0 00-1.176 0l-3.366 2.446c-.784.57-1.838-.196-1.539-1.118l1.286-3.957a1 1 0 00-.363-1.118L2.07 9.384c-.783-.57-.38-1.81.588-1.81h4.162a1 1 0 00.95-.69l1.286-3.957z"/></svg>
+        Buyer-ready
+      </span>
+      {% endif %}
+    </div>
+    {% if snapshot.priority_reasons %}
+    <ul class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+      {% for reason in snapshot.priority_reasons %}
+      <li class="flex items-start gap-2 text-sm text-gray-700">
+        <svg class="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <span>{{ reason }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+
   {# Scores section — side by side #}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
     {# Fit score #}
     <div class="bg-white border border-brand-200 rounded-lg p-6">
-      <div class="text-sm font-medium text-gray-500 mb-2">Fit Score</div>
+      <div class="text-sm font-medium text-gray-500 mb-2">Fit Score <span class="text-gray-300">· ICP match</span></div>
       {% set fit = prospect.fit_score or 0 %}
-      <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">
-        {{ fit }}%
-      </div>
+      <div class="text-3xl font-bold {{ score.score_text_color(fit) }}">{{ fit }}%</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}"
-             style="width: {{ fit }}%"></div>
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(fit) }}" style="width: {{ fit }}%"></div>
       </div>
       {% if prospect.fit_reasoning %}
       <p class="mt-3 text-xs text-gray-500 leading-relaxed">{{ prospect.fit_reasoning }}</p>
@@ -105,31 +132,79 @@
 
     {# Readiness score #}
     <div class="bg-white border border-brand-200 rounded-lg p-6">
-      <div class="text-sm font-medium text-gray-500 mb-2">Readiness Score</div>
+      <div class="text-sm font-medium text-gray-500 mb-2">Readiness Score <span class="text-gray-300">· near-term timing</span></div>
       {% set ready = prospect.readiness_score or 0 %}
-      <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">
-        {{ ready }}%
-      </div>
+      <div class="text-3xl font-bold {{ score.score_text_color(ready) }}">{{ ready }}%</div>
       <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}"
-             style="width: {{ ready }}%"></div>
+        <div class="h-full rounded-full transition-all {{ score.score_bar_color(ready) }}" style="width: {{ ready }}%"></div>
       </div>
-      {% if prospect.readiness_signals %}
+      {% if signal_tags %}
       <div class="mt-3 flex flex-wrap gap-1.5">
-        {% for signal_key, signal_val in (prospect.readiness_signals or {}).items() %}
-        {% if signal_val %}
-        <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-brand-100 text-brand-600">
-          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-          </svg>
-          {{ signal_key|replace("_", " ")|title }}
+        {% for tag in signal_tags %}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full
+                     {{ 'bg-emerald-50 text-emerald-700' if tag.tone == 'positive' else 'bg-gray-100 text-gray-600' }}">
+          {% if tag.tone == 'positive' %}
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+          {% endif %}
+          {{ tag.label }}
         </span>
-        {% endif %}
         {% endfor %}
       </div>
+      {% else %}
+      <p class="mt-3 text-xs text-gray-400">No active buying signals yet.</p>
       {% endif %}
     </div>
   </div>
+
+  {# Contacts #}
+  {% if contacts %}
+  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">
+      Contacts
+      <span class="text-sm font-normal text-gray-400">
+        {{ contact_stats.total }} total · {{ contact_stats.verified }} verified · {{ contact_stats.decision_makers }} decision-maker{{ "s" if contact_stats.decision_makers != 1 }}
+      </span>
+    </h2>
+    <div class="divide-y divide-gray-100">
+      {% for c in contacts %}
+      <div class="py-2.5 flex items-center justify-between gap-3">
+        <div class="min-w-0">
+          <p class="text-sm font-medium text-gray-900 truncate">{{ c.get('name', 'Unknown') }}</p>
+          {% if c.get('title') %}<p class="text-xs text-gray-500 truncate">{{ c.title }}</p>{% endif %}
+          {% if c.get('email') %}<p class="text-xs text-brand-400 truncate">{{ c.email }}</p>{% endif %}
+        </div>
+        <div class="shrink-0 flex items-center gap-1.5">
+          {% if c.get('seniority') == 'decision_maker' %}
+          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">Decision-maker</span>
+          {% endif %}
+          {% if c.get('verified') %}
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">
+            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+            Verified
+          </span>
+          {% else %}
+          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-500">Unverified</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Similar customers / prior wins #}
+  {% if similar_customers %}
+  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Similar wins</h2>
+    <div class="flex flex-wrap gap-2">
+      {% for s in similar_customers %}
+      <span class="inline-flex px-2.5 py-1 text-xs font-medium rounded-full bg-brand-50 text-brand-600 border border-brand-100">
+        {{ s.get('name', s) if s is mapping else s }}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   {# Discovery info #}
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
