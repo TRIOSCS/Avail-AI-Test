@@ -107,11 +107,11 @@ authoritative reference. Static-analysis tests in
 |---------|-------|-----------|
 | Requisitions | 32 | partials/requisitions/ |
 | Vendors | 16 | partials/vendors/ |
-| Customers | 12 | partials/customers/ |
+| Customers | 14 | partials/customers/ |
 | Materials | 13 | partials/materials/ |
 | Excess | 10 | partials/excess/ |
 | Parts | 13 | partials/parts/ |
-| Quotes | 9 | partials/quotes/ |
+| Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
 | Prospecting | 5 | partials/prospecting/ |
@@ -132,6 +132,7 @@ authoritative reference. Static-analysis tests in
 | `_account_list.html` | partials/customers/ | Left-panel account list only — swapped in on filter/sort/pagination refreshes by `GET /v2/partials/customers/account-list`. |
 | `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
 | `tabs/contacts_tab.html` | partials/customers/tabs/ | Contacts tab partial for company detail — default tab on `company_detail_partial`. Displays `contact_rows` (active SiteContacts across the company's active sites + legacy site-level contacts on active sites) and renders click-to-contact links (tel:/mailto:/Teams deep link/weixin://) with `data-outreach-log` attributes. |
+| `tabs/quotes_tab.html` | partials/customers/tabs/ | CRM account Quotes tab — Alpine status filter (all/draft/sent/won/lost). Quote set = union of site-linked and requisition-linked quotes via `_company_quotes_query`. Served at `GET /v2/partials/customers/{id}/tab/quotes`. |
 
 ### Inline Editing
 

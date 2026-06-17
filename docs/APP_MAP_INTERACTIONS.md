@@ -892,6 +892,23 @@ ai_offer_service.py (if confidence >= 0.8)
 
 ## 5. Quote Building
 
+**Where quotes are surfaced.** The standalone Quotes nav tab was retired
+(PR quotes-relocation). Bare `/v2/quotes` 307-redirects to
+`/v2/requisitions`. Quotes are now accessed in two places:
+
+- **Reqs workspace Quotes tab** — `GET /v2/partials/parts/{requirement_id}/tab/quotes`
+  (reuses `requisitions/tabs/quotes.html`). Reached from the requirement
+  detail panel inside the Reqs workspace.
+- **CRM account Quotes tab** — `GET /v2/partials/customers/{id}/tab/quotes`
+  (renders `customers/tabs/quotes_tab.html` with an Alpine status filter).
+  The account quote set is the **union** of site-linked quotes (via the
+  company's active sites) and requisition-linked quotes (via requirements on
+  requisitions whose `site_id` matches no active site, or whose site is NULL)
+  — computed by the shared `_company_quotes_query(db, company)` helper so
+  neither surface can drift from the other.
+
+The quote detail page `/v2/quotes/{id}` is unchanged.
+
 ```
 Browser (select offers -> build quote)
     |
@@ -2601,6 +2618,8 @@ BROWSER (HTMX + Alpine.js)
   0. Bottom navigation (mobile_nav.html):
      Reqs | Sightings | Materials | Search | ...
      "Materials" tab links to /v2/materials, loads /v2/partials/materials/workspace
+     Quotes has NO top-level nav tab — surfaced via the Reqs and CRM account
+     tab strips (see § 5 Quote Building).
 
   1. Page load:
      base_page.html -> hx-get="/v2/partials/X" on load
@@ -2844,7 +2863,7 @@ the current implementation.
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
-| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
+| Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
 | Buy Plans | 6 | CRUD, external approval via token |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
