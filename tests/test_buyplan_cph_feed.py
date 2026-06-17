@@ -194,3 +194,18 @@ def test_refresh_creates_match_when_live_offer_exists(db_session):
     record_buyplan_purchase_history(db_session, plan)  # refresh=True by default
     db_session.commit()
     assert db_session.query(ProactiveMatch).filter_by(company_id=company.id, material_card_id=cards[0].id).count() == 1
+
+
+# ── Task 7: backfill command for existing COMPLETED plans ────────────
+
+
+def test_backfill_records_completed_plans_idempotently(db_session):
+    from app.management.backfill_buyplan_cph import backfill
+
+    plan, company, cards = _completed_plan(db_session, line_specs=[(BuyPlanLineStatus.VERIFIED.value, 11.0, 7, True)])
+    plan.purchase_history_recorded_at = None
+    db_session.commit()
+    n1 = backfill(db_session)
+    n2 = backfill(db_session)  # idempotent
+    assert n1 == 1 and n2 == 0
+    assert db_session.query(CustomerPartHistory).filter_by(source="buy_plan").count() == 1
