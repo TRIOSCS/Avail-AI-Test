@@ -8402,6 +8402,57 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     return ctx
 
 
+def _prospect_stats_ctx(db: Session) -> dict:
+    """Canonical prospecting KPIs (single definition, shared by the stats route and the
+    OOB refresh after grid actions).
+
+    "Buyer ready" = is_buyer_ready over SUGGESTED.
+    """
+    suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
+    claimed = (
+        db.query(sqlfunc.count(ProspectAccount.id))
+        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
+        .scalar()
+        or 0
+    )
+    return {
+        "total": len(suggested),
+        "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
+        "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
+        "claimed": claimed,
+    }
+
+
+def _status_visible_under_filter(new_status: str, flt_status: str) -> bool:
+    """Whether a card with `new_status` should remain visible under the active filter.
+
+    Default (empty filter = "All") shows suggested + claimed; an explicit filter shows
+    only that status.
+    """
+    if flt_status:
+        return new_status == flt_status
+    return new_status in _PROSPECT_DEFAULT_STATUSES
+
+
+def _prospect_action_response(request, user, db, prospect, *, message, kind, flt_status=""):
+    """Build the response for a claim/dismiss/release action.
+
+    Detail-view actions (HX-Target=main-content) return the full refreshed detail. Grid
+    actions return `_action_oob.html`: the updated card (omitted → removed when it leaves
+    the active filter) plus an OOB refresh of the #prospect-stats panel.
+    """
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        ctx = _prospect_card_ctx(request, user, prospect)
+        ctx["status"] = flt_status  # so the re-rendered card's buttons carry the filter forward
+        ctx["include_card"] = _status_visible_under_filter(prospect.status, flt_status)
+        ctx.update(_prospect_stats_ctx(db))
+        resp = template_response("htmx/partials/prospecting/_action_oob.html", ctx)
+    _prospect_toast(resp, message, kind)
+    return resp
+
+
 @router.get("/v2/partials/prospecting", response_class=HTMLResponse)
 async def prospecting_list_partial(
     request: Request,
@@ -8498,27 +8549,9 @@ async def prospecting_stats(
     "Buyer ready" uses the canonical is_buyer_ready from build_priority_snapshot — the
     same definition the list ranking uses — so the KPI never contradicts the grid.
     """
-    suggested_q = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
-    suggested = suggested_q.all()
-    total = len(suggested)
-    buyer_ready = sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"])
-    call_now = sum(1 for p in suggested if (p.readiness_score or 0) >= 70)
-    claimed = (
-        db.query(sqlfunc.count(ProspectAccount.id))
-        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
-        .scalar()
-        or 0
-    )
-
     return template_response(
         "htmx/partials/prospecting/stats.html",
-        {
-            "request": request,
-            "total": total,
-            "buyer_ready": buyer_ready,
-            "call_now": call_now,
-            "claimed": claimed,
-        },
+        {"request": request, **_prospect_stats_ctx(db)},
     )
 
 
@@ -8623,12 +8656,16 @@ async def claim_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Claimed {prospect.name}", "error" if error else "success")
-    return resp
+    form = await request.form()
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Claimed {prospect.name}",
+        kind="error" if error else "success",
+        flt_status=form.get("flt_status", ""),
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
@@ -8646,11 +8683,12 @@ async def dismiss_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
     error = None
     if prospect.status != ProspectAccountStatus.SUGGESTED:
         error = "Only suggested prospects can be dismissed."
     else:
-        form = await request.form()
         reason = (form.get("reason") or "other").strip()[:255]  # dismiss_reason is String(255)
         prospect.status = ProspectAccountStatus.DISMISSED
         prospect.dismissed_by = user.id
@@ -8658,12 +8696,15 @@ async def dismiss_prospect_htmx(
         prospect.dismiss_reason = reason
         db.commit()
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Dismissed {prospect.name}", "error" if error else "success")
-    return resp
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Dismissed {prospect.name}",
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/release", response_class=HTMLResponse)
@@ -8694,12 +8735,16 @@ async def release_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Released {prospect.name} back to the pool", "error" if error else "success")
-    return resp
+    form = await request.form()
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Released {prospect.name} back to the pool",
+        kind="error" if error else "success",
+        flt_status=form.get("flt_status", ""),
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)

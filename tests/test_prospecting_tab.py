@@ -377,3 +377,42 @@ class TestEnrichStatus:
     def test_status_missing_prospect_returns_286(self, client):
         resp = client.get("/v2/partials/prospecting/99999/enrich-status")
         assert resp.status_code == 286
+
+
+# ── Phase 2: live grid consistency (OOB card removal + stats refresh) ─────
+
+
+class TestGridConsistency:
+    def test_dismiss_in_suggested_filter_removes_card(self, client, db_session):
+        p = make_prospect(db_session, status="suggested", name="ToDismiss")
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            data={"flt_status": "suggested"},
+            headers={"HX-Target": f"prospect-{p.id}"},  # grid action
+        )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' not in resp.text  # card removed (left the filter)
+        assert 'id="prospect-stats"' in resp.text  # stats OOB-refreshed
+
+    def test_claim_in_all_filter_keeps_card(self, client, db_session):
+        p = make_prospect(db_session, status="suggested", name="ToClaim")
+        with patch("app.services.prospect_claim.trigger_deep_enrichment_bg", new_callable=AsyncMock):
+            resp = client.post(
+                f"/v2/partials/prospecting/{p.id}/claim",
+                data={"flt_status": ""},  # default All view shows suggested+claimed
+                headers={"HX-Target": f"prospect-{p.id}"},
+            )
+        assert resp.status_code == 200
+        assert f'id="prospect-{p.id}"' in resp.text  # card kept (claimed still visible)
+        assert "Claimed" in resp.text
+        assert 'id="prospect-stats"' in resp.text
+
+    def test_detail_action_returns_detail_no_oob(self, client, db_session):
+        p = make_prospect(db_session, status="suggested")
+        resp = client.post(
+            f"/v2/partials/prospecting/{p.id}/dismiss",
+            headers={"HX-Target": "main-content"},  # detail action
+        )
+        assert resp.status_code == 200
+        assert "Buyer-ready score" in resp.text  # full detail returned
+        assert 'id="prospect-stats"' not in resp.text  # no grid OOB on the detail path
