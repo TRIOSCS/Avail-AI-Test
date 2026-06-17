@@ -6,12 +6,51 @@ cache kept fresh by bump_clocks_from_activity() (real-time) and these
 functions (nightly self-healing backstop).
 """
 
-from sqlalchemy import func
+from datetime import datetime, timezone
+
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from ..constants import Direction
 from ..models.crm import Company, CustomerSite, SiteContact
 from ..models.intelligence import ActivityLog
+from ..models.vendors import VendorCard, VendorContact
+
+_CLOCK_TARGETS = (
+    (Company, "company_id"),
+    (CustomerSite, "customer_site_id"),
+    (SiteContact, "site_contact_id"),
+    (VendorCard, "vendor_card_id"),
+    (VendorContact, "vendor_contact_id"),
+)
+
+
+def _advance(db: Session, model, entity_id, field: str, when: datetime) -> None:
+    if not entity_id:
+        return
+    col = getattr(model, field)
+    db.query(model).filter(model.id == entity_id, or_(col.is_(None), col < when)).update(
+        {field: when}, synchronize_session=False
+    )
+
+
+def bump_clocks_from_activity(db: Session, activity: ActivityLog) -> None:
+    """Forward-only clock update from a freshly-written ActivityLog row.
+
+    Outbound advances last_outbound_at; meaningful inbound advances last_reply_at. Non-
+    meaningful inbound and NULL direction are ignored (timeline-only noise).
+    """
+    if activity.direction == Direction.OUTBOUND:
+        field = "last_outbound_at"
+    elif activity.direction == Direction.INBOUND and activity.is_meaningful:
+        field = "last_reply_at"
+    else:
+        return
+    when = activity.created_at or datetime.now(timezone.utc)
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    for model, fk in _CLOCK_TARGETS:
+        _advance(db, model, getattr(activity, fk), field, when)
 
 
 def _outbound_max(db: Session, col):
