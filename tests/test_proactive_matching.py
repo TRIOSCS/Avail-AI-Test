@@ -870,6 +870,7 @@ def test_aggregates_cph_across_sources(db_session):
     """
     data = _setup_scenario(db_session)  # creates one CPH row (source="avail_offer")
     # add a second, newer buy_plan row for the same company+card
+    buy_plan_date = datetime.now(timezone.utc) - timedelta(days=5)
     db_session.add(
         CustomerPartHistory(
             company_id=data["company"].id,
@@ -877,7 +878,7 @@ def test_aggregates_cph_across_sources(db_session):
             mpn="STM32F407",
             source="buy_plan",
             purchase_count=2,
-            last_purchased_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_purchased_at=buy_plan_date,
             avg_unit_price=Decimal("20.00"),
             last_unit_price=Decimal("20.00"),
             total_quantity=40,
@@ -889,3 +890,6 @@ def test_aggregates_cph_across_sources(db_session):
     assert len(matches) == 1  # one match per (company, card), not two
     m = matches[0]
     assert m.customer_purchase_count == 3 + 2  # summed across sources
+    # newest-wins: price and date come from the buy_plan row (5 days ago), not avail_offer (60 days ago)
+    assert m.customer_last_price == 20.00
+    assert m.customer_last_purchased_at == buy_plan_date

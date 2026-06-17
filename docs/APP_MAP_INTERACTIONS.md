@@ -991,8 +991,9 @@ customer purchases now flow through buy-plan completion. Historical rows written
 by the old hooks are preserved (their `source` values remain valid).
 
 Historical completed plans that predate this feature are backfilled one-time via
-`python -m app.management.backfill_buyplan_cph` (dry-run by default, `--apply` to
-write; respects the idempotency stamp so it is safe to re-run).
+`python -m app.management.backfill_buyplan_cph`. The command records CPH for every
+COMPLETED buy plan whose `purchase_history_recorded_at` is NULL, committing per plan.
+It is idempotent and safe to re-run — plans that already have the stamp are skipped.
 
 ## 7. Proactive Matching
 

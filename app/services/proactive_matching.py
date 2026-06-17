@@ -102,7 +102,7 @@ def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
     """Collapse multiple CPH rows per company (different sources) into one record:
 
     summed purchase_count, max last_purchased_at, count-weighted avg price, and the
-    most-recent row's last_unit_price/mpn.
+    most-recent row's last_unit_price.
     """
     by_company: dict[int, dict] = {}
     for cph in cph_rows:
@@ -116,7 +116,6 @@ def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
                 "avg_price_den": cnt if cph.avg_unit_price else 0,
                 "last_unit_price": float(cph.last_unit_price) if cph.last_unit_price else None,
                 "_newest": cph.last_purchased_at,
-                "mpn": cph.mpn,
             }
             continue
         agg["count"] += cnt
