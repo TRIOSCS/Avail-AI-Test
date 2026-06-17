@@ -2,6 +2,9 @@
 
 Provides upsert_purchase() — called by offer/quote won hooks and future import scripts
 to maintain the customer_part_history table.
+
+Also provides record_buyplan_purchase_history() — called by the buy-plan completion hook
+to feed CPH rows from verified buy-plan lines.
 """
 
 from datetime import datetime, timezone
@@ -92,3 +95,62 @@ def upsert_purchase(
         source,
     )
     return record
+
+
+def record_buyplan_purchase_history(db: Session, plan, *, refresh: bool = True) -> list[int]:
+    """Record customer_part_history from a COMPLETED buy plan's verified lines.
+
+    Idempotent via plan.purchase_history_recorded_at. Returns affected material_card_ids.
+    Best-effort: callers must not let CPH errors break buy-plan completion.
+    """
+    from app.constants import BuyPlanLineStatus  # local import avoids cycles
+
+    if plan.purchase_history_recorded_at is not None:
+        return []
+
+    req = plan.requisition
+    site = req.customer_site if req else None
+    company_id = site.company_id if site else None
+    if not company_id:
+        logger.warning("BUYPLAN_CPH: plan {} has no customer company — skipping", plan.id)
+        plan.purchase_history_recorded_at = datetime.now(timezone.utc)
+        db.flush()
+        return []
+
+    affected: list[int] = []
+    for line in plan.lines:
+        if line.status != BuyPlanLineStatus.VERIFIED.value:
+            continue
+        card_id = None
+        if line.requirement_id and line.requirement:
+            card_id = line.requirement.material_card_id
+        if not card_id and line.offer_id and line.offer:
+            card_id = line.offer.material_card_id
+        if not card_id:
+            logger.info(
+                "BUYPLAN_CPH: plan {} line {} has no material_card — skipping",
+                plan.id,
+                line.id,
+            )
+            continue
+        upsert_purchase(
+            db,
+            company_id=company_id,
+            material_card_id=card_id,
+            source="buy_plan",
+            unit_price=line.unit_sell,
+            quantity=line.quantity,
+            purchased_at=plan.completed_at,
+            source_ref=plan.sales_order_number,
+        )
+        affected.append(card_id)
+
+    plan.purchase_history_recorded_at = datetime.now(timezone.utc)
+    db.flush()
+    logger.info(
+        "BUYPLAN_CPH: plan {} recorded {} parts for company {}",
+        plan.id,
+        len(affected),
+        company_id,
+    )
+    return affected
