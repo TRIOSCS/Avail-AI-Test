@@ -306,7 +306,7 @@ async def update_quote(
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
-    if quote.status not in ("draft", None):
+    if quote.status not in (QuoteStatus.DRAFT.value, None):
         raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
@@ -335,7 +335,7 @@ async def delete_quote(
     quote = get_quote_for_user(db, user, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
-    if quote.status != "draft":
+    if quote.status != QuoteStatus.DRAFT.value:
         raise HTTPException(400, "Only draft quotes can be deleted")
     from ...models.buy_plan import BuyPlan
 

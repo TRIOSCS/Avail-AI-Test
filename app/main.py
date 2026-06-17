@@ -269,7 +269,6 @@ if not os.environ.get("TESTING"):
             re.compile(r"/auth/login$"),
             re.compile(r"/health$"),
             re.compile(r"/metrics$"),
-            re.compile(r"/api/buy-plans/token/.*"),  # external approval links
             re.compile(r"/v2/partials/requisitions/import-.*"),  # multipart file upload
             re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
             re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook

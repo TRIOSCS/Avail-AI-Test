@@ -78,15 +78,15 @@
           {% set bar_label = 'Draft' %}
           {% set label_color = 'text-gray-500' %}
 
-          {% if bp.status == 'pending' or bp.status == 'pending_approval' %}
+          {% if bp.status == 'pending' %}
             {% set segments = 2 %}
             {% set bar_label = 'Pending Approval' %}
             {% set label_color = 'text-amber-600' %}
-          {% elif bp.status in ('active', 'approved', 'po_entered', 'po_confirmed') %}
+          {% elif bp.status == 'active' %}
             {% set segments = 3 %}
             {% set bar_label = 'PO Execution' %}
             {% set label_color = 'text-amber-600' %}
-          {% elif bp.status in ('completed', 'complete') %}
+          {% elif bp.status == 'completed' %}
             {% set segments = 5 %}
             {% set bar_label = 'Complete' %}
             {% set label_color = 'text-emerald-600' %}

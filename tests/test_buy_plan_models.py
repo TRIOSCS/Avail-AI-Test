@@ -355,3 +355,39 @@ class TestVerificationGroupMember:
         db_session.refresh(member)
 
         assert member.is_active is False
+
+
+class TestIssueTypeValidator:
+    """QUAL-7: BuyPlanLine.issue_type is validated against LineIssueType."""
+
+    def test_rejects_invalid_issue_type(self):
+        from app.models.buy_plan import BuyPlanLine
+
+        with pytest.raises(ValueError, match="Invalid line issue type"):
+            BuyPlanLine(buy_plan_id=1, quantity=1, issue_type="bogus")
+
+    def test_accepts_valid_issue_type(self):
+        from app.models.buy_plan import BuyPlanLine
+
+        line = BuyPlanLine(buy_plan_id=1, quantity=1, issue_type="sold_out")
+        assert line.issue_type == "sold_out"
+
+
+class TestCancelHaltRelationships:
+    """QUAL-6: cancelled_by / halted_by / po_verified_by are now traversable."""
+
+    def test_cancelled_by_relationship(self, db_session, test_user, test_quote, test_requisition):
+        from app.models.buy_plan import BuyPlan, BuyPlanStatus
+
+        plan = BuyPlan(
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            status=BuyPlanStatus.CANCELLED.value,
+            cancelled_by_id=test_user.id,
+            halted_by_id=test_user.id,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        db_session.refresh(plan)
+        assert plan.cancelled_by is not None and plan.cancelled_by.id == test_user.id
+        assert plan.halted_by is not None and plan.halted_by.id == test_user.id
