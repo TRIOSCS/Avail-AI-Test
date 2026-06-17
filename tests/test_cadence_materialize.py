@@ -70,11 +70,14 @@ def test_materialize_sets_outbound_and_meaningful_reply(db_session):
     db_session.commit()
     db_session.refresh(co)
     db_session.refresh(contact)
+    db_session.refresh(site)
 
     assert co.last_outbound_at == NOW - timedelta(days=5)
     assert co.last_reply_at == NOW - timedelta(days=2)  # noise ignored
     assert contact.last_outbound_at == NOW - timedelta(days=5)
     assert contact.last_reply_at == NOW - timedelta(days=2)
+    assert site.last_outbound_at == NOW - timedelta(days=5)
+    assert site.last_reply_at == NOW - timedelta(days=2)
 
 
 def test_materialize_leaves_clocks_null_when_no_activity(db_session):
@@ -85,3 +88,26 @@ def test_materialize_leaves_clocks_null_when_no_activity(db_session):
     db_session.commit()
     db_session.refresh(co)
     assert co.last_outbound_at is None and co.last_reply_at is None
+
+
+def test_materialize_all_clocks_returns_company_count(db_session):
+    from app.services.cadence_service import materialize_all_clocks
+
+    co1 = Company(name="All Co 1")
+    co2 = Company(name="All Co 2")
+    db_session.add_all([co1, co2])
+    db_session.flush()
+    _log(
+        db_session,
+        company_id=co1.id,
+        direction=Direction.OUTBOUND,
+        meaningful=None,
+        created=NOW - timedelta(days=3),
+    )
+    db_session.commit()
+
+    n = materialize_all_clocks(db_session)
+    db_session.commit()
+    db_session.refresh(co1)
+    assert n == 2
+    assert co1.last_outbound_at == NOW - timedelta(days=3)
