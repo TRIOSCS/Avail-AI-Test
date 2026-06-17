@@ -856,3 +856,36 @@ class TestScoringBoundaries:
         dt = datetime.now(timezone.utc) - timedelta(days=90)  # recency=100
         score, margin = compute_match_score(dt, 5, 100.0, 70.0)
         assert score == 100  # 100*0.4 + 100*0.3 + 100*0.3 = 100
+
+
+# ── CPH aggregation across sources ──────────────────────────────────────────
+
+
+def test_aggregates_cph_across_sources(db_session):
+    """Two CPH rows for same (company, card) are aggregated — not duplicated.
+
+    _setup_scenario creates one CPH row (source="avail_offer", purchase_count=3). We add
+    a second buy_plan row (purchase_count=2). The engine must yield exactly one match
+    with customer_purchase_count == 5 (summed), not two separate matches.
+    """
+    data = _setup_scenario(db_session)  # creates one CPH row (source="avail_offer")
+    # add a second, newer buy_plan row for the same company+card
+    db_session.add(
+        CustomerPartHistory(
+            company_id=data["company"].id,
+            material_card_id=data["card"].id,
+            mpn="STM32F407",
+            source="buy_plan",
+            purchase_count=2,
+            last_purchased_at=datetime.now(timezone.utc) - timedelta(days=5),
+            avg_unit_price=Decimal("20.00"),
+            last_unit_price=Decimal("20.00"),
+            total_quantity=40,
+        )
+    )
+    db_session.commit()
+    offer = _make_offer(db_session, data, unit_price=Decimal("8.00"))
+    matches = find_matches_for_offer(offer.id, db_session)
+    assert len(matches) == 1  # one match per (company, card), not two
+    m = matches[0]
+    assert m.customer_purchase_count == 3 + 2  # summed across sources
