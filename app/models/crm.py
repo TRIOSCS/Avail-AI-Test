@@ -38,6 +38,11 @@ class Company(Base):
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
+    # CRM cadence — two clocks + tier (see docs/.../2026-06-17-crm-data-foundation.md)
+    last_outbound_at = Column(UTCDateTime, index=True)
+    last_reply_at = Column(UTCDateTime, index=True)
+    tier = Column(String(20), index=True)  # key | core | standard | prospect (NULL => standard)
+
     # v1.4.0: Account management fields
     account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
     phone = Column(String(100))
@@ -134,6 +139,8 @@ class CustomerSite(Base):
     # v2.10: Prospecting pool fields
     last_activity_at = Column(UTCDateTime)
     ownership_cleared_at = Column(UTCDateTime)
+    last_outbound_at = Column(UTCDateTime)
+    last_reply_at = Column(UTCDateTime)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -173,6 +180,11 @@ class SiteContact(Base):
     is_primary = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     contact_status = Column(String(20), default="new")
+
+    # CRM cadence — contact-level clocks
+    last_activity_at = Column(UTCDateTime)
+    last_outbound_at = Column(UTCDateTime)
+    last_reply_at = Column(UTCDateTime)
 
     # Customer enrichment fields
     phone_verified = Column(Boolean, default=False)

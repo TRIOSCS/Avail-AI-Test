@@ -74,6 +74,8 @@ class VendorCard(Base):
     total_pos = Column(Integer, default=0)
     total_revenue = Column(Numeric(12, 4), default=0)
     last_activity_at = Column(UTCDateTime)
+    last_outbound_at = Column(UTCDateTime)
+    last_reply_at = Column(UTCDateTime)
 
     # AI-generated material intelligence
     brand_tags = Column(JSONB, default=list)
@@ -164,6 +166,8 @@ class VendorContact(Base):
     # OOO detection (from AI email classification)
     is_ooo = Column(Boolean, default=False)
     ooo_return_date = Column(UTCDateTime)
+    last_outbound_at = Column(UTCDateTime)
+    last_reply_at = Column(UTCDateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
 
