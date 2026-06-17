@@ -25,6 +25,9 @@ def backfill_cadence_clocks() -> int:
         n = backfill_for_session(db)
         db.commit()
         return n
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
