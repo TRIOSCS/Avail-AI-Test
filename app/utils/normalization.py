@@ -395,10 +395,14 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
     if a_stripped == b_stripped:
         return True
 
-    # One is prefix of the other (trailing revision)
+    # One is prefix of the other (trailing revision). Compare the longer against
+    # the shorter so the check is symmetric — the suffix is the longer key minus
+    # the shared prefix, regardless of argument order. (The old str.replace()
+    # form only worked when the longer MPN was passed first.)
     if a_stripped.startswith(b_stripped) or b_stripped.startswith(a_stripped):
-        suffix = a_stripped.replace(b_stripped, "") or b_stripped.replace(a_stripped, "")
-        if len(suffix) <= 2:  # Short suffix = likely revision
+        longer, shorter = sorted((a_stripped, b_stripped), key=len, reverse=True)
+        suffix = longer[len(shorter) :]
+        if 0 < len(suffix) <= 2:  # Short trailing suffix = likely revision
             return True
 
     return False

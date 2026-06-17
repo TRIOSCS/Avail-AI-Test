@@ -200,3 +200,107 @@ def test_v2_page_mpn_passthrough(client, test_user):
     assert resp.status_code == 200
     # base_page.html fires hx-get="{{ partial_url }}"; the mpn rides along.
     assert "/v2/partials/search?mpn=LM317T" in resp.text
+
+
+# ── Degraded-market banner (market_health) ────────────────────────────────
+
+
+class TestMarketSourceHealth:
+    """get_market_source_health partitions live-market connectors into available / down
+    (auth-quota errors) / unconfigured."""
+
+    def test_classifies_down_unconfigured_and_ignores_non_market(self, db_session):
+        from app.search_service import get_market_source_health
+
+        # available: a built MouserConnector; down: brokerbin (error_skipped);
+        # unconfigured: ebay (skipped); a non-market/disabled enrichment source is ignored.
+        mouser = type("MouserConnector", (), {})()
+        stats = {
+            "brokerbin": {"source": "brokerbin", "status": "error_skipped", "error": "Auth error — rotate credentials"},
+            "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
+            "hunter_enrichment": {"source": "hunter_enrichment", "status": "disabled", "error": None},
+        }
+        with patch("app.search_service._build_connectors", return_value=([mouser], stats, set())):
+            h = get_market_source_health(db_session)
+
+        assert h["available"] == 1
+        assert [d["name"] for d in h["down"]] == ["brokerbin"]
+        assert h["down"][0]["display"] == "BrokerBin"
+        assert h["down"][0]["reason"].startswith("Auth error")
+        assert [u["name"] for u in h["unconfigured"]] == ["ebay"]
+        assert h["total"] == 2  # available(1) + down(1); unconfigured excluded
+
+
+def test_market_banner_renders_when_sources_down(client):
+    """When live-market sources are down, the market section shows the degraded banner
+    with the source display name, its reason, and a Settings deep-link."""
+    health = {
+        "available": 2,
+        "total": 6,
+        "down": [{"name": "brokerbin", "display": "BrokerBin", "reason": "Auth error — rotate credentials"}],
+        "unconfigured": [],
+    }
+    with patch("app.search_service.get_market_source_health", return_value=health):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    body = resp.text
+    assert "BrokerBin" in body
+    assert "unavailable" in body
+    assert "/v2/settings" in body
+    assert "Auth error — rotate credentials" in body  # per-source tooltip reason
+
+
+def test_market_no_banner_when_all_sources_healthy(client):
+    """No down sources → no degraded banner."""
+    health = {"available": 6, "total": 6, "down": [], "unconfigured": []}
+    with patch("app.search_service.get_market_source_health", return_value=health):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    assert "unavailable" not in resp.text
+
+
+def test_market_section_survives_health_lookup_failure(client):
+    """A health-check failure must never break the market section (best-effort
+    banner)."""
+    with patch("app.search_service.get_market_source_health", side_effect=RuntimeError("boom")):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    # Cache-miss frame still renders (fires the SSE run flow).
+    assert "/v2/partials/search/run" in resp.text
+
+
+def test_market_health_all_down_no_available(db_session):
+    """When no market connector is built (all errored), available=0 and
+    total==len(down)."""
+    from app.search_service import get_market_source_health
+
+    stats = {
+        "brokerbin": {"source": "brokerbin", "status": "error_skipped", "error": "Auth error"},
+        "nexar": {"source": "nexar", "status": "error_skipped", "error": "Quota exhausted"},
+        "ebay": {"source": "ebay", "status": "skipped", "error": "No API key configured"},
+    }
+    with patch("app.search_service._build_connectors", return_value=([], stats, set())):
+        h = get_market_source_health(db_session)
+
+    assert h["available"] == 0
+    assert {d["name"] for d in h["down"]} == {"brokerbin", "nexar"}
+    assert [u["name"] for u in h["unconfigured"]] == ["ebay"]
+    assert h["total"] == 2  # available(0) + down(2)
+
+
+def test_market_no_banner_when_only_unconfigured(client):
+    """Sources merely unconfigured (never set up) do NOT trigger the degraded banner —
+    only `down` (auth/quota errors) do.
+
+    Confirms the asymmetry is intentional.
+    """
+    health = {
+        "available": 5,
+        "total": 5,
+        "down": [],
+        "unconfigured": [{"name": "ebay", "display": "eBay", "reason": "No API key configured"}],
+    }
+    with patch("app.search_service.get_market_source_health", return_value=health):
+        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    assert "unavailable" not in resp.text

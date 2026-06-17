@@ -1,29 +1,29 @@
-{# Live-market terminal body — returned by search_run POST, contains the SSE connection.
-   Re-skinned to the dark "terminal" look for the Part Dossier: it renders INSIDE the
-   #dossier-market frame (the dossier already owns the bg-gray-900 section, collapsible
-   header, and the lead-detail drawer). The history "What we know" column is NOT here —
-   it is its own dossier section. SSE wiring, source-progress chips, $store.shortlist, and
-   the lead-detail Details trigger are all kept intact.
+{# Live-market body — returned by search_run POST, contains the SSE connection.
+   Light brand-card skin matching the rest of the Part Dossier: it renders INSIDE the
+   #dossier-market section (the dossier owns the white card, collapsible header, and the
+   lead-detail drawer). The history "What we know" column is NOT here — it is its own
+   dossier section. SSE wiring, source-progress chips, $store.shortlist, and the
+   lead-detail Details trigger are all kept intact.
    Called by: htmx_views.search_run.
-   Depends on: SSE stream at /v2/partials/search/stream, vendor_card.html (terminal rows). #}
+   Depends on: SSE stream at /v2/partials/search/stream, vendor_card.html (market rows). #}
 
 <div id="search-results-wrapper" data-search-id="{{ search_id }}">
-  {# terminal header: freshness + refresh #}
-  <div class="px-4 py-2.5 border-b border-gray-800 flex items-center gap-3 text-[11px]">
-    <span class="inline-flex items-center gap-1.5 text-emerald-400">
-      <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse"></span>live
+  {# header: freshness + refresh #}
+  <div class="px-4 py-2.5 border-b border-brand-100 flex items-center gap-3 text-[11px]">
+    <span class="inline-flex items-center gap-1.5 text-emerald-600">
+      <span class="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>live
     </span>
     <button type="button"
             hx-get="/v2/partials/search/dossier/market?mpn={{ mpn|urlencode }}&amp;refresh=1"
             hx-target="#dossier-market" hx-swap="innerHTML"
-            class="ml-auto px-2.5 py-1 rounded-md border border-gray-700 text-gray-400 hover:text-white hover:border-gray-600 inline-flex items-center gap-1.5">
+            class="ml-auto px-2.5 py-1 rounded-md border border-brand-300 text-brand-600 hover:text-brand-800 hover:bg-brand-50 inline-flex items-center gap-1.5">
       <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       Refresh market
     </button>
   </div>
 
   {# source progress chips #}
-  <div id="source-progress" class="px-4 py-3 border-b border-gray-800 flex flex-wrap gap-1.5 items-center">
+  <div id="source-progress" class="px-4 py-3 border-b border-brand-100 flex flex-wrap gap-1.5 items-center">
     <span class="text-[11px] text-gray-500 mr-1">Sources:</span>
     {% for source in enabled_sources %}
     <span id="source-chip-{{ source.name }}" class="source-chip source-chip--searching">
@@ -39,23 +39,23 @@
     <div id="search-results-cards"
          sse-swap="results"
          hx-swap="beforeend settle:100ms"
-         class="divide-y divide-gray-800">
+         class="divide-y divide-brand-100">
     </div>
     <div sse-swap="source-status" hx-swap="none"></div>
     <div sse-swap="card-update" hx-swap="none"></div>
     <div sse-swap="done" hx-swap="none"></div>
   </div>
 
-  <div id="search-stats" class="hidden px-4 py-2.5 border-t border-gray-800 text-[11px] text-gray-500"></div>
+  <div id="search-stats" class="hidden px-4 py-2.5 border-t border-brand-100 text-[11px] text-gray-500"></div>
 
-  {# Empty state — re-skinned dark, reframed as a pivot to knowledge. #}
+  {# Empty state — reframed as a pivot to knowledge. #}
   <div id="search-empty-state" class="hidden px-6 py-12 text-center">
-    <svg class="mx-auto mb-3 h-10 w-10 text-gray-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
     </svg>
-    <p class="text-base font-semibold text-gray-200">No live stock right now.</p>
+    <p class="text-base font-semibold text-brand-900">No live stock right now.</p>
     <p class="text-sm text-gray-500 mt-1">Here's what we already know about this part.</p>
-    <a href="#know" class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-gray-200 text-sm hover:bg-gray-700">
+    <a href="#know" class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-sm hover:bg-brand-100">
       Jump to What we know
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>
     </a>
@@ -119,6 +119,21 @@
       if (payload.error) {
         chip.setAttribute('title', payload.error);
       }
+    });
+
+    // 'done' event: surface the relevance-guard count — off-target catalog matches
+    // (a different MPN than the searched part) that were hidden from the market list.
+    wrapper.addEventListener('htmx:sseMessage', function(evt) {
+      if (!evt.detail || evt.detail.type !== 'done') return;
+      var payload;
+      try { payload = JSON.parse(evt.detail.data); } catch (e) { return; }
+      var n = (payload && payload.off_target) || 0;
+      if (n <= 0) return;
+      var stats = document.getElementById('search-stats');
+      if (!stats) return;
+      stats.textContent = n + ' off-target match' + (n === 1 ? '' : 'es') +
+        ' from catalog distributors hidden (different part number' + (n === 1 ? '' : 's') + ').';
+      stats.classList.remove('hidden');
     });
 
     wrapper.addEventListener('htmx:sseClose', function() {

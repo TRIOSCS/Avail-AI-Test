@@ -305,10 +305,13 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
     |     bumps search_count/last_searched_at on an EXISTING card only (never
     |     creates one — unknown PN stays "New to us" / "Known via FRU crosswalk").
     +-- GET /v2/partials/search/dossier/market?mpn=  part_dossier.dossier_market
-    |     cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
-    |     vendor rows in the dark terminal frame + "↻ Refresh market"; cache MISS
+    |     A degraded-source banner (dossier_market_banner.html) renders above both
+    |     branches when live-market sources are down (auth/quota) — see market_health
+    |     below. cache HIT (Redis search:{key}:latest → search:{id}:results) → cached
+    |     vendor rows in the light market card + "↻ Refresh market"; cache MISS
     |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
-    |     search/run SSE flow (results_shell.html) inside the terminal frame.
+    |     search/run SSE flow (results_shell.html). The banner sits OUTSIDE that
+    |     hx-post div so it survives the cache-miss SSE swap.
     +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
     +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
 ```
@@ -316,9 +319,27 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
 New router `app/routers/part_dossier.py` (GET-only; reuses data/services, no route
 moves). `stream_search_mpn` now also writes the pointer key `search:{normalize_mpn_key
 (mpn)}:latest = search_id` (TTL 900s) so the dossier market cache-hit path can find the
-freshest run. The search-flow `vendor_card.html` + `results_shell.html` are re-skinned in
-place to the dark terminal row/frame (their ONLY consumer is now the dossier market).
-Page-level + per-row RFQ/offer actions (the quick-source endpoints) are a follow-up task.
+freshest run. The search-flow templates (`dossier_shell` "Live market" section,
+`dossier_market`, `results_shell`, `vendor_card`, `shortlist_bar`,
+`requisition_picker_modal`) use the **light brand-card skin** matching the rest of the
+site — the earlier dark "terminal" look was the visual outlier and has been removed.
+Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
+
+**Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
+`_build_connectors` to partition the live-market connectors into available / `down`
+(health_monitor flagged ERROR — auth/quota, operator must rotate credentials in Settings
+→ Sources) / `unconfigured` (no API key). `dossier_market` passes the result as
+`market_health`; the banner names each down source with its specific error as a hover
+tooltip and deep-links `/v2/settings`. Best-effort: a health lookup failure leaves
+`market_health=None` and never breaks the market section.
+
+**Relevance guard** — `stream_search_mpn` keeps only hits whose `mpn_matched`
+`fuzzy_mpn_match`es the searched MPN (handles dash/case + ≤2-char revision suffixes,
+symmetrically). Keyword-match noise from catalog distributors (a different MPN — e.g. a
+component returned for a storage FRU) is excluded before scoring/dedup/cache; the dropped
+count rides the `done` SSE event as `off_target` and surfaces as a footnote in
+`#search-stats`. Cross-references (alternate/FRU part numbers) belong in "What we know",
+not the live-market offer list.
 
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
 
