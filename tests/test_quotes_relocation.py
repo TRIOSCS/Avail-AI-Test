@@ -87,25 +87,94 @@ def test_delete_quote_htmx_returns_hx_redirect(client, db_session, test_user):
     assert resp.headers["HX-Redirect"] == "/v2/requisitions"
 
 
-def test_part_quotes_tab_lists_requisition_quotes(client, db_session, test_user):
-    reqn, part = _req_with_part(db_session, test_user)
-    _quote(db_session, requisition_id=reqn.id, number="Q-WS-1")
-    _quote(db_session, requisition_id=reqn.id, number="Q-WS-2")
-    resp = client.get(f"/v2/partials/parts/{part.id}/tab/quotes")
+def _quote_line(db_session, *, quote_id, mpn, material_card_id=None, qty=10):
+    from app.models.quotes import QuoteLine
+
+    ql = QuoteLine(
+        quote_id=quote_id,
+        mpn=mpn,
+        material_card_id=material_card_id,
+        qty=qty,
+        sell_price=5,
+        margin_pct=20,
+    )
+    db_session.add(ql)
+    db_session.commit()
+    db_session.refresh(ql)
+    return ql
+
+
+def _make_material_card(db_session):
+    """Create a minimal valid MaterialCard (normalized_mpn and display_mpn are NOT
+    NULL)."""
+    from app.models.intelligence import MaterialCard
+
+    card = MaterialCard(
+        normalized_mpn="CARD-MPN-UNIQUE",
+        display_mpn="CARD-MPN-UNIQUE",
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+    return card
+
+
+def test_part_quotes_tab_lists_quotes_with_this_mpn_across_requisitions(client, db_session, test_user):
+    r1, part1 = _req_with_part(db_session, test_user, customer_name="CompA")  # part1.primary_mpn == "MPN-001"
+    r2, _ = _req_with_part(db_session, test_user, customer_name="CompB")
+    q = _quote(db_session, requisition_id=r2.id, number="Q-OTHERREQ")  # quote lives on a DIFFERENT requisition
+    _quote_line(db_session, quote_id=q.id, mpn="MPN-001")
+    resp = client.get(f"/v2/partials/parts/{part1.id}/tab/quotes")
     assert resp.status_code == 200
-    assert "Q-WS-1" in resp.text
-    assert "Q-WS-2" in resp.text
+    assert "Q-OTHERREQ" in resp.text  # cross-requisition match by MPN
+    assert "CompB" in resp.text  # customer of the matching quote shown
 
 
-def test_part_quotes_tab_404_for_missing_requirement(client):
-    assert client.get("/v2/partials/parts/999999/tab/quotes").status_code == 404
+def test_part_quotes_tab_matches_substitute_mpn(client, db_session, test_user):
+    r1, part1 = _req_with_part(db_session, test_user)
+    part1.substitutes = [{"mpn": "SUB-999", "manufacturer": "X"}]
+    db_session.commit()
+    r2, _ = _req_with_part(db_session, test_user)
+    q = _quote(db_session, requisition_id=r2.id, number="Q-SUBMATCH")
+    _quote_line(db_session, quote_id=q.id, mpn="SUB-999")
+    resp = client.get(f"/v2/partials/parts/{part1.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "Q-SUBMATCH" in resp.text
+
+
+def test_part_quotes_tab_matches_canonical_material_card(client, db_session, test_user):
+    # Build a minimal MaterialCard, attach it to the part and to a quote line with a DIFFERENT mpn.
+    card = _make_material_card(db_session)
+    r1, part1 = _req_with_part(db_session, test_user)
+    part1.material_card_id = card.id
+    db_session.commit()
+    r2, _ = _req_with_part(db_session, test_user)
+    q = _quote(db_session, requisition_id=r2.id, number="Q-CARDMATCH")
+    _quote_line(db_session, quote_id=q.id, mpn="DIFFERENT-MPN", material_card_id=card.id)
+    resp = client.get(f"/v2/partials/parts/{part1.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "Q-CARDMATCH" in resp.text  # matched via canonical material_card, not MPN
+
+
+def test_part_quotes_tab_excludes_unrelated_mpn(client, db_session, test_user):
+    r1, part1 = _req_with_part(db_session, test_user)  # primary_mpn == "MPN-001"
+    r2, _ = _req_with_part(db_session, test_user)
+    q = _quote(db_session, requisition_id=r2.id, number="Q-UNRELATED")
+    _quote_line(db_session, quote_id=q.id, mpn="ZZZ-000")
+    resp = client.get(f"/v2/partials/parts/{part1.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "Q-UNRELATED" not in resp.text
 
 
 def test_part_quotes_tab_empty_state(client, db_session, test_user):
     _, part = _req_with_part(db_session, test_user)
     resp = client.get(f"/v2/partials/parts/{part.id}/tab/quotes")
     assert resp.status_code == 200
-    assert "No quotes" in resp.text
+    assert "hasn't been on any quotes" in resp.text
+
+
+def test_part_quotes_tab_404_for_missing_requirement(client):
+    assert client.get("/v2/partials/parts/999999/tab/quotes").status_code == 404
 
 
 def _company_with_site(db_session, *, name="Acme Corp"):

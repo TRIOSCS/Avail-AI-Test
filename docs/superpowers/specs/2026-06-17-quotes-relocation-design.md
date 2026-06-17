@@ -95,23 +95,47 @@ async def part_tab_quotes(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Quotes for the parent requisition of the selected part."""
+    """Cross-requisition quote history for the selected part: every quote LINE
+    whose MPN matches this part (primary + substitutes) OR whose material_card
+    matches this part's canonical card — across ALL requisitions/customers."""
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
-        raise HTTPException(404, "Requirement not found")
-    quotes = (
-        db.query(Quote)
-        .filter(Quote.requisition_id == requirement.requisition_id)
-        .order_by(Quote.created_at.desc().nullslast())
-        .all()
-    )
+        raise HTTPException(404, "Part not found")
+
+    from ..utils.normalization import parse_substitute_mpns
+
+    mpns: set[str] = set()
+    if requirement.primary_mpn:
+        mpns.add(requirement.primary_mpn.upper())
+    for sub in parse_substitute_mpns(requirement.substitutes or [], requirement.primary_mpn or ""):
+        if sub.get("mpn"):
+            mpns.add(sub["mpn"].upper())
+
+    conds = []
+    if mpns:
+        conds.append(sqlfunc.upper(QuoteLine.mpn).in_(mpns))
+    if requirement.material_card_id:
+        conds.append(QuoteLine.material_card_id == requirement.material_card_id)
+
+    quote_lines = []
+    if conds:
+        quote_lines = (
+            db.query(QuoteLine)
+            .join(Quote, QuoteLine.quote_id == Quote.id)
+            .options(joinedload(QuoteLine.quote).joinedload(Quote.requisition))
+            .filter(or_(*conds))
+            .order_by(Quote.created_at.desc().nullslast())
+            .all()
+        )
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"quotes": quotes, "req": db.get(Requisition, requirement.requisition_id)})
-    return template_response("htmx/partials/requisitions/tabs/quotes.html", ctx)
+    ctx.update({"requirement": requirement, "quote_lines": quote_lines})
+    return template_response("htmx/partials/parts/tabs/quotes.html", ctx)
 ```
-- **Reuses the existing `requisitions/tabs/quotes.html`** template as-is (it consumes only `quotes`; rows deep-link to `/v2/quotes/{id}`). No new template.
-- `Requirement.requisition_id` is the FK to the parent requisition (`app/models/sourcing.py:106`) — confirmed.
-- Behavior: every part of the same requisition shows that requisition's quotes (quotes are requisition-level). This is intentional and consistent.
+- **DESIGN CHANGE (per user, 2026-06-17):** the requirement tab is **MPN-scoped and cross-requisition**, not requisition-scoped. It answers "what quotes has this part number been on, and at what price" across every requisition and customer.
+- **Match breadth (user choice):** this part's `primary_mpn` + parsed `substitutes` (upper-cased, matched against `QuoteLine.mpn`) **OR** the same canonical part (`QuoteLine.material_card_id == requirement.material_card_id`). `QuoteLine.mpn` is indexed (`ix_quote_lines_mpn`); `material_card_id` is indexed.
+- **Line-centric rows.** One row per matching `QuoteLine` (a quote that carried this part on two lines legitimately shows both quoted prices), ordered by the quote's `created_at` desc. `joinedload(QuoteLine.quote → Quote.requisition)` avoids N+1; the customer is `line.quote.requisition.customer_name`.
+- **New template `app/templates/htmx/partials/parts/tabs/quotes.html`** (the part view needs cross-requisition columns — Quote #, Customer, Requisition, Qty, Sell, Margin %, Status, Created — that the requisition-scoped `requisitions/tabs/quotes.html` lacks). Rows deep-link to `/v2/quotes/{line.quote.id}`. The requisition-detail sub-tab keeps using `requisitions/tabs/quotes.html` unchanged.
+- `Requirement` has `primary_mpn`, `substitutes` (JSON), and `material_card_id` (`app/models/sourcing.py`) — confirmed. Requires `QuoteLine` imported in `htmx_views.py`.
 
 ### 4.4 Account-side Quotes tab (CRM customer detail)
 **File:** `app/templates/htmx/partials/customers/detail.html` (line 132)
