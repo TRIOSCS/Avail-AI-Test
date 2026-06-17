@@ -1385,17 +1385,8 @@ class TestBuyPlans:
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Quotes
+# Quotes (standalone list retired; see test_quotes_relocation.py)
 # ══════════════════════════════════════════════════════════════════════════
-
-
-class TestQuotesList:
-    """Test quotes list partial."""
-
-    @pytest.mark.parametrize("query", ["", "?status=draft"], ids=["all", "status"])
-    def test_list(self, client: TestClient, query: str):
-        resp = client.get(f"/v2/partials/quotes{query}")
-        assert resp.status_code == 200
 
 
 # ══════════════════════════════════════════════════════════════════════════

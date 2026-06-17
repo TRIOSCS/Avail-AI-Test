@@ -254,6 +254,20 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 # ── Full page entry points ──────────────────────────────────────────────
 
 
+@router.get("/v2/quotes")
+async def quotes_list_redirect():
+    """Standalone Quotes list retired — quotes now live on the requirement (Reqs
+    workspace Quotes tab) and the CRM account (Quotes tab).
+
+    Kept as a
+    redirect so stale bookmarks/links land somewhere sensible.
+    Called by: browser navigation to the old /v2/quotes URL.
+    """
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/v2/requisitions", status_code=307)
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -266,7 +280,6 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
-@router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
@@ -4623,6 +4636,35 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def _company_quotes_query(db: Session, company):
+    """Quotes belonging to an account: union of quotes linked via the
+    company's customer sites OR via the company's requisitions (the latter
+    catches quotes whose customer_site_id is NULL). Returns a Query, or None
+    when the account can own no quotes (no sites and no requisitions).
+    Called by: company_detail_partial (count), company_tab (quotes + activity).
+    """
+    site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company.id).all()]
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    conds = []
+    if site_ids:
+        conds.append(Quote.customer_site_id.in_(site_ids))
+    if req_ids:
+        conds.append(Quote.requisition_id.in_(req_ids))
+    if not conds:
+        return None
+    return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4664,12 +4706,16 @@ async def company_detail_partial(
         or 0
     )
 
+    _cq = _company_quotes_query(db, company)
+    quote_count = _cq.count() if _cq is not None else 0
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
             "company": company,
             "sites": sites,
             "open_req_count": open_req_count,
+            "quote_count": quote_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
@@ -4693,7 +4739,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4761,6 +4807,13 @@ async def company_tab(
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
         return HTMLResponse(html)
 
+    elif tab == "quotes":
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).all() if cq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "quotes": quotes})
+        return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
     else:  # activity
         from sqlalchemy import or_ as or_clause
 
@@ -4797,17 +4850,10 @@ async def company_tab(
             for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
                 req_map[r.id] = r
 
-        # Quotes linked to company's sites
-        site_ids = [s.id for s in db.query(CustomerSite.id).filter(CustomerSite.company_id == company_id).all()]
-        quotes = []
-        if site_ids:
-            quotes = (
-                db.query(Quote)
-                .filter(Quote.customer_site_id.in_(site_ids))
-                .order_by(Quote.created_at.desc().nullslast())
-                .limit(20)
-                .all()
-            )
+        # Quotes for this account — union of site-linked and requisition-linked
+        # (matches the Quotes tab; site link alone misses NULL-site quotes).
+        cq = _company_quotes_query(db, company)
+        quotes = cq.order_by(Quote.created_at.desc().nullslast()).limit(20).all() if cq is not None else []
 
         # Direct activity logs on this company + its requisitions
         activity_filters = [ActivityLog.company_id == company.id]
@@ -5315,7 +5361,7 @@ async def delete_quote_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a draft quote and return refreshed quotes list."""
+    """Delete a draft quote and redirect to the requisitions page."""
     quote = db.query(Quote).filter(Quote.id == quote_id).first()
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -5326,7 +5372,7 @@ async def delete_quote_htmx(
     db.commit()
     logger.info("Quote {} deleted by {}", quote_id, user.email)
 
-    return await quotes_list_partial(request=request, user=user, db=db, limit=50, offset=0)
+    return HTMLResponse(status_code=200, headers={"HX-Redirect": "/v2/requisitions"})
 
 
 @router.post("/v2/partials/quotes/{quote_id}/reopen", response_class=HTMLResponse)
@@ -7949,34 +7995,6 @@ async def update_material_card(
 # ── Quotes partials ───────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/quotes", response_class=HTMLResponse)
-async def quotes_list_partial(
-    request: Request,
-    q: str = "",
-    status: str = "",
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return quotes list as HTML partial."""
-    query = db.query(Quote).options(
-        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        joinedload(Quote.requisition),
-        joinedload(Quote.created_by),
-    )
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(Quote.quote_number))
-    if status:
-        query = query.filter(Quote.status == status)
-    total = query.count()
-    quotes = query.order_by(Quote.created_at.desc()).offset(offset).limit(limit).all()
-    ctx = _base_ctx(request, user, "quotes")
-    ctx.update({"quotes": quotes, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
-    return template_response("htmx/partials/quotes/list.html", ctx)
-
-
 @router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
 async def quote_detail_partial(
     request: Request,
@@ -10003,6 +10021,50 @@ async def part_tab_req_details(
         }
     )
     return template_response("htmx/partials/parts/tabs/req_details.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/quotes", response_class=HTMLResponse)
+async def part_tab_quotes(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition quote history for the selected part: every quote LINE
+    whose MPN matches this part (primary + substitutes) OR whose material_card
+    matches this part's canonical card — across ALL requisitions/customers."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Part not found")
+
+    from ..utils.normalization import parse_substitute_mpns
+
+    mpns: set[str] = set()
+    if requirement.primary_mpn:
+        mpns.add(requirement.primary_mpn.upper())
+    for sub in parse_substitute_mpns(requirement.substitutes or [], requirement.primary_mpn or ""):
+        if sub.get("mpn"):
+            mpns.add(sub["mpn"].upper())
+
+    conds = []
+    if mpns:
+        conds.append(sqlfunc.upper(QuoteLine.mpn).in_(mpns))
+    if requirement.material_card_id:
+        conds.append(QuoteLine.material_card_id == requirement.material_card_id)
+
+    quote_lines = []
+    if conds:
+        quote_lines = (
+            db.query(QuoteLine)
+            .join(Quote, QuoteLine.quote_id == Quote.id)
+            .options(joinedload(QuoteLine.quote).joinedload(Quote.requisition))
+            .filter(or_(*conds))
+            .order_by(Quote.created_at.desc().nullslast())
+            .all()
+        )
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": requirement, "quote_lines": quote_lines})
+    return template_response("htmx/partials/parts/tabs/quotes.html", ctx)
 
 
 @router.get("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)
