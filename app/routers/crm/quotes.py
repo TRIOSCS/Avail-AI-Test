@@ -460,10 +460,6 @@ async def quote_result(
     if req:
         req.status = payload.result
 
-    # CPH hook: record purchase history when quote is won
-    if payload.result == QuoteStatus.WON:
-        _record_quote_won_history(db, req, quote)
-
     # Notify requisition creator about quote outcome
     notify_user_id = req.created_by if req else None
     if notify_user_id and payload.result in ("won", "lost"):
@@ -611,41 +607,3 @@ async def pricing_history(mpn: str, user: User = Depends(require_user), db: Sess
         "avg_margin": round(sum(margins) / len(margins), 2) if margins else None,
         "price_range": [min(prices), max(prices)] if prices else None,
     }
-
-
-def _record_quote_won_history(db: Session, req: Requisition | None, quote: Quote) -> None:
-    """Feed customer_part_history from quote line items when quote is won directly.
-
-    Errors are logged but never block the quote result flow.
-    """
-    if not req or not req.customer_site_id:
-        return
-    try:
-        from ...services.purchase_history_service import upsert_purchase
-
-        site = db.get(CustomerSite, req.customer_site_id)
-        if not site or not site.company_id:  # pragma: no cover
-            return
-        company_id = site.company_id
-
-        for li in quote.line_items or []:
-            card_id = li.get("material_card_id")
-            if not card_id:
-                continue
-            upsert_purchase(
-                db,
-                company_id=company_id,
-                material_card_id=card_id,
-                source="avail_quote_won",
-                unit_price=li.get("sell_price"),
-                quantity=li.get("qty"),
-                source_ref=f"quote:{quote.id}",
-            )
-    except Exception as e:
-        logger.error(
-            "Quote won purchase history recording failed for quote_id={} quote_number={}: {}",
-            quote.id,
-            quote.quote_number,
-            e,
-            exc_info=True,
-        )

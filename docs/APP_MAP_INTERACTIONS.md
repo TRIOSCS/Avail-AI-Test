@@ -972,7 +972,52 @@ buyplan_workflow.py (state machine)
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+**Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
+(app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
+`record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)
+inside a best-effort try/except so a CPH failure never rolls back the completion.
+
+```
+check_completion (buyplan_workflow.py)
+    |
+    v  [plan transitions to COMPLETE]
+record_buyplan_purchase_history (purchase_history_service.py)
+    |
+    +---> Idempotency guard: plan.purchase_history_recorded_at IS NOT NULL → skip
+    |
+    +---> For each VERIFIED buy_plan_line:
+    |       +---> resolve material_card_id (from requirement, then from offer)
+    |       +---> upsert_purchase(db, company_id, material_card_id,
+    |                             source="buy_plan", unit_sell, quantity,
+    |                             purchased_at=plan.completed_at,
+    |                             source_ref=sales_order_number)
+    |             --> DB: UPSERT customer_part_history
+    |
+    +---> plan.purchase_history_recorded_at = now(); db.flush()  [idempotency stamp]
+    |
+    +---> refresh_matches_for_cards(db, affected_card_ids)  [immediate re-match]
+              |
+              +---> For each affected card: DB: SELECT newest offers (capped at 5)
+              +---> find_matches_for_offer(db, offer) → proactive_matching.py
+              +---> DB: INSERT proactive_matches (engine dedup prevents duplicates)
+```
+
+The buy plan is the **single source of truth** for CPH. The prior offer-won and
+quote-won hooks that previously wrote CPH rows have been retired; all confirmed
+customer purchases now flow through buy-plan completion. Historical rows written
+by the old hooks are preserved (their `source` values remain valid).
+
+Historical completed plans that predate this feature are backfilled one-time via
+`python -m app.management.backfill_buyplan_cph`. The command records CPH for every
+COMPLETED buy plan whose `purchase_history_recorded_at` is NULL, committing per plan.
+It is idempotent and safe to re-run — plans that already have the stamp are skipped.
+
 ## 7. Proactive Matching
+
+`customer_part_history` (CPH) is the backbone for proactive matching. As of the
+buy-plan CPH feed (§ 6 above), CPH rows are fed by buy-plan completion rather than
+offer/quote won hooks (those hooks have been retired). The matching engine itself
+is unchanged.
 
 ```
 APScheduler (daily) OR user trigger
@@ -982,6 +1027,7 @@ proactive_matching.py
     |
     +---> DB: SELECT offers WHERE status='active' AND recent
     +---> DB: SELECT customer_part_history (who bought this MPN?)
+    |         (source="buy_plan" for all new rows; legacy values also present)
     +---> DB: CHECK proactive_throttle (not offered recently?)
     +---> DB: CHECK proactive_do_not_offer (not blacklisted?)
     +---> Score: match_score = f(purchase_count, recency, margin)
@@ -994,6 +1040,13 @@ User sends:
     +---> DB: INSERT proactive_throttle
     +---> activity_service.py --> DB: INSERT activity_log
 ```
+
+**Immediate re-match on completion.** `refresh_matches_for_cards` (called from
+`record_buyplan_purchase_history`) runs `find_matches_for_offer` against the
+newest active offers for every card touched by the completed buy plan, so new
+proactive matches surface on the Proactive tab without waiting for the daily cron.
+Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
+duplicate matches.
 
 ## 8. Activity Digest (AI Timeline Summary)
 

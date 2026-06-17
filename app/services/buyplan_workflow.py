@@ -335,6 +335,14 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
         plan.case_report = generate_case_report(plan, db)
         logger.info("Buy plan {} auto-completed (all lines terminal)", plan_id)
         db.flush()
+        # Feed the proactive backbone from this confirmed customer purchase (best-effort).
+        try:
+            from app.services.purchase_history_service import record_buyplan_purchase_history
+
+            record_buyplan_purchase_history(db, plan)
+        except Exception:  # noqa: BLE001 — CPH must never break completion
+            logger.exception("BUYPLAN_CPH: failed to record purchase history for plan {}", plan_id)
+        db.flush()
 
     return plan
 
