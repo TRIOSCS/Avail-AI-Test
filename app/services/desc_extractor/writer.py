@@ -9,9 +9,9 @@ first. (The old per-writer confidence pre-gate is gone — the ladder owns arbit
 
 The SPEC stage (``extract_and_record`` / ``extract_and_record_specs``) only fills facets
 for cards ALREADY categorized to a handled commodity (SPEC_COMMODITIES: hdd/ssd/dram/
-power_supplies/displays/tape_drives/gpu/motherboards/cpu — record_spec requires a
-category). The phase-2/3 commodities have no MPN decoders, so desc_parse is their top
-non-vendor source by confidence.
+power_supplies/displays/tape_drives/gpu/motherboards/cpu/capacitors/resistors —
+record_spec requires a category). The phase-2/3 commodities have no MPN decoders, so
+desc_parse is their top non-vendor source by confidence.
 
 The CATEGORIZE stage (``categorize_and_record`` — opt-in; only the one-shot CLI / ingest
 call it, the worker still runs spec-only) closes the gap for UNCATEGORIZED cards: a strict

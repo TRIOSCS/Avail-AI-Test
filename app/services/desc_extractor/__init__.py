@@ -1,5 +1,5 @@
 """Deterministic description→spec field extraction (storage, memory, PSU, displays,
-tape, GPU, motherboards, CPU, capacitors).
+tape, GPU, motherboards, CPU, capacitors, resistors).
 
 What: reads parametric specs straight out of TRIO's compact *human description*
       strings (part master + inventory sheets — e.g. ``HD, 450GB, 15KRPM, 3.5",
@@ -17,7 +17,7 @@ What: reads parametric specs straight out of TRIO's compact *human description*
 Called by: the enrichment worker's second pass via desc_extractor/writer.py
       (between the mpn-decode pass at 0.95 and the AI spec reader at 0.85).
 Depends on: desc_extractor.{_common,storage,memory,power,display,tape,gpu,board,
-      cpu,capacitor} (pure functions).
+      cpu,capacitor,resistor} (pure functions).
 
 Coverage is deliberately CONSERVATIVE: a field is emitted only when the description
 grammar expresses it unambiguously; conflicting signals omit the key, a foreign
@@ -39,6 +39,7 @@ from app.services.desc_extractor.display import extract_display
 from app.services.desc_extractor.gpu import extract_gpu
 from app.services.desc_extractor.memory import extract_memory
 from app.services.desc_extractor.power import extract_psu
+from app.services.desc_extractor.resistor import extract_resistor
 from app.services.desc_extractor.storage import extract_storage
 from app.services.desc_extractor.tape import extract_tape
 
@@ -53,6 +54,7 @@ _FAMILY = {
     "gpu": "gpu",
     "cpu": "cpu",
     "capacitors": "capacitor",
+    "resistors": "resistor",
 }
 
 # TRIO part-master grammar is "<Commodity label>, <details>, <OEM>". A leading label
@@ -112,6 +114,9 @@ _LEAD_MAP = {
     "CAPACITOR": "capacitors",
     "CAPACITORS": "capacitors",
     "MLCC": "capacitors",
+    "RES": "resistors",
+    "RESISTOR": "resistors",
+    "RESISTORS": "resistors",
 }
 _FOREIGN = "__foreign__"
 
@@ -223,6 +228,11 @@ _BODY_TOKENS = (
     # MLCC is the unambiguous distributor token; bare "CAPACITOR(S)" routes too. A bare
     # "CAP," lead is handled by _LEAD_MAP (CAP is too generic as a free-text body token).
     ("capacitors", re.compile(r"\bMLCC\b|\bCAPACITORS?\b")),
+    # "RESISTOR(S)"/"THICK FILM"/"THIN FILM" are the unambiguous distributor resistor
+    # tokens. A bare "OHM" is DELIBERATELY excluded: ferrite beads and inductors quote
+    # an impedance in ohms ("Ferrite Beads 330 OHM"), so OHM-routing would mis-claim
+    # them. A bare "RES," lead is handled by _LEAD_MAP.
+    ("resistors", re.compile(r"\bRESISTORS?\b|\bTHICK FILM\b|\bTHIN FILM\b")),
 )
 
 # SUBORDINATE cpu routing tokens — CPU family words and model strings appear inside
@@ -299,7 +309,7 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
     ``commodity_hint`` is the caller's authoritative commodity (typically the card's
     existing category): it routes extraction even when the text carries no commodity
     token, and a hint outside SPEC_COMMODITIES (hdd/ssd/dram/power_supplies/displays/
-    tape_drives/gpu/motherboards/cpu/capacitors) returns None. The returned
+    tape_drives/gpu/motherboards/cpu/capacitors/resistors) returns None. The returned
     ``commodity`` is a HINT for callers — nothing here ever writes a category.
     """
     if not description:
@@ -380,6 +390,8 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
         specs = extract_board(text)
     elif effective == "capacitors":
         specs = extract_capacitor(text)
+    elif effective == "resistors":
+        specs = extract_resistor(text)
     else:  # cpu — the only remaining SPEC_COMMODITIES member
         if is_cpu_pollution(text):
             # Step-0 pollution guard (docs/CPU_DECODE_FEASIBILITY.md): the SFDC CPU
