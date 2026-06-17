@@ -62,7 +62,6 @@ class TestNavHighlightingReactive:
             "buy-plans",
             "crm",
             "proactive",
-            "quotes",
             "prospecting",
             "settings",
         ],
@@ -70,6 +69,13 @@ class TestNavHighlightingReactive:
     def test_nav_has_section(self, section):
         """Each nav section is present in the bottom nav."""
         assert section in NAV_CONTENT
+
+    def test_quotes_not_in_nav(self):
+        """Quotes was retired as a standalone nav tab (PR quotes-relocation).
+
+        Quotes are now surfaced via the Reqs workspace and CRM account tabs.
+        """
+        assert "quotes" not in NAV_CONTENT
 
 
 class TestNoSidebar:
