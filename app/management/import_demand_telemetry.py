@@ -57,13 +57,25 @@ _TS_COL = "Most_Recent_Source_TS__c"
 _TS_FORMATS = ("%m/%d/%Y %H:%M", "%m/%d/%Y %H:%M:%S", "%m/%d/%Y")
 
 
+# material_cards.sourced_qty_90d is Postgres INT4 (max 2,147,483,647). The column is a
+# coarse PRIORITIZATION rank, never a displayed count, so we CLAMP out-of-range source
+# values instead of widening the column: a few SFDC rows carry absurd 90-day quantities
+# (e.g. manufacturer-name rows at 37e9 that aren't real parts) which would overflow INT4
+# and, if stored via BIGINT, would dominate the ranking with junk. A clamped value still
+# sorts at the top, which is the correct relative outcome.
+_SOURCED_QTY_MAX = 2_147_483_647
+
+
 def _parse_qty(raw: str | None) -> int | None:
-    """Parse the sourced-qty cell ("14", "14.0", "") to an int, None when
-    absent/junk."""
+    """Parse the sourced-qty cell ("14", "14.0", "") to an int, None when absent/junk.
+
+    Clamps to ``_SOURCED_QTY_MAX`` so out-of-range SFDC artifacts can't overflow the
+    INT4 column (the value is a ranking signal, so a clamped max still sorts first).
+    """
     if raw is None or not raw.strip():
         return None
     try:
-        return int(float(raw.strip()))
+        return min(int(float(raw.strip())), _SOURCED_QTY_MAX)
     except ValueError:
         return None
 
