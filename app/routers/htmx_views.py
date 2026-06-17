@@ -253,6 +253,20 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 # ── Full page entry points ──────────────────────────────────────────────
 
 
+@router.get("/v2/quotes")
+async def quotes_list_redirect():
+    """Standalone Quotes list retired — quotes now live on the requirement (Reqs
+    workspace Quotes tab) and the CRM account (Quotes tab).
+
+    Kept as a
+    redirect so stale bookmarks/links land somewhere sensible.
+    Called by: browser navigation to the old /v2/quotes URL.
+    """
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/v2/requisitions", status_code=307)
+
+
 @router.get("/v2", response_class=HTMLResponse)
 @router.get("/v2/requisitions", response_class=HTMLResponse)
 @router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
@@ -265,7 +279,6 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
-@router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
@@ -5325,7 +5338,9 @@ async def delete_quote_htmx(
     db.commit()
     logger.info("Quote {} deleted by {}", quote_id, user.email)
 
-    return await quotes_list_partial(request=request, user=user, db=db, limit=50, offset=0)
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse(url="/v2/requisitions", status_code=307)
 
 
 @router.post("/v2/partials/quotes/{quote_id}/reopen", response_class=HTMLResponse)
@@ -7946,34 +7961,6 @@ async def update_material_card(
 
 
 # ── Quotes partials ───────────────────────────────────────────────────
-
-
-@router.get("/v2/partials/quotes", response_class=HTMLResponse)
-async def quotes_list_partial(
-    request: Request,
-    q: str = "",
-    status: str = "",
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return quotes list as HTML partial."""
-    query = db.query(Quote).options(
-        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        joinedload(Quote.requisition),
-        joinedload(Quote.created_by),
-    )
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(Quote.quote_number))
-    if status:
-        query = query.filter(Quote.status == status)
-    total = query.count()
-    quotes = query.order_by(Quote.created_at.desc()).offset(offset).limit(limit).all()
-    ctx = _base_ctx(request, user, "quotes")
-    ctx.update({"quotes": quotes, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
-    return template_response("htmx/partials/quotes/list.html", ctx)
 
 
 @router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
