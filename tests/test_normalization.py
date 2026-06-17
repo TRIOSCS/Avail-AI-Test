@@ -202,17 +202,17 @@ class TestFuzzyMpnMatch:
             pytest.param("LM317T", "LM317T", True, id="exact_match"),
             pytest.param("lm317t", "LM317T", True, id="case_insensitive"),
             pytest.param("LM2596S-5.0", "LM2596S5.0", True, id="dash_vs_no_dash"),
-            # Short suffix detection uses str.replace which doesn't handle
-            # this case correctly — one-char suffix not detected
-            pytest.param("SN74HC595N", "SN74HC595NA", False, id="trailing_revision"),
+            # Trailing revision is detected regardless of argument order (shorter
+            # base passed first). Suffix "A" is <= 2 chars → likely the same part.
+            pytest.param("SN74HC595N", "SN74HC595NA", True, id="trailing_revision"),
             pytest.param("LM317T", "NE555P", False, id="completely_different"),
             pytest.param(None, "LM317T", False, id="none_a"),
             pytest.param("LM317T", None, False, id="none_b"),
             pytest.param(None, None, False, id="both_none"),
             # MPNs shorter than 3 chars after normalize are rejected
             pytest.param("AB", "AB", False, id="short_mpn_rejected"),
-            # Single-char suffix difference is not a fuzzy match.
-            pytest.param("LM317T", "LM317TA", False, id="one_prefix_of_other_short_suffix"),
+            # Single-char trailing suffix (revision) IS a fuzzy match, either order.
+            pytest.param("LM317T", "LM317TA", True, id="one_prefix_of_other_short_suffix"),
             # Empty string MPN returns False.
             pytest.param("", "LM317T", False, id="empty_string_a"),
             pytest.param("LM317T", "", False, id="empty_string_b"),
@@ -381,6 +381,19 @@ class TestFuzzyMpnMatchRevision:
         result = fuzzy_mpn_match("NE555P", "NE555")
         assert result is True
 
+    def test_revision_match_is_symmetric(self):
+        # The match must hold regardless of argument order — the base MPN passed
+        # first (the common "search the base part, listing carries a suffix" case)
+        # must still match. Regression guard for the old asymmetric str.replace.
+        assert fuzzy_mpn_match("LM317T", "LM317TN") is True
+        assert fuzzy_mpn_match("LM317TN", "LM317T") is True
+        assert fuzzy_mpn_match("17P9905", "17P9905-LF") is True
+        assert fuzzy_mpn_match("17P9905-LF", "17P9905") is True
+
+    def test_long_suffix_still_rejected(self):
+        # A 3+ char trailing difference is NOT a revision (different part).
+        assert fuzzy_mpn_match("LM317T", "LM317TABC") is False
+
 
 class TestParseSubstituteMpns:
     """Cover lines 417-435: parse_substitute_mpns function."""
@@ -444,3 +457,16 @@ class TestParseSubstituteMpns:
         result = parse_substitute_mpns(subs, "LM317T")
         assert len(result) == 1
         assert result[0]["mpn"] == "LM317AT"
+
+
+class TestFuzzyMpnMatchBoundary:
+    """Boundary coverage for the symmetric revision-suffix check."""
+
+    def test_identical_after_strip_is_exact_not_revision(self):
+        # Equal stripped keys → caught by the exact/stripped branch (suffix length 0),
+        # never misclassified as a 0-length revision.
+        assert fuzzy_mpn_match("LM-317-T", "LM317T") is True
+
+    def test_three_char_suffix_rejected_both_orders(self):
+        assert fuzzy_mpn_match("LM317TABC", "LM317T") is False
+        assert fuzzy_mpn_match("LM317T", "LM317TABC") is False

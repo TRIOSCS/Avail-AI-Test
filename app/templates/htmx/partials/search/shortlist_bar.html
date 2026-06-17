@@ -10,11 +10,11 @@
      x-transition:leave="transition ease-in duration-150 transform"
      x-transition:leave-start="translate-y-0"
      x-transition:leave-end="translate-y-full"
-     class="fixed bottom-16 left-0 right-0 z-30 bg-gray-900 border-t border-gray-700 px-4 py-3 shadow-2xl"
+     class="fixed bottom-16 left-0 right-0 z-30 bg-white border-t border-brand-200 px-4 py-3 shadow-2xl"
      x-cloak>
   <div class="max-w-7xl mx-auto flex items-center justify-between">
-    <span class="text-sm font-medium text-white">
-      <span x-text="$store.shortlist.count" class="font-mono text-brand-400"></span>
+    <span class="text-sm font-medium text-brand-900">
+      <span x-text="$store.shortlist.count" class="font-mono text-brand-600"></span>
       vendor<span x-show="$store.shortlist.count !== 1" x-cloak>s</span> selected
     </span>
     <div class="flex items-center gap-2">
@@ -23,11 +23,11 @@
         Add to Requisition
       </button>
       <button @click="$dispatch('open-modal', {url: '/v2/partials/search/requisition-picker?action=rfq&items=' + encodeURIComponent(JSON.stringify($store.shortlist.items))})"
-              class="px-4 py-2 text-sm font-semibold bg-gray-700 text-white rounded-lg hover:bg-gray-600 transition-colors border border-gray-600">
+              class="px-4 py-2 text-sm font-semibold bg-white text-brand-700 rounded-lg hover:bg-brand-50 transition-colors border border-brand-300">
         Create RFQ
       </button>
       <button @click="$store.shortlist.clear()"
-              class="px-3 py-2 text-sm text-gray-400 hover:text-white transition-colors">
+              class="px-3 py-2 text-sm text-gray-500 hover:text-brand-700 transition-colors">
         Clear
       </button>
     </div>

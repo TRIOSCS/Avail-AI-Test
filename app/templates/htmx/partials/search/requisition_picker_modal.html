@@ -3,13 +3,13 @@
    Depends on: htmx_views requisition_picker + add_to_requisition routes
 #}
 <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-label="Add to requisition" @click.self="$el.remove()" @keydown.escape="$el.remove()">
-  <div class="bg-gray-800 rounded-lg border border-gray-700 shadow-2xl w-full max-w-md mx-4 p-6">
-    <h3 class="text-lg font-semibold text-white mb-4">Add to Requisition</h3>
+  <div class="bg-white rounded-lg border border-brand-200 shadow-2xl w-full max-w-md mx-4 p-6">
+    <h3 class="text-lg font-semibold text-brand-900 mb-4">Add to Requisition</h3>
 
     {% if requisitions %}
     <div class="space-y-2 max-h-64 overflow-y-auto">
       {% for req in requisitions %}
-      <button class="w-full text-left px-3 py-2 rounded bg-gray-700 hover:bg-gray-600 text-sm text-white transition-colors"
+      <button class="w-full text-left px-3 py-2 rounded border border-brand-200 bg-white hover:bg-brand-50 text-sm text-brand-900 transition-colors"
               hx-post="/v2/partials/search/add-to-requisition"
               hx-ext="json-enc"
               hx-vals='{"requisition_id": {{ req.id }}, "mpn": "{{ mpn }}", "items": {{ items_json }}}'
@@ -17,18 +17,18 @@
               hx-swap="innerHTML"
               data-loading-disable>
         <div class="font-medium">{{ req.name }}</div>
-        <div class="text-xs text-gray-400">{{ req.customer_name|default('', true) }} &middot; {{ req.requirements|length }} parts</div>
+        <div class="text-xs text-gray-500">{{ req.customer_name|default('', true) }} &middot; {{ req.requirements|length }} parts</div>
       </button>
       {% endfor %}
     </div>
     {% else %}
-    <p class="text-sm text-gray-400">No requisitions found. Create one first.</p>
+    <p class="text-sm text-gray-500">No requisitions found. Create one first.</p>
     {% endif %}
 
     <div id="modal-result" class="mt-3"></div>
 
     <div class="mt-4 flex justify-end">
-      <button @click="$el.closest('[class*=fixed]').remove()" class="px-4 py-2 text-sm text-gray-400 hover:text-white">
+      <button @click="$el.closest('[class*=fixed]').remove()" class="px-4 py-2 text-sm text-gray-500 hover:text-brand-700">
         Close
       </button>
     </div>

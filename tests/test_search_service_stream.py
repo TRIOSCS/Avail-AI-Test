@@ -400,3 +400,168 @@ class TestStreamSearchMpnLatestPointer:
         assert f"search:{key}:latest" in setex_keys, setex_keys
         assert setex_keys[f"search:{key}:latest"] == (f"search:{key}:latest", 900, "sid-pointer-1")
         assert "search:sid-pointer-1:results" in setex_keys
+
+
+# ── Test: Relevance guard — off-target (different MPN) hits are excluded ──────
+#
+# Connectors that keyword-match (e.g. component distributors hit with a storage
+# FRU) return rows under a DIFFERENT mpn_matched. Those are catalog noise, not
+# offers for the searched part, so stream_search_mpn must drop them BEFORE
+# scoring/dedup and report the dropped count via the "done" event's off_target.
+
+
+class TestStreamSearchMpnRelevanceGuard:
+    def _conn(self, hits):
+        c = MagicMock()
+        c.source_name = "mouser"
+        c.search = AsyncMock(return_value=hits)
+        return c
+
+    async def test_off_target_hit_excluded_and_counted(self, db_session: Session):
+        """Off-target hits (different MPN) are dropped pre-scoring; off_target counts
+        them."""
+        import json
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        captured: dict = {}
+
+        def fake_dedup(scored, acc):
+            captured["scored"] = list(scored)
+            acc.extend(scored)
+            return (list(scored), [])
+
+        conn = self._conn(
+            [
+                {"mpn_matched": "17P9905", "vendor_name": "BrokerCo"},  # on-target
+                {"mpn_matched": "1300940294", "vendor_name": "Mouser"},  # off-target
+            ]
+        )
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+        ):
+            await stream_search_mpn("test-relevance-001", "17P9905")
+
+        assert len(captured["scored"]) == 1
+        assert captured["scored"][0]["mpn_matched"] == "17P9905"
+
+        done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
+        payload = json.loads(done[0][2])
+        assert payload["off_target"] == 1
+        assert payload["total_results"] == 1
+
+    async def test_revision_suffix_kept(self, db_session: Session):
+        """A close revision (17P9905 vs 17P9905-LF) is a match — NOT dropped."""
+        import json
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        captured: dict = {}
+
+        def fake_dedup(scored, acc):
+            captured["scored"] = list(scored)
+            return ([], [])
+
+        conn = self._conn([{"mpn_matched": "17P9905-LF", "vendor_name": "BrokerCo"}])
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+        ):
+            await stream_search_mpn("test-relevance-002", "17P9905")
+
+        assert len(captured["scored"]) == 1
+        done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
+        assert json.loads(done[0][2])["off_target"] == 0
+
+    async def test_missing_mpn_defaults_to_query_and_is_kept(self, db_session: Session):
+        """A hit with no mpn_matched defaults to the searched MPN and is kept."""
+        import json
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        captured: dict = {}
+
+        def fake_dedup(scored, acc):
+            captured["scored"] = list(scored)
+            return ([], [])
+
+        conn = self._conn([{"vendor_name": "BrokerCo", "qty_available": 5}])  # no mpn_matched
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([conn], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+        ):
+            await stream_search_mpn("test-relevance-003", "17P9905")
+
+        assert len(captured["scored"]) == 1
+        assert captured["scored"][0]["mpn_matched"] == "17P9905"
+        done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
+        assert json.loads(done[0][2])["off_target"] == 0
+
+    async def test_multiple_connectors_off_target_accumulates(self, db_session: Session):
+        """off_target sums across connectors; only on-target hits reach dedup."""
+        import json
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        scored_seen: list = []
+
+        def fake_dedup(scored, acc):
+            scored_seen.extend(scored)
+            return ([], [])
+
+        c1 = MagicMock()
+        c1.source_name = "brokerbin"
+        c1.search = AsyncMock(
+            return_value=[{"mpn_matched": "17P9905", "vendor_name": "A"}, {"mpn_matched": "WRONG1", "vendor_name": "B"}]
+        )
+        c2 = MagicMock()
+        c2.source_name = "mouser"
+        c2.search = AsyncMock(
+            return_value=[{"mpn_matched": "17P9905", "vendor_name": "C"}, {"mpn_matched": "WRONG2", "vendor_name": "D"}]
+        )
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([c1, c2], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+            patch("app.search_service._render_search_vendor_cards_html", return_value="<div></div>"),
+            patch("app.search_service._incremental_dedup", side_effect=fake_dedup),
+            patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
+        ):
+            await stream_search_mpn("test-relevance-multi", "17P9905")
+
+        assert len(scored_seen) == 2  # one on-target hit from each connector
+        assert {r["mpn_matched"] for r in scored_seen} == {"17P9905"}
+        done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
+        assert json.loads(done[0][2])["off_target"] == 2  # one off-target from each connector
+
+    async def test_off_target_not_counted_on_error_path(self, db_session: Session):
+        """A crashed connector adds 0 to off_target (the guard runs only on success)."""
+        import json
+
+        mock_broker = MagicMock()
+        mock_broker.publish = AsyncMock()
+        c = MagicMock()
+        c.source_name = "brokerbin"
+        c.search = AsyncMock(side_effect=RuntimeError("API down"))
+
+        with (
+            patch("app.search_service._build_connectors", return_value=([c], {}, set())),
+            patch("app.services.sse_broker.broker", mock_broker),
+        ):
+            await stream_search_mpn("test-relevance-err", "17P9905")
+
+        done = [c for c in mock_broker.publish.call_args_list if c[0][1] == "done"][0]
+        assert json.loads(done[0][2])["off_target"] == 0
