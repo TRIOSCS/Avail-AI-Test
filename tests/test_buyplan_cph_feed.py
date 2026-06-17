@@ -133,3 +133,21 @@ def test_unresolvable_line_skipped_others_recorded(db_session):
     db_session.commit()
     rows = db_session.query(CustomerPartHistory).filter_by(source="buy_plan").all()
     assert len(rows) == 1 and rows[0].material_card_id == cards[1].id
+
+
+# ── Task 3: check_completion hook ────────────────────────────────────
+
+
+def test_check_completion_records_cph(db_session):
+    from app.services.buyplan_workflow import check_completion
+
+    plan, company, cards = _completed_plan(db_session, line_specs=[(BuyPlanLineStatus.VERIFIED.value, 15.0, 50, True)])
+    # reset to the pre-completion state check_completion expects
+    plan.status = BuyPlanStatus.ACTIVE.value
+    plan.completed_at = None
+    plan.purchase_history_recorded_at = None
+    db_session.commit()
+    check_completion(plan.id, db_session)
+    db_session.commit()
+    assert db_session.get(type(plan), plan.id).status == BuyPlanStatus.COMPLETED.value
+    assert db_session.query(CustomerPartHistory).filter_by(company_id=company.id, source="buy_plan").count() == 1
