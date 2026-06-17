@@ -9806,6 +9806,35 @@ async def part_tab_req_details(
     return template_response("htmx/partials/parts/tabs/req_details.html", ctx)
 
 
+@router.get("/v2/partials/parts/{requirement_id}/tab/quotes", response_class=HTMLResponse)
+async def part_tab_quotes(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Quotes for the parent requisition of the selected part.
+
+    Quotes are
+    requisition-level, so every part of the same requisition shows the same set.
+    Called by: parts workspace tab strip (Quotes tab).
+    Depends on: Quote, Requirement models; requisitions/tabs/quotes.html.
+    """
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Part not found")
+
+    quotes = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == requirement.requisition_id)
+        .order_by(Quote.created_at.desc().nullslast())
+        .all()
+    )
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"quotes": quotes, "req": requirement.requisition})
+    return template_response("htmx/partials/requisitions/tabs/quotes.html", ctx)
+
+
 @router.get("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)
 async def part_header(
     requirement_id: int,

@@ -85,3 +85,24 @@ def test_delete_quote_htmx_returns_hx_redirect(client, db_session, test_user):
     resp = client.delete(f"/v2/partials/quotes/{q.id}")
     assert resp.status_code == 200
     assert resp.headers["HX-Redirect"] == "/v2/requisitions"
+
+
+def test_part_quotes_tab_lists_requisition_quotes(client, db_session, test_user):
+    reqn, part = _req_with_part(db_session, test_user)
+    _quote(db_session, requisition_id=reqn.id, number="Q-WS-1")
+    _quote(db_session, requisition_id=reqn.id, number="Q-WS-2")
+    resp = client.get(f"/v2/partials/parts/{part.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "Q-WS-1" in resp.text
+    assert "Q-WS-2" in resp.text
+
+
+def test_part_quotes_tab_404_for_missing_requirement(client):
+    assert client.get("/v2/partials/parts/999999/tab/quotes").status_code == 404
+
+
+def test_part_quotes_tab_empty_state(client, db_session, test_user):
+    _, part = _req_with_part(db_session, test_user)
+    resp = client.get(f"/v2/partials/parts/{part.id}/tab/quotes")
+    assert resp.status_code == 200
+    assert "No quotes" in resp.text
