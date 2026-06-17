@@ -177,7 +177,13 @@ async def enrich_card_specs(
             prompt = build_spec_prompt(cat, card_dicts)
             try:
                 result = await claude_structured(
-                    prompt, json_schema, system=_SYSTEM, model_tier="smart", max_tokens=8192, timeout=120
+                    prompt,
+                    json_schema,
+                    system=_SYSTEM,
+                    model_tier="smart",
+                    max_tokens=8192,
+                    timeout=120,
+                    cost_bucket="enrichment",
                 )
             except Exception as e:  # noqa: BLE001 — isolate one category's failure
                 logger.warning("spec extraction failed for category {}: {}", cat, e)

@@ -18,6 +18,7 @@ Usage:
 
 import asyncio
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
@@ -118,6 +119,39 @@ def _record_usage(span: Any, usage: dict) -> None:
         span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
 
 
+def _meter_usage(bucket: str, model_tier: str, usage: dict) -> None:
+    """Aggregate one call's token usage into Redis date-counters for a cost bucket.
+
+    Opt-in — runs only when a caller passes ``cost_bucket`` (e.g. the enrichment
+    worker), so app/search/RFQ/email traffic is unaffected. Keyed by
+    ``claude_usage:{bucket}:{model_tier}:{metric}:{UTC-date}`` so a readout can price
+    each tier (fast/smart/opus) separately. Mirrors the
+    ``enrichment_worker:web_calls:{date}`` pattern (atomic ``intel_cache.incr_count``).
+    Records ``server_tool_use.web_search_requests`` so the $0.01/search surcharge is
+    measured, not estimated. NEVER raises — metering must not break a real Claude call.
+    """
+    try:
+        from app.cache import intel_cache
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        prefix = f"claude_usage:{bucket}:{model_tier}"
+        server_tool = usage.get("server_tool_use") or {}
+        counters = {
+            "calls": 1,
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "cache_read_tokens": int(usage.get("cache_read_input_tokens", 0) or 0),
+            "cache_write_tokens": int(usage.get("cache_creation_input_tokens", 0) or 0),
+            "web_searches": int(server_tool.get("web_search_requests", 0) or 0),
+        }
+        # 35-day TTL keeps a month+ of per-day history for weekly/monthly readouts.
+        for metric, amount in counters.items():
+            if amount:
+                intel_cache.incr_count(f"{prefix}:{metric}:{today}", amount, ttl_days=35.0)
+    except Exception as e:  # metering is best-effort; never break the caller
+        logger.debug("claude usage metering skipped ({}): {}", bucket, e)
+
+
 async def claude_structured(
     prompt: str,
     schema: dict,
@@ -128,6 +162,7 @@ async def claude_structured(
     cache_system: bool = True,
     timeout: int = 30,
     thinking_budget: int | None = None,
+    cost_bucket: str | None = None,
 ) -> dict | None:
     """Call Claude with guaranteed-valid JSON output (Structured Outputs).
 
@@ -215,6 +250,8 @@ async def claude_structured(
 
                 data = resp.json()
                 _record_usage(span, data.get("usage", {}))
+                if cost_bucket:
+                    _meter_usage(cost_bucket, model_tier, data.get("usage", {}))
 
                 # Tool use response — extract the tool input (guaranteed valid JSON)
                 tool_input = _extract_tool_input(data.get("content", []))
@@ -251,6 +288,7 @@ async def claude_text(
     tools: list[dict] | None = None,
     cache_system: bool = True,
     timeout: int = 60,
+    cost_bucket: str | None = None,
 ) -> str | None:
     """Call Claude for free-form text response.
 
@@ -326,6 +364,8 @@ async def claude_text(
 
                 data = resp.json()
                 _record_usage(span, data.get("usage", {}))
+                if cost_bucket:
+                    _meter_usage(cost_bucket, model_tier, data.get("usage", {}))
 
                 # Extract text from response (may be interleaved with tool use)
                 texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
@@ -357,6 +397,7 @@ async def claude_json(
     max_tokens: int = 1024,
     tools: list[dict] | None = None,
     timeout: int = 30,
+    cost_bucket: str | None = None,
 ) -> dict | list | None:
     """Call Claude expecting JSON in free-form text. Parses response.
 
@@ -370,6 +411,7 @@ async def claude_json(
         max_tokens=max_tokens,
         tools=tools,
         timeout=timeout,
+        cost_bucket=cost_bucket,
     )
     if not text:
         return None

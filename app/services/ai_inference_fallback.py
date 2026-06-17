@@ -68,6 +68,7 @@ async def infer_part(display_mpn: str) -> InferenceResult:
             system=_SYSTEM,
             model_tier="opus",
             max_tokens=300,
+            cost_bucket="enrichment",
         )
     except ClaudeError:
         # Claude backend failure — surface it so the worker's circuit breaker can detect a

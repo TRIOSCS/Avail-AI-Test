@@ -81,6 +81,7 @@ async def extract_part_from_web(
             max_tokens=1200,
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
             timeout=timeout,
+            cost_bucket="enrichment",
         )
     except ClaudeError:
         # Claude backend failure (auth / rate-limit / server / unreachable). Surface it so

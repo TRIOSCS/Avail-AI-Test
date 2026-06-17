@@ -1264,6 +1264,24 @@ web_meter contract ({"web_calls": int, "claude_ok": bool}, updated in place):
     card_meter["web_calls"] to the rolling web_calls_today counter for
     the daily budget gate (ENRICHMENT_WEB_DAILY_CAP, env-configurable).
 
+Claude usage metering (MEASURED $/call — opt-in via cost_bucket):
+    claude_client.claude_structured/claude_text/claude_json take an optional
+    cost_bucket arg; default None = no metering (app/search/RFQ/email traffic
+    is unaffected). The four enrichment Claude paths (oem_crosswalk_resolver,
+    web_extractor, spec_enrichment_service, ai_inference_fallback) pass
+    cost_bucket="enrichment", so on each 200 response _meter_usage aggregates
+    response.usage (input/output/cache_read/cache_write tokens AND
+    server_tool_use.web_search_requests) into Redis date-counters keyed
+    claude_usage:{bucket}:{model_tier}:{metric}:{UTC-date} (atomic
+    intel_cache.incr_count, 35-day TTL — same counter substrate as web_calls).
+    Metering is best-effort and NEVER raises. Readout:
+    `python -m app.management.enrichment_spend [--date YYYY-MM-DD] [--days N]`
+    prices each tier (haiku $1/$5, sonnet $3/$15, opus $5/$25 per MTok; web
+    search $10/1000; cache_read 0.1x / cache_write 1.25x input) → real
+    $/call, $/day, ~$/mo. This replaces the prior estimate-only cost model;
+    the worker's daily_cap counts every processed card (drain-speed), while
+    web_daily_cap/oem_resolve_daily_cap are the only spend levers.
+
 Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
     authoritative_enrichment_service for new cards; kept for bulk/batch jobs)
     |

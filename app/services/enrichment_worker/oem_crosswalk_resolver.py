@@ -163,6 +163,7 @@ async def resolve_oem_spare(
         max_tokens=1000,
         tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
         timeout=timeout,
+        cost_bucket="enrichment",
     )
 
     if not isinstance(data, dict):
