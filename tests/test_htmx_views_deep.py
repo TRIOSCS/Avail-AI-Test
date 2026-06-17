@@ -339,8 +339,7 @@ class TestQuotesRoutes:
     @pytest.mark.parametrize(
         "path",
         [
-            "/v2/partials/quotes",
-            "/v2/partials/quotes?q=Q-001&status=draft",
+            # /v2/partials/quotes (standalone list) was retired — see test_quotes_relocation.py
             "/v2/partials/quotes/recent-terms",
             "/v2/partials/pricing-history/LM317T",
         ],

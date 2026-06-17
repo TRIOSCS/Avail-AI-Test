@@ -1390,12 +1390,13 @@ class TestBuyPlans:
 
 
 class TestQuotesList:
-    """Test quotes list partial."""
+    """Standalone quotes list endpoint was retired (quotes-relocation).
 
-    @pytest.mark.parametrize("query", ["", "?status=draft"], ids=["all", "status"])
-    def test_list(self, client: TestClient, query: str):
-        resp = client.get(f"/v2/partials/quotes{query}")
-        assert resp.status_code == 200
+    /v2/partials/quotes no longer exists — quotes are surfaced via the Reqs workspace
+    Quotes tab (/v2/partials/parts/{id}/tab/quotes) and the CRM account Quotes tab
+    (/v2/partials/customers/{id}/tab/quotes). These tests are covered by
+    test_quotes_relocation.py.
+    """
 
 
 # ══════════════════════════════════════════════════════════════════════════
