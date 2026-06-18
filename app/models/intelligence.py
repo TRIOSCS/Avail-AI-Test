@@ -210,6 +210,7 @@ class MaterialCardDatasheet(Base):
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
+    library_drive_id = Column(String(200))  # Graph drive id of the company library this copy lives in
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     source = Column(String(50))  # "connector" | "web"

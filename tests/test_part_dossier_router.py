@@ -296,21 +296,80 @@ def test_specs_shows_stored_datasheet(client, db_session):
     card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", datasheet_captured_at=datetime.now(timezone.utc))
     db_session.add(card)
     db_session.flush()
-    db_session.add(
-        MaterialCardDatasheet(
-            material_card_id=card.id,
-            file_name="LM317T-datasheet.pdf",
-            onedrive_url="https://od/x",
-            source="connector",
-            verified=True,
-            captured_at=datetime.now(timezone.utc),
-        )
+    ds = MaterialCardDatasheet(
+        material_card_id=card.id,
+        file_name="LM317T-datasheet.pdf",
+        onedrive_item_id="ITM",
+        onedrive_url="https://od/x",
+        library_drive_id="DRV",
+        source="connector",
+        verified=True,
+        captured_at=datetime.now(timezone.utc),
     )
+    db_session.add(ds)
     db_session.commit()
     resp = client.get("/v2/partials/search/dossier/specs", params={"mpn": "LM317T"})
     assert resp.status_code == 200
-    assert "https://od/x" in resp.text
+    # Links to our in-app streaming download (NOT the raw OneDrive webUrl).
+    assert f"/v2/partials/search/dossier/datasheet/{ds.id}/download" in resp.text
+    assert "https://od/x" not in resp.text
     assert "Datasheet (saved" in resp.text
+
+
+def test_datasheet_download_streams_pdf(client, db_session):
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+
+    card = MaterialCard(normalized_mpn="lm317z", display_mpn="LM317Z")
+    db_session.add(card)
+    db_session.flush()
+    ds = MaterialCardDatasheet(
+        material_card_id=card.id,
+        file_name="LM317Z-datasheet.pdf",
+        onedrive_item_id="ITM",
+        library_drive_id="DRV",
+        content_type="application/pdf",
+    )
+    db_session.add(ds)
+    db_session.commit()
+    with patch("app.routers.part_dossier.fetch_datasheet_bytes", AsyncMock(return_value=b"%PDF-1.4 hello")):
+        resp = client.get(f"/v2/partials/search/dossier/datasheet/{ds.id}/download")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("application/pdf")
+    assert resp.content == b"%PDF-1.4 hello"
+
+
+def test_datasheet_download_404_missing(client):
+    resp = client.get("/v2/partials/search/dossier/datasheet/99999999/download")
+    assert resp.status_code == 404
+
+
+def test_datasheet_download_sanitizes_content_disposition(client, db_session):
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+
+    card = MaterialCard(normalized_mpn="evil1", display_mpn="EVIL1")
+    db_session.add(card)
+    db_session.flush()
+    # file_name carries header-injection chars (CR/LF) + a quote.
+    ds = MaterialCardDatasheet(
+        material_card_id=card.id,
+        file_name='x"\r\nSet-Cookie: pwned=1.pdf',
+        onedrive_item_id="ITM",
+        library_drive_id="DRV",
+        content_type="application/pdf",
+    )
+    db_session.add(ds)
+    db_session.commit()
+    with patch("app.routers.part_dossier.fetch_datasheet_bytes", AsyncMock(return_value=b"%PDF")):
+        resp = client.get(f"/v2/partials/search/dossier/datasheet/{ds.id}/download")
+    assert resp.status_code == 200
+    cd = resp.headers["content-disposition"]
+    assert "\r" not in cd and "\n" not in cd  # no header injection
+    assert cd.count('"') == 2  # only the wrapping quotes; the payload's quote was stripped
+    assert "Set-Cookie" not in resp.headers  # no injected header
 
 
 def test_market_no_banner_when_only_unconfigured(client):
