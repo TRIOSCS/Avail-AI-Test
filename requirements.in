@@ -31,6 +31,8 @@ slowapi==0.1.10
 rapidfuzz>=3.0.0,<4.0
 # PDF generation
 weasyprint==69.0
+# PDF text extraction (datasheet verification)
+pypdf==6.13.3
 # Scheduling
 apscheduler>=3.11.2,<4.0
 # Migrations
