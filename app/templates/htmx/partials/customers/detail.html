@@ -52,6 +52,18 @@
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
+        {# Merge duplicate — opens modal with search + confirm flow #}
+        <button type="button"
+                title="Merge duplicate into this account"
+                class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white
+                       px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50
+                       focus:outline-none focus:ring-2 focus:ring-brand-500"
+                hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
+                hx-target="#modal-content"
+                hx-swap="innerHTML"
+                @click="$dispatch('open-modal')">
+          Merge duplicate
+        </button>
       </div>
     </div>
 
@@ -96,24 +108,9 @@
 
   {# ── Account Cadence Card ──────────────────────────────── #}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    {# Hero row: cadence badge + tier + next-best-touch #}
-    <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
-      {% set badge_colors = {
-        "new": "bg-gray-100 text-gray-500",
-        "on_target": "bg-emerald-100 text-emerald-700",
-        "due": "bg-amber-100 text-amber-700",
-        "overdue": "bg-rose-100 text-rose-700"
-      } %}
-      <div class="flex items-center gap-2">
-        <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, 'bg-gray-100 text-gray-500') }}">
-          {{ {"new": "New", "on_target": "On Target", "due": "Due", "overdue": "Overdue"}.get(cadence_state, cadence_state|title) }}
-        </span>
-        {% if company.tier %}
-          <span class="text-xs text-gray-500 font-medium">{{ company.tier|title }}</span>
-        {% endif %}
-      </div>
-      <span class="text-xs text-gray-600 italic">{{ next_best_touch }}</span>
-    </div>
+    {# Hero row: cadence badge + settable tier + next-best-touch.
+       _cadence_hero.html is the HTMX swap target for tier updates. #}
+    {% include 'htmx/partials/customers/_cadence_hero.html' %}
 
     {# Dual clocks: Outbound + Reply #}
     <div class="grid grid-cols-2 gap-3 mb-3">
@@ -198,7 +195,8 @@
           ('sites', 'Sites', sites|length),
           ('requisitions', 'Requisitions', open_req_count),
           ('activity', 'Activity', none),
-          ('quotes', 'Quotes', quote_count if quote_count is defined else none)
+          ('quotes', 'Quotes', quote_count if quote_count is defined else none),
+          ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none)
         ] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 role="tab"

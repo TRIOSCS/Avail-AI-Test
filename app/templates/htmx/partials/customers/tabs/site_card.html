@@ -60,6 +60,10 @@
 
     {# Site actions #}
     <div class="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
+      <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/edit-form'})"
+              class="text-xs text-brand-500 hover:text-brand-700">
+        Edit Site
+      </button>
       <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
               hx-target="#site-{{ s.id }}"
               hx-swap="outerHTML"

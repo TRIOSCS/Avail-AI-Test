@@ -4875,6 +4875,32 @@ def _company_quotes_query(db: Session, company):
     return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
 
 
+def _company_buy_plans_query(db: Session, company):
+    """Buy plans belonging to an account: all buy-plans whose requisition links
+    to the company (via company_id FK or customer_name match). Returns a Query,
+    or None when the account has no requisitions.
+    Called by: company_detail_partial (count), company_tab (buy_plans).
+    """
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    if not req_ids:
+        return None
+    return (
+        db.query(BuyPlan)
+        .options(joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition))
+        .filter(BuyPlan.requisition_id.in_(req_ids))
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
 async def company_segment_tags_partial(
     request: Request,
@@ -4978,6 +5004,165 @@ async def company_unassign_segment_tag(
     )
 
 
+_VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
+
+# Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
+# decision_maker/operations) remain valid in the DB but can only be cleared
+# via the "— clear —" option; they are not in this set.
+CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+_VALID_ROLES = frozenset(CANONICAL_ROLES)
+
+
+@router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
+async def set_company_tier(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.tier; re-renders the cadence hero with updated badge + NBT.
+
+    Accepts tier= from the inline select.  Blank value clears the tier (NULL → behaves
+    as 'standard').  Invalid value → 400.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    tier_raw = (form.get("tier") or "").strip()
+
+    if tier_raw and tier_raw not in _VALID_TIERS:
+        raise HTTPException(400, f"Invalid tier '{tier_raw}'. Valid: {sorted(_VALID_TIERS)}")
+
+    company.tier = tier_raw or None
+    db.commit()
+    db.refresh(company)
+
+    _cadence = _cadence_state(company.tier, company.last_outbound_at)
+    _nbt = _next_best_touch(company.tier, company.last_outbound_at)
+    logger.info("Company {} tier set to {} by {}", company_id, company.tier, user.email)
+    return template_response(
+        "htmx/partials/customers/_cadence_hero.html",
+        {
+            "request": request,
+            "company": company,
+            "cadence_state": _cadence,
+            "next_best_touch": _nbt,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/role",
+    response_class=HTMLResponse,
+)
+async def set_contact_role(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set SiteContact.contact_role; re-renders the role chip editor.
+
+    Accepts contact_role= from the inline select.  Blank value clears the role (NULL).
+    Invalid value → 400 (legacy values that pre-exist in the DB are not accepted via
+    this endpoint; rep must choose a canonical role).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    role_raw = (form.get("contact_role") or "").strip()
+
+    if role_raw and role_raw not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{role_raw}'. Valid: {sorted(_VALID_ROLES)}")
+
+    contact.contact_role = role_raw or None
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} role set to {} by {} (company {})",
+        contact_id,
+        contact.contact_role,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_role_chip_editor.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/do-not-contact",
+    response_class=HTMLResponse,
+)
+async def set_contact_dnc(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.do_not_contact; re-renders the DNC toggle partial.
+
+    Accepts do_not_contact= from the inline form.  Non-empty value → True. Empty string
+    → False (clear the flag).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    dnc_raw = (form.get("do_not_contact") or "").strip()
+
+    contact.do_not_contact = bool(dnc_raw)
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} do_not_contact set to {} by {} (company {})",
+        contact_id,
+        contact.do_not_contact,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_dnc_toggle.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -5022,6 +5207,9 @@ async def company_detail_partial(
     _cq = _company_quotes_query(db, company)
     quote_count = _cq.count() if _cq is not None else 0
 
+    _bpq = _company_buy_plans_query(db, company)
+    buy_plan_count = _bpq.count() if _bpq is not None else 0
+
     # Cadence card + commercial strip context
     from datetime import timezone as _tz
 
@@ -5039,6 +5227,7 @@ async def company_detail_partial(
             "sites": sites,
             "open_req_count": open_req_count,
             "quote_count": quote_count,
+            "buy_plan_count": buy_plan_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
@@ -5076,7 +5265,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -5158,6 +5347,13 @@ async def company_tab(
         ctx = _base_ctx(request, user, "customers")
         ctx.update({"company": company, "quotes": quotes})
         return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
+    elif tab == "buy_plans":
+        bpq = _company_buy_plans_query(db, company)
+        buy_plans = bpq.order_by(BuyPlan.created_at.desc().nullslast()).all() if bpq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "buy_plans": buy_plans})
+        return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
 
     else:  # activity
         from sqlalchemy import or_ as or_clause
@@ -5571,6 +5767,154 @@ async def edit_company(
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
+# ── Merge Duplicate ─────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-preview", response_class=HTMLResponse)
+async def company_merge_preview(
+    request: Request,
+    company_id: int,
+    remove_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a preview of what will happen when remove_id is merged into company_id.
+
+    Shows counts: sites, contacts, activities that will be reassigned; confirms the
+    loser will be deleted. Used by the merge-confirm modal before the user commits.
+    """
+    from ..models.intelligence import ActivityLog as _AL
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    if keep.id == remove.id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    # Count what will move
+    site_count = db.query(sqlfunc.count(CustomerSite.id)).filter(CustomerSite.company_id == remove.id).scalar() or 0
+    contact_count = (
+        db.query(sqlfunc.count(SiteContact.id))
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id == remove.id)
+        .scalar()
+        or 0
+    )
+    activity_count = db.query(sqlfunc.count(_AL.id)).filter(_AL.company_id == remove.id).scalar() or 0
+    req_count = db.query(sqlfunc.count(Requisition.id)).filter(Requisition.company_id == remove.id).scalar() or 0
+
+    ctx = {
+        "request": request,
+        "keep": keep,
+        "remove": remove,
+        "site_count": site_count,
+        "contact_count": contact_count,
+        "activity_count": activity_count,
+        "req_count": req_count,
+    }
+    return template_response("htmx/partials/customers/_merge_preview.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/merge", response_class=HTMLResponse)
+async def company_merge(
+    request: Request,
+    company_id: int,
+    remove_id: int = Form(...),
+    confirmed: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge remove_id into company_id (the keeper).
+
+    Requires confirmed="true" to prevent accidental submissions. Calls the
+    canonical merge_companies() engine — no FK logic lives here.
+    POST is mandatory: this is a destructive, irreversible operation.
+    """
+    from ..services.company_merge_service import merge_companies as _merge
+
+    if confirmed.lower() != "true":
+        raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    if remove_id == company_id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    try:
+        result = _merge(company_id, remove_id, db)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    logger.info(
+        "Manual company merge: kept {} ({}), removed {} by {}",
+        company_id,
+        keep.name,
+        remove_id,
+        user.email,
+    )
+
+    # Redirect browser to keeper's detail page via HTMX redirect header
+    safe_name = html_mod.escape(keep.name or "")
+    response = HTMLResponse(
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
+        status_code=200,
+    )
+    response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"
+    return response
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-form", response_class=HTMLResponse)
+async def company_merge_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the merge-duplicate modal form for a company.
+
+    Renders a search input to find the duplicate and a submit button that triggers the
+    merge-preview step.
+    """
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    ctx = {"request": request, "keep": keep}
+    return template_response("htmx/partials/customers/_merge_form.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
+async def site_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a customer site."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    users = db.query(User).order_by(User.name).all()
+    return template_response(
+        "htmx/partials/customers/tabs/site_edit_modal.html",
+        {"request": request, "site": site, "company_id": company_id, "users": users},
+    )
+
+
 @router.post("/v2/partials/customers/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
 async def edit_site(
     request: Request,
@@ -5586,15 +5930,120 @@ async def edit_site(
 
     form = await request.form()
     site_name = form.get("site_name", "").strip()
-    if site_name:
-        site.site_name = site_name
+    if not site_name:
+        raise HTTPException(400, "site_name is required")
+    site.site_name = site_name
+    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
+    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
     site.city = form.get("city", "").strip() or site.city
+    site.state = form.get("state", "").strip() or site.state
+    site.zip = form.get("zip", "").strip() or site.zip
     site.country = form.get("country", "").strip() or site.country
     site.site_type = form.get("site_type", "").strip() or site.site_type
+    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
+    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        site.notes = notes_val
+    owner_id = form.get("owner_id", "")
+    if owner_id and str(owner_id).isdigit():
+        site.owner_id = int(owner_id)
+    site.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Site {} edited by {}", site_id, user.email)
 
     return await company_tab(request=request, company_id=company_id, tab="sites", user=user, db=db)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
+    response_class=HTMLResponse,
+)
+async def contact_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a site contact."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    # Verify site belongs to company
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    return template_response(
+        "htmx/partials/customers/tabs/contact_edit_modal.html",
+        {"request": request, "contact": contact, "site": site, "company_id": company_id},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit",
+    response_class=HTMLResponse,
+)
+async def edit_site_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update editable contact fields (never contact_role) and return refreshed contacts
+    panel."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    form = await request.form()
+    full_name = form.get("full_name", "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    email_val = form.get("email", "").strip()
+    if email_val and "@" not in email_val:
+        raise HTTPException(400, "Invalid email address")
+
+    contact.full_name = full_name
+    contact.title = form.get("title", "").strip() or contact.title
+    contact.email = email_val or contact.email
+    phone_val = form.get("phone", "").strip()
+    if phone_val:
+        contact.phone = phone_val
+    wechat_val = form.get("wechat_id", "").strip()
+    if wechat_val:
+        contact.wechat_id = wechat_val
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        contact.notes = notes_val
+    # contact_role is intentionally NOT updated here — owned by the P2b role setter
+    contact.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Contact {} edited by {}", contact_id, user.email)
+
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "customers")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 @router.post(

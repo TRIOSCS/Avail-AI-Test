@@ -2105,3 +2105,786 @@ class TestSegmentTagViews:
         )
         assert resp.status_code == 200
         assert "Growth" in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestTierSetter — P2b account tier setter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestTierSetter:
+    """Tests for account tier-setter endpoint.
+
+    Written FIRST (TDD RED) — will fail until the route is added.
+
+    Routes tested:
+      POST /v2/partials/customers/{company_id}/tier  (set tier)
+    """
+
+    def _make_company(self, db_session: Session, name: str = "TierSet Co", **kwargs) -> Company:
+        co = Company(name=name, is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_set_tier_updates_db(self, client: TestClient, db_session: Session, test_user: User):
+        """POST tier=core persists to Company.tier."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.tier == "core"
+
+    def test_set_tier_rerenders_cadence_hero(self, client: TestClient, db_session: Session, test_user: User):
+        """POST tier=core re-renders the cadence hero with updated tier label."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
+        assert resp.status_code == 200
+        # The re-rendered hero should show the tier word
+        assert "core" in resp.text.lower() or "Core" in resp.text
+
+    def test_set_tier_cadence_badge_reflects_new_tier(self, client: TestClient, db_session: Session, test_user: User):
+        """Setting tier=key on an account that was last contacted 10 days ago changes
+        cadence from 'due' (standard 30d) to 'overdue' would NOT apply here but key
+        target is 7d so 10d ago → 'due' badge → amber classes present."""
+        outbound_10d_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago)
+        # Before: standard tier → 10d is on_target (target=30)
+        resp_before = client.get(f"/v2/partials/customers/{co.id}")
+        assert "bg-emerald-100" in resp_before.text  # on_target
+
+        # After: set tier=key → target=7d, so 10d → 'due' → amber
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "key"})
+        assert resp.status_code == 200
+        assert "bg-amber-100" in resp.text  # due
+
+    def test_set_tier_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with invalid tier value returns 400."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "vip"})
+        assert resp.status_code == 400
+
+    def test_set_tier_blank_clears_tier(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with tier='' (blank/unset) clears Company.tier to None."""
+        co = self._make_company(db_session, tier="key")
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": ""})
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.tier is None
+
+    def test_set_tier_all_valid_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """All four valid tier values are accepted without 400."""
+        for tier_val in ("key", "core", "standard", "prospect"):
+            co = self._make_company(db_session, name=f"TierSet {tier_val}")
+            resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": tier_val})
+            assert resp.status_code == 200, f"tier={tier_val} should be accepted"
+
+    def test_set_tier_nonexistent_company_returns_404(self, client: TestClient, db_session: Session, test_user: User):
+        """POST to unknown company_id returns 404."""
+        resp = client.post("/v2/partials/customers/99999/tier", data={"tier": "core"})
+        assert resp.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestBuyingRoleSetter — P2b contact buying-role setter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBuyingRoleSetter:
+    """Tests for contact buying-role setter endpoint.
+
+    Written FIRST (TDD RED) — will fail until routes are added.
+
+    Routes tested:
+      POST /v2/partials/customers/{company_id}/contacts/{contact_id}/role
+    """
+
+    def _make_company_with_contact(self, db_session: Session, **contact_kwargs):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="RoleSet Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alex Buyer",
+            email="alex@roleset.com",
+            **contact_kwargs,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(contact)
+        db_session.refresh(company)
+        return company, site, contact
+
+    def test_set_role_updates_db(self, client: TestClient, db_session: Session, test_user: User):
+        """POST contact_role=buyer_po persists to SiteContact.contact_role."""
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "buyer_po"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role == "buyer_po"
+
+    def test_set_role_rerenders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """POST role returns HTML containing the chip for the new role."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "specifier"},
+        )
+        assert resp.status_code == 200
+        assert "specifier" in resp.text.lower() or "Specifier" in resp.text
+
+    def test_set_role_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with unknown role value returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "wizard"},
+        )
+        assert resp.status_code == 400
+
+    def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """All canonical buying-role values are accepted."""
+        for role_val in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+            company, site, contact = self._make_company_with_contact(db_session)
+            resp = client.post(
+                f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+                data={"contact_role": role_val},
+            )
+            assert resp.status_code == 200, f"role={role_val} should be accepted"
+
+    def test_set_role_nonexistent_contact_returns_404(self, client: TestClient, db_session: Session, test_user: User):
+        """POST to unknown contact_id returns 404."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/99999/role",
+            data={"contact_role": "buyer_po"},
+        )
+        assert resp.status_code == 404
+
+    def test_set_role_blank_clears_role(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with contact_role='' clears the role to None."""
+
+        company, site, contact = self._make_company_with_contact(db_session, contact_role="buyer")
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRoleChipLegacy — role_chip macro handles legacy + new canonical values
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRoleChipLegacy:
+    """Tests that role_chip renders both legacy and new canonical values.
+
+    Written FIRST (TDD RED) — will fail until the template is updated.
+    """
+
+    def _make_company_with_contact(self, db_session: Session, contact_role: str | None = None):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="ChipTest Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Chip Test",
+            email="chip@test.com",
+            contact_role=contact_role,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(company)
+        return company, site, contact
+
+    def test_legacy_decision_maker_renders_gracefully(self, client: TestClient, db_session: Session, test_user: User):
+        """Legacy role 'decision_maker' still renders a chip without error."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="decision_maker")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "decision" in resp.text.lower() or "Decision" in resp.text
+
+    def test_legacy_buyer_renders_gracefully(self, client: TestClient, db_session: Session, test_user: User):
+        """Legacy role 'buyer' still renders a chip."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="buyer")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "buyer" in resp.text.lower() or "Buyer" in resp.text
+
+    def test_canonical_buyer_po_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """New canonical role 'buyer_po' renders a chip in the contact card."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="buyer_po")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        # Should show some chip text for buyer_po
+        assert "buyer" in resp.text.lower() or "PO" in resp.text or "Buyer" in resp.text
+
+    def test_canonical_specifier_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """New canonical role 'specifier' renders a chip."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="specifier")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "specifier" in resp.text.lower() or "Specifier" in resp.text
+
+    def test_null_role_renders_no_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL contact_role renders no chip (not an error)."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role=None)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+
+
+class TestEditSite:
+    """P2c: Edit-site modal form (GET edit-form + POST edit)."""
+
+    def _make_company_with_site(self, db_session: Session):
+        from app.models.crm import CustomerSite
+
+        company = Company(name="Edit Site Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(
+            company_id=company.id,
+            site_name="HQ",
+            site_type="hq",
+            city="Boston",
+            country="US",
+            address_line1="123 Main St",
+            payment_terms="Net30",
+            shipping_terms="FCA",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.commit()
+        return company, site
+
+    def test_get_site_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form route renders a form pre-populated with site fields."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/edit-form")
+        assert resp.status_code == 200
+        assert "HQ" in resp.text
+        assert "Boston" in resp.text
+
+    def test_get_site_edit_form_404_on_missing_site(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form for a nonexistent site returns 404."""
+        company, _ = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/99999/edit-form")
+        assert resp.status_code == 404
+
+    def test_post_site_edit_persists_payment_terms_and_address(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit saves payment_terms + address fields; re-rendered sites tab shows
+        new values."""
+        from app.models.crm import CustomerSite
+
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={
+                "site_name": "HQ",
+                "address_line1": "456 New Ave",
+                "city": "Cambridge",
+                "state": "MA",
+                "zip": "02139",
+                "country": "US",
+                "payment_terms": "Net60",
+                "shipping_terms": "DAP",
+                "site_type": "hq",
+                "notes": "updated note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(CustomerSite).filter(CustomerSite.id == site.id).first()
+        assert updated is not None
+        assert updated.payment_terms == "Net60"
+        assert updated.address_line1 == "456 New Ave"
+        assert updated.city == "Cambridge"
+        assert updated.state == "MA"
+        assert updated.zip == "02139"
+        assert updated.shipping_terms == "DAP"
+        assert updated.notes == "updated note"
+
+    def test_post_site_edit_re_renders_sites_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit response is the refreshed sites tab containing the updated site
+        name."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={"site_name": "New HQ Name", "city": "Salem", "country": "US"},
+        )
+        assert resp.status_code == 200
+        assert "New HQ Name" in resp.text
+
+    def test_post_site_edit_missing_site_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with empty site_name returns 400."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={"site_name": "", "city": "Boston", "country": "US"},
+        )
+        assert resp.status_code == 400
+
+
+class TestEditContact:
+    """P2c: Edit-contact modal form (GET edit-form + POST edit)."""
+
+    def _make_company_with_contact(self, db_session: Session):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Edit Contact Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alice Smith",
+            title="Buyer",
+            email="alice@editco.com",
+            phone="+16175550001",
+            wechat_id="alice_wc",
+            notes="original note",
+            contact_role="buyer",
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form renders form pre-populated with contact fields."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 200
+        assert "Alice Smith" in resp.text
+        assert "alice@editco.com" in resp.text
+
+    def test_get_contact_edit_form_404_on_missing_contact(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """GET edit-form for nonexistent contact returns 404."""
+        company, site, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/99999/edit-form")
+        assert resp.status_code == 404
+
+    def test_post_contact_edit_persists_title_and_phone(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit saves title + phone; re-rendered contacts show new values."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "title": "Senior Buyer",
+                "email": "alice@editco.com",
+                "phone": "+16175550099",
+                "wechat_id": "alice_wc",
+                "notes": "updated note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
+        assert updated is not None
+        assert updated.title == "Senior Buyer"
+        assert updated.phone == "+16175550099"
+        assert updated.notes == "updated note"
+
+    def test_post_contact_edit_does_not_touch_contact_role(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST contact edit never modifies contact_role (owned by P2b role setter)."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "contact_role": "decision_maker",  # attacker tries to override role
+                "title": "Buyer",
+                "email": "alice@editco.com",
+                "phone": "+16175550001",
+                "wechat_id": "alice_wc",
+                "notes": "original note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
+        assert updated is not None
+        assert updated.contact_role == "buyer"  # unchanged
+
+    def test_post_contact_edit_re_renders_contacts_panel(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit response contains the updated name in the re-rendered contacts
+        panel."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Updated", "title": "VP", "email": "alice@editco.com", "phone": ""},
+        )
+        assert resp.status_code == 200
+        assert "Alice Updated" in resp.text
+
+    def test_post_contact_edit_missing_full_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with empty full_name returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "", "title": "Buyer", "email": "alice@editco.com"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_contact_edit_invalid_email_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with malformed email returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Smith", "email": "not-an-email"},
+        )
+        assert resp.status_code == 400
+
+
+class TestManualCompanyMerge:
+    """Manual merge-duplicate accounts (P2e).
+
+    Verifies:
+    - Merge preview shows correct child counts
+    - Merge endpoint reassigns children and deletes the loser
+    - Guard: same id → 400, missing id → 400, no confirmation → 400
+    """
+
+    def _make_pair(self, db_session):
+        """Return (keep, remove) companies with one site+contact+activity each on
+        remove."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.models.intelligence import ActivityLog
+
+        keep = Company(name="Keep Corp", is_active=True)
+        remove = Company(name="Remove Corp", is_active=True)
+        db_session.add_all([keep, remove])
+        db_session.flush()
+
+        # Non-empty site (has an email so it's not treated as empty HQ)
+        site = CustomerSite(company_id=remove.id, site_name="West Office", contact_email="w@remove.com")
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(customer_site_id=site.id, full_name="Bob Remove", email="bob@remove.com")
+        db_session.add(contact)
+
+        activity = ActivityLog(company_id=remove.id, activity_type="outreach", channel="phone", notes="test")
+        db_session.add(activity)
+        db_session.commit()
+        return keep, remove, site, contact, activity
+
+    # ── Preview endpoint ──────────────────────────────────────────────────────
+
+    def test_preview_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET merge-preview returns 200 with preview HTML."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_preview_shows_remove_company_name(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview names the company being removed."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert "Remove Corp" in resp.text
+
+    def test_preview_shows_site_count(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview reports number of sites that will be reassigned."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert resp.status_code == 200
+        # "1" should appear — the one non-empty site
+        assert "1" in resp.text
+
+    def test_preview_missing_remove_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview with nonexistent remove_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": 999999},
+        )
+        assert resp.status_code == 400
+
+    def test_preview_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview with remove_id == keep_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": keep.id},
+        )
+        assert resp.status_code == 400
+
+    # ── Merge endpoint guards ─────────────────────────────────────────────────
+
+    def test_merge_without_confirmation_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge without confirmed=true is rejected (guard against accidental
+        calls)."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id)},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge with remove_id == keep_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(keep.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_missing_remove_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge with nonexistent remove_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": "999999", "confirmed": "true"},
+        )
+        assert resp.status_code == 400
+
+    # ── Merge endpoint effect ─────────────────────────────────────────────────
+
+    def test_merge_reassigns_site_to_keep(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the loser's site belongs to keeper."""
+        from app.models.crm import CustomerSite
+
+        keep, remove, site, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        refreshed = db_session.get(CustomerSite, site.id)
+        assert refreshed is not None
+        assert refreshed.company_id == keep.id
+
+    def test_merge_reassigns_activity_to_keep(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the loser's activity belongs to keeper."""
+        from app.models.intelligence import ActivityLog
+
+        keep, remove, _site, _contact, activity = self._make_pair(db_session)
+        client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        db_session.expire_all()
+        refreshed = db_session.get(ActivityLog, activity.id)
+        assert refreshed is not None
+        assert refreshed.company_id == keep.id
+
+    def test_merge_deletes_loser(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the removed company is gone from DB."""
+        keep, remove, *_ = self._make_pair(db_session)
+        remove_id = remove.id
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove_id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Company, remove_id) is None
+
+    def test_merge_response_redirects_to_keeper(self, client: TestClient, db_session: Session, test_user: User):
+        """Merge response carries HX-Redirect header pointing to keeper detail."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        # Should either redirect header or contain the keeper company URL
+        location = resp.headers.get("HX-Redirect", "") or resp.headers.get("Location", "") or resp.text
+        assert str(keep.id) in location
+
+    def test_merge_response_escapes_company_name_xss(self, client: TestClient, db_session: Session, test_user: User):
+        """Merge success response HTML-escapes the company name (XSS guard).
+
+        A keeper with markup in its name must produce escaped output so the browser
+        renders it as text, not as live HTML.
+        """
+        keep = Company(name="<b>Evil Corp</b>", is_active=True)
+        remove = Company(name="Victim Corp", is_active=True)
+        db_session.add_all([keep, remove])
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        # Raw markup must NOT appear — would be stored-XSS
+        assert "<b>" not in resp.text
+        assert "</b>" not in resp.text
+        # Escaped form must appear instead
+        assert "&lt;b&gt;" in resp.text
+
+    # ── UI presence ──────────────────────────────────────────────────────────
+
+    def test_merge_button_appears_in_company_detail(self, client: TestClient, db_session: Session, test_user: User):
+        """Company detail partial includes a 'merge' action/button."""
+        keep = Company(name="Merge Button Co", is_active=True)
+        db_session.add(keep)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{keep.id}")
+        assert resp.status_code == 200
+        assert "merge" in resp.text.lower()
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P3: Buy Plans tab on the account (deal consolidation)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestAccountBuyPlansTab:
+    """P3: account detail exposes a Buy Plans tab listing all buy-plans whose
+    requisition belongs to the company (via company_id FK or name match).
+    """
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _make_company(self, db_session: Session, name: str = "BuyPlan Co") -> Company:
+        co = Company(name=name, is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        return co
+
+    def _make_requisition(self, db_session: Session, company: Company, name: str = "REQ-BP-001"):
+        from app.models.sourcing import Requisition
+
+        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+        return req
+
+    def _make_buy_plan(self, db_session: Session, requisition, quote, so_number: str = "SO-001"):
+        from app.models.buy_plan import BuyPlan
+
+        bp = BuyPlan(
+            requisition_id=requisition.id,
+            quote_id=quote.id,
+            sales_order_number=so_number,
+            status="active",
+        )
+        db_session.add(bp)
+        db_session.flush()
+        return bp
+
+    def _make_quote(self, db_session: Session, requisition, quote_number: str = "Q-001"):
+        from decimal import Decimal
+
+        from app.models.quotes import Quote
+
+        q = Quote(
+            requisition_id=requisition.id,
+            quote_number=quote_number,
+            subtotal=Decimal("5000.00"),
+            status="won",
+        )
+        db_session.add(q)
+        db_session.flush()
+        return q
+
+    # ── route returns 200 + correct buy-plans ────────────────────────────────
+
+    def test_buy_plans_tab_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET /v2/partials/customers/{id}/tab/buy_plans returns 200."""
+        co = self._make_company(db_session)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+
+    def test_buy_plans_tab_shows_buy_plan_for_company(self, client: TestClient, db_session: Session, test_user: User):
+        """Company's buy-plan (linked via its requisition) appears in the tab."""
+        co = self._make_company(db_session, "BPTab Show Co")
+        req = self._make_requisition(db_session, co, "REQ-SHOW-001")
+        quote = self._make_quote(db_session, req, "Q-SHOW-001")
+        bp = self._make_buy_plan(db_session, req, quote, "SO-SHOW-001")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        assert "SO-SHOW-001" in resp.text, "Buy plan SO# should appear in tab"
+
+    def test_buy_plans_tab_empty_state_when_no_plans(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with no buy-plans renders the empty-state message."""
+        co = self._make_company(db_session, "NoBP Co")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        # Empty state must say something useful
+        assert "No buy plans" in resp.text or "no buy plans" in resp.text.lower()
+
+    def test_buy_plans_tab_scoped_to_company(self, client: TestClient, db_session: Session, test_user: User):
+        """Buy-plans from another company do NOT appear in this company's tab."""
+        co_a = self._make_company(db_session, "Scoped Co A")
+        co_b = self._make_company(db_session, "Scoped Co B")
+        req_a = self._make_requisition(db_session, co_a, "REQ-A-001")
+        req_b = self._make_requisition(db_session, co_b, "REQ-B-001")
+        quote_a = self._make_quote(db_session, req_a, "Q-A-001")
+        quote_b = self._make_quote(db_session, req_b, "Q-B-001")
+        _bp_a = self._make_buy_plan(db_session, req_a, quote_a, "SO-COMPANY-A")
+        _bp_b = self._make_buy_plan(db_session, req_b, quote_b, "SO-COMPANY-B")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co_a.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        assert "SO-COMPANY-A" in resp.text, "Company A's buy plan should appear"
+        assert "SO-COMPANY-B" not in resp.text, "Company B's buy plan must NOT appear"
+
+    def test_buy_plan_count_shown_in_account_detail(self, client: TestClient, db_session: Session, test_user: User):
+        """Account detail partial renders a 'Buy Plans' tab with correct count badge."""
+        co = self._make_company(db_session, "CountBadge Co")
+        req = self._make_requisition(db_session, co, "REQ-COUNT-001")
+        quote = self._make_quote(db_session, req, "Q-COUNT-001")
+        _bp = self._make_buy_plan(db_session, req, quote, "SO-COUNT-001")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Buy Plans" in resp.text, "Buy Plans tab label must appear in detail"
