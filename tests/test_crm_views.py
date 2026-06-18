@@ -2105,3 +2105,247 @@ class TestSegmentTagViews:
         )
         assert resp.status_code == 200
         assert "Growth" in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestTierSetter — P2b account tier setter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestTierSetter:
+    """Tests for account tier-setter endpoint.
+
+    Written FIRST (TDD RED) — will fail until the route is added.
+
+    Routes tested:
+      POST /v2/partials/customers/{company_id}/tier  (set tier)
+    """
+
+    def _make_company(self, db_session: Session, name: str = "TierSet Co", **kwargs) -> Company:
+        co = Company(name=name, is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_set_tier_updates_db(self, client: TestClient, db_session: Session, test_user: User):
+        """POST tier=core persists to Company.tier."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.tier == "core"
+
+    def test_set_tier_rerenders_cadence_hero(self, client: TestClient, db_session: Session, test_user: User):
+        """POST tier=core re-renders the cadence hero with updated tier label."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "core"})
+        assert resp.status_code == 200
+        # The re-rendered hero should show the tier word
+        assert "core" in resp.text.lower() or "Core" in resp.text
+
+    def test_set_tier_cadence_badge_reflects_new_tier(self, client: TestClient, db_session: Session, test_user: User):
+        """Setting tier=key on an account that was last contacted 10 days ago changes
+        cadence from 'due' (standard 30d) to 'overdue' would NOT apply here but key
+        target is 7d so 10d ago → 'due' badge → amber classes present."""
+        outbound_10d_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        co = self._make_company(db_session, last_outbound_at=outbound_10d_ago)
+        # Before: standard tier → 10d is on_target (target=30)
+        resp_before = client.get(f"/v2/partials/customers/{co.id}")
+        assert "bg-emerald-100" in resp_before.text  # on_target
+
+        # After: set tier=key → target=7d, so 10d → 'due' → amber
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "key"})
+        assert resp.status_code == 200
+        assert "bg-amber-100" in resp.text  # due
+
+    def test_set_tier_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with invalid tier value returns 400."""
+        co = self._make_company(db_session)
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": "vip"})
+        assert resp.status_code == 400
+
+    def test_set_tier_blank_clears_tier(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with tier='' (blank/unset) clears Company.tier to None."""
+        co = self._make_company(db_session, tier="key")
+        resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": ""})
+        assert resp.status_code == 200
+        db_session.refresh(co)
+        assert co.tier is None
+
+    def test_set_tier_all_valid_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """All four valid tier values are accepted without 400."""
+        for tier_val in ("key", "core", "standard", "prospect"):
+            co = self._make_company(db_session, name=f"TierSet {tier_val}")
+            resp = client.post(f"/v2/partials/customers/{co.id}/tier", data={"tier": tier_val})
+            assert resp.status_code == 200, f"tier={tier_val} should be accepted"
+
+    def test_set_tier_nonexistent_company_returns_404(self, client: TestClient, db_session: Session, test_user: User):
+        """POST to unknown company_id returns 404."""
+        resp = client.post("/v2/partials/customers/99999/tier", data={"tier": "core"})
+        assert resp.status_code == 404
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestBuyingRoleSetter — P2b contact buying-role setter
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestBuyingRoleSetter:
+    """Tests for contact buying-role setter endpoint.
+
+    Written FIRST (TDD RED) — will fail until routes are added.
+
+    Routes tested:
+      POST /v2/partials/customers/{company_id}/contacts/{contact_id}/role
+    """
+
+    def _make_company_with_contact(self, db_session: Session, **contact_kwargs):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="RoleSet Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alex Buyer",
+            email="alex@roleset.com",
+            **contact_kwargs,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(contact)
+        db_session.refresh(company)
+        return company, site, contact
+
+    def test_set_role_updates_db(self, client: TestClient, db_session: Session, test_user: User):
+        """POST contact_role=buyer_po persists to SiteContact.contact_role."""
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "buyer_po"},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role == "buyer_po"
+
+    def test_set_role_rerenders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """POST role returns HTML containing the chip for the new role."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "specifier"},
+        )
+        assert resp.status_code == 200
+        assert "specifier" in resp.text.lower() or "Specifier" in resp.text
+
+    def test_set_role_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with unknown role value returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "wizard"},
+        )
+        assert resp.status_code == 400
+
+    def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """All canonical buying-role values are accepted."""
+        for role_val in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+            company, site, contact = self._make_company_with_contact(db_session)
+            resp = client.post(
+                f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+                data={"contact_role": role_val},
+            )
+            assert resp.status_code == 200, f"role={role_val} should be accepted"
+
+    def test_set_role_nonexistent_contact_returns_404(self, client: TestClient, db_session: Session, test_user: User):
+        """POST to unknown contact_id returns 404."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/99999/role",
+            data={"contact_role": "buyer_po"},
+        )
+        assert resp.status_code == 404
+
+    def test_set_role_blank_clears_role(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with contact_role='' clears the role to None."""
+
+        company, site, contact = self._make_company_with_contact(db_session, contact_role="buyer")
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": ""},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.contact_role is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestRoleChipLegacy — role_chip macro handles legacy + new canonical values
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestRoleChipLegacy:
+    """Tests that role_chip renders both legacy and new canonical values.
+
+    Written FIRST (TDD RED) — will fail until the template is updated.
+    """
+
+    def _make_company_with_contact(self, db_session: Session, contact_role: str | None = None):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="ChipTest Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Chip Test",
+            email="chip@test.com",
+            contact_role=contact_role,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(company)
+        return company, site, contact
+
+    def test_legacy_decision_maker_renders_gracefully(self, client: TestClient, db_session: Session, test_user: User):
+        """Legacy role 'decision_maker' still renders a chip without error."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="decision_maker")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "decision" in resp.text.lower() or "Decision" in resp.text
+
+    def test_legacy_buyer_renders_gracefully(self, client: TestClient, db_session: Session, test_user: User):
+        """Legacy role 'buyer' still renders a chip."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="buyer")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "buyer" in resp.text.lower() or "Buyer" in resp.text
+
+    def test_canonical_buyer_po_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """New canonical role 'buyer_po' renders a chip in the contact card."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="buyer_po")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        # Should show some chip text for buyer_po
+        assert "buyer" in resp.text.lower() or "PO" in resp.text or "Buyer" in resp.text
+
+    def test_canonical_specifier_renders_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """New canonical role 'specifier' renders a chip."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role="specifier")
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "specifier" in resp.text.lower() or "Specifier" in resp.text
+
+    def test_null_role_renders_no_chip(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL contact_role renders no chip (not an error)."""
+        company, _, _ = self._make_company_with_contact(db_session, contact_role=None)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
