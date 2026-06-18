@@ -121,6 +121,7 @@ authoritative reference. Static-analysis tests in
 | Settings | 5 | partials/settings/ |
 | Shared | 16 | partials/shared/ |
 | Buy Plans | 3 | partials/buy_plans/ |
+| Reporting | 2 | partials/reporting/ — manager view at `/v2/reporting` (`reporting_dashboard` in `routers/crm/views.py`). `dashboard.html` composes `pipeline.html` (pipeline/forecast first) + the reused `crm/performance_tab.html` + cross-account Buy-Plans/Quotes links. Pipeline/forecast rollups come from `services/forecast_service.py` — the Requisition IS the opportunity; weighted forecast = Σ(deal value × `STAGE_WIN_PROBABILITY[status]`); account/owner rollups + interactions→RFQs→quotes→won funnel. Performance moved here from the CRM shell; Buy-Plans was demoted out of the bottom nav into Reporting. |
 
 ### Shared Template Components
 
