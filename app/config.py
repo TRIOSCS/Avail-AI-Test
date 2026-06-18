@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_ai_search: str = "10/minute"
 
+    # --- Cross-app alerts ---
+    alert_recency_days: int = 30  # FYI alerts only count items newer than this
+    alerts_epoch: str = ""  # ISO datetime; FYI items dated before this never count (default: no epoch floor)
+
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
     cache_backend: str = "redis"

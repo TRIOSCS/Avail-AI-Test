@@ -4,6 +4,9 @@ Import from here:  from app.models import User, Company, ...
 Or from submodules: from app.models.auth import User
 """
 
+# Alert read-state (per-user seen-state for cross-app alerts)
+from .alert_seen import AlertSeen  # noqa: F401
+
 # Auth & Users
 from .auth import User  # noqa: F401
 from .base import Base  # noqa: F401
