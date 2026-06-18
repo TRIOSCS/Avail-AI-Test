@@ -1,138 +1,230 @@
-{# activity_tab.html — Company activity timeline with RFQ contacts, quotes, and activity logs.
-   Receives: company (Company), contacts (list[Contact]), quotes (list[Quote]),
+{# activity_tab.html — Unified account activity timeline (P3-4).
+   Replaces the old 3-section layout (RFQ History / Quotes / Activity Log) with
+   a single chronological timeline.  Each row shows a kind/channel icon,
+   direction indicator, title/detail, relative timestamp, and — for activity
+   entries — a quality badge.  An Alpine hide-noise toggle filters out
+   non-meaningful (is_meaningful==False) activity events.
+
+   Receives: company (Company), timeline (list[dict] from build_account_timeline),
+             contacts (list[Contact]), quotes (list[Quote]),
              activities (list[ActivityLog]), req_map (dict[int, Requisition]).
    Called by: company_tab route (tab=="activity") in htmx_views.py.
-   Depends on: HTMX, Tailwind CSS with brand palette, activity_row macro.
+   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js.
 #}
-{% from "htmx/partials/shared/_macros.html" import activity_row %}
-<div class="space-y-4">
 
-  <div hx-get="/v2/partials/customers/{{ company.id }}/activity-digest"
-       hx-trigger="load" hx-target="this" hx-swap="innerHTML">
-    <div class="rounded-lg border border-brand-200 bg-white p-4 animate-pulse">
-      <div class="h-3 w-2/3 bg-gray-100 rounded"></div>
+<div class='space-y-4'>
+
+  {# ── AI Digest (lazy) ──────────────────────────────────────── #}
+  <div hx-get='/v2/partials/customers/{{ company.id }}/activity-digest'
+       hx-trigger='load' hx-target='this' hx-swap='innerHTML'>
+    <div class='rounded-lg border border-brand-200 bg-white p-4 animate-pulse'>
+      <div class='h-3 w-2/3 bg-gray-100 rounded'></div>
     </div>
   </div>
 
-  {# ── Summary Bar ───────────────────────────────────────── #}
+  {# ── Summary Bar ───────────────────────────────────────────── #}
   {% set rfq_count = contacts|length if contacts else 0 %}
   {% set quote_count = quotes|length if quotes else 0 %}
   {% set activity_count = activities|length if activities else 0 %}
-  <div class="grid grid-cols-3 gap-3">
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-brand-600">{{ rfq_count }}</p>
-      <p class="text-xs text-gray-500">RFQs Sent</p>
+  <div class='grid grid-cols-3 gap-3'>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-brand-600'>{{ rfq_count }}</p>
+      <p class='text-xs text-gray-500'>RFQs Sent</p>
     </div>
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-emerald-600">{{ quote_count }}</p>
-      <p class="text-xs text-gray-500">Quotes</p>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-emerald-600'>{{ quote_count }}</p>
+      <p class='text-xs text-gray-500'>Quotes</p>
     </div>
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-gray-600">{{ activity_count }}</p>
-      <p class="text-xs text-gray-500">Activities</p>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-gray-600'>{{ activity_count }}</p>
+      <p class='text-xs text-gray-500'>Activities</p>
     </div>
   </div>
 
-  {# ── RFQ History ──────────────────────────────────────── #}
-  {% if contacts %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">RFQ History</h3>
+  {# ── Unified Timeline ──────────────────────────────────────── #}
+  {% if timeline %}
+  <div class='bg-white rounded-lg border border-gray-200 overflow-hidden'
+       x-data='{ hideNoise: false }'>
+
+    {# ── Timeline header + toggle ─────────────────────── #}
+    <div class='px-4 py-3 bg-gray-50 border-b flex items-center justify-between'>
+      <h3 class='text-sm font-semibold text-gray-900'>Timeline</h3>
+      <label class='flex items-center gap-1.5 cursor-pointer select-none'>
+        <input type='checkbox' x-model='hideNoise' class='h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500'>
+        <span class='text-xs text-gray-500'>Hide routine</span>
+      </label>
     </div>
-    <div class="divide-y divide-gray-100">
-      {% for c in contacts[:20] %}
-      <div class="flex items-center gap-3 px-4 py-2.5 hover:bg-brand-50">
-        {% set st_colors = {
-          'sent': 'bg-brand-50 text-brand-700',
-          'opened': 'bg-amber-50 text-amber-700',
-          'responded': 'bg-emerald-50 text-emerald-700',
-          'quoted': 'bg-emerald-50 text-emerald-700',
-          'declined': 'bg-rose-50 text-rose-700',
-          'bounced': 'bg-rose-50 text-rose-600',
-          'failed': 'bg-rose-50 text-rose-700'
-        } %}
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
-          {{ (c.status or 'sent')|capitalize }}
+
+    {# ── Timeline rows ────────────────────────────────── #}
+    <div class='divide-y divide-gray-50'>
+      {% for ev in timeline %}
+
+      {# Determine if this event is noise (only activity entries can be noise) #}
+      {% set is_noise = (ev.kind == 'activity' and ev.is_meaningful == false) %}
+
+      {# ── RFQ row ──────────────────────────────────────── #}
+      {% if ev.kind == 'rfq' %}
+      {% set c = ev.raw %}
+      {% set st_colors = {
+        'sent': 'bg-brand-50 text-brand-700',
+        'opened': 'bg-amber-50 text-amber-700',
+        'responded': 'bg-emerald-50 text-emerald-700',
+        'quoted': 'bg-emerald-50 text-emerald-700',
+        'declined': 'bg-rose-50 text-rose-700',
+        'bounced': 'bg-rose-50 text-rose-600',
+        'failed': 'bg-rose-50 text-rose-700'
+      } %}
+      <div class='flex items-start gap-3 px-4 py-3 hover:bg-brand-50'>
+        {# RFQ icon — paper-airplane #}
+        <span class='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600'>
+          <svg class='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='1.8' aria-hidden='true'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'/>
+          </svg>
         </span>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm text-gray-900 truncate">
-            <span class="font-medium">{{ c.vendor_name or "Unknown" }}</span>
-            {% if c.vendor_contact %}<span class="text-gray-500"> — {{ c.vendor_contact }}</span>{% endif %}
-          </p>
-          {% if c.subject %}<p class="text-xs text-gray-400 truncate">{{ c.subject }}</p>{% endif %}
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            <span class='text-xs font-medium px-1.5 py-0.5 rounded-full {{ st_colors.get(c.status, "bg-gray-100 text-gray-600") }}'>
+              {{ (c.status or 'sent')|capitalize }}
+            </span>
+            <p class='text-sm font-medium text-gray-900'>RFQ — {{ c.vendor_name or "Unknown" }}</p>
+            {% if c.vendor_contact %}
+            <span class='text-xs text-gray-500'>{{ c.vendor_contact }}</span>
+            {% endif %}
+            {# outbound direction pill #}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-brand-50 text-brand-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25'/></svg>
+              Out
+            </span>
+          </div>
+          {% if c.subject %}<p class='text-xs text-gray-400 truncate mt-0.5'>{{ c.subject }}</p>{% endif %}
         </div>
-        {% set req = req_map.get(c.requisition_id) if req_map else None %}
-        {% if req %}
-        <a hx-get="/v2/partials/requisitions/{{ req.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/requisitions/{{ req.id }}"
-           class="text-xs text-brand-500 hover:text-brand-600 whitespace-nowrap cursor-pointer">
-          Req #{{ req.id }}
-        </a>
-        {% endif %}
-        <span class="text-xs text-gray-400 whitespace-nowrap">{{ c.created_at.strftime('%b %d') if c.created_at else "" }}</span>
+        <div class='text-right flex-shrink-0 flex flex-col items-end gap-1'>
+          {% if ev.req %}
+          <a hx-get='/v2/partials/requisitions/{{ ev.req.id }}'
+             hx-target='#main-content'
+             hx-push-url='/v2/requisitions/{{ ev.req.id }}'
+             class='text-xs text-brand-500 hover:text-brand-600 cursor-pointer whitespace-nowrap'>
+            Req #{{ ev.req.id }}
+          </a>
+          {% endif %}
+          <span class='text-[11px] text-gray-400 whitespace-nowrap'>{{ ev.ts.strftime('%b %d') if ev.ts else "" }}</span>
+        </div>
       </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 
-  {# ── Quotes ────────────────────────────────────────────── #}
-  {% if quotes %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">Quotes</h3>
-    </div>
-    <div class="divide-y divide-gray-100">
-      {% for q in quotes[:20] %}
+      {# ── Quote row ─────────────────────────────────────── #}
+      {% elif ev.kind == 'quote' %}
+      {% set q = ev.raw %}
       {% set q_colors = {
         'draft': 'bg-gray-100 text-gray-600',
         'sent': 'bg-brand-50 text-brand-700',
         'won': 'bg-emerald-50 text-emerald-700',
         'lost': 'bg-rose-50 text-rose-700',
       } %}
-      <div class="flex items-center gap-3 px-4 py-2.5 hover:bg-brand-50 cursor-pointer"
-           hx-get="/v2/partials/quotes/{{ q.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/quotes/{{ q.id }}">
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ q_colors.get(q.status, 'bg-gray-100 text-gray-600') }}">
-          {{ (q.status or 'draft')|capitalize }}
+      <div class='flex items-start gap-3 px-4 py-3 hover:bg-brand-50 cursor-pointer'
+           hx-get='/v2/partials/quotes/{{ q.id }}'
+           hx-target='#main-content'
+           hx-push-url='/v2/quotes/{{ q.id }}'>
+        {# Quote icon — document-text #}
+        <span class='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600'>
+          <svg class='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='1.8' aria-hidden='true'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'/>
+          </svg>
         </span>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900">{{ q.quote_number or "Quote" }}</p>
-          {% if q.total_amount %}
-          <p class="text-xs text-gray-500">${{ "{:,.2f}".format(q.total_amount) }}</p>
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            <span class='text-xs font-medium px-1.5 py-0.5 rounded-full {{ q_colors.get(q.status, "bg-gray-100 text-gray-600") }}'>
+              {{ (q.status or 'draft')|capitalize }}
+            </span>
+            <p class='text-sm font-medium text-gray-900'>{{ q.quote_number or "Quote" }}</p>
+          </div>
+          {% if ev.display_value %}
+          <p class='text-xs text-gray-500 mt-0.5'>${{ "{:,.2f}".format(ev.display_value|float) }}</p>
           {% endif %}
         </div>
-        <span class="text-xs text-gray-400 whitespace-nowrap">{{ q.created_at.strftime('%b %d') if q.created_at else "" }}</span>
+        <span class='text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0'>{{ ev.ts.strftime('%b %d') if ev.ts else "" }}</span>
       </div>
+
+      {# ── Activity row ──────────────────────────────────── #}
+      {% else %}
+      {% set a = ev.raw %}
+      <div class='flex gap-3 py-3 px-4 border-b border-gray-50 last:border-0 hover:bg-gray-50 {% if is_noise %}js-timeline-noise{% endif %}'
+           {% if is_noise %}x-show='!hideNoise'{% endif %}>
+        {# Reuse the activity icon logic inline (same as activity_row macro) #}
+        {%- set icon_map = {
+          'rfq_sent':             {'accent': 'bg-brand-100 text-brand-600',     'path': 'M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'},
+          'email_received':       {'accent': 'bg-blue-100 text-blue-600',       'path': 'M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75'},
+          'call_logged':          {'accent': 'bg-emerald-100 text-emerald-600', 'path': 'M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z'},
+          'sales_note':           {'accent': 'bg-gray-100 text-gray-500',       'path': 'M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10'},
+          'task_completed':       {'accent': 'bg-emerald-100 text-emerald-600', 'path': 'M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z'},
+          'status_changed':       {'accent': 'bg-gray-100 text-gray-500',       'path': 'M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99'},
+          'offer_created':        {'accent': 'bg-amber-100 text-amber-600',     'path': 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9zm.75 12.75h3m-3 2.25h3m-6-9.75v-1.5m0 0V9m0 1.5h1.5m-1.5 0H9'},
+          'offer_status_changed': {'accent': 'bg-amber-100 text-amber-600',     'path': 'M9 12.75L11.25 15 15 9.75M21 12c0 1.268-.63 2.39-1.593 3.068a3.745 3.745 0 01-1.043 3.296 3.745 3.745 0 01-3.296 1.043A3.745 3.745 0 0112 21c-1.268 0-2.39-.63-3.068-1.593a3.746 3.746 0 01-3.296-1.043 3.745 3.745 0 01-1.043-3.296A3.745 3.745 0 013 12c0-1.268.63-2.39 1.593-3.068a3.745 3.745 0 011.043-3.296 3.746 3.746 0 013.296-1.043A3.746 3.746 0 0112 3c1.268 0 2.39.63 3.068 1.593a3.746 3.746 0 013.296 1.043 3.746 3.746 0 011.043 3.296A3.745 3.745 0 0121 12z'},
+          'sighting_added':       {'accent': 'bg-indigo-100 text-indigo-600',   'path': 'M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z'},
+          'assignment_changed':   {'accent': 'bg-gray-100 text-gray-500',       'path': 'M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z'},
+          'req_archived':         {'accent': 'bg-gray-100 text-gray-500',       'path': 'M20.25 7.5l-.625 10.632a2.25 2.25 0 01-2.247 2.118H6.622a2.25 2.25 0 01-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125z'},
+          'req_unarchived':       {'accent': 'bg-gray-100 text-gray-500',       'path': 'M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5'}
+        } -%}
+        {%- set fallback = {'accent': 'bg-gray-100 text-gray-500', 'path': 'M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z'} -%}
+        {%- set icon = icon_map.get(a.activity_type, fallback) -%}
+        <span class='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full {{ icon.accent }}'>
+          <svg class='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='1.8' aria-hidden='true'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='{{ icon.path }}'/>
+          </svg>
+        </span>
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            <p class='text-sm font-medium text-gray-900'>{{ ev.title }}</p>
+            {# Direction pill (inbound/outbound) #}
+            {% if ev.direction == 'inbound' %}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 4.5l-15 15m0 0h11.25m-11.25 0V8.25'/></svg>
+              In
+            </span>
+            {% elif ev.direction == 'outbound' %}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-brand-50 text-brand-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25'/></svg>
+              Out
+            </span>
+            {% endif %}
+            {# Channel badge #}
+            {% if a.channel and a.channel not in ('system', 'manual', 'internal') %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600'>{{ a.channel|capitalize }}</span>
+            {% endif %}
+            {# Quality badge — only for activity events with quality data #}
+            {% if ev.is_meaningful == true %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700'>Meaningful</span>
+            {% elif ev.is_meaningful == false %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-400'>Routine</span>
+            {% endif %}
+          </div>
+          {# Contact attribution #}
+          {% set who = a.vendor_card.display_name if a.vendor_card_id and a.vendor_card else a.contact_name %}
+          {% if who %}
+          <p class='text-xs text-gray-500 mt-0.5'>{{ who }}</p>
+          {% endif %}
+          {% if ev.detail %}
+          <p class='text-xs text-gray-600 mt-0.5 leading-relaxed line-clamp-2'>{{ ev.detail }}</p>
+          {% endif %}
+        </div>
+        <div class='text-right flex-shrink-0'>
+          <p class='text-[11px] text-gray-400 whitespace-nowrap'>{{ (a.occurred_at or a.created_at)|timeago }}</p>
+        </div>
+      </div>
+      {% endif %}
+
       {% endfor %}
     </div>
   </div>
   {% endif %}
 
-  {# ── Activity Log ──────────────────────────────────────── #}
-  {% if activities %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">Activity Log</h3>
-    </div>
-    <div class="px-4 py-2">
-      {% for a in activities[:30] %}
-      {{ activity_row(a) }}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Empty State ───────────────────────────────────────── #}
-  {% if not contacts and not quotes and not activities %}
-  <div class="p-8 text-center">
-    <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  {# ── Empty State ───────────────────────────────────────────── #}
+  {% if not timeline %}
+  <div class='p-8 text-center'>
+    <svg class='mx-auto h-10 w-10 text-gray-300 mb-3' fill='none' viewBox='0 0 24 24' stroke='currentColor'>
+      <path stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'/>
     </svg>
-    <p class="text-sm text-gray-500">No activity recorded for this company yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Activity will appear here as you send RFQs, create quotes, and log interactions.</p>
+    <p class='text-sm text-gray-500'>No activity recorded for this company yet.</p>
+    <p class='text-xs text-gray-400 mt-1'>Activity will appear here as you send RFQs, create quotes, and log interactions.</p>
   </div>
   {% endif %}
 
