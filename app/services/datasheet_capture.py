@@ -6,41 +6,95 @@ Primitives (download_pdf, pdf_contains_mpn) plus finder + capture orchestrator.
 from __future__ import annotations
 
 import io
+import ipaddress
 import os
 import re
+import socket
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urljoin, urlparse
 
 from loguru import logger
 
 from ..database import SessionLocal
-from ..http_client import http_redirect
+from ..http_client import http
 from ..utils.normalization import normalize_mpn_key
 from .onedrive_files import upload_bytes_to_onedrive
 
 MAX_DATASHEET_BYTES = 25 * 1024 * 1024
 _MAX_VERIFY_PAGES = 20
+_MAX_REDIRECTS = 5
 _NONALNUM = re.compile(r"[^a-z0-9]")
 
 
+def _is_safe_url(url: str) -> bool:
+    """Reject non-http(s) schemes and any host that resolves to a private/loopback/
+    link-local/multicast/reserved/unspecified address (SSRF guard).
+
+    Note: this does a
+    DNS resolution check; a determined DNS-rebinding attacker could still race it, but
+    it blocks the realistic vectors (direct-internal URL, redirect-to-internal).
+    """
+    try:
+        p = urlparse(url)
+    except Exception:
+        return False
+    if p.scheme not in ("http", "https") or not p.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(p.hostname, p.port or (443 if p.scheme == "https" else 80), proto=socket.IPPROTO_TCP)
+    except Exception:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            return False
+    return True
+
+
 async def download_pdf(url: str) -> bytes | None:
-    """GET a URL (following redirects); return bytes iff it is a PDF within the size
-    cap."""
+    """GET a URL with per-hop SSRF validation (no blind redirect following); return
+    bytes iff it is a PDF within the size cap."""
     if not url:
         return None
-    try:
-        resp = await http_redirect.get(url, timeout=60)
-    except Exception:
-        logger.warning("datasheet download errored url={}", url, exc_info=True)
-        return None
-    if resp.status_code != 200:
-        return None
-    content = resp.content
-    if not content or len(content) > MAX_DATASHEET_BYTES:
-        return None
-    ctype = (resp.headers.get("content-type") or "").lower()
-    if not (content[:5] == b"%PDF-" or "application/pdf" in ctype):
-        return None
-    return content
+    current = url
+    for _ in range(_MAX_REDIRECTS + 1):
+        if not _is_safe_url(current):
+            logger.warning("datasheet download blocked unsafe url={}", current)
+            return None
+        try:
+            resp = await http.get(current, timeout=60)
+        except Exception:
+            logger.warning("datasheet download errored url={}", current, exc_info=True)
+            return None
+        if resp.status_code in (301, 302, 303, 307, 308):
+            location = resp.headers.get("location")
+            if not location:
+                return None
+            current = urljoin(current, location)
+            continue
+        if resp.status_code != 200:
+            return None
+        content = resp.content
+        if not content or len(content) > MAX_DATASHEET_BYTES:
+            return None
+        ctype = (resp.headers.get("content-type") or "").lower()
+        if not (content[:5] == b"%PDF-" or "application/pdf" in ctype):
+            return None
+        return content
+    logger.warning("datasheet download exceeded max redirects url={}", url)
+    return None
 
 
 def pdf_contains_mpn(pdf_bytes: bytes, mpn: str) -> bool:
