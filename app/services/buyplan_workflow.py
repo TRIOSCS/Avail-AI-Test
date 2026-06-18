@@ -3,12 +3,11 @@
 Phase 4: Approval + Execution — submit, approve, verify SO/PO, flag issues,
          auto-complete, favoritism detection, case reports.
 
-Called by: routers/crm/buy_plans.py
+Called by: routers/htmx_views.py
 Depends on: buyplan_scoring, buyplan_builder, models, config
 """
 
-import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
@@ -74,8 +73,6 @@ def submit_buy_plan(
         _generate_buyer_tasks(plan, db)
     else:
         plan.status = BuyPlanStatus.PENDING.value
-        plan.approval_token = secrets.token_urlsafe(32)
-        plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         logger.info("Buy plan {} pending approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
 
     db.flush()
@@ -170,6 +167,9 @@ def verify_so(
         plan.so_rejection_note = rejection_note
         logger.info("SO rejected for plan {}: {}", plan_id, rejection_note)
     elif action == "halt":
+        # SOVerificationStatus has no dedicated HALTED value, so a halt reuses REJECTED
+        # for so_status; it is distinguished from a plain reject by plan.status == HALTED
+        # (set just below).
         plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
         plan.status = BuyPlanStatus.HALTED.value
@@ -261,6 +261,9 @@ def verify_po(
         line.po_number = None
         line.estimated_ship_date = None
         line.po_confirmed_at = None
+        # Reset the nudge clock: the line is actionable again, so the buyer is re-nudged
+        # to re-issue the PO without waiting out a stale (ops-stamped) nudge window.
+        line.last_nudge_at = None
         logger.info("PO rejected for line {}: {}", line_id, rejection_note)
     else:
         raise ValueError(f"Invalid PO verification action: {action}")
@@ -311,6 +314,17 @@ def flag_line_issue(
 # ── Workflow: Completion ─────────────────────────────────────────────
 
 
+def _complete_plan(plan: BuyPlan, db: Session) -> None:
+    """Mark a plan completed and generate its case report.
+
+    Shared by check_completion (normal auto-complete) and the stock-sale auto-complete
+    job so both completion paths produce a case report.
+    """
+    plan.status = BuyPlanStatus.COMPLETED.value
+    plan.completed_at = datetime.now(timezone.utc)
+    plan.case_report = generate_case_report(plan, db)
+
+
 def check_completion(plan_id: int, db: Session) -> BuyPlan:
     """Auto-complete the buy plan if all lines are in terminal state.
 
@@ -319,7 +333,11 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
     - All lines are verified or cancelled
     - SO is verified (so_status = approved)
     """
-    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
+    plan = db.get(
+        BuyPlan,
+        plan_id,
+        options=[joinedload(BuyPlan.lines).joinedload(BuyPlanLine.offer)],
+    )
     if not plan or plan.status != BuyPlanStatus.ACTIVE.value:
         return plan
 
@@ -330,10 +348,16 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
     all_terminal = all(line.status in terminal for line in plan.lines)
 
     if all_terminal and plan.so_status == SOVerificationStatus.APPROVED.value:
-        plan.status = BuyPlanStatus.COMPLETED.value
-        plan.completed_at = datetime.now(timezone.utc)
-        plan.case_report = generate_case_report(plan, db)
+        _complete_plan(plan, db)
         logger.info("Buy plan {} auto-completed (all lines terminal)", plan_id)
+        db.flush()
+        # Feed the proactive backbone from this confirmed customer purchase (best-effort).
+        try:
+            from app.services.purchase_history_service import record_buyplan_purchase_history
+
+            record_buyplan_purchase_history(db, plan)
+        except Exception:  # noqa: BLE001 — CPH must never break completion
+            logger.exception("BUYPLAN_CPH: failed to record purchase history for plan {}", plan_id)
         db.flush()
 
     return plan
@@ -367,7 +391,44 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     plan.cancellation_reason = None
     plan.updated_at = datetime.now(timezone.utc)
 
+    db.flush()
     logger.info("Buy plan {} reset to draft by user {}", plan_id, user.id)
+    return plan
+
+
+def cancel_buy_plan(plan_id: int, user: User, db: Session, *, reason: str | None = None) -> BuyPlan:
+    """Cancel a buy plan and cascade-cancel its still-open lines.
+
+    Open lines (awaiting_po / pending_verify) move to cancelled so no buyer task or PO
+    nudge lingers. Completed or already-cancelled plans cannot be cancelled. The caller
+    commits and dispatches notify_cancelled.
+    """
+    plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
+    if not plan:
+        raise ValueError(f"Buy plan {plan_id} not found")
+    if plan.status in (BuyPlanStatus.COMPLETED.value, BuyPlanStatus.CANCELLED.value):
+        raise ValueError(f"Cannot cancel plan in '{plan.status}' status")
+
+    plan.status = BuyPlanStatus.CANCELLED.value
+    plan.cancelled_at = datetime.now(timezone.utc)
+    plan.cancelled_by_id = user.id
+    plan.cancellation_reason = reason
+
+    open_states = {BuyPlanLineStatus.AWAITING_PO.value, BuyPlanLineStatus.PENDING_VERIFY.value}
+    cancelled_lines = 0
+    for line in plan.lines:
+        if line.status in open_states:
+            line.status = BuyPlanLineStatus.CANCELLED.value
+            cancelled_lines += 1
+
+    logger.info(
+        "Buy plan {} cancelled by {} ({} open line(s) cancelled): {}",
+        plan_id,
+        user.email,
+        cancelled_lines,
+        reason,
+    )
+    db.flush()
     return plan
 
 
@@ -416,8 +477,6 @@ def resubmit_buy_plan(
         plan.approved_at = datetime.now(timezone.utc)
     else:
         plan.status = BuyPlanStatus.PENDING.value
-        plan.approval_token = secrets.token_urlsafe(32)
-        plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
 
     db.flush()
     return plan
@@ -427,20 +486,25 @@ def resubmit_buy_plan(
 
 
 def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
-    """Create 'Cut PO' tasks for each assigned buyer line when plan goes active."""
-    try:
-        from app.services.task_service import on_buy_plan_assigned
+    """Create 'Cut PO' tasks for each assigned buyer line when plan goes active.
 
-        for line in plan.lines:
-            if not line.buyer_id:
-                continue
-            vendor_name = ""
-            mpn = ""
-            if line.offer:
-                vendor_name = line.offer.vendor_name or ""
-                mpn = line.offer.mpn or ""
-            elif line.requirement:
-                mpn = line.requirement.primary_mpn or ""
+    Each line is handled independently: a failure on one line is logged with the
+    plan/line id and the loop continues, so one bad line never silently drops the
+    whole batch.
+    """
+    from app.services.task_service import on_buy_plan_assigned
+
+    for line in plan.lines:
+        if not line.buyer_id:
+            continue
+        vendor_name = ""
+        mpn = ""
+        if line.offer:
+            vendor_name = line.offer.vendor_name or ""
+            mpn = line.offer.mpn or ""
+        elif line.requirement:
+            mpn = line.requirement.primary_mpn or ""
+        try:
             on_buy_plan_assigned(
                 db,
                 requisition_id=plan.requisition_id,
@@ -449,8 +513,8 @@ def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
                 mpn=mpn,
                 line_id=line.id,
             )
-    except Exception:
-        logger.warning("Task auto-gen for buy plan lines failed", exc_info=True)
+        except Exception:
+            logger.warning("Buyer task auto-gen failed for plan {} line {}", plan.id, line.id, exc_info=True)
 
 
 # ── Helpers: Auto-Approval ───────────────────────────────────────────
@@ -621,11 +685,12 @@ def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
     if total_lines == 0:
         return []
 
+    buyers_by_id = {u.id: u for u in db.query(User).filter(User.id.in_(buyer_counts.keys())).all()}
     findings = []
     for buyer_id, count in buyer_counts.items():
         pct = round(count / total_lines * 100, 1)
         if pct >= threshold:
-            buyer = db.get(User, buyer_id)
+            buyer = buyers_by_id.get(buyer_id)
             findings.append(
                 {
                     "buyer_id": buyer_id,
@@ -794,8 +859,8 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
     For each line with a po_number, searches Graph API for emails containing that PO
     number. Returns list of verification results per line.
     """
-    from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient
+    from ..utils.token_manager import get_valid_token
 
     results = []
     for line in plan.lines:
@@ -864,116 +929,6 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
     # Use centralized completion check (respects SO verification requirement)
     check_completion(plan.id, db)
 
-    db.commit()
-    return results
-
-
-# ── Workflow: V3 PO Verification Scanning ──────────────────────────
-
-
-async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
-    """Scan buyer Outlook sent folders for PO emails matching each BuyPlanLine.
-
-    Iterates plan.lines where po_number is set and status is pending_verify.
-    For each line, looks up the buyer's Graph token and searches Sent Items
-    for the PO number. On match: marks the line verified with timestamp.
-    After the loop, checks if all verifiable lines are verified and auto-completes
-    the plan if so.
-
-    Called by: routers/crm/buy_plans.py GET /api/buy-plans/{plan_id}/verify-po
-    Depends on: utils.graph_client.GraphClient, utils.token_manager.get_valid_token
-
-    Returns:
-        dict of {po_number: {verified, recipient, sent_at, reason}}
-    """
-    from ..utils.graph_client import GraphClient
-    from ..utils.token_manager import get_valid_token
-
-    results: dict[str, dict] = {}
-
-    for line in plan.lines:
-        if not line.po_number:
-            continue
-        if line.status != BuyPlanLineStatus.PENDING_VERIFY.value:
-            continue
-
-        # Skip lines without a buyer
-        if not line.buyer_id:
-            results[line.po_number] = {
-                "verified": False,
-                "recipient": None,
-                "sent_at": None,
-                "reason": "no_buyer",
-            }
-            logger.debug("PO {} skipped — no buyer assigned (line {})", line.po_number, line.id)
-            continue
-
-        # Look up buyer for their azure_id
-        buyer = db.get(User, line.buyer_id)
-        if not buyer:
-            results[line.po_number] = {
-                "verified": False,
-                "recipient": None,
-                "sent_at": None,
-                "reason": "buyer_not_found",
-            }
-            logger.warning("PO {} skipped — buyer {} not found (line {})", line.po_number, line.buyer_id, line.id)
-            continue
-
-        try:
-            token = await get_valid_token(buyer, db)
-            if not token:
-                results[line.po_number] = {
-                    "verified": False,
-                    "recipient": None,
-                    "sent_at": None,
-                    "reason": "no_token",
-                }
-                continue
-
-            client = GraphClient(token)
-            messages = await client.search_sent_messages(
-                query=line.po_number,
-                user_id=str(buyer.azure_id) if buyer.azure_id else None,
-            )
-
-            if messages:
-                msg = messages[0]  # most recent match
-                recipient = None
-                recipients = msg.get("toRecipients", [])
-                if recipients:
-                    addr = recipients[0].get("emailAddress", {})
-                    recipient = addr.get("address")
-
-                line.status = BuyPlanLineStatus.VERIFIED.value
-                line.po_verified_at = datetime.now(timezone.utc)
-                logger.info("PO {} verified via Graph — line {} (plan {})", line.po_number, line.id, plan.id)
-
-                results[line.po_number] = {
-                    "verified": True,
-                    "recipient": recipient,
-                    "sent_at": msg.get("sentDateTime"),
-                    "reason": None,
-                }
-            else:
-                results[line.po_number] = {
-                    "verified": False,
-                    "recipient": None,
-                    "sent_at": None,
-                    "reason": "not_found_in_sent",
-                }
-
-        except Exception as e:
-            logger.error("Graph API error verifying PO {} (line {}): {}", line.po_number, line.id, e)
-            results[line.po_number] = {
-                "verified": False,
-                "recipient": None,
-                "sent_at": None,
-                "reason": f"graph_error: {e}",
-            }
-
-    # Use centralized completion check (respects SO verification requirement)
-    check_completion(plan.id, db)
-
+    # NOTE: flush (not commit) — the caller (PO-verify job) owns the transaction.
     db.flush()
     return results

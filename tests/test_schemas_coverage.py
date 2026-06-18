@@ -19,8 +19,6 @@ from app.schemas.buy_plan import (
     BuyPlanLineEdit,
     BuyPlanLineIssue,
     BuyPlanLineOverride,
-    BuyPlanTokenApproval,
-    BuyPlanTokenReject,
     POConfirmation,
     POVerificationRequest,
     SOVerificationRequest,
@@ -228,27 +226,6 @@ class TestVerificationGroupUpdate:
     def test_invalid_action(self):
         with pytest.raises(ValidationError):
             VerificationGroupUpdate(user_id=1, action="toggle")
-
-
-class TestBuyPlanTokenApproval:
-    def test_valid(self):
-        s = BuyPlanTokenApproval(sales_order_number="SO-100")
-        assert s.sales_order_number == "SO-100"
-        assert s.notes is None
-
-    def test_with_notes(self):
-        s = BuyPlanTokenApproval(sales_order_number="SO-100", notes="approved")
-        assert s.notes == "approved"
-
-
-class TestBuyPlanTokenReject:
-    def test_default_reason(self):
-        s = BuyPlanTokenReject()
-        assert s.reason == ""
-
-    def test_with_reason(self):
-        s = BuyPlanTokenReject(reason="pricing too high")
-        assert s.reason == "pricing too high"
 
 
 # ── Knowledge Schemas ───────────────────────────────────────────────

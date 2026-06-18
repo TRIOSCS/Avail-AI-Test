@@ -41,6 +41,11 @@ def test_parse_helpers():
     assert cli._parse_qty("") is None
     assert cli._parse_qty(None) is None
     assert cli._parse_qty("junk") is None
+    # In-range values pass through; out-of-range SFDC artifacts clamp to INT4 max so
+    # they can't overflow the sourced_qty_90d column (it's a ranking signal).
+    assert cli._parse_qty("2147483647") == cli._SOURCED_QTY_MAX
+    assert cli._parse_qty("37216300001") == cli._SOURCED_QTY_MAX
+    assert cli._parse_qty("8188453743.0") == cli._SOURCED_QTY_MAX
 
     ts = cli._parse_ts("2/5/2020 17:24")
     assert ts is not None and ts.tzinfo == timezone.utc and ts.year == 2020

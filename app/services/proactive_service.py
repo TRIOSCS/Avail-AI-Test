@@ -8,8 +8,7 @@ Depends on: models, config, utils/graph_client
 """
 
 import html
-import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from loguru import logger
@@ -60,11 +59,6 @@ def get_matches_for_user(
         query = query.filter(ProactiveMatch.salesperson_id == user_id)
     if status:
         query = query.filter(ProactiveMatch.status == status)
-
-    # For new matches, only show last 7 days
-    if status == ProactiveMatchStatus.NEW:
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-        query = query.filter(ProactiveMatch.created_at >= seven_days_ago)
 
     query = query.options(
         joinedload(ProactiveMatch.offer).joinedload(Offer.vendor_card),
@@ -541,8 +535,6 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         status=BuyPlanStatus.PENDING.value,
         submitted_by_id=user.id,
         submitted_at=datetime.now(timezone.utc),
-        approval_token=secrets.token_urlsafe(32),
-        token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
     db.add(buy_plan)
     db.flush()

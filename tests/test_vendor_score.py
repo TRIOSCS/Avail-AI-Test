@@ -682,6 +682,25 @@ class TestGetBuyplanOfferIds:
         result = _get_buyplan_offer_ids(db_session, offer_ids, AWARDED_STATUSES)
         assert len(result) == 0
 
+    def test_halted_buyplan_excluded(self, db_session):
+        """Offers in halted BuyPlans are NOT awarded (SQL filter and the
+        AWARDED_STATUSES set agree that halted plans don't count)."""
+        from app.constants import BuyPlanStatus
+
+        card = _make_vendor_card(db_session, "bp halted vendor")
+        offers, user, req = _make_offers_full(db_session, card.id, "bp halted vendor", 6)
+        db_session.flush()
+
+        q = _make_quote(db_session, req.id, user.id, [offers[0].id], status="sent")
+        _make_buy_plan(db_session, req.id, q.id, [offers[0].id], status=BuyPlanStatus.HALTED.value)
+        db_session.commit()
+
+        offer_ids = {o.id for o in offers}
+        from app.services.vendor_score import AWARDED_STATUSES
+
+        result = _get_buyplan_offer_ids(db_session, offer_ids, AWARDED_STATUSES)
+        assert len(result) == 0
+
     def test_po_confirmed_statuses(self, db_session):
         """Completed status offers are found with PO_CONFIRMED_STATUSES."""
         card = _make_vendor_card(db_session, "po confirm vendor")
@@ -772,6 +791,36 @@ class TestComputeAllVendorScoresGaps:
         db_session.refresh(card)
         assert card.vendor_score == 100.0
         assert card.advancement_score == 100.0
+
+    @pytest.mark.asyncio
+    async def test_halted_buyplan_not_awarded_in_batch(self, db_session):
+        """A halted BuyPlan's offers are NOT awarded in the batch path either — the SQL
+        pre-filter excludes halted plans, so a halted-plan vendor scores no higher than
+        a base-only vendor (QUAL-3: SQL and Python agree)."""
+        from app.constants import BuyPlanStatus
+
+        card_base = _make_vendor_card(db_session, "halt base only")
+        _make_offers(db_session, card_base.id, "halt base only", 6)
+
+        card_halted = _make_vendor_card(db_session, "halt awarded")
+        offers_halted, user_h, req_h = _make_offers_full(db_session, card_halted.id, "halt awarded", 6)
+        db_session.flush()
+
+        offer_ids_h = [o.id for o in offers_halted]
+        q = _make_quote(db_session, req_h.id, user_h.id, [offers_halted[0].id], status="sent")
+        _make_buy_plan(db_session, req_h.id, q.id, offer_ids_h, status=BuyPlanStatus.HALTED.value)
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card_base)
+        db_session.refresh(card_halted)
+        # Halted plan grants no awarded points → at most the quoted bump on the
+        # single quoted offer, never the +5 awarded tier.
+        assert card_halted.advancement_score is not None
+        # base-only vendor: all 6 offers at base (1pt) → (6/48)*100 = 12.5
+        # halted vendor: 1 offer quoted (3pt) + 5 base (1pt) = 8 → (8/48)*100 ≈ 16.7
+        # If halted counted as awarded, the quoted offer would be 5pt → 10 total.
+        assert card_halted.advancement_score == round((8 / 48) * 100, 1)
 
     @pytest.mark.asyncio
     async def test_buyplan_with_no_lines(self, db_session):

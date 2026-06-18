@@ -9,8 +9,12 @@
 
 <div class="max-w-7xl mx-auto">
 
-  {# Stats KPI panel — lazy-loaded so the grid paints first #}
-  <div class="mb-5" hx-get="/v2/partials/prospecting/stats" hx-trigger="load" hx-swap="innerHTML"></div>
+  {# Stats KPI panel — lazy-loaded so the grid paints first; OOB-refreshed after grid actions.
+     hx-target MUST be explicit: without it the div inherits #main-content's hx-target="this",
+     so the lazy stats load would wipe the whole list (cards included) instead of filling itself. #}
+  <div id="prospect-stats" class="mb-5"
+       hx-get="/v2/partials/prospecting/stats" hx-trigger="load"
+       hx-target="#prospect-stats" hx-swap="innerHTML"></div>
 
   <div class="flex items-center justify-between mb-4">
     <span class="text-sm text-gray-500">

@@ -205,10 +205,10 @@
 | requisition_id | FK -> requisitions (CASCADE) | |
 | sales_order_number | String 100 | |
 | customer_po_number | String 100 | |
-| status | String 30 | DRAFT -> SUBMITTED -> APPROVED -> COMPLETE |
-| so_status | String 30 | PENDING -> VERIFIED -> REJECTED |
+| status | String 30 | draft -> pending -> active -> completed (also halted / cancelled) |
+| so_status | String 30 | pending -> approved / rejected (ops SO-verify track) |
 | total_cost / total_revenue / total_margin_pct | Numeric | |
-| approval_token | String 100, unique | External approval link |
+| purchase_history_recorded_at | UTCDateTime, nullable | Idempotency stamp set by `record_buyplan_purchase_history` when CPH rows have been written for this plan (migration `bp_cph_recorded_at`). NULL = not yet recorded; non-NULL = safe to skip on retry/backfill. |
 
 **`buy_plan_lines`** — Individual line items for purchasing
 | Column | Type | Notes |
@@ -220,8 +220,20 @@
 | quantity | Integer | |
 | unit_cost / unit_sell | Numeric 12,4 | |
 | buyer_id | FK -> users | Assigned buyer |
-| status | String 30 | AWAITING_PO -> CONFIRMED -> SHIPPED |
+| status | String 30 | awaiting_po -> pending_verify -> verified (also issue / cancelled) |
 | po_number | String 100 | |
+| estimated_ship_date / po_confirmed_at | UTCDateTime | Vendor dock date + buyer confirm time |
+| last_nudge_at | UTCDateTime | Idempotency clock for the unconfirmed-instruction nudge job |
+
+**`verification_group_members`** — Ops users who can verify SO/PO (gates buy-plan completion)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| user_id | FK -> users (CASCADE), unique | One row per user; toggle `is_active`, never delete |
+| is_active | Boolean | |
+| added_at | UTCDateTime | |
+
+Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on startup.
 
 ---
 
@@ -366,7 +378,7 @@
 
 **`material_price_snapshots`** — Historical pricing data points
 
-**`customer_part_history`** — What parts each customer has bought (for proactive matching)
+**`customer_part_history`** — What parts each customer has bought (for proactive matching). The `source` column now takes the value `"buy_plan"` for rows written by `record_buyplan_purchase_history` (buy-plan completion hook); prior values (`salesforce_import`, `avail_offer`, `avail_quote_won`, `acctivate_po`) remain valid for legacy/import rows.
 
 **`fru_links`** — IBM/Lenovo FRU crosswalk: one row per FRU ↔ related-PN edge (migration 094)
 | Column | Type | Notes |

@@ -1,0 +1,12 @@
+{#
+  _action_oob.html — response for a grid claim/dismiss/release.
+  Receives: prospect, snapshots, contact_stats_map, status (active filter),
+            include_card (bool), total/buyer_ready/call_now/claimed (stats).
+  The card target (#prospect-<id>, outerHTML) gets the updated card when it still
+  belongs in the active filter, or nothing (removed) when it left. The stats panel
+  is refreshed out-of-band so the KPIs stay live.
+#}
+{% if include_card %}{% include "htmx/partials/prospecting/_card.html" %}{% endif %}
+<div id="prospect-stats" hx-swap-oob="innerHTML">
+  {% include "htmx/partials/prospecting/stats.html" %}
+</div>

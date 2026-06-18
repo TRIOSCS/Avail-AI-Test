@@ -74,7 +74,7 @@ async def test_po_found(db_session, test_user, test_quote, test_requisition):
     mock_client.search_sent_messages = AsyncMock(return_value=[{"id": "msg-1", "subject": "PO-12345"}])
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
         results = await verify_po_sent(plan, db_session)
@@ -101,7 +101,7 @@ async def test_po_not_found(db_session, test_user, test_quote, test_requisition)
     mock_client.search_sent_messages = AsyncMock(return_value=[])
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
         results = await verify_po_sent(plan, db_session)
@@ -125,7 +125,7 @@ async def test_graph_error(db_session, test_user, test_quote, test_requisition):
     mock_client.search_sent_messages = AsyncMock(side_effect=RuntimeError("Graph API timeout"))
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
         results = await verify_po_sent(plan, db_session)
@@ -149,7 +149,7 @@ async def test_all_verified_auto_completes(db_session, test_user, test_quote, te
     mock_client.search_sent_messages = AsyncMock(return_value=[{"id": "msg-1"}])
 
     with (
-        patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="fake-token"),
         patch("app.utils.graph_client.GraphClient", return_value=mock_client),
     ):
         results = await verify_po_sent(plan, db_session)
@@ -185,7 +185,7 @@ async def test_no_token_skips(db_session, test_user, test_quote, test_requisitio
     db_session.commit()
     db_session.refresh(plan)
 
-    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None):
+    with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None):
         results = await verify_po_sent(plan, db_session)
 
     assert len(results) == 1

@@ -6078,6 +6078,7 @@ async def buy_plans_list_partial(
                 "line_count": len(p.lines) if p.lines else 0,
                 "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
                 "auto_approved": p.auto_approved or False,
+                "is_stock_sale": p.is_stock_sale or False,
                 "created_at": str(p.created_at) if p.created_at else None,
             }
         )
@@ -6342,22 +6343,41 @@ async def buy_plan_cancel_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Cancel a buy plan — returns refreshed detail."""
+    """Cancel a buy plan — delegates to the service (line cascade + notification)."""
+    from ..services.buyplan_notifications import notify_cancelled, run_notify_bg
+    from ..services.buyplan_workflow import cancel_buy_plan
 
-    bp = db.get(BuyPlan, plan_id)
-    if not bp:
+    if not db.get(BuyPlan, plan_id):
         raise HTTPException(404, "Buy plan not found")
-    if bp.status in ("completed", "cancelled"):
-        raise HTTPException(400, f"Cannot cancel plan in '{bp.status}' status")
 
     form = await request.form()
-    bp.status = BuyPlanStatus.CANCELLED.value
-    bp.cancelled_at = datetime.now(timezone.utc)
-    bp.cancelled_by_id = user.id
-    bp.cancellation_reason = form.get("reason")
-    db.commit()
+    try:
+        plan = cancel_buy_plan(plan_id, user, db, reason=form.get("reason"))
+        db.commit()
+        await run_notify_bg(notify_cancelled, plan.id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
+
+
+# ── Settings: Ops verification group ─────────────────────────────────
+
+
+@router.get("/v2/partials/settings/ops-group", response_class=HTMLResponse)
+async def settings_ops_group_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Ops verification group management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+    from .admin.buy_plan_ops import ops_group_context
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(ops_group_context(db))
+    return template_response("htmx/partials/settings/ops_group.html", ctx)
 
 
 @router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
@@ -8352,6 +8372,7 @@ async def build_buy_plan_htmx(
     ctx = _base_ctx(request, user, "buy-plans")
     ctx["bp"] = plan
     ctx["lines"] = bp_lines
+    ctx["user"] = user
     ctx["is_ops_member"] = _is_ops_member(user, db)
     return template_response("htmx/partials/buy_plans/detail.html", ctx)
 
@@ -8362,6 +8383,24 @@ async def build_buy_plan_htmx(
 # Statuses shown in the default ("All") view — dismissed/converted are hidden
 # unless explicitly selected via the filter pills.
 _PROSPECT_DEFAULT_STATUSES = ("suggested", "claimed")
+
+# A background enrichment 'running' longer than this is treated as failed (its worker
+# died mid-job) so the detail poller self-heals and stops instead of looping forever.
+_ENRICH_STALE_SECONDS = 180
+
+
+def _enrich_is_stale(started_iso) -> bool:
+    """True when a 'running' enrich job started longer than _ENRICH_STALE_SECONDS
+    ago."""
+    if not started_iso:
+        return False
+    try:
+        started = datetime.fromisoformat(started_iso)
+    except (ValueError, TypeError):
+        return False
+    if started.tzinfo is None:
+        started = started.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - started).total_seconds() > _ENRICH_STALE_SECONDS
 
 
 def _prospect_toast(response, message: str, kind: str = "success") -> None:
@@ -8397,7 +8436,69 @@ def _prospect_detail_ctx(request: Request, user: User, prospect) -> dict:
     ctx["contacts"] = prospect.contacts_preview or []
     ctx["contact_stats"] = contacts_summary(prospect.contacts_preview)
     ctx["similar_customers"] = prospect.similar_customers or []
+    # Resume the enrich poller if a background enrichment is in flight.
+    ctx["enrich_state"] = "running" if (prospect.enrichment_data or {}).get("enrich_status") == "running" else None
     return ctx
+
+
+def _prospect_stats_ctx(db: Session) -> dict:
+    """Canonical prospecting KPIs (single definition, shared by the stats route and the
+    OOB refresh after grid actions).
+
+    "Buyer ready" = is_buyer_ready over SUGGESTED.
+    """
+    suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
+    claimed = (
+        db.query(sqlfunc.count(ProspectAccount.id))
+        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
+        .scalar()
+        or 0
+    )
+    return {
+        "total": len(suggested),
+        "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
+        "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
+        "claimed": claimed,
+    }
+
+
+def _status_visible_under_filter(new_status: str, flt_status: str) -> bool:
+    """Whether a card with `new_status` should remain visible under the active filter.
+
+    Default (empty filter = "All") shows suggested + claimed; an explicit filter shows
+    only that status.
+    """
+    if flt_status:
+        return new_status == flt_status
+    return new_status in _PROSPECT_DEFAULT_STATUSES
+
+
+def _prospect_action_response(
+    request: Request,
+    user: User,
+    db: Session,
+    prospect,
+    *,
+    message: str,
+    kind: str,
+    flt_status: str = "",
+) -> HTMLResponse:
+    """Build the response for a claim/dismiss/release action.
+
+    Detail-view actions (HX-Target=main-content) return the full refreshed detail. Grid
+    actions return `_action_oob.html`: the updated card (omitted → removed when it leaves
+    the active filter) plus an OOB refresh of the #prospect-stats panel.
+    """
+    if _wants_detail(request):
+        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
+    else:
+        ctx = _prospect_card_ctx(request, user, prospect)
+        ctx["status"] = flt_status  # so the re-rendered card's buttons carry the filter forward
+        ctx["include_card"] = _status_visible_under_filter(prospect.status, flt_status)
+        ctx.update(_prospect_stats_ctx(db))
+        resp = template_response("htmx/partials/prospecting/_action_oob.html", ctx)
+    _prospect_toast(resp, message, kind)
+    return resp
 
 
 @router.get("/v2/partials/prospecting", response_class=HTMLResponse)
@@ -8496,27 +8597,9 @@ async def prospecting_stats(
     "Buyer ready" uses the canonical is_buyer_ready from build_priority_snapshot — the
     same definition the list ranking uses — so the KPI never contradicts the grid.
     """
-    suggested_q = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
-    suggested = suggested_q.all()
-    total = len(suggested)
-    buyer_ready = sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"])
-    call_now = sum(1 for p in suggested if (p.readiness_score or 0) >= 70)
-    claimed = (
-        db.query(sqlfunc.count(ProspectAccount.id))
-        .filter(ProspectAccount.status == ProspectAccountStatus.CLAIMED)
-        .scalar()
-        or 0
-    )
-
     return template_response(
         "htmx/partials/prospecting/stats.html",
-        {
-            "request": request,
-            "total": total,
-            "buyer_ready": buyer_ready,
-            "call_now": call_now,
-            "claimed": claimed,
-        },
+        {"request": request, **_prospect_stats_ctx(db)},
     )
 
 
@@ -8621,12 +8704,16 @@ async def claim_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Claimed {prospect.name}", "error" if error else "success")
-    return resp
+    form = await request.form()
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Claimed {prospect.name}",
+        kind="error" if error else "success",
+        flt_status=form.get("flt_status", ""),
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
@@ -8644,11 +8731,12 @@ async def dismiss_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
     error = None
     if prospect.status != ProspectAccountStatus.SUGGESTED:
         error = "Only suggested prospects can be dismissed."
     else:
-        form = await request.form()
         reason = (form.get("reason") or "other").strip()[:255]  # dismiss_reason is String(255)
         prospect.status = ProspectAccountStatus.DISMISSED
         prospect.dismissed_by = user.id
@@ -8656,12 +8744,15 @@ async def dismiss_prospect_htmx(
         prospect.dismiss_reason = reason
         db.commit()
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Dismissed {prospect.name}", "error" if error else "success")
-    return resp
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Dismissed {prospect.name}",
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/release", response_class=HTMLResponse)
@@ -8692,12 +8783,16 @@ async def release_prospect_htmx(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    if _wants_detail(request):
-        resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    else:
-        resp = template_response("htmx/partials/prospecting/_card.html", _prospect_card_ctx(request, user, prospect))
-    _prospect_toast(resp, error or f"Released {prospect.name} back to the pool", "error" if error else "success")
-    return resp
+    form = await request.form()
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=error or f"Released {prospect.name} back to the pool",
+        kind="error" if error else "success",
+        flt_status=form.get("flt_status", ""),
+    )
 
 
 @router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
@@ -8707,41 +8802,63 @@ async def enrich_prospect_htmx(
     user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
-    """Run free enrichment (SAM.gov + news) + warm-intro detection — returns refreshed
-    detail."""
+    """Kick off enrichment in the BACKGROUND and return a status poller.
+
+    The SAM.gov/news/warm-intro work runs off the request path (run_enrichment_job via
+    safe_background_task); the detail page polls /enrich-status until it lands.
+    """
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    ok = True
-    try:
-        from ..services.prospect_free_enrichment import run_free_enrichment
 
-        # Pass the request session so the service reuses it (no second SessionLocal /
-        # stale-read window) and the row is current after commit.
-        await run_free_enrichment(prospect_id, db=db)
-        db.refresh(prospect)
-    except Exception as exc:
-        ok = False
-        logger.warning("Enrichment failed for prospect {}: {}", prospect_id, exc)
-    try:
-        from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
+    ed = dict(prospect.enrichment_data or {})
+    if ed.get("enrich_status") != "running":
+        from ..services.prospect_free_enrichment import run_enrichment_job
+        from ..utils.async_helpers import safe_background_task
 
-        warm = detect_warm_intros(prospect, db)
-        one_liner = generate_one_liner(prospect, warm)
-        ed = dict(prospect.enrichment_data or {})
-        ed["warm_intro"] = warm
-        ed["one_liner"] = one_liner
+        ed["enrich_status"] = "running"
+        ed["enrich_started_at"] = datetime.now(timezone.utc).isoformat()
         prospect.enrichment_data = ed
         db.commit()
-    except Exception as exc:
-        ok = False
-        logger.warning("Warm intro detection failed for prospect {}: {}", prospect_id, exc)
-    resp = template_response("htmx/partials/prospecting/detail.html", _prospect_detail_ctx(request, user, prospect))
-    _prospect_toast(
-        resp,
-        f"Enriched {prospect.name}" if ok else "Enrichment partially failed — see details",
-        "success" if ok else "warning",
+        await safe_background_task(run_enrichment_job(prospect_id), task_name="prospect_enrichment")
+
+    return template_response(
+        "htmx/partials/prospecting/enrich_status.html",
+        {"request": request, "prospect": prospect, "enrich_state": "running"},
     )
+
+
+@router.get("/v2/partials/prospecting/{prospect_id}/enrich-status", response_class=HTMLResponse)
+async def enrich_status_partial(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Poll endpoint for background enrichment.
+
+    HTTP 200 while running (htmx keeps polling); HTTP 286 when done/error (htmx swaps
+    the final fragment and STOPS).
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        # Stop the poll rather than 404 — htmx won't cancel an `every 2s` poll on a 4xx.
+        return HTMLResponse("", status_code=286)
+
+    ed = prospect.enrichment_data or {}
+    state = ed.get("enrich_status") or "done"
+    if state == "running" and _enrich_is_stale(ed.get("enrich_started_at")):
+        state = "error"  # worker died mid-job — stop the poll
+    resp = template_response(
+        "htmx/partials/prospecting/enrich_status.html",
+        {"request": request, "prospect": prospect, "enrich_state": state},
+    )
+    if state != "running":
+        resp.status_code = 286  # htmx stop-polling status — the final fragment still swaps
+        if state == "error":
+            _prospect_toast(resp, "Enrichment failed — try again", "warning")
+        else:
+            _prospect_toast(resp, f"Enriched {prospect.name}", "success")
     return resp
 
 
@@ -9127,12 +9244,24 @@ async def proactive_draft_for_prepare(
             _fn_parts = primary.full_name.split()
             contact_name = _fn_parts[0] if _fn_parts else None
 
+    # Parse rep-entered sell prices from form (sell_price_<match_id>)
+    draft_sell_prices: dict[str, float] = {}
+    for key in form:
+        if key.startswith("sell_price_"):
+            match_id_str = key[len("sell_price_") :]
+            raw_val = form.get(key, "").strip()
+            if match_id_str.isdigit() and raw_val:
+                try:
+                    draft_sell_prices[match_id_str] = float(raw_val)
+                except ValueError:
+                    pass
+
     # Build parts list for AI
     parts = []
     for m in matches:
         offer = m.offer
         cost = float(offer.unit_price) if offer and offer.unit_price else 0
-        sell = cost * 1.3
+        sell = draft_sell_prices.get(str(m.id), cost * 1.3)
         parts.append(
             {
                 "mpn": m.mpn,
@@ -9188,7 +9317,7 @@ async def proactive_draft_for_prepare(
             <button type="button"
                     hx-post="/v2/partials/proactive/draft"
                     hx-target="#draft-status"
-                    hx-include="[name='match_ids'],[name='contact_ids']"
+                    hx-include="[name='match_ids'],[name='contact_ids'],[name^='sell_price_']"
                     class="ml-2 text-brand-600 underline text-xs">Retry</button>
         </div>
     """)
@@ -9208,6 +9337,18 @@ async def proactive_send_offer(
     contact_ids = [int(cid) for cid in contact_ids_raw if cid and str(cid).isdigit()]
     subject = form.get("subject", "").strip()
     body = form.get("body", "").strip()
+
+    # Parse rep-entered sell prices keyed as sell_price_<match_id>
+    sell_prices: dict[str, float] = {}
+    for key in form:
+        if key.startswith("sell_price_"):
+            match_id_str = key[len("sell_price_") :]
+            raw_val = form.get(key, "").strip()
+            if match_id_str.isdigit() and raw_val:
+                try:
+                    sell_prices[match_id_str] = float(raw_val)
+                except ValueError:
+                    pass  # ignore non-numeric input; service will apply default
 
     if not match_ids:
         raise HTTPException(400, "No matches selected")
@@ -9236,7 +9377,7 @@ async def proactive_send_offer(
             token=token or "no-token",
             match_ids=match_ids,
             contact_ids=contact_ids,
-            sell_prices={},
+            sell_prices=sell_prices,
             subject=subject or None,
             email_html=email_html,
         )
@@ -9408,7 +9549,8 @@ async def proactive_do_not_offer(
         db.commit()
         logger.info("Do-not-offer: {} for company {} by {}", mpn, company_id, user.email)
 
-    return HTMLResponse('<span class="text-xs text-gray-500">Suppressed</span>')
+    # Return an empty collapsed row so the table structure stays valid
+    return HTMLResponse('<tr style="display:none" aria-hidden="true"></tr>')
 
 
 # ── Sprint 9: Materials + Activity + Knowledge ────────────────────────

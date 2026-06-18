@@ -32,13 +32,12 @@
           <td class="px-4 py-2.5 text-sm text-gray-500 font-mono">{{ bp.sales_order_number or "—" }}</td>
           <td class="px-4 py-2.5">
             {% set bp_colors = {
-              "draft": "bg-brand-100 text-brand-600",
-              "pending_approval": "bg-amber-50 text-amber-700",
-              "approved": "bg-emerald-50 text-emerald-700",
+              "draft": "bg-slate-50 text-slate-600",
+              "pending": "bg-amber-50 text-amber-700",
               "active": "bg-emerald-50 text-emerald-700",
+              "halted": "bg-rose-50 text-rose-700",
               "completed": "bg-emerald-50 text-emerald-700",
-              "cancelled": "bg-gray-100 text-gray-600",
-              "rejected": "bg-rose-50 text-rose-700"
+              "cancelled": "bg-gray-100 text-gray-600"
             } %}
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ bp_colors.get(bp.status, 'bg-gray-100 text-gray-600') }}">
               {{ (bp.status or 'unknown')|replace('_', ' ')|capitalize }}
