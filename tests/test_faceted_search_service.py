@@ -385,6 +385,44 @@ def test_facet_counts_numeric_chip_narrows_other_facets(db_session: Session):
     assert "DDR5" not in counts["ddr_type"]
 
 
+def test_facet_counts_chip_and_enum_both_active_cross_self_exclusion(db_session: Session):
+    """With a numeric ``__vals`` chip AND an enum BOTH active, each facet's own counts
+    drop ONLY its own selection while still applying the OTHER facet's narrowing.
+
+    Pins
+    the pass-2 ``own_variants`` (which must include ``{fk}__vals``) and the chip pass's
+    keep-the-enum behavior — a regression in either would collapse a sibling to 0.
+    """
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-D4-8", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-D4-16", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-D5-8", "DDR5", 8)
+    _make_dram_card(db_session, "MEM-D5-16", "DDR5", 16)
+
+    counts = get_facet_counts(db_session, "dram", active_filters={"ddr_type": ["DDR4"], "capacity_gb__vals": [8]})
+    # ddr_type facet: drop its own DDR4 selection, KEEP the capacity==8 chip → scope is the
+    # two 8GB cards (one DDR4, one DDR5), so both DDR types show at count 1.
+    assert counts["ddr_type"].get("DDR4") == 1
+    assert counts["ddr_type"].get("DDR5") == 1
+    # capacity facet: drop its own chip selection, KEEP the DDR4 enum → scope is the two
+    # DDR4 cards (8 and 16), so both capacities show at count 1.
+    assert counts["capacity_gb"].get("8.0") == 1
+    assert counts["capacity_gb"].get("16.0") == 1
+
+
+def test_search_materials_faceted_empty_vals_is_noop(db_session: Session):
+    """An empty ``{spec}__vals`` selection is a no-op (the guard skips it), returning
+    the full unfiltered set — never an always-false ``value_numeric IN ()`` / zero
+    rows."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-032", "DDR5", 32)
+
+    _, total = search_materials_faceted(db_session, commodity="dram", sub_filters={"capacity_gb__vals": []})
+    assert total == 3  # empty chip set → unfiltered, not zero
+
+
 # --- Facet counts with active_filters ---
 
 

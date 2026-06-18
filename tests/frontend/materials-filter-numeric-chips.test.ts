@@ -135,4 +135,18 @@ describe('materialsFilter numeric chips — count + clear', () => {
     c.clearAllFilters()
     expect(c.subFilters).toEqual({})
   })
+
+  it('removeFilter (applied-strip × button) drops one __vals NUMBER from the array', () => {
+    // The applied-filter strip calls removeFilter(fullKey, value) with the full "__vals"
+    // key and a NUMBER — exercise that number-equality path, distinct from toggleNumericChip.
+    const c = makeComponent()
+    c.init()
+    c.toggleNumericChip('capacity_gb', 8)
+    c.toggleNumericChip('capacity_gb', 32)
+    c.removeFilter('capacity_gb__vals', 8)
+    expect(c.subFilters['capacity_gb__vals']).toEqual([32])
+    // Removing the last value deletes the key entirely.
+    c.removeFilter('capacity_gb__vals', 32)
+    expect('capacity_gb__vals' in c.subFilters).toBe(false)
+  })
 })

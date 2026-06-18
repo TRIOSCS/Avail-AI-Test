@@ -8,7 +8,7 @@ partial must degrade to the explicit empty state rather than erroring.
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard, MaterialSpecFacet
+from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import COARSE_BUCKETS_WITHOUT_SEEDS, seed_commodity_schemas
 
 
@@ -51,6 +51,36 @@ def test_long_enum_facet_renders_search_within(client, db_session: Session):
     assert short.status_code == 200
     assert "ui.facetSearch['interface']" not in short.text
     assert "ui.facetSearch['usage_class']" not in short.text
+
+
+def test_enum_search_box_boundary_at_12(client, db_session: Session):
+    """Pin the exact P3 gate (``values|length > 12``): a fixed-vocab enum with EXACTLY
+    12 values gets NO search box; EXACTLY 13 gets one.
+
+    A synthetic commodity seeds both
+    so the boundary is protected regardless of real-seed value-count drift. Guards the
+    same ``> 12`` literal that also drives the overflow-y-auto clamp and per-label x-show.
+    """
+    for spec_key, n in [("twelvevals", 12), ("thirteenvals", 13)]:
+        db_session.add(
+            CommoditySpecSchema(
+                commodity="boundarytest",
+                spec_key=spec_key,
+                display_name=spec_key,
+                data_type="enum",
+                enum_values=[f"V{i}" for i in range(n)],
+                sort_order=0,
+                is_filterable=True,
+                is_primary=True,
+            )
+        )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials/filters/sub?commodity=boundarytest&sub_filters=%7B%7D")
+    assert resp.status_code == 200
+    # 13 values (> 12) → search box; 12 values (not > 12) → no box.
+    assert "ui.facetSearch['thirteenvals']" in resp.text
+    assert "ui.facetSearch['twelvevals']" not in resp.text
 
 
 @pytest.mark.parametrize("commodity", sorted(COARSE_BUCKETS_WITHOUT_SEEDS))
