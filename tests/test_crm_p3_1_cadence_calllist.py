@@ -336,6 +336,8 @@ class TestAccountListDualClocks:
         html = resp.text
         # Find our company's row section and check it contains — (dash) not "never" for reply
         assert "—" in html or "&#8212;" in html or "&mdash;" in html
+        # The spec forbids showing "never replied" as the reply label (dash is correct)
+        assert "never replied" not in html
 
 
 # ═════════════════════════════════════════════════════════════════════════════

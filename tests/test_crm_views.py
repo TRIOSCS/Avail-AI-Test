@@ -129,7 +129,9 @@ class TestOverdueChip:
             name="Overdue Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+            # Stale non-NULL outbound — this is the real overdue case the chip tracks.
+            # last_activity_at is irrelevant to the chip (chip keys off last_outbound_at).
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         db_session.add(overdue)
         db_session.commit()
@@ -179,7 +181,10 @@ class TestOverdueChip:
         assert "bg-rose-50 text-rose-700" not in resp.text
 
     def test_chip_includes_never_contacted(self, client: TestClient, db_session: Session, test_user: User):
-        """Chip counts accounts with no activity (never contacted)."""
+        """Chip counts accounts with no activity (never contacted).
+
+        Specifically: NULL last_outbound_at (never sent an outbound) → overdue.
+        """
         test_user.role = "sales"
         db_session.flush()
 
@@ -188,6 +193,7 @@ class TestOverdueChip:
             is_active=True,
             account_owner_id=test_user.id,
             last_activity_at=None,
+            # NULL last_outbound_at = never sent an outbound → treated as overdue by chip
         )
         db_session.add(never)
         db_session.commit()
@@ -212,13 +218,13 @@ class TestOverdueChip:
             name="NeverCalled Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=None,
+            last_outbound_at=None,  # NULL last_outbound_at = never contacted → overdue
         )
         overdue = Company(
             name="LongOverdue Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),  # stale non-NULL outbound → overdue
         )
         db_session.add_all([never, overdue])
         db_session.commit()
