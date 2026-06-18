@@ -193,10 +193,17 @@
     </td>
   </tr>
 
-  {# ── Detail drawer — single colspan row; inner div carries the collapse anim ── #}
-  <tr x-show="expanded" x-cloak>
-    <td colspan="5" class="p-0">
-      <div x-show="expanded" x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
+  {# ── Detail drawer — always-present colspan row; the inner div owns BOTH the
+       show/hide and the collapse animation. The <tr> deliberately has NO x-show:
+       gating the row's display would hide it the instant the collapse starts and
+       cut the close animation short (a visible snap). When collapsed the inner div
+       is display:none, so this row sits at ~0 height. Padding + border are zeroed
+       INLINE (not via Tailwind p-0) because the unlayered, higher-specificity
+       `.compact-table td` rule beats the p-0 class and would otherwise leave a
+       ~12px gap row + a stray divider between vendors. #}
+  <tr>
+    <td colspan="5" style="padding:0;border-bottom:0">
+      <div x-show="expanded" x-cloak x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
         <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 py-2 text-xs">
           {# ── Unavailability knowledge — first entry, full width ── #}
           {% if unav and is_unavailable %}
