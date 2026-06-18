@@ -358,8 +358,11 @@ async def dossier_datasheet_download(
     data = await fetch_datasheet_bytes(row.library_drive_id, row.onedrive_item_id)
     if data is None:
         raise HTTPException(502, "Datasheet temporarily unavailable")
+    # Allowlist the filename for the Content-Disposition header — file_name derives from
+    # display_mpn (external-ish), so strip anything that could inject a header (CR/LF/quote).
+    safe_name = "".join(c for c in (row.file_name or "") if c.isalnum() or c in "._- ") or "datasheet.pdf"
     return StreamingResponse(
         iter([data]),
         media_type="application/pdf",
-        headers={"Content-Disposition": f'inline; filename="{row.file_name}"'},
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
     )

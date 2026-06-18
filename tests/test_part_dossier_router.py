@@ -345,6 +345,33 @@ def test_datasheet_download_404_missing(client):
     assert resp.status_code == 404
 
 
+def test_datasheet_download_sanitizes_content_disposition(client, db_session):
+    from unittest.mock import AsyncMock, patch
+
+    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+
+    card = MaterialCard(normalized_mpn="evil1", display_mpn="EVIL1")
+    db_session.add(card)
+    db_session.flush()
+    # file_name carries header-injection chars (CR/LF) + a quote.
+    ds = MaterialCardDatasheet(
+        material_card_id=card.id,
+        file_name='x"\r\nSet-Cookie: pwned=1.pdf',
+        onedrive_item_id="ITM",
+        library_drive_id="DRV",
+        content_type="application/pdf",
+    )
+    db_session.add(ds)
+    db_session.commit()
+    with patch("app.routers.part_dossier.fetch_datasheet_bytes", AsyncMock(return_value=b"%PDF")):
+        resp = client.get(f"/v2/partials/search/dossier/datasheet/{ds.id}/download")
+    assert resp.status_code == 200
+    cd = resp.headers["content-disposition"]
+    assert "\r" not in cd and "\n" not in cd  # no header injection
+    assert cd.count('"') == 2  # only the wrapping quotes; the payload's quote was stripped
+    assert "Set-Cookie" not in resp.headers  # no injected header
+
+
 def test_market_no_banner_when_only_unconfigured(client):
     """Sources merely unconfigured (never set up) do NOT trigger the degraded banner —
     only `down` (auth/quota errors) do.
