@@ -366,9 +366,14 @@ def on_offer_received(db: Session, requisition_id: int, vendor_name: str, mpn: s
     )
 
 
-def on_email_offer_parsed(db: Session, requisition_id: int, vendor_name: str, mpn: str, offer_id: int):
-    """Auto-generate 'Review email offer' task when email intelligence parses an
-    offer."""
+def on_email_offer_parsed(db: Session, requisition_id: int | None, vendor_name: str, mpn: str, offer_id: int):
+    """Auto-generate 'Review email offer' task when email intelligence parses an offer.
+
+    Unsolicited offers (requisition_id=None) have no requisition context, so the task
+    cannot be attached — skip silently.
+    """
+    if requisition_id is None:
+        return
     auto_create_task(
         db,
         requisition_id=requisition_id,
