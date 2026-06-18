@@ -21,7 +21,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import UserRole
+from ..constants import BuyPlanStatus, UserRole
 from ..models import (
     BuyPlan,
     BuyPlanLine,
@@ -93,7 +93,7 @@ def _load_buyplan_offer_ids(db: Session) -> tuple[set[int], set[int]]:
         .all()
     ):
         bp_ids.add(offer_id)
-        if bp_status in ("completed",):
+        if bp_status in (BuyPlanStatus.COMPLETED.value,):
             po_ids.add(offer_id)
     return bp_ids, po_ids
 

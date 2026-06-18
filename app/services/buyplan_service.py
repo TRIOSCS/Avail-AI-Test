@@ -8,7 +8,7 @@ Split into domain modules:
 
 All public names re-exported here for backward compatibility.
 
-Called by: routers/crm/buy_plans.py, tests
+Called by: routers/htmx_views.py, tests
 Depends on: buyplan_builder, buyplan_scoring, buyplan_workflow, buyplan_notifications
 """
 
@@ -30,9 +30,8 @@ from app.services.buyplan_builder import (  # noqa: F401
 # ── Notifications ──────────────────────────────────────────────────
 from app.services.buyplan_notifications import (  # noqa: F401
     log_buyplan_activity,
+    notify_cancelled,
     notify_stock_sale_approved,
-    notify_token_approved,
-    notify_token_rejected,
     run_v3_notify_bg,
 )
 
@@ -57,6 +56,7 @@ from app.services.buyplan_workflow import (  # noqa: F401
     _is_stock_sale,
     _recalculate_financials,
     approve_buy_plan,
+    cancel_buy_plan,
     check_completion,
     confirm_po,
     detect_favoritism,
@@ -67,6 +67,5 @@ from app.services.buyplan_workflow import (  # noqa: F401
     submit_buy_plan,
     verify_po,
     verify_po_sent,
-    verify_po_sent_v3,
     verify_so,
 )

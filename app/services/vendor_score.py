@@ -20,17 +20,27 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants import BuyPlanStatus, QuoteStatus
+
 MIN_OFFERS_FOR_SCORE = 5
 ADVANCEMENT_WEIGHT = 0.80
 REVIEW_WEIGHT = 0.20
 MAX_STAGE_POINTS = 8
 
 # BuyPlan statuses that count as PO confirmed (V4: completed plans)
-PO_CONFIRMED_STATUSES = {"completed"}
-# BuyPlan statuses that count as awarded (any non-cancelled V4 status)
-AWARDED_STATUSES = {"pending", "active", "completed"}
+PO_CONFIRMED_STATUSES = {BuyPlanStatus.COMPLETED.value}
+# BuyPlan statuses that count as awarded. Cancelled AND halted plans are NOT
+# awarded — this set is the single source of truth and the SQL pre-filter in
+# compute_all_vendor_scores excludes the same statuses so the layers agree.
+AWARDED_STATUSES = {
+    BuyPlanStatus.PENDING.value,
+    BuyPlanStatus.ACTIVE.value,
+    BuyPlanStatus.COMPLETED.value,
+}
+# BuyPlan statuses that are NOT awarded — excluded by the SQL pre-filter.
+NON_AWARDED_STATUSES = {BuyPlanStatus.CANCELLED.value, BuyPlanStatus.HALTED.value}
 # Quote statuses that count as "used in quote"
-QUOTE_USED_STATUSES = {"sent", "won", "lost"}
+QUOTE_USED_STATUSES = {QuoteStatus.SENT.value, QuoteStatus.WON.value, QuoteStatus.LOST.value}
 
 
 def compute_vendor_score(
@@ -159,7 +169,7 @@ async def compute_all_vendor_scores(db: Session) -> dict:
     bp_lines = (
         db.query(BuyPlanLine.offer_id, BuyPlan.status)
         .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
-        .filter(BuyPlan.status != "cancelled", BuyPlanLine.offer_id.isnot(None))
+        .filter(BuyPlan.status.notin_(NON_AWARDED_STATUSES), BuyPlanLine.offer_id.isnot(None))
         .limit(50000)
         .all()
     )

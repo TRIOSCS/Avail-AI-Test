@@ -1,6 +1,6 @@
 """test_buyplan_v3_notifications.py — Tests for notification functions.
 
-Covers: notify_stock_sale_approved, notify_token_approved, notify_token_rejected,
+Covers: notify_stock_sale_approved,
 log_buyplan_activity, run_v3_notify_bg.
 
 Called by: pytest
@@ -153,7 +153,7 @@ class TestNotifyStockSaleApproved:
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com", "accounting@trioscs.com"]
             mock_settings.app_url = "https://avail.test"
-            with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
                 with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
                     with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
                         await notify_stock_sale_approved(plan, db_session)
@@ -215,173 +215,6 @@ class TestNotifyStockSaleApproved:
         mock_teams.assert_awaited_once()
         msg = mock_teams.call_args[0][0]
         assert "Stock Sale Approved" in msg
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# notify_token_approved
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNotifyTokenApproved:
-    @pytest.mark.asyncio
-    async def test_creates_submitter_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_token_approved
-
-        submitter = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, submitter.id, approved_by_id=approver.id)
-
-        with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-            await notify_token_approved(plan, db_session)
-
-        activities = (
-            db_session.query(ActivityLog)
-            .filter_by(
-                activity_type="buyplan_approved",
-                user_id=submitter.id,
-            )
-            .all()
-        )
-        assert len(activities) == 1
-        assert "approved via email" in activities[0].subject
-        assert "Manager" in activities[0].subject
-
-    @pytest.mark.asyncio
-    async def test_creates_approver_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_token_approved
-
-        submitter = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, submitter.id, approved_by_id=approver.id)
-
-        with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-            await notify_token_approved(plan, db_session)
-
-        activities = (
-            db_session.query(ActivityLog)
-            .filter_by(
-                activity_type="buyplan_approved",
-                user_id=approver.id,
-            )
-            .all()
-        )
-        assert len(activities) == 1
-        assert "via email token" in activities[0].subject
-
-    @pytest.mark.asyncio
-    async def test_no_submitter(self, db_session):
-        from app.services.buyplan_notifications import notify_token_approved
-
-        user = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, user.id, submitted_by_id=None, approved_by_id=approver.id)
-
-        with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
-            await notify_token_approved(plan, db_session)
-
-        # Only approver activity (no submitter activity)
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_approved").all()
-        assert len(activities) == 1
-        assert activities[0].user_id == approver.id
-
-    @pytest.mark.asyncio
-    async def test_teams_channel_posted(self, db_session):
-        from app.services.buyplan_notifications import notify_token_approved
-
-        submitter = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(db_session, submitter.id, approved_by_id=approver.id)
-
-        with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-            await notify_token_approved(plan, db_session)
-
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Email Token" in msg
-        assert "Manager" in msg
-
-    @pytest.mark.asyncio
-    async def test_no_approver_uses_fallback_name(self, db_session):
-        from app.services.buyplan_notifications import notify_token_approved
-
-        submitter = _make_user(db_session)
-        plan = _make_plan(db_session, submitter.id, approved_by_id=None)
-
-        with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
-            await notify_token_approved(plan, db_session)
-
-        msg = mock_teams.call_args[0][0]
-        assert "Manager (email token)" in msg
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# notify_token_rejected
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNotifyTokenRejected:
-    @pytest.mark.asyncio
-    async def test_creates_submitter_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_token_rejected
-
-        submitter = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(
-            db_session,
-            submitter.id,
-            approved_by_id=approver.id,
-            approval_notes="Price too high",
-        )
-
-        await notify_token_rejected(plan, db_session)
-
-        activities = (
-            db_session.query(ActivityLog)
-            .filter_by(
-                activity_type="buyplan_rejected",
-                user_id=submitter.id,
-            )
-            .all()
-        )
-        assert len(activities) == 1
-        assert "rejected via email" in activities[0].subject
-        assert "Price too high" in activities[0].subject
-
-    @pytest.mark.asyncio
-    async def test_no_submitter_skips_activity(self, db_session):
-        from app.services.buyplan_notifications import notify_token_rejected
-
-        user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, submitted_by_id=None)
-
-        await notify_token_rejected(plan, db_session)
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").all()
-        assert len(activities) == 0
-
-    @pytest.mark.asyncio
-    async def test_no_reason_shows_default(self, db_session):
-        from app.services.buyplan_notifications import notify_token_rejected
-
-        submitter = _make_user(db_session)
-        approver = _make_user(db_session, "mgr@trioscs.com", "Manager", "manager")
-        plan = _make_plan(
-            db_session,
-            submitter.id,
-            approved_by_id=approver.id,
-            approval_notes=None,
-        )
-
-        await notify_token_rejected(plan, db_session)
-
-        activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_rejected").all()
-        assert len(activities) == 1
-        assert "No reason given" in activities[0].subject
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# log_buyplan_activity
-# ═══════════════════════════════════════════════════════════════════════
 
 
 class TestLogBuyplanActivity:

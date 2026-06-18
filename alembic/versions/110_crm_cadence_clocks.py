@@ -11,8 +11,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "108_crm_cadence_clocks"
-down_revision = "107_is_scratch_requisitions"
+revision = "110_crm_cadence_clocks"
+down_revision = "109_offer_nullable_requisition"
 branch_labels = None
 depends_on = None
 

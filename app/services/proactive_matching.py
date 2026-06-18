@@ -95,6 +95,43 @@ def compute_match_score(
     return min(100, max(0, composite)), margin_pct
 
 
+# ── CPH aggregation helper ───────────────────────────────────────────────
+
+
+def _aggregate_cph_by_company(cph_rows: list) -> dict[int, dict]:
+    """Collapse multiple CPH rows per company (different sources) into one record:
+
+    summed purchase_count, max last_purchased_at, count-weighted avg price, and the
+    most-recent row's last_unit_price.
+    """
+    by_company: dict[int, dict] = {}
+    for cph in cph_rows:
+        agg = by_company.get(cph.company_id)
+        cnt = cph.purchase_count or 0
+        if agg is None:
+            by_company[cph.company_id] = {
+                "count": cnt,
+                "last_purchased_at": cph.last_purchased_at,
+                "avg_price_num": (float(cph.avg_unit_price) * cnt) if cph.avg_unit_price else 0.0,
+                "avg_price_den": cnt if cph.avg_unit_price else 0,
+                "last_unit_price": float(cph.last_unit_price) if cph.last_unit_price else None,
+            }
+            continue
+        agg["count"] += cnt
+        if cph.avg_unit_price:
+            agg["avg_price_num"] += float(cph.avg_unit_price) * cnt
+            agg["avg_price_den"] += cnt
+        if cph.last_purchased_at and (
+            agg["last_purchased_at"] is None or cph.last_purchased_at > agg["last_purchased_at"]
+        ):
+            agg["last_purchased_at"] = cph.last_purchased_at
+            if cph.last_unit_price:
+                agg["last_unit_price"] = float(cph.last_unit_price)
+    for agg in by_company.values():
+        agg["avg_price"] = (agg["avg_price_num"] / agg["avg_price_den"]) if agg["avg_price_den"] else None
+    return by_company
+
+
 # ── Per-offer matching ───────────────────────────────────────────────────
 
 
@@ -226,19 +263,22 @@ def _find_matches(
     if not fallback_offer_id:
         return []
 
+    # ── Aggregate CPH rows per company across all sources ───────────────
+    agg_by_company = _aggregate_cph_by_company(cph_rows)
+
     # ── Loop uses dict lookups instead of queries ────────────────────
     matches = []
-    for cph in cph_rows:
-        company = companies.get(cph.company_id)
+    for company_id, agg in agg_by_company.items():
+        company = companies.get(company_id)
         if not company or not company.account_owner_id:
             continue
 
-        site = sites.get(cph.company_id)
+        site = sites.get(company_id)
         if not site:
             continue
 
         # Check do-not-offer
-        if cph.company_id in dno_company_ids:
+        if company_id in dno_company_ids:
             continue
 
         # Check throttle
@@ -246,15 +286,14 @@ def _find_matches(
             continue
 
         # Dedup: one active match per part per customer
-        if cph.company_id in existing_match_company_ids:
+        if company_id in existing_match_company_ids:
             continue
 
-        # Score the match
-        avg_price = float(cph.avg_unit_price) if cph.avg_unit_price else None
+        # Score the match using aggregated values
         score, margin_pct = compute_match_score(
-            cph.last_purchased_at,
-            cph.purchase_count or 0,
-            avg_price,
+            agg["last_purchased_at"],
+            agg["count"],
+            agg["avg_price"],
             our_cost,
         )
 
@@ -267,8 +306,6 @@ def _find_matches(
         requirement_id = req_row[0].id if req_row else None
         requisition_id = req_row[1].id if req_row else None
 
-        last_price = float(cph.last_unit_price) if cph.last_unit_price else None
-
         match = ProactiveMatch(
             offer_id=fallback_offer_id,
             requirement_id=requirement_id,
@@ -277,19 +314,19 @@ def _find_matches(
             salesperson_id=company.account_owner_id,
             mpn=mpn_upper,
             material_card_id=material_card_id,
-            company_id=cph.company_id,
+            company_id=company_id,
             match_score=score,
             margin_pct=margin_pct,
-            customer_purchase_count=cph.purchase_count or 0,
-            customer_last_price=last_price,
-            customer_last_purchased_at=cph.last_purchased_at,
+            customer_purchase_count=agg["count"],
+            customer_last_price=agg["last_unit_price"],
+            customer_last_purchased_at=agg["last_purchased_at"],
             our_cost=our_cost,
         )
         db.add(match)
         matches.append(match)
 
         # Track for dedup within this batch
-        existing_match_company_ids.add(cph.company_id)
+        existing_match_company_ids.add(company_id)
 
         # In-app notification
         db.add(
@@ -298,14 +335,14 @@ def _find_matches(
                 activity_type="proactive_match",
                 channel="system",
                 requisition_id=requisition_id,
-                company_id=cph.company_id,
+                company_id=company_id,
                 contact_name=company.name,
                 subject=f"Proactive match: {mpn_upper} — {company.name} (score {score})",
             )
         )
 
-        if cph.company_id:
-            _update_last_activity({"type": "company", "id": cph.company_id}, db)
+        if company_id:
+            _update_last_activity({"type": "company", "id": company_id}, db)
 
     return matches
 

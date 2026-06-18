@@ -236,28 +236,19 @@ class TestProspectingDetailClaimDismiss:
             assert "already claimed" in resp.headers.get("HX-Trigger", "")
 
     def test_enrich_prospect_success(self, client: TestClient, db_session: Session):
+        # Enrich now spawns a background job and returns the status poller (200).
         p = make_prospect(db_session)
-        with patch("app.services.prospect_free_enrichment.run_free_enrichment", new_callable=AsyncMock):
-            with patch("app.services.prospect_warm_intros.detect_warm_intros", return_value={}):
-                with patch("app.services.prospect_warm_intros.generate_one_liner", return_value="test liner"):
-                    resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
-                    assert resp.status_code == 200
+        with (
+            patch("app.services.prospect_free_enrichment.run_enrichment_job"),
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
+        ):
+            resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
+        assert resp.status_code == 200
+        assert "enrich-status" in resp.text
 
     def test_enrich_prospect_not_found(self, client: TestClient):
         resp = client.post("/v2/partials/prospecting/99999/enrich")
         assert resp.status_code == 404
-
-    def test_enrich_prospect_service_error_graceful(self, client: TestClient, db_session: Session):
-        """Enrichment errors are caught; endpoint still returns 200."""
-        p = make_prospect(db_session)
-        with patch(
-            "app.services.prospect_free_enrichment.run_free_enrichment",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API down"),
-        ):
-            with patch("app.services.prospect_warm_intros.detect_warm_intros", side_effect=RuntimeError("fail")):
-                resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
-                assert resp.status_code == 200
 
 
 # ── Section 4: Settings partials ──────────────────────────────────────────
