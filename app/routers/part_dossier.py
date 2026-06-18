@@ -125,7 +125,9 @@ async def dossier_hero(
     if display_mpn:
         from ..services.datasheet_capture import capture_datasheet
 
-        await safe_background_task(capture_datasheet(display_mpn, user.id), task_name="datasheet_capture")
+        await safe_background_task(
+            capture_datasheet(display_mpn, user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
 
     return template_response("htmx/partials/search/dossier_hero.html", ctx)
 
@@ -296,7 +298,9 @@ async def quick_source_rfq(
     if mpn.strip():
         from ..services.datasheet_capture import capture_datasheet
 
-        await safe_background_task(capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture")
+        await safe_background_task(
+            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
     return response
 
 
@@ -313,5 +317,7 @@ async def quick_source_offer(
     if mpn.strip():
         from ..services.datasheet_capture import capture_datasheet
 
-        await safe_background_task(capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture")
+        await safe_background_task(
+            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
     return response
