@@ -1273,6 +1273,7 @@ async def requisition_tab(
     request: Request,
     req_id: int,
     tab: str,
+    qual: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1299,9 +1300,10 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
-        offers = (
-            db.query(Offer).filter(Offer.requisition_id == req_id).order_by(Offer.created_at.desc().nullslast()).all()
-        )
+        q = db.query(Offer).filter(Offer.requisition_id == req_id)
+        if qual in ("unset", "incomplete", "essentials", "complete"):
+            q = q.filter(Offer.qualification_status == qual)
+        offers = q.order_by(Offer.created_at.desc().nullslast()).all()
         # Check for existing draft quote to show "Add to Quote" button
         draft_quote = (
             db.query(Quote)
@@ -1311,6 +1313,7 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
+        ctx["qual"] = qual
         return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":

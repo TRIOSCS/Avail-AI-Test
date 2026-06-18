@@ -307,3 +307,51 @@ def test_offer_mutation_happy_path(
     kwargs = {"data": data} if data else {}
     resp = getattr(client, method)(url, **kwargs)
     assert resp.status_code == 200, f"Expected 200 for {method.upper()} {url}, got {resp.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# Qualification-status filter facet on Offers tab
+# ---------------------------------------------------------------------------
+
+
+def test_offers_tab_qual_filter_server_side(client, db_session, test_requisition, test_user):
+    """GET /v2/partials/requisitions/{req_id}/tab/offers?qual=incomplete returns only
+    the incomplete offer; without qual returns both.
+
+    Filter is index-backed WHERE clause, not Python post-filter.
+    """
+    rid = test_requisition.requirements[0].id
+    o_incomplete = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="FilterVendorIncomplete",
+        mpn="FILTMPN1",
+        qualification_status="incomplete",
+        entered_by_id=test_user.id,
+    )
+    o_complete = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="FilterVendorComplete",
+        mpn="FILTMPN2",
+        qualification_status="complete",
+        entered_by_id=test_user.id,
+    )
+    db_session.add_all([o_incomplete, o_complete])
+    db_session.commit()
+
+    req_id = test_requisition.id
+
+    # Filtered: only incomplete
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers?qual=incomplete")
+    assert resp.status_code == 200
+    body = resp.content
+    assert b"FilterVendorIncomplete" in body
+    assert b"FilterVendorComplete" not in body
+
+    # Unfiltered: both visible
+    resp_all = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers")
+    assert resp_all.status_code == 200
+    body_all = resp_all.content
+    assert b"FilterVendorIncomplete" in body_all
+    assert b"FilterVendorComplete" in body_all

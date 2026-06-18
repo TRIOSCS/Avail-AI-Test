@@ -1,8 +1,10 @@
 {# offers.html — Offers tab for requisition detail with action buttons.
-   Receives: offers (list of Offer objects), req (Requisition), draft_quote (Quote or None).
+   Receives: offers (list of Offer objects), req (Requisition), draft_quote (Quote or None),
+             qual (str or None — active qualification_status filter).
    Called by: requisition tab route.
    Depends on: brand palette, HTMX, Alpine.js.
 #}
+{% from 'htmx/partials/offers/_field_macros.html' import qual_badge %}
 <div x-data="{ selectedOffers: [] }">
 
   {# ── Add Offer dropdown ────────────────────────────────── #}
@@ -45,6 +47,19 @@
 
   {# Area where parse forms and results appear #}
   <div id="parse-area" class="mb-4"></div>
+
+  {# Qualification status filter pills #}
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    {% for s, label in [('', 'All'), ('unset', 'Unset'), ('incomplete', 'Incomplete'), ('essentials', 'Essentials'), ('complete', 'Complete')] %}
+    <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                   {% if qual == s %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+            hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers?qual={{ s }}"
+            hx-target="#tab-content"
+            hx-swap="innerHTML">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
 
   {% if offers %}
   {# Action bar — appears when offers are selected #}
@@ -162,9 +177,12 @@
               "draft": "bg-brand-100 text-brand-600",
               "sold": "bg-gray-100 text-gray-600"
             } %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ offer_colors.get(o.status, 'bg-gray-100 text-gray-600') }}">
-              {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
-            </span>
+            <div class="flex items-center gap-1 flex-wrap">
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ offer_colors.get(o.status, 'bg-gray-100 text-gray-600') }}">
+                {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
+              </span>
+              {{ qual_badge(o) }}
+            </div>
           </td>
           <td class="px-4 py-2.5 text-center" x-data="{ open: false }">
             <div class="relative inline-block">
