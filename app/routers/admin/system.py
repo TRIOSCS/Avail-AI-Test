@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...dependencies import require_admin, require_settings_access
 from ...models import ApiSource, User
-from ...models.config import ApiUsageLog
+from ...models.config import ApiUsageLog, GraphSubscription
 from ...rate_limit import limiter
 from ...schemas.admin import SourceCredentialsUpdate
 from ...services.admin_service import get_all_config, get_system_health, set_config_value
@@ -358,4 +358,38 @@ def api_material_audit(
             }
             for e in entries
         ],
+    }
+
+
+# -- Graph Subscription Health (settings_access) ---------------------------
+
+
+@router.get("/api/admin/subscription-health")
+@limiter.limit("30/minute")
+def api_subscription_health(
+    request: Request,
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    """Return Graph subscription health data — counts, expiry, failure stats.
+
+    Returns all graph_subscriptions rows with their health columns so the
+    admin can observe renewal failures before they silently degrade email tracking.
+    Read-only: no writes.
+    """
+    subs = db.query(GraphSubscription).order_by(GraphSubscription.expiration_dt.asc()).all()
+    return {
+        "subscriptions": [
+            {
+                "id": s.id,
+                "user_id": s.user_id,
+                "subscription_id": s.subscription_id,
+                "resource": s.resource,
+                "expiration_dt": _iso(s.expiration_dt),
+                "renew_fail_count": s.renew_fail_count or 0,
+                "last_error": s.last_error,
+                "last_renewed_at": _iso(s.last_renewed_at),
+            }
+            for s in subs
+        ]
     }

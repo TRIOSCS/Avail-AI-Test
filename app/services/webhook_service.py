@@ -35,6 +35,10 @@ SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
 _SUBSCRIPTION_GONE_STATUSES = {404, 410}
 RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
 
+# Number of consecutive transient failures before surfacing to User.m365_error_reason
+RENEW_FAIL_THRESHOLD = 3
+_M365_SUB_ERROR_MSG = "Email tracking degraded — Graph subscription renewal failing"
+
 # Replay protection: reject duplicate notifications within this window
 REPLAY_WINDOW_SECONDS = 300  # 5 minutes
 _seen_notifications: dict[str, float] = {}  # key -> timestamp
@@ -206,6 +210,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
         # Network/timeout error — Graph has not confirmed the subscription is gone.
         # Keep the record so the next renewal cycle can retry.
         logger.warning(f"Transient error renewing subscription {sub.subscription_id}: {e}")
+        _record_renewal_failure(sub, user, f"exception: {e}", db)
         return False
 
     if "error" in result:
@@ -220,12 +225,30 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
             # Transient or auth error (e.g. 401, 503, "max_retries").
             # Keep the subscription — next renewal cycle will retry.
             logger.warning(f"Transient Graph error renewing subscription {sub.subscription_id}: {error_code}")
+            detail = result.get("detail", "")
+            _record_renewal_failure(sub, user, f"{error_code}: {detail}".strip(": "), db)
         return False
 
+    # SUCCESS: reset health counters, set last_renewed_at, clear user error
     sub.expiration_dt = new_expiration
+    sub.last_renewed_at = datetime.now(timezone.utc)
+    sub.renew_fail_count = 0
+    sub.last_error = None
+    if user.m365_error_reason == _M365_SUB_ERROR_MSG:
+        user.m365_error_reason = None
     db.commit()
     logger.info(f"Renewed subscription {sub.subscription_id} until {new_expiration}")
     return True
+
+
+def _record_renewal_failure(sub, user, error_detail: str, db) -> None:
+    """Increment fail counter, set last_error, and surface to user when threshold
+    crossed."""
+    sub.renew_fail_count = (sub.renew_fail_count or 0) + 1
+    sub.last_error = error_detail[:500]
+    if sub.renew_fail_count >= RENEW_FAIL_THRESHOLD:
+        user.m365_error_reason = _M365_SUB_ERROR_MSG
+    db.commit()
 
 
 async def renew_expiring_subscriptions(db: Session):
