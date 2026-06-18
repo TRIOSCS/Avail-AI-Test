@@ -20,7 +20,15 @@ _GRAPH = "https://graph.microsoft.com/v1.0"
 
 
 def _sanitize(part: str) -> str:
-    return re.sub(r"[\\/]+", "_", (part or "").strip()) or "_unknown"
+    """Allowlist-sanitize one path segment for the Graph library path.
+
+    MPN/manufacturer come from external-ish data, so reject path traversal (`..`) and
+    any char outside [A-Za-z0-9._ -] (incl. the Graph path delimiter `:`). Caps length.
+    Returns `_unknown` if no alphanumeric character survives (e.g. pure-dot inputs).
+    """
+    cleaned = (part or "").strip().replace("..", "_")
+    cleaned = re.sub(r"[^A-Za-z0-9._ -]", "_", cleaned)[:128].strip(" .")
+    return cleaned if re.search(r"[A-Za-z0-9]", cleaned) else "_unknown"
 
 
 async def upload_datasheet_to_library(

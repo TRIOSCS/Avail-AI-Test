@@ -65,3 +65,14 @@ async def test_fetch_bytes_ok():
     ):
         httpr.get = AsyncMock(return_value=resp)
         assert await dl.fetch_datasheet_bytes("DRV", "ITM") == b"%PDF-bytes"
+
+
+def test_sanitize_blocks_traversal_and_specials():
+    from app.services.datasheet_library import _sanitize
+
+    assert "/" not in _sanitize("../../etc/passwd") and ".." not in _sanitize("../../etc/passwd")
+    assert ":" not in _sanitize("Acme: Inc*?<>|")
+    assert _sanitize("") == "_unknown"
+    assert _sanitize("...") == "_unknown"
+    assert _sanitize("LM317-datasheet.pdf") == "LM317-datasheet.pdf"
+    assert len(_sanitize("x" * 500)) <= 128
