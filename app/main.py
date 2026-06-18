@@ -277,18 +277,42 @@ if not os.environ.get("TESTING"):
         ],
     )
 
-# Static mount order matters — most specific paths first. Mount the Vite-built
-# hashed bundles at /static/assets/ so hash-named files resolve directly, then
-# mount the source directory at /static/ for everything else (source CSS/JS,
-# public/ images, js/ helpers that aren't bundled). Previously we toggled
-# between source and dist, which made source files 404 whenever a build existed.
+
+# Serve /static from the built dist FIRST, then the source tree as a fallback.
+# Public images + bundled js land only in dist (Vite copies publicDir → dist root),
+# while unbundled source CSS/JS live only in source — no single dir has both, so
+# toggling between them always 404'd one set. Falling back across both resolves
+# everything app-direct and matches what Caddy serves in prod (dist) without
+# dev-vs-prod divergence.
+class _FallbackStaticFiles(StaticFiles):
+    """StaticFiles that looks a path up across several directories in order."""
+
+    def __init__(self, directories: list[str]) -> None:
+        self._directories = [d for d in directories if os.path.isdir(d)] or ["app/static"]
+        super().__init__(directory=self._directories[0], check_dir=False)
+
+    def lookup_path(self, path: str):
+        for directory in self._directories:
+            full = os.path.realpath(os.path.join(directory, path))
+            base = os.path.realpath(directory)
+            # Block traversal outside the served directory.
+            if os.path.commonpath([full, base]) != base:
+                continue
+            try:
+                return full, os.stat(full)
+            except (FileNotFoundError, NotADirectoryError):
+                continue
+        return "", None
+
+
+# /static/assets stays a dedicated mount (most specific) for the hashed Vite bundles.
 if os.path.isdir("app/static/dist/assets"):
     app.mount(
         "/static/assets",
         StaticFiles(directory="app/static/dist/assets"),
         name="static-assets",
     )
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", _FallbackStaticFiles(["app/static/dist", "app/static"]), name="static")
 
 # Prometheus metrics
 from fastapi import Response
