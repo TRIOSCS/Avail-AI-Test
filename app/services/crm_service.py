@@ -82,7 +82,7 @@ _CLOCK_COLUMNS = {
 _CLOCK_COLUMN = _CLOCK_COLUMNS[Company]
 
 
-def order_by_clock(query, clock: str, model=Company, now=None):
+def order_by_clock(query, clock: str, *, model=Company, now=None):
     """Order rows stalest-first: NULL clocks (never contacted) first, then oldest.
 
     Works for both Company (customer cadence) and VendorCard (vendor cadence).
@@ -190,9 +190,9 @@ def cdm_company_query(
     # calls query.order_by(...) internally), so we return early to avoid
     # double-applying .order_by() via the CDM_SORTS path.
     if sort == "outbound_asc":
-        return order_by_clock(query, "outbound", now)
+        return order_by_clock(query, "outbound", now=now)
     if sort == "reply_asc":
-        return order_by_clock(query, "reply", now)
+        return order_by_clock(query, "reply", now=now)
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 

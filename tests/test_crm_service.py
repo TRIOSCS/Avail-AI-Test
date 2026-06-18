@@ -374,3 +374,100 @@ class TestOrderByClock:
 
         names = [v.normalized_name for v in results]
         assert names.index("no-reply-vendor") < names.index("old-reply-vendor")
+
+    def test_positional_now_raises_type_error(self, db_session: Session):
+        """Keyword-only guard: passing now as a positional arg must raise TypeError,
+        not silently mis-bind to model= and cause KeyError downstream."""
+        from app.services.crm_service import order_by_clock
+
+        query = db_session.query(Company)
+        with pytest.raises(TypeError):
+            order_by_clock(query, "outbound", NOW)  # type: ignore[call-arg]
+
+
+class TestCdmCompanyQueryClockSorts:
+    """Regression tests for P3-5: cdm_company_query outbound_asc / reply_asc sorts.
+
+    The original bug: order_by_clock(query, "outbound", now) — positional now —
+    bound the datetime to model=, causing _CLOCK_COLUMNS[<datetime>] → KeyError
+    → 500 on the CDM page.  These tests call the real cdm_company_query path so
+    any recurrence will surface here first.
+    """
+
+    def test_outbound_asc_sort_does_not_raise(self, db_session: Session):
+        """cdm_company_query with sort='outbound_asc' returns sorted results, no
+        KeyError."""
+        from app.models import User
+        from app.services.crm_service import cdm_company_query
+
+        user = User(email="test-clock@example.com", name="Clock Tester", is_active=True)
+        db_session.add(user)
+
+        c_null = Company(name="Clock-Null Co", is_active=True, last_outbound_at=None)
+        c_old = Company(
+            name="Clock-Old Co",
+            is_active=True,
+            last_outbound_at=NOW - timedelta(days=30),
+        )
+        c_recent = Company(
+            name="Clock-Recent Co",
+            is_active=True,
+            last_outbound_at=NOW - timedelta(days=3),
+        )
+        db_session.add_all([c_recent, c_old, c_null])
+        db_session.commit()
+
+        # Must not raise KeyError / TypeError
+        results = cdm_company_query(
+            db_session,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="outbound_asc",
+            now=NOW,
+        ).all()
+
+        names = [c.name for c in results if c.name.startswith("Clock-")]
+        assert names.index("Clock-Null Co") < names.index("Clock-Old Co")
+        assert names.index("Clock-Old Co") < names.index("Clock-Recent Co")
+
+    def test_reply_asc_sort_does_not_raise(self, db_session: Session):
+        """cdm_company_query with sort='reply_asc' returns sorted results, no
+        KeyError."""
+        from app.models import User
+        from app.services.crm_service import cdm_company_query
+
+        user = User(email="test-reply-clock@example.com", name="Reply Tester", is_active=True)
+        db_session.add(user)
+
+        c_null = Company(name="Reply-Null Co", is_active=True, last_reply_at=None)
+        c_old = Company(
+            name="Reply-Old Co",
+            is_active=True,
+            last_reply_at=NOW - timedelta(days=25),
+        )
+        c_recent = Company(
+            name="Reply-Recent Co",
+            is_active=True,
+            last_reply_at=NOW - timedelta(days=2),
+        )
+        db_session.add_all([c_recent, c_old, c_null])
+        db_session.commit()
+
+        # Must not raise KeyError / TypeError
+        results = cdm_company_query(
+            db_session,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="reply_asc",
+            now=NOW,
+        ).all()
+
+        names = [c.name for c in results if c.name.startswith("Reply-")]
+        assert names.index("Reply-Null Co") < names.index("Reply-Old Co")
+        assert names.index("Reply-Old Co") < names.index("Reply-Recent Co")
