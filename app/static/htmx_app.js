@@ -2281,11 +2281,24 @@ Alpine.data('offerQualification', (prefill) => ({
 (() => {
   const PILL_ID = 'tab-alert-pill';
 
+  const scopeEl = () => document.getElementById('main-content') || document;
+
+  // Refs the client has already consumed this session — authoritative over the server's
+  // eventually-consistent seen-state, so a list refresh that races an in-flight seen-ping
+  // cannot resurrect a row and hijack the scroll.
+  const consumedRefs = new Set();
+
+  const refsOf = (row) =>
+    (row.getAttribute('data-alert-refs') || '').split(',').map((s) => s.trim()).filter(Boolean);
+
   const pendingRows = () =>
-    Array.from(document.querySelectorAll('[data-alert-new]:not([data-alert-consumed])'));
+    Array.from(scopeEl().querySelectorAll('[data-alert-new]:not([data-alert-consumed])'));
+
+  const prefersReducedMotion = () =>
+    window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const glideTo = (el) => {
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    if (el) el.scrollIntoView({ behavior: prefersReducedMotion() ? 'auto' : 'smooth', block: 'center' });
   };
 
   const ensurePill = () => {
@@ -2309,24 +2322,23 @@ Alpine.data('offerQualification', (prefill) => ({
     pill.style.display = '';
   };
 
-  const markSeen = (kind, refId) => {
-    if (!window.htmx) return;
+  const markSeen = (kind, refs) => {
+    if (!window.htmx || !refs.length) return;
     const url = `/v2/partials/alerts/${encodeURIComponent(kind)}/seen`;
-    // Background seen-ping: no spinner (indicator: null); htmx.ajax still applies the
-    // OOB nav-badge swap from the response.
-    window.htmx.ajax('POST', url, { target: 'body', swap: 'none', indicator: null, values: { ref_id: refId } });
+    const body = { ref_ids: refs.join(',') };
+    // One background ping per row (all its refs batched): no spinner (indicator: null);
+    // htmx.ajax still applies the OOB nav-badge swap from the response.
+    window.htmx.ajax('POST', url, { target: 'body', swap: 'none', indicator: null, values: body });
   };
 
   const consume = (row) => {
     if (row.dataset.alertConsumed) return;
     row.dataset.alertConsumed = '1';
     const kind = row.getAttribute('data-alert-kind');
-    const temperament = row.getAttribute('data-alert-temperament');
-    (row.getAttribute('data-alert-refs') || '')
-      .split(',')
-      .filter(Boolean)
-      .forEach((ref) => markSeen(kind, ref));
-    if (temperament === 'fyi') {
+    const refs = refsOf(row);
+    refs.forEach((r) => consumedRefs.add(r));
+    markSeen(kind, refs);
+    if (row.getAttribute('data-alert-temperament') === 'fyi') {
       row.classList.remove('alert-rail-pulse');
       row.classList.add('alert-rail-fade');
       setTimeout(() => row.classList.remove('alert-rail', 'alert-rail-fade'), 700);
@@ -2350,17 +2362,27 @@ Alpine.data('offerQualification', (prefill) => ({
   };
 
   const spotlight = (root) => {
-    const scope = root && root.querySelectorAll ? root : document;
+    const scope = root && root.querySelectorAll ? root : scopeEl();
     const rows = Array.from(scope.querySelectorAll('[data-alert-new]:not([data-alert-spotlit])'));
     if (!rows.length) { refreshPill(); return; }
     const obs = getObserver();
+    let firstFresh = null;
     rows.forEach((row) => {
       row.dataset.alertSpotlit = '1';
+      const refs = refsOf(row);
+      // A row whose every ref we've already consumed is a refresh-resurrected row (the
+      // server's seen-state hadn't caught up yet) — settle it silently: no rail, no glide.
+      if (refs.length && refs.every((r) => consumedRefs.has(r))) {
+        row.dataset.alertConsumed = '1';
+        return;
+      }
       row.classList.add('alert-rail', 'alert-rail-pulse');
       obs.observe(row);
+      if (!firstFresh) firstFresh = row;
     });
     refreshPill();
-    setTimeout(() => glideTo(rows[0]), 140); // let layout settle, then glide to the first
+    // Glide only to a genuinely-fresh row — never on a refresh that surfaced no new work.
+    if (firstFresh) setTimeout(() => glideTo(firstFresh), 140);
   };
 
   document.body.addEventListener('htmx:afterSettle', (evt) => {

@@ -208,3 +208,52 @@ def test_seen_does_not_change_count(db_session, test_user, test_quote, test_requ
     # ACTION temperament: seen only gates the cosmetic pulse, never the count.
     assert SOURCE.count_for_user(db_session, test_user) == 1
     assert [i.ref_id for i in SOURCE.new_items_for_user(db_session, test_user)] == [line.id]
+
+
+# ── 7. Plan-status gates (only ACTIVE plans are actionable for PO + ops-verify) ──
+
+
+def test_buyer_po_line_on_non_active_plan_not_counted(db_session, test_user, test_quote, test_requisition):
+    """A DRAFT plan's AWAITING_PO line is not actionable — confirm_po requires
+    ACTIVE."""
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT.value,
+    )
+    _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id)
+    assert SOURCE.count_for_user(db_session, test_user) == 0
+
+
+def test_ops_verify_draft_plan_not_counted(db_session, test_user, test_quote, test_requisition):
+    """so_status DEFAULTS to 'pending' on a draft — must NOT count for ops until
+    ACTIVE."""
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT.value,
+        so_status=SOVerificationStatus.PENDING.value,
+        so_verified_by_id=None,
+    )
+    db_session.add(VerificationGroupMember(user_id=test_user.id, is_active=True))
+    db_session.flush()
+    assert SOURCE.count_for_user(db_session, test_user) == 0
+
+
+def test_pending_plan_not_double_counted_for_admin_ops_member(db_session, admin_user, test_quote, test_requisition):
+    """A PENDING plan counts ONCE (approval) for an admin who is also an ops member —
+    the ops-verify branch is gated to ACTIVE, so it no longer double-counts."""
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING.value,
+        approved_by_id=None,
+        so_status=SOVerificationStatus.PENDING.value,
+        so_verified_by_id=None,
+    )
+    db_session.add(VerificationGroupMember(user_id=admin_user.id, is_active=True))
+    db_session.flush()
+    assert SOURCE.count_for_user(db_session, admin_user) == 1

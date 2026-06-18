@@ -4,6 +4,11 @@ The alert layer behind the per-tab green nav badges and the in-tab fluid spotlig
 See docs/superpowers/specs/2026-06-18-comm-ledger-alerts-design.md.
 """
 
+# Importing the sources package registers every concrete AlertSource against its nav tab
+# (a register() side effect). Done here so the registry is populated for ANY importer of
+# this package — the badge/seen router AND the list partials that call markers_for_tab —
+# rather than relying on the alerts router happening to be imported first.
+from . import sources  # noqa: E402,F401  (imported for its registration side effect)
 from .base import AlertItem, AlertSource, Temperament, recency_floor, record_seen
 from .registry import (
     count_for_tab,

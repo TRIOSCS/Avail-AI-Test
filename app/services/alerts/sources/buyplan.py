@@ -70,13 +70,17 @@ class BuyplanActionSource(AlertSource):
         """
         items: list[AlertItem] = []
 
-        # 1. Buyer PO step — lines assigned to me, still awaiting their PO. Anchor to the
-        #    owning plan's row (the list is per-plan); ref_id stays the line id.
+        # 1. Buyer PO step — lines I own that are awaiting their PO, on an ACTIVE plan.
+        #    confirm_po requires plan.status == ACTIVE (buyplan_workflow), so a line on a
+        #    draft/pending/halted/completed plan is NOT actionable and must not count.
+        #    Anchor to the owning plan's row (the list is per-plan); ref_id stays the line.
         po_lines = (
             db.query(BuyPlanLine.id, BuyPlanLine.buy_plan_id)
+            .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
             .filter(
                 BuyPlanLine.buyer_id == user.id,
                 BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
+                BuyPlan.status == BuyPlanStatus.ACTIVE,
             )
             .all()
         )
@@ -94,7 +98,12 @@ class BuyplanActionSource(AlertSource):
             )
             items.extend(AlertItem(ref_id=plan_id, anchor=f"bp-{plan_id}") for (plan_id,) in approval_plans)
 
-        # 3. Ops verify — SO still pending + unverified, if I'm an active ops member.
+        # 3. Ops verify — an ACTIVE plan whose SO is still pending + unverified, if I'm an
+        #    active ops member. The ACTIVE gate matters: so_status DEFAULTS to "pending" at
+        #    creation, so without it every draft/pending plan would falsely count (SO
+        #    verification is only meaningful + surfaced once a plan is active). Gating here
+        #    also prevents a PENDING plan double-counting for an admin who is also an ops
+        #    member (branch 2 counts it as an approval; this branch no longer also counts it).
         is_ops_member = (
             db.query(VerificationGroupMember.id)
             .filter(
@@ -108,6 +117,7 @@ class BuyplanActionSource(AlertSource):
             verify_plans = (
                 db.query(BuyPlan.id)
                 .filter(
+                    BuyPlan.status == BuyPlanStatus.ACTIVE,
                     BuyPlan.so_status == SOVerificationStatus.PENDING,
                     BuyPlan.so_verified_by_id.is_(None),
                 )

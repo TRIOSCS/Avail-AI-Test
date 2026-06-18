@@ -28,6 +28,12 @@ from ..base import AlertItem, AlertSource, Temperament
 # Channels that count as a genuine inbound customer communication.
 _INBOUND_CHANNELS = (Channel.EMAIL, Channel.PHONE, Channel.TEAMS, Channel.WECHAT)
 
+# Company.account_type is a free-text column (no StrEnum); "Customer" is the canonical
+# value (see crm_service.CDM_ACCOUNT_TYPES). Named here so the filter isn't a bare literal
+# and a future rename/normalization has one place to change — a casing drift would
+# otherwise silently zero this alert.
+_CUSTOMER_ACCOUNT_TYPE = "Customer"
+
 
 class InboundCustomerSource(AlertSource):
     """New inbound customer communications on accounts the user owns (FYI)."""
@@ -58,7 +64,7 @@ class InboundCustomerSource(AlertSource):
                 ActivityLog.channel.in_(_INBOUND_CHANNELS),
                 ActivityLog.company_id.isnot(None),
                 ActivityLog.dismissed_at.is_(None),
-                Company.account_type == "Customer",
+                Company.account_type == _CUSTOMER_ACCOUNT_TYPE,
                 Company.account_owner_id == user.id,
                 new_ts >= floor,
             )

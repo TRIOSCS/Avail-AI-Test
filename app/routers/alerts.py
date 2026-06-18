@@ -58,22 +58,32 @@ async def alert_badge(
 @router.post("/v2/partials/alerts/{kind}/seen", response_class=HTMLResponse)
 async def alert_seen(
     kind: str,
-    ref_id: int = Form(...),
+    ref_ids: str = Form(...),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    """Mark ``(kind, ref_id)`` seen for the current user (own rows only).
+    """Mark one or more ``(kind, ref_id)`` seen for the current user (own rows only).
 
+    ``ref_ids`` is comma-separated so one row's whole batch of refs is a single request.
     Returns the owning tab's refreshed nav badge as an OOB swap so it updates instantly;
-    the in-tab pill is decremented client-side. Idempotent.
+    the in-tab pill is decremented client-side. Idempotent + fully fail-quiet (a cosmetic
+    seen-ping must never 500).
     """
-    try:
-        record_seen(db, user, kind, ref_id)
-    except Exception:  # noqa: BLE001 — never 500 a cosmetic seen-ping
-        logger.exception("alert seen failed for kind {} ref {}", kind, ref_id)
+    for raw in ref_ids.split(","):
+        raw = raw.strip()
+        if not raw:
+            continue
+        try:
+            record_seen(db, user, kind, int(raw))
+        except Exception:  # noqa: BLE001 — never 500 a cosmetic seen-ping
+            logger.exception("alert seen failed for kind {} ref {}", kind, raw)
 
     tab_key = tab_for_kind(kind)
     if not tab_key:
         return HTMLResponse("")
-    count = count_for_tab(db, user, tab_key)
+    try:
+        count = count_for_tab(db, user, tab_key)
+    except Exception:  # noqa: BLE001 — never break the seen-ping on a badge recompute
+        logger.exception("alert seen badge recompute failed for tab {}", tab_key)
+        return HTMLResponse("")
     return HTMLResponse(f'<span id="{tab_key}-nav-badge" hx-swap-oob="innerHTML">{_badge_html(count)}</span>')
