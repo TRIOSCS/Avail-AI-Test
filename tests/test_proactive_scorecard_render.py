@@ -24,7 +24,17 @@ def test_conversion_rate_not_multiplied_by_100():
 
 def test_revenue_reads_converted_revenue_key():
     """Revenue card must read converted_revenue, not the never-set total_revenue."""
-    html = _render({"total_sent": 6, "total_converted": 2, "conversion_rate": 33.3, "converted_revenue": 139122.5})
+    # Provide all money keys so defaults don't produce a stray $0.
+    html = _render(
+        {
+            "total_sent": 6,
+            "total_converted": 2,
+            "conversion_rate": 33.3,
+            "converted_revenue": 139122.5,
+            "gross_profit": 41972.5,
+            "anticipated_revenue": 278580.0,
+        }
+    )
     assert "$139,122" in html  # rounded, thousands-separated
     # The old buggy key being absent must not silently render $0.
     assert "$0" not in html
@@ -53,3 +63,54 @@ def test_scorecard_matches_service_contract():
     html = _render(stats)
     assert "33%" in html and "3330%" not in html
     assert "$139,122" in html
+
+
+def test_gross_profit_renders():
+    """gross_profit=41972.5 → '$41,972' (Python round-half-even: .5 rounds to even →
+    41972)."""
+    html = _render(
+        {
+            "total_sent": 6,
+            "total_converted": 2,
+            "conversion_rate": 33.3,
+            "converted_revenue": 0,
+            "gross_profit": 41972.5,
+            "anticipated_revenue": 0,
+        }
+    )
+    assert "$41,972" in html
+
+
+def test_pipeline_renders():
+    """anticipated_revenue=278580.0 → '$278,580'."""
+    html = _render(
+        {
+            "total_sent": 6,
+            "total_converted": 2,
+            "conversion_rate": 33.3,
+            "converted_revenue": 0,
+            "gross_profit": 0,
+            "anticipated_revenue": 278580.0,
+        }
+    )
+    assert "$278,580" in html
+
+
+def test_conv_rate_no_double_100_with_money_fields():
+    """Conv.
+
+    Rate still renders correctly when the full service dict (incl. money fields) is
+    used.
+    """
+    html = _render(
+        {
+            "total_sent": 6,
+            "total_converted": 2,
+            "conversion_rate": 33.3,
+            "converted_revenue": 139122.5,
+            "gross_profit": 41972.5,
+            "anticipated_revenue": 278580.0,
+        }
+    )
+    assert "33%" in html
+    assert "3330%" not in html
