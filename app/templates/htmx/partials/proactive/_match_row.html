@@ -73,7 +73,7 @@
     <form hx-post='/v2/partials/proactive/do-not-offer'
           hx-target='#match-row-{{ match.id }}'
           hx-swap='outerHTML'
-          hx-confirm='Never offer {{ match.mpn | default("this part") }} to this customer again?'
+          hx-confirm="Never offer {{ match.mpn | default('this part') | e }} to this customer again?"
           class='inline'>
       <input type='hidden' name='mpn' value='{{ match.mpn | default("") }}'>
       <input type='hidden' name='company_id' value='{{ group.company_id | default("") }}'>

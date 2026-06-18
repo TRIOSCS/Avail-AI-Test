@@ -496,6 +496,86 @@ def test_htmx_do_not_offer_route_creates_dno_record(db_session):
         app.dependency_overrides.pop(require_user, None)
 
 
+# ── Fix 1 regression: form-path sell_price serialization ─────────────────────
+
+
+def test_send_form_path_includes_sell_price(db_session):
+    """POST /v2/proactive/send with sell_price_<match_id> form fields must pass the rep-
+    entered price through to send_proactive_offer — not cost*1.3.
+
+    This is a form-path end-to-end test: it exercises form deserialization in
+    the route handler so that the Fix-1 'form=' association regression is
+    detectable at the integration level.
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+
+    data = _setup_send_scenario(db_session)
+    match_id = data["match"].id
+    contact_id = data["contact1"].id
+
+    # Custom sell price that is NOT cost*1.3 (cost=0.42, 1.3x≈0.546)
+    rep_sell = 0.99
+
+    # Capture what sell_prices dict is passed to the service
+    captured: dict = {}
+
+    async def _fake_send(*, db, user, token, match_ids, contact_ids, sell_prices, subject=None, email_html=None):
+        captured["sell_prices"] = sell_prices
+        # Return minimal result the route needs to render success
+        return {
+            "id": 1,
+            "line_items": [{"mpn": "LM358N", "sell_price": sell_prices.get(str(match_id), 0)}],
+            "recipient_emails": [data["contact1"].email],
+            "subject": subject or "Test",
+            "total_sell": sell_prices.get(str(match_id), 0),
+        }
+
+    def _override_db():
+        yield db_session
+
+    def _override_user():
+        return data["owner"]
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = _override_user
+
+    try:
+        with (
+            patch("app.services.proactive_service.send_proactive_offer", new=_fake_send),
+            patch("app.scheduler.get_valid_token", new=AsyncMock(return_value="fake-token")),
+            TestClient(app) as client,
+        ):
+            resp = client.post(
+                "/v2/proactive/send",
+                data={
+                    "match_ids": str(match_id),
+                    "contact_ids": str(contact_id),
+                    "subject": "Form Path Test",
+                    "body": "",
+                    f"sell_price_{match_id}": str(rep_sell),
+                },
+            )
+
+        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:300]}"
+        assert "sell_prices" in captured, "send_proactive_offer was not called"
+        parsed_price = captured["sell_prices"].get(str(match_id))
+        assert parsed_price is not None, (
+            f"sell_price_{match_id} was not parsed from form; got sell_prices={captured['sell_prices']}"
+        )
+        assert abs(parsed_price - rep_sell) < 0.0001, (
+            f"Expected sell_price={rep_sell}, got {parsed_price} — form association may be broken"
+        )
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
+
+
 def test_htmx_do_not_offer_match_no_longer_in_list(db_session):
     """After DNO is posted, the match must not appear in get_matches_for_user."""
     from app.models.intelligence import ProactiveDoNotOffer

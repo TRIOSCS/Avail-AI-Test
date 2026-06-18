@@ -9317,7 +9317,7 @@ async def proactive_draft_for_prepare(
             <button type="button"
                     hx-post="/v2/partials/proactive/draft"
                     hx-target="#draft-status"
-                    hx-include="[name='match_ids'],[name='contact_ids']"
+                    hx-include="[name='match_ids'],[name='contact_ids'],[name^='sell_price_']"
                     class="ml-2 text-brand-600 underline text-xs">Retry</button>
         </div>
     """)
