@@ -266,6 +266,125 @@ def test_get_subfilter_options_natural_sorts_enum_overflow(db_session: Session):
     assert pkg_opt["values"] == ["0402", "0603", "205", "0805", "1210"]
 
 
+# --- Numeric common-value chips (P2 backend) ---
+
+
+def test_search_materials_faceted_numeric_vals_in(db_session: Session):
+    """``{spec_key}__vals`` filters via ``value_numeric IN (...)`` (OR-within-facet),
+    returning exactly the selected discrete values — never the in-between ones."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-032", "DDR5", 32)
+
+    results, total = search_materials_faceted(
+        db_session,
+        commodity="dram",
+        sub_filters={"capacity_gb__vals": [8, 32]},
+    )
+    assert total == 2  # the 8 and 32 cards, NOT the in-between 16
+    assert {r.normalized_mpn for r in results} == {"mem-008", "mem-032"}
+
+
+def test_subfilter_numeric_chips_top_n_ordered_by_value(db_session: Session):
+    """Numeric specs expose ``chips`` = top-N values by DISTINCT-card count, displayed
+    ascending by value, alongside the existing min/max ``range``."""
+    _seed_dram_schema(db_session)
+    # 16GB on 3 cards, 8GB on 2, 32GB on 1 → all three are chips; display value-ascending.
+    for cap, n in [(8.0, 2), (16.0, 3), (32.0, 1)]:
+        for i in range(n):
+            _make_dram_card(db_session, f"MEM-{int(cap)}-{i}", "DDR4", cap)
+
+    opt = {o["spec_key"]: o for o in get_subfilter_options(db_session, "dram")}["capacity_gb"]
+    assert [c["value"] for c in opt["chips"]] == [8.0, 16.0, 32.0]
+    assert {c["value"]: c["count"] for c in opt["chips"]} == {8.0: 2, 16.0: 3, 32.0: 1}
+    assert opt["range"]["min"] == 8.0 and opt["range"]["max"] == 32.0
+
+
+def test_subfilter_numeric_chips_truncated_to_n(db_session: Session):
+    """More than ``NUMERIC_CHIP_N`` distinct values → keep the N most common, then
+    display the kept set ascending by value."""
+    from app.services.faceted_search_service import NUMERIC_CHIP_N
+
+    _seed_dram_schema(db_session)
+    # Distinct counts 1..N+2 so the two least-common values (count 1 and 2) are dropped.
+    caps = [(float(8 * (i + 1)), i + 1) for i in range(NUMERIC_CHIP_N + 2)]
+    for cap, n in caps:
+        for i in range(n):
+            _make_dram_card(db_session, f"MEM-{int(cap)}-{i}", "DDR4", cap)
+
+    opt = {o["spec_key"]: o for o in get_subfilter_options(db_session, "dram")}["capacity_gb"]
+    kept = {c["value"] for c in opt["chips"]}
+    assert len(opt["chips"]) == NUMERIC_CHIP_N
+    # The two lowest-count values (the first two seeded) are excluded.
+    assert caps[0][0] not in kept and caps[1][0] not in kept
+    # Displayed ascending by value.
+    assert [c["value"] for c in opt["chips"]] == sorted(kept)
+
+
+def test_subfilter_numeric_chips_empty_without_rows(db_session: Session):
+    """A numeric spec with no facet rows → no chips (empty list), range absent/None."""
+    _seed_dram_schema(db_session)
+    # ddr_type/ecc cards exist but carry NO capacity_gb numeric rows.
+    card = MaterialCard(
+        normalized_mpn="no-cap",
+        display_mpn="NO-CAP",
+        manufacturer="TestCo",
+        category="dram",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.flush()
+    db_session.add(MaterialSpecFacet(material_card_id=card.id, category="dram", spec_key="ddr_type", value_text="DDR4"))
+    db_session.flush()
+
+    opt = {o["spec_key"]: o for o in get_subfilter_options(db_session, "dram")}["capacity_gb"]
+    assert opt.get("chips") == []
+
+
+def test_facet_counts_numeric_chip_pass1(db_session: Session):
+    """Numeric chip counts (pass 1) are string-keyed by value and reflect the active
+    card scope."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-008b", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-016b", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-016c", "DDR4", 16)
+
+    counts = get_facet_counts(db_session, "dram")
+    assert counts["capacity_gb"]["8.0"] == 2
+    assert counts["capacity_gb"]["16.0"] == 3
+
+
+def test_facet_counts_numeric_chip_self_exclusion(db_session: Session):
+    """With one chip actively selected, the facet's OWN counts still include the
+    unselected sibling at its full count (OR-within-facet), keyed as ``str(value)``."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-008b", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-016b", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-016c", "DDR4", 16)
+
+    counts = get_facet_counts(db_session, "dram", active_filters={"capacity_gb__vals": [8]})
+    # Self-exclusion: selecting 8 must NOT collapse the sibling 16's count.
+    assert counts["capacity_gb"].get("16.0") == 3
+    assert counts["capacity_gb"].get("8.0") == 2
+
+
+def test_facet_counts_numeric_chip_narrows_other_facets(db_session: Session):
+    """A ``__vals`` selection narrows OTHER facets (AND-across-facets), pass 1."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR5", 16)
+
+    counts = get_facet_counts(db_session, "dram", active_filters={"capacity_gb__vals": [8]})
+    # Only the 8GB card (DDR4) is in scope, so the ddr_type facet shows DDR4 only.
+    assert counts["ddr_type"].get("DDR4") == 1
+    assert "DDR5" not in counts["ddr_type"]
+
+
 # --- Facet counts with active_filters ---
 
 
