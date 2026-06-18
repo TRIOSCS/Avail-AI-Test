@@ -79,9 +79,22 @@ CONNECTOR_DESC_CONFIDENCE = 0.90
 # by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
 # set). The PSU-vs-CPU wattage guard is structural: only extract_psu can emit the
 # `wattage` key, while the cpu route emits `tdp_watts` — CPU "135W" TDP text can
-# never land in wattage and PSU ratings can never land in tdp_watts.
+# never land in wattage and PSU ratings can never land in tdp_watts. Passive
+# commodities (capacitors, resistors) join via the same distributor-description grammar.
 SPEC_COMMODITIES = frozenset(
-    {"hdd", "ssd", "dram", "power_supplies", "displays", "tape_drives", "gpu", "motherboards", "cpu"}
+    {
+        "hdd",
+        "ssd",
+        "dram",
+        "power_supplies",
+        "displays",
+        "tape_drives",
+        "gpu",
+        "motherboards",
+        "cpu",
+        "capacitors",
+        "resistors",
+    }
 )
 
 

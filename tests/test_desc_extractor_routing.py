@@ -81,8 +81,11 @@ def test_empty_and_blank_return_none():
 
 
 def test_hint_outside_spec_commodities_returns_none():
-    # The extractor only speaks the nine SPEC_COMMODITIES — a capacitor-categorized
-    # card never gets drive facets, no matter what its description says.
+    # A hint outside SPEC_COMMODITIES ("networking") returns None outright. And a
+    # capacitors-hinted card whose description is a DRIVE ("HD," lead) is the
+    # cross-family contradiction guard: a capacitor card never gets drive facets,
+    # no matter what its description says (capacitors joined SPEC_COMMODITIES, so
+    # this now fails the family-contradiction check, not the unknown-hint check).
     assert extract_desc('HD, 450GB, 15KRPM, 3.5", Fibre Channel', commodity_hint="capacitors") is None
     assert extract_desc("PSU, 1460W 240V/200V AC Hot Swap for EN 62368-1", commodity_hint="networking") is None
 
