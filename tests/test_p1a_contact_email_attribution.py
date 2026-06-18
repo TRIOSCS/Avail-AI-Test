@@ -264,8 +264,8 @@ class TestLogEmailActivitySiteContactCadence:
         assert record.company_id == co.id  # company still matched
         assert record.site_contact_id is None  # no contact resolved
 
-    def test_meaningful_inbound_advances_last_reply_at(self, db_session, test_user):
-        """Meaningful inbound email → last_reply_at on SiteContact advances."""
+    def test_meaningful_inbound_advances_cadence_clocks(self, db_session, test_user):
+        """Meaningful inbound email sets site_contact_id AND advances last_reply_at."""
         co = _make_company(db_session)
         site = _make_site(db_session, co.id, contact_email="carol@corpx.com")
         contact = _make_contact(db_session, site.id, email="carol@corpx.com")
@@ -296,33 +296,79 @@ class TestLogEmailActivitySiteContactCadence:
         assert contact.last_reply_at is not None
 
     def test_prefers_verified_contact_over_unverified(self, db_session, test_user):
-        """When multiple SiteContacts share an email, prefer email_verified=True."""
+        """Two cross-site contacts with the SAME email → prefer email_verified=True.
+
+        The per-site unique constraint allows the same email across different sites of
+        the same company.  We use the domain-match path (site_id=None) so both contacts
+        are candidates and the preference branch is exercised.
+        """
         co = _make_company(db_session)
-        site = _make_site(db_session, co.id, contact_email="site@corpx.com")
-        # Two contacts at the same site with same email — verified one should win
-        unverified = _make_contact(db_session, site.id, email="shared@corpx.com", email_verified=False)
-        verified = _make_contact(db_session, site.id, email="shared2@corpx.com", email_verified=True)
+        # Two different sites; neither site's contact_email equals shared@corpx.com so
+        # match_email_to_entity falls through to the domain-match path (step 3) which
+        # calls _resolve_site_contact with site_id=None, collecting both candidates.
+        site_a = _make_site(db_session, co.id, contact_email="hq@corpx.com")
+        site_b = _make_site(db_session, co.id, contact_email="ops@corpx.com")
+        unverified = _make_contact(db_session, site_a.id, email="shared@corpx.com", email_verified=False)
+        verified = _make_contact(db_session, site_b.id, email="shared@corpx.com", email_verified=True)
         db_session.commit()
 
-        # Test that verified one is found when matched
-        result = match_email_to_entity("shared2@corpx.com", db_session)
+        result = match_email_to_entity("shared@corpx.com", db_session)
         assert result is not None
+        # Both contacts matched; verified one must win
         assert result.get("site_contact_id") == verified.id
 
-    def test_prefers_primary_contact(self, db_session):
-        """When multiple contacts share an email (in practice via domain), is_primary
-        wins."""
-        # In practice the UniqueConstraint prevents two contacts with same email at same site.
-        # Test that is_primary contact is returned for domain match when multiple contacts exist.
+    def test_inbound_unscored_sets_site_contact_id(self, db_session, test_user):
+        """Inbound email from a known SiteContact → site_contact_id is linked on the
+        record regardless of is_meaningful scoring."""
         co = _make_company(db_session)
-        site = _make_site(db_session, co.id, contact_email="site@corpx.com")
-        non_primary = _make_contact(db_session, site.id, email="np@corpx.com", is_primary=False)
-        primary = _make_contact(db_session, site.id, email="primary@corpx.com", is_primary=True)
+        site = _make_site(db_session, co.id, contact_email="carol@corpx.com")
+        contact = _make_contact(db_session, site.id, email="carol@corpx.com")
         db_session.commit()
 
-        # Each email is unique so each resolves to its own contact
-        result_np = match_email_to_entity("np@corpx.com", db_session)
-        result_primary = match_email_to_entity("primary@corpx.com", db_session)
+        record = log_email_activity(
+            user_id=test_user.id,
+            direction="received",
+            email_addr="carol@corpx.com",
+            subject="Just checking in",
+            external_id="inbound-unscored-001",
+            contact_name="Carol",
+            db=db_session,
+        )
+        db_session.commit()
 
-        assert result_np is not None and result_np.get("site_contact_id") == non_primary.id
-        assert result_primary is not None and result_primary.get("site_contact_id") == primary.id
+        assert record is not None
+        assert record.site_contact_id == contact.id
+
+    def test_prefers_primary_contact(self, db_session):
+        """Two cross-site contacts with the SAME email, neither verified → is_primary
+        wins.
+
+        The per-site unique constraint allows the same email across different sites of
+        the same company.  We use the domain-match path (site_id=None) so both contacts
+        are candidates and the primary-preference branch is exercised.
+        """
+        co = _make_company(db_session)
+        # Two different sites; neither site contact_email matches shared2@corpx.com so
+        # the domain-match path fires and collects both contacts as candidates.
+        site_a = _make_site(db_session, co.id, contact_email="hq2@corpx.com")
+        site_b = _make_site(db_session, co.id, contact_email="ops2@corpx.com")
+        non_primary = _make_contact(
+            db_session,
+            site_a.id,
+            email="shared2@corpx.com",
+            is_primary=False,
+            email_verified=False,
+        )
+        primary = _make_contact(
+            db_session,
+            site_b.id,
+            email="shared2@corpx.com",
+            is_primary=True,
+            email_verified=False,
+        )
+        db_session.commit()
+
+        result = match_email_to_entity("shared2@corpx.com", db_session)
+        assert result is not None
+        # Both contacts matched; primary one must win
+        assert result.get("site_contact_id") == primary.id
