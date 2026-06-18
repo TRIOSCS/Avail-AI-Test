@@ -134,7 +134,25 @@ def test_action_count_ignores_seen(db_session: Session, test_user: User):
 # --- registry --------------------------------------------------------------
 
 
-def test_registry_sums_sources_and_is_fail_quiet(db_session: Session, test_user: User):
+@pytest.fixture
+def isolate_registry():
+    """Snapshot + restore the module-global registry so this test's fake-source
+    registrations can't leak into the real registry used by endpoint tests."""
+    import app.services.alerts.registry as reg
+
+    snap_tab = {k: list(v) for k, v in reg._BY_TAB.items()}
+    snap_kind = dict(reg._BY_KIND)
+    snap_tab_by_kind = dict(reg._TAB_BY_KIND)
+    yield
+    reg._BY_TAB.clear()
+    reg._BY_TAB.update({k: list(v) for k, v in snap_tab.items()})
+    reg._BY_KIND.clear()
+    reg._BY_KIND.update(snap_kind)
+    reg._TAB_BY_KIND.clear()
+    reg._TAB_BY_KIND.update(snap_tab_by_kind)
+
+
+def test_registry_sums_sources_and_is_fail_quiet(db_session: Session, test_user: User, isolate_registry):
     register("demo_tab", _FyiSource())
     register("demo_tab", _ActionSource())
     register("demo_tab", _BrokenSource())  # raises in count → must be swallowed

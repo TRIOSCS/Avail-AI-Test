@@ -5,7 +5,14 @@ See docs/superpowers/specs/2026-06-18-comm-ledger-alerts-design.md.
 """
 
 from .base import AlertItem, AlertSource, Temperament, recency_floor, record_seen
-from .registry import count_for_tab, register, source_for_kind, sources_for_tab
+from .registry import (
+    count_for_tab,
+    markers_for_tab,
+    register,
+    source_for_kind,
+    sources_for_tab,
+    tab_for_kind,
+)
 
 __all__ = [
     "AlertItem",
@@ -14,7 +21,9 @@ __all__ = [
     "recency_floor",
     "record_seen",
     "count_for_tab",
+    "markers_for_tab",
     "register",
     "source_for_kind",
     "sources_for_tab",
+    "tab_for_kind",
 ]
