@@ -6,6 +6,7 @@ Called by: htmx_views.py faceted search routes
 Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -44,6 +45,12 @@ SEARCHED_WITHIN_VALUES = ("any", *SEARCHED_WITHIN_DAYS)  # "any" = no-op sentine
 # GROUP BY / equality from ix_mc_cat_order_live (098_materials_perf_idx) instead of
 # heap-fetching the raw column.
 _CATEGORY_NORM = func.lower(func.trim(MaterialCard.category))
+
+
+def _natural_sort_key(s: str):
+    """Split on digit runs so '205' sorts before '1210' (numeric runs compared as
+    ints)."""
+    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s) if t != ""]
 
 
 def has_crosses_predicate():
@@ -616,9 +623,10 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
                 # Fixed vocabulary: render the full canonical list (so unstocked values
                 # still show with a (0) count), then append any unexpected observed values.
                 observed = set(text_map.get(schema.spec_key, []))
-                option["values"] = list(schema.enum_values) + [
-                    v for v in sorted(observed) if v not in schema.enum_values
-                ]
+                option["values"] = list(schema.enum_values) + sorted(
+                    (v for v in observed if v not in schema.enum_values),
+                    key=_natural_sort_key,
+                )
                 option["widget"] = "checkbox"
             else:
                 # Open vocabulary (e.g. motherboard chipset): no canonical list to enumerate,

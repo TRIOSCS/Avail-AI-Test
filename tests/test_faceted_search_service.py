@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.faceted_search_service import (
+    _natural_sort_key,
     get_commodity_counts,
     get_facet_counts,
     get_global_facet_counts,
@@ -213,6 +214,56 @@ def test_get_subfilter_options(db_session: Session):
     ddr_opt = next(o for o in options if o["spec_key"] == "ddr_type")
     assert "DDR4" in ddr_opt["values"]
     assert "DDR5" in ddr_opt["values"]
+
+
+def test_natural_sort_key_orders_numeric_runs():
+    """Digit runs compare as ints so '205' sorts before '1210' (not lexically)."""
+    assert sorted(["1210", "0805", "205"], key=_natural_sort_key) == ["205", "0805", "1210"]
+
+
+def test_get_subfilter_options_natural_sorts_enum_overflow(db_session: Session):
+    """Fixed-vocab enum: canonical values keep their curated order, then observed
+    overflow values (not in the canonical list) append in NUMERIC order."""
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="capacitors",
+            spec_key="package",
+            display_name="Package",
+            data_type="enum",
+            enum_values=["0402", "0603"],
+            sort_order=0,
+            is_filterable=True,
+            is_primary=False,
+        )
+    )
+    db_session.flush()
+
+    # Overflow values (none are in the canonical list); "0805" sorts as 805,
+    # between 205 and 1210 — proving the numeric (not lexical) order. Each value
+    # lives on its own card ((material_card_id, spec_key) is UNIQUE).
+    for i, value in enumerate(["1210", "0805", "205"]):
+        card = MaterialCard(
+            normalized_mpn=f"cap-pkg-{i}",
+            display_mpn=f"CAP-PKG-{i}",
+            manufacturer="TestCo",
+            category="capacitors",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(
+            MaterialSpecFacet(
+                material_card_id=card.id,
+                category="capacitors",
+                spec_key="package",
+                value_text=value,
+            )
+        )
+    db_session.flush()
+
+    options = get_subfilter_options(db_session, "capacitors")
+    pkg_opt = next(o for o in options if o["spec_key"] == "package")
+    assert pkg_opt["values"] == ["0402", "0603", "205", "0805", "1210"]
 
 
 # --- Facet counts with active_filters ---
