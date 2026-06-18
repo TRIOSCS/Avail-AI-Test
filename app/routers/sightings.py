@@ -2569,7 +2569,21 @@ async def sightings_offer_edit_form(
         "country_of_origin",
         "notes",
     ]
-    prefill = {f: ("" if getattr(offer, f) is None else getattr(offer, f)) for f in fields}
+    import datetime
+    from decimal import Decimal
+
+    def _json_safe(v: object) -> object:
+        """Coerce DB field values to JSON-serializable types for |tojson in Alpine
+        x-data."""
+        if v is None:
+            return ""
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, (datetime.date, datetime.datetime)):
+            return v.isoformat()
+        return v
+
+    prefill = {f: _json_safe(getattr(offer, f)) for f in fields}
     ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": offer}
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 

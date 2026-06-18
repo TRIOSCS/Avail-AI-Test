@@ -1,7 +1,23 @@
 {# _field_macros.html — shared input widgets for the offer field grid.
-   Called by: offers/_offer_form_fields.html.
+   Called by: offers/_offer_form_fields.html, offers/_qualification_fields.html.
    The macros emit the exact same markup the grid used to repeat inline; keep the
    input name= attributes stable — both offer POST handlers read inputs by name. #}
+
+{# Radio chip selector — drives both a hidden radio input and an Alpine x-model. #}
+{%- macro chip_select(label, name, options, model) -%}
+<div>
+  <label class="block text-xs text-gray-500 mb-1">{{ label }}</label>
+  <div class="flex flex-wrap gap-1.5">
+    {% for value, text in options %}
+    <label class="cursor-pointer">
+      <input type="radio" name="{{ name }}" value="{{ value }}" x-model="{{ model }}" class="peer sr-only">
+      <span class="inline-flex px-2 py-1 text-xs rounded-full border border-gray-300 text-gray-600
+                   peer-checked:bg-brand-500 peer-checked:text-white peer-checked:border-brand-500">{{ text }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</div>
+{%- endmacro -%}
 
 {# Plain optional text input (label + text box pre-filled from prefill dict `p`). #}
 {%- macro text_field(label, name, placeholder, p) -%}
