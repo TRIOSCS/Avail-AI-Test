@@ -213,3 +213,158 @@ def test_modal_open_prefills_country_from_last_vendor_offer(client, db_session, 
     resp = client.get(f"/v2/partials/sightings/{rid}/offer-form", params={"vendor_name": "MemVendor"})
     assert resp.status_code == 200
     assert b"JP" in resp.content  # country prefilled into the form
+
+
+# ---------------------------------------------------------------------------
+# IDOR scope guard — mutation routes (review / reconfirm / mark-sold / delete)
+# ---------------------------------------------------------------------------
+
+
+def _make_cross_req_offer(db_session, test_requisition, test_user, status="active"):
+    """Return (own_req_id, other_req_id, offer_on_other_req).
+
+    Creates a second Requirement under the same Requisition and attaches an Offer to
+    *that* one, so POSTing under the first requirement's path hits the IDOR guard.
+    """
+    from app.models.sourcing import Requirement
+
+    own_rid = test_requisition.requirements[0].id
+    other = Requirement(requisition_id=test_requisition.id, primary_mpn="CROSS123", target_qty=1)
+    db_session.add(other)
+    db_session.commit()
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=other.id,
+        vendor_name="CrossVendor",
+        mpn="CROSS123",
+        status=status,
+        qualification={},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    return own_rid, other.id, o
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "method,path_suffix,data,initial_status",
+    [
+        ("post", "/review", {"action": "approve"}, "pending_review"),
+        ("post", "/reconfirm", {}, "active"),
+        ("post", "/mark-sold", {}, "active"),
+        ("delete", "", {}, "active"),
+    ],
+    ids=["review", "reconfirm", "mark-sold", "delete"],
+)
+def test_offer_mutation_idor_guard(
+    client, db_session, test_requisition, test_user, method, path_suffix, data, initial_status
+):
+    """IDOR guard: mutating an offer that belongs to a DIFFERENT requirement via path
+    → 404 and the offer is NOT mutated."""
+    own_rid, _other_rid, o = _make_cross_req_offer(db_session, test_requisition, test_user, status=initial_status)
+    url = f"/v2/partials/sightings/{own_rid}/offers/{o.id}{path_suffix}"
+    kwargs = {"data": data} if data else {}
+    resp = getattr(client, method)(url, **kwargs)
+    assert resp.status_code == 404, f"Expected 404 for {method.upper()} {url}, got {resp.status_code}"
+
+    db_session.expire(o)
+    db_session.refresh(o)
+    # Offer must NOT have been mutated: status unchanged and still exists.
+    assert o.status == initial_status, "Offer status was mutated despite IDOR guard"
+    assert db_session.get(type(o), o.id) is not None, "Offer was deleted despite IDOR guard"
+
+
+@pytest.mark.parametrize(
+    "method,path_suffix,data,initial_status",
+    [
+        ("post", "/review", {"action": "approve"}, "pending_review"),
+        ("post", "/reconfirm", {}, "active"),
+        ("post", "/mark-sold", {}, "active"),
+        ("delete", "", {}, "active"),
+    ],
+    ids=["review", "reconfirm", "mark-sold", "delete"],
+)
+def test_offer_mutation_happy_path(
+    client, db_session, test_requisition, test_user, method, path_suffix, data, initial_status
+):
+    """Happy path: mutating an offer that correctly belongs to the path requirement → 200."""
+    rid = test_requisition.requirements[0].id
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="HappyVendor",
+        mpn="LM317T",
+        status=initial_status,
+        qualification={},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    url = f"/v2/partials/sightings/{rid}/offers/{o.id}{path_suffix}"
+    kwargs = {"data": data} if data else {}
+    resp = getattr(client, method)(url, **kwargs)
+    assert resp.status_code == 200, f"Expected 200 for {method.upper()} {url}, got {resp.status_code}"
+
+
+# ---------------------------------------------------------------------------
+# Qualification-status filter facet on Offers tab
+# ---------------------------------------------------------------------------
+
+
+def test_offers_tab_qual_filter_server_side(client, db_session, test_requisition, test_user):
+    """GET /v2/partials/requisitions/{req_id}/tab/offers?qual=incomplete returns only
+    the incomplete offer; without qual returns both.
+
+    Filter is index-backed WHERE clause, not Python post-filter.
+    """
+    rid = test_requisition.requirements[0].id
+    o_incomplete = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="FilterVendorIncomplete",
+        mpn="FILTMPN1",
+        qualification_status="incomplete",
+        entered_by_id=test_user.id,
+    )
+    o_complete = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="FilterVendorComplete",
+        mpn="FILTMPN2",
+        qualification_status="complete",
+        entered_by_id=test_user.id,
+    )
+    db_session.add_all([o_incomplete, o_complete])
+    db_session.commit()
+
+    req_id = test_requisition.id
+
+    # Filtered: only incomplete
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers?qual=incomplete")
+    assert resp.status_code == 200
+    body = resp.content
+    assert b"FilterVendorIncomplete" in body
+    assert b"FilterVendorComplete" not in body
+
+    # Unfiltered: both visible
+    resp_all = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers")
+    assert resp_all.status_code == 200
+    body_all = resp_all.content
+    assert b"FilterVendorIncomplete" in body_all
+    assert b"FilterVendorComplete" in body_all
+
+    # FIX 1: "All" pill must carry the active class when no qual param is sent.
+    assert b"bg-brand-500" in body_all, "All pill should be active (bg-brand-500) when no qual filter"
+
+    # FIX 2: filter-aware empty state — ?qual=essentials on a req with only incomplete/complete offers.
+    resp_empty = client.get(f"/v2/partials/requisitions/{req_id}/tab/offers?qual=essentials")
+    assert resp_empty.status_code == 200
+    body_empty = resp_empty.content
+    assert b"FilterVendorIncomplete" not in body_empty
+    assert b"FilterVendorComplete" not in body_empty
+    assert b"No offers match this filter" in body_empty, (
+        "Filter-aware empty copy should appear when qual is set and no results"
+    )
