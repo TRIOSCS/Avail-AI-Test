@@ -51,17 +51,6 @@ _REQUEST_TEMPLATES = {
 }
 
 
-class QualificationError(Exception):
-    """Raised when an offer is missing a per-condition essential.
-
-    Carries `.errors`.
-    """
-
-    def __init__(self, errors: list[str]):
-        self.errors = errors
-        super().__init__("; ".join(errors))
-
-
 def normalize_offer_condition(raw: str | None) -> str | None:
     if not raw:
         return None
@@ -123,19 +112,25 @@ def validate_essentials(condition: str | None, data: dict) -> list[str]:
 
 
 def compose_note(condition: str | None, data: dict) -> str:
+    from app.utils.normalization import normalize_packaging as _norm_pkg
+
     _raw_pkg = _s(data, "packaging")
-    # Humanise a storage-normalised token ("tray" → "Trays"); leave display strings intact.
-    pkg = _PKG_DISPLAY.get(_raw_pkg.lower(), _raw_pkg) if _raw_pkg else ""
+    # Normalize raw/display packaging to a storage token ("Tape & Reel" → "reel",
+    # "Trays" → "tray") then humanise via _PKG_DISPLAY ("reel" → "Reels"). Both offer
+    # flows + the JS chip→display map converge for all six chips. Fall back to the raw
+    # value when normalization yields nothing recognised.
+    pkg = ""
+    if _raw_pkg:
+        _norm = _norm_pkg(_raw_pkg)
+        pkg = _PKG_DISPLAY.get(_norm, _raw_pkg) if _norm else _raw_pkg
     if condition == "new":
         return "New — parts are in the original manufacturer's packaging."
     if condition == "new_no_pkg":
-        note = (
+        return (
             f"New, no original manufacturer packaging. Packaged in {pkg}."
             if pkg
             else "New, no original manufacturer packaging."
         )
-        pc = _s(data, "part_condition")
-        return f"{note} {pc}" if pc else note
     if condition == "pulls":
         usage = _USAGE_HUMAN.get(data.get("usage"), "")
         if pkg and usage:
@@ -221,15 +216,14 @@ def _data_from_offer(offer: Any) -> dict:
 
 
 def apply_qualification(offer: Any) -> None:
-    """Validate essentials, compose the standardized note, compute status; set the
-    columns.
+    """Compose the standardized note + compute qualification status; set the columns.
 
-    Raises QualificationError(list[str]) when a per-condition essential is missing.
+    Never raises: this is the canonical builder used by programmatic/AI offer creation
+    too. When a per-condition essential is missing, `compute_status` yields "incomplete"
+    rather than blocking. The hard gate lives in the buyer handlers, which call
+    `validate_essentials` on submitted values before delegating here.
     """
     data = _data_from_offer(offer)
-    errors = validate_essentials(offer.condition, data)
-    if errors:
-        raise QualificationError(errors)
     has_images = bool(getattr(offer, "attachments", None))
     offer.qualification_note = compose_note(offer.condition, data)
     offer.qualification_status = compute_status(offer.condition, data, has_images)

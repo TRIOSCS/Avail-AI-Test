@@ -388,15 +388,12 @@ async def create_offer(
         notes=payload.notes,
         status=payload.status,
     )
-    from fastapi import HTTPException as _HTTPException
-
-    from app.services.offer_qualification import QualificationError, apply_qualification
+    from app.services.offer_qualification import apply_qualification
 
     offer.qualification = payload.qualification or None
-    try:
-        apply_qualification(offer)
-    except QualificationError as e:
-        raise _HTTPException(status_code=422, detail={"error": "; ".join(e.errors)})
+    # Non-raising: composes the standardized note + sets qualification_status. The
+    # essentials gate is enforced at the buyer handlers, not in this canonical builder.
+    apply_qualification(offer)
     db.add(offer)
     old_status = req.status
     if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING):
@@ -610,16 +607,13 @@ async def update_offer(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
 
-    from fastapi import HTTPException as _HTTPException
-
-    from app.services.offer_qualification import QualificationError, apply_qualification
+    from app.services.offer_qualification import apply_qualification
 
     if "qualification" in changes:
         offer.qualification = changes["qualification"] or None
-    try:
-        apply_qualification(offer)
-    except QualificationError as e:
-        raise _HTTPException(status_code=422, detail={"error": "; ".join(e.errors)})
+    # Non-raising: composes the standardized note + sets qualification_status. The
+    # essentials gate is enforced at the buyer handlers, not in this canonical builder.
+    apply_qualification(offer)
 
     # CPH hook: record purchase history when offer status changes to 'won'
     if old_dict.get("status") != OfferStatus.WON and offer.status == OfferStatus.WON:

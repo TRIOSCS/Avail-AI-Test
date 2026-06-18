@@ -16,6 +16,7 @@ import json
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
 from urllib.parse import urlsplit
 
@@ -2369,11 +2370,14 @@ async def sightings_create_offer(
     """
     from ..routers.crm.offers import create_offer
     from ..schemas.crm import OfferCreate
+    from ..services.offer_qualification import normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
 
+    # Build (and structurally validate) the payload FIRST so a bad numeric/date is
+    # reported as a 422 (not masked by the essentials gate below or crashed as a 500).
     try:
         payload = OfferCreate(
             mpn=mpn,
@@ -2410,49 +2414,62 @@ async def sightings_create_offer(
         # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
         raise RequestValidationError(e.errors()) from e
 
+    # Gate: validate the buyer's submitted essentials BEFORE delegating to the
+    # canonical builder (which no longer blocks). On a missing essential, re-render the
+    # modal with inline errors and do not persist. Uses the schema-normalized condition.
+    gate_errors = validate_essentials(
+        normalize_offer_condition(payload.condition) or "new",
+        {
+            "manufacturer": manufacturer,
+            "packaging": packaging,
+            "usage": usage,
+            "refurbished_by": refurbished_by,
+            "refurb_process": refurb_process,
+            "cert_doc": cert_doc,
+            "part_condition": part_condition,
+        },
+    )
+    if gate_errors:
+        prefill = _echo_prefill(
+            vendor_name,
+            mpn,
+            manufacturer,
+            qty_available,
+            unit_price,
+            lead_time,
+            date_code,
+            condition,
+            packaging,
+            firmware,
+            hardware_code,
+            moq,
+            spq,
+            warranty,
+            country_of_origin,
+            valid_until,
+            notes,
+            usage,
+            refurbished_by,
+            refurb_process,
+            cert_doc,
+            part_condition,
+            provenance_story,
+            terms,
+            lead_time_reason,
+        )
+        ctx = {
+            "request": request,
+            "requirement": requirement,
+            "offer": None,
+            "prefill": prefill,
+            "errors": gate_errors,
+        }
+        return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
     # The canonical create_offer fires the offer-hook release itself
-    # (maybe_release_on_offer) — no route-level call needed here.
-    try:
-        await create_offer(requirement.requisition_id, payload, user=user, db=db)
-    except HTTPException as e:
-        if e.status_code == 422:
-            errors = [(e.detail or {}).get("error")] if isinstance(e.detail, dict) else [str(e.detail)]
-            prefill = _echo_prefill(
-                vendor_name,
-                mpn,
-                manufacturer,
-                qty_available,
-                unit_price,
-                lead_time,
-                date_code,
-                condition,
-                packaging,
-                firmware,
-                hardware_code,
-                moq,
-                spq,
-                warranty,
-                country_of_origin,
-                valid_until,
-                notes,
-                usage,
-                refurbished_by,
-                refurb_process,
-                cert_doc,
-                part_condition,
-                provenance_story,
-                terms,
-                lead_time_reason,
-            )
-            ctx = {
-                "request": request,
-                "requirement": requirement,
-                "offer": None,
-                "prefill": prefill,
-                "errors": errors,
-            }
-            return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
-        raise
+    # (maybe_release_on_offer) — no route-level call needed here. Essentials were already
+    # gated above, so create_offer no longer rejects on qualification grounds.
+    await create_offer(requirement.requisition_id, payload, user=user, db=db)
     db.commit()
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
@@ -2569,8 +2586,6 @@ async def sightings_offer_edit_form(
         "country_of_origin",
         "notes",
     ]
-    import datetime
-    from decimal import Decimal
 
     def _json_safe(v: object) -> object:
         """Coerce DB field values to JSON-serializable types for |tojson in Alpine
@@ -2579,7 +2594,7 @@ async def sightings_offer_edit_form(
             return ""
         if isinstance(v, Decimal):
             return str(v)
-        if isinstance(v, (datetime.date, datetime.datetime)):
+        if isinstance(v, (date, datetime)):
             return v.isoformat()
         return v
 
@@ -2624,10 +2639,12 @@ async def sightings_update_offer(
     """Update an offer via the canonical update_offer, then re-render the panel."""
     from ..routers.crm.offers import update_offer
     from ..schemas.crm import OfferUpdate
+    from ..services.offer_qualification import normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+
     try:
         payload = OfferUpdate(
             vendor_name=vendor_name or None,
@@ -2661,11 +2678,24 @@ async def sightings_update_offer(
     except ValidationError as e:
         raise RequestValidationError(e.errors()) from e
 
-    try:
-        await update_offer(offer_id, payload, user=user, db=db)
-    except HTTPException as e:
-        if e.status_code == 422:
-            errors = [(e.detail or {}).get("error")] if isinstance(e.detail, dict) else [str(e.detail)]
+    # Gate: validate the submitted essentials BEFORE delegating to the canonical builder
+    # (payload already structurally validated above, so a bad numeric is a 422 either way).
+    # On a missing essential, re-render the modal with inline errors and do not persist.
+    norm_condition = normalize_offer_condition(payload.condition)
+    if norm_condition:
+        gate_errors = validate_essentials(
+            norm_condition,
+            {
+                "manufacturer": manufacturer,
+                "packaging": packaging,
+                "usage": usage,
+                "refurbished_by": refurbished_by,
+                "refurb_process": refurb_process,
+                "cert_doc": cert_doc,
+                "part_condition": part_condition,
+            },
+        )
+        if gate_errors:
             offer = db.get(Offer, offer_id)
             prefill = _echo_prefill(
                 vendor_name,
@@ -2699,9 +2729,10 @@ async def sightings_update_offer(
                 "requirement": requirement,
                 "offer": offer,
                 "prefill": prefill,
-                "errors": errors,
+                "errors": gate_errors,
             }
             return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
-        raise
+
+    await update_offer(offer_id, payload, user=user, db=db)
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")

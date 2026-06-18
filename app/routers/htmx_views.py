@@ -2128,9 +2128,30 @@ async def add_offer(
 
     from datetime import date as date_type
 
-    from ..services.offer_qualification import QualificationError, apply_qualification, normalize_offer_condition
+    from ..services.offer_qualification import apply_qualification, normalize_offer_condition, validate_essentials
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
+
+    # Gate: validate the submitted essentials before persisting. On a missing essential,
+    # return the existing inline 400 error and do not create the offer.
+    norm_condition = normalize_offer_condition(form.get("condition")) or (form.get("condition") or None)
+    gate_errors = validate_essentials(
+        norm_condition,
+        {
+            "manufacturer": form.get("manufacturer") or "",
+            "packaging": form.get("packaging") or "",
+            "usage": form.get("usage") or "",
+            "refurbished_by": form.get("refurbished_by") or "",
+            "refurb_process": form.get("refurb_process") or "",
+            "cert_doc": form.get("cert_doc") or "",
+            "part_condition": form.get("part_condition") or "",
+        },
+    )
+    if gate_errors:
+        return HTMLResponse(
+            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
+            status_code=400,
+        )
 
     offer = Offer(
         requisition_id=req_id,
@@ -2174,13 +2195,7 @@ async def add_offer(
     qual = {k: (form.get(k) or None) for k in _qkeys}
     qual["requests"] = []
     offer.qualification = qual if any(qual[k] for k in _qkeys) else None
-    try:
-        apply_qualification(offer)
-    except QualificationError as e:
-        return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(e.errors)}</div>',
-            status_code=400,
-        )
+    apply_qualification(offer)  # non-raising: composes note + sets status
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
     # Offer hook: a manually entered offer is user-initiated proof of availability —
@@ -2326,7 +2341,7 @@ async def edit_offer(
     if req_id_val:
         offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
 
-    from ..services.offer_qualification import QualificationError, apply_qualification, normalize_offer_condition
+    from ..services.offer_qualification import apply_qualification, normalize_offer_condition, validate_essentials
 
     _qkeys = (
         "usage",
@@ -2347,13 +2362,28 @@ async def edit_offer(
     cond_raw = form.get("condition", "").strip()
     if cond_raw:
         offer.condition = normalize_offer_condition(cond_raw) or cond_raw
-    try:
-        apply_qualification(offer)
-    except QualificationError as e:
+
+    # Gate: validate the effective essentials before persisting. On a missing essential,
+    # return the existing inline 400 error and do not commit.
+    _q = offer.qualification or {}
+    gate_errors = validate_essentials(
+        offer.condition,
+        {
+            "manufacturer": offer.manufacturer or "",
+            "packaging": offer.packaging or "",
+            "usage": _q.get("usage") or "",
+            "refurbished_by": _q.get("refurbished_by") or "",
+            "refurb_process": _q.get("refurb_process") or "",
+            "cert_doc": _q.get("cert_doc") or "",
+            "part_condition": _q.get("part_condition") or "",
+        },
+    )
+    if gate_errors:
         return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(e.errors)}</div>',
+            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
             status_code=400,
         )
+    apply_qualification(offer)  # non-raising: composes note + sets status
     offer.updated_at = now
     offer.updated_by_id = user.id
     db.commit()
