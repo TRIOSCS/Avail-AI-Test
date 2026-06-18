@@ -8,7 +8,7 @@ Depends on: models, config, utils/graph_client
 """
 
 import html
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from loguru import logger
@@ -59,11 +59,6 @@ def get_matches_for_user(
         query = query.filter(ProactiveMatch.salesperson_id == user_id)
     if status:
         query = query.filter(ProactiveMatch.status == status)
-
-    # For new matches, only show last 7 days
-    if status == ProactiveMatchStatus.NEW:
-        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
-        query = query.filter(ProactiveMatch.created_at >= seven_days_ago)
 
     query = query.options(
         joinedload(ProactiveMatch.offer).joinedload(Offer.vendor_card),

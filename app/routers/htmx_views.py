@@ -9244,12 +9244,24 @@ async def proactive_draft_for_prepare(
             _fn_parts = primary.full_name.split()
             contact_name = _fn_parts[0] if _fn_parts else None
 
+    # Parse rep-entered sell prices from form (sell_price_<match_id>)
+    draft_sell_prices: dict[str, float] = {}
+    for key in form:
+        if key.startswith("sell_price_"):
+            match_id_str = key[len("sell_price_") :]
+            raw_val = form.get(key, "").strip()
+            if match_id_str.isdigit() and raw_val:
+                try:
+                    draft_sell_prices[match_id_str] = float(raw_val)
+                except ValueError:
+                    pass
+
     # Build parts list for AI
     parts = []
     for m in matches:
         offer = m.offer
         cost = float(offer.unit_price) if offer and offer.unit_price else 0
-        sell = cost * 1.3
+        sell = draft_sell_prices.get(str(m.id), cost * 1.3)
         parts.append(
             {
                 "mpn": m.mpn,
@@ -9326,6 +9338,18 @@ async def proactive_send_offer(
     subject = form.get("subject", "").strip()
     body = form.get("body", "").strip()
 
+    # Parse rep-entered sell prices keyed as sell_price_<match_id>
+    sell_prices: dict[str, float] = {}
+    for key in form:
+        if key.startswith("sell_price_"):
+            match_id_str = key[len("sell_price_") :]
+            raw_val = form.get(key, "").strip()
+            if match_id_str.isdigit() and raw_val:
+                try:
+                    sell_prices[match_id_str] = float(raw_val)
+                except ValueError:
+                    pass  # ignore non-numeric input; service will apply default
+
     if not match_ids:
         raise HTTPException(400, "No matches selected")
     if not contact_ids:
@@ -9353,7 +9377,7 @@ async def proactive_send_offer(
             token=token or "no-token",
             match_ids=match_ids,
             contact_ids=contact_ids,
-            sell_prices={},
+            sell_prices=sell_prices,
             subject=subject or None,
             email_html=email_html,
         )
@@ -9525,7 +9549,8 @@ async def proactive_do_not_offer(
         db.commit()
         logger.info("Do-not-offer: {} for company {} by {}", mpn, company_id, user.email)
 
-    return HTMLResponse('<span class="text-xs text-gray-500">Suppressed</span>')
+    # Return an empty collapsed row so the table structure stays valid
+    return HTMLResponse('<tr style="display:none" aria-hidden="true"></tr>')
 
 
 # ── Sprint 9: Materials + Activity + Knowledge ────────────────────────
