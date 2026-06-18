@@ -7,6 +7,7 @@ from app.services.offer_qualification import (
     apply_qualification,
     compose_note,
     compute_status,
+    essentials_data,
     meter,
     normalize_offer_condition,
     request_template,
@@ -134,3 +135,77 @@ def test_apply_qualification_sets_note_and_status():
     apply_qualification(o)
     assert o.qualification_note.startswith("New — parts are in the original")
     assert o.qualification_status in ("essentials", "complete")
+
+
+# ── FIX A: broad-synonym fallback in normalize_offer_condition ────────────────
+
+
+def test_normalize_offer_condition_factory_new():
+    assert normalize_offer_condition("Factory New") == "new"
+
+
+def test_normalize_offer_condition_brand_new():
+    assert normalize_offer_condition("Brand New") == "new"
+
+
+def test_normalize_offer_condition_used_synonym_to_pulls():
+    # "surplus" maps to "used" via the broad normalizer → "pulls" in offer vocab
+    assert normalize_offer_condition("surplus") == "pulls"
+
+
+def test_normalize_offer_condition_junk_still_none():
+    assert normalize_offer_condition("garbage") is None
+
+
+# ── FIX B: compute_status with unrecognized condition ────────────────────────
+
+
+def test_compute_status_unrecognized_condition_is_unset():
+    assert compute_status("garbage", {}, has_images=False) == "unset"
+
+
+@pytest.mark.parametrize("cond", ["new", "new_no_pkg", "pulls", "refurb"])
+def test_compute_status_valid_conditions_not_unset(cond):
+    # Valid conditions must not be short-circuited to "unset" — they may be
+    # incomplete/essentials/complete depending on data, but never "unset".
+    status = compute_status(cond, {}, has_images=False)
+    assert status != "unset"
+
+
+# ── FIX C: essentials_data helper ────────────────────────────────────────────
+
+
+def test_essentials_data_all_defaults_are_empty_strings():
+    d = essentials_data()
+    expected_keys = {
+        "manufacturer",
+        "packaging",
+        "date_code",
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+    }
+    assert set(d.keys()) == expected_keys
+    assert all(v == "" for v in d.values())
+
+
+def test_essentials_data_passes_through_values():
+    d = essentials_data(manufacturer="TI", packaging="Trays", usage="boards")
+    assert d["manufacturer"] == "TI"
+    assert d["packaging"] == "Trays"
+    assert d["usage"] == "boards"
+    assert d["date_code"] == ""
+
+
+def test_essentials_data_none_coerced_to_empty_string():
+    d = essentials_data(manufacturer=None, usage=None)
+    assert d["manufacturer"] == ""
+    assert d["usage"] == ""
+
+
+def test_essentials_data_compatible_with_validate_essentials():
+    # essentials_data output must be accepted by validate_essentials without error
+    errs = validate_essentials("new", essentials_data(manufacturer="TI"))
+    assert errs == []

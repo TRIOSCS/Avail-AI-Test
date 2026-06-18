@@ -2370,7 +2370,7 @@ async def sightings_create_offer(
     """
     from ..routers.crm.offers import create_offer
     from ..schemas.crm import OfferCreate
-    from ..services.offer_qualification import normalize_offer_condition, validate_essentials
+    from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -2419,15 +2419,15 @@ async def sightings_create_offer(
     # modal with inline errors and do not persist. Uses the schema-normalized condition.
     gate_errors = validate_essentials(
         normalize_offer_condition(payload.condition) or "new",
-        {
-            "manufacturer": manufacturer,
-            "packaging": packaging,
-            "usage": usage,
-            "refurbished_by": refurbished_by,
-            "refurb_process": refurb_process,
-            "cert_doc": cert_doc,
-            "part_condition": part_condition,
-        },
+        essentials_data(
+            manufacturer=manufacturer,
+            packaging=packaging,
+            usage=usage,
+            refurbished_by=refurbished_by,
+            refurb_process=refurb_process,
+            cert_doc=cert_doc,
+            part_condition=part_condition,
+        ),
     )
     if gate_errors:
         prefill = _echo_prefill(
@@ -2639,7 +2639,7 @@ async def sightings_update_offer(
     """Update an offer via the canonical update_offer, then re-render the panel."""
     from ..routers.crm.offers import update_offer
     from ..schemas.crm import OfferUpdate
-    from ..services.offer_qualification import normalize_offer_condition, validate_essentials
+    from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -2685,15 +2685,15 @@ async def sightings_update_offer(
     if norm_condition:
         gate_errors = validate_essentials(
             norm_condition,
-            {
-                "manufacturer": manufacturer,
-                "packaging": packaging,
-                "usage": usage,
-                "refurbished_by": refurbished_by,
-                "refurb_process": refurb_process,
-                "cert_doc": cert_doc,
-                "part_condition": part_condition,
-            },
+            essentials_data(
+                manufacturer=manufacturer,
+                packaging=packaging,
+                usage=usage,
+                refurbished_by=refurbished_by,
+                refurb_process=refurb_process,
+                cert_doc=cert_doc,
+                part_condition=part_condition,
+            ),
         )
         if gate_errors:
             offer = db.get(Offer, offer_id)

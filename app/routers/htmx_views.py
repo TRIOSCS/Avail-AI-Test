@@ -2128,7 +2128,12 @@ async def add_offer(
 
     from datetime import date as date_type
 
-    from ..services.offer_qualification import apply_qualification, normalize_offer_condition, validate_essentials
+    from ..services.offer_qualification import (
+        apply_qualification,
+        essentials_data,
+        normalize_offer_condition,
+        validate_essentials,
+    )
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
 
@@ -2137,15 +2142,15 @@ async def add_offer(
     norm_condition = normalize_offer_condition(form.get("condition")) or (form.get("condition") or None)
     gate_errors = validate_essentials(
         norm_condition,
-        {
-            "manufacturer": form.get("manufacturer") or "",
-            "packaging": form.get("packaging") or "",
-            "usage": form.get("usage") or "",
-            "refurbished_by": form.get("refurbished_by") or "",
-            "refurb_process": form.get("refurb_process") or "",
-            "cert_doc": form.get("cert_doc") or "",
-            "part_condition": form.get("part_condition") or "",
-        },
+        essentials_data(
+            manufacturer=form.get("manufacturer"),
+            packaging=form.get("packaging"),
+            usage=form.get("usage"),
+            refurbished_by=form.get("refurbished_by"),
+            refurb_process=form.get("refurb_process"),
+            cert_doc=form.get("cert_doc"),
+            part_condition=form.get("part_condition"),
+        ),
     )
     if gate_errors:
         return HTMLResponse(
@@ -2341,7 +2346,12 @@ async def edit_offer(
     if req_id_val:
         offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
 
-    from ..services.offer_qualification import apply_qualification, normalize_offer_condition, validate_essentials
+    from ..services.offer_qualification import (
+        apply_qualification,
+        essentials_data,
+        normalize_offer_condition,
+        validate_essentials,
+    )
 
     _qkeys = (
         "usage",
@@ -2368,15 +2378,15 @@ async def edit_offer(
     _q = offer.qualification or {}
     gate_errors = validate_essentials(
         offer.condition,
-        {
-            "manufacturer": offer.manufacturer or "",
-            "packaging": offer.packaging or "",
-            "usage": _q.get("usage") or "",
-            "refurbished_by": _q.get("refurbished_by") or "",
-            "refurb_process": _q.get("refurb_process") or "",
-            "cert_doc": _q.get("cert_doc") or "",
-            "part_condition": _q.get("part_condition") or "",
-        },
+        essentials_data(
+            manufacturer=offer.manufacturer,
+            packaging=offer.packaging,
+            usage=_q.get("usage"),
+            refurbished_by=_q.get("refurbished_by"),
+            refurb_process=_q.get("refurb_process"),
+            cert_doc=_q.get("cert_doc"),
+            part_condition=_q.get("part_condition"),
+        ),
     )
     if gate_errors:
         return HTMLResponse(

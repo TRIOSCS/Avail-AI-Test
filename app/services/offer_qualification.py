@@ -51,12 +51,21 @@ _REQUEST_TEMPLATES = {
 }
 
 
+_BROAD_TO_OFFER = {"new": "new", "used": "pulls", "refurb": "refurb"}
+
+
 def normalize_offer_condition(raw: str | None) -> str | None:
     if not raw:
         return None
     v = str(raw).strip().lower().replace(" ", "_").replace("-", "_")
     v = _LEGACY_CONDITION.get(v, v)
-    return v if v in _VALID_CONDITIONS else None
+    if v in _VALID_CONDITIONS:
+        return v
+    # Fall back to the broad normalizer (handles "Factory New", "Brand New", etc.)
+    from app.utils.normalization import normalize_condition as _broad
+
+    broad = _broad(raw)
+    return _BROAD_TO_OFFER.get(broad) if broad else None
 
 
 def _s(data: dict, key: str) -> str:
@@ -88,6 +97,33 @@ def _require_packaging(data: dict, errors: list[str]) -> None:
         errors.append("Packaging is required; 'bulk' is not acceptable.")
     elif not _is_acceptable_packaging(pkg):
         errors.append(f"Packaging must be one of {', '.join(PACKAGING_CHIPS)} — 'bulk' is not acceptable.")
+
+
+def essentials_data(
+    manufacturer: str | None = None,
+    packaging: str | None = None,
+    date_code: str | None = None,
+    usage: str | None = None,
+    refurbished_by: str | None = None,
+    refurb_process: str | None = None,
+    cert_doc: str | None = None,
+    part_condition: str | None = None,
+) -> dict:
+    """Build the essentials dict accepted by validate_essentials / meter.
+
+    Centralises the repeated hand-built dicts in the four buyer handlers so the key-set
+    stays in sync automatically.
+    """
+    return {
+        "manufacturer": manufacturer or "",
+        "packaging": packaging or "",
+        "date_code": date_code or "",
+        "usage": usage or "",
+        "refurbished_by": refurbished_by or "",
+        "refurb_process": refurb_process or "",
+        "cert_doc": cert_doc or "",
+        "part_condition": part_condition or "",
+    }
 
 
 def validate_essentials(condition: str | None, data: dict) -> list[str]:
@@ -194,6 +230,8 @@ def meter(condition: str | None, data: dict, has_images: bool) -> tuple[int, int
 
 def compute_status(condition: str | None, data: dict, has_images: bool) -> str:
     if not condition:
+        return "unset"
+    if condition not in _VALID_CONDITIONS:
         return "unset"
     if validate_essentials(condition, data):
         return "incomplete"
