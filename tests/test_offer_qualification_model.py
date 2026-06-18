@@ -42,3 +42,23 @@ def test_qualification_summary_property(db_session, test_requisition, test_user)
     s = o.qualification_summary
     assert s["status"] in ("essentials", "complete", "incomplete")
     assert s["total"] == 4 and 0 <= s["filled"] <= 4
+
+
+def test_qualification_summary_unset_when_no_condition(db_session, test_requisition, test_user):
+    """qualification_summary returns status=='unset' and total==0 when condition is
+    None."""
+    from app.models.offers import Offer
+
+    o = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="V",
+        mpn="LM317T",
+        condition=None,
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    db_session.refresh(o)
+    s = o.qualification_summary
+    assert s["status"] == "unset"
+    assert s["total"] == 0

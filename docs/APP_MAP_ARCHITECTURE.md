@@ -203,6 +203,32 @@ top-tier enrichment input (trio_source:95 / trio_source_ai:88 on the F1 ladder):
 | `ai_correct.py` | Optional Claude (smart tier) standardization/inference pass — output tagged `trio_source_ai` (tier 88, below vendor APIs). Per-part failure isolation; fail-fast on ClaudeUnavailable/Auth; returns `{corrected, failed}` for the report. |
 | `ingest.py` | AUGMENTs `material_cards` (creates when absent; never clobbers an existing description), category via `spec_tiers.set_category`, specs via `record_spec`; per-card SAVEPOINTs with tallies merged only after a clean release; failed parts counted + sampled in the report; `apply=False` (default) is a true dry run through the SAME ladder/schema gates (`set_category(write=False)` + `spec_would_write`) so the report matches `--apply`. |
 
+## Offer Qualification Service (`app/services/offer_qualification.py`)
+
+Pure-function library that drives the condition-spine qualification capture for buyer-entered
+offers. Zero I/O except `apply_qualification` (writes onto an Offer ORM object) and
+`prefill_from_vendor` (one DB read). All other functions are pure Python — safe to call from
+templates, tests, or background jobs without a DB session.
+
+| Export | Role |
+|--------|------|
+| `validate_essentials` | Per-condition gate (new/new_no_pkg/pulls/refurb); returns error strings |
+| `compose_note` | System-composed standardized note for `offers.qualification_note` |
+| `meter` | `(filled, total)` qualification item counts |
+| `compute_status` | → `QualificationStatus` string |
+| `apply_qualification` | Composes note+status onto Offer ORM; never raises (gate is in buyer handlers) |
+| `normalize_offer_condition` | Normalizes raw condition incl. legacy `used`→`pulls` |
+| `prefill_from_vendor` | Vendor-memory (#8): stable answer prefill from the vendor's last offer |
+| `request_template` | RFQ-back request text for `images`/`fpq`/`cert`/`pkg_qty` |
+| `essentials_data` | Canonical `data` dict builder (keeps key-set in sync across callers) |
+| `PACKAGING_CHIPS` | Display strings for the packaging chip selector |
+| `REQUEST_KINDS` | Tuple of valid request kind tokens |
+
+Frontend: `partials/offers/_qualification_fields.html` (condition-spine partial) and
+the `offerQualification` Alpine.js factory in `htmx_app.js` (live note preview + meter).
+`_offer_row.html` renders the qualification badge and standardized note/request list on each
+offer row.
+
 ## Enrichment Worker Modules (`app/services/enrichment_worker/`)
 
 Key modules added for OEM/FRU enrichment:

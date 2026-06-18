@@ -522,6 +522,59 @@ NOTE: the two creation paths historically wrote Offer.normalized_mpn differently
 (create_offer = normalize_mpn_key, add_offer = normalize_mpn); add_offer was
 fixed to use normalize_mpn_key, and the part query matches both forms for safety.
 
+### 2c-bis. Offer Qualification Capture (`app/services/offer_qualification.py`)
+
+Standardized condition-driven qualification for buyer-entered offers. Every offer
+has a **condition spine** (`new` / `new_no_pkg` / `pulls` / `refurb`) that drives
+per-condition validation, a system-composed standardized note, a status/meter, and
+optional vendor requests.
+
+**Service API (all pure, no I/O except `apply_qualification` and `prefill_from_vendor`):**
+
+| Function | Purpose |
+|----------|---------|
+| `validate_essentials(condition, data)` | Returns a list of error strings for missing per-condition essentials. Empty = OK. |
+| `compose_note(condition, data)` | Builds the standardized human-readable note string from condition + data dict. |
+| `meter(condition, data, has_images)` | Returns `(filled, total)` int tuple of qualification item counts. |
+| `compute_status(condition, data, has_images)` | Returns the `QualificationStatus` string (`unset`/`incomplete`/`essentials`/`complete`). |
+| `apply_qualification(offer)` | Composes `qualification_note` + `qualification_status` onto an Offer ORM object. **Never raises** — the gate lives in the buyer handlers. |
+| `normalize_offer_condition(raw)` | Normalizes raw condition strings (incl. legacy `used`→`pulls`) to the `OfferCondition` vocabulary. |
+| `prefill_from_vendor(db, vendor_name_normalized)` | Vendor-memory (#8): pulls stable answers (`country_of_origin`, `refurbished_by`, `terms`) from the vendor's most-recent offer. |
+| `request_template(kind, mpn)` | Returns the RFQ-back request text for a given `kind` (`images`/`fpq`/`cert`/`pkg_qty`). |
+| `essentials_data(...)` | Builds the canonical `data` dict accepted by `validate_essentials`/`meter` from named keyword args. |
+
+**Gate placement (important).** The hard-block lives **only** in the buyer-facing handlers:
+
+- `app/routers/sightings.py` (sightings create/update): calls `validate_essentials`; on
+  errors, re-renders the modal with error messages at HTTP 200 (HTMX swap).
+- `app/routers/htmx_views.py` (add/edit offer): calls `validate_essentials`; on errors,
+  returns HTTP 400 with the form re-rendered.
+
+The **canonical builders** (`crm.offers.create_offer` / `update_offer`) only call
+`apply_qualification()` to compose the note+status — they **never block**. This means
+API/AI offer ingestion (inbox monitor, email-parsed, proactive) is unaffected: those
+paths may produce `qualification_status='incomplete'` but are never rejected.
+
+**Vendor memory prefill (#8).** When the sightings offer modal opens (GET `.../offer-form`),
+the router calls `prefill_from_vendor(db, vendor_name_normalized)` and passes the returned
+dict to the template as Alpine initial-state `x-init` values. The buyer sees pre-populated
+`refurbished_by` / `terms` / `country_of_origin` from the vendor's most-recent offer — no
+extra form step required.
+
+**One-tap vendor requests (#7).** `POST .../offers/{offer_id}/request` (scoped to
+the path's `requirement_id` to prevent IDOR) accepts `kind` ∈ `REQUEST_KINDS`
+(`images`/`fpq`/`cert`/`pkg_qty`). v1: logs the pending request into
+`offer.qualification["requests"]` and drafts the request text via `request_template`;
+does NOT auto-send email (the existing solicit modal sends). The `offer_id` is
+validated against the `requirement_id` path parameter so a buyer can only request
+on their own requirement's offers.
+
+**Live badge/meter vs. stored snapshot.** `Offer.qualification_summary` (property)
+recomputes status+meter live from the current column values — the display badge always
+reflects reality. `qualification_status` is a refresh-on-save snapshot used for
+filtering/reporting. An image attachment added after the last save bumps the live
+meter but not the column until the next save.
+
 ### 2d. Vendor+part unavailability (durable knowledge + temporal policy)
 
 "Unavailable" is learned vendor intelligence about a **(vendor, part)** pair, not
