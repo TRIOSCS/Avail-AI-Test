@@ -128,6 +128,164 @@ def test_request_scoped_to_requirement_blocks_cross_requirement_offer(client, db
     assert (o.qualification or {}).get("requests", []) == []  # not mutated
 
 
+def _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card, *, vendor_email="x"):
+    """Offer (req + requisition + vendor card) carrying one pending #7 request.
+
+    `vendor_email` only documents intent; the actual contact email is created by the
+    test_vendor_contact fixture when requested. Returns (requirement_id, offer).
+    """
+    from app.models.offers import Offer
+
+    rid = test_requisition.requirements[0].id
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_card_id=test_vendor_card.id,
+        vendor_name="Arrow Electronics",
+        mpn="LM317T",
+        qualification={
+            "requests": [
+                {"kind": "images", "status": "pending", "requested_at": "2026-06-17T00:00:00+00:00", "contact_id": None}
+            ]
+        },
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    return rid, o
+
+
+def test_request_send_marks_entry_sent(
+    client, db_session, test_requisition, test_user, test_vendor_card, test_vendor_contact, monkeypatch
+):
+    """Send a logged pending request → mocked send_batch_rfq returns 'sent' → the entry
+    flips to status='sent' with contact_id set; 200."""
+    import app.email_service as email_service
+
+    async def _fake_send(**kwargs):
+        return [{"id": 777, "vendor_name": "Arrow Electronics", "vendor_email": "john@arrow.com", "status": "sent"}]
+
+    monkeypatch.setattr(email_service, "send_batch_rfq", _fake_send)
+
+    rid, o = _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card)
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/0/send")
+    assert resp.status_code == 200
+    db_session.expire(o)
+    db_session.refresh(o)
+    entry = o.qualification["requests"][0]
+    assert entry["status"] == "sent"
+    assert entry["contact_id"] == 777
+    assert entry.get("sent_at")
+
+
+def test_request_send_no_email_marks_skipped(
+    client, db_session, test_requisition, test_user, test_vendor_card, monkeypatch
+):
+    """No resolvable contact email → send_batch_rfq returns 'skipped' →
+    entry='skipped'."""
+    import app.email_service as email_service
+
+    async def _fake_send(**kwargs):
+        return [
+            {
+                "vendor_name": "Arrow Electronics",
+                "vendor_email": "",
+                "status": "skipped",
+                "error": "no contact email on file",
+            }
+        ]
+
+    monkeypatch.setattr(email_service, "send_batch_rfq", _fake_send)
+
+    # No test_vendor_contact fixture → the card has no VendorContact email.
+    rid, o = _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card)
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/0/send")
+    assert resp.status_code == 200
+    db_session.expire(o)
+    db_session.refresh(o)
+    assert o.qualification["requests"][0]["status"] == "skipped"
+
+
+def test_request_send_idempotent_when_already_sent(
+    client, db_session, test_requisition, test_user, test_vendor_card, test_vendor_contact, monkeypatch
+):
+    """An already-sent entry is a no-op: send_batch_rfq is NOT called again."""
+    import app.email_service as email_service
+
+    calls = {"n": 0}
+
+    async def _fake_send(**kwargs):
+        calls["n"] += 1
+        return [{"id": 1, "vendor_name": "Arrow Electronics", "vendor_email": "john@arrow.com", "status": "sent"}]
+
+    monkeypatch.setattr(email_service, "send_batch_rfq", _fake_send)
+
+    rid, o = _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card)
+    # Pre-mark the entry as already sent.
+    o.qualification = {"requests": [{"kind": "images", "status": "sent", "contact_id": 5}]}
+    db_session.commit()
+
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/0/send")
+    assert resp.status_code == 200
+    assert calls["n"] == 0  # never re-sent
+    db_session.expire(o)
+    db_session.refresh(o)
+    assert o.qualification["requests"][0]["status"] == "sent"
+
+
+def test_request_send_no_requisition_marks_skipped_without_sending(
+    client, db_session, test_requisition, test_user, test_vendor_card, monkeypatch
+):
+    """Requisition guard: an offer with requisition_id=None is marked 'skipped' and
+    send_batch_rfq is NEVER called (Contact.requisition_id is NOT NULL)."""
+    import app.email_service as email_service
+    from app.models.offers import Offer
+
+    calls = {"n": 0}
+
+    async def _fake_send(**kwargs):
+        calls["n"] += 1
+        return [{"status": "sent", "id": 1}]
+
+    monkeypatch.setattr(email_service, "send_batch_rfq", _fake_send)
+
+    rid = test_requisition.requirements[0].id
+    o = Offer(
+        requisition_id=None,  # unsolicited inbound — no requisition
+        requirement_id=rid,
+        vendor_card_id=test_vendor_card.id,
+        vendor_name="Arrow Electronics",
+        mpn="LM317T",
+        qualification={"requests": [{"kind": "images", "status": "pending", "contact_id": None}]},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/0/send")
+    assert resp.status_code == 200
+    assert calls["n"] == 0  # never attempted a send
+    db_session.expire(o)
+    db_session.refresh(o)
+    assert o.qualification["requests"][0]["status"] == "skipped"
+
+
+def test_request_send_cross_requirement_offer_is_404(client, db_session, test_requisition, test_user):
+    """IDOR guard: sending on an offer that belongs to another requirement → 404."""
+    own_rid, _other_rid, o = _make_cross_req_offer(db_session, test_requisition, test_user)
+    # Give it a pending request so only the IDOR guard (not index range) can 404.
+    o.qualification = {"requests": [{"kind": "images", "status": "pending"}]}
+    db_session.commit()
+    resp = client.post(f"/v2/partials/sightings/{own_rid}/offers/{o.id}/request/0/send")
+    assert resp.status_code == 404
+
+
+def test_request_send_out_of_range_index_is_404(client, db_session, test_requisition, test_user, test_vendor_card):
+    """An index past the end of the requests list → 404 'request not found'."""
+    rid, o = _seed_offer_with_pending_request(db_session, test_requisition, test_user, test_vendor_card)
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request/9/send")
+    assert resp.status_code == 404
+
+
 def test_sightings_edit_merges_qualification_preserving_requests(client, db_session, test_requisition, test_user):
     """Regression: editing an unrelated field must MERGE (not overwrite) the qualification
     JSON — the logged #7 requests array and the stored `usage` survive, and the merged
