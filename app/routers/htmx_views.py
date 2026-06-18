@@ -2199,6 +2199,7 @@ async def add_offer(
     )
     qual = {k: (form.get(k) or None) for k in _qkeys}
     qual["requests"] = []
+    qual["schema"] = 1  # forward-version the qualification blob (spec §3.1)
     offer.qualification = qual if any(qual[k] for k in _qkeys) else None
     apply_qualification(offer)  # non-raising: composes note + sets status
     db.add(offer)
@@ -2368,6 +2369,7 @@ async def edit_offer(
         merged = dict(offer.qualification or {})
         merged.update(submitted_qual)
         merged.setdefault("requests", [])
+        merged["schema"] = 1  # forward-version the qualification blob (spec §3.1)
         offer.qualification = merged
     cond_raw = form.get("condition", "").strip()
     if cond_raw:

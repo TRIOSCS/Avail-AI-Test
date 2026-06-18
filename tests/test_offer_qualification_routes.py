@@ -128,6 +128,73 @@ def test_request_scoped_to_requirement_blocks_cross_requirement_offer(client, db
     assert (o.qualification or {}).get("requests", []) == []  # not mutated
 
 
+def test_sightings_edit_merges_qualification_preserving_requests(client, db_session, test_requisition, test_user):
+    """Regression: editing an unrelated field must MERGE (not overwrite) the qualification
+    JSON — the logged #7 requests array and the stored `usage` survive, and the merged
+    essentials satisfy the gate so the edit is not falsely blocked (200, not re-render)."""
+    rid = test_requisition.requirements[0].id
+    logged_request = {
+        "kind": "images",
+        "status": "pending",
+        "requested_at": "2026-06-17T00:00:00+00:00",
+        "contact_id": None,
+    }
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="MergeMe",
+        mpn="LM317T",
+        condition="pulls",
+        packaging="Trays",
+        qualification={"usage": "systems", "requests": [logged_request]},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    offer_id = o.id
+
+    # Edit only an unrelated field (unit_price) + re-supply condition, WITHOUT resubmitting usage.
+    resp = client.post(
+        f"/v2/partials/sightings/{rid}/offers/{offer_id}",
+        data={
+            "vendor_name": "MergeMe",
+            "mpn": "LM317T",
+            "condition": "pulls",
+            "packaging": "Trays",
+            "unit_price": "12.50",
+        },
+    )
+    # Not blocked: merged usage="systems" satisfies the pulls gate → success refresh, not re-render.
+    assert resp.status_code == 200
+    db_session.refresh(o)
+    assert float(o.unit_price) == 12.50
+    # MERGE preserved stored usage and the logged request.
+    assert o.qualification["usage"] == "systems"
+    reqs = o.qualification.get("requests", [])
+    assert reqs and reqs[0]["kind"] == "images" and reqs[0]["status"] == "pending"
+
+
+def test_sightings_edit_form_repopulates_stored_qualification_chip(client, db_session, test_requisition, test_user):
+    """The edit-modal GET must repopulate qualification chips from stored JSON so a re-
+    save does not appear to clear them."""
+    rid = test_requisition.requirements[0].id
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="PrefillMe",
+        mpn="LM317T",
+        condition="pulls",
+        packaging="Trays",
+        qualification={"usage": "systems", "requests": []},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    resp = client.get(f"/v2/partials/sightings/{rid}/offers/{o.id}/edit-form")
+    assert resp.status_code == 200
+    assert b"systems" in resp.content  # stored usage rendered into the prefill x-data
+
+
 def test_modal_open_prefills_country_from_last_vendor_offer(client, db_session, test_requisition, test_user):
     from app.vendor_utils import normalize_vendor_name
 

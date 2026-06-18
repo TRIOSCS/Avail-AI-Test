@@ -2225,6 +2225,7 @@ def _qual_dict(
         "terms": terms or None,
         "lead_time_reason": lead_time_reason or None,
         "requests": [],
+        "schema": 1,  # forward-version the qualification blob (spec §3.1)
     }
     _qual_keys = (
         "usage",
@@ -2572,6 +2573,10 @@ async def sightings_offer_edit_form(
     offer = db.get(Offer, offer_id)
     if not requirement or not offer:
         raise HTTPException(404, "Not found")
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer belongs to another requirement.
+    if offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     fields = [
         "vendor_name",
         "mpn",
@@ -2603,6 +2608,21 @@ async def sightings_offer_edit_form(
         return v
 
     prefill = {f: _json_safe(getattr(offer, f)) for f in fields}
+    # Repopulate the qualification chips/inputs from the stored JSON so the Alpine panel
+    # reflects current state on edit (otherwise the chips render empty and a re-save would
+    # appear to clear them). Keys match the offerQualification x-data names.
+    _q = offer.qualification or {}
+    for _qk in (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    ):
+        prefill[_qk] = _json_safe(_q.get(_qk))
     ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": offer}
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
@@ -2649,6 +2669,41 @@ async def sightings_update_offer(
     if not requirement:
         raise HTTPException(404, "Requirement not found")
 
+    # Load the offer FIRST and scope it to the path requirement (prevents cross-requirement
+    # IDOR via a guessed offer_id; 404 if missing or owned by another requirement).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+
+    # MERGE-not-overwrite: start from the stored qualification JSON and overlay only the
+    # SUBMITTED non-empty qual fields. This preserves the logged #7 `requests` array and any
+    # optional keys (provenance_story / terms / lead_time_reason) that aren't on this form
+    # submission — the previous always-rebuild path wiped them on every edit.
+    merged_qual = dict(offer.qualification or {})
+    _submitted_qual = {
+        "usage": usage or None,
+        "refurbished_by": refurbished_by or None,
+        "refurb_process": refurb_process or None,
+        "cert_doc": cert_doc or None,
+        "part_condition": part_condition or None,
+        "provenance_story": provenance_story or None,
+        "terms": terms or None,
+        "lead_time_reason": lead_time_reason or None,
+    }
+    for _k, _v in _submitted_qual.items():
+        if _v:
+            merged_qual[_k] = _v
+    # Always preserve the existing requests list (never reset it to []); copy it last so it
+    # can't be clobbered by anything overlaid above.
+    merged_qual["requests"] = list((offer.qualification or {}).get("requests") or [])
+    # Forward-version the blob (spec §3.1).
+    merged_qual["schema"] = 1
+    # If nothing meaningful is stored (only the structural keys), persist None.
+    _qual_value_keys = (*_submitted_qual.keys(),)
+    qualification_to_store = (
+        merged_qual if (any(merged_qual.get(k) for k in _qual_value_keys) or merged_qual["requests"]) else None
+    )
+
     try:
         payload = OfferUpdate(
             vendor_name=vendor_name or None,
@@ -2668,23 +2723,16 @@ async def sightings_update_offer(
             country_of_origin=country_of_origin or None,
             valid_until=_parse_iso_date(valid_until),
             notes=notes or None,
-            qualification=_qual_dict(
-                usage,
-                refurbished_by,
-                refurb_process,
-                cert_doc,
-                part_condition,
-                provenance_story,
-                terms,
-                lead_time_reason,
-            ),
+            qualification=qualification_to_store,
         )
     except ValidationError as e:
         raise RequestValidationError(e.errors()) from e
 
-    # Gate: validate the submitted essentials BEFORE delegating to the canonical builder
+    # Gate: validate the MERGED essentials BEFORE delegating to the canonical builder
     # (payload already structurally validated above, so a bad numeric is a 422 either way).
-    # On a missing essential, re-render the modal with inline errors and do not persist.
+    # Using merged data means editing an unrelated field on a pulls/refurb offer whose stored
+    # usage/process is intact is NOT falsely blocked. On a missing essential, re-render the
+    # modal with inline errors and do not persist.
     norm_condition = normalize_offer_condition(payload.condition)
     if norm_condition:
         gate_errors = validate_essentials(
@@ -2692,15 +2740,14 @@ async def sightings_update_offer(
             essentials_data(
                 manufacturer=manufacturer,
                 packaging=packaging,
-                usage=usage,
-                refurbished_by=refurbished_by,
-                refurb_process=refurb_process,
-                cert_doc=cert_doc,
-                part_condition=part_condition,
+                usage=merged_qual.get("usage"),
+                refurbished_by=merged_qual.get("refurbished_by"),
+                refurb_process=merged_qual.get("refurb_process"),
+                cert_doc=merged_qual.get("cert_doc"),
+                part_condition=merged_qual.get("part_condition"),
             ),
         )
         if gate_errors:
-            offer = db.get(Offer, offer_id)
             prefill = _echo_prefill(
                 vendor_name,
                 mpn,

@@ -2133,7 +2133,7 @@ Alpine.data('solicitModal', (subject) => ({
 //     replicates that two-step so preview == stored note for all six chips.
 //
 // _items() mirrors server _items_for() per condition:
-//   new:        [manufacturer, package_type, date_code]          — no images
+//   new:        [manufacturer, package_type(=any non-empty packaging), date_code] — no images
 //   new_no_pkg: [packaging, images=false, date_code]
 //   pulls:      [packaging, usage, images=false, part_condition]
 //   refurb:     [refurbished_by, refurb_process, images=false] + cert_doc if third_party
@@ -2213,7 +2213,9 @@ Alpine.data('offerQualification', (prefill) => ({
     const c = this.condition;
     const pkgOk = this._pkgOk();
     const dcOk = !!this.date_code.trim();
-    if (c === 'new') return [!!this.manufacturer.trim(), pkgOk, dcOk];
+    // For condition=new the server counts package_type as any non-empty packaging string
+    // (free-text in "More details"), NOT chip-membership — mirror bool(_s(data,"packaging")).
+    if (c === 'new') return [!!this.manufacturer.trim(), !!this.packaging.trim(), dcOk];
     if (c === 'new_no_pkg') return [pkgOk, false, dcOk];
     if (c === 'pulls') return [pkgOk, this.usage === 'boards' || this.usage === 'systems', false, !!this.part_condition.trim()];
     if (c === 'refurb') {
