@@ -8,9 +8,19 @@
    survives HTMX re-renders of this partial; no partial-local x-data. spec_key is [a-z0-9_]. #}
 <div class="mb-3">
   <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
-  <div class="space-y-0.5" :class="!ui.facetExpanded['{{ spec_key }}'] && {{ values|length }} > 6 ? 'max-h-[168px] overflow-hidden' : 'max-h-[320px] overflow-y-auto'">
+  {% if values|length > 12 %}
+  {# Long enum facet (>12 values): a search-within box (mirrors typeahead_group) so users
+     don't have to scroll a long list. State lives on the parent (ui.facetSearch[spec_key]). #}
+  <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
+         aria-label="Search {{ display_name }}"
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+  {% endif %}
+  {# A search box only helps if its matches are reachable: when present, the collapsed clamp
+     must scroll (overflow-y-auto) instead of hiding matches below the fold (overflow-hidden). #}
+  <div class="space-y-0.5" :class="!ui.facetExpanded['{{ spec_key }}'] && {{ values|length }} > 6 ? 'max-h-[168px] {{ 'overflow-y-auto' if values|length > 12 else 'overflow-hidden' }}' : 'max-h-[320px] overflow-y-auto'">
     {% for val in values %}
-    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group">
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group"{% if values|length > 12 %}
+           x-show='!ui.facetSearch["{{ spec_key }}"] || {{ val|tojson }}.toLowerCase().includes((ui.facetSearch["{{ spec_key }}"]||"").toLowerCase())' x-cloak{% endif %}>
       {# Single-quoted attributes: |tojson emits double quotes (and escapes single quotes),
          so spec_key/val are safe inside single quotes — a double-quoted attribute breaks. #}
       <input type="checkbox" value="{{ val }}"

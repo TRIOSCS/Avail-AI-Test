@@ -32,6 +32,27 @@ def test_open_vocab_facet_renders_typeahead_search(client, db_session: Session):
     assert "Intel C621" in resp.text
 
 
+def test_long_enum_facet_renders_search_within(client, db_session: Session):
+    """A fixed-vocab enum facet with >12 values (connectors.connector_type has 19) gets
+    a search-within box bound to the shared ui.facetSearch state, while a short enum
+    facet on the same page (any hdd facet is <=6) gets no search box (P3)."""
+    seed_commodity_schemas(db_session)
+
+    resp = client.get("/v2/partials/materials/filters/sub?commodity=connectors&sub_filters=%7B%7D")
+    assert resp.status_code == 200
+    # The long connector_type facet (19 values) renders the search-within input...
+    assert "ui.facetSearch['connector_type']" in resp.text
+    assert "Search Connector Family / Type" in resp.text
+    # ...and a short enum facet on the same page (gender, 3 values) does NOT.
+    assert "ui.facetSearch['gender']" not in resp.text
+
+    # A page whose enum facets are all short (hdd: every facet <=6) gets no search box at all.
+    short = client.get("/v2/partials/materials/filters/sub?commodity=hdd&sub_filters=%7B%7D")
+    assert short.status_code == 200
+    assert "ui.facetSearch['interface']" not in short.text
+    assert "ui.facetSearch['usage_class']" not in short.text
+
+
 @pytest.mark.parametrize("commodity", sorted(COARSE_BUCKETS_WITHOUT_SEEDS))
 def test_coarse_bucket_subfilters_render_empty_state(client, db_session: Session, commodity):
     """The first-ever seedless tree commodities (declared coarse buckets) must render
