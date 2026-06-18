@@ -5084,6 +5084,59 @@ async def set_contact_role(
     )
 
 
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/do-not-contact",
+    response_class=HTMLResponse,
+)
+async def set_contact_dnc(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.do_not_contact; re-renders the DNC toggle partial.
+
+    Accepts do_not_contact= from the inline form.  Non-empty value → True. Empty string
+    → False (clear the flag).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    dnc_raw = (form.get("do_not_contact") or "").strip()
+
+    contact.do_not_contact = bool(dnc_raw)
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} do_not_contact set to {} by {} (company {})",
+        contact_id,
+        contact.do_not_contact,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_dnc_toggle.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
