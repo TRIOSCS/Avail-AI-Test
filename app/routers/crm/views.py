@@ -6,7 +6,7 @@ Depends on: app/dependencies (require_user), app/templates
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -114,6 +114,28 @@ async def crm_performance(
         "users_scores": _build_user_scores(db),
     }
     return template_response("htmx/partials/crm/performance_tab.html", ctx)
+
+
+@router.get("/v2/partials/crm/reporting", response_class=HTMLResponse)
+async def crm_reporting(
+    request: Request,
+    days: int | None = Query(None, gt=0, le=3650),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the CRM reporting dashboard: coverage, pipeline, funnel."""
+    from ...services.reporting_service import coverage_report, outcome_funnel, pipeline_report
+    from ...template_env import template_response
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "coverage": coverage_report(db),
+        "pipeline": pipeline_report(db, days=days),
+        "funnel": outcome_funnel(db, days=days or 90),
+        "days": days,
+    }
+    return template_response("htmx/partials/crm/reporting_tab.html", ctx)
 
 
 @router.get("/api/crm/performance-metrics")
