@@ -94,19 +94,83 @@
     </div>
   </div>
 
-  {# ── Stats Row (3 cols) ──────────────────────────────────── #}
-  <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ sites|length }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Sites</p>
+  {# ── Account Cadence Card ──────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+    {# Hero row: cadence badge + tier + next-best-touch #}
+    <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+      {% set badge_colors = {
+        "new": "bg-gray-100 text-gray-500",
+        "on_target": "bg-emerald-100 text-emerald-700",
+        "due": "bg-amber-100 text-amber-700",
+        "overdue": "bg-rose-100 text-rose-700"
+      } %}
+      <div class="flex items-center gap-2">
+        <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, 'bg-gray-100 text-gray-500') }}">
+          {{ {"new": "New", "on_target": "On Target", "due": "Due", "overdue": "Overdue"}.get(cadence_state, cadence_state|title) }}
+        </span>
+        {% if company.tier %}
+          <span class="text-xs text-gray-500 font-medium">{{ company.tier|title }}</span>
+        {% endif %}
+      </div>
+      <span class="text-xs text-gray-600 italic">{{ next_best_touch }}</span>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ open_req_count }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Open Requisitions</p>
+
+    {# Dual clocks: Outbound + Reply #}
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+          <svg class="inline h-3 w-3 mr-1 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Last Out
+        </p>
+        {% if company.last_outbound_at %}
+          {% set out_days = ((now_utc - company.last_outbound_at).days) if now_utc is defined else 0 %}
+          <p class="text-lg font-bold text-gray-900">{{ out_days }}d</p>
+          <p class="text-[10px] text-gray-400">{{ company.last_outbound_at.strftime('%b %d') }}</p>
+        {% else %}
+          <p class="text-sm font-medium text-gray-400">Never</p>
+        {% endif %}
+      </div>
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+          <svg class="inline h-3 w-3 mr-1 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+          Last Reply
+        </p>
+        {% if company.last_reply_at %}
+          {% set reply_days = ((now_utc - company.last_reply_at).days) if now_utc is defined else 0 %}
+          <p class="text-lg font-bold text-gray-900">{{ reply_days }}d</p>
+          <p class="text-[10px] text-gray-400">{{ company.last_reply_at.strftime('%b %d') }}</p>
+        {% else %}
+          <p class="text-sm font-medium text-gray-400">—</p>
+        {% endif %}
+      </div>
     </div>
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-sm font-medium text-gray-900">{{ company.created_at.strftime('%b %d, %Y') if company.created_at else "—" }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Created</p>
+
+    {# Coverage badge #}
+    <p class="text-xs text-gray-500">
+      <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }}</span>
+      <span class="text-gray-300 mx-1">·</span>
+      <span class="font-medium text-gray-700">{{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+    </p>
+  </div>
+
+  {# ── Commercial Context Strip ────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 px-4 py-3">
+    <div class="flex items-center gap-4 flex-wrap text-sm">
+      <span class="text-xs font-medium text-gray-400 uppercase tracking-wider mr-2">Commercial</span>
+      <span class="text-gray-600">
+        Win rate:
+        <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
+      </span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">
+        Rev 90d:
+        <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
+      </span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">
+        Last deal:
+        <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
+      </span>
     </div>
   </div>
 

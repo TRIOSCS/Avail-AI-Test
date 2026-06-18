@@ -4531,8 +4531,11 @@ async def partials_companies_redirect(request: Request, path: str = ""):
 # additionally re-exported under its historical name because tests
 # (tests/test_htmx_views_nightly28.py) import it from this module — the F401
 # keeps ruff from stripping that alias.
+from ..services.crm_service import cadence_state as _cadence_state  # noqa: E402
 from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
+from ..services.crm_service import company_commercial_stats as _company_commercial_stats  # noqa: E402
 from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
+from ..services.crm_service import next_best_touch as _next_best_touch  # noqa: E402
 from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
@@ -4800,6 +4803,14 @@ async def company_detail_partial(
     _cq = _company_quotes_query(db, company)
     quote_count = _cq.count() if _cq is not None else 0
 
+    # Cadence card + commercial strip context
+    from datetime import timezone as _tz
+
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+    _cadence = _cadence_state(company.tier, company.last_outbound_at)
+    _nbt = _next_best_touch(company.tier, company.last_outbound_at)
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
@@ -4810,8 +4821,19 @@ async def company_detail_partial(
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
-            "contact_rows": _company_contact_rows(db, company_id, sites=sites),
+            "contact_rows": contact_rows,
             "user": user,
+            # Cadence card
+            "cadence_state": _cadence,
+            "next_best_touch": _nbt,
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            # Commercial strip
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            # Clock day calculations
+            "now_utc": datetime.now(_tz.utc),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
