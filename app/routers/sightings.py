@@ -2817,9 +2817,12 @@ async def sightings_offer_request(
 ):
     """Log a pending vendor request (images / FPQ / cert / pkg qty) on an offer.
 
-    v1: logs the request to offer.qualification['requests'] and returns the drafted
-    RFQ-back line as a toast. Does NOT send email — the buyer copies the draft into
-    the existing solicit modal (Contact.requisition_id NOT NULL caveat out of scope).
+    Logs the request to offer.qualification['requests'] (status="pending") and returns
+    the drafted RFQ-back line as a toast. This route is require_buyer-only (NO Graph
+    token) so logging never 401s on an expired token. Sending a logged PENDING request
+    as a real email is now available on demand via the separate token-bearing route
+    `.../offers/{offer_id}/request/{index}/send` (sightings_offer_request_send) — the
+    buyer no longer has to copy the draft into the solicit modal by hand.
     """
     from datetime import datetime, timezone
 
@@ -2848,3 +2851,156 @@ async def sightings_offer_request(
     db.commit()
     db.expire_all()
     return _append_oob_toast(_refresh_offers_panel(request, requirement_id, db), f"Logged request: {draft}")
+
+
+@router.post(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/request/{index}/send",
+    response_class=HTMLResponse,
+)
+async def sightings_offer_request_send(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    index: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+    token: str = Depends(require_fresh_token),
+):
+    """Send a previously-logged PENDING #7 vendor request as a real RFQ-back email.
+
+    Distinct from the logging route (sightings_offer_request) on purpose: this route
+    also requires a fresh Graph token (require_fresh_token) so the actual send fails
+    loudly on an expired token, while LOGGING a request never 401s. `index` addresses
+    the entry in offer.qualification['requests'] (append-only, so the index is stable).
+
+    Flow: resolve the vendor's best contact email (_best_contacts_by_card, mirroring the
+    batch send-inquiry path), draft the request body via request_template, and hand a
+    single vendor group to send_batch_rfq with the SCALAR requisition_id (single-req
+    mode; passing both the scalar and a parts-map raises ValueError). send_batch_rfq
+    commits internally and can expire the session, so the entry-status update is applied
+    AFTER it returns against a freshly re-fetched offer. Idempotent on an already-"sent"
+    entry; a single request is logged as an outreach activity but does NOT auto-progress
+    the sourcing status (one clarification is not a full RFQ round).
+    """
+    from datetime import datetime, timezone
+
+    from ..email_service import send_batch_rfq
+    from ..services.offer_qualification import request_template
+
+    offer = db.get(Offer, offer_id)
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    if index < 0 or index >= len(reqs):
+        raise HTTPException(status_code=404, detail={"error": "request not found"})
+    # Copy the entry into a fresh nested dict (the dict()/list() above are SHALLOW, so
+    # reqs[index] is still the committed-JSON baseline object — see the post-send block).
+    entry = dict(reqs[index])
+    reqs[index] = entry
+
+    # Idempotency: a request already sent is never re-sent (the entry is the durable
+    # record of the outreach). Surface an info toast, leave state untouched.
+    if entry.get("status") == "sent":
+        return _append_oob_toast(
+            _refresh_offers_panel(request, requirement_id, db),
+            "Request already sent",
+            "info",
+        )
+
+    # Requisition guard: Contact.requisition_id is NOT NULL, so send_batch_rfq can write
+    # no tracking row without a requisition. An offer with no requisition (unsolicited
+    # inbound) is marked "skipped" rather than firing an untracked email.
+    if offer.requisition_id is None:
+        entry["status"] = "skipped"
+        q["requests"] = reqs
+        offer.qualification = q
+        db.commit()
+        return _append_oob_toast(
+            _refresh_offers_panel(request, requirement_id, db),
+            "No requisition on this offer — not sent",
+            "warning",
+        )
+
+    # Resolve the vendor's BEST contact email exactly as the batch send path does:
+    # worst-first ordering + last-wins dict so a real email always beats a NULL/'' row.
+    contact_map = (
+        {c.vendor_card_id: c for c in _best_contacts_by_card(db, [offer.vendor_card_id])}
+        if offer.vendor_card_id
+        else {}
+    )
+    contact = contact_map.get(offer.vendor_card_id)
+    vendor_email = contact.email if contact and contact.email else ""
+
+    draft = request_template(entry["kind"], offer.mpn)
+    requirement = db.get(Requirement, requirement_id)
+    parts = [{"mpn": offer.mpn, "qty": requirement.target_qty if requirement else None}]
+
+    # Single-requisition mode: pass the SCALAR requisition_id (one Contact row, parts
+    # from the vendor group). Passing requisition_parts_map AS WELL would raise ValueError.
+    results = await send_batch_rfq(
+        token=token,
+        db=db,
+        user_id=user.id,
+        requisition_id=offer.requisition_id,
+        vendor_groups=[
+            {
+                "vendor_name": offer.vendor_name,
+                "vendor_email": vendor_email,
+                "parts": parts,
+                "subject": f"Request: {entry['kind']} — {offer.mpn}",
+                "body": draft,
+            }
+        ],
+    )
+
+    # CRITICAL: send_batch_rfq does its own db.commit() and can expire the session, so
+    # re-fetch the offer and re-read the requests list before mutating the entry status.
+    offer = db.get(Offer, offer_id)
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    # COPY the target entry into a fresh nested dict before mutating: dict(q)/list(reqs)
+    # are SHALLOW, so reqs[index] is still the SAME object SQLAlchemy holds as the
+    # committed JSON baseline. Mutating it in place would make the new value equal the
+    # (already-mutated) old value and the JSON flush would write nothing. Re-slotting a
+    # fresh dict keeps the change detectable.
+    entry = dict(reqs[index])
+    reqs[index] = entry
+
+    r = results[0]
+    if r["status"] == "sent":
+        entry["status"] = "sent"
+        entry["contact_id"] = r.get("id")
+        entry["sent_at"] = datetime.now(timezone.utc).isoformat()
+        toast_msg, toast_level = (f"Request sent to {offer.vendor_name}", "success")
+        # Log the outreach (mirrors sightings_send_inquiry's rfq_sent), but deliberately
+        # NO auto_progress: one clarification request is not a full RFQ round.
+        log_rfq_activity(
+            db=db,
+            rfq_id=offer.requisition_id,
+            activity_type="rfq_sent",
+            description=f"Requested {entry['kind']} from {offer.vendor_name}",
+            user_id=user.id,
+            requirement_id=requirement_id,
+        )
+    elif r["status"] == "skipped":
+        entry["status"] = "skipped"
+        toast_msg, toast_level = ("Not sent — no contact email on file", "warning")
+    else:
+        entry["status"] = "failed"
+        entry["error"] = r.get("error")
+        toast_msg, toast_level = (f"Send failed for {offer.vendor_name}", "error")
+
+    # Reassign a NEW dict so SQLAlchemy's JSON change detection persists the mutation.
+    q["requests"] = reqs
+    offer.qualification = q
+    db.commit()
+
+    return _append_oob_toast(
+        _refresh_offers_panel(request, requirement_id, db),
+        toast_msg,
+        toast_level,
+    )
