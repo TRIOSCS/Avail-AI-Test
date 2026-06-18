@@ -216,6 +216,18 @@ class TestReqsDetailTabs:
         detail = get_requisition_detail(db_session, test_requisition.id, test_user.id, "buyer")
         assert detail["req"]["offer_count"] == 2
 
+    def test_urgency_not_duplicated_in_metadata_grid(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition
+    ):
+        """Urgency is surfaced once via the header pill — it must NOT also appear as a
+        redundant metadata-grid field (the grid <dt>Urgency</dt> cell is removed)."""
+        test_requisition.urgency = "critical"
+        db_session.commit()
+        resp = client.get(f"/requisitions2/{test_requisition.id}/detail")
+        assert resp.status_code == 200
+        assert ">Urgency</dt>" not in resp.text  # no redundant grid label
+        assert "critical" in resp.text  # still surfaced via the header pill
+
     def test_lazy_tabs_enforce_ownership_for_sales(
         self, client: TestClient, sales_user: User, test_requisition: Requisition
     ):
