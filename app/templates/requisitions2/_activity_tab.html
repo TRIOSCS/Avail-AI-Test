@@ -1,0 +1,10 @@
+{#
+  _activity_tab.html — Activity timeline for the requisitions2 detail panel.
+  Thin wrapper around the shared activity_timeline partial (handles its own empty state).
+  Called by: GET /requisitions2/{id}/activity → lazy-loaded into #rq2-activity-pane
+  Context vars: activities (list[ActivityLog])
+  Depends on: htmx/partials/shared/activity_timeline.html
+#}
+<div class="px-2 py-2">
+  {% include "htmx/partials/shared/activity_timeline.html" %}
+</div>

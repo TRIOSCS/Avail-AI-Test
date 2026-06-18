@@ -114,7 +114,7 @@ authoritative reference. Static-analysis tests in
 | Quotes | 5 | partials/quotes/ — `list.html` removed (standalone Quotes tab retired); detail/macros/line_row/preview/pricing_history remain |
 | Sightings | 7 | partials/sightings/ |
 | Search | 13 | partials/search/ — incl. the Part Dossier ("Bench") at `/v2/search?mpn=`: `dossier_shell/hero/specs/recent/market.html` (routes in `routers/part_dossier.py`). |
-| Prospecting | 6 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth) |
+| Prospecting | 8 | partials/prospecting/ — list/_card/_macros/detail/stats/add_result/enrich_status/_action_oob; buyer-ready ranking via `services/prospect_priority.build_priority_snapshot` (single source of truth); background enrich polls `/enrich-status` (HTTP 286 stops); grid actions OOB-remove cards + refresh `#prospect-stats` |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |
@@ -179,6 +179,9 @@ authoritative reference. Static-analysis tests in
 | prospecting_refresh | Daily | Web search for new prospects |
 | maintenance | Daily | DB ANALYZE, cache cleanup, integrity checks |
 | quality | Daily | Vendor scorecards, engagement scoring |
+| po_verification | 15 min | Scan buyer sent-mail for PO confirmations on active buy plans |
+| stock_autocomplete | Daily | Auto-complete stuck stock-sale buy plans (case report + notification) |
+| buyplan_nudge | 30 min | Remind buyer (PO unconfirmed >4h) / ops (PO unverified >2h); idempotent via `buy_plan_lines.last_nudge_at` |
 
 ## Management Commands (`app/management/`)
 
@@ -203,6 +206,32 @@ top-tier enrichment input (trio_source:95 / trio_source_ai:88 on the F1 ladder):
 | `consolidate.py` | Groups cleaned records by `normalized_mpn` → one `ConsolidatedPart` per MPN with per-field provenance (description=longest, manufacturer=modal, condition=modal, quantity=sum, specs merged with master-wins). |
 | `ai_correct.py` | Optional Claude (smart tier) standardization/inference pass — output tagged `trio_source_ai` (tier 88, below vendor APIs). Per-part failure isolation; fail-fast on ClaudeUnavailable/Auth; returns `{corrected, failed}` for the report. |
 | `ingest.py` | AUGMENTs `material_cards` (creates when absent; never clobbers an existing description), category via `spec_tiers.set_category`, specs via `record_spec`; per-card SAVEPOINTs with tallies merged only after a clean release; failed parts counted + sampled in the report; `apply=False` (default) is a true dry run through the SAME ladder/schema gates (`set_category(write=False)` + `spec_would_write`) so the report matches `--apply`. |
+
+## Offer Qualification Service (`app/services/offer_qualification.py`)
+
+Pure-function library that drives the condition-spine qualification capture for buyer-entered
+offers. Zero I/O except `apply_qualification` (writes onto an Offer ORM object) and
+`prefill_from_vendor` (one DB read). All other functions are pure Python — safe to call from
+templates, tests, or background jobs without a DB session.
+
+| Export | Role |
+|--------|------|
+| `validate_essentials` | Per-condition gate (new/new_no_pkg/pulls/refurb); returns error strings |
+| `compose_note` | System-composed standardized note for `offers.qualification_note` |
+| `meter` | `(filled, total)` qualification item counts |
+| `compute_status` | → `QualificationStatus` string |
+| `apply_qualification` | Composes note+status onto Offer ORM; never raises (gate is in buyer handlers) |
+| `normalize_offer_condition` | Normalizes raw condition incl. legacy `used`→`pulls` |
+| `prefill_from_vendor` | Vendor-memory (#8): stable answer prefill from the vendor's last offer |
+| `request_template` | RFQ-back request text for `images`/`fpq`/`cert`/`pkg_qty` |
+| `essentials_data` | Canonical `data` dict builder (keeps key-set in sync across callers) |
+| `PACKAGING_CHIPS` | Display strings for the packaging chip selector |
+| `REQUEST_KINDS` | Tuple of valid request kind tokens |
+
+Frontend: `partials/offers/_qualification_fields.html` (condition-spine partial) and
+the `offerQualification` Alpine.js factory in `htmx_app.js` (live note preview + meter).
+`_offer_row.html` renders the qualification badge and standardized note/request list on each
+offer row.
 
 ## Enrichment Worker Modules (`app/services/enrichment_worker/`)
 

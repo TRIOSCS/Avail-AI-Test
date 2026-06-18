@@ -337,6 +337,7 @@ class TestAddOffer:
                 "unit_price": "0.50",
                 "lead_time": "4 weeks",
                 "condition": "New",
+                "manufacturer": "TI",  # essential for condition=new (qualification gate)
             },
         )
         assert resp.status_code == 200

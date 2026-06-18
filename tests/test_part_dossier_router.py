@@ -288,6 +288,31 @@ def test_market_health_all_down_no_available(db_session):
     assert h["total"] == 2  # available(0) + down(2)
 
 
+def test_specs_shows_stored_datasheet(client, db_session):
+    from datetime import datetime, timezone
+
+    from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+
+    card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", datasheet_captured_at=datetime.now(timezone.utc))
+    db_session.add(card)
+    db_session.flush()
+    db_session.add(
+        MaterialCardDatasheet(
+            material_card_id=card.id,
+            file_name="LM317T-datasheet.pdf",
+            onedrive_url="https://od/x",
+            source="connector",
+            verified=True,
+            captured_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/search/dossier/specs", params={"mpn": "LM317T"})
+    assert resp.status_code == 200
+    assert "https://od/x" in resp.text
+    assert "Datasheet (saved" in resp.text
+
+
 def test_market_no_banner_when_only_unconfigured(client):
     """Sources merely unconfigured (never set up) do NOT trigger the degraded banner —
     only `down` (auth/quota errors) do.

@@ -562,7 +562,7 @@ class TestJobWarnStrategicExpiring:
 
 
 class TestRegisterInventoryJobs:
-    def test_registers_two_jobs(self):
+    def test_registers_three_jobs(self):
         from app.jobs.inventory_jobs import register_inventory_jobs
 
         scheduler = MagicMock()
@@ -572,7 +572,8 @@ class TestRegisterInventoryJobs:
         settings.buyplan_auto_complete_tz = "UTC"
 
         register_inventory_jobs(scheduler, settings)
-        assert scheduler.add_job.call_count == 2
+        # po_verification + stock_autocomplete + buyplan_nudge
+        assert scheduler.add_job.call_count == 3
 
 
 class TestJobPoVerification:

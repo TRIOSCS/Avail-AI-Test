@@ -171,8 +171,9 @@ class TestEnsureAllUsersSubscribedEdgeCases:
 
 
 class TestRenewSubscriptionEdgeCases:
-    def test_renew_with_error_only_no_detail(self, db_session, test_user):
-        """Graph response with 'error' field but no 'detail' deletes sub."""
+    def test_renew_with_unknown_string_error_keeps_sub(self, db_session, test_user):
+        """Graph response with an unknown string error code keeps the subscription
+        (transient)."""
         from app.services.webhook_service import renew_subscription
 
         sub = GraphSubscription(
@@ -197,7 +198,8 @@ class TestRenewSubscriptionEdgeCases:
             result = _run(renew_subscription(sub, db_session))
 
         assert result is False
-        assert db_session.get(GraphSubscription, sub_pk) is None
+        # Unknown string errors are transient — subscription must NOT be deleted
+        assert db_session.get(GraphSubscription, sub_pk) is not None
 
 
 class TestCreateTeamsSubscription:

@@ -1,0 +1,38 @@
+import os
+
+os.environ["TESTING"] = "1"
+from datetime import datetime, timezone
+
+from app.models.intelligence import MaterialCard, MaterialCardDatasheet
+
+
+def test_datasheet_row_links_to_card(db_session):
+    card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T")
+    db_session.add(card)
+    db_session.flush()
+    ds = MaterialCardDatasheet(
+        material_card_id=card.id,
+        file_name="LM317T-datasheet.pdf",
+        onedrive_item_id="01ABC",
+        onedrive_url="https://onedrive/x",
+        content_type="application/pdf",
+        size_bytes=12345,
+        source="connector",
+        original_url="https://ti.com/lm317t.pdf",
+        verified=True,
+        captured_at=datetime.now(timezone.utc),
+    )
+    db_session.add(ds)
+    db_session.commit()
+    db_session.refresh(card)
+    assert card.datasheets[0].file_name == "LM317T-datasheet.pdf"
+    assert card.datasheets[0].verified is True
+
+
+def test_card_has_datasheet_stamp_columns(db_session):
+    card = MaterialCard(normalized_mpn="ne555", display_mpn="NE555")
+    card.datasheet_searched_at = datetime.now(timezone.utc)
+    db_session.add(card)
+    db_session.commit()
+    assert card.datasheet_searched_at is not None
+    assert card.datasheet_captured_at is None

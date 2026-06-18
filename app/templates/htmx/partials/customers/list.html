@@ -54,6 +54,8 @@
             class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
       <option value="oldest" {{ "selected" if sort == "oldest" }}>Longest since activity</option>
       <option value="newest" {{ "selected" if sort == "newest" }}>Most recent activity</option>
+      <option value="outbound_asc" {{ "selected" if sort == "outbound_asc" }}>Stalest outbound</option>
+      <option value="reply_asc" {{ "selected" if sort == "reply_asc" }}>Stalest reply</option>
       <option value="name_asc" {{ "selected" if sort == "name_asc" }}>Name A&ndash;Z</option>
       <option value="name_desc" {{ "selected" if sort == "name_desc" }}>Name Z&ndash;A</option>
     </select>

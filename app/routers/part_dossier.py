@@ -36,6 +36,7 @@ from ..models.intelligence import MaterialCard
 from ..models.sourcing import Requisition
 from ..services.quick_source_service import get_or_create_scratch_req, persist_rows_as_sightings
 from ..template_env import template_response
+from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["part-dossier"])
@@ -119,6 +120,15 @@ async def dossier_hero(
 
     ctx = _ctx(request, user)
     ctx.update({"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view})
+
+    # Auto-datasheet capture (background, never blocks the dossier render).
+    if display_mpn:
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(
+            capture_datasheet(display_mpn, user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
+
     return template_response("htmx/partials/search/dossier_hero.html", ctx)
 
 
@@ -134,6 +144,27 @@ async def dossier_specs(
     ctx = _ctx(request, user)
     ctx.update({"mpn": mpn.strip().upper(), "card": card})
     return template_response("htmx/partials/search/dossier_specs.html", ctx)
+
+
+@router.get("/v2/partials/search/dossier/datasheet-status", response_class=HTMLResponse)
+async def dossier_datasheet_status(
+    request: Request,
+    mpn: str = Query(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll target for the 'fetching datasheet…' chip.
+
+    Returns the datasheet block; stops polling (HTTP 286) once a copy is stored or a
+    search has been recorded.
+    """
+    card = _resolve_card(db, normalize_mpn_key(mpn))
+    ctx = _ctx(request, user)
+    ctx.update({"mpn": mpn.strip().upper(), "card": card})
+    resp = template_response("htmx/partials/search/dossier_datasheet_block.html", ctx)
+    if card is not None and (card.datasheet_captured_at or card.datasheet_searched_at):
+        resp.status_code = 286
+    return resp
 
 
 @router.get("/v2/partials/search/dossier/market", response_class=HTMLResponse)
@@ -284,7 +315,14 @@ async def quick_source_rfq(
     db: Session = Depends(get_db),
 ):
     """Send RFQ from the dossier → scratch req + captured sightings → its workspace."""
-    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    if mpn.strip():
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(
+            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
+    return response
 
 
 @router.post("/v2/partials/search/quick-source/offer", response_class=HTMLResponse)
@@ -296,4 +334,11 @@ async def quick_source_offer(
     db: Session = Depends(get_db),
 ):
     """Add Offer from the dossier → scratch req + captured sightings → its workspace."""
-    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    if mpn.strip():
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(
+            capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
+        )
+    return response

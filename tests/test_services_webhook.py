@@ -814,15 +814,16 @@ class TestRenewSubscription:
             result = _run(renew_subscription(sub, db_session))
             assert result is False
 
-    def test_renew_graph_error_deletes_subscription(self, db_session, test_user):
-        """Graph error deletes the subscription and returns False."""
+    def test_renew_graph_exception_keeps_subscription(self, db_session, test_user):
+        """A raised exception (e.g. network) keeps the subscription (transient
+        error)."""
         from app.services.webhook_service import renew_subscription
 
         sub = _make_subscription(db_session, test_user, sub_id="sub-graph-err")
         sub_id_val = sub.id
 
         mock_gc = MagicMock()
-        mock_gc.patch_json = AsyncMock(side_effect=Exception("Graph 404"))
+        mock_gc.patch_json = AsyncMock(side_effect=Exception("network error"))
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
@@ -830,9 +831,9 @@ class TestRenewSubscription:
         ):
             result = _run(renew_subscription(sub, db_session))
             assert result is False
-            # Subscription should be deleted
-            deleted = db_session.get(GraphSubscription, sub_id_val)
-            assert deleted is None
+            # Subscription must NOT be deleted — this is a transient failure
+            still_exists = db_session.get(GraphSubscription, sub_id_val)
+            assert still_exists is not None
 
     def test_renew_calls_correct_graph_endpoint(self, db_session, test_user):
         """Renewal calls PATCH on the correct subscription endpoint."""

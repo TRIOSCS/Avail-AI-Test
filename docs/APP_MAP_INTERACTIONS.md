@@ -341,6 +341,58 @@ count rides the `done` SSE event as `off_target` and surfaces as a footnote in
 `#search-stats`. Cross-references (alternate/FRU part numbers) belong in "What we know",
 not the live-market offer list.
 
+**Auto-datasheet capture** — a fire-and-forget `capture_datasheet(mpn, user_id)` job is
+enqueued via `safe_background_task(..., suppress_in_testing=True)` on two triggers:
+(1) `dossier_hero` — every Part Dossier page-load; (2) `quick_source_rfq` /
+`quick_source_offer` + `add_requirements` (Requirements router) — whenever a part is
+added to an RFQ or the requirements list. The job opens its own DB session (request
+session is already closed) and follows this pipeline:
+
+```
+capture_datasheet(mpn, user_id)
+    |
+    +-- gate: card already has a datasheet row?          → skip (already stored)
+    +-- gate: datasheet_searched_at < 30 days?           → skip (negative cache)
+    |
+    +-- find_datasheet_url(card, mpn):
+    |       connector card.datasheet_url if present      → source="connector" (trusted)
+    |       else: Claude web_search (up to 6 uses)       → source="web" (untrusted)
+    |       TESTING env: web-search branch skipped
+    |
+    +-- download_pdf(url):
+    |       SSRF guard: scheme + per-hop IP check (blocks private/loopback/
+    |       link-local/multicast/reserved); follows ≤5 redirects, re-validates
+    |       each hop; 25 MB size cap; must begin with %PDF- magic bytes.
+    |
+    +-- source=="web": pdf_contains_mpn(pdf, mpn)?
+    |       pypdf extracts text from first 20 pages; MPN normalised to alnum-lower
+    |       key (≥4 chars); mismatch → stamp searched, discard (wrong file)
+    |
+    +-- cardless MPN + verified hit: resolve_material_card(mpn, db)
+    |       creates a card only on a *verified* hit (miss never creates a card)
+    |
+    +-- upload_bytes_to_onedrive(user, db,
+    |       folder="AvailAI/Datasheets/{card.id}",
+    |       name="{display_mpn}-datasheet.pdf")
+    |       → {onedrive_item_id, onedrive_url, size_bytes}
+    |
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 108)
+         UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
+```
+
+`material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
+`onedrive_url`, `source` ("connector"/"web"), `original_url`, `verified`, `captured_at`.
+`MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
+`datasheet_searched_at` (any attempt — gates the 30-day negative cache).
+
+**Dossier UI** (`dossier_datasheet_block.html`, included in `dossier_specs`) has three
+states: (a) `card.datasheets[0]` present → branded link "Datasheet (saved MMM DD, YYYY)"
+to the OneDrive copy; (b) `datasheet_searched_at` set but no captured copy →
+"No datasheet found (will retry)"; (c) neither stamp yet → "Fetching Datasheet…" spinner
+that polls `GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
+(`hx-trigger="every 15s"`). The status endpoint returns the same `dossier_datasheet_block`
+fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
+
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
 
 ```
@@ -504,11 +556,17 @@ crm.offers functions directly (no logic duplication) and re-render the panel:
   POST .../offers/{id}/mark-sold -> mark_offer_sold
   DELETE .../offers/{id}         -> delete_offer
 
-"Convert to offer" sits on the collapsed vendor row (next to Build RFQ / Mark
-Unavail) and opens the modal prefilled from the VendorSightingSummary. The modal
-and the requisitions add-offer form share one field grid
-(offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
-entered offers appear in the Activity tab automatically.
+The Vendors tab is a **fitted-column table — Vendor | Qty | Best Price | Score | ⋯**
+where each vendor is its own `<tbody>` (a summary row carrying exactly one `<td>`
+per `<th>`, plus an expandable intel drawer in a sibling `<tr><td colspan="5">`).
+Status pill, phone (tel link) and the OOO / overlap / "via SUB-MPN" badges live
+inside the Vendor cell; **every action lives in the row's ⋯ kebab** (Build RFQ /
+Mark Unavail / Convert to offer for available vendors; Mark available / Verify in
+the unavailability states). A test guards the header↔cell count
+(`tests/test_panel_column_alignment.py`). "Convert to offer" opens the modal
+prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
+form share one field grid (offers/_offer_form_fields.html). Offer creation logs
+OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
@@ -521,6 +579,59 @@ record is the authority, and the row renders one of three states (suppressed ros
 NOTE: the two creation paths historically wrote Offer.normalized_mpn differently
 (create_offer = normalize_mpn_key, add_offer = normalize_mpn); add_offer was
 fixed to use normalize_mpn_key, and the part query matches both forms for safety.
+
+### 2c-bis. Offer Qualification Capture (`app/services/offer_qualification.py`)
+
+Standardized condition-driven qualification for buyer-entered offers. Every offer
+has a **condition spine** (`new` / `new_no_pkg` / `pulls` / `refurb`) that drives
+per-condition validation, a system-composed standardized note, a status/meter, and
+optional vendor requests.
+
+**Service API (all pure, no I/O except `apply_qualification` and `prefill_from_vendor`):**
+
+| Function | Purpose |
+|----------|---------|
+| `validate_essentials(condition, data)` | Returns a list of error strings for missing per-condition essentials. Empty = OK. |
+| `compose_note(condition, data)` | Builds the standardized human-readable note string from condition + data dict. |
+| `meter(condition, data, has_images)` | Returns `(filled, total)` int tuple of qualification item counts. |
+| `compute_status(condition, data, has_images)` | Returns the `QualificationStatus` string (`unset`/`incomplete`/`essentials`/`complete`). |
+| `apply_qualification(offer)` | Composes `qualification_note` + `qualification_status` onto an Offer ORM object. **Never raises** — the gate lives in the buyer handlers. |
+| `normalize_offer_condition(raw)` | Normalizes raw condition strings (incl. legacy `used`→`pulls`) to the `OfferCondition` vocabulary. |
+| `prefill_from_vendor(db, vendor_name_normalized)` | Vendor-memory (#8): pulls stable answers (`country_of_origin`, `refurbished_by`, `terms`) from the vendor's most-recent offer. |
+| `request_template(kind, mpn)` | Returns the RFQ-back request text for a given `kind` (`images`/`fpq`/`cert`/`pkg_qty`). |
+| `essentials_data(...)` | Builds the canonical `data` dict accepted by `validate_essentials`/`meter` from named keyword args. |
+
+**Gate placement (important).** The hard-block lives **only** in the buyer-facing handlers:
+
+- `app/routers/sightings.py` (sightings create/update): calls `validate_essentials`; on
+  errors, re-renders the modal with error messages at HTTP 200 (HTMX swap).
+- `app/routers/htmx_views.py` (add/edit offer): calls `validate_essentials`; on errors,
+  returns HTTP 400 with the form re-rendered.
+
+The **canonical builders** (`crm.offers.create_offer` / `update_offer`) only call
+`apply_qualification()` to compose the note+status — they **never block**. This means
+API/AI offer ingestion (inbox monitor, email-parsed, proactive) is unaffected: those
+paths may produce `qualification_status='incomplete'` but are never rejected.
+
+**Vendor memory prefill (#8).** When the sightings offer modal opens (GET `.../offer-form`),
+the router calls `prefill_from_vendor(db, vendor_name_normalized)` and passes the returned
+dict to the template as Alpine initial-state `x-init` values. The buyer sees pre-populated
+`refurbished_by` / `terms` / `country_of_origin` from the vendor's most-recent offer — no
+extra form step required.
+
+**One-tap vendor requests (#7).** `POST .../offers/{offer_id}/request` (scoped to
+the path's `requirement_id` to prevent IDOR) accepts `kind` ∈ `REQUEST_KINDS`
+(`images`/`fpq`/`cert`/`pkg_qty`). v1: logs the pending request into
+`offer.qualification["requests"]` and drafts the request text via `request_template`;
+does NOT auto-send email (the existing solicit modal sends). The `offer_id` is
+validated against the `requirement_id` path parameter so a buyer can only request
+on their own requirement's offers.
+
+**Live badge/meter vs. stored snapshot.** `Offer.qualification_summary` (property)
+recomputes status+meter live from the current column values — the display badge always
+reflects reality. `qualification_status` is a refresh-on-save snapshot used for
+filtering/reporting. An image attachment added after the last save bumps the live
+meter but not the column until the next save.
 
 ### 2d. Vendor+part unavailability (durable knowledge + temporal policy)
 
@@ -959,17 +1070,22 @@ buyplan_builder.py
     v
 buyplan_workflow.py (state machine)
     |
-    |  DRAFT --> SUBMITTED --> APPROVED --> PO_SENT --> COMPLETE
-    |                |              |
-    |                v              v
-    |            REJECTED        HALTED
+    |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
+    |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
+    |                       v                    v
+    |                 draft (reject)         halted (SO halt)
     |
-    +---> buyplan_notifications.py
-    |       +---> teams_notifications.py --> Teams webhook
-    |       +---> DB: INSERT notifications
-    |       +---> email (approval token link)
+    |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
+    |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
+    |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
+    |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
     |
-    +---> activity_service.py --> DB: INSERT activity_log
+    +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
+    |       +---> teams_notifications.py --> Teams webhook / DM
+    |       +---> DB: INSERT activity_log (linked via buy_plan_id FK)
+    |
+    +---> inventory_jobs.py: buyplan_nudge (30 min) re-pings buyer (PO unconfirmed >4h) and
+            ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
 **Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
@@ -2444,6 +2560,19 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     +---> Selected commodity's sub-filters → /v2/partials/materials/filters/sub:
     |       is_primary expanded; rest fold under "More filters (N)". Fixed-vocab enums
     |       show every canonical value with a count incl. (0); open-vocab → typeahead.
+    |       Fixed-vocab enums with >12 values ALSO get a search-within box (P3, bound to
+    |       ui.facetSearch[spec_key]); observed values outside the canonical list append in
+    |       natural-numeric order via _natural_sort_key (P5, type-ranked so a mixed
+    |       digit/alpha overflow never raises).
+    |       Numeric specs (range widget) also expose common-value CHIPS — the top
+    |       NUMERIC_CHIP_N (8) discrete value_numeric values by distinct-card count
+    |       (get_subfilter_options option["chips"], displayed value-ascending) as a
+    |       multi-select row above the min/max inputs; selecting chips filters via the
+    |       "{spec_key}__vals" key → value_numeric.in_() in _apply_facet_filters
+    |       (OR-within-facet, AND-across). Chip live counts come from get_facet_counts's
+    |       numeric path (string-keyed by str(value), same pass-1/pass-2 self-exclusion as
+    |       enums). The "__vals" branch precedes the generic list branch so it isn't
+    |       mis-read as a value_text enum.
     |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
     |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
     |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
@@ -2932,19 +3061,19 @@ the current implementation.
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 45 | CRUD, search, bulk archive/assign, claim |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
-| Buy Plans | 6 | CRUD, external approval via token |
+| Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 8 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich |
+| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job), enrich-status (poll; HTTP 286 stops) |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
@@ -2968,7 +3097,7 @@ the current implementation.
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
 | Vendor Mgmt | 9 | vendor_analysis, vendor_affinity, vendor_scorecard, vendor_duplicates |
-| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
+| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring, buyplan_notifications, status_machine |
 | Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |

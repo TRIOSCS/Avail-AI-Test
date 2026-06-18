@@ -57,6 +57,7 @@ from .intelligence import (  # noqa: F401
     ChangeLog,
     MaterialCard,
     MaterialCardAudit,
+    MaterialCardDatasheet,
     MaterialVendorHistory,
     ProactiveDoNotOffer,
     ProactiveMatch,

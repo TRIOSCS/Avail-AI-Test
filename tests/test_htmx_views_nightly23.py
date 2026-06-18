@@ -357,6 +357,7 @@ class TestAddOfferDirect:
                 "qty_available": "200",
                 "unit_price": "1.25",
                 "condition": "new",
+                "manufacturer": "TI",  # essential for condition=new (qualification gate)
                 "lead_time": "2 weeks",
             },
         )
@@ -403,6 +404,9 @@ class TestEditOfferDirect:
                 "unit_price": "3.00",
                 "qty_available": "750",
                 "condition": "refurbished",
+                # essentials for condition=refurb (qualification gate)
+                "refurbished_by": "supplier",
+                "refurb_process": "Cleaned and tested",
                 "lead_time": "3 weeks",
                 "notes": "Updated note",
             },

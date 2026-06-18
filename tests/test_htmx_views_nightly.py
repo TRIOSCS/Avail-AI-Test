@@ -822,36 +822,21 @@ class TestProspectingPartials:
         assert resp.status_code == 404
 
     def test_enrich_prospect(self, client, db_session: Session):
+        # Enrich spawns a background job and returns the status poller (200).
         p = _prospect(db_session)
         db_session.commit()
 
         with (
-            patch(
-                "app.services.prospect_free_enrichment.run_free_enrichment",
-                AsyncMock(return_value=None),
-            ),
-            patch(
-                "app.services.prospect_warm_intros.detect_warm_intros",
-                return_value={"connection": "none"},
-            ),
-            patch(
-                "app.services.prospect_warm_intros.generate_one_liner",
-                return_value="Great prospect",
-            ),
+            patch("app.services.prospect_free_enrichment.run_enrichment_job"),
+            patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
         ):
             resp = client.post(f"/v2/partials/prospecting/{p.id}/enrich")
 
         assert resp.status_code == 200
+        assert "enrich-status" in resp.text
 
     def test_enrich_prospect_not_found(self, client, db_session: Session):
-        with (
-            patch(
-                "app.services.prospect_free_enrichment.run_free_enrichment",
-                AsyncMock(return_value=None),
-            ),
-        ):
-            resp = client.post("/v2/partials/prospecting/999999/enrich")
-
+        resp = client.post("/v2/partials/prospecting/999999/enrich")
         assert resp.status_code == 404
 
     def test_add_prospect_domain(self, client, db_session: Session, test_user: User):

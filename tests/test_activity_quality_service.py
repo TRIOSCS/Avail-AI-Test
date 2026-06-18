@@ -438,3 +438,107 @@ class TestScoreUnscoredActivitiesNewTypes:
         db_session.refresh(log)
         assert log.quality_assessed_at is not None
         assert log.is_meaningful is True
+
+
+class TestScoreActivityBumpsReplyClock:
+    """Test that score_activity advances last_reply_at in real time for meaningful
+    inbound."""
+
+    async def test_meaningful_inbound_advances_reply_clock(self, db_session: Session, test_user):
+        """After grading an inbound email as meaningful, company.last_reply_at is non-
+        NULL and equals the activity's created_at — no nightly recompute required."""
+        from app.constants import ActivityType, Channel, Direction
+        from app.models.crm import Company
+        from app.services.activity_quality_service import score_activity
+
+        created = datetime(2026, 6, 17, 10, 0, tzinfo=timezone.utc)
+
+        company = Company(name="Reply Clock Co")
+        db_session.add(company)
+        db_session.flush()
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type=ActivityType.EMAIL_RECEIVED,
+            channel=Channel.EMAIL,
+            direction=Direction.INBOUND,
+            subject="RE: LM317T quote",
+            notes="Vendor confirmed 5K units available.",
+            company_id=company.id,
+            created_at=created,
+            occurred_at=created,
+            is_meaningful=None,
+        )
+        db_session.add(log)
+        db_session.flush()
+
+        mock_result = {
+            "is_meaningful": True,
+            "quality_score": 75,
+            "classification": "quote",
+            "sentiment": "positive",
+            "clean_summary": "Vendor confirmed stock for LM317T.",
+        }
+
+        with patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            await score_activity(log.id, db_session)
+
+        db_session.refresh(log)
+        db_session.refresh(company)
+
+        assert log.is_meaningful is True
+        assert company.last_reply_at is not None
+        assert company.last_reply_at == created
+
+    async def test_noise_inbound_does_not_advance_reply_clock(self, db_session: Session, test_user):
+        """After grading an inbound email as NOT meaningful, company.last_reply_at stays
+        NULL."""
+        from app.constants import ActivityType, Channel, Direction
+        from app.models.crm import Company
+        from app.services.activity_quality_service import score_activity
+
+        created = datetime(2026, 6, 17, 11, 0, tzinfo=timezone.utc)
+
+        company = Company(name="Noise Clock Co")
+        db_session.add(company)
+        db_session.flush()
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type=ActivityType.EMAIL_RECEIVED,
+            channel=Channel.EMAIL,
+            direction=Direction.INBOUND,
+            subject="Auto: Out of office",
+            notes="I am OOO until Monday.",
+            company_id=company.id,
+            created_at=created,
+            occurred_at=created,
+            is_meaningful=None,
+        )
+        db_session.add(log)
+        db_session.flush()
+
+        mock_result = {
+            "is_meaningful": False,
+            "quality_score": 5,
+            "classification": "ooo",
+            "sentiment": "neutral",
+            "clean_summary": "OOO auto-reply.",
+        }
+
+        with patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            await score_activity(log.id, db_session)
+
+        db_session.refresh(log)
+        db_session.refresh(company)
+
+        assert log.is_meaningful is False
+        assert company.last_reply_at is None

@@ -461,6 +461,7 @@ class TestConvertProactiveToWin:
         assert quote is not None
         assert quote.quote_number == "Q-2026-0100"
         assert quote.status == "won"
+        assert quote.source == "proactive"
 
         # Verify buy plan
         bp = db_session.get(BuyPlan, result["buy_plan_id"])
@@ -1152,3 +1153,113 @@ class TestGetMatchCount:
         count = get_match_count(db_session, test_user.id)
         # "sent" status should not be counted
         assert count == 0
+
+
+# ── Change 3: 7-day window removal ────────────────────────────────────────
+
+
+class TestSevenDayWindowRemoved:
+    """Change 3: status=new matches older than 7 days but <30d must now appear.
+
+    Before the fix, get_matches_for_user silently filtered out matches created
+    more than 7 days ago (while the badge counter still counted them).  After
+    the fix, ALL status=new matches are visible (consistent with the 30-day
+    expiry job).
+    """
+
+    def test_old_new_match_appears_in_list(self, db_session, test_user, test_company, test_customer_site, test_offer):
+        """A status=new match created 10 days ago must appear in
+        get_matches_for_user."""
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="OLD-MPN-1")
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
+            mpn="OLD-MPN-1",
+            status="new",
+        )
+        # Back-date the match to 10 days ago (outside old 7-day window, inside 30-day expiry)
+        ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        match.created_at = ten_days_ago
+        db_session.commit()
+
+        result = get_matches_for_user(db_session, test_user.id, status="new")
+        all_mpns = [m["mpn"] for g in result["groups"] for m in g["matches"]]
+        assert "OLD-MPN-1" in all_mpns, "Match created 10 days ago should be visible (7-day filter must be removed)"
+
+    def test_old_match_count_consistent_with_badge(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """Badge count and list length must agree for old status=new matches."""
+        from app.services.proactive_service import get_match_count, get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="OLD-MPN-2")
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
+            mpn="OLD-MPN-2",
+            status="new",
+        )
+        ten_days_ago = datetime.now(timezone.utc) - timedelta(days=10)
+        match.created_at = ten_days_ago
+        db_session.commit()
+
+        badge_count = get_match_count(db_session, test_user.id)
+        list_result = get_matches_for_user(db_session, test_user.id, status="new")
+        list_total = list_result["stats"]["total"]
+        assert badge_count == list_total, f"Badge count ({badge_count}) must equal list total ({list_total})"
+
+
+# ── Change 2: Do-Not-Offer backend (service-level) ─────────────────────────
+
+
+class TestDoNotOfferService:
+    """Change 2: triggering do-not-offer creates a ProactiveDoNotOffer row and
+    the match no longer appears in get_matches_for_user."""
+
+    def test_dno_suppresses_match_in_list(self, db_session, test_user, test_company, test_customer_site, test_offer):
+        """After adding a DNO record, the match must not appear in
+        get_matches_for_user."""
+        from app.models.intelligence import ProactiveDoNotOffer
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(db_session, test_user, test_customer_site, mpn="DNO-MPN-1")
+        match = _make_match(
+            db_session,
+            offer=test_offer,
+            requirement=req_item,
+            requisition=archived_req,
+            site=test_customer_site,
+            user=test_user,
+            mpn="DNO-MPN-1",
+            status="new",
+            company_id=test_company.id,
+        )
+        db_session.commit()
+
+        # Verify it appears before DNO
+        before = get_matches_for_user(db_session, test_user.id, status="new")
+        before_mpns = [m["mpn"] for g in before["groups"] for m in g["matches"]]
+        assert "DNO-MPN-1" in before_mpns
+
+        # Add DNO record
+        dno = ProactiveDoNotOffer(
+            mpn="DNO-MPN-1",
+            company_id=test_company.id,
+            created_by_id=test_user.id,
+        )
+        db_session.add(dno)
+        db_session.commit()
+
+        after = get_matches_for_user(db_session, test_user.id, status="new")
+        after_mpns = [m["mpn"] for g in after["groups"] for m in g["matches"]]
+        assert "DNO-MPN-1" not in after_mpns, "Match suppressed by do-not-offer must not appear in list"

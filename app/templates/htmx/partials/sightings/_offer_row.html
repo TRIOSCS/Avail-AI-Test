@@ -3,6 +3,7 @@
    Kebab: Edit opens the offer modal; pending offers show Approve/Reject; active or
    approved offers show Reconfirm/Mark Sold; all show Delete. The mutating actions
    (review/reconfirm/mark-sold/delete) re-render #sightings-offers-panel. #}
+{% from "htmx/partials/offers/_field_macros.html" import qual_badge %}
 {% set sc = {
   'active': 'bg-emerald-50 text-emerald-700',
   'pending_review': 'bg-amber-50 text-amber-700',
@@ -12,14 +13,16 @@
   'won': 'bg-emerald-50 text-emerald-700',
   'expired': 'bg-gray-100 text-gray-500',
 } %}
-<div id="offer-row-{{ o.id }}" class="group px-2 py-1.5 hover:bg-gray-50/50" x-data="{ open: false }">
+<div id="offer-row-{{ o.id }}" class="group px-2 py-1.5 hover:bg-gray-50/50" x-data="{ open: false, expand: false }">
   <div class="flex items-center gap-2">
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2">
-        <span class="font-medium text-gray-900 text-sm truncate">{{ o.vendor_name or '—' }}</span>
+        <button @click.stop="expand = !expand"
+                class="font-medium text-gray-900 text-sm truncate hover:text-brand-600 text-left">{{ o.vendor_name or '—' }}</button>
         <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
           {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
         </span>
+        {{ qual_badge(o) }}
       </div>
       <div class="text-[11px] text-gray-400 mt-0.5 font-mono">
         {{ '$%.4f'|format(o.unit_price) if o.unit_price is not none else 'RFQ' }}
@@ -71,5 +74,52 @@
                 class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>
       </div>
     </div>
+  </div>
+  {# Qualification detail — expands on vendor-name click #}
+  <div x-show="expand" x-cloak class="mt-1.5 ml-1 pb-1 text-[11px] text-gray-600 space-y-1 border-l-2 border-gray-100 pl-2">
+    {% set q = o.qualification or {} %}
+    {% if o.qualification_note %}
+    <p class="text-gray-700">{{ o.qualification_note }}</p>
+    {% endif %}
+    {% if q.get('provenance_story') %}
+    <p class="text-gray-500"><span class="font-medium text-gray-600">Provenance:</span> {{ q.provenance_story }}</p>
+    {% endif %}
+    {% if q.get('terms') %}
+    <p class="text-gray-500"><span class="font-medium text-gray-600">Terms:</span> {{ q.terms }}</p>
+    {% endif %}
+    {% if q.get('lead_time_reason') %}
+    <p class="text-gray-500"><span class="font-medium text-gray-600">Lead time:</span> {{ q.lead_time_reason }}</p>
+    {% endif %}
+    {# ── One-tap vendor request chips ─────────────────────────────── #}
+    <div class="flex flex-wrap gap-1 pt-1">
+      {% set kind_labels = {'images': 'Request images', 'fpq': 'Request FPQ', 'cert': 'Request cert', 'pkg_qty': 'Request pkg qty'} %}
+      {% for kind_key in ['images', 'fpq', 'cert', 'pkg_qty'] %}
+      <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/request"
+              hx-vals='{"kind":"{{ kind_key }}"}'
+              hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+              class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+        {{ kind_labels[kind_key] }}
+      </button>
+      {% endfor %}
+    </div>
+    {# ── Logged requests listing (all statuses) ────────────────────── #}
+    {% set requests = q.get('requests', []) %}
+    {% if requests %}
+    {% set kind_display = {'images': 'Images', 'fpq': 'FPQ', 'cert': 'Cert', 'pkg_qty': 'Pkg qty'} %}
+    {% set status_colors = {'pending': 'bg-amber-50 text-amber-700', 'sent': 'bg-blue-50 text-blue-700'} %}
+    <div class="flex flex-wrap gap-1 pt-0.5">
+      {% for r in requests %}
+      {% set r_kind = r.get('kind', '') %}
+      {% set r_status = r.get('status', '') %}
+      {% set color = status_colors.get(r_status, 'bg-gray-100 text-gray-500') %}
+      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ color }}">
+        {{ kind_display.get(r_kind, r_kind|capitalize) }}{% if r_status != 'pending' %} — {{ r_status }}{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+    {% endif %}
+    {% if not o.qualification_note and not q.get('provenance_story') and not q.get('terms') and not q.get('lead_time_reason') and not requests %}
+    <p class="text-gray-400 italic">No qualification details recorded.</p>
+    {% endif %}
   </div>
 </div>

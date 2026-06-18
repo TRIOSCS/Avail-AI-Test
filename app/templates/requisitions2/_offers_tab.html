@@ -1,0 +1,56 @@
+{#
+  _offers_tab.html — Read-focused offers list for the requisitions2 detail panel.
+  Mirrors the Parts tab table in the same panel: real aligned columns
+  (Vendor | Qty | Unit $ | Lead | Status).
+  Called by: GET /requisitions2/{id}/offers → lazy-loaded into #rq2-offers-pane
+  Context vars: offers (list[Offer]), req (dict with id)
+  Depends on: Tailwind. Status-pill color map reused from sightings/_offer_row.html.
+#}
+{% set sc = {
+  'active': 'bg-emerald-50 text-emerald-700',
+  'approved': 'bg-emerald-50 text-emerald-700',
+  'won': 'bg-emerald-50 text-emerald-700',
+  'pending_review': 'bg-amber-50 text-amber-700',
+  'rejected': 'bg-rose-50 text-rose-700',
+  'sold': 'bg-gray-100 text-gray-600',
+  'expired': 'bg-gray-100 text-gray-600',
+} %}
+{% if offers %}
+<div class="overflow-x-auto">
+  <table class="min-w-full divide-y divide-gray-200 text-sm">
+    <thead class="bg-gray-50">
+      <tr>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit $</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead</th>
+        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-gray-100">
+      {% for o in offers %}
+      <tr class="hover:bg-gray-50">
+        <td class="px-4 py-2">
+          <div class="text-gray-900">{{ o.vendor_name or '—' }}</div>
+          {% if o.requirement and o.requirement.primary_mpn %}
+          <div class="text-[11px] text-gray-400 font-mono mt-0.5">{{ o.requirement.primary_mpn }}</div>
+          {% endif %}
+        </td>
+        <td class="px-4 py-2 text-right text-gray-600">{{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }}</td>
+        <td class="px-4 py-2 text-right text-gray-600 font-mono">{{ '${:,.4f}'.format(o.unit_price) if o.unit_price is not none else 'RFQ' }}</td>
+        <td class="px-4 py-2 text-gray-600">{{ o.lead_time or '—' }}</td>
+        <td class="px-4 py-2">
+          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
+            {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
+          </span>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="px-5 py-8 text-center text-sm text-gray-400">
+  No offers yet for this requisition.
+</div>
+{% endif %}
