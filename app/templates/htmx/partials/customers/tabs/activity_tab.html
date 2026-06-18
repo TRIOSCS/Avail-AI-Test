@@ -214,6 +214,13 @@
 
       {% endfor %}
     </div>
+
+    {# ── Truncation Footer ─────────────────────────────────── #}
+    {% if timeline_truncated %}
+    <div class='px-4 py-2 bg-gray-50 border-t border-gray-200'>
+      <p class='text-xs text-gray-400'>Showing most recent activity — older history may not appear.</p>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 

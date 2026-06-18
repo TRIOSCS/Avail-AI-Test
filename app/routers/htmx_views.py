@@ -5071,6 +5071,10 @@ async def company_tab(
         # Merge all three sources into a single chronological timeline
         timeline = build_account_timeline(contacts, quotes, activities, req_map=req_map)
 
+        # Compute truncation flag: True if ANY source hit its limit
+        # (RFQ .limit(30), quotes .limit(20), activities .limit(30))
+        timeline_truncated = len(contacts) >= 30 or len(quotes) >= 20 or len(activities) >= 30
+
         # Load email intelligence for email activities (retained for potential future use)
         email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
         email_intel_map: dict = {}
@@ -5085,6 +5089,7 @@ async def company_tab(
             {
                 "company": company,
                 "timeline": timeline,
+                "timeline_truncated": timeline_truncated,
                 # Keep raw lists available for summary counts
                 "contacts": contacts,
                 "quotes": quotes,

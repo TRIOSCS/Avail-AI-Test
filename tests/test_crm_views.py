@@ -1577,3 +1577,143 @@ class TestUnifiedTimelineHelper:
         events = build_account_timeline([rfq], [quote], [act], req_map={})
         assert events[0]["ts"] == new
         assert events[-1]["ts"] == old
+
+
+class TestActivityTabTruncation:
+    """Test that the activity timeline indicates when results are truncated."""
+
+    def test_activity_tab_shows_truncation_footer_when_rfq_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >30 RFQ contacts exist, the timeline shows the truncation footer."""
+        from app.models.offers import Contact as RfqContact
+        from app.models.sourcing import Requisition
+
+        company = Company(name="Busy Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create a requisition for the company
+        req = Requisition(name="RFQ-001", customer_name=company.name, company_id=company.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+
+        # Create 31 RFQ contacts (exceeds .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(31):
+            contact = RfqContact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="rfq",
+                vendor_name=f"Vendor {i:02d}",
+                vendor_contact="test@example.com",
+                subject=f"RFQ {i}",
+                status="sent",
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_shows_truncation_footer_when_quote_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >20 quotes exist, the timeline shows the truncation footer."""
+        from decimal import Decimal
+
+        from app.models.crm import CustomerSite
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        company = Company(name="Quote Busy Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create a site for the company
+        site = CustomerSite(company_id=company.id, site_name="Main")
+        db_session.add(site)
+        db_session.flush()
+
+        # Create a requisition for the company to link quotes
+        req = Requisition(name="QT-REQ-001", company_id=company.id, customer_site_id=site.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+
+        # Create 21 quotes (exceeds .limit(20))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(21):
+            quote = Quote(
+                requisition_id=req.id,
+                customer_site_id=site.id,
+                quote_number=f"Q-{i:03d}",
+                status="sent",
+                subtotal=Decimal("1000.00"),
+                total_cost=Decimal("1000.00"),
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(quote)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_shows_truncation_footer_when_activity_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >30 activities exist, the timeline shows the truncation footer."""
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Active Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create 31 activity logs (exceeds .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(31):
+            activity = ActivityLog(
+                company_id=company.id,
+                activity_type="sales_note",
+                channel="manual",
+                notes=f"Activity {i}",
+                is_meaningful=True,
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(activity)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_no_truncation_footer_when_under_limits(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When all sources are under their limits, no truncation footer appears."""
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Small Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create just 5 activities (well under .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(5):
+            activity = ActivityLog(
+                company_id=company.id,
+                activity_type="sales_note",
+                channel="manual",
+                notes=f"Activity {i}",
+                is_meaningful=True,
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(activity)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        # Truncation footer should NOT appear
+        assert "Showing most recent activity" not in resp.text
