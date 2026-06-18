@@ -180,6 +180,7 @@ class SiteContact(Base):
     is_primary = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     contact_status = Column(String(20), default="new")
+    do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # CRM cadence — contact-level clocks
     last_activity_at = Column(UTCDateTime)

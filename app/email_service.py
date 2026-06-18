@@ -172,6 +172,36 @@ async def send_batch_rfq(
             )
             continue
 
+        # DNC check — skip any email address that belongs to a do-not-contact
+        # SiteContact. Reported as "skipped" (same mechanism as no-email), with
+        # an explicit "do-not-contact" reason so the caller can surface it
+        # distinctly (compliance: the address must never appear in sendMail).
+        from .models.crm import SiteContact
+
+        dnc_match = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.email == email,
+                SiteContact.do_not_contact.is_(True),
+            )
+            .first()
+        )
+        if dnc_match:
+            logger.warning(
+                "RFQ skipped — do-not-contact flag set for vendor '{}' ({})",
+                group.get("vendor_name"),
+                email,
+            )
+            results.append(
+                {
+                    "vendor_name": group.get("vendor_name"),
+                    "vendor_email": email,
+                    "status": "skipped",
+                    "error": "do-not-contact",
+                }
+            )
+            continue
+
         html_body = _build_html_body(group["body"])
         raw_subject = group["subject"]
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject

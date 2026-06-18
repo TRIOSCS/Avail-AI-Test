@@ -721,7 +721,19 @@ def log_outreach_initiated(
     last_activity_at on the company and site so staleness sorting reflects
     the touch immediately. Re-clicks within OUTREACH_DEDUP_SECONDS return the
     existing record instead of duplicating it. Caller commits.
+
+    Raises ValueError if site_contact_id refers to a DNC contact — caller must
+    convert this to a 403.
     """
+    # DNC check — must be enforced before any log is written so the flag holds
+    # even when the UI is bypassed (e.g. direct API calls).
+    if site_contact_id:
+        from ..models.crm import SiteContact
+
+        contact = db.get(SiteContact, site_contact_id)
+        if contact and contact.do_not_contact:
+            raise ValueError(f"Contact {site_contact_id} is marked do-not-contact")
+
     if channel not in _OUTREACH_CHANNEL_MAP:
         raise ValueError(f"Unknown outreach channel: {channel}")
     activity_type, log_channel, event_type, snapshot_col = _OUTREACH_CHANNEL_MAP[channel]
