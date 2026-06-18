@@ -83,9 +83,7 @@ class TestBottomNavReporting:
         """mobile_nav.html nav_items tuple contains the 'reporting' entry."""
         import pathlib
 
-        template_path = pathlib.Path(
-            "/root/availai/.claude/worktrees/p5-reporting/app/templates/htmx/partials/shared/mobile_nav.html"
-        )
+        template_path = pathlib.Path("app/templates/htmx/partials/shared/mobile_nav.html")
         src = template_path.read_text()
         assert "('reporting'," in src or "('reporting'" in src, "reporting nav item missing"
         assert "Reporting" in src, "Reporting label missing"
@@ -94,9 +92,7 @@ class TestBottomNavReporting:
         """mobile_nav.html no longer has 'buy-plans' as a primary nav item."""
         import pathlib
 
-        template_path = pathlib.Path(
-            "/root/availai/.claude/worktrees/p5-reporting/app/templates/htmx/partials/shared/mobile_nav.html"
-        )
+        template_path = pathlib.Path("app/templates/htmx/partials/shared/mobile_nav.html")
         src = template_path.read_text()
         # nav_items tuple entries are ('id', 'Label', ...) — 'buy-plans' must be gone as a tuple entry
         assert "('buy-plans'," not in src, "'buy-plans' nav item still present in nav_items"
@@ -105,9 +101,7 @@ class TestBottomNavReporting:
         """mobile_nav.html URL map maps /v2/reporting to 'reporting'."""
         import pathlib
 
-        template_path = pathlib.Path(
-            "/root/availai/.claude/worktrees/p5-reporting/app/templates/htmx/partials/shared/mobile_nav.html"
-        )
+        template_path = pathlib.Path("app/templates/htmx/partials/shared/mobile_nav.html")
         src = template_path.read_text()
         assert "'/v2/reporting':'reporting'" in src
 
@@ -116,9 +110,7 @@ class TestBottomNavReporting:
         plans')."""
         import pathlib
 
-        template_path = pathlib.Path(
-            "/root/availai/.claude/worktrees/p5-reporting/app/templates/htmx/partials/shared/mobile_nav.html"
-        )
+        template_path = pathlib.Path("app/templates/htmx/partials/shared/mobile_nav.html")
         src = template_path.read_text()
         assert "'/v2/buy-plans':'reporting'" in src
         assert "'/v2/buy-plans':'buy-plans'" not in src
