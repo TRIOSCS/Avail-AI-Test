@@ -412,7 +412,7 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
             data = await gc.get_json(
                 "/me/mailFolders/sentItems/messages",
                 params={
-                    "$top": "25",
+                    "$top": "50",
                     "$orderby": "sentDateTime desc",
                     "$select": "id,conversationId,subject,toRecipients",
                 },
