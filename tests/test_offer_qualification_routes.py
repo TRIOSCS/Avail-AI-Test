@@ -60,3 +60,23 @@ def test_legacy_used_normalizes_to_pulls(client, db_session, test_requisition):
     )
     o = db_session.query(Offer).filter_by(vendor_name="Legacy").one()
     assert o.condition == "pulls"
+
+
+def test_modal_open_prefills_country_from_last_vendor_offer(client, db_session, test_requisition, test_user):
+    from app.vendor_utils import normalize_vendor_name
+
+    db_session.add(
+        Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="MemVendor",
+            vendor_name_normalized=normalize_vendor_name("MemVendor"),
+            mpn="LM317T",
+            country_of_origin="JP",
+            entered_by_id=test_user.id,
+        )
+    )
+    db_session.commit()
+    rid = test_requisition.requirements[0].id
+    resp = client.get(f"/v2/partials/sightings/{rid}/offer-form", params={"vendor_name": "MemVendor"})
+    assert resp.status_code == 200
+    assert b"JP" in resp.content  # country prefilled into the form

@@ -48,6 +48,7 @@ from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
+from ..services.offer_qualification import prefill_from_vendor
 from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
@@ -2327,6 +2328,9 @@ async def sightings_offer_form(
             "moq": moq,
             "lead_time": f"{lead_days} days" if lead_days else "",
         }
+        remembered = prefill_from_vendor(db, normalize_vendor_name(vendor_name))
+        for k, v in remembered.items():
+            prefill.setdefault(k, v)  # only fill empty keys; buyer overrides
     ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": None}
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
