@@ -232,6 +232,10 @@ def log_email_activity(
     db.add(record)
     db.flush()
 
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
+
     if match:
         # Update last_activity_at on the matched entity
         _update_last_activity(match, db, user_id)
@@ -305,6 +309,10 @@ def log_call_activity(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     if match:
         _update_last_activity(match, db, user_id)
@@ -560,6 +568,10 @@ def log_company_call(
     db.add(record)
     db.flush()
 
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
+
     bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
     return record
@@ -583,6 +595,10 @@ def log_company_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: note -> company {company_id} by user {user_id}")
@@ -701,6 +717,10 @@ def log_outreach_initiated(
     db.add(record)
     db.flush()
 
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
+
     bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Outreach logged: {channel} -> company {company_id} by user {user_id}")
     return record
@@ -733,6 +753,10 @@ def log_site_contact_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
@@ -788,6 +812,10 @@ def log_vendor_call(
     db.add(record)
     db.flush()
 
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
+
     now = datetime.now(timezone.utc)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
         {"last_activity_at": now}, synchronize_session=False
@@ -821,6 +849,10 @@ def log_vendor_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     now = datetime.now(timezone.utc)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
@@ -958,6 +990,10 @@ def log_activity(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     if company_id:
         _update_last_activity({"type": "company", "id": company_id}, db)

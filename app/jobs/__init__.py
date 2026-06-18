@@ -9,6 +9,7 @@ from loguru import logger
 
 def register_all_jobs(scheduler, settings):
     """Register all background jobs from domain modules."""
+    from .cadence_jobs import register_cadence_jobs
     from .core_jobs import register_core_jobs
     from .eight_by_eight_jobs import register_eight_by_eight_jobs
     from .email_jobs import register_email_jobs
@@ -23,6 +24,7 @@ def register_all_jobs(scheduler, settings):
     from .task_jobs import register_task_jobs
     from .teams_call_jobs import register_teams_call_jobs
 
+    register_cadence_jobs(scheduler, settings)
     register_core_jobs(scheduler, settings)
     register_email_jobs(scheduler, settings)
     register_inventory_jobs(scheduler, settings)

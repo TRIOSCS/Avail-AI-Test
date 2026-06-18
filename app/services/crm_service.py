@@ -68,6 +68,41 @@ def staleness_tier(last_activity_at: datetime | None) -> str:
     return "recent"
 
 
+TIER_TARGET_DAYS = {"key": 7, "core": 14, "standard": 30, "prospect": 30}
+CADENCE_RED_DAYS = 30  # universal ceiling — every tier goes overdue past this
+
+_CLOCK_COLUMN = {"outbound": Company.last_outbound_at, "reply": Company.last_reply_at}
+
+
+def order_by_clock(query, clock: str, now=None):
+    """Order companies stalest-first: NULL clocks (never contacted) first, then oldest.
+
+    NULLs-first is portable across SQLite (tests) and PostgreSQL (prod) by
+    ordering on the IS-NULL flag before the timestamp.
+    """
+    col = _CLOCK_COLUMN[clock]
+    return query.order_by(col.isnot(None), col.asc())
+
+
+def cadence_state(tier: str | None, last_outbound_at: datetime | None, now: datetime | None = None) -> str:
+    """Cadence state from the OUTBOUND clock against the account's tier target.
+
+    Returns "new" (never touched), "on_target" (<= tier target), "due" (past target, <=
+    30d), or "overdue" (> 30d, for every tier).
+    """
+    if last_outbound_at is None:
+        return "new"
+    now = now or datetime.now(timezone.utc)
+    ts = last_outbound_at if last_outbound_at.tzinfo else last_outbound_at.replace(tzinfo=timezone.utc)
+    days = (now - ts).days
+    if days > CADENCE_RED_DAYS:
+        return "overdue"
+    target = TIER_TARGET_DAYS.get(tier or "standard", TIER_TARGET_DAYS["standard"])
+    if days > target:
+        return "due"
+    return "on_target"
+
+
 # Sort options for the CDM account workspace left panel. Default "oldest"
 # puts the longest-neglected accounts at the top (call-list order).
 CDM_SORTS = {
