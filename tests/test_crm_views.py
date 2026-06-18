@@ -866,7 +866,7 @@ class TestContactsTabP33:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         html = resp.text
         # HQ has 2 contacts; the count must appear near the site name
-        assert "2" in html
+        assert "2 contacts" in html
 
     def test_accordion_uses_alpine_xdata(self, client: TestClient, db_session, test_user):
         """Accordion groups use Alpine x-data with an open/expanded boolean."""
