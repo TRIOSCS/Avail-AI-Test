@@ -4,7 +4,6 @@
 import pytest
 
 from app.services.offer_qualification import (
-    QualificationError,
     apply_qualification,
     compose_note,
     compute_status,
@@ -101,7 +100,9 @@ def test_request_template():
         request_template("nope", "X")
 
 
-def test_apply_qualification_raises_on_missing_essential():
+def test_apply_qualification_incomplete_on_missing_essential():
+    # The canonical builder never blocks: a missing essential yields status
+    # "incomplete" (the gate lives in the buyer handlers), and a note is still composed.
     class _O:
         condition = "pulls"
         packaging = "Trays"
@@ -113,8 +114,9 @@ def test_apply_qualification_raises_on_missing_essential():
         qualification_status = None
 
     o = _O()
-    with pytest.raises(QualificationError):
-        apply_qualification(o)
+    apply_qualification(o)
+    assert o.qualification_status == "incomplete"
+    assert o.qualification_note == "Pulls — packaged in Trays."
 
 
 def test_apply_qualification_sets_note_and_status():
