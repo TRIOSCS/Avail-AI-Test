@@ -101,6 +101,9 @@ from .auth import _password_login_enabled
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
+_NAV_ID_ALIAS = {"buy-plans": "reporting", "quotes": "reporting"}
+
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
 _vite_manifest: dict = {}
@@ -278,6 +281,7 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
+@router.get("/v2/reporting", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -307,6 +311,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "buy-plans",
         "excess",
         "quotes",
+        "reporting",
         "prospecting",
         "proactive",
         "settings",
@@ -356,7 +361,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
 
-    ctx = _base_ctx(request, user, current_view)
+    nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
+    ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return template_response("htmx/base_page.html", ctx)
 

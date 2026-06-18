@@ -6,7 +6,7 @@ Depends on: app/dependencies (require_user), app/templates
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -116,26 +116,37 @@ async def crm_performance(
     return template_response("htmx/partials/crm/performance_tab.html", ctx)
 
 
-@router.get("/v2/partials/crm/reporting", response_class=HTMLResponse)
-async def crm_reporting(
+@router.get("/v2/partials/reporting", response_class=HTMLResponse)
+async def reporting_dashboard(
     request: Request,
-    days: int | None = Query(None, gt=0, le=3650),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render the CRM reporting dashboard: coverage, pipeline, funnel."""
-    from ...services.reporting_service import coverage_report, outcome_funnel, pipeline_report
+    """Render the Reporting section — pipeline/forecast + cadence coverage + team
+    performance + cross-account report links.
+
+    The Requisition IS the opportunity: pipeline/forecast (value × stage win-probability)
+    comes from forecast_service. Cadence coverage (by tier / by rep) comes from
+    reporting_service.coverage_report. Reuses the team-performance dashboard (no
+    duplication) and links to the demoted Buy-Plans / Quotes cross-account views.
+    Management visibility lives here, never the daily hub.
+    """
+    from ...services import forecast_service
+    from ...services.reporting_service import coverage_report
     from ...template_env import template_response
 
     ctx = {
         "request": request,
         "user": user,
+        "current_view": "reporting",
+        "users_scores": _build_user_scores(db),
+        "pipeline": forecast_service.pipeline_summary(db),
+        "pipeline_accounts": forecast_service.pipeline_by_account(db),
+        "pipeline_owners": forecast_service.pipeline_by_owner(db),
+        "funnel": forecast_service.conversion_funnel(db),
         "coverage": coverage_report(db),
-        "pipeline": pipeline_report(db, days=days),
-        "funnel": outcome_funnel(db, days=days or 90),
-        "days": days,
     }
-    return template_response("htmx/partials/crm/reporting_tab.html", ctx)
+    return template_response("htmx/partials/reporting/dashboard.html", ctx)
 
 
 @router.get("/api/crm/performance-metrics")
