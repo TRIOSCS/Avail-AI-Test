@@ -893,3 +893,81 @@ def test_aggregates_cph_across_sources(db_session):
     # newest-wins: price and date come from the buy_plan row (5 days ago), not avail_offer (60 days ago)
     assert m.customer_last_price == 20.00
     assert m.customer_last_purchased_at == buy_plan_date
+
+
+# ── Fix 1: live-offer gate tests ─────────────────────────────────────────
+
+
+def test_scan_excludes_pending_review_offer(db_session):
+    """run_proactive_scan: pending_review offer produces NO match (fix 1)."""
+    data = _setup_scenario(db_session)
+
+    _make_offer(
+        db_session,
+        data,
+        status="pending_review",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    from app.models.config import SystemConfig
+
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
+    db_session.commit()
+
+    result = run_proactive_scan(db_session)
+    assert result["matches_created"] == 0, "pending_review offer must not seed proactive matches"
+
+
+def test_scan_includes_active_offer(db_session):
+    """run_proactive_scan: active offer DOES produce a match (fix 1)."""
+    data = _setup_scenario(db_session)
+
+    _make_offer(
+        db_session,
+        data,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    from app.models.config import SystemConfig
+
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
+    db_session.commit()
+
+    result = run_proactive_scan(db_session)
+    assert result["matches_created"] >= 1, "active offer must seed proactive matches"
+
+
+def test_scan_excludes_expired_offer(db_session):
+    """run_proactive_scan: expired offer produces NO match (fix 1)."""
+    data = _setup_scenario(db_session)
+
+    _make_offer(
+        db_session,
+        data,
+        status="expired",
+        created_at=datetime.now(timezone.utc),
+    )
+
+    from app.models.config import SystemConfig
+
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
+    db_session.commit()
+
+    result = run_proactive_scan(db_session)
+    assert result["matches_created"] == 0, "expired offer must not seed proactive matches"
