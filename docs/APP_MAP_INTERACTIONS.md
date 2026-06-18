@@ -504,11 +504,17 @@ crm.offers functions directly (no logic duplication) and re-render the panel:
   POST .../offers/{id}/mark-sold -> mark_offer_sold
   DELETE .../offers/{id}         -> delete_offer
 
-"Convert to offer" sits on the collapsed vendor row (next to Build RFQ / Mark
-Unavail) and opens the modal prefilled from the VendorSightingSummary. The modal
-and the requisitions add-offer form share one field grid
-(offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
-entered offers appear in the Activity tab automatically.
+The Vendors tab is a **fitted-column table — Vendor | Qty | Best Price | Score | ⋯**
+where each vendor is its own `<tbody>` (a summary row carrying exactly one `<td>`
+per `<th>`, plus an expandable intel drawer in a sibling `<tr><td colspan="5">`).
+Status pill, phone (tel link) and the OOO / overlap / "via SUB-MPN" badges live
+inside the Vendor cell; **every action lives in the row's ⋯ kebab** (Build RFQ /
+Mark Unavail / Convert to offer for available vendors; Mark available / Verify in
+the unavailability states). A test guards the header↔cell count
+(`tests/test_panel_column_alignment.py`). "Convert to offer" opens the modal
+prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
+form share one field grid (offers/_offer_form_fields.html). Offer creation logs
+OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
@@ -2932,7 +2938,7 @@ the current implementation.
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 45 | CRUD, search, bulk archive/assign, claim |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |

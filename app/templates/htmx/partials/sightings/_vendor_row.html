@@ -1,12 +1,21 @@
-{# _vendor_row.html — Single vendor row with expandable intelligence.
+{# _vendor_row.html — One vendor rendered as its own <tbody>: a fitted-column
+   summary row (Vendor | Qty | Best Price | Score | ⋯ kebab) plus an expandable
+   detail drawer. Each vendor is a separate <tbody> so Alpine's per-vendor
+   `expanded` scope is isolated and the overflow vendors (beyond the visible 5)
+   can be gated individually on the table-level `vendorsExpanded` flag.
+
+   The header in detail.html declares exactly these 5 columns and the summary row
+   emits exactly one <td> per <th> — see tests/test_panel_column_alignment.py
+   (the "columns match data" invariant). Status, phone, OOO/overlap/sub-MPN badges
+   and the state hints all live INSIDE the Vendor cell; every action lives in the
+   kebab; the rich intel lives in the drawer.
+
    Called by: detail.html (loop include)
-   Depends on: source_badge.html, _macros.html
+   Depends on: source_badge.html
    Context: s (VendorSightingSummary), vs (vendor status string),
-            intel (vendor_intel dict for this vendor),
-            vendor_phone (str or None), requirement,
-            ooo_vendor (OOO contact or None),
-            overlap_counts, vendor_matched_mpns,
-            stale_days (int, from config)
+            is_overflow (bool — vendor beyond the visible-5 limit),
+            intel via vendor_intel, vendor_phones, ooo_map, overlap_counts,
+            vendor_matched_mpns, unavailable_intel, requirement, stale_days
 #}
 
 {% set intel = vendor_intel.get(s.vendor_name, {}) %}
@@ -15,258 +24,279 @@
 {# Single source of truth for the 'unavailable' dim/tint invariant — every
    unavailable-specific conditional below uses this flag, never the raw string. #}
 {% set is_unavailable = vs == 'unavailable' %}
-{# Three-state unavailability UI keyed off the reader-authority rule via the
-   annotated unavailable_intel (spec 2026-06-10-vendor-part-unavailability-design.md):
-   state 1 suppressed = pill 'unavailable' (active record + no unstamped row, or true
-   legacy flags); state 2 advisory = record exists but is no longer active (expired /
-   released) — row fully normal + gray history hint + amber verify; state 3 restock =
-   active record + an override-surfaced (unstamped) row — emerald chip + verify.
-   RFQ stays gated server-side while a record is active (states 1 and 3). #}
+{# Three-state unavailability UI (spec 2026-06-10-vendor-part-unavailability-design.md):
+   state 1 suppressed = pill 'unavailable'; state 2 advisory = record no longer active
+   (row normal + gray history hint + amber verify); state 3 restock = active record +
+   an override-surfaced (unstamped) row (emerald chip + verify). RFQ stays gated
+   server-side while a record is active (states 1 and 3). #}
 {% set unav = unavailable_intel.get(s.vendor_name) if unavailable_intel is defined else none %}
 {% set unav_advisory = unav is not none and not unav.is_active and not is_unavailable %}
 {% set unav_restock = unav is not none and unav.is_active and not is_unavailable and unav.has_unstamped_row %}
 
-<tr class="group border-b border-gray-50 last:border-0"
-    x-data="{ expanded: false }">
-  <td colspan="7" class="p-0">
-    {# ── Always-visible row ─────────────────────────────── #}
-    {# Status-aware row treatment: unavailable = red tint + dimmed, offer-in = green tint #}
-    {% set row_bg = 'bg-rose-50/60 hover:bg-rose-50/80' if is_unavailable
-       else ('bg-emerald-50/50 hover:bg-emerald-50/70' if vs == 'offer-in'
-       else 'hover:bg-gray-50/50') %}
-    <div class="flex items-center px-2 py-1.5 cursor-pointer transition-colors {{ row_bg }}"
-         @click="expanded = !expanded">
-      <div class="flex-1 min-w-0">
-        <div class="flex items-center gap-2">
-          <span class="font-medium text-sm {{ 'text-gray-400' if is_unavailable else 'text-gray-900' }}">{{ s.vendor_name }}</span>
-          {% set vs_styles = {
-            'sighting': 'bg-gray-100 text-gray-600',
-            'contacted': 'bg-blue-50 text-blue-700',
-            'offer-in': 'bg-emerald-100 text-emerald-700',
-            'unavailable': 'bg-rose-100 text-rose-700',
-            'blacklisted': 'bg-red-50 text-red-700',
-          } %}
-          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ vs_styles.get(vs, 'bg-gray-100 text-gray-600') }}">
-            {{ vs|replace('-', ' ')|capitalize }}
-          </span>
-          {% if unav_restock %}
-          {# Bordered emerald-50 chip — deliberately distinct from the solid
-             bg-emerald-100 offer-in pill (color-collision rule). #}
-          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
-                title="qty {{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '?' }} since marked — possible restock">
-            Possible restock
-          </span>
-          {% endif %}
-          {% if ooo %}
-          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
-            OOO{% if ooo.ooo_return_date %} until {{ ooo.ooo_return_date.strftime('%m/%d') }}{% endif %}
-          </span>
-          {% endif %}
-          {% set overlap = overlap_counts.get(s.vendor_name, 0) if overlap_counts is defined else 0 %}
-          {% if overlap > 1 %}
-          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">
-            Also on {{ overlap - 1 }} other req{{ 's' if overlap - 1 != 1 }}
-          </span>
-          {% endif %}
-          {% set matched = vendor_matched_mpns.get(s.vendor_name, []) if vendor_matched_mpns is defined else [] %}
-          {% set sub_matches = matched|reject("equalto", requirement.primary_mpn)|list %}
-          {% for mpn in sub_matches %}
-          <span class="inline-flex px-1 py-0.5 text-[9px] font-mono rounded bg-amber-50 text-amber-600 border border-amber-100">via {{ mpn }}</span>
-          {% endfor %}
-        </div>
-        {# Inline metrics: response rate + best price with freshness, then actions #}
-        <div class="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
-          {% if intel.get('response_rate') is not none %}
-          <span>{{ (intel.response_rate * 100)|int }}% response</span>
-          {% endif %}
-          {% if s.best_price %}
-          <span class="font-mono">${{ '%.2f'|format(s.best_price) }}
-            {% if intel.get('age_days') is not none %}
-            <span class="text-{{ 'amber-500' if intel.age_days > stale_days|default(3) else 'gray-300' }}">— {{ intel.age_days }}d ago</span>
+{% set overlap = overlap_counts.get(s.vendor_name, 0) if overlap_counts is defined else 0 %}
+{% set matched = vendor_matched_mpns.get(s.vendor_name, []) if vendor_matched_mpns is defined else [] %}
+{% set sub_matches = matched|reject("equalto", requirement.primary_mpn)|list %}
+
+{% set vs_styles = {
+  'sighting': 'bg-gray-100 text-gray-600',
+  'contacted': 'bg-blue-50 text-blue-700',
+  'offer-in': 'bg-emerald-100 text-emerald-700',
+  'unavailable': 'bg-rose-100 text-rose-700',
+  'blacklisted': 'bg-red-50 text-red-700',
+} %}
+{# Status-aware row treatment: unavailable = red tint + dimmed, offer-in = green tint.
+   The compact-table hover rule paints over the tr tint on hover (transient) — the at-a-
+   glance non-hover state carries the signal, matching the existing red/green treatment. #}
+{% set row_tint = 'bg-rose-50/60' if is_unavailable else ('bg-emerald-50/50' if vs == 'offer-in' else '') %}
+{% set name_color = 'text-gray-400' if is_unavailable else 'text-gray-900' %}
+{% set num_color = 'text-gray-400' if is_unavailable else 'text-gray-600' %}
+{% set score_color = 'text-gray-400' if (is_unavailable or s.score is none)
+   else ('text-emerald-600' if s.score >= 70 else ('text-amber-600' if s.score >= 40 else 'text-gray-500')) %}
+{# Blacklisted vendors expose no actions; everyone else gets a kebab. #}
+{% set has_actions = vs != 'blacklisted' %}
+
+<tbody x-data="{ expanded: false }"
+       {% if is_overflow %}x-show="vendorsExpanded" x-cloak{% endif %}>
+
+  {# ── Summary row — exactly 5 <td> to match the 5 <th> ─────────────── #}
+  <tr class="group cursor-pointer transition-colors {{ row_tint }}"
+      @click="expanded = !expanded">
+
+    {# 1 · Vendor (name + status + badges + phone + state hint) #}
+    <td class="px-2 py-1.5 align-top td-label">
+      <div class="flex items-start gap-1.5 min-w-0">
+        <svg :class="expanded ? 'rotate-180' : ''"
+             class="h-3 w-3 mt-1 flex-shrink-0 text-gray-300 transition-transform"
+             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="font-medium text-sm {{ name_color }}">{{ s.vendor_name }}</span>
+            <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ vs_styles.get(vs, 'bg-gray-100 text-gray-600') }}">
+              {{ vs|replace('-', ' ')|capitalize }}
+            </span>
+            {% if unav_restock %}
+            {# Bordered emerald-50 chip — deliberately distinct from the solid
+               bg-emerald-100 offer-in pill (color-collision rule). #}
+            <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200"
+                  title="qty {{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '?' }} since marked — possible restock">
+              Possible restock
+            </span>
             {% endif %}
-          </span>
+            {% if ooo %}
+            <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
+              OOO{% if ooo.ooo_return_date %} until {{ ooo.ooo_return_date.strftime('%m/%d') }}{% endif %}
+            </span>
+            {% endif %}
+            {% if overlap > 1 %}
+            <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">
+              Also on {{ overlap - 1 }} other req{{ 's' if overlap - 1 != 1 }}
+            </span>
+            {% endif %}
+            {% for mpn in sub_matches %}
+            <span class="inline-flex px-1 py-0.5 text-[9px] font-mono rounded bg-amber-50 text-amber-600 border border-amber-100">via {{ mpn }}</span>
+            {% endfor %}
+          </div>
+
+          {# Second line: phone + state hint (only rendered when there's something) #}
+          {% if vendor_phone or (is_unavailable and unav) or unav_advisory or unav_restock %}
+          <div class="flex items-center gap-2 mt-0.5 text-[11px] flex-wrap">
+            {% if vendor_phone %}
+            <a href="tel:{{ vendor_phone }}" @click.stop
+               class="inline-flex items-center gap-0.5 text-brand-500 hover:text-brand-700">
+              <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
+              {{ vendor_phone }}
+            </a>
+            {% endif %}
+            {# State 1 (suppressed): reason + note + age #}
+            {% if is_unavailable and unav %}
+            <span class="text-rose-400">{{ unav.reason_label }}</span>
+            {% if unav.note %}
+            <span class="text-rose-300 italic truncate max-w-[28ch] min-w-0" title="{{ unav.note }}">{{ unav.note }}</span>
+            {% endif %}
+            <span class="text-rose-300">{{ unav.age_days }}d ago</span>
+            {% endif %}
+            {# State 2 (expired/released advisory): gray italic hint #}
+            {% if unav_advisory %}
+            <span class="text-gray-400 italic truncate max-w-[36ch] min-w-0"
+                  title="Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label }}{% if unav.note %} — {{ unav.note }}{% endif %}{% if unav.marked_by %} · {{ unav.marked_by }}{% endif %}{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}">
+              Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label|lower }}
+            </span>
+            {% endif %}
+            {# State 3 (possible restock): qty delta + compressed history #}
+            {% if unav_restock %}
+            <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
+            <span class="text-gray-400 italic truncate max-w-[24ch]">was: {{ unav.reason_label|lower }}, {{ unav.age_days }}d ago</span>
+            {% endif %}
+          </div>
           {% endif %}
-          {# ── State 1 (suppressed): reason + note + age; Mark available is the only action ── #}
-          {% if is_unavailable and unav %}
-          <span class="text-rose-400">{{ unav.reason_label }}</span>
-          {% if unav.note %}
-          <span class="text-rose-300 italic truncate max-w-[28ch] min-w-0" title="{{ unav.note }}">{{ unav.note }}</span>
-          {% endif %}
-          <span class="text-rose-300">{{ unav.age_days }}d ago</span>
-          {% endif %}
+        </div>
+      </div>
+    </td>
+
+    {# 2 · Qty #}
+    <td class="px-2 py-1.5 text-right font-mono text-xs {{ num_color }}">{{ s.estimated_qty or '—' }}</td>
+
+    {# 3 · Best Price #}
+    <td class="px-2 py-1.5 text-right font-mono text-xs {{ num_color }}"
+        {% if s.best_price and intel.get('age_days') is not none %}title="seen {{ intel.age_days }}d ago"{% endif %}>
+      {% if s.best_price %}${{ '%.2f'|format(s.best_price) }}{% else %}—{% endif %}
+    </td>
+
+    {# 4 · Score #}
+    <td class="px-2 py-1.5 text-right font-mono text-xs {{ score_color }}">{{ (s.score|round|int ~ '%') if s.score is not none else '—' }}</td>
+
+    {# 5 · Actions (kebab) — @click.stop on the cell keeps menu clicks off the row #}
+    <td class="px-2 py-1.5 text-center w-8" @click.stop>
+      {% if has_actions %}
+      <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
+        <button @click.stop="open = !open" type="button"
+                class="p-1 text-gray-300 hover:text-gray-600 rounded transition-colors"
+                aria-label="Vendor actions">
+          <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+          </svg>
+        </button>
+        <div x-show="open" x-cloak
+             class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+          {# ── State 1 (suppressed): Mark available is the only action ── #}
           {% if is_unavailable %}
           <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-available"
                   hx-vals='{{ {"vendor_name": s.vendor_name}|tojson }}'
-                  hx-target="#sightings-detail"
-                  hx-swap="innerHTML"
+                  hx-target="#sightings-detail" hx-swap="innerHTML"
                   hx-confirm="Mark {{ s.vendor_name }} available again for this part?"
                   data-loading-disable
-                  @click.stop
-                  class="text-[10px] text-gray-400 hover:text-emerald-600 font-medium">
-            Mark available
-          </button>
+                  @click.stop="open = false"
+                  class="w-full text-left px-3 py-1.5 font-medium text-gray-400 hover:text-emerald-600">Mark available</button>
           {% endif %}
-          {# ── State 2 (expired/released advisory): gray italic hint + amber verify.
-                Within the unavailability treatment, amber appears ONLY on the verify
-                link (collision rule) — the OOO pill above is also amber but is a
-                separate, pre-existing treatment. The verify modal carries both
-                actions — re-arm and mark-available. ── #}
-          {% if unav_advisory %}
-          <span class="text-gray-400 italic truncate max-w-[36ch] min-w-0"
-                title="Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label }}{% if unav.note %} — {{ unav.note }}{% endif %}{% if unav.marked_by %} · {{ unav.marked_by }}{% endif %}{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}">
-            Marked unavailable {{ unav.age_days }}d ago — {{ unav.reason_label|lower }}
-          </span>
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
-                  class="text-[10px] text-amber-600 hover:text-amber-800 font-medium">
-            Verify availability
-          </button>
-          {% endif %}
-          {# ── State 3 (possible restock): qty delta + compressed history + emerald verify ── #}
-          {% if unav_restock %}
-          <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
-          <span class="text-gray-400 italic truncate max-w-[24ch]">was: {{ unav.reason_label|lower }}, {{ unav.age_days }}d ago</span>
-          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
-                  class="text-[10px] text-emerald-700 hover:text-emerald-900 font-medium">
-            Verify restock
-          </button>
-          {% endif %}
-          {# Actions — always visible on the collapsed row; @click.stop keeps a button press from toggling expand #}
+          {# ── Available / advisory / restock: full action set ── #}
           {% if vs != 'blacklisted' and not is_unavailable %}
-          {# Pill-styled action buttons (tiered emphasis): Build RFQ is the solid-brand
-             primary; Mark Unavail + Convert to offer are outline-pill secondaries. The
-             pill base + colors reuse the app's btn_primary/btn_secondary vocabulary so
-             these read as buttons, distinct from the soft-tinted status pills above. #}
-          <span class="flex items-center gap-1.5">
-            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'})"
-                    class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full transition-colors bg-brand-500 text-white hover:bg-brand-600">
-              Build RFQ
-            </button>
-            {# Opens the reason modal; on an advisory/restock row this doubles as the
-               re-arm (the modal's upsert refreshes the suppression window). #}
-            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'})"
-                    class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full transition-colors bg-white text-gray-500 border border-gray-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200">
-              Mark Unavail
-            </button>
-            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offer-form?vendor_name={{ s.vendor_name|urlencode }}&unit_price={{ s.best_price or '' }}&qty={{ s.estimated_qty or '' }}&moq={{ s.min_moq or '' }}&lead_days={{ s.best_lead_time_days or '' }}'})"
-                    class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full transition-colors bg-white text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
-              Convert to offer
-            </button>
-          </span>
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'}); open = false"
+                  class="w-full text-left px-3 py-1.5 font-medium text-brand-600 hover:bg-brand-50">Build RFQ</button>
+          {% if unav_advisory %}
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                  class="w-full text-left px-3 py-1.5 font-medium text-amber-600 hover:text-amber-800">Verify availability</button>
+          {% endif %}
+          {% if unav_restock %}
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                  class="w-full text-left px-3 py-1.5 font-medium text-emerald-700 hover:text-emerald-900">Verify restock</button>
+          {% endif %}
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offer-form?vendor_name={{ s.vendor_name|urlencode }}&unit_price={{ s.best_price or '' }}&qty={{ s.estimated_qty or '' }}&moq={{ s.min_moq or '' }}&lead_days={{ s.best_lead_time_days or '' }}'}); open = false"
+                  class="w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50">Convert to offer</button>
+          <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/unavailable-form?vendor_name={{ s.vendor_name|urlencode }}'}); open = false"
+                  class="w-full text-left px-3 py-1.5 text-gray-500 hover:bg-rose-50 hover:text-rose-600 border-t border-gray-100">Mark Unavail</button>
           {% endif %}
         </div>
       </div>
-
-      <div class="flex items-center gap-3 shrink-0">
-        <span class="font-mono text-xs {{ 'text-gray-400' if is_unavailable else 'text-gray-600' }}">{{ s.estimated_qty or '—' }} pcs</span>
-        {% set score_color = 'text-gray-400' if (is_unavailable or s.score is none) else ('text-emerald-600' if s.score >= 70 else ('text-amber-600' if s.score >= 40 else 'text-gray-500')) %}
-        <span class="font-mono text-xs {{ score_color }}">{{ (s.score|round|int ~ '%') if s.score is not none else '—' }}</span>
-        <svg :class="expanded ? 'rotate-180' : ''" class="h-3.5 w-3.5 text-gray-300 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </div>
-    </div>
-
-    {# ── Expandable detail ──────────────────────────────── #}
-    <div x-show="expanded" x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
-      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 py-2 text-xs">
-        {# ── Unavailability knowledge — first entry, full width ── #}
-        {% if unav and is_unavailable %}
-        <div class="col-span-2">
-          <span class="text-gray-400">What we learned:</span>
-          <span class="text-rose-600 font-medium">{{ unav.reason_label }}</span>
-          {% if unav.note %}<span class="italic text-gray-600">— {{ unav.note }}</span>{% endif %}
-          <span class="text-gray-400">· {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago</span>
-        </div>
-        {% elif unav_advisory or unav_restock %}
-        <div class="col-span-2">
-          <span class="text-gray-400">History:</span>
-          <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}</span>
-        </div>
-        {% if unav_restock %}
-        <div class="col-span-2">
-          <span class="text-gray-400">Changed:</span>
-          <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
-          {% if intel.get('age_days') is not none %}<span class="text-gray-400">· seen {{ intel.age_days }}d ago</span>{% endif %}
-        </div>
-        {% endif %}
-        {% endif %}
-
-        {% if intel.get('listing_count') %}
-        <div>
-          <span class="text-gray-400">Sources:</span>
-          <span class="text-gray-700">Found on {{ intel.listing_count }} source{{ 's' if intel.listing_count != 1 }}</span>
-        </div>
-        {% endif %}
-
-        {% if intel.get('source_types') %}
-        <div>
-          <span class="text-gray-400">Via:</span>
-          {% for src in intel.source_types[:3] %}
-            {% set source_name = src %}
-            {% include "htmx/partials/shared/source_badge.html" %}
-          {% endfor %}
-          {% if intel.source_types|length > 3 %}
-          <span class="text-gray-400 text-[10px]">+{{ intel.source_types|length - 3 }}</span>
-          {% endif %}
-        </div>
-        {% endif %}
-
-        {% if intel.get('tier') %}
-        <div>
-          <span class="text-gray-400">Evidence:</span>
-          <span class="text-gray-700">{{ intel.tier }}</span>
-        </div>
-        {% endif %}
-
-        {% if s.avg_price and s.best_price %}
-        <div>
-          <span class="text-gray-400">Price Range:</span>
-          <span class="font-mono text-gray-700">${{ '%.2f'|format(s.best_price) }} — ${{ '%.2f'|format(s.avg_price) }}</span>
-        </div>
-        {% endif %}
-
-        {% if intel.get('response_rate') is not none %}
-        <div>
-          <span class="text-gray-400">Response Rate:</span>
-          <span class="text-gray-700">{{ (intel.response_rate * 100)|int }}%</span>
-        </div>
-        {% endif %}
-
-        {% if intel.get('ghost_rate') is not none %}
-        <div>
-          <span class="text-gray-400">Ghost Rate:</span>
-          <span class="{{ 'text-rose-600' if intel.ghost_rate > 0.3 else 'text-gray-700' }}">{{ (intel.ghost_rate * 100)|int }}%</span>
-        </div>
-        {% endif %}
-
-        {% if intel.get('best_lead_time_days') %}
-        <div>
-          <span class="text-gray-400">Lead Time:</span>
-          <span class="text-gray-700">{{ intel.best_lead_time_days }} day{{ 's' if intel.best_lead_time_days != 1 }}</span>
-        </div>
-        {% endif %}
-
-        {% if intel.get('min_moq') %}
-        <div>
-          <span class="text-gray-400">MOQ:</span>
-          <span class="font-mono text-gray-700">{{ intel.min_moq }}</span>
-        </div>
-        {% endif %}
-
-        {% if vendor_phone %}
-        <div>
-          <span class="text-gray-400">Phone:</span>
-          <a href="tel:{{ vendor_phone }}" class="text-brand-500 hover:text-brand-700">{{ vendor_phone }}</a>
-        </div>
-        {% endif %}
-      </div>
-
-      {# explain_lead one-liner #}
-      {% if intel.get('explain_lead') %}
-      <p class="text-[11px] text-gray-500 italic border-t border-gray-100 pt-1.5 mt-1">
-        {{ intel.explain_lead }}
-      </p>
       {% endif %}
-    </div>
-  </td>
-</tr>
+    </td>
+  </tr>
+
+  {# ── Detail drawer — single colspan row; inner div carries the collapse anim ── #}
+  <tr x-show="expanded" x-cloak>
+    <td colspan="5" class="p-0">
+      <div x-show="expanded" x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
+        <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 py-2 text-xs">
+          {# ── Unavailability knowledge — first entry, full width ── #}
+          {% if unav and is_unavailable %}
+          <div class="col-span-2">
+            <span class="text-gray-400">What we learned:</span>
+            <span class="text-rose-600 font-medium">{{ unav.reason_label }}</span>
+            {% if unav.note %}<span class="italic text-gray-600">— {{ unav.note }}</span>{% endif %}
+            <span class="text-gray-400">· {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago</span>
+          </div>
+          {% elif unav_advisory or unav_restock %}
+          <div class="col-span-2">
+            <span class="text-gray-400">History:</span>
+            <span class="text-gray-600">Marked unavailable — {{ unav.reason_label|lower }}{% if unav.note %} — <span class="italic">{{ unav.note }}</span>{% endif %} · {% if unav.marked_by %}{{ unav.marked_by }}, {% endif %}{{ unav.age_days }}d ago{% if unav.released_by %} · released by {{ unav.released_by }}{% endif %}</span>
+          </div>
+          {% if unav_restock %}
+          <div class="col-span-2">
+            <span class="text-gray-400">Changed:</span>
+            <span class="font-mono text-emerald-600">{{ unav.qty_at_mark if unav.qty_at_mark is not none else '?' }} → {{ s.estimated_qty or '—' }}</span>
+            {% if intel.get('age_days') is not none %}<span class="text-gray-400">· seen {{ intel.age_days }}d ago</span>{% endif %}
+          </div>
+          {% endif %}
+          {% endif %}
+
+          {% if intel.get('listing_count') %}
+          <div>
+            <span class="text-gray-400">Sources:</span>
+            <span class="text-gray-700">Found on {{ intel.listing_count }} source{{ 's' if intel.listing_count != 1 }}</span>
+          </div>
+          {% endif %}
+
+          {% if intel.get('source_types') %}
+          <div>
+            <span class="text-gray-400">Via:</span>
+            {% for src in intel.source_types[:3] %}
+              {% set source_name = src %}
+              {% include "htmx/partials/shared/source_badge.html" %}
+            {% endfor %}
+            {% if intel.source_types|length > 3 %}
+            <span class="text-gray-400 text-[10px]">+{{ intel.source_types|length - 3 }}</span>
+            {% endif %}
+          </div>
+          {% endif %}
+
+          {% if intel.get('tier') %}
+          <div>
+            <span class="text-gray-400">Evidence:</span>
+            <span class="text-gray-700">{{ intel.tier }}</span>
+          </div>
+          {% endif %}
+
+          {% if s.avg_price and s.best_price %}
+          <div>
+            <span class="text-gray-400">Price Range:</span>
+            <span class="font-mono text-gray-700">${{ '%.2f'|format(s.best_price) }} — ${{ '%.2f'|format(s.avg_price) }}</span>
+          </div>
+          {% endif %}
+
+          {% if intel.get('response_rate') is not none %}
+          <div>
+            <span class="text-gray-400">Response Rate:</span>
+            <span class="text-gray-700">{{ (intel.response_rate * 100)|int }}%</span>
+          </div>
+          {% endif %}
+
+          {% if intel.get('ghost_rate') is not none %}
+          <div>
+            <span class="text-gray-400">Ghost Rate:</span>
+            <span class="{{ 'text-rose-600' if intel.ghost_rate > 0.3 else 'text-gray-700' }}">{{ (intel.ghost_rate * 100)|int }}%</span>
+          </div>
+          {% endif %}
+
+          {% if intel.get('best_lead_time_days') %}
+          <div>
+            <span class="text-gray-400">Lead Time:</span>
+            <span class="text-gray-700">{{ intel.best_lead_time_days }} day{{ 's' if intel.best_lead_time_days != 1 }}</span>
+          </div>
+          {% endif %}
+
+          {% if intel.get('min_moq') %}
+          <div>
+            <span class="text-gray-400">MOQ:</span>
+            <span class="font-mono text-gray-700">{{ intel.min_moq }}</span>
+          </div>
+          {% endif %}
+
+          {% if vendor_phone %}
+          <div>
+            <span class="text-gray-400">Phone:</span>
+            <a href="tel:{{ vendor_phone }}" @click.stop class="text-brand-500 hover:text-brand-700">{{ vendor_phone }}</a>
+          </div>
+          {% endif %}
+        </div>
+
+        {# explain_lead one-liner #}
+        {% if intel.get('explain_lead') %}
+        <p class="text-[11px] text-gray-500 italic border-t border-gray-100 pt-1.5 mt-1">
+          {{ intel.explain_lead }}
+        </p>
+        {% endif %}
+      </div>
+    </td>
+  </tr>
+</tbody>
