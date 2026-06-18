@@ -12,15 +12,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Requisitions — AvailAI</title>
   {# Vite-built CSS bundles — hash-named so cache-busting is automatic.
-     Falls back to source files if Vite manifest isn't loaded. #}
-  {% if vite_css %}
-    {% for css_file in vite_css %}
-    <link rel="stylesheet" href="/static/{{ css_file }}">
-    {% endfor %}
-  {% else %}
-    <link rel="stylesheet" href="/static/styles.css">
-    <link rel="stylesheet" href="/static/htmx_mobile.css">
-  {% endif %}
+     No source fallback: /static/styles.css is raw Tailwind (@tailwind ...) that
+     can't render and 404s via Caddy (serves dist) — matches base.html. #}
+  {% for css_file in vite_css|default([]) %}
+  <link rel="stylesheet" href="/static/{{ css_file }}">
+  {% endfor %}
   <style>
     /* Inline editing — keeps HTMX swap responsive */
     .rq2-editable:hover { background: #f0f4f8; cursor: cell; }
