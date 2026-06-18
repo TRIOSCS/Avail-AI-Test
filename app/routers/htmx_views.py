@@ -4730,6 +4730,86 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def build_account_timeline(contacts, quotes, activities, *, req_map):
+    """Merge RFQ contacts, quotes, and activity logs into a single sorted list.
+
+    Each event dict has the shape:
+        {ts, kind, channel, direction, title, detail, is_meaningful,
+         quality_score, quality_classification, raw}
+
+    ``kind`` is one of "rfq" | "quote" | "activity".
+    Events are sorted descending by ``ts`` (newest first).
+    ``raw`` carries the original ORM object for template use.
+
+    Called by: company_tab (activity branch) in htmx_views.py.
+    """
+    from datetime import datetime, timezone
+
+    _epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    events: list[dict] = []
+
+    for c in contacts or []:
+        ts = c.created_at or _epoch
+        events.append(
+            {
+                "ts": ts,
+                "kind": "rfq",
+                "channel": "email",
+                "direction": "outbound",
+                "title": c.vendor_name or "Unknown Vendor",
+                "detail": c.subject or "",
+                "is_meaningful": True,
+                "quality_score": None,
+                "quality_classification": None,
+                "raw": c,
+                "req": req_map.get(c.requisition_id) if req_map and c.requisition_id else None,
+            }
+        )
+
+    for q in quotes or []:
+        ts = q.created_at or _epoch
+        # Use won_revenue for won quotes; fall back to subtotal then total_cost
+        if q.status == "won" and q.won_revenue:
+            display_value = q.won_revenue
+        else:
+            display_value = q.subtotal or q.total_cost
+        events.append(
+            {
+                "ts": ts,
+                "kind": "quote",
+                "channel": "internal",
+                "direction": None,
+                "title": q.quote_number or "Quote",
+                "detail": "${:,.2f}".format(float(display_value)) if display_value else "",
+                "is_meaningful": True,
+                "quality_score": None,
+                "quality_classification": None,
+                "raw": q,
+                "display_value": display_value,
+            }
+        )
+
+    for a in activities or []:
+        ts = a.occurred_at or a.created_at or _epoch
+        events.append(
+            {
+                "ts": ts,
+                "kind": "activity",
+                "channel": a.channel,
+                "direction": a.direction,
+                "title": (a.activity_type or "").replace("_", " ").title(),
+                "detail": a.summary or a.notes or a.subject or "",
+                "is_meaningful": a.is_meaningful,
+                "quality_score": a.quality_score,
+                "quality_classification": a.quality_classification,
+                "raw": a,
+            }
+        )
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    return events
+
+
 def _company_quotes_query(db: Session, company):
     """Quotes belonging to an account: union of quotes linked via the
     company's customer sites OR via the company's requisitions (the latter
@@ -4988,7 +5068,14 @@ async def company_tab(
             .all()
         )
 
-        # Load email intelligence for email activities
+        # Merge all three sources into a single chronological timeline
+        timeline = build_account_timeline(contacts, quotes, activities, req_map=req_map)
+
+        # Compute truncation flag: True if ANY source hit its limit
+        # (RFQ .limit(30), quotes .limit(20), activities .limit(30))
+        timeline_truncated = len(contacts) >= 30 or len(quotes) >= 20 or len(activities) >= 30
+
+        # Load email intelligence for email activities (retained for potential future use)
         email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
         email_intel_map: dict = {}
         if email_external_ids:
@@ -5001,6 +5088,9 @@ async def company_tab(
         ctx.update(
             {
                 "company": company,
+                "timeline": timeline,
+                "timeline_truncated": timeline_truncated,
+                # Keep raw lists available for summary counts
                 "contacts": contacts,
                 "quotes": quotes,
                 "activities": activities,

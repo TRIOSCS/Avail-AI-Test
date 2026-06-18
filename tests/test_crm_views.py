@@ -1200,3 +1200,520 @@ class TestCompanyDetailCadenceCard:
         # These exact strings were the old stat-row labels — they must be gone
         assert "Open Requisitions" not in html
         assert ">Created<" not in html
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P3-4: Unified Activity Timeline
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestUnifiedActivityTimeline:
+    """P3-4: activity tab merges RFQ contacts + quotes + activity logs into ONE
+    chronological timeline, fixes the q.total_amount bug, adds quality badges,
+    and exposes a hide-noise toggle.
+    """
+
+    # ── helpers ─────────────────────────────────────────────────────────────
+
+    def _make_company(self, db_session: Session, name: str = "Timeline Co") -> "Company":
+        from app.models.crm import Company
+
+        co = Company(name=name, is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        return co
+
+    def _make_requisition(self, db_session: Session, company, name: str = "REQ-001"):
+        from app.models.sourcing import Requisition
+
+        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+        return req
+
+    # ── route returns 200 with merged timeline ────────────────────────────
+
+    def test_activity_tab_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET /v2/partials/customers/{id}/tab/activity returns 200."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+
+    def test_all_three_event_kinds_appear_in_timeline(self, client: TestClient, db_session: Session, test_user: User):
+        """Timeline shows events from all three sources: RFQ, quote, activity."""
+        from decimal import Decimal
+
+        from app.models.intelligence import ActivityLog
+        from app.models.offers import Contact as RfqContact
+        from app.models.quotes import Quote
+
+        co = self._make_company(db_session, "MergeTest Co")
+        req = self._make_requisition(db_session, co)
+
+        # RFQ contact
+        rfq = RfqContact(
+            requisition_id=req.id,
+            user_id=test_user.id,
+            contact_type="rfq",
+            vendor_name="Acme Vendor",
+            status="sent",
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(rfq)
+
+        # Quote with real money value (subtotal — the correct field)
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-2026-001",
+            subtotal=Decimal("9999.00"),
+            status="sent",
+            created_at=datetime(2026, 6, 11, tzinfo=timezone.utc),
+        )
+        db_session.add(q)
+
+        # Meaningful activity
+        act = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=co.id,
+            subject="Follow-up RE: STM32",
+            direction="inbound",
+            is_meaningful=True,
+            quality_score=0.85,
+            quality_classification="meaningful",
+            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+        )
+        db_session.add(act)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+
+        # All three kinds present
+        assert "Acme Vendor" in html, "RFQ vendor missing from timeline"
+        assert "QT-2026-001" in html, "Quote number missing from timeline"
+        assert "Email Received" in html, "Activity entry missing from timeline"
+
+    def test_quote_value_renders_not_blank(self, client: TestClient, db_session: Session, test_user: User):
+        """Quote dollar value renders (guards the q.total_amount bug fix).
+
+        The old template used q.total_amount which does NOT exist on Quote, so every
+        quote row rendered blank.  Now uses q.subtotal (or won_revenue for won quotes).
+        A quote with subtotal=1234.56 must show that value.
+        """
+        from decimal import Decimal
+
+        from app.models.quotes import Quote
+
+        co = self._make_company(db_session, "QuoteBug Co")
+        req = self._make_requisition(db_session, co)
+
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-BUG-001",
+            subtotal=Decimal("1234.56"),
+            status="sent",
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        # Dollar value must appear — "1,234.56" formatted
+        assert "1,234.56" in resp.text, "Quote subtotal not rendered (total_amount bug still present)"
+
+    def test_won_quote_shows_won_revenue(self, client: TestClient, db_session: Session, test_user: User):
+        """Won quote shows won_revenue rather than subtotal."""
+        from decimal import Decimal
+
+        from app.models.quotes import Quote
+
+        co = self._make_company(db_session, "WonQuote Co")
+        req = self._make_requisition(db_session, co)
+
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-WON-001",
+            subtotal=Decimal("5000.00"),
+            won_revenue=Decimal("4800.00"),
+            status="won",
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "4,800.00" in resp.text, "Won revenue not rendered for won quote"
+
+    def test_meaningful_activity_has_quality_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """Meaningful activity entry carries a quality badge in the rendered HTML."""
+        from app.models.intelligence import ActivityLog
+
+        co = self._make_company(db_session, "QualityBadge Co")
+        act = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=co.id,
+            subject="Pricing request",
+            is_meaningful=True,
+            quality_score=0.9,
+            quality_classification="meaningful",
+            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+        )
+        db_session.add(act)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        # "Meaningful" badge text must appear
+        assert "meaningful" in resp.text.lower(), "Meaningful quality badge not rendered"
+
+    def test_noise_activity_has_hide_noise_marker(self, client: TestClient, db_session: Session, test_user: User):
+        """Non-meaningful (noise) activity has the hide-noise CSS class/marker."""
+        from app.models.intelligence import ActivityLog
+
+        co = self._make_company(db_session, "NoiseTest Co")
+        noise = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=co.id,
+            subject="Out of office: re-joining Mon",
+            is_meaningful=False,
+            quality_score=0.1,
+            quality_classification="noise",
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(noise)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        # Noise entries must carry the js-timeline-noise class for Alpine toggle
+        assert "js-timeline-noise" in resp.text, "Noise marker class missing from noise entry"
+
+    def test_hide_noise_toggle_control_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Hide-noise Alpine toggle control is rendered in the activity tab."""
+        from app.models.intelligence import ActivityLog
+
+        co = self._make_company(db_session, "ToggleTest Co")
+        act = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=co.id,
+            is_meaningful=False,
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(act)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+        # Alpine x-data toggle must be present
+        assert "hideNoise" in html, "Alpine hideNoise toggle not in template"
+        assert "Hide routine" in html or "hide routine" in html.lower(), "Hide routine toggle label not found"
+
+    def test_events_are_sorted_newest_first(self, client: TestClient, db_session: Session, test_user: User):
+        """Timeline events appear in descending chronological order (newest first)."""
+        from decimal import Decimal
+
+        from app.models.intelligence import ActivityLog
+        from app.models.quotes import Quote
+
+        co = self._make_company(db_session, "SortTest Co")
+        req = self._make_requisition(db_session, co)
+
+        # Older quote
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-SORT-OLD",
+            subtotal=Decimal("100.00"),
+            status="draft",
+            created_at=datetime(2026, 6, 1, tzinfo=timezone.utc),
+        )
+        db_session.add(q)
+
+        # Newer activity
+        act = ActivityLog(
+            user_id=test_user.id,
+            activity_type="sales_note",
+            channel="manual",
+            company_id=co.id,
+            notes="Follow-up call done",
+            is_meaningful=True,
+            created_at=datetime(2026, 6, 5, tzinfo=timezone.utc),
+        )
+        db_session.add(act)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+
+        # The newer activity should appear before (lower index) the older quote
+        act_pos = html.find("Follow-up call done")
+        quote_pos = html.find("QT-SORT-OLD")
+        assert act_pos != -1, "Activity note not found in timeline"
+        assert quote_pos != -1, "Quote not found in timeline"
+        assert act_pos < quote_pos, "Newer activity should appear before older quote (newest-first order)"
+
+    def test_no_separate_rfq_history_section(self, client: TestClient, db_session: Session, test_user: User):
+        """The old 'RFQ History' section heading is gone — replaced by unified
+        timeline."""
+        co = self._make_company(db_session, "NoSectionsTest Co")
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "RFQ History" not in resp.text, "Old 'RFQ History' section still present"
+        assert "Activity Log" not in resp.text, "Old 'Activity Log' section still present"
+
+
+class TestUnifiedTimelineHelper:
+    """Unit tests for the build_account_timeline helper function."""
+
+    def test_build_timeline_merges_three_sources(self):
+        """build_account_timeline produces events from all 3 source lists."""
+        from datetime import datetime, timezone
+        from decimal import Decimal
+        from types import SimpleNamespace
+
+        from app.routers.htmx_views import build_account_timeline
+
+        t1 = datetime(2026, 6, 10, tzinfo=timezone.utc)
+        t2 = datetime(2026, 6, 11, tzinfo=timezone.utc)
+        t3 = datetime(2026, 6, 12, tzinfo=timezone.utc)
+
+        rfq = SimpleNamespace(
+            vendor_name="Acme",
+            vendor_contact=None,
+            subject="Test RFQ",
+            status="sent",
+            created_at=t1,
+            requisition_id=1,
+        )
+        quote = SimpleNamespace(
+            id=1,
+            quote_number="QT-001",
+            subtotal=Decimal("500.00"),
+            total_cost=Decimal("490.00"),
+            won_revenue=None,
+            status="sent",
+            created_at=t2,
+        )
+        act = SimpleNamespace(
+            activity_type="email_received",
+            channel="email",
+            direction="inbound",
+            subject="Hello",
+            summary=None,
+            notes=None,
+            is_meaningful=True,
+            quality_score=0.8,
+            quality_classification="meaningful",
+            occurred_at=None,
+            created_at=t3,
+            contact_name="Alice",
+            vendor_card_id=None,
+            vendor_card=None,
+        )
+
+        events = build_account_timeline([rfq], [quote], [act], req_map={1: SimpleNamespace(id=1)})
+        kinds = {e["kind"] for e in events}
+        assert "rfq" in kinds
+        assert "quote" in kinds
+        assert "activity" in kinds
+
+    def test_build_timeline_sorted_desc(self):
+        """Events are sorted newest-first."""
+        from datetime import datetime, timezone
+        from types import SimpleNamespace
+
+        from app.routers.htmx_views import build_account_timeline
+
+        old = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        mid = datetime(2026, 6, 5, tzinfo=timezone.utc)
+        new = datetime(2026, 6, 9, tzinfo=timezone.utc)
+
+        rfq = SimpleNamespace(
+            vendor_name="V",
+            vendor_contact=None,
+            subject=None,
+            status="sent",
+            created_at=old,
+            requisition_id=None,
+        )
+        quote = SimpleNamespace(
+            id=2,
+            quote_number="Q",
+            subtotal=None,
+            total_cost=None,
+            won_revenue=None,
+            status="draft",
+            created_at=mid,
+        )
+        act = SimpleNamespace(
+            activity_type="sales_note",
+            channel="manual",
+            direction=None,
+            subject=None,
+            summary=None,
+            notes="note",
+            is_meaningful=True,
+            quality_score=None,
+            quality_classification=None,
+            occurred_at=None,
+            created_at=new,
+            contact_name=None,
+            vendor_card_id=None,
+            vendor_card=None,
+        )
+
+        events = build_account_timeline([rfq], [quote], [act], req_map={})
+        assert events[0]["ts"] == new
+        assert events[-1]["ts"] == old
+
+
+class TestActivityTabTruncation:
+    """Test that the activity timeline indicates when results are truncated."""
+
+    def test_activity_tab_shows_truncation_footer_when_rfq_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >30 RFQ contacts exist, the timeline shows the truncation footer."""
+        from app.models.offers import Contact as RfqContact
+        from app.models.sourcing import Requisition
+
+        company = Company(name="Busy Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create a requisition for the company
+        req = Requisition(name="RFQ-001", customer_name=company.name, company_id=company.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+
+        # Create 31 RFQ contacts (exceeds .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(31):
+            contact = RfqContact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="rfq",
+                vendor_name=f"Vendor {i:02d}",
+                vendor_contact="test@example.com",
+                subject=f"RFQ {i}",
+                status="sent",
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_shows_truncation_footer_when_quote_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >20 quotes exist, the timeline shows the truncation footer."""
+        from decimal import Decimal
+
+        from app.models.crm import CustomerSite
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        company = Company(name="Quote Busy Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create a site for the company
+        site = CustomerSite(company_id=company.id, site_name="Main")
+        db_session.add(site)
+        db_session.flush()
+
+        # Create a requisition for the company to link quotes
+        req = Requisition(name="QT-REQ-001", company_id=company.id, customer_site_id=site.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+
+        # Create 21 quotes (exceeds .limit(20))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(21):
+            quote = Quote(
+                requisition_id=req.id,
+                customer_site_id=site.id,
+                quote_number=f"Q-{i:03d}",
+                status="sent",
+                subtotal=Decimal("1000.00"),
+                total_cost=Decimal("1000.00"),
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(quote)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_shows_truncation_footer_when_activity_limit_hit(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When >30 activities exist, the timeline shows the truncation footer."""
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Active Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create 31 activity logs (exceeds .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(31):
+            activity = ActivityLog(
+                company_id=company.id,
+                activity_type="sales_note",
+                channel="manual",
+                notes=f"Activity {i}",
+                is_meaningful=True,
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(activity)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Showing most recent activity" in resp.text
+
+    def test_activity_tab_no_truncation_footer_when_under_limits(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """When all sources are under their limits, no truncation footer appears."""
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Small Corp", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        # Create just 5 activities (well under .limit(30))
+        base_ts = datetime.now(timezone.utc)
+        for i in range(5):
+            activity = ActivityLog(
+                company_id=company.id,
+                activity_type="sales_note",
+                channel="manual",
+                notes=f"Activity {i}",
+                is_meaningful=True,
+                created_at=base_ts - timedelta(hours=i),
+            )
+            db_session.add(activity)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        # Truncation footer should NOT appear
+        assert "Showing most recent activity" not in resp.text
