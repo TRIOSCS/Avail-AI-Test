@@ -71,6 +71,18 @@ def staleness_tier(last_activity_at: datetime | None) -> str:
 TIER_TARGET_DAYS = {"key": 7, "core": 14, "standard": 30, "prospect": 30}
 CADENCE_RED_DAYS = 30  # universal ceiling — every tier goes overdue past this
 
+_CLOCK_COLUMN = {"outbound": Company.last_outbound_at, "reply": Company.last_reply_at}
+
+
+def order_by_clock(query, clock: str, now=None):
+    """Order companies stalest-first: NULL clocks (never contacted) first, then oldest.
+
+    NULLs-first is portable across SQLite (tests) and PostgreSQL (prod) by
+    ordering on the IS-NULL flag before the timestamp.
+    """
+    col = _CLOCK_COLUMN[clock]
+    return query.order_by(col.isnot(None), col.asc())
+
 
 def cadence_state(tier: str | None, last_outbound_at: datetime | None, now: datetime | None = None) -> str:
     """Cadence state from the OUTBOUND clock against the account's tier target.
