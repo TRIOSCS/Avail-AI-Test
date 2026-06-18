@@ -146,6 +146,27 @@ async def dossier_specs(
     return template_response("htmx/partials/search/dossier_specs.html", ctx)
 
 
+@router.get("/v2/partials/search/dossier/datasheet-status", response_class=HTMLResponse)
+async def dossier_datasheet_status(
+    request: Request,
+    mpn: str = Query(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll target for the 'fetching datasheet…' chip.
+
+    Returns the datasheet block; stops polling (HTTP 286) once a copy is stored or a
+    search has been recorded.
+    """
+    card = _resolve_card(db, normalize_mpn_key(mpn))
+    ctx = _ctx(request, user)
+    ctx.update({"mpn": mpn.strip().upper(), "card": card})
+    resp = template_response("htmx/partials/search/dossier_datasheet_block.html", ctx)
+    if card is not None and (card.datasheet_captured_at or card.datasheet_searched_at):
+        resp.status_code = 286
+    return resp
+
+
 @router.get("/v2/partials/search/dossier/market", response_class=HTMLResponse)
 async def dossier_market(
     request: Request,
