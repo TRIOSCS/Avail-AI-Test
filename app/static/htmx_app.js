@@ -916,7 +916,16 @@ Alpine.data('materialsFilter', () => ({
         if (key.startsWith('sf_')) {
           const specKey = key.slice(3);
           try {
-            if (specKey.endsWith('_min') || specKey.endsWith('_max')) {
+            if (specKey.endsWith('__vals')) {
+              // Numeric common-value chips (P2): a comma-joined number list.
+              // Coerce each to a number and drop NaN so the chip :class membership
+              // check (which compares numbers) and the value_numeric IN predicate stay
+              // numeric — string entries would silently never match.
+              const nums = val.split(',').map(Number).filter(n => !isNaN(n));
+              if (nums.length > 0) {
+                this.subFilters[specKey] = nums;
+              }
+            } else if (specKey.endsWith('_min') || specKey.endsWith('_max')) {
               const num = parseFloat(val);
               if (!isNaN(num)) {
                 this.subFilters[specKey] = num;
@@ -1077,6 +1086,31 @@ Alpine.data('materialsFilter', () => ({
         }
       } else {
         this.subFilters[specKey].push(value);
+      }
+    }
+    if (window.innerWidth >= 1024) {
+      this.applyFilters();
+    }
+  },
+
+  // Numeric common-value chip toggle (P2). Maintains subFilters[specKey + '__vals']
+  // as an array of NUMBERS — the backend predicate is value_numeric IN (...), and the
+  // chip :class membership check (.includes()) compares against JS numbers. Mirrors
+  // toggleFilter's add/remove + delete-when-empty shape; the value is server-rendered
+  // from value_numeric (chip.value|tojson), so it is always a number.
+  toggleNumericChip(specKey, value) {
+    const key = specKey + '__vals';
+    if (!this.subFilters[key]) {
+      this.subFilters[key] = [value];
+    } else {
+      const idx = this.subFilters[key].indexOf(value);
+      if (idx >= 0) {
+        this.subFilters[key].splice(idx, 1);
+        if (this.subFilters[key].length === 0) {
+          delete this.subFilters[key];
+        }
+      } else {
+        this.subFilters[key].push(value);
       }
     }
     if (window.innerWidth >= 1024) {

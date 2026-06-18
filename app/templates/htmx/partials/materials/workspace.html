@@ -425,7 +425,7 @@
           <template x-for="[key, vals] in Object.entries(subFilters)" :key="key">
             <template x-for="val in (Array.isArray(vals) ? vals : [vals])" :key="key + val">
               <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
-                <span x-text="key.replace(/_/g, ' ') + ': ' + val"></span>
+                <span x-text="(key.endsWith('__vals') ? key.slice(0, -6) : key).replace(/_/g, ' ') + ': ' + val"></span>
                 <button @click="removeFilter(key, val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
               </span>
             </template>
