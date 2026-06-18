@@ -5730,6 +5730,135 @@ async def edit_company(
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
+# ── Merge Duplicate ─────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-preview", response_class=HTMLResponse)
+async def company_merge_preview(
+    request: Request,
+    company_id: int,
+    remove_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a preview of what will happen when remove_id is merged into company_id.
+
+    Shows counts: sites, contacts, activities that will be reassigned; confirms the
+    loser will be deleted. Used by the merge-confirm modal before the user commits.
+    """
+    from ..models.intelligence import ActivityLog as _AL
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    if keep.id == remove.id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    # Count what will move
+    site_count = db.query(sqlfunc.count(CustomerSite.id)).filter(CustomerSite.company_id == remove.id).scalar() or 0
+    contact_count = (
+        db.query(sqlfunc.count(SiteContact.id))
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id == remove.id)
+        .scalar()
+        or 0
+    )
+    activity_count = db.query(sqlfunc.count(_AL.id)).filter(_AL.company_id == remove.id).scalar() or 0
+    req_count = db.query(sqlfunc.count(Requisition.id)).filter(Requisition.company_id == remove.id).scalar() or 0
+
+    ctx = {
+        "request": request,
+        "keep": keep,
+        "remove": remove,
+        "site_count": site_count,
+        "contact_count": contact_count,
+        "activity_count": activity_count,
+        "req_count": req_count,
+    }
+    return template_response("htmx/partials/customers/_merge_preview.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/merge", response_class=HTMLResponse)
+async def company_merge(
+    request: Request,
+    company_id: int,
+    remove_id: int = Form(...),
+    confirmed: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge remove_id into company_id (the keeper).
+
+    Requires confirmed="true" to prevent accidental submissions. Calls the
+    canonical merge_companies() engine — no FK logic lives here.
+    POST is mandatory: this is a destructive, irreversible operation.
+    """
+    from ..services.company_merge_service import merge_companies as _merge
+
+    if confirmed.lower() != "true":
+        raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    if remove_id == company_id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    try:
+        result = _merge(company_id, remove_id, db)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    logger.info(
+        "Manual company merge: kept {} ({}), removed {} by {}",
+        company_id,
+        keep.name,
+        remove_id,
+        user.email,
+    )
+
+    # Redirect browser to keeper's detail page via HTMX redirect header
+    safe_name = html_mod.escape(keep.name or "")
+    response = HTMLResponse(
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
+        status_code=200,
+    )
+    response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"
+    return response
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-form", response_class=HTMLResponse)
+async def company_merge_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the merge-duplicate modal form for a company.
+
+    Renders a search input to find the duplicate and a submit button that triggers the
+    merge-preview step.
+    """
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    ctx = {"request": request, "keep": keep}
+    return template_response("htmx/partials/customers/_merge_form.html", ctx)
+
+
 @router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
 async def site_edit_form(
     request: Request,

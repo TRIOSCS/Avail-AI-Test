@@ -52,6 +52,18 @@
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
+        {# Merge duplicate — opens modal with search + confirm flow #}
+        <button type="button"
+                title="Merge duplicate into this account"
+                class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white
+                       px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50
+                       focus:outline-none focus:ring-2 focus:ring-brand-500"
+                hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
+                hx-target="#modal-content"
+                hx-swap="innerHTML"
+                @click="$dispatch('open-modal')">
+          Merge duplicate
+        </button>
       </div>
     </div>
 
