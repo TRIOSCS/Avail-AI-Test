@@ -1,8 +1,12 @@
-# Real Prospect Enrichment via a Credit-Aware Provider Router — Design
+# Real Prospect Enrichment — SP1: Credit-Aware Provider Router + Lusha
 
 **Date:** 2026-06-18
 **Status:** Approved (design); pending implementation plan
 **Owner:** prospecting
+**Program:** Sub-project 1 of 2. **SP2** = Clay async-primary layer (separate spec:
+`2026-06-18-prospect-enrichment-sp2-clay-async-design.md`). SP1 ships real enrichment via
+the *synchronous* providers now and stands up the router that SP2's Clay callback reuses as
+its **gap-fill engine**. SP1 has no Clay dependency and is independently shippable.
 
 ## Goal
 
@@ -31,8 +35,9 @@ it, so CRM/vendor enrichment also benefits. CRM enrichment will begin spending L
 credits — accepted.
 
 **Provider access (confirmed):** Lusha has a REST API key the worker can call inline
-(like Apollo). Clay is UI/MCP-only — it stays a Claude/manual seeding feed and is **out
-of scope** for in-app enrichment.
+(like Apollo). Clay has no synchronous API — its in-app integration is **SP2** (async
+webhook, Clay-primary), which reuses this router as its gap-fill engine. SP1 does not
+depend on Clay.
 
 ## Global Constraints
 
@@ -248,7 +253,8 @@ gains contacts/firmographics when at least one configured provider answers).
 
 ## Out of scope (explicit)
 
-- **Clay** in-app integration (UI/MCP-only; stays a manual/Claude seeding feed).
+- **Clay** async-primary integration — that is **SP2** (separate spec), not abandoned; it
+  builds on SP1's router as its synchronous gap-fill engine.
 - **Batch "Enrich top N"** UI/action (on-demand only).
 - **Per-provider monthly caps** (circuit-breaker only).
 - Persisting `buyer_ready_score`/`is_buyer_ready` as columns (separate parked item).
