@@ -9082,6 +9082,31 @@ async def proactive_list_partial(
     return template_response("htmx/partials/proactive/list.html", ctx)
 
 
+@router.post("/v2/partials/proactive/refresh", response_class=HTMLResponse)
+async def proactive_refresh(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger a proactive scan then return the matches list partial."""
+    from ..services.proactive_matching import run_proactive_scan
+    from ..services.proactive_service import get_matches_for_user
+
+    run_proactive_scan(db)
+
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
+    groups = result.get("groups", []) if isinstance(result, dict) else result
+    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
+
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = groups
+    ctx["sent"] = []
+    ctx["tab"] = "matches"
+    ctx["match_count"] = match_count
+    ctx["success_msg"] = ""
+    return template_response("htmx/partials/proactive/list.html", ctx)
+
+
 @router.post("/v2/partials/proactive/batch-dismiss", response_class=HTMLResponse)
 async def proactive_batch_dismiss(
     request: Request,
