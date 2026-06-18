@@ -7,8 +7,8 @@ Downgrade: drops the index + 3 columns. The 'used' -> 'pulls' data change is NOT
 Called by: alembic (upgrade/downgrade).
 Depends on: offers table.
 
-Revision ID: 111_offer_qualification
-Revises: 110_crm_cadence_clocks
+Revision ID: 112_offer_qualification
+Revises: 111_material_card_datasheets
 Create Date: 2026-06-17
 """
 
@@ -18,8 +18,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision = "111_offer_qualification"
-down_revision = "110_crm_cadence_clocks"
+revision = "112_offer_qualification"
+down_revision = "111_material_card_datasheets"
 branch_labels = None
 depends_on = None
 

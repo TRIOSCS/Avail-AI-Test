@@ -341,6 +341,58 @@ count rides the `done` SSE event as `off_target` and surfaces as a footnote in
 `#search-stats`. Cross-references (alternate/FRU part numbers) belong in "What we know",
 not the live-market offer list.
 
+**Auto-datasheet capture** — a fire-and-forget `capture_datasheet(mpn, user_id)` job is
+enqueued via `safe_background_task(..., suppress_in_testing=True)` on two triggers:
+(1) `dossier_hero` — every Part Dossier page-load; (2) `quick_source_rfq` /
+`quick_source_offer` + `add_requirements` (Requirements router) — whenever a part is
+added to an RFQ or the requirements list. The job opens its own DB session (request
+session is already closed) and follows this pipeline:
+
+```
+capture_datasheet(mpn, user_id)
+    |
+    +-- gate: card already has a datasheet row?          → skip (already stored)
+    +-- gate: datasheet_searched_at < 30 days?           → skip (negative cache)
+    |
+    +-- find_datasheet_url(card, mpn):
+    |       connector card.datasheet_url if present      → source="connector" (trusted)
+    |       else: Claude web_search (up to 6 uses)       → source="web" (untrusted)
+    |       TESTING env: web-search branch skipped
+    |
+    +-- download_pdf(url):
+    |       SSRF guard: scheme + per-hop IP check (blocks private/loopback/
+    |       link-local/multicast/reserved); follows ≤5 redirects, re-validates
+    |       each hop; 25 MB size cap; must begin with %PDF- magic bytes.
+    |
+    +-- source=="web": pdf_contains_mpn(pdf, mpn)?
+    |       pypdf extracts text from first 20 pages; MPN normalised to alnum-lower
+    |       key (≥4 chars); mismatch → stamp searched, discard (wrong file)
+    |
+    +-- cardless MPN + verified hit: resolve_material_card(mpn, db)
+    |       creates a card only on a *verified* hit (miss never creates a card)
+    |
+    +-- upload_bytes_to_onedrive(user, db,
+    |       folder="AvailAI/Datasheets/{card.id}",
+    |       name="{display_mpn}-datasheet.pdf")
+    |       → {onedrive_item_id, onedrive_url, size_bytes}
+    |
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 108)
+         UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
+```
+
+`material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
+`onedrive_url`, `source` ("connector"/"web"), `original_url`, `verified`, `captured_at`.
+`MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
+`datasheet_searched_at` (any attempt — gates the 30-day negative cache).
+
+**Dossier UI** (`dossier_datasheet_block.html`, included in `dossier_specs`) has three
+states: (a) `card.datasheets[0]` present → branded link "Datasheet (saved MMM DD, YYYY)"
+to the OneDrive copy; (b) `datasheet_searched_at` set but no captured copy →
+"No datasheet found (will retry)"; (c) neither stamp yet → "Fetching Datasheet…" spinner
+that polls `GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
+(`hx-trigger="every 15s"`). The status endpoint returns the same `dossier_datasheet_block`
+fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
+
 ### 2b. Streaming Part-Search (`/v2/partials/search/run`)
 
 ```

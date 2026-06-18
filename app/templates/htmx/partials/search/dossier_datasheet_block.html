@@ -1,0 +1,32 @@
+{# Datasheet (our stored copy preferred) + manufacturer pills.
+   Used by: dossier_specs.html ({% include %}) and the poll endpoint
+   GET /v2/partials/search/dossier/datasheet-status (same markup, 286 stops polling).
+
+   Context vars: card (MaterialCard | None), mpn (str). #}
+{% if card %}
+{% set saved = card.datasheets[0] if card.datasheets else None %}
+<div class="mt-4 flex flex-wrap items-center gap-2">
+  {% if saved %}
+  <a href="{{ saved.onedrive_url }}" target="_blank" rel="noopener noreferrer"
+     class="inline-flex items-center gap-1.5 rounded-lg border border-brand-300 px-3 py-1.5 text-xs font-medium text-brand-700 hover:bg-brand-50">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+    Datasheet (saved {{ saved.captured_at.strftime('%b %d, %Y') if saved.captured_at else '' }})
+  </a>
+  {% elif card.datasheet_searched_at and not card.datasheet_captured_at %}
+  <span class="inline-flex items-center gap-1.5 text-xs text-gray-400">No datasheet found (will retry)</span>
+  {% else %}
+  <span class="inline-flex items-center gap-1.5 text-xs text-gray-400"
+        hx-get="/v2/partials/search/dossier/datasheet-status?mpn={{ mpn|urlencode }}"
+        hx-trigger="every 15s" hx-target="this" hx-swap="outerHTML">
+    <svg class="h-3.5 w-3.5 animate-spin text-brand-400" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+    Fetching Datasheet…
+  </span>
+  {% endif %}
+  {% if card.datasheet_url and not saved %}
+  <a href="{{ card.datasheet_url }}" target="_blank" rel="noopener noreferrer" class="text-[11px] text-gray-400 hover:text-brand-600 underline">vendor link</a>
+  {% endif %}
+  {% if card.manufacturer %}
+  <span class="inline-flex items-center rounded-lg border border-brand-200 px-3 py-1.5 text-xs font-medium text-gray-600">{{ card.manufacturer }}</span>
+  {% endif %}
+</div>
+{% endif %}
