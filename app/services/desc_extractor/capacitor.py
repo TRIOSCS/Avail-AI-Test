@@ -44,6 +44,13 @@ _CANONICAL_CAP_UNIT = "pF"
 _FARAD_TO_PF = {"PF": 1, "NF": 1_000, "UF": 1_000_000, "ΜF": 1_000_000, "µF": 1_000_000, "MF": 1_000_000_000}
 _CAPACITANCE = re.compile(r"\b(\d+(?:\.\d+)?)\s?(PF|NF|UF|ΜF|µF|MF)\b")
 
+# Seeded capacitance numeric_range — record_spec performs NO range check, so this is the
+# only range gate (mirrors the voltage gate below); the drift guard pins it against
+# commodity_seeds.json. A token like "0PF" (0 pF) or "2000000UF" (2e12 pF) is out of the
+# seeded {0.1 .. 1e12} pF range and must emit no capacitance (a wrong facet value is
+# worse than a missing one).
+_CAP_MIN, _CAP_MAX = 0.1, 1_000_000_000_000
+
 # Seeded voltage_rating numeric_range — record_spec performs NO range check, so this is
 # the only range gate; the drift guard in tests pins it against commodity_seeds.json.
 _VOLT_MIN, _VOLT_MAX = 1, 10000
@@ -56,10 +63,12 @@ _DIELECTRIC = re.compile(r"\b(X7R|X5R|C0G|Y5V|NP0)\b")
 _TOLERANCE_VOCAB = {"±1%", "±5%", "±10%", "±20%"}
 # Distributor symmetric-tolerance forms: "10%", "+/-10%", "±10%" → seeded "±N%". The
 # ``±``/``+/-`` prefix is accepted and discarded. A BARE "<n>%" matches only when it is
-# NOT preceded by a lone +/- sign: a signed bound like the Y5V temperature coefficient
-# "-20%+80%" is asymmetric, not a symmetric tolerance, so it must never read as ±20%.
-# The trailing (?!\d) stops "10" matching inside "100%"-style tokens.
-_TOLERANCE = re.compile(r"(?:\+/-\s?|±\s?|(?<![-+\d]))(1|5|10|20)\s?%(?!\d)")
+# NOT preceded by a lone +/- sign, a digit, OR a decimal point: a signed bound like the
+# Y5V temperature coefficient "-20%+80%" is asymmetric, not a symmetric tolerance, so it
+# must never read as ±20%; and a decimal-prefixed percent like "0.5%"/"2.1%" must not let
+# the trailing "5"/"1" read as ±5%/±1% (10× wrong — the "." must block the bare match too,
+# exactly like a leading digit). The trailing (?!\d) stops "10" matching inside "100%".
+_TOLERANCE = re.compile(r"(?:\+/-\s?|±\s?|(?<![-+.\d]))(1|5|10|20)\s?%(?!\d)")
 
 _PACKAGE_VOCAB = {"0402", "0603", "0805", "1206", "1210"}
 # The exact EIA imperial case-code series (no character classes — phantom codes like
@@ -73,7 +82,9 @@ def _capacitance_pf(text: str) -> int | float | None:
     """Single capacitance in canonical pF, or None (no farad token / conflict)."""
     values: set[float] = set()
     for m in _CAPACITANCE.finditer(text):
-        values.add(float(m.group(1)) * _FARAD_TO_PF[m.group(2)])
+        candidate = float(m.group(1)) * _FARAD_TO_PF[m.group(2)]
+        if _CAP_MIN <= candidate <= _CAP_MAX:
+            values.add(candidate)
     value = unique_or_none(values)
     if value is None:
         return None

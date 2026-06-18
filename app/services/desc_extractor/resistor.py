@@ -54,6 +54,16 @@ _CANONICAL_POWER_UNIT = "W"
 # also the decimal point: "4K7" = 4700, "4M7" = 4.7e6).
 _OHM_MULT = {"R": 1, "K": 1_000, "M": 1_000_000}
 
+# Milli-ohm (current-sense / shunt) form — CASE-SENSITIVE, run on the ORIGINAL-case text
+# BEFORE the upper-casing destroys the signal: a lowercase "m" hugging an ohm word/sign
+# ("1mOhm" = 0.001 Ω, "100mOhms" = 0.1 Ω) is the SI milli prefix, NOT the Mega "M"
+# ("168MOHM" on an inductor row is Mega and stays untouched). After upper-casing, "mOhm"
+# would collapse into "MOHM" and read as 1e6× via _OHM_MULT["M"] — 9 orders of magnitude
+# wrong. _neutralize_milliohm rewrites each match to its already-converted canonical-ohm
+# value spelled with an explicit " OHM " (so the upper-cased _OHM_EXPLICIT path below
+# reads it back with multiplier 1, no new resistance code), distinct from Mega.
+_MILLIOHM = re.compile(r"(\d+(?:\.\d+)?)\s?m(?:Ω|[Oo][Hh][Mm][Ss]?)")
+
 # Explicit "<n><mult?> OHM(S)/Ω" form: an optional K/M multiplier hugging the number,
 # then a (possibly spaced) OHM word or Ω sign. "10K OHMS" / "4.7K OHM" / "2.2M OHMS" /
 # "100 OHMS" / "100R" handled by _RKM below; the bare-Ω sign and the spelled "OHM(S)"
@@ -82,7 +92,11 @@ _TOLERANCE_VOCAB = {"0.1%", "1%", "5%"}
 # Accept the distributor symmetric forms "5%", "5 %", "±5%", "+/-5%" and emit the seeded
 # bare member. A leading lone +/- (an asymmetric signed bound) is tolerated only as the
 # explicit ±/+- symmetric prefix; the trailing (?!\d) stops "1" matching inside "100%".
-_TOLERANCE = re.compile(r"(?:\+/-\s?|±\s?)?\b(0\.1|1|5)\s?%(?!\d)")
+# The leading negative lookbehind (?<![\d.]) replaces a plain \b: a \b fires on the
+# "."→digit transition, so "0.5%"/"12.5%" used to let the trailing "5" read as a bare 5%
+# and "2.1%" the "1" as 1% — a decimal-prefixed percent is NOT one of the seeded bare
+# tolerances and must be rejected (a wrong facet value is worse than a missing one).
+_TOLERANCE = re.compile(r"(?:\+/-\s?|±\s?)?(?<![\d.])(0\.1|1|5)\s?%(?!\d)")
 
 _PACKAGE_VOCAB = {"0402", "0603", "0805", "1206", "through-hole"}
 # The exact EIA imperial case-code series the resistor corpus uses (no character classes
@@ -96,6 +110,21 @@ _THROUGH_HOLE = re.compile(r"\bTHROUGH[- ]?HOLE\b|\bTHT\b")
 _MOUNTING_VOCAB = {"SMD", "through-hole", "press-fit"}
 _MOUNT_SMD = re.compile(r"\bSMD\b|\bSMT\b")
 _MOUNT_PRESS_FIT = re.compile(r"\bPRESS[- ]?FIT\b")
+
+
+def _neutralize_milliohm(text: str) -> str:
+    """Rewrite CASE-SENSITIVE milli-ohm tokens ("1mOhm", "100mOhms", "5mΩ") to their
+    already-converted canonical-ohm value spelled with an explicit " OHM " token.
+
+    Mirrors __init__._BIT_UNITS: the milli prefix is a CASE signal that the later
+    ``.upper()`` destroys (lowercase "m" → Mega "M"), so it MUST run on the original-case
+    text first. The substitution does the ×0.001 conversion in-place ("1mOhm" → "0.001
+    OHM "), so the upper-cased _OHM_EXPLICIT path reads the value back with multiplier 1 —
+    no separate milli candidate set, and Mega "M" stays a true 1e6× multiplier. Idempotent
+    (the rewritten token carries no lowercase "m" before its ohm word), so it is safe to
+    run again inside extract_resistor for the direct (non-extract_desc) call path.
+    """
+    return _MILLIOHM.sub(lambda m: f" {float(m.group(1)) * 0.001} OHM ", text)
 
 
 def _resistance_ohms(text: str) -> int | float | None:
@@ -160,7 +189,16 @@ def _mounting(text: str) -> str | None:
 
 
 def extract_resistor(text: str) -> SpecDict:
-    """Extract resistors specs from an upper-cased, whitespace-collapsed description."""
+    """Extract resistors specs from a (typically upper-cased) whitespace-collapsed
+    description.
+
+    Milli-ohm neutralization runs first on the AS-GIVEN text so the lowercase-"m" SI
+    signal survives a direct call (extract_desc neutralizes before its own .upper(), so
+    that path passes already-neutralized upper-cased text and this is an idempotent no-
+    op); everything else is upper-cased here so the rest of the grammar is case-
+    insensitive.
+    """
+    text = _neutralize_milliohm(text).upper()
     specs: SpecDict = {}
     resistance = _resistance_ohms(text)
     if resistance is not None:

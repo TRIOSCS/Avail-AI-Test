@@ -10,7 +10,7 @@ What: ``categorize_from_desc`` reads a strict commodity *lead/body grammar* out 
       lead suppresses, conflicting signals return None, "a wrong facet is worse than a
       missing one" — here, "a wrong CATEGORY is worse than a missing one".
 
-      The nine SPEC_COMMODITIES are routed by reusing ``extract_desc``'s own lead/body/
+      The eleven SPEC_COMMODITIES are routed by reusing ``extract_desc``'s own lead/body/
       contradiction machinery (no second grammar to drift): ``extract_desc(description)``
       with NO hint returns a DescResult whose ``commodity`` IS the routing verdict, and
       it already encodes every foreign-lead / packaging-lead / storage×dram-conflict /
@@ -129,7 +129,7 @@ def categorize_from_desc(description: str | None) -> str | None:
                 return None  # "BATTERY MANAGEMENT" IC, not a battery — never categorize
             return commodity
 
-    # 2. The nine SPEC_COMMODITIES via extract_desc's own router (no hint → pure routing).
+    # 2. The eleven SPEC_COMMODITIES via extract_desc's own router (no hint → pure routing).
     result = extract_desc(description)
     if result is None:
         return None

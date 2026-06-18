@@ -82,6 +82,59 @@ def test_mounting_smd_is_emitted():
     assert specs["mounting"] == "SMD"
 
 
+def test_decimal_prefixed_percent_is_not_a_tolerance():
+    # HIGH-2: the "5" in "0.5%" / "12.5%" and the "1" in "2.1%" must NOT read as a bare
+    # resistor tolerance — the word boundary used to fire on the "."→digit transition, so
+    # a negative lookbehind on [\d.] is required.
+    assert "tolerance" not in extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 0.5% 0603")
+    assert "tolerance" not in extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 2.1% 0603")
+    assert "tolerance" not in extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 12.5% 0603")
+
+
+def test_seeded_tolerance_forms_still_parse():
+    # The decimal-lookbehind fix must not break the real seeded bare forms.
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 0.1% 0603")["tolerance"] == "0.1%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 1% 0603")["tolerance"] == "1%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 5% 0603")["tolerance"] == "5%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS ±5% 0603")["tolerance"] == "5%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS +/-5% 0603")["tolerance"] == "5%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 5 % 0603")["tolerance"] == "5%"
+    assert extract_resistor("THICK FILM RESISTORS - SMD 100 OHMS 1/4W 1% 0603")["tolerance"] == "1%"
+
+
+def test_milliohm_resistance_does_not_parse_as_megaohm():
+    # HIGH-3: "1mOhm"/"100mOhms" are milliohm (current-sense/shunt) parts. After .upper()
+    # the lowercase "m" collapses into the Mega multiplier "M" — 9 orders of magnitude
+    # wrong. The milli multiplier must be detected case-sensitively from the ORIGINAL text.
+    assert extract_resistor("1mOhm 1% 2512")["resistance"] == 0.001
+    assert extract_resistor("100mOhms 1% 2512")["resistance"] == 0.1
+
+
+def test_milliohm_routing_via_extract_desc():
+    # The milliohm part must still route + extract under a resistors signal.
+    result = extract_desc("Current Sense Resistors - SMD 1mOhm 1% 2512", commodity_hint="resistors")
+    assert result is not None
+    assert result.commodity == "resistors"
+    assert result.specs["resistance"] == 0.001
+
+
+def test_megaohm_resistance_still_parses():
+    # The milli fix must NOT touch the Mega path ("M" before OHM, or the "4M7" RKM code).
+    assert extract_resistor("1M OHM 1% 0603")["resistance"] == 1_000_000
+    assert extract_resistor("4M7 1% 1206")["resistance"] == 4_700_000
+
+
+def test_milliwatt_is_not_misread_as_watt():
+    # HIGH-3 analog (power path): the W unit token requires \bW (the regex is anchored so
+    # the wattage number must directly precede "W"/"WATT"), so a milliwatt "0.5mW" → upper
+    # "0.5MW" leaves an "M" between the number and "W" and never matches _POWER_DECIMAL —
+    # i.e. there is NO milliwatt-as-watt bug to fix (a milliwatt simply emits nothing).
+    assert "power_rating" not in extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 0.5mW 0603")
+    assert "power_rating" not in extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 250mW 0603")
+    # A real fractional/decimal watt still parses (regression guard for the analog check).
+    assert extract_resistor("THICK FILM RESISTORS - SMD 10K OHMS 0.5W 0603")["power_rating"] == 0.5
+
+
 # ── extract_desc routing: a Mouser resistor description routes to resistors ──
 
 

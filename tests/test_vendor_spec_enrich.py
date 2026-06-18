@@ -13,7 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
-from app.services.spec_tiers import SOURCE_TIER
+from app.services.spec_tiers import SOURCE_TIER, set_category
+from app.services.spec_write_service import load_schema_cache, record_spec
 from app.services.vendor_spec_enrich import enrich_card_from_mouser
 
 
@@ -118,6 +119,72 @@ def test_first_non_empty_result_chosen(db_session: Session):
     assert card.category == "capacitors"
     assert summary["categorized"] == 1
     assert summary["specs_written"] >= 4
+
+
+def test_higher_tier_category_wins_ladder_no_cap_facets(db_session: Session):
+    # MEDIUM-7(a): a card already categorized 'dram' at trio_source (tier 95) must NOT be
+    # reclassified to 'capacitors' by the connector_desc (tier 84) write, and — since the
+    # commodity resolved from the result is 'capacitors' but the card stays 'dram' — the
+    # facet extraction runs under the (lost-ladder) card category 'dram', so a CAPACITOR
+    # description yields NO capacitor facets on a dram card.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    assert set_category(card, "dram", source="trio_source", confidence=0.99)
+    db_session.flush()
+
+    summary = enrich_card_from_mouser(db_session, card, [_CAP_RESULT])
+    db_session.commit()
+
+    assert card.category == "dram"  # higher-tier trio_source category held the ladder
+    assert summary["categorized"] == 0
+    facets = _facets(db_session, card.id)
+    assert "capacitance" not in facets
+    assert "dielectric" not in facets
+
+
+def test_connector_desc_overwrites_lower_tier_desc_parse_facet(db_session: Session):
+    # MEDIUM-7(b): a pre-recorded desc_parse (tier 83) dielectric=X5R on a capacitors card
+    # must be overwritten by the connector_desc (tier 84) dielectric=X7R from the Mouser
+    # description — the ladder lets the higher tier win.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    assert set_category(card, "capacitors", source="connector_desc", confidence=0.9)
+    db_session.flush()
+
+    cache = load_schema_cache(db_session, "capacitors")
+    assert record_spec(
+        db_session, int(card.id), "dielectric", "X5R", source="desc_parse", confidence=0.9, schema_cache=cache
+    )
+    db_session.flush()
+    assert _facets(db_session, card.id)["dielectric"].value_text == "X5R"
+
+    enrich_card_from_mouser(db_session, card, [_CAP_RESULT])  # description carries X7R
+    db_session.commit()
+
+    dielectric = _facets(db_session, card.id)["dielectric"]
+    assert dielectric.value_text == "X7R"
+    assert dielectric.source == "connector_desc"
+    assert dielectric.tier == 84
+
+
+def test_no_commodity_resolvable_is_a_no_op(db_session: Session):
+    # MEDIUM-8: an off-vocab distributor category + a description with no commodity grammar
+    # token resolves to NO commodity — the card stays uncategorized and nothing is written.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "UNKNOWN123")
+
+    result = {
+        "manufacturer": "Acme",
+        "category": "Sockets, Adapters",
+        "description": "Generic Adapter Socket 2.54mm pitch",
+        "source_type": "mouser",
+    }
+    summary = enrich_card_from_mouser(db_session, card, [result])
+    db_session.commit()
+
+    assert card.category is None
+    assert _facets(db_session, card.id) == {}
+    assert summary == {"categorized": 0, "specs_written": 0}
 
 
 def test_no_commit_in_writer(db_session: Session):

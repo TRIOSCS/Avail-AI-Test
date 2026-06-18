@@ -39,7 +39,7 @@ from app.services.desc_extractor.display import extract_display
 from app.services.desc_extractor.gpu import extract_gpu
 from app.services.desc_extractor.memory import extract_memory
 from app.services.desc_extractor.power import extract_psu
-from app.services.desc_extractor.resistor import extract_resistor
+from app.services.desc_extractor.resistor import _neutralize_milliohm, extract_resistor
 from app.services.desc_extractor.storage import extract_storage
 from app.services.desc_extractor.tape import extract_tape
 
@@ -315,6 +315,7 @@ def extract_desc(description: str, commodity_hint: str | None = None) -> DescRes
     if not description:
         return None
     text = _BIT_UNITS.sub(r"\1\2BIT", description)  # before .upper() — see _BIT_UNITS
+    text = _neutralize_milliohm(text)  # before .upper() — lowercase "m" milli vs Mega "M"
     text = re.sub(r"\s+", " ", text).strip().upper()
     if not text:
         return None

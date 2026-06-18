@@ -107,6 +107,31 @@ def test_phantom_case_code_does_not_conflict_with_real_package():
     assert specs["package"] == "0402"
 
 
+def test_decimal_prefixed_percent_is_not_a_tolerance():
+    # HIGH-1: a decimal-prefixed percent ("0.5%", "2.1%") must NOT read as a bare
+    # symmetric tolerance — the negative lookbehind blocks a preceding "." (just like a
+    # preceding digit / sign), so "0.5%" never collapses to ±5% (10× wrong).
+    assert "tolerance" not in extract_capacitor("MLCC - SMD/SMT 50V 1000PF C0G 0603 0.5%")
+    assert "tolerance" not in extract_capacitor("MLCC - SMD/SMT 50V 1000PF C0G 0603 2.1%")
+
+
+def test_bare_and_signed_percent_tolerances_still_parse():
+    # The decimal-lookbehind fix must not break the real symmetric forms.
+    assert extract_capacitor("MLCC - SMD/SMT 16V 0.1UF X7R 0402 10%")["tolerance"] == "±10%"
+    assert extract_capacitor("MLCC - SMD/SMT 16V 0.1UF X7R 0402 ±10%")["tolerance"] == "±10%"
+    assert extract_capacitor("MLCC - SMD/SMT 16V 1000PF C0G 0603 5%")["tolerance"] == "±5%"
+    assert extract_capacitor("MLCC - SMD/SMT 16V 1000PF C0G 0603 1%")["tolerance"] == "±1%"
+    assert extract_capacitor("MLCC - SMD/SMT 16V 1000PF Y5V 0603 20%")["tolerance"] == "±20%"
+
+
+def test_out_of_range_capacitance_is_omitted():
+    # LOW-4: capacitance has no record_spec range check, so the module gates it to the
+    # seeded {0.1 .. 1e12} pF range — 0 pF and an absurd 2,000,000 µF (2e12 pF) emit none.
+    assert "capacitance" not in extract_capacitor("MLCC - SMD/SMT 16V 0PF X7R 0402")
+    assert "capacitance" not in extract_capacitor("MLCC - SMD/SMT 16V 0UF X7R 0402")
+    assert "capacitance" not in extract_capacitor("MLCC - SMD/SMT 16V 2000000UF X7R 0402")
+
+
 def test_resistor_description_emits_no_capacitance():
     # A thin-film resistor description carries Ohms / %, never a farad token: the
     # capacitor route must never invent a capacitance from it.
@@ -138,6 +163,8 @@ def test_emittable_capacitor_vocabulary_matches_commodity_seeds():
 
     from app.services.desc_extractor.capacitor import (
         _CANONICAL_CAP_UNIT,
+        _CAP_MAX,
+        _CAP_MIN,
         _DIELECTRIC_VOCAB,
         _PACKAGE_VOCAB,
         _TOLERANCE_VOCAB,
@@ -150,5 +177,6 @@ def test_emittable_capacitor_vocabulary_matches_commodity_seeds():
     assert _PACKAGE_VOCAB <= set(spec("package")["enum_values"])
     cap = spec("capacitance")
     assert _CANONICAL_CAP_UNIT == cap["canonical_unit"]
+    assert (_CAP_MIN, _CAP_MAX) == (cap["numeric_range"]["min"], cap["numeric_range"]["max"])
     volt = spec("voltage_rating")
     assert (_VOLT_MIN, _VOLT_MAX) == (volt["numeric_range"]["min"], volt["numeric_range"]["max"])

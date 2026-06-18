@@ -39,6 +39,7 @@ from app.services.vendor_spec_enrich import enrich_card_from_mouser
 
 _DEFAULT_DAILY_CAP = 800  # safe Mouser free-tier budget (1000 calls/day) with headroom
 _COMMIT_EVERY = 25
+_DRY_RUN_LOG_LIMIT = 50  # cap per-candidate dry-run logging (the backlog is ~737k rows)
 
 
 def select_candidates(db, limit: int | None) -> list[MaterialCard]:
@@ -84,18 +85,35 @@ async def run(
     """Backfill parametric facets for up to *limit* uncategorized cards via *source*.
 
     Returns a summary dict (seen / would_enrich / enriched / categorized / specs_written /
-    calls). Stops when the per-day call counter reaches *daily_cap* (checked BEFORE each
-    call). Dry-run (``apply=False``) searches nothing and writes nothing.
+    calls / failed). Stops when the per-day call counter reaches *daily_cap* (checked
+    BEFORE each call). When *limit* is None the candidate selection is bounded to
+    *daily_cap* (at most that many cards can be processed per run) so the whole
+    uncategorized backlog is never materialized. A per-card enrichment that raises is
+    isolated (its writes rolled back), tallied in ``failed`` and skipped — the run
+    continues and prior committed chunks survive. Dry-run (``apply=False``) searches
+    nothing and writes nothing, and caps per-candidate logging at ``_DRY_RUN_LOG_LIMIT``.
     """
     from app.database import SessionLocal
 
     if source != "mouser":
         raise ValueError(f"unsupported source {source!r} — only 'mouser' is wired in v1")
 
-    summary = {"seen": 0, "would_enrich": 0, "enriched": 0, "categorized": 0, "specs_written": 0, "calls": 0}
+    summary = {
+        "seen": 0,
+        "would_enrich": 0,
+        "enriched": 0,
+        "categorized": 0,
+        "specs_written": 0,
+        "calls": 0,
+        "failed": 0,
+    }
     db = SessionLocal()
     try:
-        candidates = select_candidates(db, limit)
+        # At most daily_cap cards can be processed per run, so a no-limit run is bounded to
+        # daily_cap rather than materializing the entire uncategorized backlog (~737k rows)
+        # into memory. An explicit --limit always wins (the operator's tighter cap).
+        effective_limit = limit if limit is not None else daily_cap
+        candidates = select_candidates(db, effective_limit)
         summary["seen"] = len(candidates)
         logger.info(
             "backfill-vendor-specs: {} uncategorized candidate(s){}",
@@ -104,11 +122,17 @@ async def run(
         )
         if not apply:
             summary["would_enrich"] = len(candidates)
-            for card in candidates:
+            for card in candidates[:_DRY_RUN_LOG_LIMIT]:
                 logger.info(
                     "backfill-vendor-specs: would enrich {} (sourced_qty_90d={})",
                     card.display_mpn,
                     card.sourced_qty_90d,
+                )
+            if len(candidates) > _DRY_RUN_LOG_LIMIT:
+                logger.info(
+                    "backfill-vendor-specs: … and {} more (per-candidate log capped at {})",
+                    len(candidates) - _DRY_RUN_LOG_LIMIT,
+                    _DRY_RUN_LOG_LIMIT,
                 )
             return summary
 
@@ -148,7 +172,22 @@ async def run(
                 logger.debug("backfill-vendor-specs: {} no {} hit", card.display_mpn, source)
                 continue
 
-            card_summary = enrich_card_from_mouser(db, card, results)
+            # Per-card isolation (mirrors writer.extract_and_record_specs): the whole
+            # enrichment runs in ONE begin_nested SAVEPOINT so a re-raise rolls back ALL of
+            # this card's writes — including set_category's card.category mutation, which
+            # the writer performs OUTSIDE its own inner savepoint — without poisoning the
+            # caller's transaction or discarding already-committed chunks. A failure is
+            # tallied and skipped; the run continues.
+            try:
+                with db.begin_nested():
+                    card_summary = enrich_card_from_mouser(db, card, results)
+            except Exception:
+                summary["failed"] += 1
+                logger.warning(
+                    "backfill-vendor-specs: card id={} ({}) enrichment failed — skipping", card.id, card.display_mpn
+                )
+                continue
+
             if card_summary["categorized"] or card_summary["specs_written"]:
                 summary["enriched"] += 1
                 summary["categorized"] += card_summary["categorized"]
@@ -193,7 +232,7 @@ def main() -> None:
         f"{'would_enrich' if not args.apply else 'enriched'}="
         f"{summary['would_enrich'] if not args.apply else summary['enriched']} "
         f"categorized={summary['categorized']} specs_written={summary['specs_written']} "
-        f"calls={summary['calls']}"
+        f"failed={summary['failed']} calls={summary['calls']}"
     )
 
 
