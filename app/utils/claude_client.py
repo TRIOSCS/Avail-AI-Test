@@ -494,8 +494,8 @@ async def claude_batch_submit(
         requests: List of dicts with keys:
             custom_id, prompt, schema, system, model_tier, max_tokens
         cost_bucket: Optional Redis metering bucket (e.g. "email_mining").
-            When set, logs a ``calls`` counter for the submit event itself.
-            Per-entry usage is metered in ``claude_batch_results``.
+            Passed through to ``claude_batch_results`` where per-entry usage
+            is metered on poll completion; no metering occurs at submit time.
 
     Returns:
         Batch ID string for polling, or None on failure.

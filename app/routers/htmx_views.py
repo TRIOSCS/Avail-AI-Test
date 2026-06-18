@@ -9842,7 +9842,7 @@ async def proactive_convert(
     offer = db.query(ProactiveOffer).filter(ProactiveOffer.id == offer_id).first()
     if not offer:
         raise HTTPException(404, "Proactive offer not found")
-    if offer.salesperson_id != user.id:
+    if offer.salesperson_id and offer.salesperson_id != user.id:
         raise HTTPException(403, "Not your proactive offer")
 
     try:

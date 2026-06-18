@@ -250,3 +250,36 @@ class TestProactiveConvert:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
+
+    @patch(
+        "app.services.proactive_service.convert_proactive_to_win",
+        return_value={"ok": True, "requisition_id": 1, "quote_id": 1},
+    )
+    def test_null_salesperson_convert_succeeds(
+        self,
+        mock_convert,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_customer_site,
+    ):
+        """An offer with salesperson_id=None is convertible by any authenticated user
+        (not 403)."""
+        from app.models import ProactiveOffer
+
+        po = ProactiveOffer(
+            customer_site_id=test_customer_site.id,
+            salesperson_id=None,  # no owner
+            line_items=[],
+            recipient_emails=[],
+            subject="Unowned offer",
+            status="sent",
+        )
+        db_session.add(po)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/proactive/{po.id}/convert",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200, f"Expected 200 for null salesperson, got {resp.status_code}"

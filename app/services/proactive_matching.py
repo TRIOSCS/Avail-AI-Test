@@ -362,6 +362,9 @@ def run_proactive_scan(db: Session) -> dict:
 
     # Oldest-first so the limit processes chronologically.
     # Gate to live offers only: pending_review/rejected/sold/won/expired are excluded.
+    # NOTE: an offer created as pending_review (excluded here) that is later approved
+    # won't be re-scanned because the watermark has already advanced past its created_at.
+    # The proper fix is a re-match hook triggered on offer approval (follow-up task).
     _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
     new_offers = (
         db.query(Offer)
