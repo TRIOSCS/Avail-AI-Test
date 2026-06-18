@@ -66,6 +66,8 @@
   </div>
 
   {# ── Metadata grid ──────────────────────────────────────────── #}
+  {# Urgency is intentionally absent here — it's surfaced once via the header pill
+     above (showing only when it's non-normal); a grid cell would duplicate it. #}
   <div class="grid grid-cols-3 gap-x-4 gap-y-2 px-5 py-3 border-b border-gray-200 text-sm flex-shrink-0">
     <div>
       <dt class="text-xs font-medium text-gray-400 uppercase">Owner</dt>
@@ -76,20 +78,16 @@
       <dd class="text-gray-900 mt-0.5">{{ req.requirement_count }}</dd>
     </div>
     <div>
+      <dt class="text-xs font-medium text-gray-400 uppercase">Offers</dt>
+      <dd class="text-gray-900 mt-0.5">{{ req.offer_count or 0 }}</dd>
+    </div>
+    <div>
       <dt class="text-xs font-medium text-gray-400 uppercase">Deadline</dt>
       <dd class="text-gray-900 mt-0.5">{{ req.deadline or '—' }}</dd>
     </div>
     <div>
       <dt class="text-xs font-medium text-gray-400 uppercase">Created</dt>
       <dd class="text-gray-900 mt-0.5">{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else '—' }}</dd>
-    </div>
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Urgency</dt>
-      <dd class="text-gray-900 mt-0.5">{{ req.urgency or 'normal' }}</dd>
-    </div>
-    <div>
-      <dt class="text-xs font-medium text-gray-400 uppercase">Offers</dt>
-      <dd class="text-gray-900 mt-0.5">{{ req.offer_count or 0 }}</dd>
     </div>
   </div>
 
