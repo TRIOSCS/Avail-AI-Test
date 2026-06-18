@@ -2,8 +2,8 @@
 
 App-only Graph (get_app_graph_token) against the configured library drive
 (settings.datasheet_library_drive_id). Unconfigured or no-token => returns None so the
-caller skips storage gracefully. Separate from onedrive_files (per-user req/offer
-attachments).
+caller skips storage gracefully. Separate from the inline per-user req/offer attachment
+uploads in the requisitions/offers routers.
 """
 
 from __future__ import annotations
