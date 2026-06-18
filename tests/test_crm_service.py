@@ -471,3 +471,251 @@ class TestCdmCompanyQueryClockSorts:
         names = [c.name for c in results if c.name.startswith("Reply-")]
         assert names.index("Reply-Null Co") < names.index("Reply-Old Co")
         assert names.index("Reply-Old Co") < names.index("Reply-Recent Co")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestSegmentTagService — P2a manual account segmentation tags
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSegmentTagService:
+    """Tests for manual segment-tag service functions.
+
+    Written FIRST (TDD RED) — these will fail until the functions are
+    implemented in app/services/tagging.py (or crm_service.py).
+
+    segment tags differ from AI brand/commodity tags:
+    - tag_type = 'segment'
+    - EntityTag.is_visible = True ALWAYS (not subject to count thresholds)
+    - Managed by rep action (assign / unassign), not by propagate waterfall
+    """
+
+    def test_assign_segment_tag_creates_entity_tag(self, db_session: Session):
+        """Assigning a segment tag creates an EntityTag(is_visible=True) for the
+        company."""
+        from app.models.tags import EntityTag
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        co = _make_company(db_session, "Seg Co A")
+        db_session.commit()
+
+        tag = get_or_create_segment_tag("OEM", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+
+        et = db_session.query(EntityTag).filter_by(entity_type="company", entity_id=co.id, tag_id=tag.id).first()
+        assert et is not None
+        assert et.is_visible is True
+
+    def test_assign_segment_tag_idempotent(self, db_session: Session):
+        """Assigning the same tag twice does not create a duplicate EntityTag."""
+        from app.models.tags import EntityTag
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        co = _make_company(db_session, "Seg Co Idem")
+        db_session.commit()
+
+        tag = get_or_create_segment_tag("Key-target", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+
+        count = db_session.query(EntityTag).filter_by(entity_type="company", entity_id=co.id, tag_id=tag.id).count()
+        assert count == 1
+
+    def test_unassign_segment_tag_removes_entity_tag(self, db_session: Session):
+        """Unassigning a segment tag removes the EntityTag row."""
+        from app.models.tags import EntityTag
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag, unassign_segment_tag
+
+        co = _make_company(db_session, "Seg Co B")
+        db_session.commit()
+
+        tag = get_or_create_segment_tag("At-risk", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+
+        unassign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+
+        et = db_session.query(EntityTag).filter_by(entity_type="company", entity_id=co.id, tag_id=tag.id).first()
+        assert et is None
+
+    def test_list_company_segment_tags_returns_assigned(self, db_session: Session):
+        """list_company_segment_tags returns the Tag rows for a company's segment
+        tags."""
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag, list_company_segment_tags
+
+        co = _make_company(db_session, "Seg Co C")
+        db_session.commit()
+
+        tag_a = get_or_create_segment_tag("OEM", db_session)
+        tag_b = get_or_create_segment_tag("At-risk", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag_a.id, db=db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag_b.id, db=db_session)
+        db_session.flush()
+
+        tags = list_company_segment_tags(company_id=co.id, db=db_session)
+        names = {t.name for t in tags}
+        assert "OEM" in names
+        assert "At-risk" in names
+
+    def test_list_all_segment_tags_returns_all_created(self, db_session: Session):
+        """list_all_segment_tags returns every Tag with tag_type='segment'."""
+        from app.services.tagging import get_or_create_segment_tag, list_all_segment_tags
+
+        get_or_create_segment_tag("OEM", db_session)
+        get_or_create_segment_tag("Key-target", db_session)
+        get_or_create_segment_tag("At-risk", db_session)
+        db_session.flush()
+
+        all_tags = list_all_segment_tags(db=db_session)
+        names = {t.name for t in all_tags}
+        assert "OEM" in names
+        assert "Key-target" in names
+        assert "At-risk" in names
+
+    def test_segment_tag_is_always_visible_not_affected_by_thresholds(self, db_session: Session):
+        """recalculate_entity_tag_visibility does NOT flip segment tags to
+        is_visible=False even with zero interaction count."""
+        from app.models.tags import EntityTag
+        from app.services.tagging import (
+            assign_segment_tag,
+            get_or_create_segment_tag,
+            recalculate_entity_tag_visibility,
+        )
+
+        co = _make_company(db_session, "Seg Visibility Co")
+        db_session.commit()
+
+        tag = get_or_create_segment_tag("OEM", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.flush()
+
+        # Calling recalculate should NOT touch segment tags
+        recalculate_entity_tag_visibility("company", co.id, db_session)
+        db_session.flush()
+
+        et = db_session.query(EntityTag).filter_by(entity_type="company", entity_id=co.id, tag_id=tag.id).first()
+        assert et is not None
+        assert et.is_visible is True
+
+    def test_get_or_create_segment_tag_case_insensitive(self, db_session: Session):
+        """get_or_create_segment_tag deduplicates case-insensitively."""
+        from app.services.tagging import get_or_create_segment_tag
+
+        t1 = get_or_create_segment_tag("OEM", db_session)
+        db_session.flush()
+        t2 = get_or_create_segment_tag("oem", db_session)
+        db_session.flush()
+
+        assert t1.id == t2.id
+
+
+class TestCdmCompanyQuerySegmentFilter:
+    """Tests for cdm_company_query with segment= filter.
+
+    Written FIRST (TDD RED) — will fail until cdm_company_query accepts segment= and
+    filters by EntityTag(tag_type='segment', is_visible=True).
+    """
+
+    def test_segment_filter_returns_only_tagged_companies(self, db_session: Session):
+        """cdm_company_query(segment=tag_id) returns only companies with that segment
+        tag."""
+        from app.models import User
+        from app.services.crm_service import cdm_company_query
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        user = User(email="seg-filter@example.com", name="Seg Tester", is_active=True)
+        db_session.add(user)
+
+        co_tagged = Company(name="Seg-Tagged Co", is_active=True)
+        co_other = Company(name="Seg-Untagged Co", is_active=True)
+        db_session.add_all([co_tagged, co_other])
+        db_session.flush()
+
+        tag = get_or_create_segment_tag("OEM", db_session)
+        assign_segment_tag(company_id=co_tagged.id, tag_id=tag.id, db=db_session)
+        db_session.commit()
+
+        results = cdm_company_query(
+            db_session,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="oldest",
+            segment=tag.id,
+        ).all()
+
+        names = {c.name for c in results}
+        assert "Seg-Tagged Co" in names
+        assert "Seg-Untagged Co" not in names
+
+    def test_segment_filter_composes_with_my_only(self, db_session: Session):
+        """Segment= filter composes with my_only — only returns owned+tagged
+        companies."""
+
+        from app.models import User
+        from app.services.crm_service import cdm_company_query
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        owner = User(email="owner-seg@example.com", name="Owner", role="sales", is_active=True)
+        other_user = User(email="other-seg@example.com", name="Other", role="sales", is_active=True)
+        db_session.add_all([owner, other_user])
+        db_session.flush()
+
+        co_mine = Company(name="MySegCo", is_active=True, account_owner_id=owner.id)
+        co_theirs = Company(name="TheirSegCo", is_active=True, account_owner_id=other_user.id)
+        db_session.add_all([co_mine, co_theirs])
+        db_session.flush()
+
+        tag = get_or_create_segment_tag("Key-target", db_session)
+        assign_segment_tag(company_id=co_mine.id, tag_id=tag.id, db=db_session)
+        assign_segment_tag(company_id=co_theirs.id, tag_id=tag.id, db=db_session)
+        db_session.commit()
+
+        results = cdm_company_query(
+            db_session,
+            owner,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=True,
+            sort="oldest",
+            segment=tag.id,
+        ).all()
+
+        names = {c.name for c in results}
+        assert "MySegCo" in names
+        assert "TheirSegCo" not in names
+
+    def test_segment_filter_zero_returns_all(self, db_session: Session):
+        """Segment=0 (or None / empty) returns all companies (no filter applied)."""
+        from app.models import User
+        from app.services.crm_service import cdm_company_query
+
+        user = User(email="seg-zero@example.com", name="Zero Tester", is_active=True)
+        db_session.add(user)
+
+        co1 = Company(name="ZeroSeg-Co1", is_active=True)
+        co2 = Company(name="ZeroSeg-Co2", is_active=True)
+        db_session.add_all([co1, co2])
+        db_session.commit()
+
+        results = cdm_company_query(
+            db_session,
+            user,
+            search="",
+            staleness="",
+            account_type="",
+            my_only=False,
+            sort="oldest",
+            segment=0,
+        ).all()
+
+        names = {c.name for c in results}
+        assert "ZeroSeg-Co1" in names
+        assert "ZeroSeg-Co2" in names

@@ -1990,3 +1990,118 @@ class TestVendorDetailCadenceHero:
         assert resp.status_code == 200
         assert "Sightings" in resp.text
         assert "7" in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestSegmentTagViews — P2a manual account segmentation tags
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestSegmentTagViews:
+    """Tests for segment-tag UI endpoints.
+
+    Written FIRST (TDD RED) — will fail until the routes are added to
+    htmx_views.py and the templates updated.
+
+    Routes tested:
+      POST /v2/partials/customers/{company_id}/segment-tags   (assign)
+      DELETE /v2/partials/customers/{company_id}/segment-tags/{tag_id}  (unassign)
+      GET  /v2/partials/customers/{company_id}/segment-tags   (chips partial)
+    """
+
+    def _make_company(self, db_session: Session, name: str = "SegView Co") -> Company:
+        co = Company(name=name, is_active=True)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_segment_chips_partial_returns_html(self, client: TestClient, db_session: Session, test_user: User):
+        """GET /v2/partials/customers/{id}/segment-tags returns 200 HTML."""
+        co = self._make_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{co.id}/segment-tags")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_assign_segment_tag_returns_chips_partial(self, client: TestClient, db_session: Session, test_user: User):
+        """POST assign creates the EntityTag and re-renders the chips partial."""
+        from app.services.tagging import get_or_create_segment_tag
+
+        co = self._make_company(db_session, "AssignSeg Co")
+        tag = get_or_create_segment_tag("OEM", db_session)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/segment-tags",
+            data={"tag_id": str(tag.id)},
+        )
+        assert resp.status_code == 200
+        assert "OEM" in resp.text
+
+    def test_unassign_segment_tag_returns_chips_partial(self, client: TestClient, db_session: Session, test_user: User):
+        """DELETE unassign removes the EntityTag and re-renders the chips partial.
+
+        The tag may still appear in the 'add existing' dropdown, but the active chip
+        (which carries a remove-button with hx-delete) must be gone.
+        """
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        co = self._make_company(db_session, "UnassignSeg Co")
+        tag = get_or_create_segment_tag("At-risk", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.commit()
+
+        resp = client.delete(f"/v2/partials/customers/{co.id}/segment-tags/{tag.id}")
+        assert resp.status_code == 200
+        # The remove-button for this tag must no longer be present after removal.
+        # (The tag name may still appear in the "add existing" dropdown.)
+        assert f"hx-delete='/v2/partials/customers/{co.id}/segment-tags/{tag.id}'" not in resp.text
+
+    def test_account_detail_renders_segment_tag_section(self, client: TestClient, db_session: Session, test_user: User):
+        """Company detail page includes the segment-tags editor block."""
+        co = self._make_company(db_session, "DetailSeg Co")
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        # The segment tag editor container must be present in the detail
+        assert "segment-tags" in resp.text
+
+    def test_list_filter_bar_renders_segment_dropdown(self, client: TestClient, db_session: Session, test_user: User):
+        """The CDM filter bar renders a segment-tags dropdown when segment tags
+        exist."""
+        from app.services.tagging import get_or_create_segment_tag
+
+        get_or_create_segment_tag("OEM", db_session)
+        get_or_create_segment_tag("At-risk", db_session)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        # The dropdown name attribute must be present
+        assert 'name="segment"' in resp.text
+        assert "OEM" in resp.text
+
+    def test_account_list_segment_filter_param_accepted(self, client: TestClient, db_session: Session, test_user: User):
+        """The account-list partial accepts a segment= query param without error."""
+        from app.services.tagging import assign_segment_tag, get_or_create_segment_tag
+
+        co = self._make_company(db_session, "FilterAccept Co")
+        tag = get_or_create_segment_tag("OEM", db_session)
+        assign_segment_tag(company_id=co.id, tag_id=tag.id, db=db_session)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/account-list?segment={tag.id}")
+        assert resp.status_code == 200
+        assert "FilterAccept Co" in resp.text
+
+    def test_create_new_segment_tag_via_name_param(self, client: TestClient, db_session: Session, test_user: User):
+        """POST with tag_name= (instead of tag_id=) creates a new segment tag and
+        assigns it."""
+        co = self._make_company(db_session, "NewTag Co")
+
+        resp = client.post(
+            f"/v2/partials/customers/{co.id}/segment-tags",
+            data={"tag_name": "Growth"},
+        )
+        assert resp.status_code == 200
+        assert "Growth" in resp.text

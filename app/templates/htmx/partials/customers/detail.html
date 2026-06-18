@@ -225,6 +225,12 @@
     </div>
   </div>
 
+  {# ── Segment Tags ────────────────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
+    {% include "htmx/partials/customers/_segment_tags.html" %}
+  </div>
+
   {# ── Notes ───────────────────────────────────────────────── #}
   {% if company.notes %}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">

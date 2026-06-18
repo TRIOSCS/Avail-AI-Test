@@ -4554,6 +4554,21 @@ from ..services.crm_service import company_contact_rows as _company_contact_rows
 from ..services.crm_service import next_best_touch as _next_best_touch  # noqa: E402
 from ..services.crm_service import order_by_clock as _order_by_clock  # noqa: E402
 from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
+from ..services.tagging import (  # noqa: E402
+    assign_segment_tag as _assign_segment_tag,
+)
+from ..services.tagging import (
+    get_or_create_segment_tag as _get_or_create_segment_tag,
+)
+from ..services.tagging import (
+    list_all_segment_tags as _list_all_segment_tags,
+)
+from ..services.tagging import (
+    list_company_segment_tags as _list_company_segment_tags,
+)
+from ..services.tagging import (
+    unassign_segment_tag as _unassign_segment_tag,
+)
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
 _ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
@@ -4576,6 +4591,7 @@ async def companies_list_partial(
     account_type: str = "",
     my_only: bool = False,
     sort: str = "oldest",
+    segment: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4592,6 +4608,7 @@ async def companies_list_partial(
             account_type=account_type,
             my_only=my_only,
             sort=sort,
+            segment=segment,
             limit=limit,
             offset=offset,
             include_overdue=True,
@@ -4608,6 +4625,7 @@ async def companies_account_list_partial(
     account_type: str = "",
     my_only: bool = False,
     sort: str = "oldest",
+    segment: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4628,6 +4646,7 @@ async def companies_account_list_partial(
             account_type=account_type,
             my_only=my_only,
             sort=sort,
+            segment=segment,
             limit=limit,
             offset=offset,
         )
@@ -4856,6 +4875,109 @@ def _company_quotes_query(db: Session, company):
     return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
 
 
+@router.get("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
+async def company_segment_tags_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the segment-tag chips + editor partial for a company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
+async def company_assign_segment_tag(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assign a segment tag to a company.
+
+    Accepts tag_id= (existing) or tag_name= (creates new).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    tag_id_raw = form.get("tag_id", "").strip()
+    tag_name_raw = form.get("tag_name", "").strip()
+
+    if tag_name_raw:
+        tag = _get_or_create_segment_tag(tag_name_raw, db)
+    elif tag_id_raw:
+        try:
+            tag_id = int(tag_id_raw)
+        except ValueError:
+            raise HTTPException(400, "tag_id must be an integer")
+        from ..models.tags import Tag as _Tag
+
+        tag = db.query(_Tag).filter_by(id=tag_id).first()
+        if not tag:
+            raise HTTPException(404, "Tag not found")
+    else:
+        raise HTTPException(400, "Provide tag_id or tag_name")
+
+    _assign_segment_tag(company_id=company_id, tag_id=tag.id, db=db)
+    db.commit()
+
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.delete("/v2/partials/customers/{company_id}/segment-tags/{tag_id}", response_class=HTMLResponse)
+async def company_unassign_segment_tag(
+    request: Request,
+    company_id: int,
+    tag_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a segment tag from a company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    _unassign_segment_tag(company_id=company_id, tag_id=tag_id, db=db)
+    db.commit()
+
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -4907,6 +5029,8 @@ async def company_detail_partial(
     _cadence = _cadence_state(company.tier, company.last_outbound_at)
     _nbt = _next_best_touch(company.tier, company.last_outbound_at)
     contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    segment_tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
@@ -4931,6 +5055,9 @@ async def company_detail_partial(
             "last_req_date": _stats.get("last_req_date"),
             # Clock day calculations
             "now_utc": datetime.now(_tz.utc),
+            # Segment tags
+            "segment_tags": segment_tags,
+            "all_segment_tags": all_segment_tags,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)

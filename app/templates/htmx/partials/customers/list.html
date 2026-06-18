@@ -50,6 +50,16 @@
       {% endfor %}
     </select>
 
+    {% if all_segment_tags %}
+    <select name="segment" aria-label="Filter by segment tag"
+            class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
+      <option value="0">All segments</option>
+      {% for t in all_segment_tags %}
+      <option value="{{ t.id }}" {{ "selected" if segment == t.id }}>{{ t.name }}</option>
+      {% endfor %}
+    </select>
+    {% endif %}
+
     <select name="sort" aria-label="Sort accounts"
             class="px-2 py-1.5 text-sm border border-gray-200 rounded-lg">
       <option value="oldest" {{ "selected" if sort == "oldest" }}>Longest since activity</option>
