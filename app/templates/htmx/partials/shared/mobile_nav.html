@@ -63,6 +63,14 @@
               hx-target="#proactive-nav-badge"
               hx-swap="innerHTML"
               class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
+        {% elif id in ('requisitions', 'buy-plans') %}
+        {# Cross-app alert badge — same emerald pill as proactive, fed by the AlertSource registry #}
+        <span id="{{ id }}-nav-badge"
+              hx-get="/v2/partials/alerts/{{ id }}/badge"
+              hx-trigger="load, every 60s"
+              hx-target="#{{ id }}-nav-badge"
+              hx-swap="innerHTML"
+              class="absolute -top-1.5 -right-2 flex items-center justify-center min-w-[14px] h-[14px]"></span>
         {% endif %}
       </div>
       <span :class="activeNav === '{{ id }}' ? 'text-[10px] font-semibold text-brand-800' : 'text-[10px] font-medium text-gray-500'"

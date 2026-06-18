@@ -82,7 +82,7 @@
   </div>
 
   {% if requirements %}
-  {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}{% from "htmx/partials/parts/_macros.html" import edit_cell %}
+  {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}{% from "htmx/partials/parts/_macros.html" import edit_cell %}{% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
   <div class="top-scroll-content flex-1 min-h-0" id="left-table-content">
       <table class="compact-table">
         <thead>
@@ -133,7 +133,7 @@
         <tbody>
           {% for req in requirements %}
           {% set stats = offer_stats.get(req.id, {}) %}
-          <tr data-part-id="{{ req.id }}"
+          <tr data-part-id="{{ req.id }}"{{ alert_row_attrs(alert_markers, 'req-' ~ req.id) }}
               :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
               @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
             <td class="w-6" @click.stop>

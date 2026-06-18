@@ -2269,4 +2269,104 @@ Alpine.data('offerQualification', (prefill) => ({
   meterFilled() { return this._items().filter(Boolean).length; },
 }));
 
+/* ────────────────────────────────────────────────────────────────────────
+   Cross-app tab alerts — in-tab spotlight for new / actionable rows.
+
+   List rows carrying data-alert-new (stamped by _alert_macros.html) get an
+   emerald accent rail; the page glides to the first, and each row is marked
+   seen as it scrolls into view. FYI rows fade their rail and drain the badge;
+   ACTION rows keep the rail (the work-state count owns it). A floating pill
+   jumps between the still-unviewed rows. Reuses the proactive emerald palette.
+   ──────────────────────────────────────────────────────────────────────── */
+(() => {
+  const PILL_ID = 'tab-alert-pill';
+
+  const pendingRows = () =>
+    Array.from(document.querySelectorAll('[data-alert-new]:not([data-alert-consumed])'));
+
+  const glideTo = (el) => {
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  };
+
+  const ensurePill = () => {
+    let pill = document.getElementById(PILL_ID);
+    if (pill) return pill;
+    pill = document.createElement('button');
+    pill.id = PILL_ID;
+    pill.type = 'button';
+    pill.className = 'tab-alert-pill';
+    pill.style.display = 'none';
+    pill.addEventListener('click', () => glideTo(pendingRows()[0]));
+    document.body.appendChild(pill);
+    return pill;
+  };
+
+  const refreshPill = () => {
+    const pill = ensurePill();
+    const n = pendingRows().length;
+    if (n === 0) { pill.style.display = 'none'; return; }
+    pill.textContent = `${n} new ↓`;
+    pill.style.display = '';
+  };
+
+  const markSeen = (kind, refId) => {
+    if (!window.htmx) return;
+    const url = `/v2/partials/alerts/${encodeURIComponent(kind)}/seen`;
+    // Background seen-ping: no spinner (indicator: null); htmx.ajax still applies the
+    // OOB nav-badge swap from the response.
+    window.htmx.ajax('POST', url, { target: 'body', swap: 'none', indicator: null, values: { ref_id: refId } });
+  };
+
+  const consume = (row) => {
+    if (row.dataset.alertConsumed) return;
+    row.dataset.alertConsumed = '1';
+    const kind = row.getAttribute('data-alert-kind');
+    const temperament = row.getAttribute('data-alert-temperament');
+    (row.getAttribute('data-alert-refs') || '')
+      .split(',')
+      .filter(Boolean)
+      .forEach((ref) => markSeen(kind, ref));
+    if (temperament === 'fyi') {
+      row.classList.remove('alert-rail-pulse');
+      row.classList.add('alert-rail-fade');
+      setTimeout(() => row.classList.remove('alert-rail', 'alert-rail-fade'), 700);
+    }
+    // ACTION rows keep .alert-rail — the work-state badge owns the count.
+    refreshPill();
+  };
+
+  let observer = null;
+  const getObserver = () => {
+    if (observer) return observer;
+    observer = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          consume(entry.target);
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.6 });
+    return observer;
+  };
+
+  const spotlight = (root) => {
+    const scope = root && root.querySelectorAll ? root : document;
+    const rows = Array.from(scope.querySelectorAll('[data-alert-new]:not([data-alert-spotlit])'));
+    if (!rows.length) { refreshPill(); return; }
+    const obs = getObserver();
+    rows.forEach((row) => {
+      row.dataset.alertSpotlit = '1';
+      row.classList.add('alert-rail', 'alert-rail-pulse');
+      obs.observe(row);
+    });
+    refreshPill();
+    setTimeout(() => glideTo(rows[0]), 140); // let layout settle, then glide to the first
+  };
+
+  document.body.addEventListener('htmx:afterSettle', (evt) => {
+    spotlight(evt.detail ? evt.detail.elt : document);
+  });
+  document.addEventListener('DOMContentLoaded', () => spotlight(document));
+})();
+
 Alpine.start();

@@ -1,0 +1,15 @@
+{# Spotlight row attributes for the cross-app alert system.
+
+   Stamps data-alert-* on a list row so the shared tab-alerts frontend (htmx_app.js)
+   can glide to it, draw the emerald accent rail, observe it into view, and mark its
+   items seen. `markers` is the per-tab dict from registry.markers_for_tab(); `anchor`
+   is the row's key ("req-<id>" for Sales Hub, "bp-<id>" for Buy Plans).
+
+   Usage:
+     {% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
+     <tr ...{{ alert_row_attrs(alert_markers, 'req-' ~ req.id) }}>
+#}
+{% macro alert_row_attrs(markers, anchor) -%}
+{%- set m = (markers or {}).get(anchor) -%}
+{%- if m %} data-alert-new data-alert-kind="{{ m.kind }}" data-alert-temperament="{{ m.temperament }}" data-alert-refs="{{ m.refs | join(',') }}"{% endif -%}
+{%- endmacro %}

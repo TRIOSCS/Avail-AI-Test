@@ -6,6 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 <title hx-swap-oob="true">Buy Plans — AvailAI</title>
+{% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
 
 <div class="max-w-7xl mx-auto" x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">
 
@@ -100,7 +101,7 @@
             {% set label_color = 'text-gray-400' %}
           {% endif %}
 
-          <tr class="hover:bg-brand-50/40 cursor-pointer transition-colors"
+          <tr class="hover:bg-brand-50/40 cursor-pointer transition-colors"{{ alert_row_attrs(alert_markers, 'bp-' ~ bp.id) }}
               hx-get="/v2/partials/buy-plans/{{ bp.id }}"
               hx-target="#main-content"
               hx-push-url="/v2/buy-plans/{{ bp.id }}"
