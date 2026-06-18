@@ -1,0 +1,35 @@
+{# Cadence hero — cadence badge + settable tier dropdown + next-best-touch.
+   Renders inside the Account Cadence Card (detail.html).
+   Re-rendered by POST /v2/partials/customers/{company_id}/tier to reflect
+   updated tier + recomputed cadence_state / next_best_touch.
+
+   Receives: company, cadence_state, next_best_touch
+#}
+{% set badge_colors = {
+  'new': 'bg-gray-100 text-gray-500',
+  'on_target': 'bg-emerald-100 text-emerald-700',
+  'due': 'bg-amber-100 text-amber-700',
+  'overdue': 'bg-rose-100 text-rose-700'
+} %}
+<div id='cadence-hero' class='flex items-center justify-between flex-wrap gap-2 mb-3'>
+  <div class='flex items-center gap-2'>
+    <span class='px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, "bg-gray-100 text-gray-500") }}'>
+      {{ {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'}.get(cadence_state, cadence_state|title) }}
+    </span>
+    {# Tier inline-select — POSTs on change; re-swaps this partial via hx-target='#cadence-hero' #}
+    <form hx-post='/v2/partials/customers/{{ company.id }}/tier'
+          hx-target='#cadence-hero'
+          hx-swap='outerHTML'>
+      <select name='tier'
+              onchange='this.form.requestSubmit()'
+              class='text-xs text-gray-600 font-medium bg-transparent border border-gray-200 rounded px-1.5 py-0.5 hover:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-400 cursor-pointer'>
+        <option value='' {% if not company.tier %}selected{% endif %}>— tier —</option>
+        <option value='key' {% if company.tier == 'key' %}selected{% endif %}>Key</option>
+        <option value='core' {% if company.tier == 'core' %}selected{% endif %}>Core</option>
+        <option value='standard' {% if company.tier == 'standard' %}selected{% endif %}>Standard</option>
+        <option value='prospect' {% if company.tier == 'prospect' %}selected{% endif %}>Prospect</option>
+      </select>
+    </form>
+  </div>
+  <span class='text-xs text-gray-600 italic'>{{ next_best_touch }}</span>
+</div>

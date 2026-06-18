@@ -224,17 +224,22 @@ def outreach_initiated(
             db, body.company_id, body.customer_site_id, body.site_contact_id
         )
 
-        record = log_outreach_initiated(
-            db,
-            user_id=user.id,
-            channel=body.channel,
-            contact_value=contact_value,
-            company_id=company_id,
-            customer_site_id=customer_site_id,
-            site_contact_id=site_contact_id,
-            contact_name=body.contact_name,
-            origin=body.origin,
-        )
+        try:
+            record = log_outreach_initiated(
+                db,
+                user_id=user.id,
+                channel=body.channel,
+                contact_value=contact_value,
+                company_id=company_id,
+                customer_site_id=customer_site_id,
+                site_contact_id=site_contact_id,
+                contact_name=body.contact_name,
+                origin=body.origin,
+            )
+        except ValueError as exc:
+            if "do-not-contact" in str(exc).lower() or "do not contact" in str(exc).lower():
+                raise HTTPException(403, "Contact is marked do-not-contact — outreach not permitted")
+            raise HTTPException(400, str(exc))
         db.commit()
         # dropped_links tells the client which stale entity links were removed —
         # the touch IS logged, but it won't appear on the account it was clicked

@@ -19,6 +19,11 @@ from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCa
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
+# Minimum connected-call duration to be considered a real conversation.
+# Calls shorter than this (including duration=0 or None) are voicemails or
+# missed calls — they do NOT advance the reply clock.
+CALL_MEANINGFUL_MIN_SECONDS: int = 30
+
 # Activity types that are inherently meaningful — flagged is_meaningful=True at
 # write time (cheap, deterministic). The high-volume / free-text types
 # (sighting_added, email_received) are deliberately excluded: they are left
@@ -363,7 +368,7 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=True,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
@@ -622,6 +627,7 @@ def log_company_call(
         duration_seconds=duration_seconds,
         direction=direction,
         notes=notes,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
@@ -715,7 +721,19 @@ def log_outreach_initiated(
     last_activity_at on the company and site so staleness sorting reflects
     the touch immediately. Re-clicks within OUTREACH_DEDUP_SECONDS return the
     existing record instead of duplicating it. Caller commits.
+
+    Raises ValueError if site_contact_id refers to a DNC contact — caller must
+    convert this to a 403.
     """
+    # DNC check — must be enforced before any log is written so the flag holds
+    # even when the UI is bypassed (e.g. direct API calls).
+    if site_contact_id:
+        from ..models.crm import SiteContact
+
+        contact = db.get(SiteContact, site_contact_id)
+        if contact and contact.do_not_contact:
+            raise ValueError(f"Contact {site_contact_id} is marked do-not-contact")
+
     if channel not in _OUTREACH_CHANNEL_MAP:
         raise ValueError(f"Unknown outreach channel: {channel}")
     activity_type, log_channel, event_type, snapshot_col = _OUTREACH_CHANNEL_MAP[channel]
@@ -866,6 +884,7 @@ def log_vendor_call(
         direction=direction,
         notes=notes,
         requisition_id=requisition_id,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
