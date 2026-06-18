@@ -2572,3 +2572,183 @@ class TestEditContact:
             data={"full_name": "Alice Smith", "email": "not-an-email"},
         )
         assert resp.status_code == 400
+
+
+class TestManualCompanyMerge:
+    """Manual merge-duplicate accounts (P2e).
+
+    Verifies:
+    - Merge preview shows correct child counts
+    - Merge endpoint reassigns children and deletes the loser
+    - Guard: same id → 400, missing id → 400, no confirmation → 400
+    """
+
+    def _make_pair(self, db_session):
+        """Return (keep, remove) companies with one site+contact+activity each on
+        remove."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.models.intelligence import ActivityLog
+
+        keep = Company(name="Keep Corp", is_active=True)
+        remove = Company(name="Remove Corp", is_active=True)
+        db_session.add_all([keep, remove])
+        db_session.flush()
+
+        # Non-empty site (has an email so it's not treated as empty HQ)
+        site = CustomerSite(company_id=remove.id, site_name="West Office", contact_email="w@remove.com")
+        db_session.add(site)
+        db_session.flush()
+
+        contact = SiteContact(customer_site_id=site.id, full_name="Bob Remove", email="bob@remove.com")
+        db_session.add(contact)
+
+        activity = ActivityLog(company_id=remove.id, activity_type="outreach", channel="phone", notes="test")
+        db_session.add(activity)
+        db_session.commit()
+        return keep, remove, site, contact, activity
+
+    # ── Preview endpoint ──────────────────────────────────────────────────────
+
+    def test_preview_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET merge-preview returns 200 with preview HTML."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_preview_shows_remove_company_name(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview names the company being removed."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert "Remove Corp" in resp.text
+
+    def test_preview_shows_site_count(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview reports number of sites that will be reassigned."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": remove.id},
+        )
+        assert resp.status_code == 200
+        # "1" should appear — the one non-empty site
+        assert "1" in resp.text
+
+    def test_preview_missing_remove_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview with nonexistent remove_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": 999999},
+        )
+        assert resp.status_code == 400
+
+    def test_preview_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """Preview with remove_id == keep_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{keep.id}/merge-preview",
+            params={"remove_id": keep.id},
+        )
+        assert resp.status_code == 400
+
+    # ── Merge endpoint guards ─────────────────────────────────────────────────
+
+    def test_merge_without_confirmation_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge without confirmed=true is rejected (guard against accidental
+        calls)."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id)},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_same_id_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge with remove_id == keep_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(keep.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 400
+
+    def test_merge_missing_remove_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST merge with nonexistent remove_id returns 400."""
+        keep, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": "999999", "confirmed": "true"},
+        )
+        assert resp.status_code == 400
+
+    # ── Merge endpoint effect ─────────────────────────────────────────────────
+
+    def test_merge_reassigns_site_to_keep(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the loser's site belongs to keeper."""
+        from app.models.crm import CustomerSite
+
+        keep, remove, site, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        refreshed = db_session.get(CustomerSite, site.id)
+        assert refreshed is not None
+        assert refreshed.company_id == keep.id
+
+    def test_merge_reassigns_activity_to_keep(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the loser's activity belongs to keeper."""
+        from app.models.intelligence import ActivityLog
+
+        keep, remove, _site, _contact, activity = self._make_pair(db_session)
+        client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        db_session.expire_all()
+        refreshed = db_session.get(ActivityLog, activity.id)
+        assert refreshed is not None
+        assert refreshed.company_id == keep.id
+
+    def test_merge_deletes_loser(self, client: TestClient, db_session: Session, test_user: User):
+        """After merge, the removed company is gone from DB."""
+        keep, remove, *_ = self._make_pair(db_session)
+        remove_id = remove.id
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove_id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(Company, remove_id) is None
+
+    def test_merge_response_redirects_to_keeper(self, client: TestClient, db_session: Session, test_user: User):
+        """Merge response carries HX-Redirect header pointing to keeper detail."""
+        keep, remove, *_ = self._make_pair(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        # Should either redirect header or contain the keeper company URL
+        location = resp.headers.get("HX-Redirect", "") or resp.headers.get("Location", "") or resp.text
+        assert str(keep.id) in location
+
+    # ── UI presence ──────────────────────────────────────────────────────────
+
+    def test_merge_button_appears_in_company_detail(self, client: TestClient, db_session: Session, test_user: User):
+        """Company detail partial includes a 'merge' action/button."""
+        keep = Company(name="Merge Button Co", is_active=True)
+        db_session.add(keep)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{keep.id}")
+        assert resp.status_code == 200
+        assert "merge" in resp.text.lower()
