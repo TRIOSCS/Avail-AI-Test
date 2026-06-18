@@ -68,4 +68,20 @@
       {{ score }}
     </span>
   </td>
+  {# Do-Not-Offer button #}
+  <td class="px-3 py-2.5 text-right" id="dno-cell-{{ match.id }}">
+    <form hx-post='/v2/partials/proactive/do-not-offer'
+          hx-target='#match-row-{{ match.id }}'
+          hx-swap='outerHTML'
+          hx-confirm="Never offer {{ match.mpn | default('this part') | e }} to this customer again?"
+          class='inline'>
+      <input type='hidden' name='mpn' value='{{ match.mpn | default("") }}'>
+      <input type='hidden' name='company_id' value='{{ group.company_id | default("") }}'>
+      <button type='submit'
+              title="Never offer this part to this customer"
+              class='text-[10px] text-gray-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50'>
+        Don&rsquo;t offer
+      </button>
+    </form>
+  </td>
 </tr>
