@@ -31,7 +31,7 @@ class Offer(Base):
 
     __tablename__ = "offers"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
 
