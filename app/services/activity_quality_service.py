@@ -194,6 +194,13 @@ async def score_activity(activity_id: int, db: Session) -> None:
     log.quality_assessed_at = datetime.now(timezone.utc)
     db.flush()
 
+    # Advance reply clock in real time if this is a meaningful inbound activity.
+    # Email rows are created with is_meaningful=None and graded here — without this
+    # bump the clock would only update on the nightly recompute (up to ~24h stale).
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, log)
+
     logger.debug(f"Scored activity {activity_id}: {log.quality_classification} ({log.quality_score})")
 
 

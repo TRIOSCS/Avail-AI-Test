@@ -38,7 +38,7 @@ class Company(Base):
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
-    # CRM cadence — two clocks + tier (see docs/.../2026-06-17-crm-data-foundation.md)
+    # CRM cadence — two clocks + tier (see docs/superpowers/plans/2026-06-17-crm-data-foundation.md)
     last_outbound_at = Column(UTCDateTime, index=True)
     last_reply_at = Column(UTCDateTime, index=True)
     tier = Column(String(20), index=True)  # key | core | standard | prospect (NULL => standard)
