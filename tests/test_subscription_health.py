@@ -350,6 +350,73 @@ class TestSuccessfulRenewal:
 
 
 # ══════════════════════════════════════════════════════════════════════
+#  Write-guard: don't clobber unrelated m365_error_reason
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestM365ErrorReasonGuard:
+    def test_success_does_not_clear_unrelated_m365_error(self, db_session):
+        """Successful renewal does NOT clear an unrelated m365_error_reason.
+
+        The success path only clears the subscription-sentinel string; any other reason
+        (e.g. "Token expired — re-authorize M365") must be left untouched so the user
+        still sees that unrelated problem.
+        """
+        from app.services.webhook_service import renew_subscription
+
+        unrelated_reason = "Token expired — re-authorize M365"
+        user = _make_user(db_session, email="success-unrelated@trioscs.com")
+        user.m365_error_reason = unrelated_reason
+        db_session.commit()
+
+        sub = _make_sub(db_session, user, sub_id="sub-success-unrelated", fail_count=0)
+
+        mock_gc = MagicMock()
+        mock_gc.patch_json = AsyncMock(return_value={})
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
+            result = _run(renew_subscription(sub, db_session))
+
+        assert result is True
+        db_session.refresh(user)
+        assert user.m365_error_reason == unrelated_reason
+
+    def test_failure_threshold_does_not_overwrite_unrelated_m365_error(self, db_session):
+        """Crossing the fail threshold does NOT overwrite an unrelated
+        m365_error_reason.
+
+        The write-guard in _record_renewal_failure only sets the subscription- sentinel
+        when m365_error_reason is None or already the sentinel.  A pre-existing
+        unrelated error (e.g. "Token expired — re-authorize M365") must be preserved so
+        the user sees the correct root cause.
+        """
+        from app.services.webhook_service import renew_subscription
+
+        unrelated_reason = "Token expired — re-authorize M365"
+        user = _make_user(db_session, email="threshold-unrelated@trioscs.com")
+        user.m365_error_reason = unrelated_reason
+        db_session.commit()
+
+        # Already at threshold-1 so next failure crosses it
+        sub = _make_sub(db_session, user, sub_id="sub-threshold-unrelated", fail_count=FAIL_THRESHOLD - 1)
+
+        mock_gc = MagicMock()
+        mock_gc.patch_json = AsyncMock(side_effect=Exception("timeout"))
+
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
+            _run(renew_subscription(sub, db_session))
+
+        db_session.refresh(user)
+        assert user.m365_error_reason == unrelated_reason
+
+
+# ══════════════════════════════════════════════════════════════════════
 #  404/410 GONE — unchanged behavior: delete subscription
 # ══════════════════════════════════════════════════════════════════════
 

@@ -226,7 +226,8 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
             # Keep the subscription — next renewal cycle will retry.
             logger.warning(f"Transient Graph error renewing subscription {sub.subscription_id}: {error_code}")
             detail = result.get("detail", "")
-            _record_renewal_failure(sub, user, f"{error_code}: {detail}".strip(": "), db)
+            error_msg = f"{error_code}: {detail}" if detail else str(error_code)
+            _record_renewal_failure(sub, user, error_msg, db)
         return False
 
     # SUCCESS: reset health counters, set last_renewed_at, clear user error
@@ -247,7 +248,8 @@ def _record_renewal_failure(sub, user, error_detail: str, db) -> None:
     sub.renew_fail_count = (sub.renew_fail_count or 0) + 1
     sub.last_error = error_detail[:500]
     if sub.renew_fail_count >= RENEW_FAIL_THRESHOLD:
-        user.m365_error_reason = _M365_SUB_ERROR_MSG
+        if user.m365_error_reason in (None, _M365_SUB_ERROR_MSG):
+            user.m365_error_reason = _M365_SUB_ERROR_MSG
     db.commit()
 
 

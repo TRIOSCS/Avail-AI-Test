@@ -386,7 +386,7 @@ def api_subscription_health(
                 "subscription_id": s.subscription_id,
                 "resource": s.resource,
                 "expiration_dt": _iso(s.expiration_dt),
-                "renew_fail_count": s.renew_fail_count or 0,
+                "renew_fail_count": s.renew_fail_count,
                 "last_error": s.last_error,
                 "last_renewed_at": _iso(s.last_renewed_at),
             }
