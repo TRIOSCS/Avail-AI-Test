@@ -821,6 +821,8 @@ async def scan_sent_folder(user, db):
     Called by: _job_scan_sent_folders (scheduler, every 30 min)
     Depends on: GraphClient.delta_query, models.ActivityLog, models.SyncState
     """
+    from sqlalchemy import func
+
     from app.utils.graph_client import GraphClient, GraphSyncStateExpired
 
     from ..models import SyncState
@@ -840,7 +842,7 @@ async def scan_sent_folder(user, db):
     delta_token = sync_state.delta_token if sync_state else None
 
     delta_params = {
-        "$select": "id,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
+        "$select": "id,conversationId,subject,from,toRecipients,sentDateTime,hasAttachments,internetMessageHeaders",
         "$top": "100",
     }
     try:
@@ -893,6 +895,19 @@ async def scan_sent_folder(user, db):
 
     # Process each sent message. Per-message SAVEPOINT: one malformed message
     # must not roll back the batch (and with it the already-flushed delta token).
+    #
+    # Reconcile-first strategy (P1b): send_batch_rfq now writes an outbound
+    # ActivityLog at the moment sendMail succeeds (external_id=NULL, no graph id
+    # yet).  When this scan finds the corresponding message, it UPDATES that
+    # existing row (sets external_id / graph ids) instead of creating a second
+    # one.  This prevents duplicate outbound ActivityLog rows and ensures the
+    # outbound clock was already advanced at send time.
+    #
+    # Idempotency key: same user_id + contact_email (first recipient) +
+    # requisition_id + direction=outbound + external_id IS NULL + occurred_at
+    # within RECONCILE_WINDOW_HOURS of the message's sentDateTime.
+    RECONCILE_WINDOW_HOURS = 48
+
     created_logs = []
     attachment_queue = []
     for msg in messages:
@@ -902,6 +917,7 @@ async def scan_sent_folder(user, db):
             with db.begin_nested():
                 subject = msg.get("subject", "")
                 sent_dt = msg.get("sentDateTime")
+                conversation_id = msg.get("conversationId", "")
 
                 # Skip if we already logged this message (dedup by external_id)
                 existing = (
@@ -937,24 +953,80 @@ async def scan_sent_folder(user, db):
                     except (ValueError, TypeError):
                         occurred_at = datetime.now(timezone.utc)
 
-                # Create one ActivityLog entry per token requisition (they share the
-                # message's external_id, so the dedup check above still skips re-scans)
+                # Reconcile with send-time rows first, then fall back to CREATE.
+                # A send-time ActivityLog row has external_id=NULL (the graph id was
+                # not available at send time).  Match on user + recipient + req +
+                # outbound direction within the reconcile window.
+                reconcile_window_start = (occurred_at or datetime.now(timezone.utc)) - timedelta(
+                    hours=RECONCILE_WINDOW_HOURS
+                )
                 for requisition_id in token_req_ids or [None]:
-                    log_entry = ActivityLog(
-                        user_id=user.id,
-                        activity_type="email_sent",
-                        channel="email",
-                        direction="outbound",
-                        event_type="email",
-                        subject=subject[:500] if subject else None,
-                        contact_email=first_recipient or None,
-                        external_id=msg_id,
-                        requisition_id=requisition_id,
-                        auto_logged=True,
-                        occurred_at=occurred_at,
-                    )
-                    db.add(log_entry)
-                    msg_logs.append(log_entry)
+                    # Try to find the send-time row to reconcile
+                    send_time_row: ActivityLog | None = None
+                    if first_recipient:
+                        q = db.query(ActivityLog).filter(
+                            ActivityLog.user_id == user.id,
+                            ActivityLog.direction == "outbound",
+                            ActivityLog.external_id.is_(None),
+                            func.lower(ActivityLog.contact_email) == first_recipient.lower(),
+                            ActivityLog.occurred_at >= reconcile_window_start,
+                        )
+                        if requisition_id is not None:
+                            q = q.filter(ActivityLog.requisition_id == requisition_id)
+                        send_time_row = q.order_by(ActivityLog.occurred_at.desc()).first()
+
+                    if isinstance(send_time_row, ActivityLog):
+                        # Reconcile: stamp graph id onto the existing row so
+                        # Tier-1 reply-matching works — no duplicate row created.
+                        send_time_row.external_id = msg_id
+                        if conversation_id:
+                            send_time_row.notes = (
+                                (send_time_row.notes or "") + f" graph_conversation_id={conversation_id}"
+                            ).strip()
+                        # Also update the matching Contact(s) with graph ids so
+                        # poll_inbox Tier-1 (conv_id_map lookup) works.
+                        if conversation_id or msg_id:
+                            from ..models.offers import Contact as OfferContact
+
+                            contact_q = db.query(OfferContact).filter(
+                                OfferContact.user_id == user.id,
+                                OfferContact.status == "sent",
+                                OfferContact.graph_message_id.is_(None),
+                                func.lower(OfferContact.vendor_contact) == first_recipient.lower(),
+                            )
+                            if requisition_id is not None:
+                                contact_q = contact_q.filter(OfferContact.requisition_id == requisition_id)
+                            for c in contact_q.all():
+                                if msg_id:
+                                    c.graph_message_id = msg_id
+                                if conversation_id:
+                                    c.graph_conversation_id = conversation_id
+                        msg_logs.append(send_time_row)
+                        logger.debug(
+                            "Sent folder scan [{}]: reconciled existing ActivityLog id={} with graph_message_id {}",
+                            user.email,
+                            send_time_row.id,
+                            msg_id[:20],
+                        )
+                    else:
+                        # No send-time row: fall back to the legacy create path
+                        # (handles sends that pre-date P1b, or edge cases where the
+                        # send-time row was already reconciled or deleted).
+                        log_entry = ActivityLog(
+                            user_id=user.id,
+                            activity_type="email_sent",
+                            channel="email",
+                            direction="outbound",
+                            event_type="email",
+                            subject=subject[:500] if subject else None,
+                            contact_email=first_recipient or None,
+                            external_id=msg_id,
+                            requisition_id=requisition_id,
+                            auto_logged=True,
+                            occurred_at=occurred_at,
+                        )
+                        db.add(log_entry)
+                        msg_logs.append(log_entry)
         except Exception:
             logger.error(
                 f"Sent folder scan [{user.email}]: skipping message {msg_id[:20]} after per-message failure",

@@ -49,11 +49,14 @@ def _create_contact(
     body: str,
     status: str,
     error_message: str | None = None,
+    sent_at: datetime | None = None,
 ) -> Contact:
     """Create and flush a Contact record with common fields.
 
     Called by: send_batch_rfq (for success, exception-error, and API-error cases).
     Depends on: normalize_vendor_name.
+    sent_at: set only for status="sent" — records the true send moment so the
+    outbound clock advances immediately without waiting for scan_sent_folder.
     """
     now = datetime.now(timezone.utc)
     contact = Contact(
@@ -70,6 +73,7 @@ def _create_contact(
         error_message=error_message,
         status_updated_at=now,
         created_at=now,
+        sent_at=sent_at,
     )
     db.add(contact)
     db.flush()
@@ -251,6 +255,7 @@ async def send_batch_rfq(
             continue
 
         per_req_parts = _per_req_parts(group)
+        send_time = datetime.now(timezone.utc)
         try:
             with db.begin_nested():
                 contacts = [
@@ -264,9 +269,27 @@ async def send_batch_rfq(
                         tagged_subject,
                         group["body"],
                         "sent",
+                        sent_at=send_time,
                     )
                     for rid, parts in per_req_parts
                 ]
+                # Write the outbound ActivityLog IMMEDIATELY at send time (one row per
+                # involved requisition) so the outbound clock advances now rather than
+                # waiting up to 30 min for scan_sent_folder.  graph_message_id /
+                # graph_conversation_id are not available yet — scan_sent_folder will
+                # reconcile by setting ActivityLog.external_id on the EXISTING row
+                # instead of creating a second one.
+                for contact in contacts:
+                    log_email_activity(
+                        user_id=user_id,
+                        direction="sent",
+                        email_addr=email,
+                        subject=tagged_subject,
+                        external_id=None,  # filled in later by scan_sent_folder
+                        contact_name=group["vendor_name"],
+                        db=db,
+                        requisition_id=contact.requisition_id,
+                    )
         except Exception:
             # The email WAS delivered — report a tracking error for this vendor
             # only; the rest of the batch keeps its rows.
