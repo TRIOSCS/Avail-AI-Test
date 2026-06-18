@@ -101,6 +101,20 @@ describe('materialsFilter numeric chips — URL round-trip', () => {
     expect(c.subFilters['capacity_gb__vals'].every((v: any) => typeof v === 'number')).toBe(true)
   })
 
+  it('drops empty CSV segments — no phantom 0 from a truncated link (Number("")===0)', () => {
+    history.replaceState({}, '', '/v2/materials?commodity=dram&sf_capacity_gb__vals=8,')
+    const c = makeComponent()
+    c.init()
+    expect(c.subFilters['capacity_gb__vals']).toEqual([8])  // NOT [8, 0]
+  })
+
+  it('ignores an empty __vals param entirely (no key set)', () => {
+    history.replaceState({}, '', '/v2/materials?commodity=dram&sf_capacity_gb__vals=')
+    const c = makeComponent()
+    c.init()
+    expect('capacity_gb__vals' in c.subFilters).toBe(false)
+  })
+
   it('round-trips push → sync without drift (copied link restores selection)', () => {
     const c1 = makeComponent()
     c1.init()

@@ -921,7 +921,9 @@ Alpine.data('materialsFilter', () => ({
               // Coerce each to a number and drop NaN so the chip :class membership
               // check (which compares numbers) and the value_numeric IN predicate stay
               // numeric — string entries would silently never match.
-              const nums = val.split(',').map(Number).filter(n => !isNaN(n));
+              // Drop empty segments BEFORE coercion: Number('') === 0 (not NaN), so a
+              // malformed/truncated link like "8," would otherwise inject a phantom 0.
+              const nums = val.split(',').filter(s => s !== '').map(Number).filter(n => !isNaN(n));
               if (nums.length > 0) {
                 this.subFilters[specKey] = nums;
               }

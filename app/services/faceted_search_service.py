@@ -53,9 +53,14 @@ _CATEGORY_NORM = func.lower(func.trim(MaterialCard.category))
 
 
 def _natural_sort_key(s: str):
-    """Split on digit runs so '205' sorts before '1210' (numeric runs compared as
-    ints)."""
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", s) if t != ""]
+    """Split on digit runs so '205' sorts before '1210' (numeric runs compared as ints).
+
+    Each token is type-ranked — (0, int) for a digit run, (1, str) for text — so an int
+    is never compared to a str. A mixed overflow set like ['1210', 'BGA'] then sorts
+    cleanly (numbers before letters) instead of raising ``TypeError: '<' not supported
+    between 'int' and 'str'``.
+    """
+    return [(0, int(t)) if t.isdigit() else (1, t) for t in re.split(r"(\d+)", s) if t != ""]
 
 
 def has_crosses_predicate():
@@ -265,7 +270,11 @@ def get_facet_counts(
     chip_filtered_keys = [k for k, v in active_filters.items() if isinstance(v, list) and k.endswith("__vals")]
     for fk in chip_filtered_keys:
         spec_key = fk[: -len("__vals")]
-        others = {k: v for k, v in active_filters.items() if k != fk}
+        # Exclude every variant of this spec (chip, enum, and _min/_max range) so a
+        # same-spec range never narrows the chip facet's own OR-within counts — mirrors
+        # the enum Pass-2 own_variants contract above.
+        own_variants = (spec_key, f"{spec_key}_min", f"{spec_key}_max", fk)
+        others = {k: v for k, v in active_filters.items() if k not in own_variants}
         result[spec_key] = {
             str(value): count for _sk, value, count in _grouped_numeric_counts(others, only_spec_key=spec_key)
         }

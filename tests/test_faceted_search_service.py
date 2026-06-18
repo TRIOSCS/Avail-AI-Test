@@ -221,6 +221,12 @@ def test_natural_sort_key_orders_numeric_runs():
     assert sorted(["1210", "0805", "205"], key=_natural_sort_key) == ["205", "0805", "1210"]
 
 
+def test_natural_sort_key_mixed_alpha_numeric_does_not_crash():
+    """Type-ranked tokens never cross-compare int vs str: a mixed leading-digit /
+    leading-alpha set sorts numbers-first instead of raising TypeError."""
+    assert sorted(["1210", "BGA", "205", "0805"], key=_natural_sort_key) == ["205", "0805", "1210", "BGA"]
+
+
 def test_get_subfilter_options_natural_sorts_enum_overflow(db_session: Session):
     """Fixed-vocab enum: canonical values keep their curated order, then observed
     overflow values (not in the canonical list) append in NUMERIC order."""
@@ -264,6 +270,44 @@ def test_get_subfilter_options_natural_sorts_enum_overflow(db_session: Session):
     options = get_subfilter_options(db_session, "capacitors")
     pkg_opt = next(o for o in options if o["spec_key"] == "package")
     assert pkg_opt["values"] == ["0402", "0603", "205", "0805", "1210"]
+
+
+def test_get_subfilter_options_mixed_overflow_does_not_crash(db_session: Session):
+    """Regression: overflow values mixing leading-digit and leading-alpha forms (e.g.
+    '1210' and 'BGA') must NOT raise — the type-ranked natural-sort key keeps int and str
+    tokens from cross-comparing, so the sidebar builds instead of 500-ing. Numbers sort
+    before letters."""
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="capacitors",
+            spec_key="package",
+            display_name="Package",
+            data_type="enum",
+            enum_values=["0402"],
+            sort_order=0,
+            is_filterable=True,
+            is_primary=False,
+        )
+    )
+    db_session.flush()
+    for i, value in enumerate(["1210", "BGA", "205"]):
+        card = MaterialCard(
+            normalized_mpn=f"cap-mix-{i}",
+            display_mpn=f"CAP-MIX-{i}",
+            manufacturer="TestCo",
+            category="capacitors",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(
+            MaterialSpecFacet(material_card_id=card.id, category="capacitors", spec_key="package", value_text=value)
+        )
+    db_session.flush()
+
+    options = get_subfilter_options(db_session, "capacitors")  # must not raise
+    pkg_opt = next(o for o in options if o["spec_key"] == "package")
+    assert pkg_opt["values"] == ["0402", "205", "1210", "BGA"]
 
 
 # --- Numeric common-value chips (P2 backend) ---
@@ -421,6 +465,23 @@ def test_search_materials_faceted_empty_vals_is_noop(db_session: Session):
 
     _, total = search_materials_faceted(db_session, commodity="dram", sub_filters={"capacity_gb__vals": []})
     assert total == 3  # empty chip set → unfiltered, not zero
+
+
+def test_facet_counts_chip_self_exclusion_ignores_same_spec_range(db_session: Session):
+    """A chip facet's OWN Pass-2 counts exclude EVERY variant of its spec — including a
+    simultaneous {spec}_min/_max range — so a chip value outside the active range still
+    reports its full OR-within count (clicking it ORs the value in, not ANDs it)."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-008", "DDR4", 8)
+    _make_dram_card(db_session, "MEM-016", "DDR4", 16)
+    _make_dram_card(db_session, "MEM-032", "DDR4", 32)
+
+    counts = get_facet_counts(db_session, "dram", active_filters={"capacity_gb__vals": [32], "capacity_gb_min": 16})
+    # 8 (below the active >=16 range) still shows its full count — the chip facet's own
+    # counts are not narrowed by its own same-spec range.
+    assert counts["capacity_gb"].get("8.0") == 1
+    assert counts["capacity_gb"].get("16.0") == 1
+    assert counts["capacity_gb"].get("32.0") == 1
 
 
 # --- Facet counts with active_filters ---
