@@ -5829,9 +5829,10 @@ async def company_merge(
     )
 
     # Redirect browser to keeper's detail page via HTMX redirect header
+    safe_name = html_mod.escape(keep.name or "")
     response = HTMLResponse(
-        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{keep.name}</strong>. '
-        f"{result.get('sites_moved', 0)} site(s) and {result.get('reassigned', 0)} record(s) reassigned.</p>",
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
         status_code=200,
     )
     response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"

@@ -2742,6 +2742,27 @@ class TestManualCompanyMerge:
         location = resp.headers.get("HX-Redirect", "") or resp.headers.get("Location", "") or resp.text
         assert str(keep.id) in location
 
+    def test_merge_response_escapes_company_name_xss(self, client: TestClient, db_session: Session, test_user: User):
+        """Merge success response HTML-escapes the company name (XSS guard).
+
+        A keeper with markup in its name must produce escaped output so the browser
+        renders it as text, not as live HTML.
+        """
+        keep = Company(name="<b>Evil Corp</b>", is_active=True)
+        remove = Company(name="Victim Corp", is_active=True)
+        db_session.add_all([keep, remove])
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{keep.id}/merge",
+            data={"remove_id": str(remove.id), "confirmed": "true"},
+        )
+        assert resp.status_code == 200
+        # Raw markup must NOT appear — would be stored-XSS
+        assert "<b>" not in resp.text
+        assert "</b>" not in resp.text
+        # Escaped form must appear instead
+        assert "&lt;b&gt;" in resp.text
+
     # ── UI presence ──────────────────────────────────────────────────────────
 
     def test_merge_button_appears_in_company_detail(self, client: TestClient, db_session: Session, test_user: User):

@@ -52,7 +52,7 @@
               if (removeId) {
                 htmx.ajax('GET',
                   '/v2/partials/customers/{{ keep.id }}/merge-preview?remove_id=' + removeId,
-                  {target: '#merge-preview-area', swap: 'innerHTML'}
+                  {target: '#merge-preview-area', swap: 'innerHTML', indicator: '#merge-preview-indicator'}
                 );
               }
             ">
@@ -75,6 +75,9 @@
         });
       })();
     </script>
+
+    {# Loading indicator for the merge preview htmx.ajax call #}
+    <div id="merge-preview-indicator" class="htmx-indicator text-sm text-gray-400 py-2">Loading preview…</div>
 
     {# Preview loads here after a company is selected #}
     <div id="merge-preview-area" class="mt-4"></div>
