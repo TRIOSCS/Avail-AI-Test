@@ -19,6 +19,11 @@ from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCa
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
+# Minimum connected-call duration to be considered a real conversation.
+# Calls shorter than this (including duration=0 or None) are voicemails or
+# missed calls — they do NOT advance the reply clock.
+CALL_MEANINGFUL_MIN_SECONDS: int = 30
+
 # Activity types that are inherently meaningful — flagged is_meaningful=True at
 # write time (cheap, deterministic). The high-volume / free-text types
 # (sighting_added, email_received) are deliberately excluded: they are left
@@ -363,7 +368,7 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=True,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
@@ -622,6 +627,7 @@ def log_company_call(
         duration_seconds=duration_seconds,
         direction=direction,
         notes=notes,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
@@ -866,6 +872,7 @@ def log_vendor_call(
         direction=direction,
         notes=notes,
         requisition_id=requisition_id,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
