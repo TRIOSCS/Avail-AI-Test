@@ -166,12 +166,7 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             _stamp_searched(db, card)
             return
 
-        # Resolve uploaded_by_id safely: only use user.id when the user is a
-        # real SQLAlchemy ORM instance (not a MagicMock injected in tests).
-        # The column is nullable (ondelete="SET NULL"), so None is valid.
-        from ..models import Base as _Base
-
-        uploaded_by_id: int | None = user.id if isinstance(user, _Base) else None
+        now = datetime.now(timezone.utc)
         db.add(
             MaterialCardDatasheet(
                 material_card_id=card.id,
@@ -183,23 +178,18 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
                 source=source,
                 original_url=url,
                 verified=True,
-                uploaded_by_id=uploaded_by_id,
-                captured_at=datetime.now(timezone.utc),
+                uploaded_by_id=user.id,
+                captured_at=now,
             )
         )
-        card.datasheet_captured_at = datetime.now(timezone.utc)
+        card.datasheet_captured_at = now
         db.commit()
         logger.info("datasheet captured mpn={} source={}", mpn, source)
     except Exception:
         logger.exception("capture_datasheet failed mpn={}", mpn)
         db.rollback()
     finally:
-        # Expire all cached state so the next reader sees fresh DB data.
-        # We do NOT call db.close() here because in tests SessionLocal is
-        # patched to return the shared test session; calling close() would
-        # expunge all tracked objects and break post-call assertions. In
-        # production the session is garbage-collected at task teardown.
-        db.expire_all()
+        db.close()
 
 
 def _as_utc(dt: datetime) -> datetime:

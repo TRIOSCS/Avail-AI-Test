@@ -2,7 +2,7 @@ import os
 
 os.environ["TESTING"] = "1"
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -16,24 +16,26 @@ def _session(db_session):
         yield db_session
 
 
-async def test_capture_stores_verified_connector_datasheet(_session):
+async def test_capture_stores_verified_connector_datasheet(_session, test_user):
     card = MaterialCard(normalized_mpn="17p9905", display_mpn="17P9905", datasheet_url="https://ti/17P9905.pdf")
     _session.add(card)
     _session.commit()
-    user = MagicMock(id=1)
+    # Capture id before the call — db.close() expires all ORM state including test_user.
+    user_id = test_user.id
     with (
-        patch("app.services.datasheet_capture._load_user", return_value=user),
+        patch("app.services.datasheet_capture._load_user", return_value=test_user),
         patch("app.services.datasheet_capture.download_pdf", AsyncMock(return_value=b"%PDF-1.4 data")),
         patch(
             "app.services.datasheet_capture.upload_bytes_to_onedrive",
             AsyncMock(return_value={"onedrive_item_id": "01", "onedrive_url": "https://od/x", "size_bytes": 12}),
         ),
     ):
-        await dc.capture_datasheet("17P9905", 1)
-    _session.refresh(card)
+        await dc.capture_datasheet("17P9905", user_id)
+    card = _session.query(MaterialCard).filter_by(normalized_mpn="17p9905").first()
     assert len(card.datasheets) == 1
     assert card.datasheets[0].source == "connector"
     assert card.datasheets[0].verified is True
+    assert card.datasheets[0].uploaded_by_id == user_id
     assert card.datasheet_captured_at is not None
 
 
@@ -50,13 +52,12 @@ async def test_capture_skips_within_cooldown(_session):
         find.assert_not_called()
 
 
-async def test_capture_web_hit_rejected_when_mpn_absent(_session):
+async def test_capture_web_hit_rejected_when_mpn_absent(_session, test_user):
     card = MaterialCard(normalized_mpn="17p9905", display_mpn="17P9905")  # no connector url
     _session.add(card)
     _session.commit()
-    user = MagicMock(id=1)
     with (
-        patch("app.services.datasheet_capture._load_user", return_value=user),
+        patch("app.services.datasheet_capture._load_user", return_value=test_user),
         patch(
             "app.services.datasheet_capture.find_datasheet_url", AsyncMock(return_value=("https://x/wrong.pdf", "web"))
         ),
@@ -64,8 +65,8 @@ async def test_capture_web_hit_rejected_when_mpn_absent(_session):
         patch("app.services.datasheet_capture.pdf_contains_mpn", return_value=False),
         patch("app.services.datasheet_capture.upload_bytes_to_onedrive", AsyncMock()) as up,
     ):
-        await dc.capture_datasheet("17P9905", 1)
+        await dc.capture_datasheet("17P9905", test_user.id)
         up.assert_not_called()
-    _session.refresh(card)
+    card = _session.query(MaterialCard).filter_by(normalized_mpn="17p9905").first()
     assert card.datasheets == []
     assert card.datasheet_searched_at is not None  # negative cache stamped
