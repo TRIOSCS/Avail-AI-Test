@@ -41,3 +41,4 @@
 114 feat/p1b-send-time-clock contacts.sent_at for durable send-time tracking; chains onto 113_quote_source
 115 feat/p1c-subscription-health GraphSubscription health columns (last_renewed_at, renew_fail_count, last_error); chains onto 114_contact_sent_at
 116 feat/p2d-do-not-contact site_contacts.do_not_contact (Boolean NOT NULL server_default false); chains onto 115_subscription_health
+117 feat/datasheet-company-library material_card_datasheets.library_drive_id (RE-NUMBERED 116->117: 116_site_contact_dnc landed on main first; RE-CHAINED onto 116_site_contact_dnc)

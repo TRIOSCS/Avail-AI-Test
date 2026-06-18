@@ -363,6 +363,7 @@ capture_datasheet(mpn, user_id)
     |       SSRF guard: scheme + per-hop IP check (blocks private/loopback/
     |       link-local/multicast/reserved); follows ≤5 redirects, re-validates
     |       each hop; 25 MB size cap; must begin with %PDF- magic bytes.
+    |       (DNS resolution runs in asyncio.to_thread to avoid blocking the loop.)
     |
     +-- source=="web": pdf_contains_mpn(pdf, mpn)?
     |       pypdf extracts text from first 20 pages; MPN normalised to alnum-lower
@@ -371,25 +372,46 @@ capture_datasheet(mpn, user_id)
     +-- cardless MPN + verified hit: resolve_material_card(mpn, db)
     |       creates a card only on a *verified* hit (miss never creates a card)
     |
-    +-- upload_bytes_to_onedrive(user, db,
-    |       folder="AvailAI/Datasheets/{card.id}",
-    |       name="{display_mpn}-datasheet.pdf")
-    |       → {onedrive_item_id, onedrive_url, size_bytes}
+    +-- upload_datasheet_to_library(file_name, pdf, "application/pdf",
+    |       manufacturer=card.manufacturer)                      [datasheet_library.py]
+    |       |
+    |       +-- get_app_graph_token()                           [graph_app_auth.py]
+    |       |   client-credentials (AZURE_CLIENT_ID/SECRET/TENANT_ID);
+    |       |   requires Sites.Selected application permission; cached 55 min.
+    |       |   Returns None → skip storage gracefully.
+    |       |
+    |       +-- PUT /drives/{DATASHEET_LIBRARY_DRIVE_ID}/root:/
+    |               Datasheets/{manufacturer}/{MPN}-datasheet.pdf:/content
+    |       → {onedrive_item_id, onedrive_url, size_bytes, library_drive_id}
+    |       DATASHEET_LIBRARY_DRIVE_ID unset or token unavailable → returns None
+    |       (capture stamps datasheet_searched_at and returns; upload is optional)
     |
-    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 108)
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 116)
          UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
 ```
 
 `material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
-`onedrive_url`, `source` ("connector"/"web"), `original_url`, `verified`, `captured_at`.
+`onedrive_url`, `library_drive_id` (Graph drive id of the company library),
+`source` ("connector"/"web"), `original_url`, `verified`, `uploaded_by_id`
+(optional; user who triggered the capture), `captured_at`.
 `MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
 `datasheet_searched_at` (any attempt — gates the 30-day negative cache).
 
+**Storage: company SharePoint library (app-only).** Storage goes to a shared
+SharePoint document library, not a per-user OneDrive. The app uses an app-only
+Graph token (`graph_app_auth.get_app_graph_token`, client-credentials flow) so no
+user must be present. One-time Azure-admin setup required: create the SharePoint
+library, grant the Azure app `Sites.Selected` (application permission, admin-consented)
+scoped to that site, and set `DATASHEET_LIBRARY_DRIVE_ID` to the library's Graph drive
+id. Until that env var is set the upload step is silently skipped.
+
 **Dossier UI** (`dossier_datasheet_block.html`, included in `dossier_specs`) has three
-states: (a) `card.datasheets[0]` present → branded link "Datasheet (saved MMM DD, YYYY)"
-to the OneDrive copy; (b) `datasheet_searched_at` set but no captured copy →
-"No datasheet found (will retry)"; (c) neither stamp yet → "Fetching Datasheet…" spinner
-that polls `GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
+states: (a) `card.datasheets[0]` present → "Datasheet (saved MMM DD, YYYY)" link that
+hits the in-app streaming endpoint `GET /v2/partials/search/dossier/datasheet/{id}/download`
+(fetches from the company library via app-only token, streams as `application/pdf`);
+(b) `datasheet_searched_at` set but no captured copy → "No datasheet found (will retry)";
+(c) neither stamp yet → "Fetching Datasheet…" spinner that polls
+`GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
 (`hx-trigger="every 15s"`). The status endpoint returns the same `dossier_datasheet_block`
 fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
 
