@@ -53,6 +53,8 @@ class Quote(Base):
     won_revenue = Column(Numeric(12, 2))
 
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    # Revenue attribution: "proactive" = originated from proactive selling; NULL = manual/unknown.
+    source = Column(String(50))
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         UTCDateTime,
