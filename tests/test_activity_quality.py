@@ -147,10 +147,10 @@ class TestPerformanceTab:
         resp = client.get("/v2/partials/crm/performance")
         assert "Team Performance" in resp.text
 
-    def test_crm_shell_no_longer_has_performance_tab(self, client: TestClient):
-        """CRM shell no longer renders Performance tab (relocated to /v2/reporting)."""
+    def test_crm_shell_has_performance_tab(self, client: TestClient):
+        """CRM shell renders Performance tab button."""
         resp = client.get("/v2/partials/crm/shell")
-        assert "/v2/partials/crm/performance" not in resp.text
+        assert "Performance" in resp.text
 
 
 class TestQualityJobRegistration:
