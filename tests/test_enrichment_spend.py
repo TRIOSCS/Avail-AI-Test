@@ -11,23 +11,27 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import sys
-from unittest.mock import MagicMock, patch
-
-import pytest
-
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _zero_counts():
-    return {"calls": 0, "input_tokens": 0, "output_tokens": 0,
-            "cache_read_tokens": 0, "cache_write_tokens": 0, "web_searches": 0}
+    return {
+        "calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "web_searches": 0,
+    }
 
 
-def _counts(calls=10, input_tokens=1_000_000, output_tokens=500_000,
-            cache_read_tokens=0, cache_write_tokens=0, web_searches=0):
+def _counts(
+    calls=10, input_tokens=1_000_000, output_tokens=500_000, cache_read_tokens=0, cache_write_tokens=0, web_searches=0
+):
     return {
         "calls": calls,
         "input_tokens": input_tokens,
@@ -42,14 +46,17 @@ def _counts(calls=10, input_tokens=1_000_000, output_tokens=500_000,
 # _tier_cost
 # ---------------------------------------------------------------------------
 
+
 class TestTierCost:
     def setup_method(self):
         from app.management.enrichment_spend import _tier_cost
+
         self._tier_cost = _tier_cost
 
     def test_basic_arithmetic(self):
-        c = _counts(input_tokens=1_000_000, output_tokens=1_000_000,
-                    cache_read_tokens=0, cache_write_tokens=0, web_searches=0)
+        c = _counts(
+            input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=0, cache_write_tokens=0, web_searches=0
+        )
         # fast tier: in=1.0, out=5.0
         # cost = (1M * 1.0 + 0 + 0 + 1M * 5.0) / 1M = 6.0
         result = self._tier_cost(c, in_rate=1.0, out_rate=5.0)
@@ -62,16 +69,14 @@ class TestTierCost:
 
     def test_cache_read_multiplier(self):
         # cache_read billed at 0.1x input rate
-        c = _counts(input_tokens=0, output_tokens=0,
-                    cache_read_tokens=1_000_000, cache_write_tokens=0, web_searches=0)
+        c = _counts(input_tokens=0, output_tokens=0, cache_read_tokens=1_000_000, cache_write_tokens=0, web_searches=0)
         # cost = (0 + 1M * 1.0 * 0.1 + 0 + 0) / 1M = 0.1
         result = self._tier_cost(c, in_rate=1.0, out_rate=5.0)
         assert abs(result - 0.1) < 1e-9
 
     def test_cache_write_multiplier(self):
         # cache_write billed at 1.25x input rate
-        c = _counts(input_tokens=0, output_tokens=0,
-                    cache_read_tokens=0, cache_write_tokens=1_000_000, web_searches=0)
+        c = _counts(input_tokens=0, output_tokens=0, cache_read_tokens=0, cache_write_tokens=1_000_000, web_searches=0)
         # cost = (0 + 0 + 1M * 1.0 * 1.25 + 0) / 1M = 1.25
         result = self._tier_cost(c, in_rate=1.0, out_rate=5.0)
         assert abs(result - 1.25) < 1e-9
@@ -85,8 +90,14 @@ class TestTierCost:
 
     def test_combined_all_components(self):
         from app.management.enrichment_spend import _CACHE_READ_MULT, _CACHE_WRITE_MULT, _WEB_SEARCH_USD
-        c = _counts(input_tokens=500_000, output_tokens=200_000,
-                    cache_read_tokens=100_000, cache_write_tokens=50_000, web_searches=5)
+
+        c = _counts(
+            input_tokens=500_000,
+            output_tokens=200_000,
+            cache_read_tokens=100_000,
+            cache_write_tokens=50_000,
+            web_searches=5,
+        )
         in_rate, out_rate = 3.0, 15.0
         expected = (
             500_000 * in_rate
@@ -102,6 +113,7 @@ class TestTierCost:
 # collect
 # ---------------------------------------------------------------------------
 
+
 class TestCollect:
     def test_single_date_single_tier_accumulation(self):
         call_map = {}
@@ -114,6 +126,7 @@ class TestCollect:
         with patch("app.management.enrichment_spend.intel_cache") as mock_cache:
             mock_cache.get_count.side_effect = fake_get_count
             from app.management.enrichment_spend import collect
+
             result = collect("enrichment", ["2026-06-18"])
 
         assert result["fast"]["calls"] == 42
@@ -128,6 +141,7 @@ class TestCollect:
         with patch("app.management.enrichment_spend.intel_cache") as mock_cache:
             mock_cache.get_count.side_effect = fake_get_count
             from app.management.enrichment_spend import collect
+
             result = collect("enrichment", ["2026-06-18", "2026-06-17", "2026-06-16"])
 
         # 3 dates × 10 calls each = 30 for each tier
@@ -139,6 +153,7 @@ class TestCollect:
         with patch("app.management.enrichment_spend.intel_cache") as mock_cache:
             mock_cache.get_count.return_value = 0
             from app.management.enrichment_spend import collect
+
             result = collect("enrichment", ["2026-06-18"])
 
         for tier in ("fast", "smart", "opus"):
@@ -154,6 +169,7 @@ class TestCollect:
         with patch("app.management.enrichment_spend.intel_cache") as mock_cache:
             mock_cache.get_count.side_effect = fake_get_count
             from app.management.enrichment_spend import collect
+
             collect("my_bucket", ["2026-06-18"])
 
         assert any("my_bucket" in k for k in seen_keys)
@@ -163,11 +179,14 @@ class TestCollect:
 # render
 # ---------------------------------------------------------------------------
 
+
 class TestRender:
     def setup_method(self):
         # Force reimport to avoid cached state from mocks above
         import importlib
+
         import app.management.enrichment_spend as mod
+
         importlib.reload(mod)
         self._render = mod.render
 
@@ -235,14 +254,17 @@ class TestRender:
 # main
 # ---------------------------------------------------------------------------
 
+
 class TestMain:
     def test_main_today_default(self):
         with patch("app.management.enrichment_spend.intel_cache") as mock_cache:
             mock_cache.get_count.return_value = 0
             with patch("builtins.print") as mock_print:
                 with patch("sys.argv", ["enrichment_spend"]):
-                    from app.management import enrichment_spend
                     import importlib
+
+                    from app.management import enrichment_spend
+
                     importlib.reload(enrichment_spend)
                     enrichment_spend.main()
 
@@ -256,7 +278,9 @@ class TestMain:
             with patch("builtins.print") as mock_print:
                 with patch("sys.argv", ["enrichment_spend", "--date", "2026-06-01"]):
                     import importlib
+
                     import app.management.enrichment_spend as mod
+
                     importlib.reload(mod)
                     mod.main()
 
@@ -269,7 +293,9 @@ class TestMain:
             with patch("builtins.print") as mock_print:
                 with patch("sys.argv", ["enrichment_spend", "--days", "7"]):
                     import importlib
+
                     import app.management.enrichment_spend as mod
+
                     importlib.reload(mod)
                     mod.main()
 
@@ -282,7 +308,9 @@ class TestMain:
             with patch("builtins.print") as mock_print:
                 with patch("sys.argv", ["enrichment_spend", "--bucket", "web"]):
                     import importlib
+
                     import app.management.enrichment_spend as mod
+
                     importlib.reload(mod)
                     mod.main()
 

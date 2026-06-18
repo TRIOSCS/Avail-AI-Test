@@ -181,7 +181,8 @@ class TestBackfillSkipsAlreadyRecorded:
         mock_rec.assert_called_once_with(db_session, unrecorded, refresh=False)
 
     def test_idempotent_on_repeat_call(self, db_session: Session):
-        """Running backfill twice on an already-recorded plan is a no-op on the 2nd call."""
+        """Running backfill twice on an already-recorded plan is a no-op on the 2nd
+        call."""
         _make_buy_plan(
             db_session,
             status=BuyPlanStatus.COMPLETED.value,

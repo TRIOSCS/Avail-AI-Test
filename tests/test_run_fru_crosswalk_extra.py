@@ -298,7 +298,7 @@ class TestMainCli:
         mock_db.close.assert_called()
 
     def test_main_drain_only(self):
-        """phase='drain' calls run_drain but not run_create."""
+        """Phase='drain' calls run_drain but not run_create."""
         mock_db = MagicMock()
         import app.management.run_fru_crosswalk as mod
 
@@ -314,7 +314,7 @@ class TestMainCli:
         mock_create.assert_not_called()
 
     def test_main_create_only(self):
-        """phase='create' calls run_create but not run_drain."""
+        """Phase='create' calls run_create but not run_drain."""
         mock_db = MagicMock()
         import app.management.run_fru_crosswalk as mod
 

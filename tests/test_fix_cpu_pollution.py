@@ -13,7 +13,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -22,7 +22,8 @@ from app.models.intelligence import MaterialCard
 
 
 def _make_cpu_card(db: Session, mpn: str) -> MaterialCard:
-    """Create a MaterialCard in the 'cpu' category via Core UPDATE to bypass the ORM guard."""
+    """Create a MaterialCard in the 'cpu' category via Core UPDATE to bypass the ORM
+    guard."""
     from sqlalchemy import update as _sa_update
 
     card = MaterialCard(
@@ -56,6 +57,7 @@ class TestReclassifyCpuPollutionDryRun:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value="memory"):
             with patch("app.management.fix_cpu_pollution.set_category") as mock_set:
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=False)
 
         # set_category should NOT be called in dry-run
@@ -68,6 +70,7 @@ class TestReclassifyCpuPollutionDryRun:
 
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value=None):
             from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
             result = reclassify_cpu_pollution(db_session, apply=False)
 
         assert result["scanned"] == 1
@@ -87,6 +90,7 @@ class TestReclassifyCpuPollutionDryRun:
 
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn") as mock_cls:
             from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
             result = reclassify_cpu_pollution(db_session, apply=False)
 
         mock_cls.assert_not_called()
@@ -96,15 +100,15 @@ class TestReclassifyCpuPollutionDryRun:
         """Soft-deleted cards (deleted_at IS NOT NULL) must not be scanned."""
         card = _make_cpu_card(db_session, "DELETED-CPU")
         from sqlalchemy import update as _sa_update
+
         db_session.execute(
-            _sa_update(MaterialCard).where(MaterialCard.id == card.id).values(
-                deleted_at=datetime.now(timezone.utc)
-            )
+            _sa_update(MaterialCard).where(MaterialCard.id == card.id).values(deleted_at=datetime.now(timezone.utc))
         )
         db_session.commit()
 
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn") as mock_cls:
             from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
             result = reclassify_cpu_pollution(db_session, apply=False)
 
         mock_cls.assert_not_called()
@@ -118,6 +122,7 @@ class TestReclassifyCpuPollutionApply:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value="memory"):
             with patch("app.management.fix_cpu_pollution.set_category") as mock_set:
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=True)
 
         mock_set.assert_called_once()
@@ -130,6 +135,7 @@ class TestReclassifyCpuPollutionApply:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value="memory"):
             with patch("app.management.fix_cpu_pollution.set_category"):
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=True)
 
         assert result["scanned"] == 2
@@ -145,6 +151,7 @@ class TestReclassifyCpuPollutionApply:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", side_effect=side_effect):
             with patch("app.management.fix_cpu_pollution.set_category"):
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=True)
 
         assert result["scanned"] == 2
@@ -166,6 +173,7 @@ class TestReclassifyCpuPollutionApply:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value="memory"):
             with patch("app.management.fix_cpu_pollution.set_category", side_effect=side_effect):
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=True)
 
         # Second card should still be counted
@@ -181,6 +189,7 @@ class TestReclassifyCpuPollutionLimit:
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value="memory"):
             with patch("app.management.fix_cpu_pollution.set_category"):
                 from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
                 result = reclassify_cpu_pollution(db_session, apply=False, limit=2)
 
         assert result["scanned"] == 2
@@ -191,6 +200,7 @@ class TestReclassifyCpuPollutionLimit:
 
         with patch("app.management.fix_cpu_pollution.classify_polluted_mpn", return_value=None):
             from app.management.fix_cpu_pollution import reclassify_cpu_pollution
+
             result = reclassify_cpu_pollution(db_session, apply=False, limit=None)
 
         assert result["scanned"] == 4

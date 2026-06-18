@@ -14,7 +14,6 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -114,8 +113,7 @@ class TestCheckVendorDuplicateFuzzyPythonPath:
 
         with patch("app.services.vendor_duplicates._fuzzy_match_python") as mock_py:
             mock_py.return_value = [
-                {"id": i, "name": f"Vendor {i}", "match": "fuzzy", "score": 90 - i}
-                for i in range(8)
+                {"id": i, "name": f"Vendor {i}", "match": "fuzzy", "score": 90 - i} for i in range(8)
             ]
             results = check_vendor_duplicate("acme corp", db_session)
 
@@ -139,9 +137,11 @@ class TestCheckVendorDuplicatePgTrgmFallback:
                         db_session_mock = MagicMock()
                         db_session_mock.query.return_value = mock_query
                         db_session_mock.bind.dialect.name = "postgresql"
-                        results = check_vendor_duplicate.__wrapped__(
-                            "Future Electron XYZ", db_session_mock
-                        ) if hasattr(check_vendor_duplicate, "__wrapped__") else None
+                        results = (
+                            check_vendor_duplicate.__wrapped__("Future Electron XYZ", db_session_mock)
+                            if hasattr(check_vendor_duplicate, "__wrapped__")
+                            else None
+                        )
 
         # Simpler: just test the fallback path directly through the module logic
         assert isinstance(results, (list, type(None)))
@@ -189,11 +189,7 @@ class TestFuzzyMatchPgTrgmDirect:
 
         mock_session = MagicMock()
         (
-            mock_session.query.return_value
-            .filter.return_value
-            .order_by.return_value
-            .limit.return_value
-            .all.return_value
+            mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value
         ) = [mock_row]
 
         results = _fuzzy_match_pg_trgm(mock_session, "texas instruments")
@@ -207,11 +203,7 @@ class TestFuzzyMatchPgTrgmDirect:
     def test_pg_trgm_empty_result(self):
         mock_session = MagicMock()
         (
-            mock_session.query.return_value
-            .filter.return_value
-            .order_by.return_value
-            .limit.return_value
-            .all.return_value
+            mock_session.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value
         ) = []
 
         results = _fuzzy_match_pg_trgm(mock_session, "no match")
