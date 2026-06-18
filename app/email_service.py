@@ -1305,7 +1305,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
     Depends on: extract_draft_offers, resolve_material_card, normalize_mpn_key,
                 tier_for_parsed_offer, task_service, knowledge_service, tagging.
     """
-    if not (vr.confidence and vr.confidence >= 0.5 and vr.requisition_id):
+    if not (vr.confidence and vr.confidence >= 0.5):
         return
 
     try:
@@ -1316,7 +1316,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
         logger.warning("Failed to extract draft offers: {}", e)
         return
 
-    req = db.get(Requisition, vr.requisition_id)
+    req = db.get(Requisition, vr.requisition_id) if vr.requisition_id else None
     owner_id = vr.scanned_by_user_id
     if req and req.created_by:
         owner_id = req.created_by
@@ -1441,16 +1441,17 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
 
             # Deduplicated notification -- update existing if unread, else create new
             if owner_id:
-                existing_notif = (
-                    db.query(ActivityLog)
-                    .filter(
-                        ActivityLog.user_id == owner_id,
-                        ActivityLog.activity_type == "offer_pending_review",
-                        ActivityLog.requisition_id == vr.requisition_id,
-                        ActivityLog.dismissed_at.is_(None),
-                    )
-                    .first()
+                notif_q = db.query(ActivityLog).filter(
+                    ActivityLog.user_id == owner_id,
+                    ActivityLog.activity_type == "offer_pending_review",
+                    ActivityLog.requisition_id == vr.requisition_id,
+                    ActivityLog.dismissed_at.is_(None),
                 )
+                # When requisition_id is None the filter above would match ALL
+                # null-req notifications from any vendor — scope to this vendor.
+                if vr.requisition_id is None:
+                    notif_q = notif_q.filter(ActivityLog.contact_name == vr.vendor_name)
+                existing_notif = notif_q.first()
                 if existing_notif:
                     existing_notif.subject = (
                         f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}"
