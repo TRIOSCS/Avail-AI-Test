@@ -49,6 +49,7 @@ from ...services.sourcing_leads import (
     update_lead_status,
 )
 from ...services.vendor_unavailability import apply_to_fresh_sightings
+from ...utils.async_helpers import safe_background_task
 from ...utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -443,6 +444,15 @@ async def add_requirements(
             on_requirement_added(db, req_id, r.primary_mpn, assigned_to_id=req.created_by)
     except Exception:
         logger.warning("Task auto-gen for requirements failed", exc_info=True)
+
+    # Auto-datasheet capture — fire-and-forget once per distinct MPN (never blocks).
+    try:
+        from ...services.datasheet_capture import capture_datasheet
+
+        for _mpn in {r.primary_mpn for r in created if r.primary_mpn}:
+            await safe_background_task(capture_datasheet(_mpn, user.id), task_name="datasheet_capture")
+    except Exception:
+        logger.warning("Datasheet capture enqueue failed for requirements", exc_info=True)
 
     # Duplicate detection
     duplicates = []

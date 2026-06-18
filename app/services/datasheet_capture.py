@@ -112,7 +112,11 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
     """Fire-and-forget: find → verify → store a datasheet copy on the MPN's card.
 
     Opens its own session (request session is gone by the time this runs).
+    No-ops in TESTING mode to avoid background asyncio tasks that crash xdist workers.
     """
+    if os.environ.get("TESTING"):
+        return
+
     from ..models import MaterialCard, MaterialCardDatasheet
 
     db = SessionLocal()

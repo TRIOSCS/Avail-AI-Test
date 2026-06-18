@@ -36,6 +36,7 @@ from ..models.intelligence import MaterialCard
 from ..models.sourcing import Requisition
 from ..services.quick_source_service import get_or_create_scratch_req, persist_rows_as_sightings
 from ..template_env import template_response
+from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["part-dossier"])
@@ -119,6 +120,13 @@ async def dossier_hero(
 
     ctx = _ctx(request, user)
     ctx.update({"mpn": display_mpn, "card": card, "history": history, "fru_view": fru_view})
+
+    # Auto-datasheet capture (background, never blocks the dossier render).
+    if display_mpn:
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(capture_datasheet(display_mpn, user.id), task_name="datasheet_capture")
+
     return template_response("htmx/partials/search/dossier_hero.html", ctx)
 
 
@@ -284,7 +292,12 @@ async def quick_source_rfq(
     db: Session = Depends(get_db),
 ):
     """Send RFQ from the dossier → scratch req + captured sightings → its workspace."""
-    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    if mpn.strip():
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture")
+    return response
 
 
 @router.post("/v2/partials/search/quick-source/offer", response_class=HTMLResponse)
@@ -296,4 +309,9 @@ async def quick_source_offer(
     db: Session = Depends(get_db),
 ):
     """Add Offer from the dossier → scratch req + captured sightings → its workspace."""
-    return _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    response = _redirect_to_req(_start_quick_source(db, user, mpn, items, vendor_name))
+    if mpn.strip():
+        from ..services.datasheet_capture import capture_datasheet
+
+        await safe_background_task(capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture")
+    return response
