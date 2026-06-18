@@ -2130,33 +2130,10 @@ async def add_offer(
 
     from ..services.offer_qualification import (
         apply_qualification,
-        essentials_data,
         normalize_offer_condition,
-        validate_essentials,
     )
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
-
-    # Gate: validate the submitted essentials before persisting. On a missing essential,
-    # return the existing inline 400 error and do not create the offer.
-    norm_condition = normalize_offer_condition(form.get("condition")) or (form.get("condition") or None)
-    gate_errors = validate_essentials(
-        norm_condition,
-        essentials_data(
-            manufacturer=form.get("manufacturer"),
-            packaging=form.get("packaging"),
-            usage=form.get("usage"),
-            refurbished_by=form.get("refurbished_by"),
-            refurb_process=form.get("refurb_process"),
-            cert_doc=form.get("cert_doc"),
-            part_condition=form.get("part_condition"),
-        ),
-    )
-    if gate_errors:
-        return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
-            status_code=400,
-        )
 
     offer = Offer(
         requisition_id=req_id,
@@ -2349,9 +2326,7 @@ async def edit_offer(
 
     from ..services.offer_qualification import (
         apply_qualification,
-        essentials_data,
         normalize_offer_condition,
-        validate_essentials,
     )
 
     _qkeys = (
@@ -2375,26 +2350,6 @@ async def edit_offer(
     if cond_raw:
         offer.condition = normalize_offer_condition(cond_raw) or cond_raw
 
-    # Gate: validate the effective essentials before persisting. On a missing essential,
-    # return the existing inline 400 error and do not commit.
-    _q = offer.qualification or {}
-    gate_errors = validate_essentials(
-        offer.condition,
-        essentials_data(
-            manufacturer=offer.manufacturer,
-            packaging=offer.packaging,
-            usage=_q.get("usage"),
-            refurbished_by=_q.get("refurbished_by"),
-            refurb_process=_q.get("refurb_process"),
-            cert_doc=_q.get("cert_doc"),
-            part_condition=_q.get("part_condition"),
-        ),
-    )
-    if gate_errors:
-        return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
-            status_code=400,
-        )
     apply_qualification(offer)  # non-raising: composes note + sets status
     offer.updated_at = now
     offer.updated_by_id = user.id
