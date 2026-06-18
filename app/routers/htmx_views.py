@@ -8926,6 +8926,11 @@ async def add_offer_to_quote(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    if not (offer.requisition_id == quote.requisition_id or offer.requisition_id is None):
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "offer does not belong to this quote's requisition"},
+        )
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
