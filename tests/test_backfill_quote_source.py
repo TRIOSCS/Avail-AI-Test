@@ -18,7 +18,6 @@ from app.models import (
     Requisition,
     User,
 )
-from app.models.intelligence import ProactiveOffer  # noqa: F811
 
 
 def _make_quote(db: Session, user: User, site: CustomerSite, req: Requisition, source=None) -> Quote:
