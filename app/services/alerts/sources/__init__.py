@@ -7,9 +7,11 @@ registry is fully populated. Tab keys match the nav item ids in mobile_nav.html.
 
 from ..registry import register
 from .buyplan import BuyplanActionSource
+from .inbound_customer import InboundCustomerSource
 from .offers import OfferConfirmedSource
 
 register("requisitions", OfferConfirmedSource())  # Sales Hub
 register("buy-plans", BuyplanActionSource())
+register("crm", InboundCustomerSource())  # CRM — inbound from a customer
 
-__all__ = ["OfferConfirmedSource", "BuyplanActionSource"]
+__all__ = ["OfferConfirmedSource", "BuyplanActionSource", "InboundCustomerSource"]
