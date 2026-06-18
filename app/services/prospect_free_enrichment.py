@@ -282,6 +282,7 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
     tab spawns it via ``safe_background_task`` and polls the status endpoint.
     """
     from app.database import SessionLocal
+    from app.services.prospect_scoring import calculate_readiness_score
     from app.services.prospect_warm_intros import detect_warm_intros, generate_one_liner
 
     owns_session = db is None
@@ -301,6 +302,11 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         except Exception as exc:  # noqa: BLE001 — warm-intro is best-effort; free enrichment may have succeeded
             logger.warning("Warm-intro step failed for prospect {}: {}", prospect_id, exc)
             warm, one_liner = {}, ""
+
+        # Recompute readiness from the now news-augmented signals so enrichment actually
+        # moves the readiness tier + buyer-ready ranking — not just the displayed panels.
+        new_readiness, _ = calculate_readiness_score({"name": prospect.name}, prospect.readiness_signals or {})
+        prospect.readiness_score = new_readiness
 
         ed = dict(prospect.enrichment_data or {})
         ed["warm_intro"] = warm
