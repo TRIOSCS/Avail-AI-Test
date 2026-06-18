@@ -261,3 +261,116 @@ class TestNextBestTouch:
         last_outbound = NOW - timedelta(days=3)
         result = next_best_touch(tier="key", last_outbound_at=last_outbound, now=NOW)
         assert result == "On track"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestOrderByClock — P3-5 generalization (VendorCard support)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestOrderByClock:
+    """Tests for order_by_clock generalization: model= param, VendorCard support,
+    Company regression guard.
+
+    Written FIRST (TDD RED) — will fail until order_by_clock accepts model=.
+    """
+
+    def test_vendor_outbound_nulls_first(self, db_session: Session):
+        """order_by_clock with model=VendorCard puts NULL outbound vendors first."""
+        from app.models.vendors import VendorCard
+        from app.services.crm_service import order_by_clock
+
+        v_null = VendorCard(normalized_name="null-vendor", display_name="Null Vendor")
+        v_old = VendorCard(
+            normalized_name="old-vendor",
+            display_name="Old Vendor",
+            last_outbound_at=NOW - timedelta(days=30),
+        )
+        v_recent = VendorCard(
+            normalized_name="recent-vendor",
+            display_name="Recent Vendor",
+            last_outbound_at=NOW - timedelta(days=5),
+        )
+        db_session.add_all([v_recent, v_old, v_null])
+        db_session.commit()
+
+        query = db_session.query(VendorCard)
+        results = order_by_clock(query, "outbound", model=VendorCard).all()
+
+        names = [v.normalized_name for v in results]
+        assert names.index("null-vendor") < names.index("old-vendor")
+        assert names.index("old-vendor") < names.index("recent-vendor")
+
+    def test_vendor_outbound_oldest_before_recent(self, db_session: Session):
+        """order_by_clock VendorCard: oldest non-NULL outbound comes before recent."""
+        from app.models.vendors import VendorCard
+        from app.services.crm_service import order_by_clock
+
+        v_old = VendorCard(
+            normalized_name="stalest-vendor",
+            display_name="Stalest Vendor",
+            last_outbound_at=NOW - timedelta(days=60),
+        )
+        v_recent = VendorCard(
+            normalized_name="freshest-vendor",
+            display_name="Freshest Vendor",
+            last_outbound_at=NOW - timedelta(days=2),
+        )
+        db_session.add_all([v_recent, v_old])
+        db_session.commit()
+
+        query = db_session.query(VendorCard)
+        results = order_by_clock(query, "outbound", model=VendorCard).all()
+
+        names = [v.normalized_name for v in results]
+        assert names.index("stalest-vendor") < names.index("freshest-vendor")
+
+    def test_company_order_by_clock_default_unchanged(self, db_session: Session):
+        """Regression guard: order_by_clock with no model= arg (default Company) still
+        orders companies by stalest outbound first."""
+        from app.models import Company
+        from app.services.crm_service import order_by_clock
+
+        c_null = Company(name="Null Outbound Co", is_active=True, last_outbound_at=None)
+        c_old = Company(
+            name="Old Outbound Co",
+            is_active=True,
+            last_outbound_at=NOW - timedelta(days=45),
+        )
+        c_recent = Company(
+            name="Recent Outbound Co",
+            is_active=True,
+            last_outbound_at=NOW - timedelta(days=3),
+        )
+        db_session.add_all([c_recent, c_old, c_null])
+        db_session.commit()
+
+        query = db_session.query(Company)
+        results = order_by_clock(query, "outbound").all()
+
+        names = [c.name for c in results]
+        # NULL first, then oldest, then most recent
+        null_pos = names.index("Null Outbound Co")
+        old_pos = names.index("Old Outbound Co")
+        recent_pos = names.index("Recent Outbound Co")
+        assert null_pos < old_pos < recent_pos
+
+    def test_vendor_reply_clock_nulls_first(self, db_session: Session):
+        """order_by_clock('reply', model=VendorCard) orders by last_reply_at."""
+        from app.models.vendors import VendorCard
+        from app.services.crm_service import order_by_clock
+
+        v_null = VendorCard(normalized_name="no-reply-vendor", display_name="No Reply", last_reply_at=None)
+        v_old = VendorCard(
+            normalized_name="old-reply-vendor",
+            display_name="Old Reply",
+            last_reply_at=NOW - timedelta(days=20),
+        )
+        db_session.add_all([v_old, v_null])
+        db_session.commit()
+
+        query = db_session.query(VendorCard)
+        results = order_by_clock(query, "reply", model=VendorCard).all()
+
+        names = [v.normalized_name for v in results]
+        assert names.index("no-reply-vendor") < names.index("old-reply-vendor")
