@@ -478,7 +478,8 @@ class TestProactiveDoNotOffer:
             data={"mpn": "LM317T", "company_id": str(test_company.id)},
         )
         assert resp.status_code == 200
-        assert "Suppressed" in resp.text
+        # SP2 changed the response to a hidden <tr> for outerHTML row-swap; no longer returns "Suppressed"
+        assert "display:none" in resp.text
         rec = db_session.query(ProactiveDoNotOffer).filter_by(company_id=test_company.id).first()
         assert rec is not None
         assert rec.mpn == "LM317T"

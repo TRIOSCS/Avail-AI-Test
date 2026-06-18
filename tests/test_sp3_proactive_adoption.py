@@ -206,7 +206,7 @@ class TestProactiveRefreshRoute:
         with patch(
             "app.services.proactive_matching.run_proactive_scan",
             return_value={"scanned_offers": 3, "matches_created": 1},
-        ):
+        ) as mock_scan:
             resp = client.post(
                 "/v2/partials/proactive/refresh",
                 headers={"HX-Request": "true"},
@@ -215,6 +215,10 @@ class TestProactiveRefreshRoute:
         assert resp.status_code == 200
         # Returns the list partial (has the tab bar)
         assert "Matches" in resp.text or "proactive" in resp.text.lower()
+        # Verify the scan was invoked exactly once with a db session argument
+        # (asyncio.to_thread calls run_proactive_scan(db) in a thread)
+        mock_scan.assert_called_once()
+        assert len(mock_scan.call_args.args) == 1, "run_proactive_scan should be called with exactly one arg (db)"
 
     def test_refresh_returns_matches_tab_by_default(self, client: TestClient):
         """Refresh always returns the matches tab view."""

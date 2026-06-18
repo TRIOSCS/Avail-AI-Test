@@ -9092,7 +9092,7 @@ async def proactive_refresh(
     from ..services.proactive_matching import run_proactive_scan
     from ..services.proactive_service import get_matches_for_user
 
-    run_proactive_scan(db)
+    await asyncio.to_thread(run_proactive_scan, db)
 
     result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
     groups = result.get("groups", []) if isinstance(result, dict) else result

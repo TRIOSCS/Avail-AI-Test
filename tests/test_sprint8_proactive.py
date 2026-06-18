@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import User
+from app.models.intelligence import ProactiveDoNotOffer
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -122,14 +123,18 @@ class TestProactiveBadge:
 
 
 class TestDoNotOffer:
-    def test_suppress(self, client: TestClient, test_company):
+    def test_suppress(self, client: TestClient, db_session: Session, test_company):
         resp = client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "customer_site_id": str(test_company.id)},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Suppressed" in resp.text
+        # SP2 changed the response to a hidden <tr> for outerHTML row-swap; no longer returns "Suppressed"
+        assert "display:none" in resp.text
+        # Verify the ProactiveDoNotOffer record was created in the database
+        rec = db_session.query(ProactiveDoNotOffer).filter_by(company_id=test_company.id, mpn="LM317T").first()
+        assert rec is not None, "ProactiveDoNotOffer record should have been created"
 
     def test_suppress_missing_fields(self, client: TestClient):
         resp = client.post(
