@@ -116,15 +116,18 @@ CDM_ACCOUNT_TYPES = ("Customer", "Prospect", "Partner", "Competitor")
 
 
 def _needs_call_filter(now: datetime):
-    """Predicate for accounts needing a call: overdue (30d+) OR never contacted.
+    """Predicate for accounts needing a call: outbound clock overdue (30d+) OR never touched.
+
+    Uses last_outbound_at (not last_activity_at) so the chip and its click-through
+    filter are consistent with the cadence model — a reply does NOT reset the
+    outbound obligation.
 
     Single source of truth shared by the "needs a call" chip COUNT
     (cdm_overdue_count) and the chip's click-through filter (cdm_company_query
-    staleness="needs_call") — the two must never disagree on NULL
-    last_activity_at semantics, or the chip promises rows the list won't show.
+    staleness="needs_call") — the two must never disagree.
     """
-    cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
-    return or_(Company.last_activity_at < cutoff, Company.last_activity_at.is_(None))
+    cutoff = now - timedelta(days=CADENCE_RED_DAYS)
+    return or_(Company.last_outbound_at < cutoff, Company.last_outbound_at.is_(None))
 
 
 def cdm_company_query(
@@ -172,6 +175,13 @@ def cdm_company_query(
     if my_only:
         query = query.filter(Company.account_owner_id == user.id)
 
+    # Cadence clock sorts return a fully-ordered query directly (order_by_clock
+    # calls query.order_by(...) internally), so we return early to avoid
+    # double-applying .order_by() via the CDM_SORTS path.
+    if sort == "outbound_asc":
+        return order_by_clock(query, "outbound", now)
+    if sort == "reply_asc":
+        return order_by_clock(query, "reply", now)
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 
@@ -225,6 +235,7 @@ def cdm_list_ctx(
     companies = query.offset(offset).limit(limit).all()
     for c in companies:
         c.staleness = staleness_tier(c.last_activity_at)
+        c.cadence_state = cadence_state(c.tier, c.last_outbound_at, now)
 
     ctx = {
         "companies": companies,

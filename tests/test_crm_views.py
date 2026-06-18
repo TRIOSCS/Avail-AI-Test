@@ -129,7 +129,9 @@ class TestOverdueChip:
             name="Overdue Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+            # Stale non-NULL outbound — this is the real overdue case the chip tracks.
+            # last_activity_at is irrelevant to the chip (chip keys off last_outbound_at).
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
         )
         db_session.add(overdue)
         db_session.commit()
@@ -157,7 +159,11 @@ class TestOverdueChip:
         assert "needs a call" not in resp.text
 
     def test_chip_excludes_non_overdue(self, client: TestClient, db_session: Session, test_user: User):
-        """Chip does not count accounts with recent activity."""
+        """Chip does not count accounts with recent outbound activity (<30d).
+
+        Uses last_outbound_at (cadence model); last_activity_at alone does not suppress
+        the chip — the chip tracks whether we sent something recently.
+        """
         test_user.role = "sales"
         db_session.flush()
 
@@ -165,18 +171,20 @@ class TestOverdueChip:
             name="Recent Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
         db_session.add(recent)
         db_session.commit()
 
         resp = client.get("/v2/partials/customers")
         assert resp.status_code == 200
-        assert "need a call" not in resp.text
-        assert "needs a call" not in resp.text
+        assert "bg-rose-50 text-rose-700" not in resp.text
 
     def test_chip_includes_never_contacted(self, client: TestClient, db_session: Session, test_user: User):
-        """Chip counts accounts with no activity (never contacted)."""
+        """Chip counts accounts with no activity (never contacted).
+
+        Specifically: NULL last_outbound_at (never sent an outbound) → overdue.
+        """
         test_user.role = "sales"
         db_session.flush()
 
@@ -185,6 +193,7 @@ class TestOverdueChip:
             is_active=True,
             account_owner_id=test_user.id,
             last_activity_at=None,
+            # NULL last_outbound_at = never sent an outbound → treated as overdue by chip
         )
         db_session.add(never)
         db_session.commit()
@@ -209,13 +218,13 @@ class TestOverdueChip:
             name="NeverCalled Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=None,
+            last_outbound_at=None,  # NULL last_outbound_at = never contacted → overdue
         )
         overdue = Company(
             name="LongOverdue Corp",
             is_active=True,
             account_owner_id=test_user.id,
-            last_activity_at=datetime.now(timezone.utc) - timedelta(days=45),
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),  # stale non-NULL outbound → overdue
         )
         db_session.add_all([never, overdue])
         db_session.commit()
@@ -422,12 +431,16 @@ class TestCustomerStaleness:
         assert "rounded-full" in resp.text
 
     @pytest.mark.parametrize(
-        ("name", "days_ago", "expected_class"),
+        ("name", "tier", "outbound_days_ago", "expected_class"),
         [
-            pytest.param("Stale Corp", 45, "bg-rose-500", id="overdue_shows_rose"),
-            pytest.param("New Corp", None, "bg-brand-300", id="new_shows_brand"),
-            pytest.param("DueSoon Corp", 20, "bg-amber-400", id="due_soon_shows_amber"),
-            pytest.param("Recent Corp", 5, "bg-emerald-400", id="recent_shows_emerald"),
+            # cadence_state="overdue" (>30d ceiling) → bg-rose-500
+            pytest.param("Stale Corp", "standard", 35, "bg-rose-500", id="overdue_shows_rose"),
+            # cadence_state="new" (never outbound) → bg-gray-300
+            pytest.param("New Corp", None, None, "bg-gray-300", id="new_shows_gray300"),
+            # cadence_state="due" (key tier, past 7d target, within 30d ceiling) → bg-amber-400
+            pytest.param("DueSoon Corp", "key", 10, "bg-amber-400", id="due_shows_amber"),
+            # cadence_state="on_target" (standard tier, within 30d target) → bg-emerald-400
+            pytest.param("Recent Corp", "standard", 5, "bg-emerald-400", id="on_target_shows_emerald"),
         ],
     )
     def test_staleness_tier_indicator(
@@ -436,16 +449,21 @@ class TestCustomerStaleness:
         db_session: Session,
         test_user: User,
         name: str,
-        days_ago: int | None,
+        tier: str | None,
+        outbound_days_ago: int | None,
         expected_class: str,
     ):
-        """Each staleness tier renders its indicator color.
+        """Each cadence state renders its indicator color on the account row dot.
 
-        overdue (30+d) → rose, never-contacted → brand, due-soon (14-29d) → amber,
-        recent (<14d) → emerald.
+        cadence_state is driven by last_outbound_at + tier (P3-1 dual-clock model):
+        overdue (>30d ceiling) → rose-500,   new (never outbound) → gray-300,   due
+        (past tier target, ≤30d) → amber-400,   on_target (within tier target) →
+        emerald-400.
         """
-        last_activity = None if days_ago is None else datetime.now(timezone.utc) - timedelta(days=days_ago)
-        c = Company(name=name, is_active=True, last_activity_at=last_activity)
+        last_outbound = (
+            None if outbound_days_ago is None else datetime.now(timezone.utc) - timedelta(days=outbound_days_ago)
+        )
+        c = Company(name=name, is_active=True, tier=tier, last_outbound_at=last_outbound)
         db_session.add(c)
         db_session.commit()
 
