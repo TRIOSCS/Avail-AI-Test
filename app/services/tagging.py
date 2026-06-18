@@ -261,10 +261,16 @@ def recalculate_entity_tag_visibility(entity_type: str, entity_id: int, db: Sess
     thresholds = {cfg.tag_type: cfg for cfg in db.query(TagThresholdConfig).filter_by(entity_type=entity_type).all()}
 
     for et in entity_tags:
-        et.total_entity_interactions = total
         tag = db.get(Tag, et.tag_id)
         if not tag:  # pragma: no cover
             continue
+
+        # Segment tags are always visible — never subject to count thresholds.
+        if tag.tag_type == "segment":
+            et.is_visible = True
+            continue
+
+        et.total_entity_interactions = total
 
         cfg = thresholds.get(tag.tag_type)
         if not cfg:
@@ -314,3 +320,85 @@ def propagate_tags_to_entity(
         recalculate_entity_tag_visibility(entity_type, entity_id, db)
     except Exception:  # pragma: no cover
         logger.exception(f"Failed to recalculate visibility for {entity_type}:{entity_id}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  MANUAL SEGMENT TAGS — always-visible, rep-controlled segmentation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def get_or_create_segment_tag(name: str, db: Session) -> Tag:
+    """Find or create a Tag with tag_type='segment'. Case-insensitive dedup.
+
+    Segment tags are created on-demand by reps (e.g. "OEM", "At-risk", "Key-target").
+    Race-safe via savepoint + IntegrityError retry.
+    """
+    normalized = name.strip()
+    by_name = select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "segment")
+
+    tag = db.execute(by_name).scalar_one_or_none()
+    if tag:
+        return tag
+
+    try:
+        with db.begin_nested():
+            tag = Tag(name=normalized, tag_type="segment", created_at=datetime.now(timezone.utc))
+            db.add(tag)
+            db.flush()
+        return tag
+    except IntegrityError:
+        return db.execute(by_name).scalar_one()
+
+
+def assign_segment_tag(company_id: int, tag_id: int, db: Session) -> EntityTag:
+    """Assign a segment tag to a company.
+
+    Upserts an EntityTag(entity_type='company', is_visible=True). Manual segment tags
+    are ALWAYS visible — they are never subject to the count-threshold visibility gates
+    used for AI brand/commodity tags.
+    """
+    existing = db.query(EntityTag).filter_by(entity_type="company", entity_id=company_id, tag_id=tag_id).first()
+    if existing:
+        existing.is_visible = True
+        return existing
+
+    et = EntityTag(
+        entity_type="company",
+        entity_id=company_id,
+        tag_id=tag_id,
+        is_visible=True,
+        interaction_count=0,
+        total_entity_interactions=0,
+    )
+    db.add(et)
+    db.flush()
+    return et
+
+
+def unassign_segment_tag(company_id: int, tag_id: int, db: Session) -> None:
+    """Remove a segment tag assignment from a company."""
+    et = db.query(EntityTag).filter_by(entity_type="company", entity_id=company_id, tag_id=tag_id).first()
+    if et:
+        db.delete(et)
+        db.flush()
+
+
+def list_company_segment_tags(company_id: int, db: Session) -> list[Tag]:
+    """Return all segment Tags assigned to a company (is_visible=True)."""
+    return (
+        db.query(Tag)
+        .join(EntityTag, EntityTag.tag_id == Tag.id)
+        .filter(
+            EntityTag.entity_type == "company",
+            EntityTag.entity_id == company_id,
+            EntityTag.is_visible.is_(True),
+            Tag.tag_type == "segment",
+        )
+        .order_by(Tag.name)
+        .all()
+    )
+
+
+def list_all_segment_tags(db: Session) -> list[Tag]:
+    """Return all Tags with tag_type='segment', ordered alphabetically."""
+    return db.query(Tag).filter(Tag.tag_type == "segment").order_by(Tag.name).all()
