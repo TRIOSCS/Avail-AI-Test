@@ -461,6 +461,7 @@ class TestConvertProactiveToWin:
         assert quote is not None
         assert quote.quote_number == "Q-2026-0100"
         assert quote.status == "won"
+        assert quote.source == "proactive"
 
         # Verify buy plan
         bp = db_session.get(BuyPlan, result["buy_plan_id"])
