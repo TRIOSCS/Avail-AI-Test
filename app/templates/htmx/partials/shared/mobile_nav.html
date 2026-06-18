@@ -11,7 +11,7 @@
        moreOpen: false,
        activeNav: '{{ current_view }}',
        urlToNav(url) {
-         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/crm':'crm','/v2/customers':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/settings':'settings'};
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/materials':'materials','/v2/search':'search','/v2/reporting':'reporting','/v2/buy-plans':'reporting','/v2/crm':'crm','/v2/customers':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/prospecting':'prospecting','/v2/settings':'settings'};
          for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
          return this.activeNav;
        }
@@ -30,8 +30,8 @@
        'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'),
       ('search', 'Search', '/v2/search', '/v2/partials/search',
        'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-      ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans',
-       'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+      ('reporting', 'Reporting', '/v2/reporting', '/v2/partials/reporting',
+       'M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z'),
       ('crm', 'CRM', '/v2/crm', '/v2/partials/crm/shell',
        'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z'),
       ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',

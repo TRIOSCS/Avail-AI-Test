@@ -134,7 +134,12 @@ class TestAvailScoreInteractionQuality:
 
 
 class TestPerformanceTab:
-    """Test Performance tab in CRM shell."""
+    """Test the Performance dashboard.
+
+    The dashboard partial route still serves Team Performance, but it was relocated out
+    of the CRM shell into the Reporting section (Phase 5a). The CRM shell now only has
+    Customers + Vendors tabs.
+    """
 
     def test_performance_route_returns_200(self, client: TestClient):
         """GET /v2/partials/crm/performance returns 200."""
@@ -147,10 +152,10 @@ class TestPerformanceTab:
         resp = client.get("/v2/partials/crm/performance")
         assert "Team Performance" in resp.text
 
-    def test_crm_shell_has_performance_tab(self, client: TestClient):
-        """CRM shell renders Performance tab button."""
+    def test_crm_shell_no_longer_has_performance_tab(self, client: TestClient):
+        """Performance moved to Reporting — the CRM shell no longer links it."""
         resp = client.get("/v2/partials/crm/shell")
-        assert "Performance" in resp.text
+        assert "/v2/partials/crm/performance" not in resp.text
 
 
 class TestQualityJobRegistration:
