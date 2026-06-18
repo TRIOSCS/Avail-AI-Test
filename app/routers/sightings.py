@@ -2740,3 +2740,43 @@ async def sightings_update_offer(
     await update_offer(offer_id, payload, user=user, db=db)
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/request", response_class=HTMLResponse)
+async def sightings_offer_request(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    kind: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Log a pending vendor request (images / FPQ / cert / pkg qty) on an offer.
+
+    v1: logs the request to offer.qualification['requests'] and returns the drafted
+    RFQ-back line as a toast. Does NOT send email — the buyer copies the draft into
+    the existing solicit modal (Contact.requisition_id NOT NULL caveat out of scope).
+    """
+    from datetime import datetime, timezone
+
+    from ..services.offer_qualification import REQUEST_KINDS, request_template
+
+    offer = db.get(Offer, offer_id)
+    if offer is None or kind not in REQUEST_KINDS:
+        raise HTTPException(status_code=400, detail={"error": "invalid offer or request kind"})
+    draft = request_template(kind, offer.mpn)
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    reqs.append(
+        {
+            "kind": kind,
+            "status": "pending",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "contact_id": None,
+        }
+    )
+    q["requests"] = reqs
+    offer.qualification = q
+    db.commit()
+    db.expire_all()
+    return _append_oob_toast(_refresh_offers_panel(request, requirement_id, db), f"Logged request: {draft}")

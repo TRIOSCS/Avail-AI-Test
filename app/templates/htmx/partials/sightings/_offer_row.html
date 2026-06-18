@@ -90,18 +90,35 @@
     {% if q.get('lead_time_reason') %}
     <p class="text-gray-500"><span class="font-medium text-gray-600">Lead time:</span> {{ q.lead_time_reason }}</p>
     {% endif %}
+    {# ── One-tap vendor request chips ─────────────────────────────── #}
+    <div class="flex flex-wrap gap-1 pt-1">
+      {% set kind_labels = {'images': 'Request images', 'fpq': 'Request FPQ', 'cert': 'Request cert', 'pkg_qty': 'Request pkg qty'} %}
+      {% for kind_key in ['images', 'fpq', 'cert', 'pkg_qty'] %}
+      <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/request"
+              hx-vals='{"kind":"{{ kind_key }}"}'
+              hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+              class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:border-gray-300 transition-colors">
+        {{ kind_labels[kind_key] }}
+      </button>
+      {% endfor %}
+    </div>
+    {# ── Logged requests listing (all statuses) ────────────────────── #}
     {% set requests = q.get('requests', []) %}
-    {% set pending_requests = requests | selectattr('status', 'equalto', 'pending') | list %}
-    {% if pending_requests %}
+    {% if requests %}
+    {% set kind_display = {'images': 'Images', 'fpq': 'FPQ', 'cert': 'Cert', 'pkg_qty': 'Pkg qty'} %}
+    {% set status_colors = {'pending': 'bg-amber-50 text-amber-700', 'sent': 'bg-blue-50 text-blue-700'} %}
     <div class="flex flex-wrap gap-1 pt-0.5">
-      {% for r in pending_requests %}
-      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
-        {{ r.get('kind', '') }} · {{ r.get('status', '') }}
+      {% for r in requests %}
+      {% set r_kind = r.get('kind', '') %}
+      {% set r_status = r.get('status', '') %}
+      {% set color = status_colors.get(r_status, 'bg-gray-100 text-gray-500') %}
+      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ color }}">
+        {{ kind_display.get(r_kind, r_kind|capitalize) }}{% if r_status != 'pending' %} — {{ r_status }}{% endif %}
       </span>
       {% endfor %}
     </div>
     {% endif %}
-    {% if not o.qualification_note and not q.get('provenance_story') and not q.get('terms') and not q.get('lead_time_reason') and not pending_requests %}
+    {% if not o.qualification_note and not q.get('provenance_story') and not q.get('terms') and not q.get('lead_time_reason') and not requests %}
     <p class="text-gray-400 italic">No qualification details recorded.</p>
     {% endif %}
   </div>

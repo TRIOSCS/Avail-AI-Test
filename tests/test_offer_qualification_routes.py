@@ -62,6 +62,27 @@ def test_legacy_used_normalizes_to_pulls(client, db_session, test_requisition):
     assert o.condition == "pulls"
 
 
+def test_request_from_vendor_logs_pending_and_returns_draft(client, db_session, test_requisition, test_user):
+    from app.models.offers import Offer
+
+    o = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="V",
+        mpn="LM317T",
+        qualification={"requests": []},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    rid = test_requisition.requirements[0].id
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "images"})
+    assert resp.status_code == 200
+    db_session.refresh(o)
+    reqs = (o.qualification or {}).get("requests", [])
+    assert reqs and reqs[-1]["kind"] == "images" and reqs[-1]["status"] == "pending"
+    assert b"images" in resp.content.lower()
+
+
 def test_modal_open_prefills_country_from_last_vendor_offer(client, db_session, test_requisition, test_user):
     from app.vendor_utils import normalize_vendor_name
 
