@@ -233,6 +233,7 @@ class Contact(Base):
     status_updated_at = Column(UTCDateTime)
     graph_message_id = Column(String(500))
     graph_conversation_id = Column(String(500))
+    sent_at = Column(UTCDateTime, nullable=True)
     needs_review = Column(Boolean, default=False)
     parse_result_json = Column(JSON)
     parse_confidence = Column(Float)
