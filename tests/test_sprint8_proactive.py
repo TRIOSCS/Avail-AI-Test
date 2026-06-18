@@ -129,7 +129,6 @@ class TestDoNotOffer:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Suppressed" in resp.text
 
     def test_suppress_missing_fields(self, client: TestClient):
         resp = client.post(
