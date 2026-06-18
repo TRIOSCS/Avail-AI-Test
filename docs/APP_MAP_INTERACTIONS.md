@@ -2455,6 +2455,10 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     +---> Selected commodity's sub-filters → /v2/partials/materials/filters/sub:
     |       is_primary expanded; rest fold under "More filters (N)". Fixed-vocab enums
     |       show every canonical value with a count incl. (0); open-vocab → typeahead.
+    |       Fixed-vocab enums with >12 values ALSO get a search-within box (P3, bound to
+    |       ui.facetSearch[spec_key]); observed values outside the canonical list append in
+    |       natural-numeric order via _natural_sort_key (P5, type-ranked so a mixed
+    |       digit/alpha overflow never raises).
     |       Numeric specs (range widget) also expose common-value CHIPS — the top
     |       NUMERIC_CHIP_N (8) discrete value_numeric values by distinct-card count
     |       (get_subfilter_options option["chips"], displayed value-ascending) as a
