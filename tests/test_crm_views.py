@@ -2349,3 +2349,226 @@ class TestRoleChipLegacy:
         company, _, _ = self._make_company_with_contact(db_session, contact_role=None)
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
+
+
+class TestEditSite:
+    """P2c: Edit-site modal form (GET edit-form + POST edit)."""
+
+    def _make_company_with_site(self, db_session: Session):
+        from app.models.crm import CustomerSite
+
+        company = Company(name="Edit Site Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(
+            company_id=company.id,
+            site_name="HQ",
+            site_type="hq",
+            city="Boston",
+            country="US",
+            address_line1="123 Main St",
+            payment_terms="Net30",
+            shipping_terms="FCA",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.commit()
+        return company, site
+
+    def test_get_site_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form route renders a form pre-populated with site fields."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/edit-form")
+        assert resp.status_code == 200
+        assert "HQ" in resp.text
+        assert "Boston" in resp.text
+
+    def test_get_site_edit_form_404_on_missing_site(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form for a nonexistent site returns 404."""
+        company, _ = self._make_company_with_site(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/99999/edit-form")
+        assert resp.status_code == 404
+
+    def test_post_site_edit_persists_payment_terms_and_address(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit saves payment_terms + address fields; re-rendered sites tab shows
+        new values."""
+        from app.models.crm import CustomerSite
+
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={
+                "site_name": "HQ",
+                "address_line1": "456 New Ave",
+                "city": "Cambridge",
+                "state": "MA",
+                "zip": "02139",
+                "country": "US",
+                "payment_terms": "Net60",
+                "shipping_terms": "DAP",
+                "site_type": "hq",
+                "notes": "updated note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(CustomerSite).filter(CustomerSite.id == site.id).first()
+        assert updated is not None
+        assert updated.payment_terms == "Net60"
+        assert updated.address_line1 == "456 New Ave"
+        assert updated.city == "Cambridge"
+        assert updated.state == "MA"
+        assert updated.zip == "02139"
+        assert updated.shipping_terms == "DAP"
+        assert updated.notes == "updated note"
+
+    def test_post_site_edit_re_renders_sites_tab(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit response is the refreshed sites tab containing the updated site
+        name."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={"site_name": "New HQ Name", "city": "Salem", "country": "US"},
+        )
+        assert resp.status_code == 200
+        assert "New HQ Name" in resp.text
+
+    def test_post_site_edit_missing_site_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with empty site_name returns 400."""
+        company, site = self._make_company_with_site(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/edit",
+            data={"site_name": "", "city": "Boston", "country": "US"},
+        )
+        assert resp.status_code == 400
+
+
+class TestEditContact:
+    """P2c: Edit-contact modal form (GET edit-form + POST edit)."""
+
+    def _make_company_with_contact(self, db_session: Session):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Edit Contact Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alice Smith",
+            title="Buyer",
+            email="alice@editco.com",
+            phone="+16175550001",
+            wechat_id="alice_wc",
+            notes="original note",
+            contact_role="buyer",
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET edit-form renders form pre-populated with contact fields."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 200
+        assert "Alice Smith" in resp.text
+        assert "alice@editco.com" in resp.text
+
+    def test_get_contact_edit_form_404_on_missing_contact(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """GET edit-form for nonexistent contact returns 404."""
+        company, site, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/99999/edit-form")
+        assert resp.status_code == 404
+
+    def test_post_contact_edit_persists_title_and_phone(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit saves title + phone; re-rendered contacts show new values."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "title": "Senior Buyer",
+                "email": "alice@editco.com",
+                "phone": "+16175550099",
+                "wechat_id": "alice_wc",
+                "notes": "updated note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
+        assert updated is not None
+        assert updated.title == "Senior Buyer"
+        assert updated.phone == "+16175550099"
+        assert updated.notes == "updated note"
+
+    def test_post_contact_edit_does_not_touch_contact_role(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST contact edit never modifies contact_role (owned by P2b role setter)."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "contact_role": "decision_maker",  # attacker tries to override role
+                "title": "Buyer",
+                "email": "alice@editco.com",
+                "phone": "+16175550001",
+                "wechat_id": "alice_wc",
+                "notes": "original note",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
+        assert updated is not None
+        assert updated.contact_role == "buyer"  # unchanged
+
+    def test_post_contact_edit_re_renders_contacts_panel(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit response contains the updated name in the re-rendered contacts
+        panel."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Updated", "title": "VP", "email": "alice@editco.com", "phone": ""},
+        )
+        assert resp.status_code == 200
+        assert "Alice Updated" in resp.text
+
+    def test_post_contact_edit_missing_full_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with empty full_name returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "", "title": "Buyer", "email": "alice@editco.com"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_contact_edit_invalid_email_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with malformed email returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Smith", "email": "not-an-email"},
+        )
+        assert resp.status_code == 400

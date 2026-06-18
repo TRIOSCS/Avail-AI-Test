@@ -5677,6 +5677,25 @@ async def edit_company(
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
+async def site_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a customer site."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    users = db.query(User).order_by(User.name).all()
+    return template_response(
+        "htmx/partials/customers/tabs/site_edit_modal.html",
+        {"request": request, "site": site, "company_id": company_id, "users": users},
+    )
+
+
 @router.post("/v2/partials/customers/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
 async def edit_site(
     request: Request,
@@ -5692,15 +5711,120 @@ async def edit_site(
 
     form = await request.form()
     site_name = form.get("site_name", "").strip()
-    if site_name:
-        site.site_name = site_name
+    if not site_name:
+        raise HTTPException(400, "site_name is required")
+    site.site_name = site_name
+    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
+    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
     site.city = form.get("city", "").strip() or site.city
+    site.state = form.get("state", "").strip() or site.state
+    site.zip = form.get("zip", "").strip() or site.zip
     site.country = form.get("country", "").strip() or site.country
     site.site_type = form.get("site_type", "").strip() or site.site_type
+    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
+    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        site.notes = notes_val
+    owner_id = form.get("owner_id", "")
+    if owner_id and str(owner_id).isdigit():
+        site.owner_id = int(owner_id)
+    site.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Site {} edited by {}", site_id, user.email)
 
     return await company_tab(request=request, company_id=company_id, tab="sites", user=user, db=db)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
+    response_class=HTMLResponse,
+)
+async def contact_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a site contact."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    # Verify site belongs to company
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    return template_response(
+        "htmx/partials/customers/tabs/contact_edit_modal.html",
+        {"request": request, "contact": contact, "site": site, "company_id": company_id},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit",
+    response_class=HTMLResponse,
+)
+async def edit_site_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update editable contact fields (never contact_role) and return refreshed contacts
+    panel."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    form = await request.form()
+    full_name = form.get("full_name", "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    email_val = form.get("email", "").strip()
+    if email_val and "@" not in email_val:
+        raise HTTPException(400, "Invalid email address")
+
+    contact.full_name = full_name
+    contact.title = form.get("title", "").strip() or contact.title
+    contact.email = email_val or contact.email
+    phone_val = form.get("phone", "").strip()
+    if phone_val:
+        contact.phone = phone_val
+    wechat_val = form.get("wechat_id", "").strip()
+    if wechat_val:
+        contact.wechat_id = wechat_val
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        contact.notes = notes_val
+    # contact_role is intentionally NOT updated here — owned by the P2b role setter
+    contact.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Contact {} edited by {}", contact_id, user.email)
+
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "customers")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 @router.post(
