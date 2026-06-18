@@ -15,7 +15,8 @@
 </div>
 
 {% if companies %}
-{% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
+{# Cadence dot colors keyed on c.cadence_state (outbound clock + tier target). #}
+{% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
 <div class="divide-y divide-gray-100">
   {% for c in companies %}
   <div id="cdm-row-{{ c.id }}" role="button" tabindex="0"
@@ -30,18 +31,24 @@
        @click="selectedId = {{ c.id }}"
        @keyup.enter="selectedId = {{ c.id }}"
        :class="selectedId === {{ c.id }} ? 'bg-brand-50 border-l-brand-500' : 'border-l-transparent'">
-    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.staleness, 'bg-gray-300') }}"
-          role="img" aria-label="{{ c.staleness|replace('_', ' ')|title }}"
-          title="{{ c.staleness|replace('_', ' ')|title }}"></span>
+    <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 {{ dot_colors.get(c.cadence_state, 'bg-gray-300') }}"
+          role="img" aria-label="{{ c.cadence_state|replace('_', ' ')|title }}"
+          title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
     <div class="flex-1 min-w-0">
       <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
       <p class="text-[11px] text-gray-500 truncate">
         {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
+        {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">{{ c.tier }}</span>{% endif %}
       </p>
     </div>
-    <span class="flex-shrink-0 text-[11px] {% if c.staleness == 'overdue' %}text-rose-600 font-medium{% elif c.staleness == 'due_soon' %}text-amber-600{% else %}text-gray-400{% endif %}">
-      {{ c.last_activity_at|timeago if c.last_activity_at else "Never" }}
-    </span>
+    <div class="flex-shrink-0 text-right">
+      <p class="text-[11px] {% if c.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif c.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
+        Out {{ c.last_outbound_at|timeago if c.last_outbound_at else "never" }}
+      </p>
+      <p class="text-[11px] text-gray-400">
+        Reply {{ c.last_reply_at|timeago if c.last_reply_at else "—" }}
+      </p>
+    </div>
   </div>
   {% endfor %}
 </div>
