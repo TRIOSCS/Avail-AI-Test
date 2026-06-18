@@ -6363,6 +6363,12 @@ async def log_phone_call(
     )
     if log is not None:
         log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
+        # A manually logged call is a deliberate human interaction → always meaningful,
+        # regardless of P1e's duration-gating in log_call_activity (which targets
+        # auto-captured Teams/8x8 calls that carry a real duration). Without this, a
+        # no-duration manual log lands is_meaningful=False and drops out of the
+        # meaningful-activity surfaces and the reply clock.
+        log.is_meaningful = True
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 

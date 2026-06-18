@@ -621,11 +621,33 @@ extra form step required.
 
 **One-tap vendor requests (#7).** `POST .../offers/{offer_id}/request` (scoped to
 the path's `requirement_id` to prevent IDOR) accepts `kind` ∈ `REQUEST_KINDS`
-(`images`/`fpq`/`cert`/`pkg_qty`). v1: logs the pending request into
-`offer.qualification["requests"]` and drafts the request text via `request_template`;
-does NOT auto-send email (the existing solicit modal sends). The `offer_id` is
-validated against the `requirement_id` path parameter so a buyer can only request
-on their own requirement's offers.
+(`images`/`fpq`/`cert`/`pkg_qty`). Logs the pending request into
+`offer.qualification["requests"]` (status `"pending"`) and drafts the request text via
+`request_template`. This route is `require_buyer`-only (NO Graph token) so logging
+never 401s on an expired M365 token. The `offer_id` is validated against the
+`requirement_id` path parameter so a buyer can only request on their own requirement's
+offers.
+
+**Sending a logged request (#7 send).** `POST .../offers/{offer_id}/request/{index}/send`
+(`sightings_offer_request_send`) sends a single PENDING entry as a real RFQ-back email.
+This is a SEPARATE, token-bearing route: it adds `require_fresh_token` on top of
+`require_buyer` so the actual send fails loudly on an expired token while LOGGING never
+does. `{index}` addresses the append-only `qualification["requests"]` list (stable
+index). It resolves the vendor's best contact email via `_best_contacts_by_card`
+(mirroring the batch send-inquiry path), drafts the body with `request_template`, and
+hands ONE vendor group to `send_batch_rfq` with the SCALAR `requisition_id`
+(single-requisition mode — passing the scalar AND a parts-map raises `ValueError`).
+Because `send_batch_rfq` commits internally and can expire the session, the entry-status
+update is applied AFTER it returns against a freshly re-fetched offer (and the mutated
+entry is re-slotted as a fresh nested dict so the JSON column flush is detectable — a
+shallow copy would mutate the committed baseline and persist nothing). Outcomes per
+entry: `sent` (records `contact_id`/`sent_at` and logs an `rfq_sent` activity, but does
+NOT auto-progress the sourcing status — one clarification is not a full RFQ round),
+`skipped` (no contact email, OR `offer.requisition_id is None` since
+`Contact.requisition_id` is NOT NULL — guarded BEFORE any send), `failed` (records the
+error). Idempotent: an already-`sent` entry is a no-op. The template shows a per-PENDING
+**Send** button next to each pending request pill (`status_colors` adds `skipped`/`failed`
+states).
 
 **Live badge/meter vs. stored snapshot.** `Offer.qualification_summary` (property)
 recomputes status+meter live from the current column values — the display badge always
