@@ -2773,3 +2773,118 @@ class TestManualCompanyMerge:
         resp = client.get(f"/v2/partials/customers/{keep.id}")
         assert resp.status_code == 200
         assert "merge" in resp.text.lower()
+
+
+# ────────────────────────────────────────────────────────────────────────────
+# P3: Buy Plans tab on the account (deal consolidation)
+# ────────────────────────────────────────────────────────────────────────────
+
+
+class TestAccountBuyPlansTab:
+    """P3: account detail exposes a Buy Plans tab listing all buy-plans whose
+    requisition belongs to the company (via company_id FK or name match).
+    """
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+
+    def _make_company(self, db_session: Session, name: str = "BuyPlan Co") -> Company:
+        co = Company(name=name, is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        return co
+
+    def _make_requisition(self, db_session: Session, company: Company, name: str = "REQ-BP-001"):
+        from app.models.sourcing import Requisition
+
+        req = Requisition(name=name, customer_name=company.name, company_id=company.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+        return req
+
+    def _make_buy_plan(self, db_session: Session, requisition, quote, so_number: str = "SO-001"):
+        from app.models.buy_plan import BuyPlan
+
+        bp = BuyPlan(
+            requisition_id=requisition.id,
+            quote_id=quote.id,
+            sales_order_number=so_number,
+            status="active",
+        )
+        db_session.add(bp)
+        db_session.flush()
+        return bp
+
+    def _make_quote(self, db_session: Session, requisition, quote_number: str = "Q-001"):
+        from decimal import Decimal
+
+        from app.models.quotes import Quote
+
+        q = Quote(
+            requisition_id=requisition.id,
+            quote_number=quote_number,
+            subtotal=Decimal("5000.00"),
+            status="won",
+        )
+        db_session.add(q)
+        db_session.flush()
+        return q
+
+    # ── route returns 200 + correct buy-plans ────────────────────────────────
+
+    def test_buy_plans_tab_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET /v2/partials/customers/{id}/tab/buy_plans returns 200."""
+        co = self._make_company(db_session)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+
+    def test_buy_plans_tab_shows_buy_plan_for_company(self, client: TestClient, db_session: Session, test_user: User):
+        """Company's buy-plan (linked via its requisition) appears in the tab."""
+        co = self._make_company(db_session, "BPTab Show Co")
+        req = self._make_requisition(db_session, co, "REQ-SHOW-001")
+        quote = self._make_quote(db_session, req, "Q-SHOW-001")
+        bp = self._make_buy_plan(db_session, req, quote, "SO-SHOW-001")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        assert "SO-SHOW-001" in resp.text, "Buy plan SO# should appear in tab"
+
+    def test_buy_plans_tab_empty_state_when_no_plans(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with no buy-plans renders the empty-state message."""
+        co = self._make_company(db_session, "NoBP Co")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        # Empty state must say something useful
+        assert "No buy plans" in resp.text or "no buy plans" in resp.text.lower()
+
+    def test_buy_plans_tab_scoped_to_company(self, client: TestClient, db_session: Session, test_user: User):
+        """Buy-plans from another company do NOT appear in this company's tab."""
+        co_a = self._make_company(db_session, "Scoped Co A")
+        co_b = self._make_company(db_session, "Scoped Co B")
+        req_a = self._make_requisition(db_session, co_a, "REQ-A-001")
+        req_b = self._make_requisition(db_session, co_b, "REQ-B-001")
+        quote_a = self._make_quote(db_session, req_a, "Q-A-001")
+        quote_b = self._make_quote(db_session, req_b, "Q-B-001")
+        _bp_a = self._make_buy_plan(db_session, req_a, quote_a, "SO-COMPANY-A")
+        _bp_b = self._make_buy_plan(db_session, req_b, quote_b, "SO-COMPANY-B")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co_a.id}/tab/buy_plans")
+        assert resp.status_code == 200
+        assert "SO-COMPANY-A" in resp.text, "Company A's buy plan should appear"
+        assert "SO-COMPANY-B" not in resp.text, "Company B's buy plan must NOT appear"
+
+    def test_buy_plan_count_shown_in_account_detail(self, client: TestClient, db_session: Session, test_user: User):
+        """Account detail partial renders a 'Buy Plans' tab with correct count badge."""
+        co = self._make_company(db_session, "CountBadge Co")
+        req = self._make_requisition(db_session, co, "REQ-COUNT-001")
+        quote = self._make_quote(db_session, req, "Q-COUNT-001")
+        _bp = self._make_buy_plan(db_session, req, quote, "SO-COUNT-001")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Buy Plans" in resp.text, "Buy Plans tab label must appear in detail"

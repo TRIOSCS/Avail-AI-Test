@@ -4875,6 +4875,32 @@ def _company_quotes_query(db: Session, company):
     return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
 
 
+def _company_buy_plans_query(db: Session, company):
+    """Buy plans belonging to an account: all buy-plans whose requisition links
+    to the company (via company_id FK or customer_name match). Returns a Query,
+    or None when the account has no requisitions.
+    Called by: company_detail_partial (count), company_tab (buy_plans).
+    """
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    if not req_ids:
+        return None
+    return (
+        db.query(BuyPlan)
+        .options(joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition))
+        .filter(BuyPlan.requisition_id.in_(req_ids))
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
 async def company_segment_tags_partial(
     request: Request,
@@ -5181,6 +5207,9 @@ async def company_detail_partial(
     _cq = _company_quotes_query(db, company)
     quote_count = _cq.count() if _cq is not None else 0
 
+    _bpq = _company_buy_plans_query(db, company)
+    buy_plan_count = _bpq.count() if _bpq is not None else 0
+
     # Cadence card + commercial strip context
     from datetime import timezone as _tz
 
@@ -5198,6 +5227,7 @@ async def company_detail_partial(
             "sites": sites,
             "open_req_count": open_req_count,
             "quote_count": quote_count,
+            "buy_plan_count": buy_plan_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
@@ -5235,7 +5265,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -5317,6 +5347,13 @@ async def company_tab(
         ctx = _base_ctx(request, user, "customers")
         ctx.update({"company": company, "quotes": quotes})
         return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
+    elif tab == "buy_plans":
+        bpq = _company_buy_plans_query(db, company)
+        buy_plans = bpq.order_by(BuyPlan.created_at.desc().nullslast()).all() if bpq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "buy_plans": buy_plans})
+        return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
 
     else:  # activity
         from sqlalchemy import or_ as or_clause

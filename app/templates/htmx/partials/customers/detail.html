@@ -195,7 +195,8 @@
           ('sites', 'Sites', sites|length),
           ('requisitions', 'Requisitions', open_req_count),
           ('activity', 'Activity', none),
-          ('quotes', 'Quotes', quote_count if quote_count is defined else none)
+          ('quotes', 'Quotes', quote_count if quote_count is defined else none),
+          ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none)
         ] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 role="tab"
