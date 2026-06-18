@@ -792,6 +792,8 @@ class TestComputeUserScore:
         data = resp.json()
         # User still appears in response with zero scores
         assert len(data["names"]) >= 1
+        assert len(data["scores"]) > 0
+        assert all(s == 0.0 for s in data["scores"])
 
 
 class TestCompanyDetailCadenceCard:
