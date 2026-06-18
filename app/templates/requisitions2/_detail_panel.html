@@ -94,16 +94,37 @@
   </div>
 
   {# ── Tabs ───────────────────────────────────────────────────── #}
+  {# Parts is pure-Alpine; Offers/Activity also lazy-load their pane once on first click. #}
   <div class="flex border-b border-gray-200 px-5 flex-shrink-0">
-    {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('activity', 'Activity')] %}
-    <button @click="activeTab = '{{ tab_id }}'"
-            :class="activeTab === '{{ tab_id }}'
+    <button type="button" @click="activeTab = 'parts'"
+            :class="activeTab === 'parts'
               ? 'border-brand-500 text-brand-600'
               : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
             class="px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px">
-      {{ tab_label }}
+      Parts
     </button>
-    {% endfor %}
+    <button type="button" @click="activeTab = 'offers'"
+            hx-get="/requisitions2/{{ req.id }}/offers"
+            hx-target="#rq2-offers-pane"
+            hx-swap="innerHTML"
+            hx-trigger="click once"
+            :class="activeTab === 'offers'
+              ? 'border-brand-500 text-brand-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+            class="px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px">
+      Offers
+    </button>
+    <button type="button" @click="activeTab = 'activity'"
+            hx-get="/requisitions2/{{ req.id }}/activity"
+            hx-target="#rq2-activity-pane"
+            hx-swap="innerHTML"
+            hx-trigger="click once"
+            :class="activeTab === 'activity'
+              ? 'border-brand-500 text-brand-600'
+              : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+            class="px-4 py-2 text-sm font-medium border-b-2 transition-colors -mb-px">
+      Activity
+    </button>
   </div>
 
   {# ── Tab content ────────────────────────────────────────────── #}
@@ -155,17 +176,17 @@
       {% endif %}
     </div>
 
-    {# Offers tab #}
+    {# Offers tab — lazy-loaded from GET /requisitions2/{id}/offers on first click #}
     <div x-show="activeTab === 'offers'" x-cloak>
-      <div class="px-5 py-8 text-center text-sm text-gray-400">
-        Offers will appear here as vendors respond.
+      <div id="rq2-offers-pane">
+        <div class="px-5 py-8 text-center text-sm text-gray-400">Loading offers…</div>
       </div>
     </div>
 
-    {# Activity tab #}
+    {# Activity tab — lazy-loaded from GET /requisitions2/{id}/activity on first click #}
     <div x-show="activeTab === 'activity'" x-cloak>
-      <div class="px-5 py-8 text-center text-sm text-gray-400">
-        Activity timeline coming soon.
+      <div id="rq2-activity-pane">
+        <div class="px-5 py-8 text-center text-sm text-gray-400">Loading activity…</div>
       </div>
     </div>
   </div>
