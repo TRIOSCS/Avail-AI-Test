@@ -244,3 +244,10 @@ class TestPipelineSection:
         assert resp.status_code == 200
         for label in ("Opportunities", "Sourcing", "Quoted", "Won"):
             assert label in resp.text
+
+    def test_reporting_renders_coverage_section(self, client: TestClient):
+        # Absorbed from the concurrent Phase 5 — cadence coverage by tier/rep.
+        resp = client.get("/v2/partials/reporting")
+        assert resp.status_code == 200
+        assert "Cadence Coverage" in resp.text
+        assert "By tier" in resp.text

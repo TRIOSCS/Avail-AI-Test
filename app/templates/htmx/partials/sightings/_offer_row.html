@@ -106,8 +106,13 @@
     {% set requests = q.get('requests', []) %}
     {% if requests %}
     {% set kind_display = {'images': 'Images', 'fpq': 'FPQ', 'cert': 'Cert', 'pkg_qty': 'Pkg qty'} %}
-    {% set status_colors = {'pending': 'bg-amber-50 text-amber-700', 'sent': 'bg-blue-50 text-blue-700'} %}
-    <div class="flex flex-wrap gap-1 pt-0.5">
+    {% set status_colors = {
+      'pending': 'bg-amber-50 text-amber-700',
+      'sent': 'bg-blue-50 text-blue-700',
+      'skipped': 'bg-amber-100 text-amber-600',
+      'failed': 'bg-rose-50 text-rose-700',
+    } %}
+    <div class="flex flex-wrap items-center gap-1 pt-0.5">
       {% for r in requests %}
       {% set r_kind = r.get('kind', '') %}
       {% set r_status = r.get('status', '') %}
@@ -115,6 +120,14 @@
       <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ color }}">
         {{ kind_display.get(r_kind, r_kind|capitalize) }}{% if r_status != 'pending' %} — {{ r_status }}{% endif %}
       </span>
+      {# Per-PENDING Send control: fires the token-bearing send route for this entry. #}
+      {% if r_status == 'pending' %}
+      <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/request/{{ loop.index0 }}/send"
+              hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+              class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded border border-blue-200 bg-white text-blue-600 hover:bg-blue-50 hover:border-blue-300 transition-colors">
+        Send
+      </button>
+      {% endif %}
       {% endfor %}
     </div>
     {% endif %}

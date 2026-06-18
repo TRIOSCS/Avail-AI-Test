@@ -1,6 +1,9 @@
-{# reporting/dashboard.html — Reporting section: Performance dashboard + cross-account views.
-   Receives: users_scores (list of dicts), request, current_view.
-   Called by: htmx_views.py reporting_partial route.
+{# reporting/dashboard.html — Reporting section: pipeline/forecast + cadence coverage
+   + team performance + cross-account report links.
+   Receives: pipeline/pipeline_accounts/pipeline_owners/funnel (forecast_service),
+             coverage (reporting_service.coverage_report), users_scores, request,
+             current_view.
+   Called by: crm/views.py reporting_dashboard route.
    Depends on: Alpine.js, HTMX, brand palette, Tailwind CSS.
 #}
 <div class="px-4 py-6 max-w-5xl mx-auto space-y-8">
@@ -14,6 +17,11 @@
   {# Pipeline & forecast — management sees the forecast first #}
   <section>
     {% include "htmx/partials/reporting/pipeline.html" %}
+  </section>
+
+  {# Cadence coverage — relationship health of the book #}
+  <section>
+    {% include "htmx/partials/reporting/coverage.html" %}
   </section>
 
   {# Performance dashboard — reused directly (no duplication) #}

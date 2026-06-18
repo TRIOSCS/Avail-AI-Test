@@ -122,15 +122,17 @@ async def reporting_dashboard(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render the Reporting section — performance dashboard + cross-account report
-    links.
+    """Render the Reporting section — pipeline/forecast + cadence coverage + team
+    performance + cross-account report links.
 
-    Reuses the team-performance dashboard (no duplication) and adds links to the demoted
-    Buy-Plans / Quotes cross-account views. Also surfaces the pipeline/forecast rollups
-    (the Requisition is the opportunity) — management visibility lives here, never the
-    daily hub.
+    The Requisition IS the opportunity: pipeline/forecast (value × stage win-probability)
+    comes from forecast_service. Cadence coverage (by tier / by rep) comes from
+    reporting_service.coverage_report. Reuses the team-performance dashboard (no
+    duplication) and links to the demoted Buy-Plans / Quotes cross-account views.
+    Management visibility lives here, never the daily hub.
     """
     from ...services import forecast_service
+    from ...services.reporting_service import coverage_report
     from ...template_env import template_response
 
     ctx = {
@@ -142,6 +144,7 @@ async def reporting_dashboard(
         "pipeline_accounts": forecast_service.pipeline_by_account(db),
         "pipeline_owners": forecast_service.pipeline_by_owner(db),
         "funnel": forecast_service.conversion_funnel(db),
+        "coverage": coverage_report(db),
     }
     return template_response("htmx/partials/reporting/dashboard.html", ctx)
 

@@ -862,3 +862,105 @@ class TestErrorDifferentiation:
     async def test_no_key_is_unavailable(self, mock_cred, call):
         with pytest.raises(ClaudeUnavailableError):
             await call()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Fix 2: batch metering via cost_bucket
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBatchMetering:
+    """Verify that cost_bucket="email_mining" routes to _meter_usage."""
+
+    def _make_jsonl(self, entries):
+        import json
+
+        return "\n".join(json.dumps({"custom_id": cid, "result": r}) for cid, r in entries)
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client._meter_usage")
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_batch_results_meters_with_bucket(self, mock_http, mock_cred, mock_meter):
+        """cost_bucket triggers _meter_usage for each succeeded entry."""
+        jsonl = self._make_jsonl(
+            [
+                (
+                    "r1",
+                    {
+                        "type": "succeeded",
+                        "message": {
+                            "model": "claude-haiku-3",
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "structured_output",
+                                    "input": {"parsed": True},
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ]
+        )
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_m1",
+                "request_counts": {"succeeded": 1, "errored": 0},
+            },
+        )
+        results_resp = _mock_response(200, text=jsonl)
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        result = await claude_batch_results("batch_m1", cost_bucket="email_mining")
+
+        assert result == {"r1": {"parsed": True}}
+        mock_meter.assert_called_once()
+        call_args = mock_meter.call_args
+        assert call_args[0][0] == "email_mining"  # bucket
+        assert call_args[0][1] == "fast"  # haiku → fast
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client._meter_usage")
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_batch_results_no_bucket_skips_meter(self, mock_http, mock_cred, mock_meter):
+        """Without cost_bucket, _meter_usage is NOT called."""
+        jsonl = self._make_jsonl(
+            [
+                (
+                    "r1",
+                    {
+                        "type": "succeeded",
+                        "message": {
+                            "model": "claude-haiku-3",
+                            "usage": {"input_tokens": 100, "output_tokens": 50},
+                            "content": [
+                                {
+                                    "type": "tool_use",
+                                    "name": "structured_output",
+                                    "input": {"parsed": True},
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ]
+        )
+        status_resp = _mock_response(
+            200,
+            {
+                "processing_status": "ended",
+                "results_url": "https://api.anthropic.com/results/batch_nm",
+                "request_counts": {"succeeded": 1, "errored": 0},
+            },
+        )
+        results_resp = _mock_response(200, text=jsonl)
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        await claude_batch_results("batch_nm")  # no cost_bucket
+
+        mock_meter.assert_not_called()
