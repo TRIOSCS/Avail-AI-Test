@@ -42,7 +42,7 @@ def nav_click(page: Page, href: str):
 
 # Navigation map: (href, label text)
 NAV_ITEMS = [
-    ("/v2/requisitions", "Reqs"),
+    ("/v2/requisitions", "Sales Hub"),
     ("/v2/search", "Search"),
     ("/v2/buy-plans", "Buys"),
     ("/v2/vendors", "Vendors"),
