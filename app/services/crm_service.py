@@ -13,10 +13,12 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import case as sa_case
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
-from ..models import Company, CustomerSite, Quote, SiteContact
+from ..constants import RequisitionStatus
+from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
 from ..utils.search_builder import SearchBuilder
 
@@ -287,3 +289,86 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
         if s.contact_name or s.contact_email:
             rows.append({"contact": None, "site": s, "legacy": True})
     return rows
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  COMMERCIAL STATS — company_commercial_stats, next_best_touch
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def company_commercial_stats(db: Session, company_ids: list[int]) -> dict[int, dict]:
+    """Compute win_rate, revenue_90d, last_req_date for a list of company IDs.
+
+    Returns {company_id: {"win_rate": int|None, "revenue_90d": float, "last_req_date":
+    str|None}}. win_rate is None when no decided (WON+LOST) reqs exist. revenue_90d is
+    sum of Quote.subtotal on WON reqs in last 90 days. last_req_date is ISO string of
+    the max Requisition.created_at across all sites.
+    """
+    if not company_ids:
+        return {}
+
+    # Initialise defaults so every requested id is present in the result
+    result: dict[int, dict] = {
+        cid: {"win_rate": None, "revenue_90d": 0.0, "last_req_date": None} for cid in company_ids
+    }
+
+    # Win-rate + last_req_date — single pass via CustomerSite → Requisition join
+    stats_rows = (
+        db.query(
+            CustomerSite.company_id,
+            func.count(sa_case((Requisition.status == RequisitionStatus.WON, 1))).label("won_count"),
+            func.count(sa_case((Requisition.status.in_([RequisitionStatus.WON, RequisitionStatus.LOST]), 1))).label(
+                "decided_count"
+            ),
+            func.max(Requisition.created_at).label("last_req_date"),
+        )
+        .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id.in_(company_ids))
+        .group_by(CustomerSite.company_id)
+        .all()
+    )
+    for row in stats_rows:
+        wr = round(row.won_count / row.decided_count * 100) if row.decided_count > 0 else None
+        result[row.company_id]["win_rate"] = wr
+        result[row.company_id]["last_req_date"] = row.last_req_date.isoformat() if row.last_req_date else None
+
+    # 90-day won revenue — CustomerSite → Requisition → Quote join
+    rev_cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+    rev_rows = (
+        db.query(
+            CustomerSite.company_id,
+            func.coalesce(func.sum(Quote.subtotal), 0).label("revenue"),
+        )
+        .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
+        .join(Quote, Quote.requisition_id == Requisition.id)
+        .filter(
+            CustomerSite.company_id.in_(company_ids),
+            Requisition.status == RequisitionStatus.WON,
+            Quote.created_at >= rev_cutoff,
+        )
+        .group_by(CustomerSite.company_id)
+        .all()
+    )
+    for row in rev_rows:
+        result[row.company_id]["revenue_90d"] = float(row.revenue)
+
+    return result
+
+
+def next_best_touch(
+    tier: str | None,
+    last_outbound_at: datetime | None,
+    now: datetime | None = None,
+) -> str:
+    """Human-readable next-best-touch guidance derived from cadence_state.
+
+    "Never contacted — reach out"  (state=new) "Overdue — reach out now" (state=overdue)
+    "Due for outreach"             (state=due) "On track" (state=on_target)
+    """
+    state = cadence_state(tier, last_outbound_at, now)
+    return {
+        "new": "Never contacted — reach out",
+        "overdue": "Overdue — reach out now",
+        "due": "Due for outreach",
+        "on_target": "On track",
+    }.get(state, "On track")

@@ -792,4 +792,193 @@ class TestComputeUserScore:
         data = resp.json()
         # User still appears in response with zero scores
         assert len(data["names"]) >= 1
+        assert len(data["scores"]) > 0
         assert all(s == 0.0 for s in data["scores"])
+
+
+class TestCompanyDetailCadenceCard:
+    """Tests for the new account-cadence card + commercial-context strip in the company
+    detail partial.
+
+    The old 3-stat row (Sites / Open Requisitions / Created) is being REPLACED
+    by a cadence card that shows:
+      - Two clocks: outbound + reply
+      - A cadence_state badge (color-coded)
+      - Next-best-touch text
+      - Coverage: "N contacts · N sites"
+      - Commercial strip: win rate, revenue 90d, last deal date
+
+    These tests are written FIRST (TDD) — they will FAIL until the route and
+    template are updated in CRM cockpit P3-2.
+    """
+
+    # ─── helpers ────────────────────────────────────────────────────────
+
+    def _make_company(self, db_session, **kwargs) -> Company:
+        co = Company(name="Test Cadence Co", is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    # ─── cadence badge ──────────────────────────────────────────────────
+
+    def test_detail_shows_cadence_badge_for_new_company(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with no outbound → cadence badge uses 'new' CSS classes and
+        references never/Never somewhere in the HTML.
+
+        Fails until: route passes cadence_state to template AND template renders
+        the cadence badge with correct classes.
+        """
+        co = self._make_company(db_session, last_outbound_at=None, last_reply_at=None)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        # New cadence badge CSS: bg-gray-100 text-gray-500
+        assert "bg-gray-100" in html
+        assert "text-gray-500" in html
+        # Template must say "never" or "Never" somewhere (the "Out" clock label)
+        assert "never" in html.lower()
+
+    def test_detail_shows_overdue_cadence_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with outbound 40 days ago → overdue badge CSS classes present.
+
+        Fails until: route computes cadence_state and template renders the
+        overdue badge: bg-rose-100 text-rose-700.
+        """
+        outbound_40d_ago = datetime.now(timezone.utc) - timedelta(days=40)
+        co = self._make_company(db_session, last_outbound_at=outbound_40d_ago)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        assert "bg-rose-100" in html
+        assert "text-rose-700" in html
+
+    # ─── outbound clock ─────────────────────────────────────────────────
+
+    def test_detail_shows_outbound_clock(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with last_outbound_at set → shows days count + Out/out label.
+
+        Fails until: route passes last_outbound_at (or computed days) to template
+        AND template renders the outbound clock.
+        """
+        outbound_7d_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        co = self._make_company(db_session, last_outbound_at=outbound_7d_ago)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        # The outbound clock label (case-insensitive)
+        assert "out" in html.lower()
+        # A number representing days (7d = "7")
+        assert "7" in html
+
+    # ─── next-best-touch ────────────────────────────────────────────────
+
+    def test_detail_shows_next_best_touch(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with no outbound → 'Never contacted' shown in HTML.
+
+        Fails until: route computes next_best_touch and template renders it.
+        """
+        co = self._make_company(db_session, last_outbound_at=None)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        assert "Never contacted" in resp.text
+
+    # ─── coverage row ───────────────────────────────────────────────────
+
+    def test_detail_shows_coverage(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with 2 contacts and 1 site → 'contacts' and 'site' in HTML.
+
+        Fails until: route passes contact_count + site_count to template AND
+        template renders the coverage row.
+        """
+        from app.models.crm import CustomerSite, SiteContact
+
+        co = self._make_company(db_session)
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site)
+        db_session.flush()
+
+        contact1 = SiteContact(customer_site_id=site.id, full_name="Alice Smith")
+        contact2 = SiteContact(customer_site_id=site.id, full_name="Bob Jones", email="bob@test.com")
+        db_session.add_all([contact1, contact2])
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        # "2 contacts" or "2 contact" (singular/plural variations acceptable)
+        assert "contact" in html.lower()
+        # "1 site" or "1 sites"
+        assert "site" in html.lower()
+        # The numbers 2 and 1 appear
+        assert "2" in html
+        assert "1" in html
+
+    # ─── commercial strip ───────────────────────────────────────────────
+
+    def test_detail_commercial_strip_shows_win_rate(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with WON + LOST reqs → win rate percentage in HTML.
+
+        Fails until: route fetches commercial_stats and template renders win rate %.
+        """
+        from app.models.crm import CustomerSite
+        from app.models.sourcing import Requisition
+
+        co = self._make_company(db_session)
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site)
+        db_session.flush()
+
+        req_won = Requisition(
+            name="REQ-WON-001",
+            customer_name=co.name,
+            status="won",
+            customer_site_id=site.id,
+            company_id=co.id,
+        )
+        req_lost = Requisition(
+            name="REQ-LOST-001",
+            customer_name=co.name,
+            status="lost",
+            customer_site_id=site.id,
+            company_id=co.id,
+        )
+        db_session.add_all([req_won, req_lost])
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        # 1 won / 2 decided = 50% win rate — the % symbol must appear
+        assert "%" in html
+        assert "50" in html
+
+    # ─── old labels gone ────────────────────────────────────────────────
+
+    def test_detail_old_stats_labels_gone(self, client: TestClient, db_session: Session, test_user: User):
+        """The old 3-stat row labels 'Open Requisitions' and 'Created' must NOT appear
+        in the new template.
+
+        Fails until: template no longer contains the old stat row from lines
+        97-111 of detail.html.
+        """
+        co = self._make_company(db_session)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+
+        html = resp.text
+        # These exact strings were the old stat-row labels — they must be gone
+        assert "Open Requisitions" not in html
+        assert ">Created<" not in html
