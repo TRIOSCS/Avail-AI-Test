@@ -116,6 +116,29 @@ async def crm_performance(
     return template_response("htmx/partials/crm/performance_tab.html", ctx)
 
 
+@router.get("/v2/partials/reporting", response_class=HTMLResponse)
+async def reporting_dashboard(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the Reporting section — performance dashboard + cross-account report
+    links.
+
+    Reuses the team-performance dashboard (no duplication) and adds links to the demoted
+    Buy-Plans / Quotes cross-account views.
+    """
+    from ...template_env import template_response
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "current_view": "reporting",
+        "users_scores": _build_user_scores(db),
+    }
+    return template_response("htmx/partials/reporting/dashboard.html", ctx)
+
+
 @router.get("/api/crm/performance-metrics")
 async def performance_metrics_json(
     user: User = Depends(require_user),

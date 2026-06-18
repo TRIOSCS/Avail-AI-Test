@@ -204,12 +204,9 @@ class TestNavHighlightAlias:
         # The urlToNav map on the client side should map /v2/buy-plans to 'reporting'
         assert "'/v2/buy-plans':'reporting'" in nav_content
 
-    def test_mobile_nav_maps_quotes_to_reporting_client_side(self):
-        """mobile_nav.html URL map includes /v2/quotes -> reporting for HTMX
-        navigation."""
-        from pathlib import Path
-
-        nav_path = Path("app/templates/htmx/partials/shared/mobile_nav.html")
-        nav_content = nav_path.read_text()
-        # The urlToNav map on the client side should map /v2/quotes to 'reporting'
-        assert "'/v2/quotes':'reporting'" in nav_content
+    # NOTE: quotes is intentionally NOT in the client-side urlToNav map. Quotes was
+    # retired as a standalone nav tab (quotes-relocation), and tests/test_browser_back_
+    # navigation.py::test_quotes_not_in_nav guards that "quotes" never appears in
+    # mobile_nav.html. The server-side _NAV_ID_ALIAS still maps a direct /v2/quotes
+    # full-page load to Reporting; HTMX nav reaches quotes only from the Reporting
+    # dashboard, where the urlToNav `return this.activeNav` fallback keeps Reporting lit.
