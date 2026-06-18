@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from ..constants import RequisitionStatus as RS
 from ..models.auth import User
 from ..models.crm import Company
 from ..models.intelligence import ActivityLog
@@ -22,11 +23,11 @@ from .crm_service import cadence_state
 
 TIER_ORDER = ["key", "core", "standard", "prospect"]
 
-_ACTIVE_STATUSES = {"draft", "active"}
-_SOURCING_STATUSES = {"sourcing", "offers"}
-_QUOTING_STATUSES = {"quoting", "quoted", "reopened"}
-_WON_STATUSES = {"won"}
-_LOST_STATUSES = {"lost"}
+_ACTIVE_STATUSES = {RS.DRAFT, RS.ACTIVE}
+_SOURCING_STATUSES = {RS.SOURCING, RS.OFFERS}
+_QUOTING_STATUSES = {RS.QUOTING, RS.QUOTED, RS.REOPENED}
+_WON_STATUSES = {RS.WON}
+_LOST_STATUSES = {RS.LOST}
 
 _INTERACTION_TYPES = {"email_sent", "email_received", "call_logged", "teams_message"}
 
@@ -61,9 +62,7 @@ def coverage_report(db: Session) -> dict:
     rep_buckets: dict[str | None, dict] = {}
 
     for r in rows:
-        tier = r.tier or "standard"
-        if tier not in tier_buckets:
-            tier_buckets[tier] = {"tier": tier, "total": 0, "on_target": 0, "due": 0, "overdue": 0, "new": 0}
+        tier = r.tier if r.tier in tier_buckets else "standard"
         state = cadence_state(tier, r.last_outbound_at)
 
         tier_buckets[tier]["total"] += 1

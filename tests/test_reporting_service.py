@@ -311,6 +311,19 @@ class TestPipelineReport:
         result = pipeline_report(db_session)
         assert result["win_rate"] == 0.0
 
+    def test_null_opportunity_value_treated_as_zero(self, db_session: Session):
+        """Won requisitions with NULL opportunity_value contribute 0 to
+        avg_deal_value."""
+        from app.services.reporting_service import pipeline_report
+
+        _make_req(db_session, "won", value=None)
+        _make_req(db_session, "won", value=None)
+        db_session.commit()
+
+        result = pipeline_report(db_session)
+        assert result["avg_deal_value"] == pytest.approx(0.0, abs=0.01)
+        assert result["win_rate"] == pytest.approx(100.0, abs=0.1)
+
     def test_total_open_value_excludes_won_lost(self, db_session: Session):
         """total_open_value sums Active+Sourcing+Quoting but not Won or Lost."""
         from app.services.reporting_service import pipeline_report
@@ -397,6 +410,19 @@ class TestOutcomeFunnel:
         result = outcome_funnel(db_session, days=90)
         for step in result["steps"]:
             assert step["count"] == 0
+
+    def test_cutoff_uses_days_window_consistently(self, db_session: Session):
+        """Items within the window are counted; items outside are excluded."""
+        from app.services.reporting_service import outcome_funnel
+
+        co = _make_company(db_session, "Window Co")
+        _make_activity(db_session, "email_sent", company_id=co.id, created_at=NOW - timedelta(days=29))
+        _make_activity(db_session, "email_sent", company_id=co.id, created_at=NOW - timedelta(days=31))
+        db_session.commit()
+
+        result = outcome_funnel(db_session, days=30)
+        interactions_step = next(s for s in result["steps"] if s["label"] == "Interactions")
+        assert interactions_step["count"] == 1
 
     def test_conv_rfq_rate(self, db_session: Session):
         """conv_rfq = rfqs / interactions * 100."""

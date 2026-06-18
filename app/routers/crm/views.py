@@ -6,7 +6,7 @@ Depends on: app/dependencies (require_user), app/templates
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -119,7 +119,7 @@ async def crm_performance(
 @router.get("/v2/partials/crm/reporting", response_class=HTMLResponse)
 async def crm_reporting(
     request: Request,
-    days: int | None = None,
+    days: int | None = Query(None, gt=0, le=3650),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):

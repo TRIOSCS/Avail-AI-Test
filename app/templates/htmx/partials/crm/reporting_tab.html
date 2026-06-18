@@ -61,7 +61,7 @@
       </div>
     </div>
 
-    {% if coverage.by_tier %}
+    {% if coverage.summary.total > 0 %}
     {# By-tier table #}
     <div class="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mb-4">
       <div class="px-4 py-2 border-b border-gray-100 bg-gray-50">
@@ -115,6 +115,7 @@
               <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">On Target</th>
               <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Due</th>
               <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Overdue</th>
+              <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">New</th>
               <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Coverage</th>
             </tr>
           </thead>
@@ -126,6 +127,7 @@
               <td class="px-4 py-2.5 text-sm text-right text-emerald-600 font-medium">{{ row.on_target }}</td>
               <td class="px-4 py-2.5 text-sm text-right text-amber-600">{{ row.due }}</td>
               <td class="px-4 py-2.5 text-sm text-right text-rose-600">{{ row.overdue }}</td>
+              <td class="px-4 py-2.5 text-sm text-right text-gray-400">{{ row.new }}</td>
               <td class="px-4 py-2.5 text-sm text-right font-semibold
                 {% if row.coverage_pct >= 85 %}text-emerald-600
                 {% elif row.coverage_pct >= 60 %}text-amber-600
