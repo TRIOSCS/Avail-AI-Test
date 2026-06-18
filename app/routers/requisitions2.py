@@ -19,13 +19,13 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from loguru import logger
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import UserRole
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_user
-from ..models import Requisition, User
+from ..models import Offer, Requisition, User
 from ..schemas.requisitions2 import (
     BulkActionName,
     InlineEditField,
@@ -200,6 +200,50 @@ async def requisition_detail_panel(
     return template_response(
         "requisitions2/_detail_panel.html",
         {"request": request, **detail, "user": user},
+    )
+
+
+# ── Detail panel tabs (lazy-loaded) ──────────────────────────────────
+
+
+@router.get("/{req_id}/offers", response_class=HTMLResponse)
+async def requisition_offers_tab(
+    request: Request,
+    req_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Offers tab content — lazy-loaded into #rq2-offers-pane on first click."""
+    get_req_for_user(db, user, req_id, options=[])  # role-based access (404 for non-owners)
+    # joinedload the requirement so the template's o.requirement.primary_mpn is not an N+1.
+    offers = (
+        db.query(Offer)
+        .filter(Offer.requisition_id == req_id)
+        .options(joinedload(Offer.requirement))
+        .order_by(Offer.created_at.desc().nullslast())
+        .all()
+    )
+    return template_response(
+        "requisitions2/_offers_tab.html",
+        {"request": request, "offers": offers, "req": {"id": req_id}},
+    )
+
+
+@router.get("/{req_id}/activity", response_class=HTMLResponse)
+async def requisition_activity_tab(
+    request: Request,
+    req_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Activity tab content — lazy-loaded into #rq2-activity-pane on first click."""
+    from ..services.activity_service import get_requisition_activities
+
+    get_req_for_user(db, user, req_id, options=[])  # role-based access (404 for non-owners)
+    activities = get_requisition_activities(req_id, db, meaningful_only=True)
+    return template_response(
+        "requisitions2/_activity_tab.html",
+        {"request": request, "activities": activities},
     )
 
 

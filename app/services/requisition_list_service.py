@@ -640,6 +640,9 @@ def get_requisition_detail(
 
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).order_by(Requirement.id).all()
 
+    # Real offer count so the detail panel's metadata matches its (now-wired) Offers tab.
+    offer_count = db.query(sqlfunc.count(Offer.id)).filter(Offer.requisition_id == req_id).scalar() or 0
+
     return {
         "req": {
             "id": req.id,
@@ -648,7 +651,7 @@ def get_requisition_detail(
             "customer_display": customer_display,
             "created_by_name": creator_name,
             "requirement_count": len(requirements),
-            "offer_count": 0,  # Lightweight — no subquery here
+            "offer_count": offer_count,
             "urgency": req.urgency or "normal",
             "deadline": req.deadline,
             "created_at": req.created_at,

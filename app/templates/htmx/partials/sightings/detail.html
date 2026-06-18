@@ -105,34 +105,20 @@
       <thead>
         <tr>
           <th class="px-2 py-1.5 text-left">Vendor</th>
-          <th class="px-2 py-1.5 text-left">Status</th>
           <th class="px-2 py-1.5 text-right">Qty</th>
           <th class="px-2 py-1.5 text-right">Best Price</th>
-          <th class="px-2 py-1.5 text-center">Score</th>
-          <th class="px-2 py-1.5 text-center">Phone</th>
-          <th class="px-2 py-1.5 text-center">Actions</th>
+          <th class="px-2 py-1.5 text-right">Score</th>
+          <th class="px-2 py-1.5 w-8" aria-hidden="true"></th>
         </tr>
       </thead>
-      <tbody>
-        {% for s in summaries %}
-        {% set vs = vendor_statuses.get(s.vendor_name, 'sighting') %}
-        {% if loop.index <= vendor_collapse_limit %}
-        {# ── First 5 vendors: always visible ── #}
-        {% include "htmx/partials/sightings/_vendor_row.html" %}
-        {% endif %}
-        {% endfor %}
-      </tbody>
-      {# ── Collapsed overflow vendors (Phase 2.6) ── #}
-      {% if extra_count > 0 %}
-      <tbody x-show="vendorsExpanded" x-cloak x-collapse>
-        {% for s in summaries %}
-        {% set vs = vendor_statuses.get(s.vendor_name, 'sighting') %}
-        {% if loop.index > vendor_collapse_limit %}
-        {% include "htmx/partials/sightings/_vendor_row.html" %}
-        {% endif %}
-        {% endfor %}
-      </tbody>
-      {% endif %}
+      {# Each vendor renders its own <tbody> for an isolated Alpine `expanded`
+         scope; vendors past the visible-5 limit are gated on `vendorsExpanded`
+         via the is_overflow flag set here. #}
+      {% for s in summaries %}
+      {% set vs = vendor_statuses.get(s.vendor_name, 'sighting') %}
+      {% set is_overflow = loop.index > vendor_collapse_limit %}
+      {% include "htmx/partials/sightings/_vendor_row.html" %}
+      {% endfor %}
     </table>
     {% if extra_count > 0 %}
     <button @click="vendorsExpanded = !vendorsExpanded"
