@@ -9842,6 +9842,8 @@ async def proactive_convert(
     offer = db.query(ProactiveOffer).filter(ProactiveOffer.id == offer_id).first()
     if not offer:
         raise HTTPException(404, "Proactive offer not found")
+    if offer.salesperson_id != user.id:
+        raise HTTPException(403, "Not your proactive offer")
 
     try:
         from ..services.proactive_service import convert_proactive_to_win
@@ -9851,7 +9853,12 @@ async def proactive_convert(
             "htmx/partials/proactive/convert_success.html",
             {"request": request, "offer": offer, "result": result},
         )
-    except (ImportError, RuntimeError, Exception) as exc:
+    except ValueError as exc:
+        exc_str = str(exc).lower()
+        if "already converted" in exc_str:
+            raise HTTPException(409, "This offer has already been converted.")
+        raise HTTPException(403, str(exc))
+    except Exception as exc:
         logger.error("Proactive conversion failed: {}", exc)
         raise HTTPException(500, "Conversion failed. Please try again.")
 

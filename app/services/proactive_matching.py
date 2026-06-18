@@ -1,7 +1,9 @@
 """Proactive matching engine — finds customer matches for new inventory.
 
 Uses customer_part_history (CPH) as the primary matching backbone.
-Only confirmed buyer-entered Offers trigger proactive matches.
+Active/approved Offers (including mined inbound) seed proactive matches;
+unverified (pending_review) and terminal (rejected/sold/won/expired) offers
+are excluded so the tab only surfaces live stock.
 
 Scoring: composite of recency (40%) + frequency (30%) + margin potential (30%).
 
@@ -15,7 +17,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import ProactiveMatchStatus
+from ..constants import OfferStatus, ProactiveMatchStatus
 from ..models import (
     ActivityLog,
     Company,
@@ -358,12 +360,15 @@ def run_proactive_scan(db: Session) -> dict:
     """
     since = _get_watermark(db)
 
-    # Oldest-first so the limit processes chronologically
+    # Oldest-first so the limit processes chronologically.
+    # Gate to live offers only: pending_review/rejected/sold/won/expired are excluded.
+    _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
     new_offers = (
         db.query(Offer)
         .filter(
             Offer.created_at > since,
             Offer.material_card_id.isnot(None),
+            Offer.status.in_(_LIVE_STATUSES),
         )
         .order_by(Offer.created_at.asc())
         .limit(5000)

@@ -1131,7 +1131,7 @@ async def _submit_parse_batch(
         )
         request_map[cid] = vr.id
 
-    batch_id = await claude_batch_submit(requests)
+    batch_id = await claude_batch_submit(requests, cost_bucket="email_mining")
     if not batch_id:
         raise RuntimeError("Batch API returned no batch_id")
 
@@ -1531,7 +1531,7 @@ async def process_batch_results(db: Session) -> int:
 
     for pb in pending_batches:
         try:
-            results = await claude_batch_results(pb.batch_id)
+            results = await claude_batch_results(pb.batch_id, cost_bucket="email_mining")
         except Exception as e:
             logger.warning(f"Batch results check failed for {pb.batch_id}: {e}")
             # Mark as failed if submitted >24h ago
