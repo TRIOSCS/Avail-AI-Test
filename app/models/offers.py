@@ -22,11 +22,16 @@ from .base import Base
 
 
 class Offer(Base):
-    """Vendor offer logged by a buyer for a specific MPN on a requisition."""
+    """Vendor offer logged by a buyer for a specific MPN on a requisition.
+
+    requisition_id is nullable: unsolicited inbound vendor emails (Tier-5 fallback
+    in poll_inbox) produce Offers without a matching requisition.  These are still
+    proactive-eligible as long as material_card_id is resolved.
+    """
 
     __tablename__ = "offers"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
 

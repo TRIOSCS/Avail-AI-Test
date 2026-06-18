@@ -548,3 +548,191 @@ class TestAutoCreateOffersSSEException:
 
         offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).first()
         assert offer is not None
+
+
+# ── Unsolicited (requisition_id=None) offer creation — fix regression ──────
+
+
+def _make_unsolicited_vr(db: Session, user: User, confidence: float = 0.7) -> VendorResponse:
+    """Create a VendorResponse with NO requisition (unsolicited inbound email)."""
+    vr = VendorResponse(
+        requisition_id=None,
+        vendor_name="Unsolicited Vendor LLC",
+        vendor_email="stocklist@unsolv.com",
+        confidence=confidence,
+        scanned_by_user_id=user.id,
+        status="quote_provided",
+        received_at=datetime.now(timezone.utc),
+        message_id=f"unsol-msg-{id(user)}-{confidence}",
+    )
+    db.add(vr)
+    db.commit()
+    db.refresh(vr)
+    return vr
+
+
+class TestUnsolicitedOfferCreation:
+    """Tests for the removed `and vr.requisition_id` guard.
+
+    Before the fix, all unsolicited VendorResponses (requisition_id=None) were silently
+    dropped by _auto_create_offers_from_parse even when confidence >= 0.5 and parsed
+    parts had quoted prices.  These tests document the correct behavior after the fix.
+    """
+
+    def test_unsolicited_high_confidence_quoted_part_creates_offer(self, db_session: Session, test_user: User):
+        """RED->GREEN: unsolicited VR with confidence >= 0.5, status='quoted',
+        unit_price set, and MPN resolving to a material card MUST create an Offer with
+        that material_card_id."""
+        from app.models import MaterialCard
+
+        mc = MaterialCard(
+            normalized_mpn="abc123",
+            display_mpn="ABC123",
+            manufacturer="Acme",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(mc)
+        db_session.flush()
+
+        vr = _make_unsolicited_vr(db_session, test_user, confidence=0.75)
+        parsed = {"confidence": 0.75}
+        draft = {
+            "mpn": "ABC123",
+            "vendor_name": "Unsolicited Vendor LLC",
+            "unit_price": 3.50,
+            "status": "quoted",
+        }
+
+        with (
+            patch("app.services.response_parser.extract_draft_offers", return_value=[draft]),
+            patch("app.search_service.resolve_material_card", return_value=mc),
+            patch("app.evidence_tiers.tier_for_parsed_offer", return_value=2),
+            patch("app.services.task_service.on_email_offer_parsed"),
+            patch("app.services.knowledge_service.capture_offer_fact"),
+        ):
+            _auto_create_offers_from_parse(vr, parsed, db_session)
+
+        offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).first()
+        assert offer is not None, "Offer was not created for unsolicited high-confidence VR"
+        assert offer.requisition_id is None
+        assert offer.material_card_id == mc.id
+
+    def test_low_confidence_unsolicited_creates_no_offer(self, db_session: Session, test_user: User):
+        """Guard still holds: confidence < 0.5 must NOT create an Offer."""
+        vr = _make_unsolicited_vr(db_session, test_user, confidence=0.3)
+        parsed = {"confidence": 0.3}
+        draft = {
+            "mpn": "LOWCONF99",
+            "vendor_name": "Unsolicited Vendor LLC",
+            "unit_price": 1.0,
+        }
+
+        with patch("app.services.response_parser.extract_draft_offers", return_value=[draft]):
+            _auto_create_offers_from_parse(vr, parsed, db_session)
+
+        offer = db_session.query(Offer).filter_by(vendor_response_id=vr.id).first()
+        assert offer is None, "Offer must NOT be created when confidence < 0.5"
+
+    def test_null_req_dedup_scoped_per_vendor(self, db_session: Session, test_user: User):
+        """Two unsolicited VRs from DIFFERENT vendors each produce their own
+        notification -- the null-req dedup must NOT cross-suppress between vendors."""
+        from app.models import MaterialCard
+
+        mc = MaterialCard(
+            normalized_mpn="xde789",
+            display_mpn="XDE789",
+            manufacturer="Test Corp",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(mc)
+        db_session.flush()
+
+        # VR from Vendor A
+        vr_a = VendorResponse(
+            requisition_id=None,
+            vendor_name="Vendor Alpha",
+            vendor_email="alpha@vendora.com",
+            confidence=0.8,
+            scanned_by_user_id=test_user.id,
+            status="quote_provided",
+            received_at=datetime.now(timezone.utc),
+            message_id="unsol-a-001",
+        )
+        db_session.add(vr_a)
+
+        # VR from Vendor B
+        vr_b = VendorResponse(
+            requisition_id=None,
+            vendor_name="Vendor Beta",
+            vendor_email="beta@vendorb.com",
+            confidence=0.8,
+            scanned_by_user_id=test_user.id,
+            status="quote_provided",
+            received_at=datetime.now(timezone.utc),
+            message_id="unsol-b-001",
+        )
+        db_session.add(vr_b)
+        db_session.commit()
+        db_session.refresh(vr_a)
+        db_session.refresh(vr_b)
+
+        parsed = {"confidence": 0.8}
+
+        # Fire VR from Vendor A (distinct mpn to avoid offer-level dedup)
+        with (
+            patch(
+                "app.services.response_parser.extract_draft_offers",
+                return_value=[{"mpn": "XDE789A", "vendor_name": "Vendor Alpha", "unit_price": 2.0}],
+            ),
+            patch("app.search_service.resolve_material_card", return_value=mc),
+            patch("app.evidence_tiers.tier_for_parsed_offer", return_value=1),
+            patch("app.services.task_service.on_email_offer_parsed"),
+            patch("app.services.knowledge_service.capture_offer_fact"),
+        ):
+            _auto_create_offers_from_parse(vr_a, parsed, db_session)
+
+        # Fire VR from Vendor B (distinct mpn)
+        with (
+            patch(
+                "app.services.response_parser.extract_draft_offers",
+                return_value=[{"mpn": "XDE789B", "vendor_name": "Vendor Beta", "unit_price": 2.0}],
+            ),
+            patch("app.search_service.resolve_material_card", return_value=mc),
+            patch("app.evidence_tiers.tier_for_parsed_offer", return_value=1),
+            patch("app.services.task_service.on_email_offer_parsed"),
+            patch("app.services.knowledge_service.capture_offer_fact"),
+        ):
+            _auto_create_offers_from_parse(vr_b, parsed, db_session)
+
+        # Flush pending adds (auto-flush triggers before queries in production;
+        # explicit flush ensures determinism in tests with no event-loop SSE code).
+        db_session.flush()
+
+        # Each vendor must have its own notification (not cross-suppressed)
+        notifs = (
+            db_session.query(ActivityLog)
+            .filter_by(
+                user_id=test_user.id,
+                activity_type="offer_pending_review",
+                requisition_id=None,
+            )
+            .all()
+        )
+        vendor_names = {n.contact_name for n in notifs}
+        assert "Vendor Alpha" in vendor_names, "Vendor Alpha notification missing"
+        assert "Vendor Beta" in vendor_names, "Vendor Beta notification missing"
+
+
+class TestOnEmailOfferParsedNullReq:
+    """Tests for task_service.on_email_offer_parsed handling requisition_id=None."""
+
+    def test_none_requisition_id_skips_task_creation(self, db_session: Session):
+        """on_email_offer_parsed with requisition_id=None returns without creating a
+        task (avoids NOT NULL DB constraint on RequisitionTask.requisition_id)."""
+        from app.models.task import RequisitionTask
+        from app.services.task_service import on_email_offer_parsed
+
+        on_email_offer_parsed(db_session, None, "SomeVendor", "MPN-XYZ", 9999)
+
+        count = db_session.query(RequisitionTask).filter_by(source_ref="email_offer:9999").count()
+        assert count == 0, "Task must NOT be created when requisition_id is None"
