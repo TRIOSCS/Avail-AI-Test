@@ -74,6 +74,10 @@ class GraphSubscription(Base):
     expiration_dt = Column(UTCDateTime, nullable=False)
     client_state = Column(String(255))
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    # Health tracking columns (migration 115)
+    last_renewed_at = Column(UTCDateTime, nullable=True)
+    renew_fail_count = Column(Integer, nullable=False, default=0, server_default="0")
+    last_error = Column(String(500), nullable=True)
 
     user = relationship("User", foreign_keys=[user_id])
 

@@ -39,3 +39,4 @@
 112 feat/offer-qualification-capture offer qualification capture columns (qualification_status/qualification_note/qualification JSON) + condition used->pulls (PR #356; RE-NUMBERED 108->111->112: buyplan-audit/offer-feed/crm-cadence/auto-datasheet all merged to main first; RE-CHAINED onto 111_material_card_datasheets — single head verified via `alembic heads`)
 113 sp4-quote-attribution add quotes.source for proactive revenue attribution; chains onto 112_offer_qualification
 114 feat/p1b-send-time-clock contacts.sent_at for durable send-time tracking; chains onto 113_quote_source
+115 feat/p1c-subscription-health GraphSubscription health columns (last_renewed_at, renew_fail_count, last_error); chains onto 114_contact_sent_at
