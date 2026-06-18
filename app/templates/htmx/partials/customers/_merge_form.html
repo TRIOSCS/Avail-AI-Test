@@ -1,0 +1,95 @@
+{# _merge_form.html — Step-1 of merge flow: search for the duplicate account to merge away.
+   The rep picks the "loser" (remove) here; keep = this account.
+   Selecting a company from the typeahead triggers the preview step.
+   Receives: keep (Company).
+   Called by: company_merge_form route in htmx_views.py.
+   Depends on: HTMX, Tailwind CSS, /v2/partials/customers/typeahead.
+#}
+<div class="space-y-5 p-1">
+  <div>
+    <h2 class="text-lg font-bold text-gray-900">Merge Duplicate into {{ keep.name }}</h2>
+    <p class="mt-1 text-sm text-gray-500">
+      Search for the duplicate account to merge away. The duplicate will be
+      <strong>deleted</strong> and its data reassigned to
+      <strong>{{ keep.name }}</strong>.
+    </p>
+  </div>
+
+  {# Search + preview area #}
+  <div x-data="{ removeId: '', removeName: '' }">
+    <label class="block text-sm font-medium text-gray-700 mb-1">
+      Duplicate account to remove
+    </label>
+
+    {# Typeahead select — Alpine bridges the selected value into the preview load #}
+    <div class="relative">
+      <input type="text"
+             id="merge-search"
+             placeholder="Type to search accounts…"
+             autocomplete="off"
+             class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm
+                    focus:ring-brand-500 focus:border-brand-500"
+             hx-get="/v2/partials/customers/typeahead"
+             hx-trigger="input changed delay:250ms"
+             hx-target="#merge-typeahead-results"
+             name="q">
+      <datalist id="merge-typeahead-results"></datalist>
+    </div>
+
+    {# Inline dropdown from typeahead — user picks a company #}
+    <select id="merge-remove-select"
+            name="remove_id"
+            size="6"
+            class="mt-2 w-full border border-gray-200 rounded-md text-sm text-gray-700
+                   focus:ring-brand-500 focus:border-brand-500 hidden"
+            hx-get="/v2/partials/customers/typeahead"
+            hx-trigger="none"
+            hx-target="this"
+            hx-swap="innerHTML"
+            @change="
+              removeId = $el.value;
+              removeName = $el.options[$el.selectedIndex]?.text;
+              if (removeId) {
+                htmx.ajax('GET',
+                  '/v2/partials/customers/{{ keep.id }}/merge-preview?remove_id=' + removeId,
+                  {target: '#merge-preview-area', swap: 'innerHTML', indicator: '#merge-preview-indicator'}
+                );
+              }
+            ">
+    </select>
+
+    {# Fast search: load options on text input #}
+    <script>
+      (function () {
+        const inp = document.getElementById('merge-search');
+        const sel = document.getElementById('merge-remove-select');
+        if (!inp || !sel) return;
+
+        inp.addEventListener('input', async function () {
+          const q = inp.value.trim();
+          if (q.length < 2) { sel.classList.add('hidden'); return; }
+          const resp = await fetch('/v2/partials/customers/typeahead?q=' + encodeURIComponent(q));
+          const html = await resp.text();
+          sel.innerHTML = html;
+          sel.classList.toggle('hidden', !html.trim());
+        });
+      })();
+    </script>
+
+    {# Loading indicator for the merge preview htmx.ajax call #}
+    <div id="merge-preview-indicator" class="htmx-indicator text-sm text-gray-400 py-2">Loading preview…</div>
+
+    {# Preview loads here after a company is selected #}
+    <div id="merge-preview-area" class="mt-4"></div>
+  </div>
+
+  {# Cancel button — closes the modal without any action #}
+  <div class="flex justify-end">
+    <button type="button"
+            @click="$dispatch('close-modal')"
+            class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium
+                   text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      Cancel
+    </button>
+  </div>
+</div>

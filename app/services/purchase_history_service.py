@@ -170,9 +170,16 @@ def refresh_matches_for_cards(db: Session, card_ids: list[int], *, per_card_limi
 
     created = 0
     for card_id in set(card_ids):
+        from app.constants import OfferStatus
+
+        _LIVE_STATUSES = [OfferStatus.ACTIVE.value, OfferStatus.APPROVED.value]
         offers = (
             db.query(Offer.id)
-            .filter(Offer.material_card_id == card_id, Offer.is_stale.isnot(True))
+            .filter(
+                Offer.material_card_id == card_id,
+                Offer.is_stale.isnot(True),
+                Offer.status.in_(_LIVE_STATUSES),
+            )
             .order_by(Offer.created_at.desc())
             .limit(per_card_limit)
             .all()

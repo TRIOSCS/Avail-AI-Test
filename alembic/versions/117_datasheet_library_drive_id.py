@@ -6,8 +6,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "116_datasheet_library_drive_id"
-down_revision = "115_subscription_health"
+revision = "117_datasheet_library_drive_id"
+down_revision = "116_site_contact_dnc"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -2495,6 +2495,11 @@ async def sightings_review_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard — prevents a guessed offer_id
+    # from a different requirement from being approved/rejected).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     if action == "approve":
         await approve_offer(offer_id, user=user, db=db)
     else:
@@ -2517,6 +2522,10 @@ async def sightings_reconfirm_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await reconfirm_offer(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
@@ -2536,6 +2545,10 @@ async def sightings_mark_offer_sold(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await mark_offer_sold(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
@@ -2555,6 +2568,10 @@ async def sightings_delete_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await delete_offer(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)

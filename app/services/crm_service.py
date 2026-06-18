@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..constants import RequisitionStatus
 from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
+from ..models.tags import EntityTag
 from ..models.vendors import VendorCard
 from ..utils.search_builder import SearchBuilder
 
@@ -151,6 +152,7 @@ def cdm_company_query(
     my_only: bool,
     sort: str,
     now: datetime | None = None,
+    segment: int = 0,
 ):
     """Build the filtered + sorted CDM account list query.
 
@@ -185,6 +187,18 @@ def cdm_company_query(
         query = query.filter(Company.account_type == account_type)
     if my_only:
         query = query.filter(Company.account_owner_id == user.id)
+    if segment:
+        query = query.filter(
+            db.query(EntityTag)
+            .filter(
+                EntityTag.entity_type == "company",
+                EntityTag.entity_id == Company.id,
+                EntityTag.tag_id == segment,
+                EntityTag.is_visible.is_(True),
+            )
+            .correlate(Company)
+            .exists()
+        )
 
     # Cadence clock sorts return a fully-ordered query directly (order_by_clock
     # calls query.order_by(...) internally), so we return early to avoid
@@ -229,6 +243,7 @@ def cdm_list_ctx(
     sort: str,
     limit: int,
     offset: int,
+    segment: int = 0,
     include_overdue: bool = False,
 ) -> dict:
     """Shared context for the CDM workspace shell and its account-list partial.
@@ -237,10 +252,21 @@ def cdm_list_ctx(
     "needs a call" chip, an extra COUNT query) AND account_types (the type
     dropdown options). The account-list refresh route re-renders neither, so
     it omits both and skips the COUNT query.
+    segment: when non-zero, filter companies carrying that segment tag_id.
     """
+    from .tagging import list_all_segment_tags
+
     now = datetime.now(timezone.utc)
     query = cdm_company_query(
-        db, user, search=search, staleness=staleness, account_type=account_type, my_only=my_only, sort=sort, now=now
+        db,
+        user,
+        search=search,
+        staleness=staleness,
+        account_type=account_type,
+        my_only=my_only,
+        sort=sort,
+        now=now,
+        segment=segment,
     )
     total = query.count()
     companies = query.offset(offset).limit(limit).all()
@@ -255,9 +281,11 @@ def cdm_list_ctx(
         "account_type": account_type,
         "my_only": my_only,
         "sort": sort,
+        "segment": segment,
         "total": total,
         "limit": limit,
         "offset": offset,
+        "all_segment_tags": list_all_segment_tags(db),
     }
     if include_overdue:
         ctx["overdue_count"] = cdm_overdue_count(db, user, now=now)
