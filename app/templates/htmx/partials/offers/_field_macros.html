@@ -28,3 +28,13 @@
            placeholder="{{ placeholder }}">
   </div>
 {%- endmacro -%}
+
+{# Qualification status badge — colored pill with filled/total count or "Unqualified". #}
+{%- macro qual_badge(offer) -%}
+{% set s = offer.qualification_summary %}
+{% set cmap = {'complete':'bg-emerald-50 text-emerald-700','essentials':'bg-amber-50 text-amber-700','incomplete':'bg-rose-50 text-rose-700','unset':'bg-gray-100 text-gray-500'} %}
+<span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ cmap.get(s.status, 'bg-gray-100 text-gray-600') }}"
+      title="{{ s.note or 'Not qualified' }}">
+  {% if s.status == 'unset' %}Unqualified{% elif s.total %}{{ s.filled }}/{{ s.total }}{% else %}{{ s.status|capitalize }}{% endif %}
+</span>
+{%- endmacro -%}

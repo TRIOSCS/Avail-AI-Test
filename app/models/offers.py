@@ -142,6 +142,30 @@ class Offer(Base):
             logger.warning("Unexpected offer condition: {}. Expected one of {}", value, valid)
         return value
 
+    @property
+    def qualification_summary(self) -> dict:
+        """Live qualification badge/meter (display reads this; column is the
+        snapshot)."""
+        from app.services.offer_qualification import compute_status, meter
+
+        data = {
+            "manufacturer": self.manufacturer,
+            "packaging": self.packaging,
+            "date_code": self.date_code,
+            **{
+                k: (self.qualification or {}).get(k)
+                for k in ("usage", "refurbished_by", "refurb_process", "cert_doc", "part_condition")
+            },
+        }
+        has_images = bool(self.attachments)
+        filled, total = meter(self.condition, data, has_images)
+        return {
+            "status": compute_status(self.condition, data, has_images),
+            "filled": filled,
+            "total": total,
+            "note": self.qualification_note,
+        }
+
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
