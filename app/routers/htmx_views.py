@@ -101,6 +101,9 @@ from .auth import _password_login_enabled
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
+_NAV_ID_ALIAS = {"buy-plans": "reporting", "quotes": "reporting"}
+
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
 _vite_manifest: dict = {}
@@ -292,6 +295,7 @@ async def quotes_list_redirect():
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
+@router.get("/v2/reporting", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -313,6 +317,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "materials",
         "follow-ups",
         "trouble-tickets",
+        "reporting",
         "crm",
         "vendors",
         "customers",
@@ -328,6 +333,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/parts/workspace"
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
+    elif current_view == "reporting":
+        partial_url = "/v2/partials/reporting"
     elif current_view == "crm":
         partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
@@ -356,9 +363,33 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
 
-    ctx = _base_ctx(request, user, current_view)
+    nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
+    ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return template_response("htmx/base_page.html", ctx)
+
+
+# ── Reporting section ──────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/reporting", response_class=HTMLResponse)
+async def reporting_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reporting section: relocated Performance dashboard + cross-account deal views.
+
+    Called by: v2_page dispatcher (current_view == 'reporting') and direct HTMX links.
+    Reuses /v2/partials/crm/performance logic — scores built inline, same template included.
+    """
+    from .crm.views import _build_user_scores
+
+    ctx = {
+        **_base_ctx(request, user, "reporting"),
+        "users_scores": _build_user_scores(db),
+    }
+    return template_response("htmx/partials/reporting/dashboard.html", ctx)
 
 
 # ── Global search ──────────────────────────────────────────────────────

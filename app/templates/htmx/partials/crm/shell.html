@@ -2,6 +2,7 @@
    Receives: user (User), default_tab (str).
    Called by: crm/views.py crm_shell route.
    Depends on: Alpine.js, HTMX, brand palette.
+   Note: Performance tab was relocated to /v2/reporting (Reporting section).
 #}
 {% from "htmx/partials/crm/_shell_macros.html" import tab_button -%}
 <div x-data="{ tab: '{{ default_tab }}' }">
@@ -9,7 +10,6 @@
   <div class="flex gap-1 mb-6 border-b border-brand-200">
     {{ tab_button('customers', '/v2/partials/customers', 'Customers', 'load, click' if default_tab == 'customers' else 'click') }}
     {{ tab_button('vendors', '/v2/partials/vendors?hx_target=%23crm-tab-content&push_url_base=/v2/crm', 'Vendors', 'load, click' if default_tab == 'vendors' else 'click') }}
-    {{ tab_button('performance', '/v2/partials/crm/performance', 'Performance', 'click') }}
   </div>
 
   {# Tab content — lazy-loaded by HTMX #}
