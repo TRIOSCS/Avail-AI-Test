@@ -65,8 +65,10 @@ def test_legacy_used_normalizes_to_pulls(client, db_session, test_requisition):
 def test_request_from_vendor_logs_pending_and_returns_draft(client, db_session, test_requisition, test_user):
     from app.models.offers import Offer
 
+    rid = test_requisition.requirements[0].id
     o = Offer(
         requisition_id=test_requisition.id,
+        requirement_id=rid,
         vendor_name="V",
         mpn="LM317T",
         qualification={"requests": []},
@@ -74,13 +76,56 @@ def test_request_from_vendor_logs_pending_and_returns_draft(client, db_session, 
     )
     db_session.add(o)
     db_session.commit()
-    rid = test_requisition.requirements[0].id
     resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "images"})
     assert resp.status_code == 200
     db_session.refresh(o)
     reqs = (o.qualification or {}).get("requests", [])
     assert reqs and reqs[-1]["kind"] == "images" and reqs[-1]["status"] == "pending"
     assert b"images" in resp.content.lower()
+
+
+def test_request_rejects_invalid_kind(client, db_session, test_requisition, test_user):
+    from app.models.offers import Offer
+
+    rid = test_requisition.requirements[0].id
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=rid,
+        vendor_name="V",
+        mpn="LM317T",
+        qualification={"requests": []},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "bogus"})
+    assert resp.status_code == 400
+
+
+def test_request_scoped_to_requirement_blocks_cross_requirement_offer(client, db_session, test_requisition, test_user):
+    """IDOR guard: an offer belonging to another requirement is 404, not mutated."""
+    from app.models.offers import Offer
+    from app.models.sourcing import Requirement
+
+    rid = test_requisition.requirements[0].id
+    other = Requirement(requisition_id=test_requisition.id, primary_mpn="OTHER123", target_qty=1)
+    db_session.add(other)
+    db_session.commit()
+    # Offer belongs to `other`, but we POST under the original requirement's path.
+    o = Offer(
+        requisition_id=test_requisition.id,
+        requirement_id=other.id,
+        vendor_name="V",
+        mpn="OTHER123",
+        qualification={"requests": []},
+        entered_by_id=test_user.id,
+    )
+    db_session.add(o)
+    db_session.commit()
+    resp = client.post(f"/v2/partials/sightings/{rid}/offers/{o.id}/request", data={"kind": "images"})
+    assert resp.status_code == 404
+    db_session.refresh(o)
+    assert (o.qualification or {}).get("requests", []) == []  # not mutated
 
 
 def test_modal_open_prefills_country_from_last_vendor_offer(client, db_session, test_requisition, test_user):

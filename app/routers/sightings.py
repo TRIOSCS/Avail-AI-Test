@@ -2761,9 +2761,13 @@ async def sightings_offer_request(
 
     from ..services.offer_qualification import REQUEST_KINDS, request_template
 
+    if kind not in REQUEST_KINDS:
+        raise HTTPException(status_code=400, detail={"error": "invalid request kind"})
     offer = db.get(Offer, offer_id)
-    if offer is None or kind not in REQUEST_KINDS:
-        raise HTTPException(status_code=400, detail={"error": "invalid offer or request kind"})
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     draft = request_template(kind, offer.mpn)
     q = dict(offer.qualification or {})
     reqs = list(q.get("requests") or [])
