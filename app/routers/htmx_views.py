@@ -4873,8 +4873,16 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
+        from datetime import timezone as _tz
+
         ctx = _base_ctx(request, user, "customers")
-        ctx.update({"company": company, "contact_rows": _company_contact_rows(db, company_id)})
+        ctx.update(
+            {
+                "company": company,
+                "contact_rows": _company_contact_rows(db, company_id),
+                "now_utc": datetime.now(_tz.utc),
+            }
+        )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
 
     elif tab == "requisitions":

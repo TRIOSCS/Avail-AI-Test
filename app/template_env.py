@@ -271,3 +271,7 @@ def _now() -> datetime:
 
 
 templates.env.globals["now"] = _now
+
+from .services.crm_service import cadence_state  # noqa: E402
+
+templates.env.globals["cadence_state"] = cadence_state

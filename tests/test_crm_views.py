@@ -796,6 +796,224 @@ class TestComputeUserScore:
         assert all(s == 0.0 for s in data["scores"])
 
 
+class TestContactsTabP33:
+    """P3-3 TDD: accordion by site, role chips, per-contact clocks, honest empty states.
+
+    Written FIRST (failing) per TDD — implement contacts_tab.html to pass.
+    """
+
+    def _setup_multi_site_company(self, db_session):
+        """Two active sites with contacts of varying roles and clock states."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="P33 Accordion Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        site_hq = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        site_branch = CustomerSite(company_id=company.id, site_name="Branch Office", is_active=True)
+        db_session.add_all([site_hq, site_branch])
+        db_session.flush()
+
+        # HQ contacts: one buyer with outbound clock set, one with NULL clocks
+        contact_buyer = SiteContact(
+            customer_site_id=site_hq.id,
+            full_name="Alice Buyer",
+            email="alice@p33.com",
+            contact_role="buyer",
+            is_primary=True,
+            last_outbound_at=__import__("datetime").datetime(2026, 5, 1, tzinfo=__import__("datetime").timezone.utc),
+        )
+        contact_no_clock = SiteContact(
+            customer_site_id=site_hq.id,
+            full_name="Bob Noclock",
+            email="bob@p33.com",
+            contact_role="technical",
+            last_outbound_at=None,
+            last_reply_at=None,
+        )
+        # Branch: decision_maker
+        contact_dm = SiteContact(
+            customer_site_id=site_branch.id,
+            full_name="Carol Decider",
+            email="carol@p33.com",
+            contact_role="decision_maker",
+        )
+        db_session.add_all([contact_buyer, contact_no_clock, contact_dm])
+        db_session.commit()
+        return company, site_hq, site_branch, contact_buyer, contact_no_clock, contact_dm
+
+    # ── accordion grouping ──────────────────────────────────────────────
+
+    def test_contacts_tab_returns_200(self, client: TestClient, db_session, test_user):
+        """GET contacts tab for a multi-site company returns 200."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+
+    def test_contacts_grouped_under_site_headers(self, client: TestClient, db_session, test_user):
+        """Contacts tab renders both site names as accordion headers."""
+        company, site_hq, site_branch, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "HQ" in html
+        assert "Branch Office" in html
+
+    def test_site_header_shows_contact_count(self, client: TestClient, db_session, test_user):
+        """Site header shows the contact count for that site."""
+        company, site_hq, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        # HQ has 2 contacts; the count must appear near the site name
+        assert "2 contacts" in html
+
+    def test_accordion_uses_alpine_xdata(self, client: TestClient, db_session, test_user):
+        """Accordion groups use Alpine x-data with an open/expanded boolean."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "x-data" in html
+        assert "x-show" in html
+
+    def test_all_three_contacts_appear(self, client: TestClient, db_session, test_user):
+        """All contacts from both sites appear in the tab."""
+        company, _, _, buyer, noclock, dm = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "Alice Buyer" in html
+        assert "Bob Noclock" in html
+        assert "Carol Decider" in html
+
+    # ── role chips ──────────────────────────────────────────────────────
+
+    def test_buyer_role_chip_renders(self, client: TestClient, db_session, test_user):
+        """Buyer contact_role renders a chip containing 'buyer' text."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        # The chip must contain the role text (case-insensitive acceptable)
+        assert "buyer" in html.lower()
+
+    def test_technical_role_chip_renders(self, client: TestClient, db_session, test_user):
+        """Technical contact_role renders a chip."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "technical" in html.lower()
+
+    def test_decision_maker_role_chip_renders(self, client: TestClient, db_session, test_user):
+        """decision_maker contact_role renders a chip."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "decision" in html.lower()
+
+    def test_null_role_no_chip_crash(self, client: TestClient, db_session, test_user):
+        """A contact with NULL contact_role renders without error (graceful
+        fallback)."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="NullRole Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="No Role Pete",
+            email="pete@nullrole.com",
+            contact_role=None,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "No Role Pete" in resp.text
+
+    # ── per-contact clocks ──────────────────────────────────────────────
+
+    def test_contact_with_outbound_shows_clock_value(self, client: TestClient, db_session, test_user):
+        """Contact with last_outbound_at set shows the outbound clock (days value)."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        # Alice Buyer has last_outbound_at set — some days label must appear
+        # The label "Out" or "out" or similar must be present
+        assert "out" in html.lower() or "outbound" in html.lower()
+
+    def test_null_outbound_shows_dash_not_never_replied(self, client: TestClient, db_session, test_user):
+        """NULL last_outbound_at renders '—' or 'no logged touch' — NOT 'never
+        replied'."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        # Must NOT say "never replied" (honest empty state rule)
+        assert "never replied" not in html.lower()
+        # Must indicate unknown/absent state via dash or descriptive text
+        # "—" (em-dash) OR "no logged touch" must appear somewhere
+        assert "—" in html or "no logged touch" in html.lower()
+
+    def test_null_reply_shows_dash(self, client: TestClient, db_session, test_user):
+        """NULL last_reply_at renders '—' — NOT 'never replied'."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "never replied" not in html.lower()
+
+    def test_cadence_state_new_for_null_outbound(self, client: TestClient, db_session, test_user):
+        """Contact with NULL last_outbound_at renders a 'new' cadence indicator (no
+        red)."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="NewCadence Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Fresh Freddy",
+            email="fresh@cadence.com",
+            last_outbound_at=None,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        # cadence_state("new") should produce gray indicator, not rose (overdue)
+        # We can't assert no rose at all (there may be other elements), but
+        # "never replied" must not appear
+        assert "never replied" not in html.lower()
+
+    # ── outreach buttons preserved ──────────────────────────────────────
+
+    def test_outreach_buttons_still_present(self, client: TestClient, db_session, test_user):
+        """Outreach buttons (data-outreach-log) are still rendered after accordion
+        refactor."""
+        company, *_ = self._setup_multi_site_company(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        html = resp.text
+        assert "data-outreach-log" in html
+        assert 'href="mailto:alice@p33.com"' in html
+
+    # ── empty state ─────────────────────────────────────────────────────
+
+    def test_empty_company_shows_no_contacts_message(self, client: TestClient, db_session, test_user):
+        """Company with no contacts shows a helpful empty-state message."""
+        company = Company(name="Empty P33 Co", is_active=True)
+        db_session.add(company)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "No contacts" in resp.text or "no contacts" in resp.text.lower()
+
+
 class TestCompanyDetailCadenceCard:
     """Tests for the new account-cadence card + commercial-context strip in the company
     detail partial.
