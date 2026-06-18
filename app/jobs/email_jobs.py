@@ -980,9 +980,10 @@ async def scan_sent_folder(user, db):
                         # Tier-1 reply-matching works — no duplicate row created.
                         send_time_row.external_id = msg_id
                         if conversation_id:
-                            send_time_row.notes = (
-                                (send_time_row.notes or "") + f" graph_conversation_id={conversation_id}"
-                            ).strip()
+                            tag = f"graph_conversation_id={conversation_id}"
+                            existing_notes = send_time_row.notes or ""
+                            if tag not in existing_notes:
+                                send_time_row.notes = (existing_notes + " " + tag).strip()
                         # Also update the matching Contact(s) with graph ids so
                         # poll_inbox Tier-1 (conv_id_map lookup) works.
                         if conversation_id or msg_id:

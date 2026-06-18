@@ -25,6 +25,7 @@ from app.models import (
     ActivityLog,
     Contact,
 )
+from app.services.activity_service import log_email_activity
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helper: build a mock GraphClient that sends OK and returns no sent-items
@@ -220,23 +221,24 @@ class TestScanSentFolderReconcile:
         db_session.add(contact)
         db_session.flush()
 
-        # Create the outbound ActivityLog (no external_id yet)
-        activity = ActivityLog(
+        # Create the outbound ActivityLog via the REAL log_email_activity path
+        # (exactly as send_batch_rfq does) so this test genuinely exercises the
+        # reconcile match.  occurred_at=now is passed here — without it the row
+        # gets occurred_at=NULL and the reconcile query would miss it (the bug).
+        activity = log_email_activity(
             user_id=test_user.id,
-            activity_type="email_sent",
-            channel="email",
-            direction="outbound",
-            event_type="email",
-            contact_email=vendor_email,
+            direction="sent",
+            email_addr=vendor_email,
             subject=tagged_subject,
             external_id=None,  # not set at send time
+            contact_name="Acme Parts",
+            db=db_session,
             requisition_id=test_requisition.id,
-            auto_logged=True,
             occurred_at=now,
         )
-        db_session.add(activity)
         db_session.commit()
 
+        assert activity is not None, "log_email_activity must return an ActivityLog"
         activity_id_before = activity.id
         log_count_before = (
             db_session.query(ActivityLog)

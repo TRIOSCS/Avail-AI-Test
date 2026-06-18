@@ -250,10 +250,16 @@ def log_email_activity(
     db: Session,
     requisition_id: int | None = None,
     requirement_id: int | None = None,
+    occurred_at: datetime | None = None,
 ) -> ActivityLog | None:
     """Log an email activity, matching the contact to a company or vendor.
 
     Returns the ActivityLog record or None if dedup/no-match.
+
+    Pass occurred_at to stamp the exact send/receive time on the row.  When omitted the
+    column default (server-side UTC now) is used.  Always pass occurred_at for send-time
+    rows so the scan_sent_folder reconcile query (which filters ActivityLog.occurred_at
+    >= reconcile_window_start) can match the row and avoid creating a duplicate.
     """
     # Dedup by external_id
     if external_id:
@@ -279,6 +285,7 @@ def log_email_activity(
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
+        occurred_at=occurred_at,
     )
     db.add(record)
     db.flush()

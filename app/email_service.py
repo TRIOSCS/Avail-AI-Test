@@ -289,6 +289,7 @@ async def send_batch_rfq(
                         contact_name=group["vendor_name"],
                         db=db,
                         requisition_id=contact.requisition_id,
+                        occurred_at=send_time,  # ensures reconcile filter matches (no dup)
                     )
         except Exception:
             # The email WAS delivered — report a tracking error for this vendor
