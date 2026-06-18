@@ -126,8 +126,11 @@ async def reporting_dashboard(
     links.
 
     Reuses the team-performance dashboard (no duplication) and adds links to the demoted
-    Buy-Plans / Quotes cross-account views.
+    Buy-Plans / Quotes cross-account views. Also surfaces the pipeline/forecast rollups
+    (the Requisition is the opportunity) — management visibility lives here, never the
+    daily hub.
     """
+    from ...services import forecast_service
     from ...template_env import template_response
 
     ctx = {
@@ -135,6 +138,10 @@ async def reporting_dashboard(
         "user": user,
         "current_view": "reporting",
         "users_scores": _build_user_scores(db),
+        "pipeline": forecast_service.pipeline_summary(db),
+        "pipeline_accounts": forecast_service.pipeline_by_account(db),
+        "pipeline_owners": forecast_service.pipeline_by_owner(db),
+        "funnel": forecast_service.conversion_funnel(db),
     }
     return template_response("htmx/partials/reporting/dashboard.html", ctx)
 

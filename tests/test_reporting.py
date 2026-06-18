@@ -202,3 +202,45 @@ class TestNavHighlightAlias:
     # mobile_nav.html. The server-side _NAV_ID_ALIAS still maps a direct /v2/quotes
     # full-page load to Reporting; HTMX nav reaches quotes only from the Reporting
     # dashboard, where the urlToNav `return this.activeNav` fallback keeps Reporting lit.
+
+
+class TestPipelineSection:
+    """Phase 5b — the Reporting page renders the pipeline/forecast section."""
+
+    def _seed_sourcing_req(self, db_session, test_user, value):
+        from datetime import datetime, timezone
+
+        from app.models import Requisition
+
+        req = Requisition(
+            name="Forecast Test Req",
+            status="sourcing",
+            created_by=test_user.id,
+            opportunity_value=value,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+        return req
+
+    def test_reporting_renders_pipeline_header(self, client: TestClient):
+        resp = client.get("/v2/partials/reporting")
+        assert resp.status_code == 200
+        assert "Pipeline" in resp.text
+        assert "Weighted Forecast" in resp.text
+        assert "Open Pipeline" in resp.text
+        assert "Win Rate" in resp.text
+
+    def test_reporting_renders_weighted_forecast_figure(self, client: TestClient, db_session, test_user):
+        # One sourcing req at $100,000 → weighted = 100000 * 0.25 = $25,000.
+        self._seed_sourcing_req(db_session, test_user, 100000)
+        resp = client.get("/v2/partials/reporting")
+        assert resp.status_code == 200
+        assert "$100,000" in resp.text  # open pipeline
+        assert "$25,000" in resp.text  # weighted forecast
+
+    def test_reporting_renders_funnel_stages(self, client: TestClient):
+        resp = client.get("/v2/partials/reporting")
+        assert resp.status_code == 200
+        for label in ("Opportunities", "Sourcing", "Quoted", "Won"):
+            assert label in resp.text

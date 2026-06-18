@@ -11,6 +11,11 @@
     <p class="mt-1 text-sm text-gray-500">Team performance and cross-account deal views.</p>
   </div>
 
+  {# Pipeline & forecast — management sees the forecast first #}
+  <section>
+    {% include "htmx/partials/reporting/pipeline.html" %}
+  </section>
+
   {# Performance dashboard — reused directly (no duplication) #}
   <section>
     {% include "htmx/partials/crm/performance_tab.html" %}
