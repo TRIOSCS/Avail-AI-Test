@@ -1717,3 +1717,276 @@ class TestActivityTabTruncation:
         assert resp.status_code == 200
         # Truncation footer should NOT appear
         assert "Showing most recent activity" not in resp.text
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P3-5 TDD: Vendor cadence — list dots/clocks/sort + detail hero
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestVendorListCadence:
+    """P3-5 TDD: vendor list shows cadence dots, dual clocks, stalest-outbound sort.
+
+    Written FIRST (failing) — implement to pass.
+    """
+
+    def _make_vendor(self, db_session, name: str, **kwargs):
+        from app.models.vendors import VendorCard
+
+        v = VendorCard(
+            normalized_name=name.lower().replace(" ", "-"),
+            display_name=name,
+            **kwargs,
+        )
+        db_session.add(v)
+        db_session.commit()
+        return v
+
+    def test_vendor_list_renders_cadence_dots(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor list renders cadence indicator dots (rounded-full colored spans)."""
+        self._make_vendor(db_session, "CadenceDot Vendor")
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert "rounded-full" in resp.text
+
+    @pytest.mark.parametrize(
+        ("outbound_days_ago", "expected_class"),
+        [
+            pytest.param(None, "bg-gray-300", id="new_shows_gray"),
+            pytest.param(5, "bg-emerald-400", id="on_target_shows_emerald"),
+            pytest.param(35, "bg-rose-500", id="overdue_shows_rose"),
+        ],
+    )
+    def test_vendor_list_cadence_dot_color(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        outbound_days_ago,
+        expected_class,
+    ):
+        """Vendor list cadence dot uses correct color for new/on_target/overdue."""
+        last_outbound = (
+            None if outbound_days_ago is None else datetime.now(timezone.utc) - timedelta(days=outbound_days_ago)
+        )
+        self._make_vendor(
+            db_session,
+            f"DotColor {outbound_days_ago} Vendor",
+            last_outbound_at=last_outbound,
+        )
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert expected_class in resp.text
+
+    def test_vendor_list_shows_out_clock(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor list rows show 'Out' clock label."""
+        self._make_vendor(
+            db_session,
+            "OutClock Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=7),
+        )
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert "Out" in resp.text
+
+    def test_vendor_list_null_outbound_shows_never(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL last_outbound_at renders as 'never' (not 'never replied')."""
+        self._make_vendor(db_session, "NeverOut Vendor", last_outbound_at=None)
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert "never" in resp.text.lower()
+        assert "never replied" not in resp.text.lower()
+
+    def test_vendor_list_null_reply_shows_dash(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL last_reply_at shows '—' (em-dash), not 'never'."""
+        self._make_vendor(
+            db_session,
+            "NullReply Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=3),
+            last_reply_at=None,
+        )
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        # Reply clock dash
+        assert "Reply" in resp.text
+        # The null reply shows a dash, not the word "never"
+        assert "—" in resp.text or "&mdash;" in resp.text
+
+    def test_vendor_list_score_column_still_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor score column is still rendered (additive — not removed by cadence)."""
+        self._make_vendor(db_session, "ScoreStillThere Vendor", vendor_score=72.0)
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert "72" in resp.text
+
+    def test_vendor_list_stalest_outbound_sort_option(self, client: TestClient, db_session: Session, test_user: User):
+        """sort=outbound_asc is a valid option in vendor list (accepted, returns
+        200)."""
+        self._make_vendor(
+            db_session,
+            "SortA Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=30),
+        )
+        self._make_vendor(
+            db_session,
+            "SortB Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        resp = client.get("/v2/partials/vendors?sort=outbound_asc")
+        assert resp.status_code == 200
+
+    def test_vendor_list_stalest_outbound_sort_orders_nulls_first(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """sort=outbound_asc puts NULL (never-contacted) vendors before oldest."""
+        self._make_vendor(db_session, "NullFirst Vendor", last_outbound_at=None)
+        self._make_vendor(
+            db_session,
+            "OldFirst Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=40),
+        )
+        self._make_vendor(
+            db_session,
+            "RecentLast Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=3),
+        )
+        resp = client.get("/v2/partials/vendors?sort=outbound_asc")
+        assert resp.status_code == 200
+        html = resp.text
+        assert html.index("NullFirst Vendor") < html.index("OldFirst Vendor")
+        assert html.index("OldFirst Vendor") < html.index("RecentLast Vendor")
+
+    def test_vendor_list_stalest_sort_option_present_in_html(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Vendor list renders a sort option for 'Stalest outbound'."""
+        self._make_vendor(db_session, "SortOptionCheck Vendor")
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        # The sort param name must be in the page (hidden input or link)
+        assert "outbound_asc" in resp.text
+
+    def test_vendor_list_discovery_tabs_still_present(self, client: TestClient, db_session: Session, test_user: User):
+        """All Vendors, My Vendors, and Find by Part tabs still render."""
+        self._make_vendor(db_session, "TabsCheck Vendor")
+        resp = client.get("/v2/partials/vendors")
+        assert resp.status_code == 200
+        assert "All Vendors" in resp.text
+        assert "My Vendors" in resp.text
+        assert "Find by Part" in resp.text
+
+
+class TestVendorDetailCadenceHero:
+    """P3-5 TDD: vendor detail shows cadence hero card with badge, clocks,
+    next-best-touch, while keeping vendor_score block and sightings.
+
+    Written FIRST (failing) — implement to pass.
+    """
+
+    def _make_vendor(self, db_session, name: str, **kwargs):
+        from app.models.vendors import VendorCard
+
+        v = VendorCard(
+            normalized_name=name.lower().replace(" ", "-"),
+            display_name=name,
+            **kwargs,
+        )
+        db_session.add(v)
+        db_session.commit()
+        return v
+
+    def test_vendor_detail_renders_cadence_hero(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor detail page renders a cadence card section."""
+        v = self._make_vendor(db_session, "HeroCheck Vendor")
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        # The cadence card contains the 'Last Out' clock label
+        assert "Last Out" in resp.text
+
+    def test_vendor_detail_cadence_badge_new(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL outbound → cadence badge shows 'New'."""
+        v = self._make_vendor(db_session, "BadgeNew Vendor", last_outbound_at=None)
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "New" in resp.text
+
+    def test_vendor_detail_cadence_badge_overdue(self, client: TestClient, db_session: Session, test_user: User):
+        """35-day-old outbound → cadence badge shows 'Overdue'."""
+        v = self._make_vendor(
+            db_session,
+            "BadgeOverdue Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "Overdue" in resp.text
+
+    def test_vendor_detail_cadence_badge_on_target(self, client: TestClient, db_session: Session, test_user: User):
+        """5-day-old outbound (within standard 30d) → cadence badge 'On Target'."""
+        v = self._make_vendor(
+            db_session,
+            "BadgeOnTarget Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "On Target" in resp.text
+
+    def test_vendor_detail_next_best_touch_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor detail renders next-best-touch text."""
+        v = self._make_vendor(db_session, "NBT Vendor", last_outbound_at=None)
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        # next_best_touch for new vendor = "Never contacted — reach out"
+        assert "Never contacted" in resp.text
+
+    def test_vendor_detail_dual_clocks_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor detail renders both 'Last Out' and 'Last Reply' clock labels."""
+        v = self._make_vendor(
+            db_session,
+            "DualClock Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=10),
+            last_reply_at=datetime.now(timezone.utc) - timedelta(days=8),
+        )
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "Last Out" in resp.text
+        assert "Last Reply" in resp.text
+
+    def test_vendor_detail_null_outbound_shows_never(self, client: TestClient, db_session: Session, test_user: User):
+        """NULL last_outbound_at in detail hero shows 'Never'."""
+        v = self._make_vendor(db_session, "NeverOut Detail Vendor", last_outbound_at=None)
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "Never" in resp.text
+
+    def test_vendor_detail_null_reply_shows_dash_not_never(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """NULL last_reply_at in detail hero shows '—' (not 'never replied')."""
+        v = self._make_vendor(
+            db_session,
+            "NullReply Detail Vendor",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=5),
+            last_reply_at=None,
+        )
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "—" in resp.text or "&mdash;" in resp.text
+        assert "never replied" not in resp.text.lower()
+
+    def test_vendor_detail_score_block_still_present(self, client: TestClient, db_session: Session, test_user: User):
+        """vendor_score block is still shown in header (not removed by cadence hero)."""
+        v = self._make_vendor(db_session, "ScoreKept Vendor", vendor_score=85.0)
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "85" in resp.text
+        assert "Score" in resp.text
+
+    def test_vendor_detail_stat_row_still_present(self, client: TestClient, db_session: Session, test_user: User):
+        """4-stat row (Sightings, Win Rate, POs, Avg Response) still renders."""
+        v = self._make_vendor(db_session, "StatRow Vendor", sighting_count=7)
+        resp = client.get(f"/v2/partials/vendors/{v.id}")
+        assert resp.status_code == 200
+        assert "Sightings" in resp.text
+        assert "7" in resp.text

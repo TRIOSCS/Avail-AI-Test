@@ -3709,17 +3709,25 @@ async def vendors_list_partial(
 
     total = query.count()
 
-    # Sorting
-    sort_col_map = {
-        "display_name": VendorCard.display_name,
-        "sighting_count": VendorCard.sighting_count,
-        "overall_win_rate": VendorCard.overall_win_rate,
-        "hq_country": VendorCard.hq_country,
-        "industry": VendorCard.industry,
-    }
-    sort_col = sort_col_map.get(sort, VendorCard.sighting_count)
-    order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
-    vendors = query.order_by(order).offset(offset).limit(limit).all()
+    # Sorting — outbound_asc uses the generalized order_by_clock (VendorCard clocks)
+    now_utc = datetime.now(timezone.utc)
+    if sort == "outbound_asc":
+        vendors = _order_by_clock(query, "outbound", model=VendorCard).offset(offset).limit(limit).all()
+    else:
+        sort_col_map = {
+            "display_name": VendorCard.display_name,
+            "sighting_count": VendorCard.sighting_count,
+            "overall_win_rate": VendorCard.overall_win_rate,
+            "hq_country": VendorCard.hq_country,
+            "industry": VendorCard.industry,
+        }
+        sort_col = sort_col_map.get(sort, VendorCard.sighting_count)
+        order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
+        vendors = query.order_by(order).offset(offset).limit(limit).all()
+
+    # Attach cadence_state to each vendor (tier=None → standard/30d target)
+    for v in vendors:
+        v.cadence_state = _cadence_state(None, v.last_outbound_at, now_utc)
 
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
@@ -3735,6 +3743,7 @@ async def vendors_list_partial(
             "my_only": my_only,
             "hx_target": hx_target,
             "push_url_base": push_url_base,
+            "now_utc": now_utc,
         }
     )
     return template_response("htmx/partials/vendors/list.html", ctx)
@@ -3874,6 +3883,10 @@ async def vendor_detail_partial(
         safety_summary = lead.vendor_safety_summary
         safety_flags = lead.vendor_safety_flags
 
+    now_utc = datetime.now(timezone.utc)
+    vendor_cadence = _cadence_state(None, vendor.last_outbound_at, now_utc)
+    vendor_nbt = _next_best_touch(None, vendor.last_outbound_at, now_utc)
+
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
         {
@@ -3886,6 +3899,9 @@ async def vendor_detail_partial(
             "safety_score": None,
             "safety_available": False,
             "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
+            "cadence_state": vendor_cadence,
+            "next_best_touch": vendor_nbt,
+            "now_utc": now_utc,
         }
     )
     return template_response("htmx/partials/vendors/detail.html", ctx)
@@ -4536,6 +4552,7 @@ from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
 from ..services.crm_service import company_commercial_stats as _company_commercial_stats  # noqa: E402
 from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
 from ..services.crm_service import next_best_touch as _next_best_touch  # noqa: E402
+from ..services.crm_service import order_by_clock as _order_by_clock  # noqa: E402
 from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..constants import RequisitionStatus
 from ..models import Company, CustomerSite, Quote, Requisition, SiteContact
 from ..models.auth import User
+from ..models.vendors import VendorCard
 from ..utils.search_builder import SearchBuilder
 
 STALENESS_OVERDUE_DAYS = 30
@@ -73,16 +74,24 @@ def staleness_tier(last_activity_at: datetime | None) -> str:
 TIER_TARGET_DAYS = {"key": 7, "core": 14, "standard": 30, "prospect": 30}
 CADENCE_RED_DAYS = 30  # universal ceiling — every tier goes overdue past this
 
-_CLOCK_COLUMN = {"outbound": Company.last_outbound_at, "reply": Company.last_reply_at}
+_CLOCK_COLUMNS = {
+    Company: {"outbound": Company.last_outbound_at, "reply": Company.last_reply_at},
+    VendorCard: {"outbound": VendorCard.last_outbound_at, "reply": VendorCard.last_reply_at},
+}
+# Keep the old name as a view of the Company entry for backwards-compat internal refs.
+_CLOCK_COLUMN = _CLOCK_COLUMNS[Company]
 
 
-def order_by_clock(query, clock: str, now=None):
-    """Order companies stalest-first: NULL clocks (never contacted) first, then oldest.
+def order_by_clock(query, clock: str, *, model=Company, now=None):
+    """Order rows stalest-first: NULL clocks (never contacted) first, then oldest.
+
+    Works for both Company (customer cadence) and VendorCard (vendor cadence).
+    Defaults to Company so all existing customer call sites are unchanged.
 
     NULLs-first is portable across SQLite (tests) and PostgreSQL (prod) by
     ordering on the IS-NULL flag before the timestamp.
     """
-    col = _CLOCK_COLUMN[clock]
+    col = _CLOCK_COLUMNS[model][clock]
     return query.order_by(col.isnot(None), col.asc())
 
 
@@ -181,9 +190,9 @@ def cdm_company_query(
     # calls query.order_by(...) internally), so we return early to avoid
     # double-applying .order_by() via the CDM_SORTS path.
     if sort == "outbound_asc":
-        return order_by_clock(query, "outbound", now)
+        return order_by_clock(query, "outbound", now=now)
     if sort == "reply_asc":
-        return order_by_clock(query, "reply", now)
+        return order_by_clock(query, "reply", now=now)
     return query.order_by(CDM_SORTS.get(sort, CDM_SORTS["oldest"]))
 
 

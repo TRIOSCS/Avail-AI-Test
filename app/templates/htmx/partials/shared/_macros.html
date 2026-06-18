@@ -477,6 +477,79 @@ Usage:
 {% endmacro %}
 
 
+{# ── Cadence Hero Card ────────────────────────────────────────────── #}
+{#
+  Purpose:     Shared cadence card for any entity with last_outbound_at /
+               last_reply_at clocks (Company, VendorCard). Renders badge,
+               next-best-touch, and dual clocks.
+  Args:
+    entity:        The ORM object (must have .last_outbound_at, .last_reply_at).
+    cadence_state: "new" | "on_target" | "due" | "overdue" (pre-computed by route).
+    next_best_touch: Human-readable guidance string (pre-computed by route).
+    now_utc:       datetime.datetime for computing age (passed from route context).
+  Called-by:   vendors/detail.html (vendor cadence hero),
+               customers/detail.html optionally (customer cadence card uses inline markup).
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import cadence_hero %}
+    {{ cadence_hero(vendor, cadence_state, next_best_touch, now_utc) }}
+#}
+{% macro cadence_hero(entity, cadence_state, next_best_touch, now_utc) %}
+{%- set badge_colors = {
+  "new":       "bg-gray-100 text-gray-500",
+  "on_target": "bg-emerald-100 text-emerald-700",
+  "due":       "bg-amber-100 text-amber-700",
+  "overdue":   "bg-rose-100 text-rose-700"
+} -%}
+{%- set badge_labels = {
+  "new":       "New",
+  "on_target": "On Target",
+  "due":       "Due",
+  "overdue":   "Overdue"
+} -%}
+<div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+  {# Hero row: cadence badge + next-best-touch #}
+  <div class="flex items-center justify-between flex-wrap gap-2 mb-3">
+    <div class="flex items-center gap-2">
+      <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(cadence_state, 'bg-gray-100 text-gray-500') }}">
+        {{ badge_labels.get(cadence_state, cadence_state|title) }}
+      </span>
+    </div>
+    <span class="text-xs text-gray-600 italic">{{ next_best_touch }}</span>
+  </div>
+
+  {# Dual clocks: Outbound + Reply #}
+  <div class="grid grid-cols-2 gap-3">
+    <div class="p-3 rounded-lg bg-gray-50">
+      <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+        <svg class="inline h-3 w-3 mr-1 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        Last Out
+      </p>
+      {% if entity.last_outbound_at %}
+        {% set out_days = ((now_utc - entity.last_outbound_at).days) if now_utc is defined else 0 %}
+        <p class="text-lg font-bold text-gray-900">{{ out_days }}d</p>
+        <p class="text-[10px] text-gray-400">{{ entity.last_outbound_at.strftime('%b %d') }}</p>
+      {% else %}
+        <p class="text-sm font-medium text-gray-400">Never</p>
+      {% endif %}
+    </div>
+    <div class="p-3 rounded-lg bg-gray-50">
+      <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+        <svg class="inline h-3 w-3 mr-1 text-brand-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/></svg>
+        Last Reply
+      </p>
+      {% if entity.last_reply_at %}
+        {% set reply_days = ((now_utc - entity.last_reply_at).days) if now_utc is defined else 0 %}
+        <p class="text-lg font-bold text-gray-900">{{ reply_days }}d</p>
+        <p class="text-[10px] text-gray-400">{{ entity.last_reply_at.strftime('%b %d') }}</p>
+      {% else %}
+        <p class="text-sm font-medium text-gray-400">—</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endmacro %}
+
+
 {# ── Opportunity Table v2 — Row Action Rail ───────────────────────── #}
 {% macro opp_row_action_rail(req, user) %}
 <td class="opp-action-rail-cell">

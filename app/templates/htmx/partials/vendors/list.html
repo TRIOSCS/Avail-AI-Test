@@ -1,7 +1,8 @@
-{# Vendor list partial — sortable table with blacklisted toggle.
-   Receives: vendors, q, hide_blacklisted, sort, dir, total, limit, offset.
+{# Vendor list partial — sortable table with blacklisted toggle and cadence clocks.
+   Receives: vendors, q, hide_blacklisted, sort, dir, total, limit, offset, now_utc.
+   Each vendor has .cadence_state attached by the route (tier=None → standard 30d).
    Called by: vendors_list_partial route.
-   Depends on: brand palette.
+   Depends on: brand palette, timeago filter.
 #}
 
 <div class="max-w-7xl mx-auto">
@@ -59,6 +60,15 @@
       <input type="hidden" name="dir" value="{{ dir }}">
       <input type="hidden" name="view" :value="view">
       <div class="flex items-center gap-2">
+        {# Sort by stalest outbound #}
+        <select name="sort_select" aria-label="Sort vendors"
+                onchange="document.querySelector('#vendor-filters [name=sort]').value = this.value; htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg bg-white focus:ring-2 focus:ring-brand-500">
+          <option value="sighting_count" {{ 'selected' if sort == 'sighting_count' }}>Most Sightings</option>
+          <option value="display_name" {{ 'selected' if sort == 'display_name' }}>Name A–Z</option>
+          <option value="overall_win_rate" {{ 'selected' if sort == 'overall_win_rate' }}>Win Rate</option>
+          <option value="outbound_asc" {{ 'selected' if sort == 'outbound_asc' }}>Stalest outbound</option>
+        </select>
         <div x-data="{ hideBlacklisted: {{ 'true' if hide_blacklisted else 'false' }} }">
           <input type="hidden" name="hide_blacklisted" :value="hideBlacklisted">
           <label class="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
@@ -87,6 +97,9 @@
   </div>
   {% endif %}
 
+  {# Cadence dot color map \u2014 same keys as customer _account_list.html #}
+  {% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
+
   {# Table view #}
   {% if view != 'cards' and vendors %}
   <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
@@ -94,6 +107,8 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
+            {# Cadence dot column \u2014 no label, narrow #}
+            <th class="px-2 py-3 w-6"></th>
             {% for col_name, col_key in [('Vendor', 'display_name'), ('Score', None), ('Sightings', 'sighting_count'), ('Win Rate', 'overall_win_rate'), ('Location', 'hq_country'), ('Industry', 'industry')] %}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
@@ -115,6 +130,7 @@
               {% endif %}
             </th>
             {% endfor %}
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cadence</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
@@ -124,6 +140,13 @@
               hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="/v2/vendors/{{ v.id }}"
               preload="mouseover">
+            {# Cadence dot #}
+            <td class="px-2 py-3">
+              <span class="w-2.5 h-2.5 rounded-full flex-shrink-0 inline-block {{ dot_colors.get(v.cadence_state, 'bg-gray-300') }}"
+                    role="img"
+                    aria-label="{{ v.cadence_state|replace('_', ' ')|title if v.cadence_state else 'New' }}"
+                    title="{{ v.cadence_state|replace('_', ' ')|title if v.cadence_state else 'New' }}"></span>
+            </td>
             <td class="px-4 py-3">
               <div>
                 <p class="text-sm font-medium text-brand-500">{{ v.display_name }}</p>
@@ -143,6 +166,15 @@
             <td class="px-4 py-3 text-sm text-gray-500">{{ "%.0f%%"|format(v.overall_win_rate * 100) if v.overall_win_rate else "\u2014" }}</td>
             <td class="px-4 py-3 text-sm text-gray-500">{{ v.hq_country or "\u2014" }}</td>
             <td class="px-4 py-3 text-sm text-gray-500">{{ v.industry or "\u2014" }}</td>
+            {# Dual cadence clocks #}
+            <td class="px-4 py-3 text-right">
+              <p class="text-[11px] {% if v.cadence_state == 'overdue' %}text-rose-600 font-medium{% elif v.cadence_state == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">
+                Out {{ v.last_outbound_at|timeago if v.last_outbound_at else "never" }}
+              </p>
+              <p class="text-[11px] text-gray-400">
+                Reply {{ v.last_reply_at|timeago if v.last_reply_at else "\u2014" }}
+              </p>
+            </td>
           </tr>
           {% endfor %}
         </tbody>
