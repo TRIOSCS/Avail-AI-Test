@@ -1,0 +1,71 @@
+{# Role chip + inline editor for a SiteContact.
+   Re-rendered by POST /v2/partials/customers/{company_id}/contacts/{contact_id}/role.
+   Renders inside the contact card (contacts_tab.html contact_card macro).
+
+   Receives: company, contact
+   Canonical roles: specifier | buyer_po | ap_payer | logistics | exec | other
+   Legacy roles: buyer | technical | decision_maker | operations (display-only, no 400)
+#}
+{% set role_labels = {
+  'specifier':      'Specifier',
+  'buyer_po':       'Buyer / PO',
+  'ap_payer':       'AP / Payer',
+  'logistics':      'Logistics',
+  'exec':           'Exec',
+  'other':          'Other',
+  'buyer':          'Buyer',
+  'technical':      'Technical',
+  'decision_maker': 'Decision Maker',
+  'operations':     'Operations'
+} %}
+{% set role_colors = {
+  'specifier':      'bg-indigo-50 text-indigo-700',
+  'buyer_po':       'bg-blue-50 text-blue-700',
+  'ap_payer':       'bg-teal-50 text-teal-700',
+  'logistics':      'bg-orange-50 text-orange-700',
+  'exec':           'bg-rose-50 text-rose-700',
+  'other':          'bg-gray-100 text-gray-600',
+  'buyer':          'bg-blue-50 text-blue-700',
+  'technical':      'bg-purple-50 text-purple-700',
+  'decision_maker': 'bg-amber-50 text-amber-700',
+  'operations':     'bg-gray-100 text-gray-600'
+} %}
+<div id='role-chip-{{ contact.id }}' x-data='{"editing": false}' class='inline-flex items-center gap-1'>
+  {# Display chip — click to edit #}
+  {% if contact.contact_role %}
+  <button type='button'
+          @click='editing = true'
+          title='Change role'
+          class='px-1.5 py-0.5 text-[9px] font-medium rounded {{ role_colors.get(contact.contact_role, "bg-gray-100 text-gray-600") }} hover:opacity-80 transition-opacity'>
+    {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }}
+  </button>
+  {% else %}
+  <button type='button'
+          @click='editing = true'
+          title='Set role'
+          class='px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-50 text-gray-400 border border-dashed border-gray-300 hover:border-brand-300 hover:text-brand-400 transition-colors'>
+    + role
+  </button>
+  {% endif %}
+  {# Inline editor — shown on click #}
+  <form x-show='editing'
+        x-cloak
+        hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/role'
+        hx-target='#role-chip-{{ contact.id }}'
+        hx-swap='outerHTML'
+        @htmx:after-request='editing = false'>
+    <select name='contact_role'
+            onchange='this.form.requestSubmit()'
+            @blur='editing = false'
+            x-init='$nextTick(() => { if (editing) $el.focus() })'
+            class='text-[10px] border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400'>
+      <option value=''>— clear —</option>
+      <option value='specifier' {% if contact.contact_role == 'specifier' %}selected{% endif %}>Specifier</option>
+      <option value='buyer_po' {% if contact.contact_role == 'buyer_po' %}selected{% endif %}>Buyer / PO</option>
+      <option value='ap_payer' {% if contact.contact_role == 'ap_payer' %}selected{% endif %}>AP / Payer</option>
+      <option value='logistics' {% if contact.contact_role == 'logistics' %}selected{% endif %}>Logistics</option>
+      <option value='exec' {% if contact.contact_role == 'exec' %}selected{% endif %}>Exec</option>
+      <option value='other' {% if contact.contact_role == 'other' %}selected{% endif %}>Other</option>
+    </select>
+  </form>
+</div>

@@ -38,9 +38,25 @@
 </a>
 {% endmacro %}
 
-{# Role chip — color-coded by role; graceful fallback for null/unknown. #}
+{# Role chip — color-coded by role; covers canonical P2b roles + legacy values.
+   Canonical: specifier | buyer_po | ap_payer | logistics | exec | other
+   Legacy (display-only, no migration): buyer | technical | decision_maker | operations
+   Graceful fallback for any unknown value; silent for null.
+#}
 {% macro role_chip(role) %}
-{% if role == 'buyer' %}
+{% if role == 'specifier' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-indigo-50 text-indigo-700">Specifier</span>
+{% elif role == 'buyer_po' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-blue-50 text-blue-700">Buyer / PO</span>
+{% elif role == 'ap_payer' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-teal-50 text-teal-700">AP / Payer</span>
+{% elif role == 'logistics' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-orange-50 text-orange-700">Logistics</span>
+{% elif role == 'exec' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-rose-50 text-rose-700">Exec</span>
+{% elif role == 'other' %}
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-100 text-gray-600">Other</span>
+{% elif role == 'buyer' %}
 <span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-blue-50 text-blue-700">Buyer</span>
 {% elif role == 'technical' %}
 <span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-purple-50 text-purple-700">Technical</span>
@@ -49,7 +65,7 @@
 {% elif role == 'operations' %}
 <span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-100 text-gray-600">Operations</span>
 {% elif role %}
-<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-100 text-gray-600">{{ role|title }}</span>
+<span class="px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-100 text-gray-600">{{ role|replace('_', ' ')|title }}</span>
 {% endif %}
 {% endmacro %}
 
@@ -131,7 +147,7 @@
           {% if contact.is_primary %}
           <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
           {% endif %}
-          {{ role_chip(contact.contact_role) }}
+          {% include 'htmx/partials/customers/_role_chip_editor.html' %}
         </div>
         <p class="text-[11px] text-gray-500 mt-0.5">{{ contact.title or "—" }}</p>
         <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">

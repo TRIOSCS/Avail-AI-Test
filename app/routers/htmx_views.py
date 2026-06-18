@@ -4978,6 +4978,112 @@ async def company_unassign_segment_tag(
     )
 
 
+_VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
+
+# Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
+# decision_maker/operations) remain valid in the DB but can only be cleared
+# via the "— clear —" option; they are not in this set.
+CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+_VALID_ROLES = frozenset(CANONICAL_ROLES)
+
+
+@router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
+async def set_company_tier(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.tier; re-renders the cadence hero with updated badge + NBT.
+
+    Accepts tier= from the inline select.  Blank value clears the tier (NULL → behaves
+    as 'standard').  Invalid value → 400.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    tier_raw = (form.get("tier") or "").strip()
+
+    if tier_raw and tier_raw not in _VALID_TIERS:
+        raise HTTPException(400, f"Invalid tier '{tier_raw}'. Valid: {sorted(_VALID_TIERS)}")
+
+    company.tier = tier_raw or None
+    db.commit()
+    db.refresh(company)
+
+    _cadence = _cadence_state(company.tier, company.last_outbound_at)
+    _nbt = _next_best_touch(company.tier, company.last_outbound_at)
+    logger.info("Company {} tier set to {} by {}", company_id, company.tier, user.email)
+    return template_response(
+        "htmx/partials/customers/_cadence_hero.html",
+        {
+            "request": request,
+            "company": company,
+            "cadence_state": _cadence,
+            "next_best_touch": _nbt,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/role",
+    response_class=HTMLResponse,
+)
+async def set_contact_role(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set SiteContact.contact_role; re-renders the role chip editor.
+
+    Accepts contact_role= from the inline select.  Blank value clears the role (NULL).
+    Invalid value → 400 (legacy values that pre-exist in the DB are not accepted via
+    this endpoint; rep must choose a canonical role).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    role_raw = (form.get("contact_role") or "").strip()
+
+    if role_raw and role_raw not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{role_raw}'. Valid: {sorted(_VALID_ROLES)}")
+
+    contact.contact_role = role_raw or None
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} role set to {} by {} (company {})",
+        contact_id,
+        contact.contact_role,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_role_chip_editor.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
