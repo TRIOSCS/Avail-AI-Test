@@ -60,9 +60,49 @@ def run_startup_migrations() -> None:
     _backfill_material_cards()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
+    _seed_verification_group_from_admin_emails()
     _seed_commodity_schemas()
     _warn_non_canonical_categories()
     logger.info("Startup migrations complete")
+
+
+def _seed_verification_group_from_admin_emails() -> None:
+    """Seed the ops verification group from ADMIN_EMAILS (idempotent).
+
+    For each email in settings.admin_emails, if a matching user exists and has no
+    VerificationGroupMember row, create one (is_active=True). Users that haven't logged
+    in yet are skipped; an admin can add them via Settings > Ops Group once they exist.
+    Ensures the group is non-empty so SO/PO verification and buy-plan completion are
+    reachable out of the box. filter_by(...).first() + the UNIQUE(user_id) guard make
+    this safe to run on every boot.
+    """
+    from .config import settings
+    from .models import User
+    from .models.buy_plan import VerificationGroupMember
+
+    admin_emails = settings.admin_emails
+    if not admin_emails:
+        return
+
+    db = SessionLocal()
+    try:
+        seeded = 0
+        for email in admin_emails:
+            user = db.query(User).filter_by(email=email).first()
+            if not user:
+                continue
+            if db.query(VerificationGroupMember).filter_by(user_id=user.id).first():
+                continue
+            db.add(VerificationGroupMember(user_id=user.id, is_active=True))
+            seeded += 1
+        if seeded:
+            db.commit()
+            logger.info("Seeded {} ops verification group member(s) from ADMIN_EMAILS", seeded)
+    except Exception:
+        logger.exception("Failed seeding ops verification group members")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _create_default_user_if_env_set() -> None:

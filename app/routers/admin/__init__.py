@@ -18,9 +18,11 @@ from fastapi import APIRouter
 # The sub-modules import these via "from . import decrypt_value" at call
 # time so that the patched version is picked up.
 from ...services.credential_service import decrypt_value, encrypt_value, mask_value  # noqa: F401
+from .buy_plan_ops import router as buy_plan_ops_router
 from .spec_codes import router as spec_codes_router
 from .system import router as system_router
 
 router = APIRouter()
 router.include_router(system_router)
 router.include_router(spec_codes_router)
+router.include_router(buy_plan_ops_router)

@@ -504,11 +504,17 @@ crm.offers functions directly (no logic duplication) and re-render the panel:
   POST .../offers/{id}/mark-sold -> mark_offer_sold
   DELETE .../offers/{id}         -> delete_offer
 
-"Convert to offer" sits on the collapsed vendor row (next to Build RFQ / Mark
-Unavail) and opens the modal prefilled from the VendorSightingSummary. The modal
-and the requisitions add-offer form share one field grid
-(offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
-entered offers appear in the Activity tab automatically.
+The Vendors tab is a **fitted-column table — Vendor | Qty | Best Price | Score | ⋯**
+where each vendor is its own `<tbody>` (a summary row carrying exactly one `<td>`
+per `<th>`, plus an expandable intel drawer in a sibling `<tr><td colspan="5">`).
+Status pill, phone (tel link) and the OOO / overlap / "via SUB-MPN" badges live
+inside the Vendor cell; **every action lives in the row's ⋯ kebab** (Build RFQ /
+Mark Unavail / Convert to offer for available vendors; Mark available / Verify in
+the unavailability states). A test guards the header↔cell count
+(`tests/test_panel_column_alignment.py`). "Convert to offer" opens the modal
+prefilled from the VendorSightingSummary. The modal and the requisitions add-offer
+form share one field grid (offers/_offer_form_fields.html). Offer creation logs
+OFFER_CREATED, so converted/entered offers appear in the Activity tab automatically.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
@@ -1012,20 +1018,70 @@ buyplan_builder.py
     v
 buyplan_workflow.py (state machine)
     |
-    |  DRAFT --> SUBMITTED --> APPROVED --> PO_SENT --> COMPLETE
-    |                |              |
-    |                v              v
-    |            REJECTED        HALTED
+    |  draft --submit--> pending --approve--> active --(all lines verified)--> completed
+    |                       |                    |                  \--> cancelled (cancel_buy_plan: cascades open lines)
+    |                       v                    v
+    |                 draft (reject)         halted (SO halt)
     |
-    +---> buyplan_notifications.py
-    |       +---> teams_notifications.py --> Teams webhook
-    |       +---> DB: INSERT notifications
-    |       +---> email (approval token link)
+    |  Per-line (active):  awaiting_po --confirm_po--> pending_verify --verify_po(ops)--> verified
+    |  Ops SO track:       so_status: pending --verify_so(ops)--> approved / rejected
+    |  Completion gate:    all lines terminal AND so_status=approved. verify_so/verify_po require a
+    |                      VerificationGroupMember (manage via Settings > Ops Group; seeded from ADMIN_EMAILS).
     |
-    +---> activity_service.py --> DB: INSERT activity_log
+    +---> buyplan_notifications.py (submit/approve/reject/SO/PO/completed/cancelled + buyer/ops nudges)
+    |       +---> teams_notifications.py --> Teams webhook / DM
+    |       +---> DB: INSERT activity_log (linked via buy_plan_id FK)
+    |
+    +---> inventory_jobs.py: buyplan_nudge (30 min) re-pings buyer (PO unconfirmed >4h) and
+            ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
+**Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
+(app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
+`record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)
+inside a best-effort try/except so a CPH failure never rolls back the completion.
+
+```
+check_completion (buyplan_workflow.py)
+    |
+    v  [plan transitions to COMPLETE]
+record_buyplan_purchase_history (purchase_history_service.py)
+    |
+    +---> Idempotency guard: plan.purchase_history_recorded_at IS NOT NULL → skip
+    |
+    +---> For each VERIFIED buy_plan_line:
+    |       +---> resolve material_card_id (from requirement, then from offer)
+    |       +---> upsert_purchase(db, company_id, material_card_id,
+    |                             source="buy_plan", unit_sell, quantity,
+    |                             purchased_at=plan.completed_at,
+    |                             source_ref=sales_order_number)
+    |             --> DB: UPSERT customer_part_history
+    |
+    +---> plan.purchase_history_recorded_at = now(); db.flush()  [idempotency stamp]
+    |
+    +---> refresh_matches_for_cards(db, affected_card_ids)  [immediate re-match]
+              |
+              +---> For each affected card: DB: SELECT newest offers (capped at 5)
+              +---> find_matches_for_offer(db, offer) → proactive_matching.py
+              +---> DB: INSERT proactive_matches (engine dedup prevents duplicates)
+```
+
+The buy plan is the **single source of truth** for CPH. The prior offer-won and
+quote-won hooks that previously wrote CPH rows have been retired; all confirmed
+customer purchases now flow through buy-plan completion. Historical rows written
+by the old hooks are preserved (their `source` values remain valid).
+
+Historical completed plans that predate this feature are backfilled one-time via
+`python -m app.management.backfill_buyplan_cph`. The command records CPH for every
+COMPLETED buy plan whose `purchase_history_recorded_at` is NULL, committing per plan.
+It is idempotent and safe to re-run — plans that already have the stamp are skipped.
+
 ## 7. Proactive Matching
+
+`customer_part_history` (CPH) is the backbone for proactive matching. As of the
+buy-plan CPH feed (§ 6 above), CPH rows are fed by buy-plan completion rather than
+offer/quote won hooks (those hooks have been retired). The matching engine itself
+is unchanged.
 
 ```
 APScheduler (daily) OR user trigger
@@ -1035,6 +1091,7 @@ proactive_matching.py
     |
     +---> DB: SELECT offers WHERE status='active' AND recent
     +---> DB: SELECT customer_part_history (who bought this MPN?)
+    |         (source="buy_plan" for all new rows; legacy values also present)
     +---> DB: CHECK proactive_throttle (not offered recently?)
     +---> DB: CHECK proactive_do_not_offer (not blacklisted?)
     +---> Score: match_score = f(purchase_count, recency, margin)
@@ -1047,6 +1104,13 @@ User sends:
     +---> DB: INSERT proactive_throttle
     +---> activity_service.py --> DB: INSERT activity_log
 ```
+
+**Immediate re-match on completion.** `refresh_matches_for_cards` (called from
+`record_buyplan_purchase_history`) runs `find_matches_for_offer` against the
+newest active offers for every card touched by the completed buy plan, so new
+proactive matches surface on the Proactive tab without waiting for the daily cron.
+Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
+duplicate matches.
 
 ## 8. Activity Digest (AI Timeline Summary)
 
@@ -2932,19 +2996,19 @@ the current implementation.
 | Domain | Routes | Key Operations |
 |--------|--------|---------------|
 | Auth | 7 | OAuth login/callback/logout, status |
-| Requisitions | 45 | CRUD, search, bulk archive/assign, claim |
+| Requisitions | 47 | CRUD, search, bulk archive/assign, claim; requisitions2 split-panel detail with lazy-loaded Offers/Activity tabs (`GET /requisitions2/{id}/offers` + `/activity`, reusing the shared activity timeline) |
 | Requirements | 23 | Add parts, CSV upload, search, leads, tasks |
 | Vendors | 35 | CRUD, contacts, stock history, reviews, tags |
 | Companies/CRM | 42 | CRUD, sites, contacts, enrichment, import; CDM workspace (`/v2/partials/customers`, `/v2/partials/customers/account-list`); outreach logging (`POST /api/activity/outreach-initiated`) |
 | Offers | 30 | CRUD, line items, accept/reject, changelog |
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history; bare `/v2/quotes` 307→`/v2/requisitions`; list partial removed; detail `/v2/quotes/{id}` unchanged; surfaced via Reqs workspace + CRM account Quotes tabs |
-| Buy Plans | 6 | CRUD, external approval via token |
+| Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 8 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich |
+| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job), enrich-status (poll; HTTP 286 stops) |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
@@ -2968,7 +3032,7 @@ the current implementation.
 | Scoring & Matching | 10+ | unified_score, avail_score, multiplier_score, proactive_matching |
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
 | Vendor Mgmt | 9 | vendor_analysis, vendor_affinity, vendor_scorecard, vendor_duplicates |
-| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
+| Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring, buyplan_notifications, status_machine |
 | Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |

@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..constants import UserRole
+from ..constants import BuyPlanStatus, UserRole
 from ..models import (
     BuyerLeaderboardSnapshot,
     BuyPlan,
@@ -67,7 +67,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         .all()
     ):
         buyplan_offer_ids.add(offer_id)
-        if bp_status in ("completed",):
+        if bp_status in (BuyPlanStatus.COMPLETED.value,):
             po_confirmed_offer_ids.add(offer_id)
 
     # Batch-fetch all offers and stock counts to avoid N+1 per buyer

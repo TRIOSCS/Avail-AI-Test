@@ -279,7 +279,7 @@ class TestSendEmail:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock()
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
             with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
                 await _send_email(user, "Subject", "<b>body</b>", db_session)
 
@@ -293,7 +293,7 @@ class TestSendEmail:
 
         user = _make_user(db_session)
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None):
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value=None):
             await _send_email(user, "Subject", "<b>body</b>", db_session)
         # Should return silently — no error
 
@@ -303,7 +303,7 @@ class TestSendEmail:
 
         user = _make_user(db_session)
 
-        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
             with patch("app.utils.graph_client.GraphClient", side_effect=Exception("fail")):
                 await _send_email(user, "Subject", "<b>body</b>", db_session)
         # Should not raise — error is caught and logged
@@ -940,7 +940,7 @@ class TestNotifyV3StockSaleApproved:
             mock_settings.admin_emails = ["admin@trioscs.com"]
             mock_settings.stock_sale_notify_emails = ["logistics@trioscs.com", "accounting@trioscs.com"]
             mock_settings.app_url = "https://avail.test"
-            with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
                 with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
                     with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
                         await notify_stock_sale_approved(plan, db_session)
@@ -1025,3 +1025,33 @@ class TestNotifyV3StockSaleApproved:
         # Should still create in-app notification even without email sending
         activities = db_session.query(ActivityLog).filter_by(activity_type="buyplan_completed").all()
         assert len(activities) == 1
+
+
+class TestNotifyCancelled:
+    @pytest.mark.asyncio
+    async def test_notifies_submitter_and_sets_fk(self, db_session, test_user, test_quote, test_requisition):
+        from unittest.mock import AsyncMock, patch
+
+        from app.models import ActivityLog
+        from app.models.buy_plan import BuyPlan, BuyPlanStatus
+        from app.services.buyplan_notifications import notify_cancelled
+
+        plan = BuyPlan(
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            status=BuyPlanStatus.CANCELLED.value,
+            submitted_by_id=test_user.id,
+            cancelled_by_id=test_user.id,
+            cancellation_reason="dupe order",
+        )
+        db_session.add(plan)
+        db_session.commit()
+
+        with patch("app.services.buyplan_notifications._teams_dm", new_callable=AsyncMock):
+            with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
+                await notify_cancelled(plan, db_session)
+
+        log = db_session.query(ActivityLog).filter_by(activity_type="buyplan_cancelled", user_id=test_user.id).first()
+        assert log is not None
+        assert log.buy_plan_id == plan.id  # DEAD-5: FK populated
+        assert "dupe order" in log.subject

@@ -32,6 +32,12 @@ def register_inventory_jobs(scheduler, settings):
         id="stock_autocomplete",
         name="Stock sale auto-complete",
     )
+    scheduler.add_job(
+        _job_buyplan_nudge,
+        IntervalTrigger(minutes=30),
+        id="buyplan_nudge",
+        name="Buy plan unconfirmed-instruction nudge",
+    )
 
 
 @_traced_job
@@ -59,6 +65,8 @@ async def _job_po_verification():
 
         if plans_to_verify:
             await asyncio.gather(*[_safe_verify(p) for p in plans_to_verify])
+            # verify_po_sent flushes (not commits); the job owns the transaction.
+            db.commit()
     except Exception as e:
         logger.exception(f"PO verification scan error: {e}")
         db.rollback()
@@ -86,18 +94,98 @@ async def _job_stock_autocomplete():
             .all()
         )
 
-        completed = 0
-        for plan in stuck:
-            plan.status = BuyPlanStatus.COMPLETED.value
-            plan.completed_at = datetime.now(timezone.utc)
-            logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
-            completed += 1
+        from ..services.buyplan_notifications import notify_stock_sale_approved, run_notify_bg
+        from ..services.buyplan_workflow import _complete_plan
 
-        if completed:
+        completed_ids = []
+        for plan in stuck:
+            # Route through the shared completion helper so a case report is generated
+            # (matches the normal auto-complete path; no silent direct status flip).
+            _complete_plan(plan, db)
+            logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
+            completed_ids.append(plan.id)
+
+        if completed_ids:
             db.commit()
-            logger.info(f"Stock sale auto-complete: {completed} plan(s) completed")
+            logger.info(f"Stock sale auto-complete: {len(completed_ids)} plan(s) completed")
+            for plan_id in completed_ids:
+                await run_notify_bg(notify_stock_sale_approved, plan_id)
     except Exception as e:
         logger.exception(f"Stock sale auto-complete error: {e}")
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_buyplan_nudge():
+    """Nudge buyers and ops when buy-plan lines sit unconfirmed too long.
+
+    Buyer nudge: awaiting_po lines whose plan was approved > buyplan_nudge_buyer_hours ago.
+    Ops nudge:   pending_verify lines whose PO was confirmed > buyplan_nudge_ops_hours ago.
+    Idempotency: last_nudge_at is stamped per line, so a stuck line is re-nudged at most
+    once per threshold window regardless of the 30-min job cadence.
+    """
+    from ..config import settings
+    from ..database import SessionLocal
+    from ..models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
+    from ..services.buyplan_notifications import notify_nudge_buyer, notify_nudge_ops
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        buyer_cutoff = now - timedelta(hours=settings.buyplan_nudge_buyer_hours)
+        ops_cutoff = now - timedelta(hours=settings.buyplan_nudge_ops_hours)
+
+        buyer_lines = (
+            db.query(BuyPlanLine)
+            .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+            .filter(
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
+                BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO.value,
+                BuyPlanLine.buyer_id.isnot(None),
+                BuyPlan.approved_at.isnot(None),
+                BuyPlan.approved_at < buyer_cutoff,
+                (BuyPlanLine.last_nudge_at.is_(None)) | (BuyPlanLine.last_nudge_at < buyer_cutoff),
+            )
+            .all()
+        )
+        ops_lines = (
+            db.query(BuyPlanLine)
+            .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+            .filter(
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
+                BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY.value,
+                BuyPlanLine.po_confirmed_at.isnot(None),
+                BuyPlanLine.po_confirmed_at < ops_cutoff,
+                (BuyPlanLine.last_nudge_at.is_(None)) | (BuyPlanLine.last_nudge_at < ops_cutoff),
+            )
+            .all()
+        )
+
+        buyer_nudged = 0
+        for line in buyer_lines:
+            try:
+                if await notify_nudge_buyer(line.buy_plan, line, db):
+                    line.last_nudge_at = now
+                    buyer_nudged += 1
+            except Exception as e:
+                logger.exception(f"Buyer nudge failed for line {line.id}: {e}")
+        ops_nudged = 0
+        for line in ops_lines:
+            try:
+                if await notify_nudge_ops(line.buy_plan, line, db):
+                    line.last_nudge_at = now
+                    ops_nudged += 1
+            except Exception as e:
+                logger.exception(f"Ops nudge failed for line {line.id}: {e}")
+
+        if buyer_nudged or ops_nudged:
+            db.commit()
+            logger.info("Buy plan nudge: {} buyer, {} ops", buyer_nudged, ops_nudged)
+    except Exception as e:
+        logger.exception(f"Buy plan nudge job error: {e}")
         db.rollback()
         raise
     finally:
@@ -480,8 +568,6 @@ async def _download_and_import_stock_list(
     except Exception as e:
         logger.exception(f"Auto-create sightings from stock list failed: {e}")
         db.rollback()
-
-    logger.debug("Teams stock match notification skipped (removed)")
 
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:

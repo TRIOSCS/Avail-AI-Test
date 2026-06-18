@@ -129,7 +129,8 @@ class TestDoNotOffer:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Suppressed" in resp.text
+        # SP2: do-not-offer returns a collapsed/hidden row (htmx removal), not a "Suppressed" message
+        assert "display:none" in resp.text
 
     def test_suppress_missing_fields(self, client: TestClient):
         resp = client.post(

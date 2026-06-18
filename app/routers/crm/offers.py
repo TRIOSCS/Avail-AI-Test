@@ -18,7 +18,6 @@ from ...models import (
     OfferAttachment,
     Quote,
     Requirement,
-    Requisition,
     User,
     VendorCard,
     VendorReview,
@@ -615,10 +614,6 @@ async def update_offer(
     # essentials gate is enforced at the buyer handlers, not in this canonical builder.
     apply_qualification(offer)
 
-    # CPH hook: record purchase history when offer status changes to 'won'
-    if old_dict.get("status") != OfferStatus.WON and offer.status == OfferStatus.WON:
-        _record_offer_won_history(db, offer)
-
     db.commit()
     return {"ok": True}
 
@@ -930,38 +925,6 @@ async def browse_onedrive(
         }
         for i in items
     ]
-
-
-def _record_offer_won_history(db: Session, offer: Offer) -> None:
-    """Feed customer_part_history when an offer is marked as won.
-
-    Resolves the company via offer → requisition → customer_site → company. Errors are
-    logged but never block the offer update flow.
-    """
-    if not offer.material_card_id:
-        return
-    try:
-        from ...models import CustomerSite
-        from ...services.purchase_history_service import upsert_purchase
-
-        req = db.get(Requisition, offer.requisition_id) if offer.requisition_id else None
-        if not req or not req.customer_site_id:
-            return
-        site = db.get(CustomerSite, req.customer_site_id)
-        if not site or not site.company_id:  # pragma: no cover
-            return
-
-        upsert_purchase(
-            db,
-            company_id=site.company_id,
-            material_card_id=offer.material_card_id,
-            source="avail_offer",
-            unit_price=offer.unit_price,
-            quantity=offer.qty_available,
-            source_ref=f"offer:{offer.id}",
-        )
-    except Exception as e:
-        logger.warning("Offer won purchase history recording failed: {}", e)
 
 
 # ── Review Queue — medium-confidence AI-parsed offers ─────────────────
