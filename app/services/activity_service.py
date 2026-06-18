@@ -42,11 +42,46 @@ _RULE_MEANINGFUL_TYPES: frozenset[str] = frozenset(
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _resolve_site_contact(email_lower: str, company_id: int, site_id: int | None, db: Session) -> int | None:
+    """Return the SiteContact.id whose email matches email_lower within the company's
+    sites.
+
+    Scoped to the matched site when known, otherwise searches all active sites for the
+    company. Prefers email_verified=True, then is_primary=True, then first found.
+    Returns None if no match — NO change to existing behaviour.
+    """
+    q = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            func.lower(SiteContact.email) == email_lower,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+    )
+    if site_id is not None:
+        q = q.filter(SiteContact.customer_site_id == site_id)
+    candidates = q.all()
+    if not candidates:
+        return None
+    # Prefer verified, then primary, then first
+    for sc in candidates:
+        if sc.email_verified:
+            return sc.id
+    for sc in candidates:
+        if sc.is_primary:
+            return sc.id
+    return candidates[0].id
+
+
 def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     """Match an email address to a company or vendor card.
 
     Returns {"type": "company"|"vendor", "id": int, "name": str} or None. Checks
     customer sites first, then vendor contacts, then vendor card email lists.
+
+    For customer-side matches also resolves the SiteContact whose email equals the
+    address and includes site_contact_id in the result (None when no contact found).
     """
     if not email_addr:
         return None
@@ -63,7 +98,14 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         .first()
     )
     if site:
-        return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
+        sc_id = _resolve_site_contact(email_lower, site.company_id, site.id, db)
+        return {
+            "type": "company",
+            "id": site.company_id,
+            "name": site.site_name,
+            "site_id": site.id,
+            "site_contact_id": sc_id,
+        }
 
     # 2. Check vendor_contacts table (exact match)
     vc = db.query(VendorContact).filter(func.lower(VendorContact.email) == email_lower).first()
@@ -76,7 +118,8 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     if domain and domain not in _GENERIC_DOMAINS:
         company = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).first()
         if company:
-            return {"type": "company", "id": company.id, "name": company.name}
+            sc_id = _resolve_site_contact(email_lower, company.id, None, db)
+            return {"type": "company", "id": company.id, "name": company.name, "site_contact_id": sc_id}
 
     # 4. Domain match against vendor_cards
     if domain and domain not in _GENERIC_DOMAINS:
@@ -169,8 +212,8 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 def _match_entity_links(match: dict | None) -> dict:
     """Translate a contact-match dict into ActivityLog entity-link kwargs.
 
-    Returns company_id / vendor_card_id / vendor_contact_id / customer_site_id with only
-    the matched side populated (the other side stays None).
+    Returns company_id / vendor_card_id / vendor_contact_id / customer_site_id /
+    site_contact_id with only the matched side populated (the other side stays None).
     """
     if match and match["type"] == "company":
         return {
@@ -178,6 +221,7 @@ def _match_entity_links(match: dict | None) -> dict:
             "vendor_card_id": None,
             "vendor_contact_id": None,
             "customer_site_id": match.get("site_id"),
+            "site_contact_id": match.get("site_contact_id"),
         }
     if match and match["type"] == "vendor":
         return {
@@ -185,8 +229,15 @@ def _match_entity_links(match: dict | None) -> dict:
             "vendor_card_id": match["id"],
             "vendor_contact_id": match.get("vendor_contact_id"),
             "customer_site_id": None,
+            "site_contact_id": None,
         }
-    return {"company_id": None, "vendor_card_id": None, "vendor_contact_id": None, "customer_site_id": None}
+    return {
+        "company_id": None,
+        "vendor_card_id": None,
+        "vendor_contact_id": None,
+        "customer_site_id": None,
+        "site_contact_id": None,
+    }
 
 
 def log_email_activity(
