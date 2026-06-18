@@ -116,6 +116,28 @@ async def crm_performance(
     return template_response("htmx/partials/crm/performance_tab.html", ctx)
 
 
+@router.get("/v2/partials/crm/reporting", response_class=HTMLResponse)
+async def crm_reporting(
+    request: Request,
+    days: int | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the CRM reporting dashboard: coverage, pipeline, funnel."""
+    from ...services.reporting_service import coverage_report, outcome_funnel, pipeline_report
+    from ...template_env import template_response
+
+    ctx = {
+        "request": request,
+        "user": user,
+        "coverage": coverage_report(db),
+        "pipeline": pipeline_report(db, days=days),
+        "funnel": outcome_funnel(db, days=days or 90),
+        "days": days,
+    }
+    return template_response("htmx/partials/crm/reporting_tab.html", ctx)
+
+
 @router.get("/api/crm/performance-metrics")
 async def performance_metrics_json(
     user: User = Depends(require_user),
