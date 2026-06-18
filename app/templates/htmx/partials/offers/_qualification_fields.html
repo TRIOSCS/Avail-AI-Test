@@ -1,0 +1,72 @@
+{# _qualification_fields.html — condition-driven qualification capture.
+   Rendered inside the offerQualification() Alpine scope (x-data on the wrapping form).
+   Consumes Alpine state: condition, packaging, usage, refurbished_by, refurb_process,
+   cert_doc, part_condition, manufacturer, date_code.
+   Called by: offers/_offer_form_fields.html.
+   Depends on: offers/_field_macros.chip_select.
+#}
+{% from "htmx/partials/offers/_field_macros.html" import chip_select %}
+{% set p = prefill or {} %}
+{% set PACKAGING_OPTS = [
+  ('Tape & Reel', 'Tape & Reel'),
+  ('Reels', 'Reels'),
+  ('Trays', 'Trays'),
+  ('Tubes', 'Tubes'),
+  ('Antistatic bags', 'Antistatic bags'),
+  ('Boxes', 'Boxes')
+] %}
+
+<div class="space-y-3 rounded-md bg-gray-50 p-3">
+  {# Condition spine #}
+  <div>
+    <label class="block text-xs text-gray-500 mb-1">Condition *</label>
+    <select name="condition" x-model="condition"
+            class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      <option value="">— choose —</option>
+      <option value="new">New (mfr packaging)</option>
+      <option value="new_no_pkg">New (no mfr packaging)</option>
+      <option value="pulls">Pulls</option>
+      <option value="refurb">Refurbs</option>
+    </select>
+  </div>
+
+  {# New (no mfr pkg) — packaging chip required #}
+  <div x-show="condition === 'new_no_pkg'" x-cloak>
+    {{ chip_select('Packaging *', 'packaging', PACKAGING_OPTS, 'packaging') }}
+  </div>
+
+  {# Pulls — packaging + usage chips required; optional part_condition text #}
+  <div x-show="condition === 'pulls'" x-cloak class="space-y-2">
+    {{ chip_select('Packaging *', 'packaging', PACKAGING_OPTS, 'packaging') }}
+    {{ chip_select('Usage *', 'usage', [('boards', 'Pulled from boards'), ('systems', 'Pulled from systems')], 'usage') }}
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Part condition</label>
+      <input type="text" name="part_condition" x-model="part_condition" value="{{ p.get('part_condition', '') }}"
+             class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+             placeholder="e.g. light wear, clean">
+    </div>
+  </div>
+
+  {# Refurbs — refurbished_by chip + process text required; cert_doc when third_party #}
+  <div x-show="condition === 'refurb'" x-cloak class="space-y-2">
+    {{ chip_select('Refurbished by *', 'refurbished_by', [('supplier', 'Supplier'), ('third_party', '3rd party')], 'refurbished_by') }}
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Process *</label>
+      <input type="text" name="refurb_process" x-model="refurb_process" value="{{ p.get('refurb_process', '') }}"
+             class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+             placeholder="What was done, and how">
+    </div>
+    <div x-show="refurbished_by === 'third_party'" x-cloak>
+      {{ chip_select('Certifying doc?', 'cert_doc', [('yes', 'Yes'), ('no', 'No')], 'cert_doc') }}
+    </div>
+  </div>
+
+  {# Standardized note preview (read-only, auto-composed by JS) + meter #}
+  <div x-show="condition" x-cloak class="text-xs">
+    <div class="text-gray-400 mb-0.5">Standardized note (auto)</div>
+    <div class="rounded bg-white border border-gray-200 px-2 py-1 text-gray-700" x-text="noteText() || '—'"></div>
+    <div class="mt-1 text-gray-500" x-show="meterTotal() > 0">
+      Qualified <span x-text="meterFilled()"></span>/<span x-text="meterTotal()"></span>
+    </div>
+  </div>
+</div>

@@ -206,7 +206,7 @@ class TestOfferCreateValidators:
             pytest.param({"packaging": "Tape & Reel"}, "packaging", "reel", id="packaging_normalized"),
             pytest.param({}, "date_code", None, id="date_code_none"),
             pytest.param({"date_code": "DC 2024"}, "date_code", "2024", id="date_code_normalized"),
-            pytest.param({"condition": "Factory New"}, "condition", "new", id="condition_normalized"),
+            pytest.param({"condition": "used"}, "condition", "pulls", id="condition_normalized"),
             pytest.param({"mpn": "lm317t"}, "mpn", "LM317T", id="mpn_normalized"),
         ],
     )

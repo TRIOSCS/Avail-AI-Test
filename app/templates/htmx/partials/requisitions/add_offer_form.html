@@ -11,7 +11,8 @@
             class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
   </div>
 
-  <form hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer"
+  <form x-data='offerQualification({})'
+        hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer"
         hx-target="#tab-content"
         data-loading-disable
         class="space-y-3">
@@ -41,8 +42,8 @@
                 placeholder="Any additional details..."></textarea>
     </div>
 
-    <button type="submit"
-            class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+    <button type="submit" :disabled="!essentialsMet()"
+            class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed">
       Save Offer
     </button>
   </form>

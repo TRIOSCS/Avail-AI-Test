@@ -57,6 +57,11 @@ class Offer(Base):
     warranty = Column(String(100))
     country_of_origin = Column(String(100))
 
+    # --- Qualification capture (standardized buyer qualification at offer entry) ---
+    qualification_status = Column(String(20))  # QualificationStatus snapshot for filter/report
+    qualification_note = Column(Text)  # system-composed standardized note (NOT free notes)
+    qualification = Column(JSON)  # condition-specific detail + pending vendor requests
+
     source = Column(String(50), default="manual")
     vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id", ondelete="SET NULL"))
     entered_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
@@ -131,6 +136,41 @@ class Offer(Base):
             raise ValueError(f"qty_available must be >= 0, got {value}")
         return value
 
+    @validates("condition")
+    def _validate_condition(self, _key, value):
+        from ..constants import OfferCondition
+
+        valid = {e.value for e in OfferCondition}
+        if value and value not in valid:
+            from loguru import logger
+
+            logger.warning("Unexpected offer condition: {}. Expected one of {}", value, valid)
+        return value
+
+    @property
+    def qualification_summary(self) -> dict:
+        """Live qualification badge/meter (display reads this; column is the
+        snapshot)."""
+        from app.services.offer_qualification import compute_status, meter
+
+        data = {
+            "manufacturer": self.manufacturer,
+            "packaging": self.packaging,
+            "date_code": self.date_code,
+            **{
+                k: (self.qualification or {}).get(k)
+                for k in ("usage", "refurbished_by", "refurb_process", "cert_doc", "part_condition")
+            },
+        }
+        has_images = bool(self.attachments)
+        filled, total = meter(self.condition, data, has_images)
+        return {
+            "status": compute_status(self.condition, data, has_images),
+            "filled": filled,
+            "total": total,
+            "note": self.qualification_note,
+        }
+
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
@@ -145,6 +185,7 @@ class Offer(Base):
         Index("ix_offers_vendor", "vendor_card_id"),
         Index("ix_offers_mpn", "mpn"),
         Index("ix_offers_status", "status"),
+        Index("ix_offers_qualification_status", "qualification_status"),
         Index("ix_offers_entered_by", "entered_by_id"),
         Index("ix_offers_req_status", "requisition_id", "status"),
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),

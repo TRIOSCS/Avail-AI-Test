@@ -638,6 +638,7 @@ class TestAddOfferManual:
                 "qty_available": "200",
                 "unit_price": "1.25",
                 "condition": "new",
+                "manufacturer": "TI",  # essential for condition=new (qualification gate)
                 "lead_time": "2 weeks",
             },
         )

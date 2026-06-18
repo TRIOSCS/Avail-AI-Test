@@ -387,6 +387,12 @@ async def create_offer(
         notes=payload.notes,
         status=payload.status,
     )
+    from app.services.offer_qualification import apply_qualification
+
+    offer.qualification = payload.qualification or None
+    # Non-raising: composes the standardized note + sets qualification_status. The
+    # essentials gate is enforced at the buyer handlers, not in this canonical builder.
+    apply_qualification(offer)
     db.add(offer)
     old_status = req.status
     if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING):
@@ -599,6 +605,14 @@ async def update_offer(
     record_changes(db, "offer", offer_id, user.id, old_dict, new_dict, trackable)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    from app.services.offer_qualification import apply_qualification
+
+    if "qualification" in changes:
+        offer.qualification = changes["qualification"] or None
+    # Non-raising: composes the standardized note + sets qualification_status. The
+    # essentials gate is enforced at the buyer handlers, not in this canonical builder.
+    apply_qualification(offer)
 
     db.commit()
     return {"ok": True}

@@ -156,6 +156,7 @@ def test_create_offer_appears_in_panel_and_logs_activity(client, db_session):
             "qty_available": "5000",
             "unit_price": "0.45",
             "condition": "new",
+            "manufacturer": "Texas Instruments",  # required for condition=new
         },
     )
     assert resp.status_code == 200
@@ -269,7 +270,12 @@ def test_mark_sold_via_panel_for_creator(client, db_session):
     rq, r = _req(db_session, mpn="LM317T")
     client.post(
         f"/v2/partials/sightings/{r.id}/offers",
-        data={"vendor_name": "Arrow", "mpn": "LM317T", "unit_price": "0.45"},
+        data={
+            "vendor_name": "Arrow",
+            "mpn": "LM317T",
+            "unit_price": "0.45",
+            "manufacturer": "Texas Instruments",
+        },  # required for condition=new
     )
     o = db_session.query(Offer).filter(Offer.vendor_name.ilike("%arrow%")).one()
     resp = client.post(f"/v2/partials/sightings/{r.id}/offers/{o.id}/mark-sold")
@@ -302,7 +308,12 @@ def test_create_offer_persists_valid_until(client, db_session):
     rq, r = _req(db_session, mpn="LM317T")
     resp = client.post(
         f"/v2/partials/sightings/{r.id}/offers",
-        data={"vendor_name": "Arrow", "mpn": "LM317T", "valid_until": "2026-12-31"},
+        data={
+            "vendor_name": "Arrow",
+            "mpn": "LM317T",
+            "valid_until": "2026-12-31",
+            "manufacturer": "Texas Instruments",
+        },  # required for condition=new
     )
     assert resp.status_code == 200
     o = db_session.query(Offer).filter(Offer.vendor_name.ilike("%arrow%")).one()
@@ -360,6 +371,7 @@ def test_create_offer_releases_active_unavailability_record(client, db_session):
             "qty_available": "5000",
             "unit_price": "0.45",
             "condition": "new",
+            "manufacturer": "Texas Instruments",  # required for condition=new
         },
     )
     assert resp.status_code == 200

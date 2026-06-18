@@ -58,6 +58,27 @@ class AttributionStatus(StrEnum):
     CONVERTED = "converted"
 
 
+class OfferCondition(StrEnum):
+    """Offer-row condition vocabulary (lowercase; distinct from MaterialCondition).
+
+    Drives the qualification capture spine. NOT the capitalized card/facet vocab.
+    """
+
+    NEW = "new"  # new, in original manufacturer packaging
+    NEW_NO_PKG = "new_no_pkg"  # new, no original manufacturer packaging
+    PULLS = "pulls"
+    REFURB = "refurb"
+
+
+class QualificationStatus(StrEnum):
+    """Snapshot of how complete an offer's standardized qualification is."""
+
+    UNSET = "unset"  # no condition chosen
+    INCOMPLETE = "incomplete"  # an essential is missing (legacy/API only)
+    ESSENTIALS = "essentials"  # essentials met, some recommended missing
+    COMPLETE = "complete"  # essentials + recommended all present
+
+
 class RequisitionStatus(StrEnum):
     """Status lifecycle for Requisition records."""
 
