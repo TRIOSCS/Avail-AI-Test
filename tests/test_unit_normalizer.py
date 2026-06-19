@@ -68,3 +68,18 @@ def test_string_numeric_value_passthrough():
     result = normalize_value("100", "uF", "pF")
     assert result == "100"
     assert isinstance(result, str)
+
+
+def test_greek_mu_microfarad_converts_like_micro_sign():
+    """Element14 encodes micro- units with GREEK SMALL LETTER MU (U+03BC); it must
+    convert the same as the MICRO SIGN (U+00B5) — not pass through unconverted (a 1e6×
+    error)."""
+    greek = normalize_value(0.1, "μF", "pF")  # U+03BC GREEK SMALL LETTER MU
+    micro = normalize_value(0.1, "µF", "pF")  # U+00B5 MICRO SIGN
+    assert greek == 100_000
+    assert greek == micro
+
+
+def test_greek_mu_microamp_and_microhenry_convert():
+    assert normalize_value(100, "μA", "A") == pytest.approx(0.0001)
+    assert normalize_value(1, "μH", "nH") == 1_000

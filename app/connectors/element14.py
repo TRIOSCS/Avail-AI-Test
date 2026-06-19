@@ -8,6 +8,7 @@ Called by: search_service.py
 Depends on: BaseConnector, httpx
 """
 
+from typing import Any
 from urllib.parse import quote_plus
 
 from loguru import logger
@@ -15,11 +16,43 @@ from loguru import logger
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from ._core_attrs import clean_str, generic_attribute, map_rohs
+from ._vendor_spec_map import extract_vendor_specs
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 # Markers that mean a 403 is a credential rejection (not a transient QPS cap).
 _AUTH_MARKERS = ("invalid", "unauthorized", "forbidden", "api key", "not accepted")
+
+
+def _product_category(prod: dict, attrs: Any) -> str | None:
+    """The product's distributor category string, if the response carries one.
+
+    Element14's `large` response shape is inconsistent across catalogs: a per-product
+    category may arrive as ``category.name`` (object), a bare ``categoryName`` string, or a
+    "Category"/"Product Category" attribute. None when nothing is present — the spec mapper
+    then falls back to the description grammar (see ``_resolve_commodity_for_specs``).
+    """
+    cat = prod.get("category")
+    if isinstance(cat, dict):
+        cat = cat.get("name")
+    return clean_str(
+        cat or prod.get("categoryName") or generic_attribute(attrs, "attributeLabel", "attributeValue", ("Category",)),
+        maxlen=255,
+    )
+
+
+def _resolve_commodity_for_specs(category: str | None, description: str) -> str | None:
+    """Canonical commodity for attribute mapping: the distributor category string first
+    (normalized like ``set_category`` does), then the description grammar fallback.
+
+    Mirrors ``vendor_spec_enrich._resolve_commodity`` (the writer's resolver) so the
+    connector maps attributes under the SAME commodity the writer will categorize the card
+    to. Lazy imports keep the connector free of a hard service dependency at module load.
+    """
+    from app.services.category_normalizer import normalize_category
+    from app.services.desc_extractor.categorizer import categorize_from_desc
+
+    return normalize_category(category) or categorize_from_desc(description or "")
 
 
 class Element14Connector(BaseConnector):
@@ -122,6 +155,24 @@ class Element14Connector(BaseConnector):
                 maxlen=100,
             )
 
+            # Commodity-specific parametrics: Element14's `attributes` ARE structured
+            # parametrics (Capacitance / Tolerance / …). Map them to seeded spec keys
+            # under the resolved commodity (category string → desc-grammar fallback). The
+            # WRITER (vendor_spec_enrich) records each via record_spec at element14_api/90
+            # — the ladder + the seed schema's enum/numeric gate are the final arbiter, so
+            # values are emitted raw (only cosmetic enum-format gaps are closed in the map).
+            # Short-circuit when there are no attributes to map: skips the commodity-grammar
+            # resolution (extract_desc) on the live pricing path for results that can never
+            # produce specs anyway.
+            category = _product_category(prod, attrs)
+            specs: dict[str, str] = {}
+            dropped: dict[str, str] = {}
+            if isinstance(attrs, list) and attrs:
+                commodity = _resolve_commodity_for_specs(category, desc)
+                specs, dropped = extract_vendor_specs(
+                    attrs, commodity, name_key="attributeLabel", value_key="attributeValue"
+                )
+
             results.append(
                 {
                     "vendor_name": "element14",
@@ -137,8 +188,11 @@ class Element14Connector(BaseConnector):
                     "vendor_sku": sku,
                     "vendor_url": "https://www.newark.com",
                     "description": desc[:500] if desc else "",
+                    "category": category,
                     "rohs_status": rohs,
                     "package_type": package,
+                    "specs": specs,
+                    "dropped": dropped,
                 }
             )
 

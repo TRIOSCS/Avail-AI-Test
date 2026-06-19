@@ -54,6 +54,33 @@ class _FakeMouser:
         return self.results_by_mpn.get(mpn, self.default)
 
 
+# Canned Element14 capacitor result: a category string + STRUCTURED specs (already mapped
+# to seeded keys by the connector / _vendor_spec_map), written at element14_api / tier 90.
+_E14_CAP_RESULT = {
+    "manufacturer": "Murata",
+    "category": "Capacitors",
+    "description": "SMD Multilayer Ceramic Capacitor, 0.1 µF, 16 V",
+    "source_type": "element14",
+    "specs": {"capacitance": "0.1µF", "voltage_rating": "16V", "dielectric": "X7R", "package": "0402"},
+    "dropped": {},
+}
+
+
+class _FakeElement14:
+    """A stand-in Element14 connector recording the MPNs searched, in order."""
+
+    source_name = "element14"
+
+    def __init__(self, results_by_mpn: dict | None = None, default=None):
+        self.results_by_mpn = results_by_mpn or {}
+        self.default = default if default is not None else [_E14_CAP_RESULT]
+        self.searched: list[str] = []
+
+    async def search(self, mpn: str):
+        self.searched.append(mpn)
+        return self.results_by_mpn.get(mpn, self.default)
+
+
 def _card(db: Session, mpn: str, sourced_qty_90d=None, category=None) -> MaterialCard:
     card = MaterialCard(
         normalized_mpn=mpn.lower(),
@@ -66,7 +93,7 @@ def _card(db: Session, mpn: str, sourced_qty_90d=None, category=None) -> Materia
     return card
 
 
-def _run_cli(db_session, connector, *, apply=False, limit=None, daily_cap=800, cache_counts=None):
+def _run_cli(db_session, connector, *, apply=False, limit=None, daily_cap=800, cache_counts=None, source="mouser"):
     """Drive run() with the connector, counter cache, session and sleep mocked."""
     counters = dict(cache_counts or {})
 
@@ -83,7 +110,7 @@ def _run_cli(db_session, connector, *, apply=False, limit=None, daily_cap=800, c
         patch("app.management.backfill_vendor_specs.intel_cache.get_count", side_effect=get_count),
         patch("app.management.backfill_vendor_specs.intel_cache.incr_count", side_effect=incr_count),
     ):
-        summary = asyncio.run(run_with_args(apply=apply, limit=limit, daily_cap=daily_cap))
+        summary = asyncio.run(run_with_args(apply=apply, limit=limit, daily_cap=daily_cap, source=source))
     return summary, counters
 
 
@@ -378,3 +405,58 @@ def test_no_connector_logs_error_and_returns_zero_summary(db_session: Session):
     assert summary["enriched"] == 0
     assert summary["calls"] == 0
     assert counters == {}  # nothing billed — no connector to call
+
+
+# ── Element14 source (structured parametrics at element14_api / tier 90) ──────────────
+
+
+def test_element14_apply_enriches_and_bills_own_counter(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D", sourced_qty_90d=100)
+    conn = _FakeElement14()
+
+    summary, counters = _run_cli(db_session, conn, apply=True, source="element14", daily_cap=50)
+    db_session.commit()
+
+    db_session.refresh(card)
+    assert card.category == "capacitors"
+    assert card.category_source == "element14_api"
+    facets = _facets(db_session, card.id)
+    assert "capacitance" in facets and "package" in facets
+    assert facets["capacitance"].source == "element14_api" and facets["capacitance"].tier == 90
+
+    # Billed against the element14 (not mouser) date-keyed counter.
+    assert conn.searched == ["GRM155R71C104KA88D"]
+    assert any(k.startswith("vendor_api:element14:calls:") for k in counters)
+    assert not any(k.startswith("vendor_api:mouser:") for k in counters)
+
+    assert summary["enriched"] == 1
+    assert summary["categorized"] == 1
+    assert summary["specs_written"] == len(facets)
+
+
+def test_element14_dry_run_writes_nothing(db_session: Session):
+    seed_commodity_schemas(db_session)
+    _card(db_session, "GRM155R71C104KA88D", sourced_qty_90d=100)
+    conn = _FakeElement14()
+
+    summary, counters = _run_cli(db_session, conn, apply=False, source="element14")
+    db_session.commit()
+
+    assert conn.searched == []
+    assert counters == {}
+    assert summary["seen"] == 1
+    assert summary["would_enrich"] == 1
+    assert summary["enriched"] == 0
+
+
+def test_element14_uses_element14_default_cap(db_session: Session):
+    # Element14 rate-limits hard → a much lower default daily cap than Mouser's 800.
+    assert cli._SOURCE_CONFIG["element14"]["default_cap"] < cli._SOURCE_CONFIG["mouser"]["default_cap"]
+
+
+def test_unsupported_source_raises(db_session: Session):
+    import pytest
+
+    with pytest.raises(ValueError):
+        asyncio.run(cli.run(source="digikey", limit=1, daily_cap=10, apply=False))
