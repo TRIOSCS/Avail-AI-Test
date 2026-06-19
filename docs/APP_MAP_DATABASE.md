@@ -563,6 +563,9 @@ Key columns:
 |---|---|---|
 | trio_match_score | Integer | default 0, indexed; AI procurement-fit score (0-100); 0 until screened (SP3) |
 | opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
+| swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
+| swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
+| parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |
 
 `enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
 `{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.
@@ -599,6 +602,16 @@ Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_re
 
 **`api_sources`** — Supplier connector config (credentials, quotas, health)
 **`system_config`** — Key-value app settings
+
+SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
+| Key | Type | Default | Description |
+|---|---|---|---|
+| prospecting_resurface_days | int | 180 | days before a dismissed prospect can resurface |
+| account_sweep_enabled | bool | False | enable/disable the daily 90-day hardline sweep |
+| account_sweep_inactivity_days | int | 90 | days of inactivity before an account is swept into the pool |
+| account_sweep_manager_email | str | "" | CC email for sweep digest notifications (blank = no digest) |
+| account_reactivation_sweep_enabled | bool | True | enable/disable auto-surface of past-customer unassigned accounts |
+
 **`graph_subscriptions`** — Microsoft Graph webhook registrations
 **`intel_cache`** — PostgreSQL fallback cache (when Redis unavailable)
 **`processed_messages`** — Idempotency tracking for email processing
