@@ -578,6 +578,23 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     return delta.days
 
 
+def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
+    """Return the UTC datetime of the most recent ActivityLog entry for a company.
+
+    None if no activity ever. Covers ALL event types (email, call, note, meeting,
+    quote, RFQ, buy-plan updates) because all writers set ActivityLog.company_id.
+    Used by the SP4 90-day sweep to determine dormancy.
+
+    Called by: app/services/prospect_reclamation.py
+    """
+    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    if not latest:
+        return None
+    if latest.tzinfo is None:
+        return latest.replace(tzinfo=timezone.utc)
+    return latest
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════
