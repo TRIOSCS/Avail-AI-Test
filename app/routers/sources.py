@@ -126,6 +126,7 @@ def _get_connector_for_source(name: str, db: Session = None):
         "lusha_enrichment": _LushaTestConnector,
         "explorium_enrichment": _ExploriumTestConnector,
         "azure_oauth": _AzureOAuthTestConnector,
+        "hunter_enrichment": _HunterTestConnector,
     }.get(name)
     if test_connector:
         return test_connector()
@@ -237,6 +238,22 @@ class _LushaTestConnector:
             raise ValueError(f"Lusha API returned {resp.status_code}: {resp.text[:200]}")
         status_msg = "Person found" if resp.status_code == 200 else "API key valid (no match)"
         return [{"vendor_name": "Lusha", "mpn_matched": status_msg, "status": "ok"}]
+
+
+class _HunterTestConnector:
+    """Test Hunter.io API key with a lightweight domain search."""
+
+    async def search(self, mpn: str) -> list[dict]:
+        api_key = get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
+        if not api_key:
+            raise ValueError("HUNTER_API_KEY not configured")
+        from ..connectors.hunter import HunterConnector
+
+        contacts = await HunterConnector(api_key).domain_search("anthropic.com", limit=1)
+        count = len(contacts)
+        return [
+            {"vendor_name": "Hunter.io", "mpn_matched": f"API key valid — {count} contact(s) found", "status": "ok"}
+        ]
 
 
 class _ExploriumTestConnector:

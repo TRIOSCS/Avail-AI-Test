@@ -528,17 +528,46 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     return normalized
 
 
+async def _hunter_find_contacts(domain: str) -> list[dict]:
+    """Hunter.io domain search → normalised contact list for find_suggested_contacts."""
+    api_key = get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
+    if not api_key:
+        return []
+    from .connectors.hunter import HunterConnector
+
+    contacts = await HunterConnector(api_key).domain_search(domain, limit=10)
+    results = []
+    for c in contacts:
+        email = c.get("email", "")
+        first = c.get("first_name", "")
+        last = c.get("last_name", "")
+        full_name = f"{first} {last}".strip() or email.split("@")[0]
+        results.append(
+            {
+                "full_name": full_name,
+                "title": c.get("position", ""),
+                "email": email,
+                "phone": c.get("phone_number", ""),
+                "linkedin_url": c.get("linkedin_url", ""),
+                "location": "",
+                "source": "hunter",
+            }
+        )
+    return results
+
+
 async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    Explorium and AI sources run concurrently via asyncio.gather. Returns deduplicated
-    list sorted by relevance. Each contact has: full_name, title, email, phone,
-    linkedin_url, location, source
+    Explorium, Hunter.io, and AI sources run concurrently via asyncio.gather. Returns
+    deduplicated list sorted by relevance. Each contact has: full_name, title, email,
+    phone, linkedin_url, location, source
     """
 
     # Run all sources concurrently
     results = await asyncio.gather(
         _explorium_find_contacts(domain, title_filter),
+        _hunter_find_contacts(domain),
         _ai_find_contacts(domain, name, title_filter),
         return_exceptions=True,
     )

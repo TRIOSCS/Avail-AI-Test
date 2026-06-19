@@ -150,6 +150,16 @@
         "setup_notes": "Sign up at lusha.com → API → Get API key. 6,400 credits/month. Phone pool (70%): 4,480 credits. Discovery pool (30%): 1,920 credits."
     },
     {
+        "name": "hunter_enrichment",
+        "display_name": "Hunter.io",
+        "category": "enrichment",
+        "source_type": "enrichment",
+        "description": "Email discovery — finds verified email addresses and contacts at any company domain. Used to populate vendor contact emails for RFQ outreach.",
+        "signup_url": "https://hunter.io",
+        "env_vars": ["HUNTER_API_KEY"],
+        "setup_notes": "Sign up at hunter.io → API → Generate key. Free tier: 25 domain searches + 50 email verifications/month. Paid plans start at $49/mo for 500 searches."
+    },
+    {
         "name": "clay_enrichment",
         "display_name": "Clay",
         "category": "enrichment",
