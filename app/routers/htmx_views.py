@@ -7298,11 +7298,16 @@ async def buy_plans_orders_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer "My Orders" lens body: the actionable per-line PO cut queue."""
-    from ..services.buyplan_hub import buyer_line_queue
+    """Buyer "My Orders" lens body: the actionable per-line PO cut queue.
+
+    Also includes a read-only "Team Orders" awareness section listing open lines
+    assigned to OTHER buyers (see ``team_line_queue``).
+    """
+    from ..services.buyplan_hub import buyer_line_queue, team_line_queue
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx["queue"] = buyer_line_queue(db, user)
+    ctx["team"] = team_line_queue(db, user)
     return template_response("htmx/partials/buy_plans/_orders_queue.html", ctx)
 
 

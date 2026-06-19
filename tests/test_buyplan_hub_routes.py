@@ -191,6 +191,49 @@ def test_orders_queue_empty_state(client: TestClient):
     assert "all caught up" in resp.text.lower()
 
 
+def test_orders_queue_team_section_read_only(
+    client: TestClient, db_session: Session, test_user, manager_user, test_quote
+):
+    """The Team Orders section shows another buyer's open line + name, read-only.
+
+    The team row must carry NO action form (no confirm-po / issue endpoint), while the
+    caller's own actionable row keeps its confirm form.
+    """
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    # My own actionable line (keeps its form).
+    my_line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
+    # Another buyer's open line — surfaces in Team Orders, read-only.
+    team_line = _make_line(
+        db_session,
+        plan_id=plan.id,
+        buyer_id=manager_user.id,
+        status=BuyPlanLineStatus.PENDING_VERIFY,
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/orders")
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Team Orders" in body
+    assert manager_user.name in body
+    # My own row still has its confirm-po form.
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/{my_line.id}/confirm-po" in body
+    # The team line has NO action form (no confirm-po / issue endpoint for it).
+    assert f"/lines/{team_line.id}/confirm-po" not in body
+    assert f"/lines/{team_line.id}/issue" not in body
+
+
+def test_orders_queue_no_team_section_when_alone(client: TestClient, db_session: Session, test_user, test_quote):
+    """With no other-buyer open lines, the Team Orders section is omitted."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/orders")
+    assert resp.status_code == 200
+    assert "Team Orders" not in resp.text
+
+
 # ── Deals board (sales / manager) ──────────────────────────────────────────
 
 

@@ -1149,6 +1149,9 @@ GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
     |                        scope=all role-gated to supervisors)
     +-- lens=orders    --> GET /partials/buy-plans/orders
     |                        services/buyplan_hub.buyer_line_queue (buyer PO-cut queue)
+    |                        + buyplan_hub.team_line_queue (read-only "Team Orders"
+    |                        awareness section: other buyers' open AWAITING_PO/
+    |                        PENDING_VERIFY lines; no action affordances)
     +-- lens=supervise --> GET /partials/buy-plans/supervise
                              services/buyplan_hub.supervise_overview (triage strip:
                              approvals / SO+PO verify / overdue / flagged / halted)

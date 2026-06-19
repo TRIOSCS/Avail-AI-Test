@@ -3,7 +3,10 @@
   One row per actionable AWAITING_PO line across the buyer's active deals.
   Kicked-back rows surface the manager/ops rejection note. Each row has an inline
   confirm-PO form (origin=queue) that re-renders this queue into #bp-hub-body.
-  Receives: queue (list of dicts from buyplan_hub.buyer_line_queue).
+  Below the own queue, a READ-ONLY "Team Orders" awareness section lists open lines
+  assigned to OTHER buyers (no forms / no action affordances) — it is visually
+  subordinate so it never overshadows the buyer's own actionable work.
+  Receives: queue (buyplan_hub.buyer_line_queue), team (buyplan_hub.team_line_queue).
   Called by: htmx_views.py buy_plans_orders_partial + confirm-po (origin=queue).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
@@ -109,4 +112,53 @@
   </svg>
   <p class="text-sm font-medium text-gray-500">You're all caught up — no POs to cut.</p>
 </div>
+{% endif %}
+
+{# ── Team Orders — READ-ONLY awareness of other buyers' open lines ── #}
+{% if team %}
+<section class="mt-8 opacity-90">
+  <div class="mb-2">
+    <h3 class="text-xs uppercase tracking-wide text-gray-400 font-medium">Team Orders</h3>
+    <p class="text-xs text-gray-400">What other buyers are working on (read-only).</p>
+  </div>
+  <div class="overflow-x-auto bg-gray-50/60 rounded-lg border border-gray-200">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <tbody class="divide-y divide-gray-100">
+        {% set ns = namespace(prev=None) %}
+        {% for row in team %}
+        {% if row.buyer_name != ns.prev %}
+        <tr class="bg-gray-100/60">
+          <td colspan="4" class="px-4 py-1.5 text-xs font-medium text-gray-500">{{ row.buyer_name or 'Unassigned' }}</td>
+        </tr>
+        {% set ns.prev = row.buyer_name %}
+        {% endif %}
+        <tr class="{% if row.kicked_back %}bg-rose-50/50{% else %}hover:bg-gray-100/50{% endif %} transition-colors">
+          {# Customer (read-only link to the plan detail) #}
+          <td class="px-4 py-2">
+            <a hx-get="/v2/partials/buy-plans/{{ row.plan_id }}"
+               hx-target="#main-content"
+               hx-push-url="/v2/buy-plans/{{ row.plan_id }}"
+               class="text-gray-600 hover:text-brand-600 cursor-pointer">
+              {{ row.customer_name or '-' }}
+            </a>
+          </td>
+          {# Part #}
+          <td class="px-4 py-2 font-mono text-xs text-gray-600">{{ row.mpn or '-' }}</td>
+          {# Vendor #}
+          <td class="px-4 py-2 text-gray-500">{{ row.vendor_name or '-' }}</td>
+          {# Qty + status badge #}
+          <td class="px-4 py-2 text-right whitespace-nowrap">
+            <span class="text-gray-500">{{ '{:,}'.format(row.quantity) if row.quantity is not none else '-' }}</span>
+            {% if row.status == 'awaiting_po' %}
+            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-amber-50 text-amber-700">PO to cut</span>
+            {% elif row.status == 'pending_verify' %}
+            <span class="ml-2 inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700">verifying</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
 {% endif %}

@@ -147,3 +147,75 @@ def test_buyer_queue_dict_fields(db_session, test_user, test_quote, test_requisi
     assert "description" in r
     assert "vendor_name" in r
     assert "vendor_contact_email" in r
+
+
+# ── Team Orders (read-only awareness of OTHER buyers' open lines) ──────────
+
+
+def test_team_queue_shows_other_buyers_not_mine(db_session, test_user, manager_user, test_quote, test_requisition):
+    """team_line_queue returns OTHER buyers' open lines, never the caller's own."""
+    from app.services.buyplan_hub import team_line_queue
+
+    plan = _make_plan(db_session, quote_id=test_quote.id, requisition_id=test_requisition.id)
+    # My own AWAITING_PO line — must NOT appear (it's in buyer_line_queue).
+    my_line = _make_line(db_session, buy_plan_id=plan.id, buyer_id=test_user.id)
+    # Another buyer's PENDING_VERIFY line — must appear.
+    other_line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=manager_user.id,
+        status=BuyPlanLineStatus.PENDING_VERIFY,
+    )
+
+    rows = team_line_queue(db_session, test_user)
+    line_ids = [r["line_id"] for r in rows]
+    assert other_line.id in line_ids
+    assert my_line.id not in line_ids
+    r = next(r for r in rows if r["line_id"] == other_line.id)
+    assert r["buyer_name"] == manager_user.name
+    assert r["status"] == BuyPlanLineStatus.PENDING_VERIFY
+
+
+def test_team_queue_excludes_inactive_plans_and_null_buyer(
+    db_session, test_user, manager_user, test_quote, test_requisition
+):
+    """Only AWAITING_PO/PENDING_VERIFY lines on ACTIVE plans with a buyer qualify."""
+    from app.services.buyplan_hub import team_line_queue
+
+    # COMPLETED plan with another buyer's line — excluded (not ACTIVE).
+    done_plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+    )
+    _make_line(db_session, buy_plan_id=done_plan.id, buyer_id=manager_user.id)
+
+    # ACTIVE plan: a null-buyer line (excluded) + a VERIFIED line (excluded by status).
+    active_plan = _make_plan(db_session, quote_id=test_quote.id, requisition_id=test_requisition.id)
+    _make_line(db_session, buy_plan_id=active_plan.id, buyer_id=None)
+    _make_line(
+        db_session,
+        buy_plan_id=active_plan.id,
+        buyer_id=manager_user.id,
+        status=BuyPlanLineStatus.VERIFIED,
+    )
+
+    assert team_line_queue(db_session, test_user) == []
+
+
+def test_team_queue_ordered_by_buyer_name(
+    db_session, test_user, manager_user, sales_user, test_quote, test_requisition
+):
+    """Rows are grouped/ordered by buyer_name ascending."""
+    from app.services.buyplan_hub import team_line_queue
+
+    plan = _make_plan(db_session, quote_id=test_quote.id, requisition_id=test_requisition.id)
+    # manager_user.name="Test Manager", sales_user.name="Test Sales" → Manager sorts first.
+    _make_line(db_session, buy_plan_id=plan.id, buyer_id=sales_user.id)
+    _make_line(db_session, buy_plan_id=plan.id, buyer_id=manager_user.id)
+
+    rows = team_line_queue(db_session, test_user)
+    names = [r["buyer_name"] for r in rows]
+    assert names == sorted(names)
+    assert names[0] == manager_user.name
