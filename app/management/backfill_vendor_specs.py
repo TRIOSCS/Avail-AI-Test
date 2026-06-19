@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from loguru import logger
 
@@ -52,13 +53,28 @@ from app.services.vendor_spec_enrich import (  # noqa: F401 — DO NOT REMOVE
     enrich_card_from_mouser,
 )
 
+
+class SourceConfig(TypedDict):
+    """Per-source dispatch row in ``_SOURCE_CONFIG``.
+
+    ``writer`` is the NAME of the writer attribute on THIS module — resolved at call time
+    via ``globals()[config["writer"]]`` in ``run()`` so a monkeypatched symbol is honored
+    (the isolation tests patch ``backfill_vendor_specs.enrich_card_from_mouser``).
+    """
+
+    source_name: str
+    writer: str
+    default_cap: int
+
+
 # Per-source dispatch: the connector's source_name, the WRITER attribute name on THIS
-# module (resolved at call time via getattr so monkeypatching the symbol is honored — the
-# isolation tests patch backfill_vendor_specs.enrich_card_from_mouser), and a default
-# daily call cap tuned to the source's free quota. Mouser's free tier is ~1000/day (800
-# with headroom); Element14 throttles after a few calls per second AND has a tight daily
-# budget, so a much lower default cap keeps the bounded top-demand supplement within quota.
-_SOURCE_CONFIG: dict[str, dict] = {
+# module (resolved at call time via globals()[config["writer"]] so monkeypatching the
+# symbol is honored — the isolation tests patch backfill_vendor_specs.enrich_card_from_mouser),
+# and a default daily call cap tuned to the source's free quota. Mouser's free tier is
+# ~1000/day (800 with headroom); Element14 throttles after a few calls per second AND has a
+# tight daily budget, so a much lower default cap keeps the bounded top-demand supplement
+# within quota.
+_SOURCE_CONFIG: dict[str, SourceConfig] = {
     "mouser": {"source_name": "mouser", "writer": "enrich_card_from_mouser", "default_cap": 800},
     "element14": {"source_name": "element14", "writer": "enrich_card_from_element14", "default_cap": 100},
 }
@@ -223,16 +239,16 @@ async def run(
                 )
                 continue
 
-            if card_summary["categorized"] or card_summary["specs_written"]:
+            if card_summary.categorized or card_summary.specs_written:
                 summary["enriched"] += 1
-                summary["categorized"] += card_summary["categorized"]
-                summary["specs_written"] += card_summary["specs_written"]
+                summary["categorized"] += card_summary.categorized
+                summary["specs_written"] += card_summary.specs_written
                 logger.info(
                     "backfill-vendor-specs: {} -> {} (categorized={}, specs={})",
                     card.display_mpn,
                     card.category,
-                    card_summary["categorized"],
-                    card_summary["specs_written"],
+                    card_summary.categorized,
+                    card_summary.specs_written,
                 )
 
             since_commit += 1

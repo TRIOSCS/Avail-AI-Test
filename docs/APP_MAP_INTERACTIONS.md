@@ -2026,8 +2026,10 @@ owns arbitration in one place:
        hard → a much lower default daily cap (100 vs Mouser 800), so it is a bounded
        top-demand SUPPLEMENT to the Mouser-description backbone. Both writers categorize
        fill-only (distributor category string → desc-grammar fallback) and are commit-free
-       (the backfill owns per-chunk commits + per-card SAVEPOINT isolation). Commodities
-       mapped so far: capacitors, resistors (the top-demand passives).
+       (the backfill owns per-chunk commits + per-card SAVEPOINT isolation). Both writers
+       return a typed `EnrichSummary(categorized, specs_written)` (frozen dataclass — the
+       backfill aggregates it by attribute, not by dict key). Commodities mapped so far:
+       capacitors, resistors (the top-demand passives).
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
