@@ -304,8 +304,12 @@ def cdm_list_ctx(
         c.staleness = staleness_tier(c.last_activity_at)
         c.cadence_state = cadence_state(c.tier, c.last_outbound_at, now)
 
+    # Spotlight markers: accounts with new, unseen inbound customer comms (the owner's).
+    from app.services.alerts import markers_for_tab
+
     ctx = {
         "companies": companies,
+        "alert_markers": markers_for_tab(db, user, "crm"),
         "search": search,
         "staleness": staleness,
         "account_type": account_type,

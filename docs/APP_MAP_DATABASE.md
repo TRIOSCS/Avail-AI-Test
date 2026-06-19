@@ -531,6 +531,17 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 
 **`change_log`** — Field-level edit history on offers/requirements/requisitions
 
+**`alert_seen`** — Per-user read-state for the cross-app nav alerts (migration 117). One row records that a user has SEEN one alert item. FYI alert counts EXCLUDE seen items (seeing drains the badge); ACTION alert counts ignore this table for counting and use it only to suppress re-pulsing an already-viewed row. Written/read only via `app/services/alerts/` (`record_seen` / `seen_ref_ids`). See APP_MAP_INTERACTIONS § Cross-app alerts.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| user_id | FK -> users (CASCADE) | |
+| alert_kind | String 40 | `AlertKind` value (offer_confirmed\|inbound_customer\|inbound_vendor\|buyplan_action) |
+| ref_id | Integer | Source item's id (offer.id, activity_log.id, buy_plan(_line).id — no DB-level FK, kind-scoped) |
+| seen_at | UTCDateTime | When marked seen (Python default) |
+
+> UNIQUE `uq_alert_seen_user_kind_ref` (user_id, alert_kind, ref_id) — `record_seen` is an idempotent check-then-insert with an `IntegrityError` fallback for the concurrent case. Index `ix_alert_seen_user_kind` (user_id, alert_kind) backs `seen_ref_ids`.
+
 **`email_intelligence`** — Classified inbox emails (offer, stock_list, ooo, spam)
 
 **`knowledge_entries`** — Q&A, facts, AI insights linked to entities

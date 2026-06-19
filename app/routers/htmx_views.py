@@ -7035,10 +7035,17 @@ async def buy_plans_list_partial(
             }
         )
 
+    # Spotlight markers: plan rows that carry an open step needing this user's action.
+    # Buy Plans lives under the Reporting nav now, so the source is registered there.
+    from ..services.alerts import markers_for_tab
+
+    alert_markers = markers_for_tab(db, user, "reporting")
+
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
             "buy_plans": buy_plans,
+            "alert_markers": alert_markers,
             "q": q,
             "status": status,
             "mine": mine,
@@ -11026,11 +11033,17 @@ async def parts_list_partial(
     # Team users for owner filter
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
+    # Spotlight markers: requirement rows carrying new confirmed offers the user hasn't seen.
+    from ..services.alerts import markers_for_tab
+
+    alert_markers = markers_for_tab(db, user, "requisitions")
+
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
             "requirements": requirements,
             "offer_stats": offer_stats,
+            "alert_markers": alert_markers,
             "q": q,
             "requisition_name": requisition_name,
             "customer": customer,

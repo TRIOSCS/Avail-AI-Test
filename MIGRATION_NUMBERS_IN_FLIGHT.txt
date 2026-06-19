@@ -43,3 +43,4 @@
 116 feat/p2d-do-not-contact site_contacts.do_not_contact (Boolean NOT NULL server_default false); chains onto 115_subscription_health
 117 feat/datasheet-company-library material_card_datasheets.library_drive_id (RE-NUMBERED 116->117: 116_site_contact_dnc landed on main first; RE-CHAINED onto 116_site_contact_dnc)
 118 feat/crm-disposition Company.disposition(active/bucket)+disposition_reason/set_by/set_at + site_contacts.is_priority/is_archived (Boolean NOT NULL server_default false); chains onto 117_datasheet_library_drive_id
+119 worktree-comm-ledger-alerts alert_seen table (per-user cross-app alert read-state) for the AlertSource primitive; RE-NUMBERED 117->118->119: feat/datasheet-company-library(117) + feat/crm-disposition(118) merged to main first; RE-CHAINED onto 118_company_disposition, single head verified via `alembic heads`

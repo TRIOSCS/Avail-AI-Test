@@ -641,3 +641,17 @@ class OemCrosswalkStatus(StrEnum):
 
     RESOLVED = "resolved"
     NO_MATCH = "no_match"
+
+
+class AlertKind(StrEnum):
+    """alert_seen.alert_kind values — which cross-app alert a seen-row belongs to.
+
+    FYI kinds (offer_confirmed, inbound_customer, inbound_vendor) clear on see — the
+    badge count excludes seen rows. ACTION kinds (buyplan_action) clear on act — seen
+    rows only suppress the one-time in-tab spotlight pulse, never the count.
+    """
+
+    OFFER_CONFIRMED = "offer_confirmed"
+    INBOUND_CUSTOMER = "inbound_customer"
+    INBOUND_VENDOR = "inbound_vendor"
+    BUYPLAN_ACTION = "buyplan_action"

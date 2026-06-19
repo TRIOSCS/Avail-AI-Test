@@ -5,6 +5,7 @@
    Called by: list.html (initial include) and companies_account_list_partial route (refresh).
    Depends on: workspace x-data (selectedId), brand palette, timeago filter.
 #}
+{% from "htmx/partials/shared/_alert_macros.html" import alert_row_attrs %}
 
 {# data-offset/data-limit: read by the outreach logger's system-initiated list
    refresh (htmx_app.js) so logging a touch doesn't snap a paginated list back
@@ -19,7 +20,7 @@
 {% set dot_colors = {"new": "bg-gray-300", "on_target": "bg-emerald-400", "due": "bg-amber-400", "overdue": "bg-rose-500"} %}
 <div class="divide-y divide-gray-100">
   {% for c in companies %}
-  <div id="cdm-row-{{ c.id }}" role="button" tabindex="0"
+  <div id="cdm-row-{{ c.id }}"{{ alert_row_attrs(alert_markers, 'company-' ~ c.id) }} role="button" tabindex="0"
        class="flex items-center gap-2.5 px-3 py-2.5 cursor-pointer hover:bg-gray-50 transition-colors border-l-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-brand-500"
        hx-get="/v2/partials/customers/{{ c.id }}"
        hx-target="#cdm-detail"
