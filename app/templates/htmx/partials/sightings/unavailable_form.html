@@ -11,7 +11,7 @@
    On success: re-renders #sightings-detail and closes the modal. #}
 <div class="p-4">
   <h3 class="text-sm font-semibold text-gray-900 mb-1">Mark unavailable — {{ vendor_name }}</h3>
-  <p class="text-[11px] text-gray-500 mb-3">
+  <p class="text-[11px] text-gray-600 mb-3">
     This applies to all of this vendor's listings of this MPN{% if requirement.primary_mpn %}
     ({{ requirement.primary_mpn }}){% endif %} — every condition and variant shares one record.
     While the mark is active, {{ vendor_name }} is left out of RFQ suggestions for this part.
@@ -43,7 +43,7 @@
     <input type="hidden" name="vendor_name" value="{{ vendor_name }}">
 
     <fieldset>
-      <legend class="block text-xs text-gray-500 mb-1">What did we learn?</legend>
+      <legend class="block text-xs text-gray-600 mb-1">What did we learn?</legend>
       <div class="space-y-0.5">
         {% for reason in reasons %}
         <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer">
@@ -57,17 +57,17 @@
     </fieldset>
 
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Note (optional)</label>
+      <label class="block text-xs text-gray-600 mb-1">Note (optional)</label>
       <textarea name="note" rows="2"
-                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                class="input"
                 placeholder="What we learned about this vendor's stock...">{{ current.note if current and current.note else '' }}</textarea>
     </div>
 
     <div class="flex justify-end gap-2 pt-1">
       <button type="button" @click="$dispatch('close-modal')"
-              class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+              class="btn btn-sm btn-ghost">Cancel</button>
       <button type="submit"
-              class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+              class="btn btn-primary btn-sm">
         Mark unavailable
       </button>
     </div>

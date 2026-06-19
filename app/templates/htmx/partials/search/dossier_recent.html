@@ -19,7 +19,7 @@
       </div>
       <div class="shrink-0 text-right">
         <p class="text-[11px] text-gray-400">{{ c.last_searched_at|timeago }}</p>
-        {% if c.search_count %}<p class="text-[10px] text-gray-300 font-mono">{{ c.search_count }}×</p>{% endif %}
+        {% if c.search_count %}<p class="text-xs text-gray-300 font-mono">{{ c.search_count }}×</p>{% endif %}
       </div>
     </a>
     {% endfor %}

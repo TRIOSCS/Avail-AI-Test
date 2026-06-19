@@ -29,7 +29,7 @@
       <td class="py-2 px-3 font-semibold text-brand-600">#{{ r.requisition_id }}</td>
       <td class="py-2 px-3">{{ r.primary_mpn or '-' }}</td>
       <td class="py-2 px-3">
-        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ st_colors.get(r.sourcing_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+        <span class="badge {{ st_colors.get(r.sourcing_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
           {{ (r.sourcing_status or 'open')|capitalize }}
         </span>
       </td>

@@ -1567,7 +1567,8 @@ class TestVendorAffinityOnDemand:
             resp = self._get(client, items)
         assert resp.status_code == 200
         assert "Gamma Supply" in resp.text
-        assert "border border-indigo-200 bg-indigo-50 text-indigo-700" in resp.text
+        # Canonical .badge pill (PR3 UX sweep) carries the border; indigo colors preserved.
+        assert "badge bg-indigo-50 text-indigo-700 border-indigo-200" in resp.text
         assert ">affinity</span>" in resp.text
         assert "55%" in resp.text
         assert 'title="Vendor shares commodity tags (3 matching tag(s))"' in resp.text

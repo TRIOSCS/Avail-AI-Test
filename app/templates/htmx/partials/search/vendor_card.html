@@ -30,9 +30,9 @@
       <span class="lg:hidden h-2.5 w-2.5 rounded-full {% if conf == 'green' %}bg-emerald-500{% elif conf == 'amber' %}bg-amber-500{% else %}bg-rose-500{% endif %}"></span>
       <span class="text-sm font-semibold text-brand-900 truncate">{{ card.vendor_name }}</span>
       {% if card.is_authorized %}
-      <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700 border border-emerald-200">AUTH</span>
+      <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-50 text-emerald-700 border border-emerald-200">AUTH</span>
       {% endif %}
-      <span class="px-1.5 py-0.5 text-[10px] font-medium rounded border
+      <span class="px-1.5 py-0.5 text-xs font-medium rounded border
         {% if conf == 'green' %}bg-emerald-50 text-emerald-700 border-emerald-200
         {% elif conf == 'amber' %}bg-amber-50 text-amber-700 border-amber-200
         {% else %}bg-rose-50 text-rose-700 border-rose-200{% endif %}">{{ card.confidence_pct|default(0) }}%</span>
@@ -40,7 +40,7 @@
       <span class="source-badge source-badge--{{ src }}">{{ src }}</span>
       {% endfor %}
     </div>
-    <div class="text-[11px] text-gray-500 mt-0.5 font-mono">
+    <div class="text-[11px] text-gray-600 mt-0.5 font-mono">
       {{ card.mpn_matched }}{% if card.manufacturer %} · {{ card.manufacturer }}{% endif %}
     </div>
   </div>
@@ -61,7 +61,7 @@
   </div>
 
   {# region / lead #}
-  <div class="text-[11px] text-gray-500 mt-0.5 lg:mt-0">{{ card.lead_quality|default('')|title }}{% if card.reason %} · {{ card.reason }}{% endif %}</div>
+  <div class="text-[11px] text-gray-600 mt-0.5 lg:mt-0">{{ card.lead_quality|default('')|title }}{% if card.reason %} · {{ card.reason }}{% endif %}</div>
 
   {# actions (reveal on hover desktop, always visible on mobile/touch) #}
   <div class="flex lg:justify-end items-center gap-1 mt-2 lg:mt-0 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
@@ -76,7 +76,7 @@
     <button type="button"
             hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
             hx-target="#lead-drawer-content" hx-swap="innerHTML"
-            class="px-2 py-1 rounded text-[11px] text-gray-500 hover:text-brand-700 hover:bg-brand-50">Details →</button>
+            class="px-2 py-1 rounded text-[11px] text-gray-600 hover:text-brand-700 hover:bg-brand-50">Details →</button>
   </div>
 
   {# Sub-offers table (expandable) #}

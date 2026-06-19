@@ -11,7 +11,7 @@
 
 {% if card is none %}
 <div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
-  <p class="text-sm font-medium text-gray-500">New to us — no enrichment yet</p>
+  <p class="text-sm font-medium text-gray-600">New to us — no enrichment yet</p>
   <p class="text-xs text-gray-400 mt-1">The first sourcing action queues this part for enrichment.</p>
 </div>
 {% else %}
@@ -24,7 +24,7 @@
   {% set val = field.value if field is mapping else field %}
   {% if val is not none and val != '' %}
   <div>
-    <dt class="text-[10px] uppercase tracking-wide text-gray-400">{{ key|replace('_', ' ') }}</dt>
+    <dt class="text-xs uppercase tracking-wide text-gray-400">{{ key|replace('_', ' ') }}</dt>
     <dd class="text-gray-900">
       <span class="font-mono">{{ val }}</span>
       {% if field is mapping and field.source %}
@@ -40,30 +40,30 @@
   {% endfor %}
 
   {% if card.package_type %}
-  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Package</dt><dd class="font-mono text-gray-900">{{ card.package_type }}</dd></div>
+  <div><dt class="text-xs uppercase tracking-wide text-gray-400">Package</dt><dd class="font-mono text-gray-900">{{ card.package_type }}</dd></div>
   {% endif %}
   {% if card.pin_count %}
-  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Pins</dt><dd class="font-mono text-gray-900">{{ card.pin_count }}</dd></div>
+  <div><dt class="text-xs uppercase tracking-wide text-gray-400">Pins</dt><dd class="font-mono text-gray-900">{{ card.pin_count }}</dd></div>
   {% endif %}
   {% if card.rohs_status %}
-  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">RoHS</dt><dd class="text-gray-900">{{ card.rohs_status|title }}</dd></div>
+  <div><dt class="text-xs uppercase tracking-wide text-gray-400">RoHS</dt><dd class="text-gray-900">{{ card.rohs_status|title }}</dd></div>
   {% endif %}
   {% if card.lifecycle_status %}
-  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Lifecycle</dt><dd class="text-gray-900">{{ card.lifecycle_status|title }}</dd></div>
+  <div><dt class="text-xs uppercase tracking-wide text-gray-400">Lifecycle</dt><dd class="text-gray-900">{{ card.lifecycle_status|title }}</dd></div>
   {% endif %}
   {% if card.condition %}
-  <div><dt class="text-[10px] uppercase tracking-wide text-gray-400">Condition</dt><dd class="text-gray-900">{{ card.condition }}</dd></div>
+  <div><dt class="text-xs uppercase tracking-wide text-gray-400">Condition</dt><dd class="text-gray-900">{{ card.condition }}</dd></div>
   {% endif %}
 </dl>
 
 {% if card.specs_summary %}
-<p class="mt-3 text-xs text-gray-500 leading-relaxed">{{ card.specs_summary }}</p>
+<p class="mt-3 text-xs text-gray-600 leading-relaxed">{{ card.specs_summary }}</p>
 {% endif %}
 
 {# Cross references. #}
 {% if card.cross_references %}
 <div class="mt-4">
-  <p class="text-[10px] uppercase tracking-wide text-gray-400 mb-1.5">Cross references</p>
+  <p class="text-xs uppercase tracking-wide text-gray-400 mb-1.5">Cross references</p>
   <div class="flex flex-wrap gap-1.5">
     {% for x in card.cross_references %}
     <span class="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-mono text-gray-600">
@@ -77,10 +77,10 @@
 {% else %}
 <div class="rounded-lg bg-brand-50 border border-brand-100 px-4 py-6 text-center">
   {% if unenriched %}
-  <p class="text-sm font-medium text-gray-500">Unenriched — enriching…</p>
+  <p class="text-sm font-medium text-gray-600">Unenriched — enriching…</p>
   <p class="text-xs text-gray-400 mt-1">We know this part, but its specs haven't been filled in yet.</p>
   {% else %}
-  <p class="text-sm font-medium text-gray-500">No specs on record.</p>
+  <p class="text-sm font-medium text-gray-600">No specs on record.</p>
   {% endif %}
 </div>
 {% endif %}

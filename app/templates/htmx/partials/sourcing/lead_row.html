@@ -37,7 +37,7 @@
       'has_stock': 'text-emerald-600',
       'bad_lead': 'text-gray-400 line-through',
     } %}
-    <span class="text-[10px] font-medium {{ status_colors.get(lead.buyer_status, 'text-gray-500') }} flex-shrink-0">
+    <span class="text-xs font-medium {{ status_colors.get(lead.buyer_status, 'text-gray-500') }} flex-shrink-0">
       {{ lead.buyer_status|replace('_', ' ')|title }}
     </span>
     {% endif %}
@@ -65,7 +65,7 @@
     </span>
 
     {# Freshness #}
-    <span class="text-[10px] text-gray-400 flex-shrink-0 w-[40px] text-right">
+    <span class="text-xs text-gray-400 flex-shrink-0 w-[40px] text-right">
       {% if lead.source_last_seen_at %}{{ lead.source_last_seen_at | timesince }}{% else %}--{% endif %}
     </span>
 
@@ -103,10 +103,10 @@
     </span>
     {% endif %}
     {% if lead.reason_summary %}
-    <span class="text-[10px] text-gray-400 truncate">{{ lead.reason_summary }}</span>
+    <span class="text-xs text-gray-400 truncate">{{ lead.reason_summary }}</span>
     {% endif %}
     {% if lead.corroborated %}
-    <span class="text-[10px] text-emerald-600 font-medium flex-shrink-0">✓ {{ lead.evidence_count }}</span>
+    <span class="text-xs text-emerald-600 font-medium flex-shrink-0">✓ {{ lead.evidence_count }}</span>
     {% endif %}
   </div>
   {% endif %}

@@ -45,11 +45,11 @@
                   title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
             {% endif %}
             {% if v.response_rate %}
-            <span class="ml-2 text-[10px] text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
+            <span class="ml-2 text-xs text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
             {% endif %}
           </div>
           {% if v.engagement_score %}
-          <span class="text-[10px] text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
+          <span class="text-xs text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
           {% endif %}
         </label>
         {% else %}
@@ -163,7 +163,7 @@
                class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
         <button type="button" :disabled="!newVendorName.trim() || addingVendorBusy"
                 @click="createVendor()"
-                class="px-3 py-1 text-xs font-semibold bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-50">
+                class="btn-primary btn-sm">
           <span x-text="addingVendorBusy ? 'Adding...' : 'Add Vendor'"></span>
         </button>
       </div>
@@ -172,7 +172,7 @@
     {# Parts reference (read-only) #}
     <div class="mb-4">
       <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts</label>
-      <div class="text-xs text-gray-500 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
+      <div class="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
         {% for p in parts %}
         <div>{{ p.mpn }} — {{ p.qty }} pcs{{ ' @ $%.2f'|format(p.target_price) if p.target_price else '' }}</div>
         {% endfor %}
