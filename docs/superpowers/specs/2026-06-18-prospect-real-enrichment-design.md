@@ -1,146 +1,65 @@
-# Real Prospect Enrichment — SP1: Credit-Aware Provider Router + Lusha
+# Real Prospect Enrichment — SP1: Lusha in the Enrichment Chain
 
-**Date:** 2026-06-18
+**Date:** 2026-06-18 (revised after architect + simplify review)
 **Status:** Approved (design); pending implementation plan
 **Owner:** prospecting
-**Program:** Sub-project 1 of 2. **SP2** = Clay async-primary layer (separate spec:
-`2026-06-18-prospect-enrichment-sp2-clay-async-design.md`). SP1 ships real enrichment via
-the *synchronous* providers now and stands up the router that SP2's Clay callback reuses as
-its **gap-fill engine**. SP1 has no Clay dependency and is independently shippable.
+**Program:** Sub-project 1 of 4. **SP2** = Clay async-primary layer (separate spec:
+`2026-06-18-prospect-enrichment-sp2-clay-async-design.md`); **SP3** = AI screening;
+**SP4** = account reclamation. SP1 ships real enrichment via the *synchronous* providers
+now and is the **gap-fill engine** SP2's Clay callback reuses. No Clay dependency;
+independently shippable.
+
+> **Design note (why no router):** an earlier draft introduced a provider-router
+> abstraction (registry + Protocol + capability-map). A simplicity review showed that for
+> four providers this is speculative generality — the existing `enrich_entity` *already is*
+> an ordered, fill-only provider chain, and `find_suggested_contacts` *already* runs
+> providers concurrently with dedup + relevance filtering. SP1 therefore **adds Lusha into
+> those two existing functions** and reuses their machinery. The seams SP2/SP3 need already
+> exist (they call these two functions). A router can be extracted later if a 5th+
+> operator-reorderable provider ever appears.
 
 ## Goal
 
-Make the prospecting tab's "Enrich" action pull **real** procurement contacts and
-firmographics (not just SAM.gov + Google News), so enrichment actually moves a prospect's
-fit score, readiness tier, and buyer-ready ranking. Do this by adding **Lusha** as the
-high-bandwidth contact provider and generalizing the shared enrichment chain into a small
-**credit-aware, task-fit provider router** that "uses whatever tool best suits the task,
-among those with credit available."
+Make the prospecting "Enrich" action pull **real** procurement contacts and firmographics
+(not just SAM.gov + Google News), so enrichment moves a prospect's fit score, readiness
+tier, and buyer-ready ranking. Add **Lusha** (the high-bandwidth contact provider) to the
+shared enrichment chain so both prospecting **and** CRM/vendor enrichment benefit.
 
 ## Context
 
-Two enrichment paths exist today:
+- **Prospecting** (`app/services/prospect_free_enrichment.py`) is free-only today (SAM.gov +
+  news) and never touches the real provider chain.
+- **Shared chain** (`app/enrichment_service.py`): `enrich_entity()` runs Explorium → Apollo
+  → AI fill-only (inner `_merge`, gap-gated AI); `find_suggested_contacts()` runs Explorium
+  + AI concurrently (`asyncio.gather`) then dedups + relevance-filters. A working **Apollo
+  connector** exists (`app/connectors/apollo.py`). **Lusha** has only a *test connector*
+  (`app/routers/sources.py` `_LushaTestConnector`, which already reads
+  `get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")`). **Clay** is not in the
+  codebase — it's SP2.
 
-- **Prospecting** (`app/services/prospect_free_enrichment.py`): free-only — SAM.gov +
-  Google News. No contacts, no firmographics beyond NAICS. This is what the "Enrich"
-  button drives.
-- **CRM/vendor** (`app/enrichment_service.py`): a real provider chain —
-  `enrich_entity()` (Explorium → Apollo → AI, fill-only/gap-driven) and
-  `find_suggested_contacts()` (Explorium + AI). A working Apollo connector exists at
-  `app/connectors/apollo.py`. Lusha has only a *test connector*
-  (`app/routers/sources.py` `_LushaTestConnector`); Clay is not in the codebase.
-
-**Decision (Approach A):** wire Lusha into the **shared** chain and have prospecting reuse
-it, so CRM/vendor enrichment also benefits. CRM enrichment will begin spending Lusha
-credits — accepted.
-
-**Provider access (confirmed):** Lusha has a REST API key the worker can call inline
-(like Apollo). Clay has no synchronous API — its in-app integration is **SP2** (async
-webhook, Clay-primary), which reuses this router as its gap-fill engine. SP1 does not
-depend on Clay.
+**Decision (Approach A):** wire Lusha into the **shared** chain. CRM/vendor enrichment will
+begin spending Lusha credits — accepted.
 
 ## Global Constraints
 
-- Stack: FastAPI + SQLAlchemy 2.0 (sync) + HTMX + Jinja2. No React. No new UI elements.
-- All outbound HTTP via the shared `app/http_client.py` singletons (the Lusha connector
-  must use `http`, unlike the legacy Apollo connector which makes its own client).
-- Loguru for logging, never `print()`. Ruff + mypy clean. Tests with every change.
-- No schema changes: all new data lands in existing JSONB columns
-  (`enrichment_data`, `readiness_signals`) and existing scalar columns
-  (`fit_score`, `readiness_score`, `industry`, `employee_count_range`, `naics_code`,
-  `hq_location`, `revenue_range`, `contacts_preview`). **No Alembic migration.**
-- Fire-and-forget safety: `run_enrichment_job` must never raise; on unexpected failure it
-  sets `enrichment_data['enrich_status'] = 'error'` (existing behavior, preserved).
-- Firmographic writes are **fill-only** — never clobber a value already set (in
-  particular SAM.gov's `naics_code`), mirroring the existing `_merge` strategy.
+- Stack: FastAPI + SQLAlchemy 2.0 (sync). No React. **No new UI elements** (only status copy).
+- Outbound HTTP via the shared `app/http_client.py` `http` singleton (the new Lusha connector
+  must use it — *not* a per-call `httpx.AsyncClient` like the legacy Apollo connector).
+- Loguru, never `print()`. Ruff + mypy clean. Tests with every task. `db.get`, not
+  `db.query(...).get`. New files get a header comment.
+- **No schema change / no Alembic migration** — all new data lands in existing JSONB
+  (`enrichment_data`, `readiness_signals`) + existing scalar columns (`industry`,
+  `employee_count_range`, `naics_code`, `hq_location`, `revenue_range`, `fit_score`,
+  `readiness_score`, `contacts_preview`).
+- Firmographic writes are **fill-only** — never clobber an existing value (especially
+  SAM.gov's `naics_code`); reuse the existing fill-only `_merge` pattern.
+- Fire-and-forget safety: `run_enrichment_job` never raises; unexpected failure →
+  `enrichment_data['enrich_status']='error'` (existing).
+- **Graceful degradation:** Lusha disabled / no key → the chain behaves exactly as today.
 
 ## Architecture
 
-### 1. Provider router (`app/services/enrichment_router.py` — new)
-
-Generalizes the hardcoded Explorium→Apollo→AI sequence into a registry-driven router.
-
-**Provider protocol** — each provider is an adapter exposing a uniform interface:
-
-```python
-class EnrichmentProvider(Protocol):
-    name: str  # "explorium" | "lusha" | "apollo" | "ai"
-    def is_configured(self) -> bool: ...
-    async def fetch_company(self, domain: str, name: str | None) -> dict | None: ...
-    async def fetch_contacts(
-        self, domain: str, titles: list[str], seniorities: list[str], limit: int
-    ) -> list[dict]: ...
-```
-
-Existing Explorium / Apollo / AI functions are wrapped into adapters (thin shims around
-`_explorium_find_company`, `connectors/apollo.search_company`, `_ai_find_company`, etc.).
-Lusha is a new adapter over `app/connectors/lusha.py`. A provider that does not support a
-task returns `None` / `[]`.
-
-**Capability map** (best tool per task; module-level constant, easy to reorder):
-
-```python
-CAPABILITY_ORDER = {
-    "company":  ["explorium", "lusha", "apollo", "ai"],   # firmographic specialist first
-    "contacts": ["lusha", "apollo", "explorium", "ai"],   # high-bandwidth contacts first
-}
-```
-
-**Availability gate** (circuit-breaker only — no monthly caps). A provider is eligible iff:
-1. `is_configured()` is true (API key present + its enable flag on), **and**
-2. its circuit is **closed** — no `402` (payment/quota) or `429` (rate-limit) recorded for
-   it within the last `provider_cooldown_minutes` (default 15).
-
-**Circuit-breaker mechanism:** Redis key `enrich:circuit:{provider}` with
-`TTL = provider_cooldown_minutes * 60`, set when a provider call returns 402/429 or raises
-a quota/rate-limit error. Eligibility = key absent. In-memory fallback dict (keyed by
-provider → expiry epoch) when Redis is unavailable — mirrors the existing
-`app/rate_limit.py` Redis-with-in-memory-fallback pattern. No DB, no migration.
-
-**Router algorithm** (`route(task, domain, name=...) -> dict | list`):
-
-```
-result = {} (company) or [] (contacts)
-for provider_name in CAPABILITY_ORDER[task]:
-    provider = registry[provider_name]
-    if not provider.is_configured() or circuit_open(provider_name):
-        continue
-    try:
-        data = await provider.fetch_company(...) | fetch_contacts(...)
-    except QuotaOrRateLimit:        # 402/429 surfaced by the adapter
-        trip_circuit(provider_name)
-        continue
-    if data:
-        merge_fill_only(result, data, source=provider_name)   # company: gap-fill
-        # contacts: extend, de-dupe by (name, email), keep verified first
-    if is_complete(result, task):   # early-stop — save credits
-        break
-return result
-```
-
-- `is_complete("company")` → all of `industry`, `employee_count_range`, `naics_code`,
-  `hq_location` present.
-- `is_complete("contacts")` → at least `prospect_enrich_contacts_per_account` (5) entries.
-- **Early-stop** means Apollo (small membership) is only called when higher-priority
-  providers left gaps — satisfying "use whatever has credit; don't waste it."
-
-`enrich_entity()` and `find_suggested_contacts()` in `enrichment_service.py` are refactored
-to delegate to the router. `find_suggested_contacts()` **gains optional, defaulted** kwargs
-(`titles=None`, `seniorities=None`, `limit=…`) whose defaults reproduce today's behavior, so
-existing CRM callers that pass none are unaffected; return shapes are unchanged — verified by
-the existing CRM enrichment tests.
-
-`ProviderQuotaError` is defined in `app/services/enrichment_router.py` and imported by the
-connectors that raise it.
-
-**Circuit-tripping reliability:** the Lusha adapter raises `ProviderQuotaError` on 402/429
-(typed), so its circuit trips reliably — this is the credit-sensitive provider we care about.
-The legacy Explorium/Apollo/AI functions already swallow HTTP errors and return `None`/`[]`;
-their adapters trip a circuit only if a quota/rate-limit status is detectable, otherwise the
-router simply falls through to the next provider (correct either way). Circuit-tripping is
-therefore *guaranteed for Lusha, best-effort for legacy providers.*
-
-### 2. Lusha connector (`app/connectors/lusha.py` — new)
+### 1. Lusha connector (`app/connectors/lusha.py` — new)
 
 Mirrors `apollo.py` but uses the shared `http` client.
 
@@ -149,113 +68,158 @@ async def enrich_company(domain: str, api_key: str) -> dict | None
 # -> {"source":"lusha","legal_name","domain","industry","employee_size",
 #     "hq_city","hq_state","hq_country","linkedin_url"} | None
 
-async def search_contacts(
-    domain: str, api_key: str, limit: int, titles: list[str], seniorities: list[str]
-) -> list[dict]
-# -> [{"source":"lusha","full_name","email","phone","title","seniority","verified"}]
+async def search_contacts(domain: str, api_key: str, limit: int) -> list[dict]
+# -> [{"source":"lusha","full_name","email","phone","title","verified"}]  # verified per Lusha
 ```
 
-Auth header per Lusha v2 (`api_key` header). Catches `httpx.HTTPError/KeyError/ValueError`
-→ logs + returns `None`/`[]`. Surfaces 402/429 as a typed signal the router catches to trip
-the circuit (e.g. raise `ProviderQuotaError`).
+Auth header per Lusha v2 (same as `_LushaTestConnector`). On **402/429** raise
+`ProviderQuotaError` (so the caller trips the cooldown). On other `httpx.HTTPError` /
+`KeyError` / `ValueError` → log warn + return `None`/`[]`.
 
-### 3. Prospect adapter (modify `app/services/prospect_free_enrichment.py`)
+### 2. Credit-guard helper (`app/services/enrichment_credit_guard.py` — new, ~15 lines)
 
-Insert a contact+firmographic step into `run_enrichment_job`, between free enrichment and
-the warm-intro/score-recompute step:
+Holds `ProviderQuotaError` plus a minimal cooldown ("circuit") so a Lusha quota/rate-limit
+error isn't re-hit on every click (the one real credit guard — graceful fall-through alone
+does NOT stop repeat spend across separate Enrich clicks):
 
-```
-run_enrichment_job(prospect_id, db):
-  1. run_free_enrichment(...)                     # SAM.gov + news (existing)
-  2. NEW: company = await enrich_entity(domain, name)        # via router
-          contacts = await find_suggested_contacts(domain, titles=PROCUREMENT_TITLES,
-                       seniorities=["decision_maker","influencer"], limit=5)
-          - map company → prospect firmographics (FILL-ONLY)
-          - map contacts → prospect.contacts_preview (canonical {name,title,seniority,
-            email,verified}); de-dupe; cap 5
-          - readiness_signals["contacts_verified_count"] = count(verified)
-          - enrichment_data["contact_provider"] = company/contacts source labels
-          - enrichment_data["contacts_enriched_at"] = now
-  3. detect_warm_intros / generate_one_liner       # existing
-  4. recompute readiness_score (existing) AND fit_score (NEW)   # both, post-mapping
-  5. enrich_status='done'; commit                  # existing
+```python
+class ProviderQuotaError(Exception): ...
+def circuit_open(provider: str) -> bool      # get_cached("enrich:circuit:{provider}") is not None
+def trip_circuit(provider: str, minutes: int) -> None  # set_cached(..., {"tripped":1}, ttl_days=minutes/1440)
 ```
 
-**Guardrail — 24h double-click skip:** if `enrichment_data['contacts_enriched_at']` is
-within the last 24h, skip the paid contact/firmographic step (free enrichment + news still
-run, scores still recompute). On-demand otherwise always runs (explicit buyer intent).
-There is **no** batch path, so no multi-day cooldown is needed.
+Reuses `app/cache/intel_cache.py` `get_cached`/`set_cached` (Redis → PG fallback already
+handles availability; **no** extra in-memory tier). Used only around the Lusha call.
 
-**Fit recompute:** call `calculate_fit_score({...prospect firmographic fields...})` and
-assign `prospect.fit_score`. Pair it with the existing readiness recompute so a single
-enrichment pass updates both scores and therefore `build_priority_snapshot`'s buyer-ready
-ranking.
+### 3. Lusha in `enrich_entity()` (company) — modify
 
-`PROCUREMENT_TITLES` = `["procurement","supply chain","sourcing","purchasing","buyer",
-"commodity","materials","operations"]` (maximizes verified-decision-maker proof points per
-the scoring contract).
-
-### 4. UI
-
-No new elements. `app/templates/htmx/partials/prospecting/enrich_status.html` running-state
-copy changes from "Enriching… (SAM.gov + news)" to "Enriching… contacts + firmographics".
-The existing 2s poll / HTTP-286 stop is unchanged.
-
-### 5. Config (`app/config.py` + `.env.example`)
+Insert a Lusha phase after Explorium, before Apollo, and **gap-gate the later paid
+providers** (early-stop) by reusing the existing `any(not result.get(f) for f in
+_enrichable)` check that already gates AI:
 
 ```
-lusha_api_key: str = ""
-lusha_enrichment_enabled: bool = False        # gate; off until key present
-provider_cooldown_minutes: int = 15           # circuit-breaker TTL
+_merge(await _explorium_find_company(...), "explorium")
+if _lusha_enabled() and not circuit_open("lusha") and gaps_remain():
+    try: _merge(await lusha.enrich_company(domain, key), "lusha")
+    except ProviderQuotaError: trip_circuit("lusha", settings.lusha_cooldown_minutes)
+if settings.apollo_api_key and gaps_remain():          # now gap-gated → spares Apollo
+    _merge(await apollo.search_company(...), "apollo")
+if gaps_remain():
+    _merge(await _ai_find_company(...), "ai")
+```
+
+`_lusha_enabled()` = `settings.lusha_enrichment_enabled and bool(get_credential_cached(
+"lusha_enrichment","LUSHA_API_KEY"))`. The 14-day IntelCache + input/output normalization
+are **unchanged**. Gap-gating Apollo is result-equivalent (fill-only Apollo only ever added
+to gaps) while saving credits when Explorium+Lusha already filled everything.
+
+### 4. Lusha in `find_suggested_contacts()` — modify
+
+Add Lusha **first** (it's the verified source); early-stop if it satisfies the need,
+otherwise fall through to the existing concurrent Explorium+AI gather and merge:
+
+```
+def find_suggested_contacts(domain, name="", title_filter="", limit=10):
+    out = []
+    if _lusha_enabled() and not circuit_open("lusha"):
+        try: out = await lusha.search_contacts(domain, key, limit)
+        except ProviderQuotaError: trip_circuit("lusha", settings.lusha_cooldown_minutes)
+    if not (len(out) >= limit and any(c.get("verified") for c in out)):
+        gathered = await asyncio.gather(_explorium_find_contacts(...), _ai_find_contacts(...),
+                                        return_exceptions=True)   # existing
+        out.extend(...)                                           # existing extend
+    # existing dedup (email/linkedin/name) + _RELEVANT_KEYWORDS relevance filter, unchanged
+```
+
+New optional `limit` kwarg defaults to 10 (today's behavior). No `seniorities` param —
+seniority is derived in the prospect adapter (below). **Apollo is NOT added to contacts**
+(it isn't called for contacts today; don't introduce surprise CRM spend).
+
+### 5. Prospect adapter (`run_enrichment_job` in `prospect_free_enrichment.py`) — modify
+
+Insert the paid step between `run_free_enrichment` and warm-intro, with the **three review
+fixes** baked in:
+
+```
+1. run_free_enrichment(...)                              # SAM.gov + news (existing)
+2. 24h skip gate: if enrichment_data['contacts_enriched_at'] within 24h → skip to step 4
+3. company  = await enrich_entity(domain, name)
+   contacts = await find_suggested_contacts(domain, name, limit=settings.prospect_enrich_contacts_per_account)
+   _apply_company_to_prospect(prospect, company)   # FILL-ONLY field-name MAPPING (fix #3):
+       industry→industry, employee_size→employee_count_range,
+       hq_city+hq_state→hq_location ("City, ST"), naics→naics_code (only if empty; keep SAM.gov),
+       revenue_range→revenue_range
+   mapped = _apply_contacts_to_prospect(prospect, contacts)   # canonical {name,title,seniority,email,verified}
+       name   = full_name
+       seniority = infer_seniority(title)   # fix #1: title-keyword → decision_maker|influencer|contributor
+       verified  = bool(c.get("verified"))  # fix #1: default False (only Lusha sets it true)
+       cap at prospect_enrich_contacts_per_account; dedup
+   readiness_signals['contacts_verified_count']   = sum(verified)        # fix #1: moves readiness
+   readiness_signals['contacts_unverified_count'] = sum(not verified)    # fix #1: +3 pts path
+   enrichment_data['contact_provider']   = sources
+   enrichment_data['contacts_enriched_at'] = now
+4. detect_warm_intros / generate_one_liner            # existing
+5. fit_score, fit_reasoning = calculate_fit_score({industry, naics_code, employee_count_range,
+       region, has_procurement_staff:None, uses_brokers:None})   # NEW recompute; None → neutral sub-scores
+   readiness_score = calculate_readiness_score({name}, readiness_signals)   # existing recompute
+6. enrich_status='done'; commit                       # existing
+```
+
+`infer_seniority(title)`: lowercased title → `decision_maker` if any of
+{vp, vice president, director, chief, ceo, coo, cfo, cto, cpo, head of, owner, president};
+`influencer` if any of {manager, lead, senior, principal, buyer, sourcing, procurement,
+purchasing, commodity}; else `contributor`.
+
+### 6. Config (`app/config.py` + `.env.example`)
+
+```
+lusha_enrichment_enabled: bool = False      # feature gate
+lusha_cooldown_minutes: int = 15            # Lusha quota/rate-limit cooldown
 prospect_enrich_contacts_per_account: int = 5
 ```
 
-(No `*_monthly_cap` — circuit-breaker only, per approval.)
+**No `lusha_api_key` in Settings** — the key flows through
+`get_credential_cached("lusha_enrichment","LUSHA_API_KEY")` (DB-managed via the Sources UI,
+env fallback), matching Explorium + the existing Lusha test connector (fix #2).
+`.env.example` documents `LUSHA_API_KEY=` for the env fallback.
 
-## Data flow
+### 7. UI
 
-- **On-demand (prospecting):** "Enrich" button → `POST …/enrich` sets `enrich_status=running`
-  + spawns `run_enrichment_job` → router pulls contacts/firmographics → fields + scores
-  updated → poll returns HTTP 286 → detail re-renders with real contacts, higher fit/
-  readiness, updated buyer-ready badge.
-- **CRM/vendor:** unchanged call sites; `enrich_entity`/`find_suggested_contacts` now route
-  through the credit-aware router and can use Lusha.
+No new elements. `app/templates/htmx/partials/prospecting/enrich_status.html` running copy
+changes "Enriching… (SAM.gov + news)" → "Enriching… contacts + firmographics".
 
-## Error handling
+## Error handling & graceful degradation
 
-- Connector errors → `None`/`[]` + Loguru warn; never propagate.
-- 402/429 → trip provider circuit, fall through to next provider; surfaced nowhere to the
-  user (degraded silently to the next-best tool).
-- All providers unavailable → router returns empty → prospect keeps free-enrichment data;
-  `enrich_status='done'` (not error — free enrichment succeeded).
+- Connector errors → `None`/`[]` + warn. 402/429 → `ProviderQuotaError` → trip cooldown →
+  the chain simply omits Lusha for the cooldown window and uses the other providers.
+- Lusha disabled / no key → `_lusha_enabled()` false → chain == today exactly.
+- All providers empty → prospect keeps free-enrichment data; `enrich_status='done'`.
 - `run_enrichment_job` unexpected exception → `enrich_status='error'` (existing).
-
-## Graceful degradation
-
-No Lusha key or `lusha_enrichment_enabled=False` → router omits Lusha → behavior is exactly
-today's Explorium→Apollo→AI chain for CRM and free-only for prospecting (prospecting only
-gains contacts/firmographics when at least one configured provider answers).
 
 ## Testing strategy
 
-- **Connector** (`tests/test_lusha_connector.py`): mock `http`; success maps fields;
-  empty → `None`/`[]`; 402/429 → raises `ProviderQuotaError`; network error → `None`/`[]`.
-- **Router** (`tests/test_enrichment_router.py`): capability order honored; unconfigured
-  provider skipped; circuit-open provider skipped; 429 trips circuit + falls through;
-  early-stop stops after completion (asserts lower-priority provider NOT called);
-  fill-only merge; contacts de-dupe + verified-first + cap.
-- **Prospect adapter** (`tests/test_prospect_real_enrichment.py`): router output maps to
-  `contacts_preview` + firmographics (fill-only, SAM.gov `naics_code` preserved);
-  `contacts_verified_count` set; fit + readiness recomputed (cold → buyer-ready when strong
-  signals returned); 24h skip avoids the paid step but still recomputes.
+- **Lusha connector** (`tests/test_lusha_connector.py`): field mapping; empty → `None`/`[]`;
+  402 + 429 → `ProviderQuotaError`; `httpx.HTTPError` → `None`/`[]`.
+- **Credit guard** (`tests/test_enrichment_credit_guard.py`): `trip_circuit` then
+  `circuit_open` true; expiry semantics (TTL minutes→days conversion).
+- **`enrich_entity` with Lusha** (extend CRM tests): Lusha fills gaps fill-only; Apollo
+  gap-gated (skipped when no gaps); circuit-open skips Lusha; disabled → unchanged.
+- **`find_suggested_contacts` with Lusha**: Lusha-first early-stop (gather not called when
+  Lusha returns ≥limit verified); fallback runs otherwise; existing dedup/filter intact.
+- **Prospect adapter** (`tests/test_prospect_real_enrichment.py`): fill-only firmographic
+  mapping incl. field-name mapping + SAM.gov `naics_code` preserved; seniority inference;
+  `verified` default False; `contacts_verified_count`/`contacts_unverified_count` set; fit +
+  readiness recomputed (cold → buyer-ready when strong data returned); 24h skip avoids paid
+  step but still recomputes.
 - **CRM regression:** existing `enrich_entity`/`find_suggested_contacts` tests stay green
-  (router refactor preserves signatures/shapes).
+  (internals preserved; Lusha gated off by default).
 
 ## Out of scope (explicit)
 
-- **Clay** async-primary integration — that is **SP2** (separate spec), not abandoned; it
-  builds on SP1's router as its synchronous gap-fill engine.
-- **Batch "Enrich top N"** UI/action (on-demand only).
-- **Per-provider monthly caps** (circuit-breaker only).
-- Persisting `buyer_ready_score`/`is_buyer_ready` as columns (separate parked item).
-- `apply_historical_bonus` wiring (parked until SFDC import).
+- A provider-router abstraction (rejected as speculative; revisit only at 5+ reorderable
+  providers).
+- **Clay** async-primary integration — that is **SP2** (reuses these two functions as its
+  gap-fill engine).
+- Batch "Enrich top N" UI/action (on-demand only).
+- Per-provider monthly caps (cooldown guard only).
+- Persisting `buyer_ready_score`/`is_buyer_ready` columns; `apply_historical_bonus` (until SFDC).

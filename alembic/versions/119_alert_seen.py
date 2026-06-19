@@ -5,20 +5,20 @@ What: creates alert_seen (user_id, alert_kind, ref_id, seen_at) with a unique
       Drives FYI alert badge exclusion + one-time in-tab spotlight pulse suppression.
 Downgrade: drops the table.
 
-Revision ID: 118_alert_seen
-Revises: 117_datasheet_library_drive_id
+Revision ID: 119_alert_seen
+Revises: 118_company_disposition
 Create Date: 2026-06-18
 
-Re-numbered 117->118 at the merge of origin/main: feat/datasheet-company-library claimed
-117 and merged first, so this re-chains onto 117_datasheet_library_drive_id.
+Re-numbered 117->118->119 across origin/main merges: feat/datasheet-company-library (117)
+and feat/crm-disposition (118) merged first, so this re-chains onto 118_company_disposition.
 """
 
 import sqlalchemy as sa
 
 from alembic import op
 
-revision = "118_alert_seen"
-down_revision = "117_datasheet_library_drive_id"
+revision = "119_alert_seen"
+down_revision = "118_company_disposition"
 branch_labels = None
 depends_on = None
 
