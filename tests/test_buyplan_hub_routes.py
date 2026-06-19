@@ -1,0 +1,272 @@
+"""Route tests for the Buy Plan Deal Hub shell + buyer Orders + sales Deals lenses.
+
+Covers:
+- /v2/partials/buy-plans renders the lens switcher + lazy body with the explicit
+  hx-target="#bp-hub-body" (guards the cards-vanish landmine) and the orders default load.
+- /v2/partials/buy-plans?lens=deals loads the board(scope=mine) by default.
+- /v2/partials/buy-plans/orders shows a buyer's AWAITING_PO line, an origin=queue confirm
+  form, and the rejection note on kicked-back rows.
+- /v2/partials/buy-plans/board?scope=mine renders 4 columns and rings needs_my_action cards.
+- /v2/partials/buy-plans/board?scope=all by a non-manager is forced to mine (no leak).
+- confirm-po with origin=queue returns the queue partial; default origin returns detail.
+
+Depends on: app/routers/htmx_views (hub routes), app/services/buyplan_hub,
+            conftest fixtures (client, db_session, test_user, sales_user, manager_user,
+            test_quote, test_requisition).
+"""
+
+from __future__ import annotations
+
+import uuid
+
+from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
+
+from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from app.models.buy_plan import BuyPlan, BuyPlanLine
+from app.models.quotes import Quote
+
+
+def _make_quote(db: Session, req_id: int) -> Quote:
+    q = Quote(
+        requisition_id=req_id,
+        quote_number=f"Q-{uuid.uuid4().hex[:8]}",
+        status="draft",
+    )
+    db.add(q)
+    db.flush()
+    return q
+
+
+def _make_plan(db: Session, *, quote_id: int, req_id: int, **kw) -> BuyPlan:
+    defaults = dict(
+        quote_id=quote_id,
+        requisition_id=req_id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.APPROVED,
+    )
+    defaults.update(kw)
+    plan = BuyPlan(**defaults)
+    db.add(plan)
+    db.flush()
+    return plan
+
+
+def _make_line(db: Session, *, plan_id: int, **kw) -> BuyPlanLine:
+    defaults = dict(
+        buy_plan_id=plan_id,
+        quantity=10,
+        status=BuyPlanLineStatus.AWAITING_PO,
+    )
+    defaults.update(kw)
+    line = BuyPlanLine(**defaults)
+    db.add(line)
+    db.flush()
+    return line
+
+
+# ── Shell + lens routing ──────────────────────────────────────────────────
+
+
+def test_hub_shell_buyer_defaults_to_orders(client: TestClient):
+    """Buyer hub: lens switcher present, lazy body carries explicit target + orders URL."""
+    resp = client.get("/v2/partials/buy-plans")
+    assert resp.status_code == 200
+    body = resp.text
+    # Lens switcher
+    assert "My Deals" in body
+    assert "My Orders" in body
+    assert "Supervise" in body
+    # Lazy body + the landmine guard: explicit hx-target on the load container
+    assert 'id="bp-hub-body"' in body
+    assert 'hx-target="#bp-hub-body"' in body
+    # Buyer default loads the orders queue
+    assert "/v2/partials/buy-plans/orders" in body
+
+
+def test_hub_shell_lens_deals_loads_board_mine(client: TestClient):
+    """Lens=deals loads the board scoped to mine by default."""
+    resp = client.get("/v2/partials/buy-plans?lens=deals")
+    assert resp.status_code == 200
+    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
+    assert 'hx-target="#bp-hub-body"' in resp.text
+
+
+def test_hub_shell_sales_defaults_to_deals(client: TestClient, sales_user):
+    """A sales user with no lens lands on the deals board (scope=mine)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: sales_user
+    try:
+        resp = client.get("/v2/partials/buy-plans")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "/v2/partials/buy-plans/board?scope=mine" in resp.text
+
+
+def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_user):
+    """A manager with no lens lands on the supervise board (scope=all)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
+
+
+# ── Orders queue (buyer) ───────────────────────────────────────────────────
+
+
+def test_orders_queue_shows_my_awaiting_line(client: TestClient, db_session: Session, test_user, test_quote):
+    """A buyer's AWAITING_PO line on an ACTIVE approved plan appears with an
+    origin=queue form."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/orders")
+    assert resp.status_code == 200
+    body = resp.text
+    assert f'id="bp-line-{line.id}"' in body
+    # Confirm form posts to the existing confirm-po route with origin=queue hidden field
+    assert f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po" in body
+    assert 'name="origin"' in body
+    assert 'value="queue"' in body
+
+
+def test_orders_queue_kicked_back_shows_note(client: TestClient, db_session: Session, test_user, test_quote):
+    """A kicked-back line surfaces its po_rejection_note prominently."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    _make_line(
+        db_session,
+        plan_id=plan.id,
+        buyer_id=test_user.id,
+        po_rejection_note="Wrong vendor — re-cut to Arrow",
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/orders")
+    assert resp.status_code == 200
+    assert "Wrong vendor — re-cut to Arrow" in resp.text
+
+
+def test_orders_queue_empty_state(client: TestClient):
+    """No actionable lines → friendly empty state."""
+    resp = client.get("/v2/partials/buy-plans/orders")
+    assert resp.status_code == 200
+    assert "all caught up" in resp.text.lower()
+
+
+# ── Deals board (sales / manager) ──────────────────────────────────────────
+
+
+def test_board_mine_rings_needs_my_action(client: TestClient, db_session: Session, test_user, test_requisition):
+    """A DRAFT plan owned by me shows the needs_my_action ring class in its column."""
+    q = _make_quote(db_session, test_requisition.id)
+    _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        so_status=SOVerificationStatus.PENDING,
+        submitted_by_id=test_user.id,
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/board?scope=mine")
+    assert resp.status_code == 200
+    body = resp.text
+    # 4 columns
+    for col in ("Draft", "Pending", "Active", "Done"):
+        assert col in body
+    # needs_my_action ring
+    assert "ring-2 ring-amber-400" in body
+
+
+def test_board_scope_all_forced_to_mine_for_non_manager(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """Scope=all requested by a plain buyer must NOT leak another user's plans."""
+    q = _make_quote(db_session, test_requisition.id)
+    # A plan owned by someone else — must be hidden when scope is forced to mine.
+    other_plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        submitted_by_id=manager_user.id,
+    )
+    db_session.commit()
+
+    resp = client.get("/v2/partials/buy-plans/board?scope=all")
+    assert resp.status_code == 200
+    # The other user's plan id must not appear as an openable card
+    assert f"/v2/partials/buy-plans/{other_plan.id}" not in resp.text
+
+
+def test_board_scope_all_allowed_for_manager(
+    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
+):
+    """A manager CAN see all plans with scope=all."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    q = _make_quote(db_session, test_requisition.id)
+    sales_plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        submitted_by_id=sales_user.id,
+    )
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans/board?scope=all")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert f"/v2/partials/buy-plans/{sales_plan.id}" in resp.text
+
+
+# ── confirm-po origin behavior ─────────────────────────────────────────────
+
+
+def test_confirm_po_origin_queue_returns_queue(client: TestClient, db_session: Session, test_user, test_quote):
+    """Origin=queue → re-rendered orders queue (not the full detail)."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
+        data={"po_number": "PO-12345", "origin": "queue"},
+    )
+    assert resp.status_code == 200
+    body = resp.text
+    # The queue partial carries the orders-specific empty/heading markers, not the detail title.
+    assert "PO(s) to cut" in body or "all caught up" in body.lower()
+    assert "Line Items" not in body  # detail.html section header must be absent
+
+
+def test_confirm_po_default_origin_returns_detail(client: TestClient, db_session: Session, test_user, test_quote):
+    """Default origin (no value) preserves today's behavior: returns the detail
+    partial."""
+    plan = _make_plan(db_session, quote_id=test_quote.id, req_id=test_quote.requisition_id)
+    line = _make_line(db_session, plan_id=plan.id, buyer_id=test_user.id)
+    db_session.commit()
+
+    resp = client.post(
+        f"/v2/partials/buy-plans/{plan.id}/lines/{line.id}/confirm-po",
+        data={"po_number": "PO-67890"},
+    )
+    assert resp.status_code == 200
+    # Detail partial has the "Line Items" section header.
+    assert "Line Items" in resp.text
