@@ -361,9 +361,9 @@ async def dossier_datasheet_download(
 ):
     """Stream our stored datasheet copy from the company library (app-only fetch)."""
     row = db.query(MaterialCardDatasheet).filter(MaterialCardDatasheet.id == datasheet_id).first()
-    if row is None or not row.onedrive_item_id:
+    if row is None or not row.library_item_id:
         raise HTTPException(404, "Datasheet not found")
-    data = await fetch_datasheet_bytes(row.library_drive_id, row.onedrive_item_id)
+    data = await fetch_datasheet_bytes(row.library_drive_id, row.library_item_id)
     if data is None:
         raise HTTPException(502, "Datasheet temporarily unavailable")
     # Allowlist the filename for the Content-Disposition header — file_name derives from
