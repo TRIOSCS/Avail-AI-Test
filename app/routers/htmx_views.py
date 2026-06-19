@@ -7577,7 +7577,11 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ..services.buyplan_notifications import notify_completed, run_notify_bg
+    from ..services.buyplan_notifications import (
+        notify_completed,
+        notify_po_rejected,
+        run_notify_bg,
+    )
     from ..services.buyplan_workflow import check_completion, verify_po
 
     form = await request.form()
@@ -7587,6 +7591,8 @@ async def buy_plan_verify_po_partial(
     try:
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
         db.commit()
+        if action == "reject":
+            await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
         updated = check_completion(plan_id, db)
         if updated and updated.status == BuyPlanStatus.COMPLETED:
             db.commit()
