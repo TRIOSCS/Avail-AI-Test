@@ -73,12 +73,14 @@ class TestCheckVendorDuplicateExact:
 
 class TestCheckVendorDuplicateEmpty:
     def test_empty_name_returns_empty_list(self, db_session: Session):
+        _make_vendor(db_session, "arrow electronics", "Arrow Electronics")
         results = check_vendor_duplicate("", db_session)
-        assert isinstance(results, list)
+        assert results == []
 
     def test_whitespace_only_name_no_crash(self, db_session: Session):
+        _make_vendor(db_session, "arrow electronics", "Arrow Electronics")
         results = check_vendor_duplicate("   ", db_session)
-        assert isinstance(results, list)
+        assert results == []
 
 
 class TestCheckVendorDuplicateFuzzyPythonPath:
@@ -121,31 +123,6 @@ class TestCheckVendorDuplicateFuzzyPythonPath:
 
 
 class TestCheckVendorDuplicatePgTrgmFallback:
-    def test_pg_trgm_operational_error_falls_back_to_python(self, db_session: Session):
-        """When pg_trgm raises OperationalError, fall back to Python fuzzy match."""
-        pg_error = OperationalError("pg_trgm not installed", None, None)
-
-        with patch("app.services.vendor_duplicates._fuzzy_match_pg_trgm", side_effect=pg_error):
-            with patch("app.services.vendor_duplicates._fuzzy_match_python", return_value=[]) as mock_py:
-                # Patch the dialect check so we enter the postgresql branch
-                with patch.object(db_session, "bind") as mock_bind:
-                    mock_bind.dialect.name = "postgresql"
-                    # Also patch exact-match query to return None so we reach fuzzy path
-                    with patch("app.services.vendor_duplicates.VendorCard") as mock_vc:
-                        mock_query = MagicMock()
-                        mock_query.filter_by.return_value.first.return_value = None
-                        db_session_mock = MagicMock()
-                        db_session_mock.query.return_value = mock_query
-                        db_session_mock.bind.dialect.name = "postgresql"
-                        results = (
-                            check_vendor_duplicate.__wrapped__("Future Electron XYZ", db_session_mock)
-                            if hasattr(check_vendor_duplicate, "__wrapped__")
-                            else None
-                        )
-
-        # Simpler: just test the fallback path directly through the module logic
-        assert isinstance(results, (list, type(None)))
-
     def test_pg_trgm_operational_error_triggers_python_fallback_via_mock_session(self, db_session: Session):
         """Verify the OperationalError branch by mocking the whole session object."""
         pg_error = OperationalError("pg_trgm not installed", None, None)
