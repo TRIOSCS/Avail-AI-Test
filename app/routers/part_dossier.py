@@ -11,6 +11,11 @@ pointer (written by search_service.stream_search_mpn) to render cached vendor ro
 cache hit, else fires the existing /v2/partials/search/run SSE flow; a degraded-source
 banner (get_market_source_health) renders above both branches.
 
+A read-only market-baseline strip (compute_market_baseline) renders at the top of the
+Live-market section when cached rows are present, showing franchise-median price,
+authorized stock, and authorized source count — computed from cached rows, no new DB
+columns, no persistence.
+
 Called by: app/main.py (include_router); dossier_shell.html lazy-load divs.
 Depends on: services.part_history_service.get_part_history, services.fru_matrix_service
             .get_fru_view, search_service (_get_search_redis / _get_cached_search_results
@@ -44,6 +49,47 @@ router = APIRouter(tags=["part-dossier"])
 
 # Recent-searches landing cap (section 9 of the design spec).
 _RECENT_LIMIT = 12
+
+
+def compute_market_baseline(rows: list[dict]) -> dict:
+    """Compute a read-only franchise-price summary from already-fetched market rows.
+
+    Restricted to rows where ``is_authorized is True`` (franchise / authorized
+    distributor). Uses the same median algorithm as search_service._median.
+
+    Args:
+        rows: List of market-row dicts (same schema as cached_rows / vendor_card.html).
+              Each may carry ``unit_price`` (float|None), ``qty_available`` (int|None),
+              and ``is_authorized`` (bool, default False).
+
+    Returns:
+        A dict with keys:
+          - ``has_authorized``: bool — True if any authorized row exists.
+          - ``median_price``:   float|None — median of authorized unit_prices (non-None,
+                                >0 only); None when no such prices exist.
+          - ``total_stock``:    int|None — sum of authorized qty_available values (non-
+                                None only); None when no authorized row has a known qty.
+          - ``sources``:        int — count of authorized rows.
+
+    No DB access, no side-effects. Safe to call with an empty or all-non-authorized list.
+    """
+    auth_rows = [r for r in rows if r.get("is_authorized")]
+    if not auth_rows:
+        return {"has_authorized": False, "median_price": None, "total_stock": None, "sources": 0}
+
+    prices = [r["unit_price"] for r in auth_rows if r.get("unit_price") and r["unit_price"] > 0]
+    sorted_prices = sorted(prices)
+    median_price: float | None = sorted_prices[len(sorted_prices) // 2] if sorted_prices else None
+
+    known_qtys = [r["qty_available"] for r in auth_rows if r.get("qty_available") is not None]
+    total_stock: int | None = sum(known_qtys) if known_qtys else None
+
+    return {
+        "has_authorized": True,
+        "median_price": median_price,
+        "total_stock": total_stock,
+        "sources": len(auth_rows),
+    }
 
 
 def _ctx(request: Request, user: User) -> dict:
@@ -219,6 +265,8 @@ async def dossier_market(
         logger.warning("dossier_market source-health lookup failed mpn={}", mpn, exc_info=True)
         market_health = None
 
+    market_baseline = compute_market_baseline(cached_rows) if cached_rows else None
+
     ctx = _ctx(request, user)
     ctx.update(
         {
@@ -226,6 +274,7 @@ async def dossier_market(
             "cached_search_id": cached_search_id,
             "cached_rows": cached_rows,
             "market_health": market_health,
+            "market_baseline": market_baseline,
         }
     )
     return template_response("htmx/partials/search/dossier_market.html", ctx)
