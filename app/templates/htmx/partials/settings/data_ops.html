@@ -76,19 +76,31 @@
 
     {% if company_dupes %}
     <div class="divide-y divide-gray-100">
+      {# find_company_dedup_candidates returns NESTED pairs: pair.company_a/company_b
+         each {id, name, site_count, has_owner}, plus pair.score + pair.auto_keep_id.
+         The default-direction button keeps auto_keep_id (more sites → has owner →
+         strategic → older); the second button keeps the other side. Both wire to the
+         admin company-merge endpoint, swapping the row in place. #}
       {% for pair in company_dupes %}
+      {% set keep_first = (pair.auto_keep_id == pair.company_a.id) %}
+      {% set keeper = pair.company_a if keep_first else pair.company_b %}
+      {% set loser = pair.company_b if keep_first else pair.company_a %}
       <div class="px-4 py-3 flex items-center gap-4">
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 text-sm">
-            <span class="font-medium text-gray-900">{{ pair.name_a }}</span>
+            <span class="font-medium text-gray-900">{{ pair.company_a.name }}</span>
             <span class="text-gray-400">&harr;</span>
-            <span class="font-medium text-gray-900">{{ pair.name_b }}</span>
+            <span class="font-medium text-gray-900">{{ pair.company_b.name }}</span>
           </div>
-          <p class="text-xs text-gray-500 mt-0.5">Score: {{ pair.score }}% match</p>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Score: {{ pair.score }}% match
+            &middot; {{ pair.company_a.site_count or 0 }} vs {{ pair.company_b.site_count or 0 }} sites
+            &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
+          </p>
         </div>
         <div class="flex gap-2">
-          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', pair.id_a, pair.id_b, pair.name_a, pair.name_b) }}
-          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', pair.id_b, pair.id_a, pair.name_b, pair.name_a) }}
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', keeper.id, loser.id, keeper.name, loser.name) }}
+          {{ merge_button('          ', '/v2/partials/admin/company-merge', 'closest div.flex.items-center', loser.id, keeper.id, loser.name, keeper.name) }}
         </div>
       </div>
       {% endfor %}

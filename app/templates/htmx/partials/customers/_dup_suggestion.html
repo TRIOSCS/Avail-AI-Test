@@ -1,0 +1,33 @@
+{# _dup_suggestion.html — per-account "possible duplicate" banner (Increment 3, AI-org).
+   Lazy-loaded into detail.html via hx-trigger=load. Surfaces the single top dedup match
+   for THIS account and offers a Merge button that reuses the existing
+   merge-form → merge-preview → POST .../merge flow (no merge logic here).
+   Renders nothing (empty 200) when there is no near-duplicate.
+   Receives: company (Company, the keeper), match {id, name, score}.
+   Called by: company_dup_suggestion route in htmx_views.py.
+   Depends on: HTMX, Alpine.js, Tailwind brand palette, _merge_form.html.
+#}
+<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
+  <div class="flex items-start justify-between gap-3">
+    <div class="min-w-0">
+      <p class="text-sm font-semibold text-amber-800">
+        Possible duplicate account
+      </p>
+      <p class="mt-0.5 text-sm text-amber-700">
+        <span class="font-medium">{{ match.name }}</span>
+        looks like the same company ({{ match.score }}% name match).
+      </p>
+    </div>
+    <button type="button"
+            title="Merge {{ match.name }} into {{ company.name }}"
+            class="flex-shrink-0 inline-flex items-center gap-1 rounded-md border border-amber-300
+                   bg-white px-2.5 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-100
+                   focus:outline-none focus:ring-2 focus:ring-amber-500"
+            hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
+            hx-target="#modal-content"
+            hx-swap="innerHTML"
+            @click="$dispatch('open-modal')">
+      Review &amp; merge
+    </button>
+  </div>
+</div>

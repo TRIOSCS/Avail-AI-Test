@@ -12,6 +12,14 @@
 {# max-w-3xl: must fit the CDM right panel (~60% viewport), not just full-page #}
 <div class="max-w-3xl mx-auto space-y-6">
 
+  {# Possible-duplicate banner — lazy (hx-target=this avoids inheriting the
+     #main-content hx-target). Renders nothing when there is no near-dup. #}
+  <div hx-get="/v2/partials/customers/{{ company.id }}/dup-suggestion"
+       hx-target="this"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="empty:hidden"></div>
+
   {# ── Header Card ─────────────────────────────────────────── #}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
     <div class="flex items-start justify-between">
@@ -22,6 +30,12 @@
         </div>
         <div>
           <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
+          {# Suggest-only name-normalization chip — lazy, renders nothing when clean. #}
+          <div hx-get="/v2/partials/customers/{{ company.id }}/name-suggestion"
+               hx-target="this"
+               hx-trigger="load"
+               hx-swap="innerHTML"
+               class="mt-1 empty:hidden"></div>
           <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
