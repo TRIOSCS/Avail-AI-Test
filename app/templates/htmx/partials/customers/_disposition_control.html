@@ -9,7 +9,7 @@
 <div id='disposition-control' class='flex items-center justify-between flex-wrap gap-2 mt-2'>
   <div class='flex items-center gap-2'>
     {% if _disp == 'bucket' %}
-    <span class='px-2 py-0.5 text-[10px] font-semibold rounded-full bg-gray-200 text-gray-600 border border-gray-300'
+    <span class='px-2 py-0.5 text-xs font-semibold rounded-full bg-gray-200 text-gray-600 border border-gray-300'
           title='Bucketed — suppressed from the "needs a call" list'>
       Bucketed
     </span>
@@ -32,7 +32,7 @@
         hx-swap='innerHTML'
         hx-confirm='Send {{ company.name }} back to prospecting? This clears your ownership.'>
     <button type='submit'
-            class='inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 text-gray-500 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-brand-400'
+            class='inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded border border-gray-200 text-gray-600 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-brand-400'
             title='Relinquish ownership and return this account to the prospecting pool'>
       Send to Prospecting
     </button>

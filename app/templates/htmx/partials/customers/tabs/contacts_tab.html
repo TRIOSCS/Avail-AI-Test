@@ -60,7 +60,7 @@
   <span class="text-gray-400">Reply:</span>
   {% if rep_ts %}
     {% set rep_days = (now_utc - rep_ts).days %}
-    <span class="text-gray-500">{{ rep_days }}d ago</span>
+    <span class="text-gray-600">{{ rep_days }}d ago</span>
   {% else %}
     <span class="text-gray-300">—</span>
   {% endif %}
@@ -86,10 +86,10 @@
           <span class="text-sm font-medium text-gray-900">{{ site.contact_name or "—" }}</span>
           <span class="text-[9px] text-gray-400">legacy</span>
         </div>
-        <p class="text-[11px] text-gray-500">
+        <p class="text-[11px] text-gray-600">
           {{ site.contact_title or "—" }}
         </p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
+        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
           {% if site.contact_email %}<span class="truncate">{{ site.contact_email }}</span>{% endif %}
           {% if site.contact_phone %}<span>{{ site.contact_phone }}</span>{% endif %}
         </div>
@@ -121,8 +121,8 @@
           {% include 'htmx/partials/customers/_archive_toggle.html' %}
           {% include 'htmx/partials/customers/_dnc_toggle.html' %}
         </div>
-        <p class="text-[11px] text-gray-500 mt-0.5">{{ contact.title or "—" }}</p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
+        <p class="text-[11px] text-gray-600 mt-0.5">{{ contact.title or "—" }}</p>
+        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
           {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
           {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}
           {% if contact.wechat_id %}<span>WeChat: {{ contact.wechat_id }}</span>{% endif %}
@@ -176,7 +176,7 @@
 {# ── Render ────────────────────────────────────────────────────────────────── #}
 {% if not contact_rows %}
 <div class="p-8 text-center">
-  <p class="text-sm text-gray-500">No contacts found. Add contacts via the Sites tab.</p>
+  <p class="text-sm text-gray-600">No contacts found. Add contacts via the Sites tab.</p>
 </div>
 {% else %}
 <div class="space-y-3">

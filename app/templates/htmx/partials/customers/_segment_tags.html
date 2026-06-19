@@ -43,7 +43,7 @@
       {% set ns = namespace(has_available=false) %}
       {% for t in all_segment_tags %}{% if t.id not in assigned_ids %}{% set ns.has_available = true %}{% endif %}{% endfor %}
       {% if ns.has_available %}
-      <p class='text-[10px] font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1'>Add existing</p>
+      <p class='text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1 px-1'>Add existing</p>
       {% for t in all_segment_tags %}
       {% if t.id not in assigned_ids %}
       <button type='button'
@@ -60,7 +60,7 @@
       {% endif %}
 
       {# Create a new tag by name #}
-      <p class='text-[10px] font-semibold text-gray-400 uppercase tracking-wider mt-2 mb-1 px-1'>New tag</p>
+      <p class='text-xs font-semibold text-gray-400 uppercase tracking-wider mt-2 mb-1 px-1'>New tag</p>
       <form hx-post='/v2/partials/customers/{{ company.id }}/segment-tags'
             hx-target='#segment-tags-{{ company.id }}'
             hx-swap='outerHTML'

@@ -11,13 +11,13 @@
   {% else %}
     <div class="bg-white rounded-xl border border-gray-200 p-5">
       <h3 class="text-base font-semibold text-gray-900 mb-2">Vendor Trust & Safety Review</h3>
-      <p class="text-sm text-gray-500">No safety data available — safety is assessed when sourcing leads are created for this vendor.</p>
+      <p class="text-sm text-gray-600">No safety data available — safety is assessed when sourcing leads are created for this vendor.</p>
     </div>
   {% endif %}
 
   {# Contact info card #}
   {% if vendor.emails or vendor.phones or vendor.website %}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-5">
+  <div class="card">
     <h2 class="text-sm font-semibold text-gray-900 mb-3">Contact Information</h2>
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
       {% if vendor.website %}
@@ -80,8 +80,8 @@
         {% for c in contacts[:5] %}
         <tr class="hover:bg-brand-50 transition-colors">
           <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ c.full_name or "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">{{ c.title or "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ c.title or "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">
             {% if c.email %}
               <a href="mailto:{{ c.email }}" class="hover:text-brand-500">{{ c.email }}</a>
             {% else %}
@@ -133,13 +133,13 @@
         {% for s in recent_sightings %}
         <tr class="hover:bg-brand-50 transition-colors">
           <td class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900">{{ s.mpn_matched or "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">{{ "{:,}".format(s.qty_available) if s.qty_available else "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-right text-gray-600 tabular-nums">{{ "{:,}".format(s.qty_available) if s.qty_available else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-600' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
           <td class="px-4 py-2.5">
             {% set source_name = s.source_type %}
             {% include "htmx/partials/shared/source_badge.html" %}
           </td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -147,7 +147,7 @@
   </div>
   {% else %}
   <div class="py-8 text-center">
-    <p class="text-sm text-gray-500">No sightings recorded for this vendor yet.</p>
+    <p class="text-sm text-gray-600">No sightings recorded for this vendor yet.</p>
   </div>
   {% endif %}
 

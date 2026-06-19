@@ -10,23 +10,23 @@
       <div class="flex items-center gap-2">
         <span class="font-medium text-sm text-gray-900">{{ p.full_name }}</span>
         {% if p.confidence == "medium" %}
-        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-700">Medium</span>
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-amber-50 text-amber-700">Medium</span>
         {% elif p.confidence == "high" %}
-        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700">High</span>
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-50 text-emerald-700">High</span>
         {% else %}
-        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-500">Low</span>
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">Low</span>
         {% endif %}
         {% if p.is_saved %}
-        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-50 text-brand-600">Saved</span>
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600">Saved</span>
         {% endif %}
         {% if p.promoted_to_type %}
-        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700">Promoted</span>
+        <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-emerald-50 text-emerald-700">Promoted</span>
         {% endif %}
       </div>
       {% if p.title %}
-      <p class="text-xs text-gray-500 mt-0.5">{{ p.title }}</p>
+      <p class="text-xs text-gray-600 mt-0.5">{{ p.title }}</p>
       {% endif %}
-      <div class="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-500">
+      <div class="flex flex-wrap items-center gap-3 mt-1 text-xs text-gray-600">
         {% if p.email %}
         <a href="mailto:{{ p.email }}" class="text-brand-500 hover:text-brand-600">{{ p.email }}</a>
         {% endif %}
