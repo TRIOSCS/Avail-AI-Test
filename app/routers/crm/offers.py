@@ -50,6 +50,48 @@ ALLOWED_OFFER_EXTENSIONS = {
 }
 
 
+def _upsert_inapp_notice(
+    db: Session,
+    *,
+    user_id: int,
+    activity_type: str,
+    requisition_id: int,
+    contact_name: str,
+    subject: str,
+) -> None:
+    """Create or refresh a deduplicated in-app (system-channel) notification.
+
+    Looks for an existing non-dismissed ActivityLog of the same type on the same
+    requisition for the same user; if found, refreshes its subject + created_at,
+    otherwise inserts a new system-channel row. Does not commit — the caller owns the
+    transaction boundary.
+    """
+    existing_notif = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == activity_type,
+            ActivityLog.requisition_id == requisition_id,
+            ActivityLog.dismissed_at.is_(None),
+        )
+        .first()
+    )
+    if existing_notif:
+        existing_notif.subject = subject
+        existing_notif.created_at = datetime.now(timezone.utc)
+    else:
+        db.add(
+            ActivityLog(
+                user_id=user_id,
+                activity_type=activity_type,
+                channel="system",
+                requisition_id=requisition_id,
+                contact_name=contact_name,
+                subject=subject,
+            )
+        )
+
+
 def _log_offer_status_change(db: Session, offer: Offer, old_status, user: User) -> None:
     """Emit the standard OFFER_STATUS_CHANGED activity log for an offer transition."""
     log_activity(
@@ -445,34 +487,18 @@ async def create_offer(
     # Phase 1: Notify sales creator that a new offer was entered on their req
     if req.created_by and req.created_by != user.id:
         try:
-            existing_notif = (
-                db.query(ActivityLog)
-                .filter(
-                    ActivityLog.user_id == req.created_by,
-                    ActivityLog.activity_type == "new_offer",
-                    ActivityLog.requisition_id == req_id,
-                    ActivityLog.dismissed_at.is_(None),
-                )
-                .first()
-            )
             offer_count = (
                 db.query(Offer).filter(Offer.requisition_id == req_id, Offer.status == OfferStatus.ACTIVE).count()
             )
             new_subj = f"New offer: {offer.vendor_name} — {offer.mpn} (${offer.unit_price or 'TBD'}) · {offer_count} total offers"
-            if existing_notif:
-                existing_notif.subject = new_subj
-                existing_notif.created_at = datetime.now(timezone.utc)
-            else:
-                db.add(
-                    ActivityLog(
-                        user_id=req.created_by,
-                        activity_type="new_offer",
-                        channel="system",
-                        requisition_id=req_id,
-                        contact_name=offer.vendor_name,
-                        subject=new_subj,
-                    )
-                )
+            _upsert_inapp_notice(
+                db,
+                user_id=req.created_by,
+                activity_type="new_offer",
+                requisition_id=req_id,
+                contact_name=offer.vendor_name,
+                subject=new_subj,
+            )
             db.commit()
         except Exception:
             logger.warning("New offer notification failed", exc_info=True)
@@ -518,31 +544,15 @@ async def create_offer(
                 pct = round((1 - float(offer.unit_price) / float(best_price)) * 100)
                 # Deduplicated in-app notification for requisition owner
                 if req.created_by:
-                    existing_notif = (
-                        db.query(ActivityLog)
-                        .filter(
-                            ActivityLog.user_id == req.created_by,
-                            ActivityLog.activity_type == "competitive_quote",
-                            ActivityLog.requisition_id == req_id,
-                            ActivityLog.dismissed_at.is_(None),
-                        )
-                        .first()
-                    )
                     new_subj = f"Competitive quote: {offer.vendor_name} — {offer.mpn} at ${offer.unit_price} ({pct}% below best)"
-                    if existing_notif:
-                        existing_notif.subject = new_subj
-                        existing_notif.created_at = datetime.now(timezone.utc)
-                    else:
-                        db.add(
-                            ActivityLog(
-                                user_id=req.created_by,
-                                activity_type="competitive_quote",
-                                channel="system",
-                                requisition_id=req_id,
-                                contact_name=offer.vendor_name,
-                                subject=new_subj,
-                            )
-                        )
+                    _upsert_inapp_notice(
+                        db,
+                        user_id=req.created_by,
+                        activity_type="competitive_quote",
+                        requisition_id=req_id,
+                        contact_name=offer.vendor_name,
+                        subject=new_subj,
+                    )
                     db.commit()
     except Exception:
         logger.warning("Activity event creation failed", exc_info=True)

@@ -225,3 +225,56 @@ def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisit
     assert resp.status_code == 200, resp.text
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) >= 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _upsert_inapp_notice — dedup helper (create + refresh branches)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_upsert_inapp_notice_creates_then_refreshes(db_session, test_requisition, test_user):
+    """First call inserts a system-channel ActivityLog; second refreshes in place."""
+    from app.routers.crm.offers import _upsert_inapp_notice
+
+    def _rows():
+        return (
+            db_session.query(ActivityLog)
+            .filter(
+                ActivityLog.user_id == test_user.id,
+                ActivityLog.activity_type == "new_offer",
+                ActivityLog.requisition_id == test_requisition.id,
+                ActivityLog.dismissed_at.is_(None),
+            )
+            .all()
+        )
+
+    _upsert_inapp_notice(
+        db_session,
+        user_id=test_user.id,
+        activity_type="new_offer",
+        requisition_id=test_requisition.id,
+        contact_name="Acme Vendor",
+        subject="New offer: Acme Vendor — LM317T",
+    )
+    db_session.commit()
+    rows = _rows()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row.channel == "system"
+    assert row.contact_name == "Acme Vendor"
+    assert row.subject == "New offer: Acme Vendor — LM317T"
+
+    # Second call with the same key updates subject in place (no new row)
+    _upsert_inapp_notice(
+        db_session,
+        user_id=test_user.id,
+        activity_type="new_offer",
+        requisition_id=test_requisition.id,
+        contact_name="Acme Vendor",
+        subject="New offer: Acme Vendor — LM317T · 3 total offers",
+    )
+    db_session.commit()
+    rows = _rows()
+    assert len(rows) == 1
+    assert rows[0].id == row.id
+    assert rows[0].subject == "New offer: Acme Vendor — LM317T · 3 total offers"
