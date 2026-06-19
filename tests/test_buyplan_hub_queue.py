@@ -149,6 +149,39 @@ def test_buyer_queue_dict_fields(db_session, test_user, test_quote, test_requisi
     assert "vendor_contact_email" in r
 
 
+# ── _customer_name helper (shared derivation) ─────────────────────────────
+
+
+def test_customer_name_returns_company_name(db_session, test_quote, test_requisition):
+    """_customer_name derives the company name via quote → customer_site → company."""
+    from app.services.buyplan_hub import _customer_name
+
+    plan = _make_plan(db_session, quote_id=test_quote.id, requisition_id=test_requisition.id)
+    db_session.flush()
+    # test_quote → test_customer_site → test_company("Acme Electronics")
+    assert _customer_name(plan) == "Acme Electronics"
+
+
+def test_customer_name_none_when_quote_has_no_site(db_session, test_requisition, test_user):
+    """A plan whose quote has a NULL customer_site (site deleted → SET NULL) yields
+    None."""
+    from app.models.quotes import Quote
+    from app.services.buyplan_hub import _customer_name
+
+    siteless_quote = Quote(
+        requisition_id=test_requisition.id,
+        customer_site_id=None,
+        quote_number="Q-NO-SITE",
+        status="sent",
+        created_by_id=test_user.id,
+    )
+    db_session.add(siteless_quote)
+    db_session.flush()
+    plan = _make_plan(db_session, quote_id=siteless_quote.id, requisition_id=test_requisition.id)
+    db_session.flush()
+    assert _customer_name(plan) is None
+
+
 # ── Team Orders (read-only awareness of OTHER buyers' open lines) ──────────
 
 

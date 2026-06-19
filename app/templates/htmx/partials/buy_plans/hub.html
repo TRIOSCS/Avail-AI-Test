@@ -16,13 +16,19 @@
   <div class="flex items-center gap-2 mb-5">
     {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('supervise', 'Supervise')] %}
     {% if l != 'supervise' or can_supervise %}
+    {# Highlight is Alpine-reactive (:class on lens) so the active pill updates the
+       instant a lens is clicked — before the server swap returns — and stays correct
+       after the re-rendered hub re-inits x-data with the server lens. Mirrors the
+       settings tab_button pattern (partials/settings/_macros.html). #}
     <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
             hx-push-url="/v2/buy-plans?lens={{ l }}"
             @click="lens = '{{ l }}'"
-            class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors
-                   {% if lens == l %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}">
+            :class="lens === '{{ l }}'
+                    ? 'bg-brand-500 text-white shadow-sm'
+                    : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+            class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors">
       {{ label }}
     </button>
     {% endif %}

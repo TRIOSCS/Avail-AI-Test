@@ -25,14 +25,15 @@ from ..models.buy_plan import BuyPlan, BuyPlanLine
 def _customer_name(plan: BuyPlan) -> str | None:
     """Derive a display customer name: plan.quote → customer_site → company.name.
 
-    Falls back to the site's ``site_name`` when the company is missing, and to
-    ``None`` when there is no quote/site. Mirrors buy_plans_list_partial in
-    routers/htmx_views.py.
+    The single shared derivation used by every Deal Hub read model (buyer/team
+    queue, deal board, supervise triage). Returns ``None`` when the plan's quote
+    has no customer_site (e.g. the site was deleted and the FK nulled via
+    ``ON DELETE SET NULL``).
     """
     if plan.quote and plan.quote.customer_site:
-        site = plan.quote.customer_site
-        co = site.company if hasattr(site, "company") else None
-        return co.name if co else getattr(site, "site_name", None)
+        # CustomerSite.company_id is NOT NULL, so the relationship always resolves.
+        name: str = plan.quote.customer_site.company.name
+        return name
     return None
 
 
