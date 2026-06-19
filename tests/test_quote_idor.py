@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
 
-from app.models import CustomerSite, Offer, Quote, Requisition, User
+from app.models import CustomerSite, Offer, Quote, QuoteLine, Requisition, User
 
 
 @contextmanager
@@ -179,3 +179,144 @@ def test_buyer_sees_all_quotes(db_session, test_user, test_customer_site):
     with _client_as(db_session, test_user) as c:
         resp = c.post(f"/v2/partials/quotes/{quote.id}/preview")
     assert resp.status_code == 200, resp.text
+
+
+# ---------------------------------------------------------------------------
+# QuoteLine-level IDOR tests (update, delete, apply-markup)
+# ---------------------------------------------------------------------------
+
+
+def _add_quote_line(db_session, quote: Quote, mpn: str = "TEST-MPN") -> QuoteLine:
+    """Insert a QuoteLine for *quote* and return it."""
+    line = QuoteLine(
+        quote_id=quote.id,
+        mpn=mpn,
+        manufacturer="TestMfr",
+        qty=10,
+        cost_price=1.00,
+        sell_price=1.25,
+        margin_pct=20.0,
+    )
+    db_session.add(line)
+    db_session.commit()
+    db_session.refresh(line)
+    return line
+
+
+def test_sales_cannot_update_other_users_quote_line(db_session, test_customer_site):
+    """SALES user A gets 404 trying to PUT a line belonging to user B's quote."""
+    user_a = _make_sales_user(db_session, "line-upd-a@trioscs.com", "azure-line-upd-a")
+    user_b = _make_sales_user(db_session, "line-upd-b@trioscs.com", "azure-line-upd-b")
+
+    _req_b, quote_b = _make_req_with_quote(db_session, user_b, test_customer_site, "LINE-UPD")
+    line_b = _add_quote_line(db_session, quote_b, mpn="LM741CN")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.put(
+            f"/v2/partials/quotes/{quote_b.id}/lines/{line_b.id}",
+            data={"mpn": "EVIL-MPN"},
+        )
+    assert resp.status_code == 404, resp.text
+
+    # Verify the line was NOT mutated.
+    db_session.refresh(line_b)
+    assert line_b.mpn == "LM741CN"
+
+
+def test_sales_can_update_own_quote_line(db_session, test_customer_site):
+    """SALES user A can PUT a line on their OWN quote."""
+    user_a = _make_sales_user(db_session, "line-own-upd@trioscs.com", "azure-line-own-upd")
+
+    _req_a, quote_a = _make_req_with_quote(db_session, user_a, test_customer_site, "LINE-OWN-UPD")
+    line_a = _add_quote_line(db_session, quote_a, mpn="LT1028CN")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.put(
+            f"/v2/partials/quotes/{quote_a.id}/lines/{line_a.id}",
+            data={"mpn": "LT1028CN-UPDATED"},
+        )
+    assert resp.status_code == 200, resp.text
+
+    db_session.refresh(line_a)
+    assert line_a.mpn == "LT1028CN-UPDATED"
+
+
+def test_sales_cannot_delete_other_users_quote_line(db_session, test_customer_site):
+    """SALES user A gets 404 trying to DELETE a line belonging to user B's quote."""
+    user_a = _make_sales_user(db_session, "line-del-a@trioscs.com", "azure-line-del-a")
+    user_b = _make_sales_user(db_session, "line-del-b@trioscs.com", "azure-line-del-b")
+
+    _req_b, quote_b = _make_req_with_quote(db_session, user_b, test_customer_site, "LINE-DEL")
+    line_b = _add_quote_line(db_session, quote_b, mpn="NE555P")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.delete(f"/v2/partials/quotes/{quote_b.id}/lines/{line_b.id}")
+    assert resp.status_code == 404, resp.text
+
+    # Line must still exist.
+    surviving = db_session.get(QuoteLine, line_b.id)
+    assert surviving is not None
+
+
+def test_sales_can_delete_own_quote_line(db_session, test_customer_site):
+    """SALES user A can DELETE a line on their OWN quote."""
+    user_a = _make_sales_user(db_session, "line-own-del@trioscs.com", "azure-line-own-del")
+
+    _req_a, quote_a = _make_req_with_quote(db_session, user_a, test_customer_site, "LINE-OWN-DEL")
+    line_a = _add_quote_line(db_session, quote_a, mpn="TL072CP")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.delete(f"/v2/partials/quotes/{quote_a.id}/lines/{line_a.id}")
+    assert resp.status_code == 200, resp.text
+
+    assert db_session.get(QuoteLine, line_a.id) is None
+
+
+def test_sales_cannot_apply_markup_to_other_users_quote(db_session, test_customer_site):
+    """SALES user A gets 404 trying to apply markup to user B's quote."""
+    user_a = _make_sales_user(db_session, "markup-a@trioscs.com", "azure-markup-a")
+    user_b = _make_sales_user(db_session, "markup-b@trioscs.com", "azure-markup-b")
+
+    _req_b, quote_b = _make_req_with_quote(db_session, user_b, test_customer_site, "MARKUP")
+    line_b = _add_quote_line(db_session, quote_b, mpn="UA741CP")
+
+    with _client_as(db_session, user_a) as c:
+        resp = c.post(
+            f"/v2/partials/quotes/{quote_b.id}/apply-markup",
+            data={"markup_pct": "50"},
+        )
+    assert resp.status_code == 404, resp.text
+
+    # Line sell_price must not have changed.
+    db_session.refresh(line_b)
+    assert float(line_b.sell_price) == 1.25
+
+
+def test_admin_can_update_any_quote_line(db_session, admin_user, test_customer_site):
+    """ADMIN can PUT a line on any quote regardless of requisition owner."""
+    other_sales = _make_sales_user(db_session, "line-adm-other@trioscs.com", "azure-line-adm-other")
+    _req, quote = _make_req_with_quote(db_session, other_sales, test_customer_site, "LINE-ADMIN")
+    line = _add_quote_line(db_session, quote, mpn="CD4011BE")
+
+    with _client_as(db_session, admin_user) as c:
+        resp = c.put(
+            f"/v2/partials/quotes/{quote.id}/lines/{line.id}",
+            data={"mpn": "CD4011BE-ADMIN"},
+        )
+    assert resp.status_code == 200, resp.text
+
+    db_session.refresh(line)
+    assert line.mpn == "CD4011BE-ADMIN"
+
+
+def test_admin_can_delete_any_quote_line(db_session, admin_user, test_customer_site):
+    """ADMIN can DELETE a line on any quote regardless of requisition owner."""
+    other_sales = _make_sales_user(db_session, "line-adm-del@trioscs.com", "azure-line-adm-del")
+    _req, quote = _make_req_with_quote(db_session, other_sales, test_customer_site, "LINE-ADMIN-DEL")
+    line = _add_quote_line(db_session, quote, mpn="MC14001BCP")
+
+    with _client_as(db_session, admin_user) as c:
+        resp = c.delete(f"/v2/partials/quotes/{quote.id}/lines/{line.id}")
+    assert resp.status_code == 200, resp.text
+
+    assert db_session.get(QuoteLine, line.id) is None

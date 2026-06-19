@@ -9272,6 +9272,8 @@ async def update_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     form = await request.form()
     if "mpn" in form:
         line.mpn = form["mpn"]
@@ -9312,6 +9314,8 @@ async def delete_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
     db.commit()
     return HTMLResponse("")
@@ -9472,6 +9476,8 @@ async def apply_markup_htmx(
     db: Session = Depends(get_db),
 ):
     """Apply a markup percentage to all lines in the quote."""
+    # Scope ownership check before mutating any lines (raises 404 for SALES on other users' quotes).
+    get_quote_for_user(db, user, quote_id)
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     for line in lines:
         if line.cost_price and float(line.cost_price) > 0:
