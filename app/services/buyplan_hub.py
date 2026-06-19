@@ -12,11 +12,28 @@ Depends on: models.buy_plan (BuyPlan, BuyPlanLine), models.auth (User),
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
+
+
+def _customer_name(plan: BuyPlan) -> str | None:
+    """Derive a display customer name: plan.quote → customer_site → company.name.
+
+    Falls back to the site's ``site_name`` when the company is missing, and to
+    ``None`` when there is no quote/site. Mirrors buy_plans_list_partial in
+    routers/htmx_views.py.
+    """
+    if plan.quote and plan.quote.customer_site:
+        site = plan.quote.customer_site
+        co = site.company if hasattr(site, "company") else None
+        return co.name if co else getattr(site, "site_name", None)
+    return None
 
 
 def buyer_line_queue(db: Session, user: object) -> list[dict]:
@@ -57,14 +74,7 @@ def buyer_line_queue(db: Session, user: object) -> list[dict]:
     rows = []
     for ln in lines:
         plan = ln.buy_plan
-
-        # Derive customer_name: plan.quote → customer_site → company.name, with site_name fallback
-        # Mirrors buy_plans_list_partial in routers/htmx_views.py
-        customer_name = None
-        if plan.quote and plan.quote.customer_site:
-            site = plan.quote.customer_site
-            co = site.company if hasattr(site, "company") else None
-            customer_name = co.name if co else getattr(site, "site_name", None)
+        customer_name = _customer_name(plan)
 
         req = ln.requirement
         offer = ln.offer
@@ -210,12 +220,7 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
             # Safety net — CANCELLED already filtered above; unknown status skipped
             continue
 
-        # Derive customer_name: plan.quote → customer_site → company.name
-        customer_name = None
-        if plan.quote and plan.quote.customer_site:
-            site = plan.quote.customer_site
-            co = site.company if hasattr(site, "company") else None
-            customer_name = co.name if co else getattr(site, "site_name", None)
+        customer_name = _customer_name(plan)
 
         # po_progress: (verified_count, total_non_cancelled_count)
         active_lines = [ln for ln in plan.lines if ln.status != BuyPlanLineStatus.CANCELLED]
@@ -288,10 +293,6 @@ def supervise_overview(db: Session) -> dict:
     Line dicts contain: line_id, plan_id, mpn, vendor_name, buyer_name,
                         plus issue_type for flagged items.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from sqlalchemy import func
-
     nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
 
     # ── Strip aggregates (single query) ──────────────────────────────
@@ -364,13 +365,6 @@ def supervise_overview(db: Session) -> dict:
     )
 
     # ── Helpers ──────────────────────────────────────────────────────
-    def _customer(plan: BuyPlan) -> str | None:
-        if plan.quote and plan.quote.customer_site:
-            site = plan.quote.customer_site
-            co = site.company if hasattr(site, "company") else None
-            return co.name if co else getattr(site, "site_name", None)
-        return None
-
     def _submitted_by_name(plan: BuyPlan) -> str | None:
         sub = plan.submitted_by
         if sub:
@@ -380,7 +374,7 @@ def supervise_overview(db: Session) -> dict:
     def _plan_dict(plan: BuyPlan) -> dict:
         return {
             "plan_id": plan.id,
-            "customer_name": _customer(plan),
+            "customer_name": _customer_name(plan),
             "value": plan.total_cost,
             "submitted_by_name": _submitted_by_name(plan),
         }
