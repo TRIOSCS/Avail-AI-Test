@@ -485,12 +485,17 @@ def _build_batch_request(
 
 async def claude_batch_submit(
     requests: list[dict],
+    *,
+    cost_bucket: str | None = None,
 ) -> str | None:
     """Submit a batch of structured output requests to the Anthropic Batch API.
 
     Args:
         requests: List of dicts with keys:
             custom_id, prompt, schema, system, model_tier, max_tokens
+        cost_bucket: Optional Redis metering bucket (e.g. "email_mining").
+            Passed through to ``claude_batch_results`` where per-entry usage
+            is metered on poll completion; no metering occurs at submit time.
 
     Returns:
         Batch ID string for polling, or None on failure.
@@ -546,8 +551,16 @@ async def claude_batch_submit(
 
 async def claude_batch_results(
     batch_id: str,
+    *,
+    cost_bucket: str | None = None,
 ) -> dict | None:
     """Check batch status and retrieve results if complete.
+
+    Args:
+        batch_id: Batch ID returned by ``claude_batch_submit``.
+        cost_bucket: Optional Redis metering bucket (e.g. "email_mining").
+            When set, calls ``_meter_usage`` for each succeeded entry so
+            per-entry token cost is visible in Redis usage counters.
 
     Returns:
         None if still processing or on error.
@@ -610,6 +623,17 @@ async def claude_batch_results(
 
                 if result.get("type") == "succeeded":
                     message = result.get("message", {})
+                    # Meter per-entry token usage when a cost_bucket is set.
+                    if cost_bucket:
+                        model_id = message.get("model", "")
+                        # Derive tier from model id (mirrors streaming path heuristic)
+                        if "haiku" in model_id:
+                            entry_tier = "fast"
+                        elif "opus" in model_id:
+                            entry_tier = "opus"
+                        else:
+                            entry_tier = "smart"
+                        _meter_usage(cost_bucket, entry_tier, message.get("usage", {}))
                     # Extract tool_use input (same as claude_structured)
                     raw_input = _extract_tool_input(message.get("content", []))
                     if raw_input is _MISSING:

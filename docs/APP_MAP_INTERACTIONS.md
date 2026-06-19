@@ -363,6 +363,7 @@ capture_datasheet(mpn, user_id)
     |       SSRF guard: scheme + per-hop IP check (blocks private/loopback/
     |       link-local/multicast/reserved); follows ≤5 redirects, re-validates
     |       each hop; 25 MB size cap; must begin with %PDF- magic bytes.
+    |       (DNS resolution runs in asyncio.to_thread to avoid blocking the loop.)
     |
     +-- source=="web": pdf_contains_mpn(pdf, mpn)?
     |       pypdf extracts text from first 20 pages; MPN normalised to alnum-lower
@@ -371,25 +372,46 @@ capture_datasheet(mpn, user_id)
     +-- cardless MPN + verified hit: resolve_material_card(mpn, db)
     |       creates a card only on a *verified* hit (miss never creates a card)
     |
-    +-- upload_bytes_to_onedrive(user, db,
-    |       folder="AvailAI/Datasheets/{card.id}",
-    |       name="{display_mpn}-datasheet.pdf")
-    |       → {onedrive_item_id, onedrive_url, size_bytes}
+    +-- upload_datasheet_to_library(file_name, pdf, "application/pdf",
+    |       manufacturer=card.manufacturer)                      [datasheet_library.py]
+    |       |
+    |       +-- get_app_graph_token()                           [graph_app_auth.py]
+    |       |   client-credentials (AZURE_CLIENT_ID/SECRET/TENANT_ID);
+    |       |   requires Sites.Selected application permission; cached 55 min.
+    |       |   Returns None → skip storage gracefully.
+    |       |
+    |       +-- PUT /drives/{DATASHEET_LIBRARY_DRIVE_ID}/root:/
+    |               Datasheets/{manufacturer}/{MPN}-datasheet.pdf:/content
+    |       → {onedrive_item_id, onedrive_url, size_bytes, library_drive_id}
+    |       DATASHEET_LIBRARY_DRIVE_ID unset or token unavailable → returns None
+    |       (capture stamps datasheet_searched_at and returns; upload is optional)
     |
-    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 108)
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 116)
          UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
 ```
 
 `material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
-`onedrive_url`, `source` ("connector"/"web"), `original_url`, `verified`, `captured_at`.
+`onedrive_url`, `library_drive_id` (Graph drive id of the company library),
+`source` ("connector"/"web"), `original_url`, `verified`, `uploaded_by_id`
+(optional; user who triggered the capture), `captured_at`.
 `MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
 `datasheet_searched_at` (any attempt — gates the 30-day negative cache).
 
+**Storage: company SharePoint library (app-only).** Storage goes to a shared
+SharePoint document library, not a per-user OneDrive. The app uses an app-only
+Graph token (`graph_app_auth.get_app_graph_token`, client-credentials flow) so no
+user must be present. One-time Azure-admin setup required: create the SharePoint
+library, grant the Azure app `Sites.Selected` (application permission, admin-consented)
+scoped to that site, and set `DATASHEET_LIBRARY_DRIVE_ID` to the library's Graph drive
+id. Until that env var is set the upload step is silently skipped.
+
 **Dossier UI** (`dossier_datasheet_block.html`, included in `dossier_specs`) has three
-states: (a) `card.datasheets[0]` present → branded link "Datasheet (saved MMM DD, YYYY)"
-to the OneDrive copy; (b) `datasheet_searched_at` set but no captured copy →
-"No datasheet found (will retry)"; (c) neither stamp yet → "Fetching Datasheet…" spinner
-that polls `GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
+states: (a) `card.datasheets[0]` present → "Datasheet (saved MMM DD, YYYY)" link that
+hits the in-app streaming endpoint `GET /v2/partials/search/dossier/datasheet/{id}/download`
+(fetches from the company library via app-only token, streams as `application/pdf`);
+(b) `datasheet_searched_at` set but no captured copy → "No datasheet found (will retry)";
+(c) neither stamp yet → "Fetching Datasheet…" spinner that polls
+`GET /v2/partials/search/dossier/datasheet-status?mpn=` every 15 s
 (`hx-trigger="every 15s"`). The status endpoint returns the same `dossier_datasheet_block`
 fragment and responds HTTP 286 (stops HTMX polling) once either stamp is set.
 
@@ -621,11 +643,33 @@ extra form step required.
 
 **One-tap vendor requests (#7).** `POST .../offers/{offer_id}/request` (scoped to
 the path's `requirement_id` to prevent IDOR) accepts `kind` ∈ `REQUEST_KINDS`
-(`images`/`fpq`/`cert`/`pkg_qty`). v1: logs the pending request into
-`offer.qualification["requests"]` and drafts the request text via `request_template`;
-does NOT auto-send email (the existing solicit modal sends). The `offer_id` is
-validated against the `requirement_id` path parameter so a buyer can only request
-on their own requirement's offers.
+(`images`/`fpq`/`cert`/`pkg_qty`). Logs the pending request into
+`offer.qualification["requests"]` (status `"pending"`) and drafts the request text via
+`request_template`. This route is `require_buyer`-only (NO Graph token) so logging
+never 401s on an expired M365 token. The `offer_id` is validated against the
+`requirement_id` path parameter so a buyer can only request on their own requirement's
+offers.
+
+**Sending a logged request (#7 send).** `POST .../offers/{offer_id}/request/{index}/send`
+(`sightings_offer_request_send`) sends a single PENDING entry as a real RFQ-back email.
+This is a SEPARATE, token-bearing route: it adds `require_fresh_token` on top of
+`require_buyer` so the actual send fails loudly on an expired token while LOGGING never
+does. `{index}` addresses the append-only `qualification["requests"]` list (stable
+index). It resolves the vendor's best contact email via `_best_contacts_by_card`
+(mirroring the batch send-inquiry path), drafts the body with `request_template`, and
+hands ONE vendor group to `send_batch_rfq` with the SCALAR `requisition_id`
+(single-requisition mode — passing the scalar AND a parts-map raises `ValueError`).
+Because `send_batch_rfq` commits internally and can expire the session, the entry-status
+update is applied AFTER it returns against a freshly re-fetched offer (and the mutated
+entry is re-slotted as a fresh nested dict so the JSON column flush is detectable — a
+shallow copy would mutate the committed baseline and persist nothing). Outcomes per
+entry: `sent` (records `contact_id`/`sent_at` and logs an `rfq_sent` activity, but does
+NOT auto-progress the sourcing status — one clarification is not a full RFQ round),
+`skipped` (no contact email, OR `offer.requisition_id is None` since
+`Contact.requisition_id` is NOT NULL — guarded BEFORE any send), `failed` (records the
+error). Idempotent: an already-`sent` entry is a no-op. The template shows a per-PENDING
+**Send** button next to each pending request pill (`status_colors` adds `skipped`/`failed`
+states).
 
 **Live badge/meter vs. stored snapshot.** `Offer.qualification_summary` (property)
 recomputes status+meter live from the current column values — the display badge always

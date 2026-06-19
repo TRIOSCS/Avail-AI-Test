@@ -70,6 +70,9 @@ class Settings(BaseSettings):
     azure_client_id: str = ""
     azure_client_secret: str = ""
     azure_tenant_id: str = ""
+    # Company-wide SharePoint datasheet library (app-only Graph). Empty = storage skipped.
+    datasheet_library_drive_id: str = ""
+    datasheet_library_subpath: str = "Datasheets"
 
     # --- Nexar (Octopart) ---
     nexar_client_id: str = ""

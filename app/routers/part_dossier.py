@@ -24,16 +24,17 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Form, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
-from ..models.intelligence import MaterialCard
+from ..models.intelligence import MaterialCard, MaterialCardDatasheet
 from ..models.sourcing import Requisition
+from ..services.datasheet_library import fetch_datasheet_bytes
 from ..services.quick_source_service import get_or_create_scratch_req, persist_rows_as_sightings
 from ..template_env import template_response
 from ..utils.async_helpers import safe_background_task
@@ -342,3 +343,26 @@ async def quick_source_offer(
             capture_datasheet(mpn.strip().upper(), user.id), task_name="datasheet_capture", suppress_in_testing=True
         )
     return response
+
+
+@router.get("/v2/partials/search/dossier/datasheet/{datasheet_id:int}/download")
+async def dossier_datasheet_download(
+    datasheet_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Stream our stored datasheet copy from the company library (app-only fetch)."""
+    row = db.query(MaterialCardDatasheet).filter(MaterialCardDatasheet.id == datasheet_id).first()
+    if row is None or not row.onedrive_item_id:
+        raise HTTPException(404, "Datasheet not found")
+    data = await fetch_datasheet_bytes(row.library_drive_id, row.onedrive_item_id)
+    if data is None:
+        raise HTTPException(502, "Datasheet temporarily unavailable")
+    # Allowlist the filename for the Content-Disposition header — file_name derives from
+    # display_mpn (external-ish), so strip anything that could inject a header (CR/LF/quote).
+    safe_name = "".join(c for c in (row.file_name or "") if c.isalnum() or c in "._- ") or "datasheet.pdf"
+    return StreamingResponse(
+        iter([data]),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
+    )

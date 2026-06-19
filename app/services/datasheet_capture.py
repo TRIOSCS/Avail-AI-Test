@@ -18,7 +18,7 @@ from loguru import logger
 from ..database import SessionLocal
 from ..http_client import http
 from ..utils.normalization import normalize_mpn_key
-from .onedrive_files import upload_bytes_to_onedrive
+from .datasheet_library import upload_datasheet_to_library
 
 MAX_DATASHEET_BYTES = 25 * 1024 * 1024
 _MAX_VERIFY_PAGES = 20
@@ -68,9 +68,11 @@ async def download_pdf(url: str) -> bytes | None:
     bytes iff it is a PDF within the size cap."""
     if not url:
         return None
+    import asyncio
+
     current = url
     for _ in range(_MAX_REDIRECTS + 1):
-        if not _is_safe_url(current):
+        if not await asyncio.to_thread(_is_safe_url, current):
             logger.warning("datasheet download blocked unsafe url={}", current)
             return None
         try:
@@ -119,7 +121,6 @@ def pdf_contains_mpn(pdf_bytes: bytes, mpn: str) -> bool:
 # ── Finder + capture orchestrator (Task 6) ──────────────────────────────────
 
 CAPTURE_COOLDOWN_DAYS = 30
-_ONEDRIVE_FOLDER = "AvailAI/Datasheets"
 
 
 def _load_user(db, user_id: int):
@@ -209,12 +210,9 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             if card is None:
                 return
 
-        user = _load_user(db, user_id)
-        if user is None:
-            _stamp_searched(db, card)
-            return
-        meta = await upload_bytes_to_onedrive(
-            user, db, f"{_ONEDRIVE_FOLDER}/{card.id}", f"{card.display_mpn}-datasheet.pdf", pdf, "application/pdf"
+        user = _load_user(db, user_id)  # optional attribution; storage no longer needs a user token
+        meta = await upload_datasheet_to_library(
+            f"{card.display_mpn}-datasheet.pdf", pdf, "application/pdf", manufacturer=card.manufacturer or ""
         )
         if not meta:
             _stamp_searched(db, card)
@@ -227,12 +225,13 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
                 file_name=f"{card.display_mpn}-datasheet.pdf",
                 onedrive_item_id=meta["onedrive_item_id"],
                 onedrive_url=meta["onedrive_url"],
+                library_drive_id=meta["library_drive_id"],
                 content_type="application/pdf",
                 size_bytes=meta["size_bytes"],
                 source=source,
                 original_url=url,
                 verified=True,
-                uploaded_by_id=user.id,
+                uploaded_by_id=user.id if user is not None else None,
                 captured_at=now,
             )
         )

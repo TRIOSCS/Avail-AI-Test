@@ -101,6 +101,9 @@ from .auth import _password_login_enabled
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
+_NAV_ID_ALIAS = {"buy-plans": "reporting", "quotes": "reporting"}
+
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
 _vite_manifest: dict = {}
@@ -278,6 +281,7 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
+@router.get("/v2/reporting", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -307,6 +311,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "buy-plans",
         "excess",
         "quotes",
+        "reporting",
         "prospecting",
         "proactive",
         "settings",
@@ -356,7 +361,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
 
-    ctx = _base_ctx(request, user, current_view)
+    nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
+    ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return template_response("htmx/base_page.html", ctx)
 
@@ -1273,6 +1279,7 @@ async def requisition_tab(
     request: Request,
     req_id: int,
     tab: str,
+    qual: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1299,9 +1306,10 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
-        offers = (
-            db.query(Offer).filter(Offer.requisition_id == req_id).order_by(Offer.created_at.desc().nullslast()).all()
-        )
+        q = db.query(Offer).filter(Offer.requisition_id == req_id)
+        if qual in ("unset", "incomplete", "essentials", "complete"):
+            q = q.filter(Offer.qualification_status == qual)
+        offers = q.order_by(Offer.created_at.desc().nullslast()).all()
         # Check for existing draft quote to show "Add to Quote" button
         draft_quote = (
             db.query(Quote)
@@ -1311,6 +1319,7 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
+        ctx["qual"] = qual
         return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
@@ -2130,33 +2139,10 @@ async def add_offer(
 
     from ..services.offer_qualification import (
         apply_qualification,
-        essentials_data,
         normalize_offer_condition,
-        validate_essentials,
     )
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
-
-    # Gate: validate the submitted essentials before persisting. On a missing essential,
-    # return the existing inline 400 error and do not create the offer.
-    norm_condition = normalize_offer_condition(form.get("condition")) or (form.get("condition") or None)
-    gate_errors = validate_essentials(
-        norm_condition,
-        essentials_data(
-            manufacturer=form.get("manufacturer"),
-            packaging=form.get("packaging"),
-            usage=form.get("usage"),
-            refurbished_by=form.get("refurbished_by"),
-            refurb_process=form.get("refurb_process"),
-            cert_doc=form.get("cert_doc"),
-            part_condition=form.get("part_condition"),
-        ),
-    )
-    if gate_errors:
-        return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
-            status_code=400,
-        )
 
     offer = Offer(
         requisition_id=req_id,
@@ -2349,9 +2335,7 @@ async def edit_offer(
 
     from ..services.offer_qualification import (
         apply_qualification,
-        essentials_data,
         normalize_offer_condition,
-        validate_essentials,
     )
 
     _qkeys = (
@@ -2375,26 +2359,6 @@ async def edit_offer(
     if cond_raw:
         offer.condition = normalize_offer_condition(cond_raw) or cond_raw
 
-    # Gate: validate the effective essentials before persisting. On a missing essential,
-    # return the existing inline 400 error and do not commit.
-    _q = offer.qualification or {}
-    gate_errors = validate_essentials(
-        offer.condition,
-        essentials_data(
-            manufacturer=offer.manufacturer,
-            packaging=offer.packaging,
-            usage=_q.get("usage"),
-            refurbished_by=_q.get("refurbished_by"),
-            refurb_process=_q.get("refurb_process"),
-            cert_doc=_q.get("cert_doc"),
-            part_condition=_q.get("part_condition"),
-        ),
-    )
-    if gate_errors:
-        return HTMLResponse(
-            f'<div class="text-sm text-rose-600 p-2">{"; ".join(gate_errors)}</div>',
-            status_code=400,
-        )
     apply_qualification(offer)  # non-raising: composes note + sets status
     offer.updated_at = now
     offer.updated_by_id = user.id
@@ -6405,6 +6369,12 @@ async def log_phone_call(
     )
     if log is not None:
         log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
+        # A manually logged call is a deliberate human interaction → always meaningful,
+        # regardless of P1e's duration-gating in log_call_activity (which targets
+        # auto-captured Teams/8x8 calls that carry a real duration). Without this, a
+        # no-duration manual log lands is_meaningful=False and drops out of the
+        # meaningful-activity surfaces and the reply clock.
+        log.is_meaningful = True
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 
@@ -6888,9 +6858,10 @@ async def buy_plans_list_partial(
         )
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
+    # Buy Plans lives under the Reporting nav now, so the source is registered there.
     from ..services.alerts import markers_for_tab
 
-    alert_markers = markers_for_tab(db, user, "buy-plans")
+    alert_markers = markers_for_tab(db, user, "reporting")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
@@ -10297,6 +10268,8 @@ async def proactive_convert(
     offer = db.query(ProactiveOffer).filter(ProactiveOffer.id == offer_id).first()
     if not offer:
         raise HTTPException(404, "Proactive offer not found")
+    if offer.salesperson_id and offer.salesperson_id != user.id:
+        raise HTTPException(403, "Not your proactive offer")
 
     try:
         from ..services.proactive_service import convert_proactive_to_win
@@ -10306,7 +10279,12 @@ async def proactive_convert(
             "htmx/partials/proactive/convert_success.html",
             {"request": request, "offer": offer, "result": result},
         )
-    except (ImportError, RuntimeError, Exception) as exc:
+    except ValueError as exc:
+        exc_str = str(exc).lower()
+        if "already converted" in exc_str:
+            raise HTTPException(409, "This offer has already been converted.")
+        raise HTTPException(403, str(exc))
+    except Exception as exc:
         logger.error("Proactive conversion failed: {}", exc)
         raise HTTPException(500, "Conversion failed. Please try again.")
 

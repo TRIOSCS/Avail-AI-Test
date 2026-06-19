@@ -1,0 +1,163 @@
+{# reporting/pipeline.html — Pipeline & Forecast (the Requisition is the opportunity).
+   Receives: pipeline (dict from forecast_service.pipeline_summary),
+             pipeline_accounts (list), pipeline_owners (list),
+             funnel (dict from forecast_service.conversion_funnel).
+   Called by: reporting/dashboard.html
+   Depends on: brand palette, Tailwind CSS. No JS.
+#}
+<div class="space-y-6">
+
+  {# Section header #}
+  <div>
+    <h2 class="text-lg font-semibold text-gray-900">Pipeline &amp; Forecast</h2>
+    <p class="mt-0.5 text-sm text-gray-500">
+      Open requisitions weighted by stage win-probability. Honest and real-time — every
+      requisition is an opportunity.
+    </p>
+  </div>
+
+  {# Top-line cards #}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+      <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Open Pipeline</p>
+      <p class="mt-1 text-2xl font-semibold text-gray-900">${{ "{:,.0f}".format(pipeline.open_value) }}</p>
+      <p class="mt-0.5 text-xs text-gray-400">{{ pipeline.open_count }} open requisition{{ '' if pipeline.open_count == 1 else 's' }}</p>
+    </div>
+    <div class="rounded-lg border border-brand-300 bg-brand-50 p-5 shadow-sm">
+      <p class="text-xs font-medium uppercase tracking-wide text-brand-600">Weighted Forecast</p>
+      <p class="mt-1 text-2xl font-semibold text-brand-800">${{ "{:,.0f}".format(pipeline.weighted_value) }}</p>
+      <p class="mt-0.5 text-xs text-brand-500">expected value (Σ value × probability)</p>
+    </div>
+    <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+      <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Won</p>
+      <p class="mt-1 text-2xl font-semibold text-green-700">${{ "{:,.0f}".format(pipeline.won_value) }}</p>
+      <p class="mt-0.5 text-xs text-gray-400">{{ pipeline.won_count }} won · {{ pipeline.lost_count }} lost</p>
+    </div>
+    <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+      <p class="text-xs font-medium uppercase tracking-wide text-gray-500">Win Rate</p>
+      <p class="mt-1 text-2xl font-semibold text-gray-900">{{ (pipeline.win_rate * 100) | round | int }}%</p>
+      <p class="mt-0.5 text-xs text-gray-400">won ÷ (won + lost)</p>
+    </div>
+  </div>
+
+  {# Pipeline by stage #}
+  <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+    <h3 class="text-sm font-semibold text-gray-900 mb-3">Pipeline by stage</h3>
+    {% if pipeline.open_count %}
+    <div class="space-y-2.5">
+      {% for stage in pipeline.by_stage %}
+      {% if stage.count %}
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1">
+          <span class="font-medium text-gray-700">{{ stage.label }}
+            <span class="text-gray-400">· {{ stage.count }}</span>
+          </span>
+          <span class="text-gray-500">${{ "{:,.0f}".format(stage.value) }}
+            <span class="text-brand-600">→ ${{ "{:,.0f}".format(stage.weighted) }}</span>
+          </span>
+        </div>
+        <div class="h-2 w-full rounded-full bg-brand-50 overflow-hidden">
+          <div class="h-full rounded-full bg-brand-500"
+               style="width: {{ ((stage.value / pipeline.open_value * 100) if pipeline.open_value else 0) | round(1) }}%"></div>
+        </div>
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <p class="text-sm text-gray-400 py-2">No open requisitions in the pipeline.</p>
+    {% endif %}
+  </div>
+
+  {# Two-column: top accounts + owner leaderboard #}
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+
+    {# Top accounts by weighted pipeline #}
+    <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+      <h3 class="text-sm font-semibold text-gray-900 mb-3">Top accounts</h3>
+      {% if pipeline_accounts %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-gray-400 border-b border-brand-100">
+            <th class="text-left font-medium pb-1.5">Account</th>
+            <th class="text-right font-medium pb-1.5">Open</th>
+            <th class="text-right font-medium pb-1.5">Weighted</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for acc in pipeline_accounts %}
+          <tr class="border-b border-brand-50 last:border-0">
+            <td class="py-1.5 text-gray-800 truncate max-w-[180px]">{{ acc.company_name }}</td>
+            <td class="py-1.5 text-right text-gray-500">${{ "{:,.0f}".format(acc.open_value) }}</td>
+            <td class="py-1.5 text-right font-medium text-brand-700">${{ "{:,.0f}".format(acc.weighted_value) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-sm text-gray-400 py-2">No accounts with open pipeline.</p>
+      {% endif %}
+    </div>
+
+    {# Owner leaderboard #}
+    <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+      <h3 class="text-sm font-semibold text-gray-900 mb-3">By owner</h3>
+      {% if pipeline_owners %}
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-gray-400 border-b border-brand-100">
+            <th class="text-left font-medium pb-1.5">Owner</th>
+            <th class="text-right font-medium pb-1.5">Weighted</th>
+            <th class="text-right font-medium pb-1.5">Won</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for owner in pipeline_owners %}
+          <tr class="border-b border-brand-50 last:border-0">
+            <td class="py-1.5 text-gray-800 truncate max-w-[180px]">{{ owner.owner_name }}</td>
+            <td class="py-1.5 text-right font-medium text-brand-700">${{ "{:,.0f}".format(owner.weighted_value) }}</td>
+            <td class="py-1.5 text-right text-green-700">${{ "{:,.0f}".format(owner.won_value) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <p class="text-sm text-gray-400 py-2">No owners with open pipeline.</p>
+      {% endif %}
+    </div>
+
+  </div>
+
+  {# Conversion funnel — interactions → RFQs → quotes → orders #}
+  <div class="rounded-lg border border-brand-200 bg-white p-5 shadow-sm">
+    <div class="flex items-baseline justify-between mb-3">
+      <h3 class="text-sm font-semibold text-gray-900">Conversion funnel</h3>
+      <span class="text-xs text-gray-400">last {{ funnel.window_days }} days</span>
+    </div>
+    {% set funnel_stages = [
+      ('Opportunities', funnel.opportunities),
+      ('Sourcing', funnel.sourcing),
+      ('Quoted', funnel.quoted),
+      ('Won', funnel.won)
+    ] %}
+    <div class="space-y-2.5">
+      {% for label, count in funnel_stages %}
+      <div>
+        <div class="flex items-center justify-between text-xs mb-1">
+          <span class="font-medium text-gray-700">{{ label }}</span>
+          <span class="text-gray-500">{{ count }}
+            {% if funnel.opportunities and not loop.first %}
+            <span class="text-gray-400">· {{ (count / funnel.opportunities * 100) | round | int }}%</span>
+            {% endif %}
+          </span>
+        </div>
+        <div class="h-2.5 w-full rounded-full bg-brand-50 overflow-hidden">
+          <div class="h-full rounded-full bg-brand-400"
+               style="width: {{ ((count / funnel.opportunities * 100) if funnel.opportunities else 0) | round(1) }}%"></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</div>
