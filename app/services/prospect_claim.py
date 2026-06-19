@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants import ProspectAccountStatus
@@ -256,19 +257,28 @@ def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, i
             if existing:
                 prospect_id = existing.id
             else:
-                prospect = ProspectAccount(
-                    name=company.name,
-                    domain=domain,
-                    discovery_source="sent_back",
-                    status=ProspectAccountStatus.SUGGESTED,
-                    fit_score=0,
-                    readiness_score=0,
-                    company_id=company.id,
-                    enrichment_data={"sent_back_by": user_id},
-                )
-                db.add(prospect)
-                db.flush()
-                prospect_id = prospect.id
+                # ProspectAccount.domain is UNIQUE NOT NULL. Insert inside a SAVEPOINT
+                # so a concurrent send claiming the same domain rolls back ONLY the
+                # failed insert (the ownership-clear above survives); then adopt the
+                # row the other writer created instead of bubbling a 500.
+                try:
+                    with db.begin_nested():
+                        prospect = ProspectAccount(
+                            name=company.name,
+                            domain=domain,
+                            discovery_source="sent_back",
+                            status=ProspectAccountStatus.SUGGESTED,
+                            fit_score=0,
+                            readiness_score=0,
+                            company_id=company.id,
+                            enrichment_data={"sent_back_by": user_id},
+                        )
+                        db.add(prospect)
+                        db.flush()
+                    prospect_id = prospect.id
+                except IntegrityError:
+                    dup = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+                    prospect_id = dup.id if dup else None
 
         db.commit()
     except Exception:
