@@ -139,7 +139,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.1
+pydantic-settings==2.14.2
     # via -r requirements.in
 pydyf==0.12.1
     # via weasyprint
@@ -200,6 +200,7 @@ typing-extensions==4.15.0
     # via
     #   alembic
     #   anthropic
+    #   anyio
     #   azure-communication-callautomation
     #   azure-core
     #   beautifulsoup4
@@ -209,6 +210,7 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pyee
     #   sqlalchemy
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
     # via

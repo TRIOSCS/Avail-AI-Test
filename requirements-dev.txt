@@ -146,7 +146,7 @@ matplotlib-inline==0.2.2
     # via ipython
 mdurl==0.1.2
     # via markdown-it-py
-msgpack==1.1.2
+msgpack==1.2.1
     # via cachecontrol
 mypy==2.1.0
     # via
@@ -339,10 +339,15 @@ types-setuptools==82.0.0.20260518
 typing-extensions==4.15.0
     # via
     #   -c requirements.txt
+    #   anyio
+    #   cyclonedx-python-lib
     #   mypy
     #   pyee
+    #   pytest-asyncio
+    #   referencing
     #   schemathesis
     #   sqlalchemy
+    #   starlette
 urllib3==2.7.0
     # via
     #   -c requirements.txt
