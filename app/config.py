@@ -322,6 +322,19 @@ class Settings(BaseSettings):
     prospecting_expire_days: int = 90
     prospecting_resurface_days: int = 180
 
+    # --- SP4: Account Reclamation ---
+    # Nightly sweep: reassigns accounts inactive beyond the threshold from their owner
+    # into the prospect pool for redistribution. Default off — enable at go-live.
+    account_sweep_enabled: bool = False
+    # Days without any CRM activity (note, RFQ, meeting, email) before an account is
+    # swept from its owner back into the prospect pool.
+    account_sweep_inactivity_days: int = 90
+    # Manager email that receives the nightly sweep digest (blank = no digest sent).
+    account_sweep_manager_email: str = ""
+    # Auto-surface previously swept accounts that have become active again (new RFQ,
+    # inbound email, etc.) — re-adds them to the prospect pool as suggested.
+    account_reactivation_sweep_enabled: bool = True
+
     # --- SP3: AI Account Screening ---
     # Feature gate — default off; flip on when ready to spend Claude credits on screening.
     ai_screen_enabled: bool = False
