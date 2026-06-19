@@ -5425,12 +5425,13 @@ async def company_site_detail_partial(
     # (keeps the is_active + Increment-1 priority/archive sort).
     contact_rows = _company_contact_rows(db, company_id, sites=[site])
 
-    # Open requisitions AT THIS SITE — FK-scoped, open statuses only.
+    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
+    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
     open_reqs = (
         db.query(Requisition)
         .filter(
             Requisition.customer_site_id == site_id,
-            Requisition.status.notin_([RequisitionStatus.ARCHIVED, RequisitionStatus.WON, RequisitionStatus.LOST]),
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
         )
         .order_by(Requisition.created_at.desc().nullslast())
         .limit(50)
