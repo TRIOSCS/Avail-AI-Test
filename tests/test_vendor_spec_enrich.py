@@ -15,7 +15,7 @@ from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
 from app.services.spec_tiers import SOURCE_TIER, set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
-from app.services.vendor_spec_enrich import enrich_card_from_element14, enrich_card_from_mouser
+from app.services.vendor_spec_enrich import EnrichSummary, enrich_card_from_element14, enrich_card_from_mouser
 
 
 def _facets(db: Session, card_id: int) -> dict:
@@ -68,9 +68,9 @@ def test_capacitor_categorized_and_facets_written(db_session: Session):
         assert f.source == "connector_desc"
         assert f.tier == 84
 
-    assert summary["categorized"] == 1
-    assert summary["specs_written"] == len(facets)
-    assert summary["specs_written"] >= 4
+    assert summary.categorized == 1
+    assert summary.specs_written == len(facets)
+    assert summary.specs_written >= 4
 
 
 def test_resistor_categorized_and_facets_written(db_session: Session):
@@ -88,8 +88,8 @@ def test_resistor_categorized_and_facets_written(db_session: Session):
     assert "tolerance" in facets and facets["tolerance"].value_text == "1%"
     assert "package" in facets and facets["package"].value_text == "0402"
 
-    assert summary["categorized"] == 1
-    assert summary["specs_written"] == len(facets)
+    assert summary.categorized == 1
+    assert summary.specs_written == len(facets)
 
 
 def test_empty_results_no_op(db_session: Session):
@@ -101,7 +101,7 @@ def test_empty_results_no_op(db_session: Session):
 
     assert card.category is None
     assert _facets(db_session, card.id) == {}
-    assert summary == {"categorized": 0, "specs_written": 0}
+    assert summary == EnrichSummary()
 
 
 def test_first_non_empty_result_chosen(db_session: Session):
@@ -117,8 +117,8 @@ def test_first_non_empty_result_chosen(db_session: Session):
     db_session.commit()
 
     assert card.category == "capacitors"
-    assert summary["categorized"] == 1
-    assert summary["specs_written"] >= 4
+    assert summary.categorized == 1
+    assert summary.specs_written >= 4
 
 
 def test_higher_tier_category_wins_ladder_no_cap_facets(db_session: Session):
@@ -136,7 +136,7 @@ def test_higher_tier_category_wins_ladder_no_cap_facets(db_session: Session):
     db_session.commit()
 
     assert card.category == "dram"  # higher-tier trio_source category held the ladder
-    assert summary["categorized"] == 0
+    assert summary.categorized == 0
     facets = _facets(db_session, card.id)
     assert "capacitance" not in facets
     assert "dielectric" not in facets
@@ -184,7 +184,7 @@ def test_no_commodity_resolvable_is_a_no_op(db_session: Session):
 
     assert card.category is None
     assert _facets(db_session, card.id) == {}
-    assert summary == {"categorized": 0, "specs_written": 0}
+    assert summary == EnrichSummary()
 
 
 def test_no_commit_in_writer(db_session: Session):
@@ -241,8 +241,8 @@ def test_element14_categorizes_and_writes_specs_at_tier_90(db_session: Session):
         assert f.source == "element14_api"
         assert f.tier == 90
 
-    assert summary["categorized"] == 1
-    assert summary["specs_written"] == len(facets)
+    assert summary.categorized == 1
+    assert summary.specs_written == len(facets)
 
 
 def test_element14_logs_dropped_coverage_gap(db_session: Session):
@@ -261,6 +261,27 @@ def test_element14_logs_dropped_coverage_gap(db_session: Session):
         logger.remove(sink)
 
     assert any("unmapped attribute" in m for m in messages), messages
+
+
+def test_element14_no_dropped_attrs_emits_no_coverage_gap_log(db_session: Session):
+    """GAP-2 (negative): a result with no ``dropped`` (empty / absent) must NOT emit the
+    "unmapped attribute" coverage-gap INFO log — the gap signal fires ONLY when there is
+    a real gap (mirror of test_element14_logs_dropped_coverage_gap)."""
+    from loguru import logger
+
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    # Same usable result, but with an EMPTY dropped dict (and a sibling with dropped absent).
+    no_drop = {**_E14_CAP_RESULT, "dropped": {}}
+
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(m.record["message"]), level="INFO")
+    try:
+        enrich_card_from_element14(db_session, card, [no_drop])
+    finally:
+        logger.remove(sink)
+
+    assert not any("unmapped attribute" in m for m in messages), messages
 
 
 def test_element14_tier_90_beats_lower_tier_desc_parse(db_session: Session):
@@ -298,7 +319,7 @@ def test_element14_does_not_clobber_higher_tier_trio_source(db_session: Session)
     db_session.commit()
 
     assert card.category == "dram"
-    assert summary["categorized"] == 0
+    assert summary.categorized == 0
     assert "capacitance" not in _facets(db_session, card.id)
 
 
@@ -318,7 +339,7 @@ def test_element14_bad_enum_value_dropped_by_schema_gate(db_session: Session):
     facets = _facets(db_session, card.id)
     assert "capacitance" in facets
     assert "tolerance" not in facets  # off-enum value dropped by the schema gate
-    assert summary["specs_written"] == 1
+    assert summary.specs_written == 1
 
 
 def test_element14_no_specs_result_is_categorize_only(db_session: Session):
@@ -331,8 +352,29 @@ def test_element14_no_specs_result_is_categorize_only(db_session: Session):
     db_session.commit()
 
     assert card.category == "capacitors"
-    assert summary["categorized"] == 1
-    assert summary["specs_written"] == 0
+    assert summary.categorized == 1
+    assert summary.specs_written == 0
+
+
+def test_element14_selects_later_spec_bearing_result(db_session: Session):
+    # GAP-3: _first_with_specs prefers the first result carrying structured `specs` over an
+    # earlier categorize-only one. A leading result with a resolvable category but NO specs
+    # must be skipped for the SECOND, spec-bearing result, so its specs land + the card
+    # categorizes (the parametrics are not lost just because an earlier hit had none).
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+
+    no_specs_first = {"category": "Capacitors", "description": "MLCC", "specs": {}}
+    summary = enrich_card_from_element14(db_session, card, [no_specs_first, _E14_CAP_RESULT])
+    db_session.commit()
+
+    assert card.category == "capacitors"
+    facets = _facets(db_session, card.id)
+    # The SECOND result's structured specs landed (not the empty first one's).
+    assert "capacitance" in facets and "package" in facets
+    assert facets["capacitance"].source == "element14_api" and facets["capacitance"].tier == 90
+    assert summary.categorized == 1
+    assert summary.specs_written == len(facets)
 
 
 def test_element14_empty_results_no_op(db_session: Session):
@@ -341,7 +383,7 @@ def test_element14_empty_results_no_op(db_session: Session):
     summary = enrich_card_from_element14(db_session, card, [])
     db_session.commit()
     assert card.category is None
-    assert summary == {"categorized": 0, "specs_written": 0}
+    assert summary == EnrichSummary()
 
 
 def test_element14_no_commit_in_writer(db_session: Session):
@@ -390,3 +432,40 @@ def test_element14_resistor_tolerance_lands_end_to_end(db_session: Session):
     assert "tolerance" in facets and facets["tolerance"].value_text == "1%"
     assert facets["tolerance"].source == "element14_api" and facets["tolerance"].tier == 90
     assert "package" in facets and facets["package"].value_text == "0402"
+
+
+# A capacitor result whose capacitance carries the literal U+03BC GREEK SMALL LETTER MU
+# (NOT U+00B5 MICRO SIGN) — the shape Element14 routinely returns. Kept as its own constant
+# so the test guard can assert the codepoint is really U+03BC.
+_GREEK_MU_CAP_RESULT = {
+    "manufacturer": "Murata",
+    "category": "Capacitors",
+    "description": "SMD Multilayer Ceramic Capacitor",
+    "source_type": "element14",
+    "specs": {"capacitance": "0.1μF"},  # U+03BC GREEK SMALL LETTER MU
+}
+
+
+def test_element14_greek_mu_capacitance_normalizes_on_the_integration_path(db_session: Session):
+    # GAP-1: the Greek-mu fix must hold on the REAL persistence path, not just in
+    # unit_normalizer's unit tests. A capacitance reported as the literal "0.1μF" (U+03BC
+    # GREEK SMALL LETTER MU — NOT the U+00B5 MICRO SIGN) must drive spec_write_service's
+    # _NUMERIC_RE split -> unit_normalizer.normalize_value end-to-end, so the PERSISTED
+    # facet canonicalizes to 100000 pF (0.1 µF x 1e6). If the Greek mu leaked through
+    # unconverted the facet would read 0.1 pF — a 1e6x error.
+    assert "μ" in _GREEK_MU_CAP_RESULT["specs"]["capacitance"]  # guard: it really is U+03BC
+
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+
+    summary = enrich_card_from_element14(db_session, card, [_GREEK_MU_CAP_RESULT])
+    db_session.commit()
+
+    assert card.category == "capacitors"
+    facets = _facets(db_session, card.id)
+    assert "capacitance" in facets
+    capacitance = facets["capacitance"]
+    assert capacitance.value_numeric == 100000  # 0.1 µF -> pF, NOT 0.1 (the 1e6x bug)
+    assert capacitance.value_unit == "pF"
+    assert capacitance.source == "element14_api" and capacitance.tier == 90
+    assert summary.specs_written >= 1

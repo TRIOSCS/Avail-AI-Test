@@ -37,6 +37,8 @@ Depends on: spec_tiers.set_category, category_normalizer.normalize_category,
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -47,6 +49,21 @@ from app.services.desc_extractor.categorizer import categorize_from_desc
 from app.services.desc_extractor.writer import _write_specs
 from app.services.spec_tiers import set_category
 from app.services.spec_write_service import load_schema_cache
+
+
+@dataclass(frozen=True)
+class EnrichSummary:
+    """Outcome of one card's vendor-API enrichment (category + spec facets).
+
+    ``categorized`` is 1 when this writer set the card's category (0 when a higher-tier
+    category held the F1 ladder); ``specs_written`` is the number of spec facets persisted.
+    Mirrors desc_extractor/_common.DescResult — a typed result the backfill aggregates
+    instead of a free-form dict.
+    """
+
+    categorized: int = 0
+    specs_written: int = 0
+
 
 # Same source identity + confidence the shipped connector-description harvest uses
 # (desc_extractor/_common.CONNECTOR_DESC_SOURCE / CONNECTOR_DESC_CONFIDENCE = 0.90):
@@ -85,21 +102,20 @@ def _resolve_commodity(result: dict) -> str | None:
     return normalize_category(result.get("category")) or categorize_from_desc(result.get("description") or "")
 
 
-def enrich_card_from_mouser(db: Session, card: MaterialCard, results: list[dict]) -> dict:
+def enrich_card_from_mouser(db: Session, card: MaterialCard, results: list[dict]) -> EnrichSummary:
     """Enrich *card* from a Mouser search result list (category + spec facets).
 
-    Returns ``{"categorized": int, "specs_written": int}``. Categorizes the card to our
+    Returns an ``EnrichSummary(categorized, specs_written)``. Categorizes the card to our
     commodity taxonomy at connector_desc/tier 84 (fill-only: set_category through the F1
     ladder, where an existing higher-tier category wins), then parses the result's
     DESCRIPTION into spec facets under that commodity and records each via record_spec at
-    the same source/tier. No-op (``{"categorized": 0, "specs_written": 0}``) when no
-    result carries a description, or when no commodity can be resolved. Does NOT commit —
-    the caller owns the transaction.
+    the same source/tier. No-op (``EnrichSummary()``) when no result carries a description,
+    or when no commodity can be resolved. Does NOT commit — the caller owns the
+    transaction.
     """
-    summary = {"categorized": 0, "specs_written": 0}
     result = _first_usable(results)
     if result is None:
-        return summary
+        return EnrichSummary()
 
     commodity = _resolve_commodity(result)
     if commodity is None:
@@ -109,25 +125,24 @@ def enrich_card_from_mouser(db: Session, card: MaterialCard, results: list[dict]
             card.display_mpn,
             result.get("category"),
         )
-        return summary
+        return EnrichSummary()
 
-    if set_category(card, commodity, source=_SOURCE, confidence=_CONFIDENCE):
-        summary["categorized"] = 1
+    categorized = 1 if set_category(card, commodity, source=_SOURCE, confidence=_CONFIDENCE) else 0
 
     # record_spec needs the now-set category; if set_category lost the ladder the card may
     # already carry a (higher-tier) category — fall back to it to still fill facets.
     category = (card.category or "").lower().strip()
     if not category:
-        return summary  # no schema without a category — facets can't be validated
+        return EnrichSummary(categorized=categorized)  # no schema without a category
 
     extracted = extract_desc(result.get("description") or "", commodity_hint=category)
     if extracted is None or not extracted.specs:
-        return summary
+        return EnrichSummary(categorized=categorized)
 
     schema_cache = load_schema_cache(db, category)
     with db.begin_nested():
-        summary["specs_written"] = _write_specs(db, int(card.id), extracted.specs, _SOURCE, _CONFIDENCE, schema_cache)
-    return summary
+        specs_written = _write_specs(db, int(card.id), extracted.specs, _SOURCE, _CONFIDENCE, schema_cache)
+    return EnrichSummary(categorized=categorized, specs_written=specs_written)
 
 
 def _first_with_specs(results: list[dict]) -> dict | None:
@@ -140,22 +155,22 @@ def _first_with_specs(results: list[dict]) -> dict | None:
     return next((r for r in usable if r.get("specs")), usable[0])
 
 
-def enrich_card_from_element14(db: Session, card: MaterialCard, results: list[dict]) -> dict:
+def enrich_card_from_element14(db: Session, card: MaterialCard, results: list[dict]) -> EnrichSummary:
     """Enrich *card* from an Element14 search result list (category + STRUCTURED specs).
 
-    Returns ``{"categorized": int, "specs_written": int}``. Element14's connector already
+    Returns an ``EnrichSummary(categorized, specs_written)``. Element14's connector already
     mapped its structured ``attributes`` to seeded spec keys in each result's ``specs``
     dict (_vendor_spec_map). Categorizes the card at element14_api/tier 90 (fill-only via
     the F1 ladder — a higher-tier category wins), then records each ``specs`` value
     DIRECTLY via record_spec at the same source/tier (no description grammar — the values
     are already structured). record_spec's enum/numeric+unit schema gate is the final
-    arbiter, so an off-enum value is dropped, never coerced. No-op when no result carries a
-    resolvable commodity. Does NOT commit — the caller owns the transaction.
+    arbiter, so an off-enum value is dropped, never coerced. No-op (``EnrichSummary()``)
+    when no result carries a resolvable commodity. Does NOT commit — the caller owns the
+    transaction.
     """
-    summary = {"categorized": 0, "specs_written": 0}
     result = _first_with_specs(results)
     if result is None:
-        return summary
+        return EnrichSummary()
 
     # Surface coverage gaps: attributes Element14 returned that mapped to no seeded key
     # (the connector collects them in `dropped`). This log IS the consumer the field was
@@ -171,8 +186,7 @@ def enrich_card_from_element14(db: Session, card: MaterialCard, results: list[di
         )
 
     commodity = _resolve_commodity(result)
-    if set_category(card, commodity, source=_E14_SOURCE, confidence=_E14_CONFIDENCE):
-        summary["categorized"] = 1
+    categorized = 1 if set_category(card, commodity, source=_E14_SOURCE, confidence=_E14_CONFIDENCE) else 0
 
     # record_spec needs the now-set category; if set_category lost the ladder the card may
     # already carry a (higher-tier) category. Only fill facets when the card's CURRENT
@@ -181,9 +195,9 @@ def enrich_card_from_element14(db: Session, card: MaterialCard, results: list[di
     category = (card.category or "").lower().strip()
     specs = result.get("specs") or {}
     if not category or category != commodity or not specs:
-        return summary
+        return EnrichSummary(categorized=categorized)
 
     schema_cache = load_schema_cache(db, category)
     with db.begin_nested():
-        summary["specs_written"] = _write_specs(db, int(card.id), specs, _E14_SOURCE, _E14_CONFIDENCE, schema_cache)
-    return summary
+        specs_written = _write_specs(db, int(card.id), specs, _E14_SOURCE, _E14_CONFIDENCE, schema_cache)
+    return EnrichSummary(categorized=categorized, specs_written=specs_written)

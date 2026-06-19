@@ -28,7 +28,8 @@ Depends on: app/connectors/_core_attrs.generic_attribute (pure label-match extra
 from __future__ import annotations
 
 import re
-from typing import Any
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 from ._core_attrs import generic_attribute
 
@@ -126,8 +127,8 @@ def _normalize_mounting(value: str, _commodity: str) -> str:
 
 
 # seeded spec_key -> commodity-aware value normalizer (only the enum keys whose vendor
-# SPELLING differs from the seed; every normalizer takes (value, commodity)).
-_VALUE_NORMALIZERS = {
+# SPELLING differs from the seed; every normalizer takes (value, commodity) -> value).
+_VALUE_NORMALIZERS: dict[str, Callable[[str, str], str]] = {
     "package": _normalize_case_code,
     "tolerance": _normalize_tolerance,
     "dielectric": _normalize_dielectric,
@@ -135,24 +136,36 @@ _VALUE_NORMALIZERS = {
 }
 
 
-def extract_vendor_specs(
-    attrs: Any, commodity: str | None, *, name_key: str, value_key: str
-) -> tuple[dict[str, str], dict[str, str]]:
-    """Map a vendor attribute list to ``(specs, dropped)`` for *commodity*.
+class VendorSpecs(NamedTuple):
+    """Outcome of mapping one vendor attribute list to seeded spec keys.
+
+    ``specs`` maps seeded spec_key -> normalized value; ``dropped`` maps the LABEL of each
+    attribute that matched no seeded alias (or lost to an earlier same-key alias) -> its
+    value (observable coverage signal). Tuple-unpack back-compatible: callers still do
+    ``specs, dropped = extract_vendor_specs(...)`` and tests still compare ``== ({}, {})``.
+    """
+
+    specs: dict[str, str]
+    dropped: dict[str, str]
+
+
+def extract_vendor_specs(attrs: Any, commodity: str | None, *, name_key: str, value_key: str) -> VendorSpecs:
+    """Map a vendor attribute list to ``VendorSpecs(specs, dropped)`` for *commodity*.
 
     *attrs* is the distributor's attribute list (Element14: ``[{attributeLabel,
     attributeValue}, …]``); *name_key*/*value_key* name its label/value fields.
     For each seeded spec_key in ``VENDOR_SPEC_MAP[commodity]`` the first matching attribute
     value (``generic_attribute``) is taken, light-normalized for the known enum-format gaps,
     and collected into ``specs``. Every attribute whose label matched no seeded alias — OR
-    matched an alias but lost (a later same-key alias already supplied the value) — is
+    matched an alias but lost (an earlier same-key alias already supplied the value) — is
     recorded in ``dropped`` (observable, mirroring the desc-extractor) so coverage gaps and
-    second-value losses are visible. Returns ``({}, {})`` when *commodity* is unmapped or
-    *attrs* is not a list.
+    second-value losses are visible. The result is a ``NamedTuple``, so it tuple-unpacks
+    as ``(specs, dropped)`` and compares equal to a plain tuple. Returns ``({}, {})`` when
+    *commodity* is unmapped or *attrs* is not a list.
     """
     aliases = VENDOR_SPEC_MAP.get(commodity or "")
     if not aliases or not isinstance(attrs, list):
-        return {}, {}
+        return VendorSpecs({}, {})
 
     specs: dict[str, str] = {}
     used_labels: set[str] = set()  # the SINGLE label per spec_key that supplied the value
@@ -176,7 +189,7 @@ def extract_vendor_specs(
             value = str(attr.get(value_key, "")).strip()
             if value and value != "-":
                 dropped[label] = value
-    return specs, dropped
+    return VendorSpecs(specs, dropped)
 
 
 def _first_present_label(attrs: list, name_key: str, value_key: str, names: tuple[str, ...]) -> str:
