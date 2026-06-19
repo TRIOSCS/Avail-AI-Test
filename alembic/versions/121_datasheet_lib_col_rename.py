@@ -8,17 +8,21 @@ What: renames onedrive_item_id -> library_item_id and onedrive_url -> library_we
       so it never becomes a data-bearing migration.
 Downgrade: renames the two columns back to onedrive_item_id / onedrive_url.
 
-Revision ID: 120_datasheet_lib_col_rename
-Revises: 119_alert_seen
+Revision ID: 121_datasheet_lib_col_rename
+Revises: 120_company_name_matching
 Create Date: 2026-06-19
+
+Re-numbered 120->121: feat/crm-aiorg (120_company_name_matching) merged to main first
+(also chained onto 119_alert_seen), so this re-chains onto 120_company_name_matching to
+keep a single head.
 """
 
 from typing import Sequence, Union
 
 from alembic import op
 
-revision = "120_datasheet_lib_col_rename"
-down_revision = "119_alert_seen"
+revision = "121_datasheet_lib_col_rename"
+down_revision = "120_company_name_matching"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -1444,6 +1444,41 @@ Three additive routes in `htmx_views.py` (declared ABOVE the
 The legacy in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is
 left intact (harmlessly redundant) — its retirement is a follow-up.
 
+**AI organization (Increment 3, migration 120).** Durable company-dedup foundation +
+review/banner surfaces — the merge engine (`company_merge_service.merge_companies`) and
+the locked nightly tiering (`auto_dedup_service`: ≥98 auto / 92-97 Claude-confirm, never
+merges different-`account_owner_id` accounts) are reused AS-IS.
+- **Durable foundation:** `companies.normalized_name` (kept in lockstep with `name` via
+  `Company._sync_normalized_name` `@validates`) + `companies.alternate_names`.
+  `merge_companies` now also appends the loser's `name` + its alternates into
+  `keep.alternate_names` (deduped) and backfills `keep.normalized_name` if empty, so a
+  re-import of the old name fuzzy-matches the survivor.
+- **Scanner** `company_utils.find_company_dedup_candidates(db, threshold, limit)` returns
+  NESTED pairs `{company_a:{id,name,site_count,has_owner}, company_b:{…}, score,
+  auto_keep_id}`. Dialect-split, same shape: **PostgreSQL** = pg_trgm self-join on
+  `normalized_name` via `func.similarity()` (drops the 500-row O(n²) cap, uses the GIN
+  index); **SQLite/fallback** = the original rapidfuzz `token_sort_ratio` scan (500-row
+  cap) so the test DB stays green.
+- **Review queue (home):** `settings/data_ops.html` Company-Duplicates loop rewritten
+  against the nested shape (was reading FLAT `pair.name_a/id_a/sightings_a` → rendered
+  blank + emitted empty merge ids; dead). Default keep/remove direction follows
+  `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
+  `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
+  declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
+  `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &
+  merge" button reusing the existing `merge-form → merge-preview → POST .../merge` flow.
+  Empty 200 when no near-dup.
+- **Name-suggestion chip (suggest-only):** `GET .../{company_id}/name-suggestion`
+  (`company_name_suggestion`) → `_name_suggestion.html`, lazy in the header. Surfaces
+  `company_utils.suggest_clean_company_name` (display-cased suffix-strip) as "Suggested
+  name: X" with an Apply button → `POST .../{company_id}/apply-name`
+  (`company_apply_name`; sets `Company.name`, `@validates` resyncs `normalized_name`,
+  `invalidate_prefix('company_list','companies_typeahead')`). Empty 200 when already
+  clean. **create_company no longer silently stores the AI-typo-corrected name** — it
+  keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
+  naming suggest-only end-to-end.
+
 ---
 
 ## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)
