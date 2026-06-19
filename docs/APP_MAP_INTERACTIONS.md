@@ -3520,3 +3520,39 @@ starting — check `docker compose ps` and earlier log lines.
 **Data flow:** Job → `eight_by_eight_service` → CDR pull → matched to
 users by extension → rows inserted into `activity_log` with
 `source='8x8_call'`. Visible in the per-record activity timeline.
+
+---
+
+## SP4 Account Reclamation
+
+Three inflows that feed idle CRM accounts into the prospecting pool.
+
+### Daily 90-day hardline sweep (1AM UTC)
+- Trigger: APScheduler CronTrigger(hour=1, minute=0) registered by `register_sweep_jobs()`
+- Job: `app/jobs/prospecting_jobs.py::_job_account_sweep()`
+- Delegates to: `app/services/prospect_reclamation.py::job_account_sweep_with_db(db)`
+- Query: Company WHERE account_owner_id IS NOT NULL AND last ActivityLog.created_at > 90 days ago (or no activity)
+- Idempotency: skips if ProspectAccount.swept_at IS NOT NULL already
+- On match: calls `send_company_to_prospecting()` (clears ownership), sets `swept_from_owner_id`/`swept_at`/`discovery_source="auto_sweep"` on ProspectAccount
+- Notification: `_send_sweep_notification()` → Graph `/me/sendMail` TO rep CC manager (falls back to admin_emails[0])
+- Token: `get_valid_token(owner, db)` from `app.utils.token_manager`; skips email on missing token (no failure)
+
+### Daily unassigned past-customer surface (2AM UTC)
+- Trigger: APScheduler CronTrigger(hour=2, minute=0) registered by `register_sweep_jobs()`
+- Job: `app/jobs/prospecting_jobs.py::_job_auto_surface_reactivation()`
+- Delegates to: `app/services/prospect_reclamation.py::job_auto_surface_with_db(db)`
+- Query: Company WHERE account_owner_id IS NULL AND (EXISTS requisition OR EXISTS quote via CustomerSite)
+- Skip: company already has non-dismissed ProspectAccount; company has no domain
+- Creates: ProspectAccount(discovery_source="reactivation", status="suggested")
+
+### Manual park: park_company_in_prospecting() [Task 8 — APPROVAL GATE]
+- Service: `app/services/prospect_reclamation.py::park_company_in_prospecting(company_id, user_id, db)`
+- Calls `send_company_to_prospecting()` then overlays `discovery_source="sales_park"`, `parked_by_id=user_id`
+- HTMX endpoint: `POST /v2/partials/customers/{company_id}/park-in-prospecting` [NOT YET BUILT]
+
+### Reclaim: reclaim_prospect_account()
+- Service: `app/services/prospect_reclamation.py::reclaim_prospect_account(prospect_id, user_id, db, *, is_admin)`
+- Permission: swept_from_owner_id == user_id OR is_admin OR user.email == account_sweep_manager_email
+- Actions: dismisses ProspectAccount, re-assigns Company.account_owner_id, logs ActivityLog(activity_type="reclaim")
+- HTMX endpoint: `POST /v2/partials/prospects/{prospect_id}/reclaim` (require_user)
+- Returns: {prospect_id, company_id, company_name, status: "reclaimed"}
