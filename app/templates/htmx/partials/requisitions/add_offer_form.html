@@ -3,7 +3,7 @@
    Called by: htmx_views.py add_offer_form route.
    Depends on: HTMX, Tailwind CSS with brand palette.
 #}
-<div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
+<div class="card mb-4">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-gray-900">Add Manual Offer</h3>
     <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers"
@@ -24,8 +24,8 @@
     {# Linked Requirement #}
     {% if requirements %}
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
-      <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      <label class="form-label">Linked Requirement</label>
+      <select name="requirement_id" class="input input-sm">
         <option value="">— None —</option>
         {% for r in requirements %}
         <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
@@ -36,14 +36,14 @@
 
     {# Notes #}
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Notes</label>
+      <label class="form-label">Notes</label>
       <textarea name="notes" rows="2"
-                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                class="input input-sm"
                 placeholder="Any additional details..."></textarea>
     </div>
 
     <button type="submit" :disabled="!essentialsMet()"
-            class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed">
+            class="btn btn-sm btn-primary">
       Save Offer
     </button>
   </form>

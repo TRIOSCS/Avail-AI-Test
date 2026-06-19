@@ -20,27 +20,27 @@
   <table class="min-w-full divide-y divide-gray-200 text-sm">
     <thead class="bg-gray-50">
       <tr>
-        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-        <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit $</th>
-        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead</th>
-        <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+        <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+        <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+        <th class="table-cell--head text-right text-xs font-medium text-gray-500 uppercase">Unit $</th>
+        <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Lead</th>
+        <th class="table-cell--head text-left text-xs font-medium text-gray-500 uppercase">Status</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-gray-100">
       {% for o in offers %}
       <tr class="hover:bg-gray-50">
-        <td class="px-4 py-2">
+        <td class="table-cell">
           <div class="text-gray-900">{{ o.vendor_name or '—' }}</div>
           {% if o.requirement and o.requirement.primary_mpn %}
           <div class="text-[11px] text-gray-400 font-mono mt-0.5">{{ o.requirement.primary_mpn }}</div>
           {% endif %}
         </td>
-        <td class="px-4 py-2 text-right text-gray-600">{{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }}</td>
-        <td class="px-4 py-2 text-right text-gray-600 font-mono">{{ '${:,.4f}'.format(o.unit_price) if o.unit_price is not none else 'RFQ' }}</td>
-        <td class="px-4 py-2 text-gray-600">{{ o.lead_time or '—' }}</td>
-        <td class="px-4 py-2">
-          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
+        <td class="table-cell text-right text-gray-600">{{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }}</td>
+        <td class="table-cell text-right text-gray-600 font-mono">{{ '${:,.4f}'.format(o.unit_price) if o.unit_price is not none else 'RFQ' }}</td>
+        <td class="table-cell text-gray-600">{{ o.lead_time or '—' }}</td>
+        <td class="table-cell">
+          <span class="badge {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
             {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
           </span>
         </td>
@@ -50,7 +50,7 @@
   </table>
 </div>
 {% else %}
-<div class="px-5 py-8 text-center text-sm text-gray-400">
+<div class="px-5 py-6 sm:py-8 text-center text-sm text-gray-400">
   No offers yet for this requisition.
 </div>
 {% endif %}

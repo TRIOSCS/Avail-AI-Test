@@ -18,28 +18,28 @@
     {{ mpn_chips(r) }}
   </td>
   {% set desc = r|part_description %}
-  <td data-col-key="description" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or "—" }}</td>
-  <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
-  <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing" x-cloak>
+  <td data-col-key="description" class="px-4 py-2.5 text-sm text-gray-600 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or "—" }}</td>
+  <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
+  <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-600 text-right tabular-nums" x-show="!editing" x-cloak>
     {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}
   </td>
-  <td data-col-key="customer_pn" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.customer_pn or "—" }}</td>
+  <td data-col-key="customer_pn" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.customer_pn or "—" }}</td>
   <td data-col-key="target_price" class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing" x-cloak>
     {% if r.target_price %}
       <span class="text-emerald-700 font-medium">${{ "{:,.4f}".format(r.target_price) }}</span>
     {% else %}
-      <span class="text-gray-500">—</span>
+      <span class="text-gray-600">—</span>
     {% endif %}
   </td>
-  <td data-col-key="need_by_date" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>
+  <td data-col-key="need_by_date" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>
     {{ r.need_by_date.strftime('%b %d, %Y') if r.need_by_date else "—" }}
   </td>
-  <td data-col-key="condition" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ (r.condition or "—")|capitalize }}</td>
-  <td data-col-key="date_codes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.date_codes or "—" }}</td>
-  <td data-col-key="firmware" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.firmware or "—" }}</td>
-  <td data-col-key="hardware_codes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.hardware_codes or "—" }}</td>
-  <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.packaging or "—" }}</td>
-  <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
+  <td data-col-key="condition" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ (r.condition or "—")|capitalize }}</td>
+  <td data-col-key="date_codes" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.date_codes or "—" }}</td>
+  <td data-col-key="firmware" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.firmware or "—" }}</td>
+  <td data-col-key="hardware_codes" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.hardware_codes or "—" }}</td>
+  <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-600" x-show="!editing" x-cloak>{{ r.packaging or "—" }}</td>
+  <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-600 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
   <td data-col-key="status" class="px-4 py-2.5" x-show="!editing" x-cloak>
     {% from "htmx/partials/shared/_macros.html" import status_badge %}
     {{ status_badge(r.sourcing_status or 'open') }}
@@ -57,7 +57,7 @@
       <span class="text-gray-400 tabular-nums">0</span>
     {% endif %}
     {% if r.last_searched_at %}
-    <div class="text-[10px] text-gray-400">{{ r.last_searched_at|timeago }}</div>
+    <div class="text-xs text-gray-400">{{ r.last_searched_at|timeago }}</div>
     {% endif %}
   </td>
   <td class="px-4 py-2.5 text-center" x-show="!editing" x-cloak>
@@ -143,7 +143,7 @@
       {# Structured substitute rows — initialised from data-subs JSON attribute #}
       <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]') }"
            data-subs="{{ r.substitutes | tojson if r.substitutes else '[]' }}">
-        <div class="text-xs text-gray-500 mb-1">Substitutes</div>
+        <div class="text-xs text-gray-600 mb-1">Substitutes</div>
         <template x-for="(sub, idx) in subs" :key="idx">
           <div class="flex gap-1.5 items-center mb-1">
             <input aria-label="Sub MPN" :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
@@ -171,7 +171,7 @@
       <textarea name="notes" rows="1" placeholder="Notes"
                 class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500">{{ r.notes or '' }}</textarea>
       <div class="flex items-center gap-2">
-        <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>
+        <button type="submit" class="btn-primary btn-sm">Save</button>
         <button type="button" @click="editing = false" class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-100">Cancel</button>
       </div>
     </form>

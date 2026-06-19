@@ -6,12 +6,12 @@
 <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
   <div class="flex items-center justify-between mb-3">
     <h3 class="text-sm font-semibold text-gray-900">RFQ Preparation</h3>
-    <span class="text-xs text-gray-500">{{ total_contacted }} vendor{{ "s" if total_contacted != 1 }} already contacted</span>
+    <span class="text-xs text-gray-600">{{ total_contacted }} vendor{{ "s" if total_contacted != 1 }} already contacted</span>
   </div>
 
   {% if mpns %}
   <div class="mb-3">
-    <p class="text-xs text-gray-500 mb-1">Parts in this requisition:</p>
+    <p class="text-xs text-gray-600 mb-1">Parts in this requisition:</p>
     <div class="flex flex-wrap gap-1">
       {% for mpn in mpns %}
       <span class="px-2 py-0.5 text-xs font-mono bg-gray-100 text-gray-700 rounded">{{ mpn }}</span>
@@ -27,7 +27,7 @@
     <div class="flex items-center justify-between px-3 py-2 rounded border {{ 'border-gray-100 bg-gray-50 opacity-60' if v.already_contacted else 'border-brand-100 bg-brand-50' }}">
       <div>
         <p class="text-sm font-medium text-gray-900">{{ v.display_name }}</p>
-        <p class="text-xs text-gray-500">{{ v.sighting_count }} sighting{{ "s" if v.sighting_count != 1 }}</p>
+        <p class="text-xs text-gray-600">{{ v.sighting_count }} sighting{{ "s" if v.sighting_count != 1 }}</p>
       </div>
       {% if v.already_contacted %}
       <span class="text-xs text-gray-400">Already contacted</span>

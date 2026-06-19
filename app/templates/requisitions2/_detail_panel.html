@@ -25,7 +25,7 @@
   <div class="flex items-center gap-3 px-5 py-3 border-b border-gray-200 bg-gray-50 flex-shrink-0">
     <div class="flex-1 min-w-0">
       <h2 class="text-base font-semibold text-gray-900 truncate">{{ req.name }}</h2>
-      <p class="text-xs text-gray-500 mt-0.5">{{ req.customer_display or 'No customer' }}</p>
+      <p class="text-xs text-gray-600 mt-0.5">{{ req.customer_display or 'No customer' }}</p>
     </div>
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full flex-shrink-0 {{ status_styles.get(req.status, 'bg-gray-100 text-gray-600') }}">
       {{ req.status }}

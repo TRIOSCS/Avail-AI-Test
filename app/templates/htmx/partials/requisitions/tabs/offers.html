@@ -11,7 +11,7 @@
   <div class="mb-4" x-data="{ addOpen: false }">
     <div class="relative inline-block">
       <button @click="addOpen = !addOpen" type="button"
-              class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
+              class="btn btn-sm btn-primary">
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
         </svg>
@@ -64,12 +64,12 @@
   {% if offers %}
   {# Action bar — appears when offers are selected #}
   <div class="flex items-center justify-between mb-4">
-    <p class="text-sm text-gray-500">
+    <p class="text-sm text-gray-600">
       <span class="font-semibold text-gray-900">{{ offers|length }}</span> offer{{ "s" if offers|length != 1 }}
     </p>
     <div class="flex items-center gap-2">
       <template x-if="selectedOffers.length > 0" x-cloak>
-        <span class="text-xs text-gray-500 mr-2" x-text="selectedOffers.length + ' selected'"></span>
+        <span class="text-xs text-gray-600 mr-2" x-text="selectedOffers.length + ' selected'"></span>
       </template>
       {% if draft_quote %}
       <button x-show="selectedOffers.length > 0" x-cloak
@@ -103,7 +103,7 @@
               hx-include="[name='offer_ids']"
               hx-target="#main-content"
               data-loading-disable
-              class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
+              class="btn btn-sm btn-primary"
               x-cloak>
         Create Quote from Selected
       </button>
@@ -151,23 +151,23 @@
           </td>
           <td data-col-key="vendor" class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ o.vendor_name or "—" }}</td>
           <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono text-gray-900">{{ o.mpn or "—" }}</td>
-          <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "—" }}</td>
+          <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "—" }}</td>
           <td data-col-key="price" class="px-4 py-2.5 text-sm text-right {{ 'text-emerald-700 font-medium' if o.unit_price else 'text-gray-500' }}">
             {{ "${:,.4f}".format(o.unit_price) if o.unit_price else "RFQ" }}
           </td>
-          <td data-col-key="condition" class="px-4 py-2.5 text-sm text-gray-500">{{ (o.condition or "—")|capitalize }}</td>
-          <td data-col-key="date_code" class="px-4 py-2.5 text-sm text-gray-500">{{ o.date_code or "—" }}</td>
-          <td data-col-key="lead_time" class="px-4 py-2.5 text-sm text-gray-500">{{ o.lead_time or "—" }}</td>
-          <td data-col-key="manufacturer" class="px-4 py-2.5 text-sm text-gray-500">{{ o.manufacturer or "—" }}</td>
-          <td data-col-key="moq" class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ "{:,}".format(o.moq) if o.moq else "—" }}</td>
-          <td data-col-key="spq" class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ "{:,}".format(o.spq) if o.spq else "—" }}</td>
-          <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-500">{{ o.packaging or "—" }}</td>
-          <td data-col-key="firmware" class="px-4 py-2.5 text-sm text-gray-500">{{ o.firmware or "—" }}</td>
-          <td data-col-key="hardware_code" class="px-4 py-2.5 text-sm text-gray-500">{{ o.hardware_code or "—" }}</td>
-          <td data-col-key="warranty" class="px-4 py-2.5 text-sm text-gray-500">{{ o.warranty or "—" }}</td>
-          <td data-col-key="country_of_origin" class="px-4 py-2.5 text-sm text-gray-500">{{ o.country_of_origin or "—" }}</td>
-          <td data-col-key="valid_until" class="px-4 py-2.5 text-sm text-gray-500">{{ o.valid_until.strftime('%b %d, %Y') if o.valid_until else "—" }}</td>
-          <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" title="{{ o.notes or '' }}">{{ o.notes or "—" }}</td>
+          <td data-col-key="condition" class="px-4 py-2.5 text-sm text-gray-600">{{ (o.condition or "—")|capitalize }}</td>
+          <td data-col-key="date_code" class="px-4 py-2.5 text-sm text-gray-600">{{ o.date_code or "—" }}</td>
+          <td data-col-key="lead_time" class="px-4 py-2.5 text-sm text-gray-600">{{ o.lead_time or "—" }}</td>
+          <td data-col-key="manufacturer" class="px-4 py-2.5 text-sm text-gray-600">{{ o.manufacturer or "—" }}</td>
+          <td data-col-key="moq" class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ "{:,}".format(o.moq) if o.moq else "—" }}</td>
+          <td data-col-key="spq" class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ "{:,}".format(o.spq) if o.spq else "—" }}</td>
+          <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-600">{{ o.packaging or "—" }}</td>
+          <td data-col-key="firmware" class="px-4 py-2.5 text-sm text-gray-600">{{ o.firmware or "—" }}</td>
+          <td data-col-key="hardware_code" class="px-4 py-2.5 text-sm text-gray-600">{{ o.hardware_code or "—" }}</td>
+          <td data-col-key="warranty" class="px-4 py-2.5 text-sm text-gray-600">{{ o.warranty or "—" }}</td>
+          <td data-col-key="country_of_origin" class="px-4 py-2.5 text-sm text-gray-600">{{ o.country_of_origin or "—" }}</td>
+          <td data-col-key="valid_until" class="px-4 py-2.5 text-sm text-gray-600">{{ o.valid_until.strftime('%b %d, %Y') if o.valid_until else "—" }}</td>
+          <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-600 max-w-[200px] truncate" title="{{ o.notes or '' }}">{{ o.notes or "—" }}</td>
           <td data-col-key="status" class="px-4 py-2.5">
             {% set offer_colors = {
               "active": "bg-emerald-50 text-emerald-700",
@@ -254,16 +254,16 @@
     </form>
   </div>
   {% else %}
-  <div class="py-12 text-center">
+  <div class="py-6 sm:py-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
     </svg>
     {% if qual %}
-    <p class="text-sm font-medium text-gray-500 mt-3">No offers match this filter.</p>
+    <p class="text-sm font-medium text-gray-600 mt-3">No offers match this filter.</p>
     <p class="text-xs text-gray-400 mt-1">Try selecting a different filter above or clear the filter to see all offers.</p>
     {% else %}
-    <p class="text-sm font-medium text-gray-500 mt-3">No offers received yet.</p>
+    <p class="text-sm font-medium text-gray-600 mt-3">No offers received yet.</p>
     <p class="text-xs text-gray-400 mt-1">Offers appear here when vendors respond to RFQs or when leads are promoted.</p>
     {% endif %}
   </div>

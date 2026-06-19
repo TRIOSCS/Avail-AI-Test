@@ -26,9 +26,9 @@
             hx-get="/requisitions2/{{ req.id }}/edit/name" hx-target="closest td" hx-swap="innerHTML"
             @click.stop>{{ req.name }}</span>
       {% if req.urgency == 'hot' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
+      <span class="inline-flex h-4 px-1 text-xs font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
       {% elif req.urgency == 'critical' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700" title="critical">CRIT</span>
+      <span class="inline-flex h-4 px-1 text-xs font-semibold rounded bg-rose-50 text-rose-700" title="critical">CRIT</span>
       {% endif %}
     </div>
   </td>

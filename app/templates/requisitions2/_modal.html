@@ -27,15 +27,15 @@
 
     {# Requisition fields #}
     <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-      <dt class="text-gray-500">Customer</dt>
+      <dt class="text-gray-600">Customer</dt>
       <dd class="text-gray-900">{{ req.customer_display or 'N/A' }}</dd>
-      <dt class="text-gray-500">Owner</dt>
+      <dt class="text-gray-600">Owner</dt>
       <dd class="text-gray-900">{{ req.created_by_name or 'Unassigned' }}</dd>
-      <dt class="text-gray-500">Urgency</dt>
+      <dt class="text-gray-600">Urgency</dt>
       <dd class="text-gray-900">{{ req.urgency or 'normal' }}</dd>
-      <dt class="text-gray-500">Deadline</dt>
+      <dt class="text-gray-600">Deadline</dt>
       <dd class="text-gray-900">{{ req.deadline.strftime('%Y-%m-%d') if req.deadline else 'None' }}</dd>
-      <dt class="text-gray-500">Created</dt>
+      <dt class="text-gray-600">Created</dt>
       <dd class="text-gray-900">{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else 'N/A' }}</dd>
     </dl>
 
@@ -46,17 +46,17 @@
       <table class="min-w-full divide-y divide-gray-200 text-sm">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-3 py-1 text-left text-xs font-medium text-gray-500">Part Number</th>
-            <th class="px-3 py-1 text-right text-xs font-medium text-gray-500">Qty</th>
-            <th class="px-3 py-1 text-left text-xs font-medium text-gray-500">Description</th>
+            <th class="compact-cell--head text-left text-xs font-medium text-gray-500">Part Number</th>
+            <th class="compact-cell--head text-right text-xs font-medium text-gray-500">Qty</th>
+            <th class="compact-cell--head text-left text-xs font-medium text-gray-500">Description</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
           {% for r in requirements[:10] %}
           <tr>
-            <td class="px-3 py-1">{{ r.primary_mpn or 'No PN' }}</td>
-            <td class="px-3 py-1 text-right">{{ r.target_qty or '—' }}</td>
-            <td class="px-3 py-1 text-gray-500">{{ r.description or '' }}</td>
+            <td class="compact-cell--dense">{{ r.primary_mpn or 'No PN' }}</td>
+            <td class="compact-cell--dense text-right">{{ r.target_qty or '—' }}</td>
+            <td class="compact-cell--dense text-gray-600">{{ r.description or '' }}</td>
           </tr>
           {% endfor %}
         </tbody>
