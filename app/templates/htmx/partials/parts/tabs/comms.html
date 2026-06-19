@@ -16,7 +16,7 @@
                required
                class="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         <button type="submit"
-                class="px-3 py-1.5 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600">
+                class="btn-primary btn-sm">
           Add
         </button>
       </div>
@@ -41,7 +41,7 @@
 
   {% if pending_tasks %}
   <div class="mb-4">
-    <h4 class="text-xs font-medium text-gray-500 uppercase mb-2">Open ({{ pending_tasks|length }})</h4>
+    <h4 class="text-xs font-medium text-gray-600 uppercase mb-2">Open ({{ pending_tasks|length }})</h4>
     <div class="space-y-2">
       {% for task in pending_tasks %}
       <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-brand-200">
@@ -54,7 +54,7 @@
         <div class="flex-1 min-w-0">
           <p class="text-sm font-medium text-gray-900">{{ task.title }}</p>
           {% if task.description %}
-            <p class="text-xs text-gray-500 mt-0.5">{{ task.description }}</p>
+            <p class="text-xs text-gray-600 mt-0.5">{{ task.description }}</p>
           {% endif %}
           <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
             {% if task.assignee %}
@@ -106,7 +106,7 @@
           </svg>
         </button>
         <div class="flex-1 min-w-0">
-          <p class="text-sm text-gray-500 line-through">{{ task.title }}</p>
+          <p class="text-sm text-gray-600 line-through">{{ task.title }}</p>
           <div class="flex items-center gap-2 mt-1 text-xs text-gray-400">
             {% if task.assignee %}<span>{{ task.assignee.name or task.assignee.email }}</span>{% endif %}
             {% if task.completed_at %}<span>Done {{ task.completed_at.strftime('%m/%d/%y') }}</span>{% endif %}
@@ -119,12 +119,12 @@
   {% endif %}
 
   {% if not pending_tasks and not done_tasks %}
-  <div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
+  <div class="mx-auto max-w-sm rounded-xl bg-white p-6 sm:p-8 text-center shadow-sm border border-gray-100">
     <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round"
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
     </svg>
-    <p class="text-base font-medium text-gray-500">No tasks yet.</p>
+    <p class="text-base font-medium text-gray-600">No tasks yet.</p>
     <p class="text-sm text-gray-400 mt-1">Add a task above to coordinate with your team.</p>
   </div>
   {% endif %}

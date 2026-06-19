@@ -5,7 +5,7 @@
 
 <div>
   <div class="mb-2">
-    <p class="text-xs text-gray-500">{{ summaries|length }} vendor{{ 's' if summaries|length != 1 else '' }}</p>
+    <p class="text-xs text-gray-600">{{ summaries|length }} vendor{{ 's' if summaries|length != 1 else '' }}</p>
   </div>
 
   {% if summaries %}
@@ -13,12 +13,12 @@
     <table class="min-w-full divide-y divide-gray-200 text-sm">
       <thead class="bg-gray-50">
         <tr>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
               x-data="{ showTip: false }" @mouseenter="showTip = true" @mouseleave="showTip = false">
             Score
             <div x-show="showTip" x-cloak
@@ -33,7 +33,7 @@
               </ul>
             </div>
           </th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
+          <th class="compact-cell--head text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
               x-data="{ showTip: false }" @mouseenter="showTip = true" @mouseleave="showTip = false">
             Tier
             <div x-show="showTip" x-cloak
@@ -52,8 +52,8 @@
       <tbody class="divide-y divide-gray-100">
         {% for s in summaries %}
         <tr class="hover:bg-gray-50">
-          <td class="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">
+          <td class="compact-cell font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
+          <td class="compact-cell whitespace-nowrap">
             {% set status = vendor_statuses.get(s.vendor_name, 'sighting') %}
             {% set status_styles = {
               'sighting': 'bg-gray-100 text-gray-600',
@@ -73,16 +73,16 @@
               {{ status_labels.get(status, status|capitalize) }}
             </span>
           </td>
-          <td class="px-3 py-2 whitespace-nowrap text-xs">
+          <td class="compact-cell whitespace-nowrap text-xs">
             {% if s.vendor_phone %}
               <a href="tel:{{ s.vendor_phone }}" class="text-brand-500 hover:underline">{{ s.vendor_phone }}</a>
             {% else %}—{% endif %}
           </td>
           {# Qty cell — click for breakdown popover #}
-          <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showQty: false }">
+          <td class="compact-cell whitespace-nowrap relative" x-data="{ showQty: false }">
             <span role="button" tabindex="0" @click="showQty = !showQty" @keydown.enter="showQty = !showQty" @keydown.space.prevent="showQty = !showQty" class="cursor-pointer hover:text-brand-500" aria-label="Show quantity breakdown">
               {{ '{:,}'.format(s.estimated_qty) if s.estimated_qty else '—' }}
-              {% if s.listing_count > 1 %}<span class="text-[10px] text-gray-400 ml-0.5">({{ s.listing_count }})</span>{% endif %}
+              {% if s.listing_count > 1 %}<span class="text-xs text-gray-400 ml-0.5">({{ s.listing_count }})</span>{% endif %}
             </span>
             <div x-show="showQty" role="tooltip" @click.away="showQty = false" x-cloak
                  class="absolute z-50 mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs">
@@ -98,7 +98,7 @@
             </div>
           </td>
           {# Price cell — click for breakdown popover #}
-          <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showPrice: false }">
+          <td class="compact-cell whitespace-nowrap relative" x-data="{ showPrice: false }">
             <span role="button" tabindex="0" @click="showPrice = !showPrice" @keydown.enter="showPrice = !showPrice" @keydown.space.prevent="showPrice = !showPrice" class="cursor-pointer hover:text-brand-500" aria-label="Show price breakdown">
               {{ '${:,.4f}'.format(s.avg_price) if s.avg_price else '—' }}
             </span>
