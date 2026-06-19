@@ -13,8 +13,8 @@ Depends on: app/models (Company, CustomerSite, SiteContact, Quote),
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import and_, func, or_
 from sqlalchemy import case as sa_case
-from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import RequisitionStatus
@@ -127,19 +127,35 @@ CDM_SORTS = {
 CDM_ACCOUNT_TYPES = ("Customer", "Prospect", "Partner", "Competitor")
 
 
+def _not_bucketed():
+    """NULL-safe predicate excluding 'bucket'-disposition accounts.
+
+    NULL disposition ⇒ active (mirrors tier's NULL ⇒ standard), so the bare `disposition
+    != 'bucket'` is INSUFFICIENT — on Postgres `NULL != 'bucket'` is NULL (excluded),
+    which would silently drop every untouched account. SQLite masks this. The explicit
+    is_(None) arm keeps NULL rows in.
+    """
+    return or_(Company.disposition != "bucket", Company.disposition.is_(None))
+
+
 def _needs_call_filter(now: datetime):
     """Predicate for accounts needing a call: outbound clock overdue (30d+) OR never touched.
 
     Uses last_outbound_at (not last_activity_at) so the chip and its click-through
     filter are consistent with the cadence model — a reply does NOT reset the
-    outbound obligation.
+    outbound obligation. Excludes bucketed accounts (disposition='bucket') here so
+    the suppression is applied in exactly ONE place shared by the chip COUNT and
+    its click-through list — count==list invariant.
 
     Single source of truth shared by the "needs a call" chip COUNT
     (cdm_overdue_count) and the chip's click-through filter (cdm_company_query
     staleness="needs_call") — the two must never disagree.
     """
     cutoff = now - timedelta(days=CADENCE_RED_DAYS)
-    return or_(Company.last_outbound_at < cutoff, Company.last_outbound_at.is_(None))
+    return and_(
+        or_(Company.last_outbound_at < cutoff, Company.last_outbound_at.is_(None)),
+        _not_bucketed(),
+    )
 
 
 def cdm_company_query(
@@ -157,13 +173,27 @@ def cdm_company_query(
     """Build the filtered + sorted CDM account list query.
 
     staleness: "" (all) | "overdue" | "due_soon" | "recent" | "new" — one band each —
-    or "needs_call" (overdue OR never contacted), the "needs a call" chip's filter.
+    or "needs_call" (overdue OR never contacted), the "needs a call" chip's filter,
+    or "bucket" (the explicit Bucket facet — the ONLY way to surface bucketed accounts).
+
+    Bucketed accounts (disposition='bucket') are hidden from the base query so they
+    drop out of the call-list everywhere, EXCEPT when the "bucket" facet is
+    explicitly requested (so they stay findable + un-bucketable). The needs_call
+    branch inherits its exclusion from the shared _needs_call_filter (count==list).
     """
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
     if search.strip():
         sb = SearchBuilder(search.strip())
         query = query.filter(sb.ilike_filter(Company.name))
+
+    # Bucket suppression at the query layer (never in materialize_all_clocks).
+    # "bucket" facet reveals ONLY bucketed accounts; every other view hides them.
+    if staleness == "bucket":
+        query = query.filter(Company.disposition == "bucket")
+    elif staleness != "needs_call":
+        # needs_call already carries _not_bucketed() via _needs_call_filter.
+        query = query.filter(_not_bucketed())
 
     now = now or datetime.now(timezone.utc)
     overdue_cutoff = now - timedelta(days=STALENESS_OVERDUE_DAYS)
@@ -318,7 +348,12 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
         contacts = (
             db.query(SiteContact)
             .filter(SiteContact.customer_site_id.in_(list(site_map)), SiteContact.is_active.is_(True))
-            .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+            .order_by(
+                SiteContact.is_archived.asc(),
+                SiteContact.is_priority.desc(),
+                SiteContact.is_primary.desc(),
+                SiteContact.full_name,
+            )
             .all()
         )
     rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]

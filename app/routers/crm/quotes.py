@@ -34,7 +34,9 @@ def _quote_load_options():
     contacts, creator)."""
     return (
         joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
+        # selectinload (not joinedload) for the to-many site_contacts leg: a joined
+        # collection multiplies Quote rows by contacts (cartesian blow-up) in list views.
+        joinedload(Quote.customer_site).selectinload(CustomerSite.site_contacts),
         joinedload(Quote.created_by),
     )
 

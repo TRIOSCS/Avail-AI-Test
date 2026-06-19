@@ -1,0 +1,43 @@
+{# Archive toggle + badge for a SiteContact.
+   Re-rendered by POST /v2/partials/customers/{company_id}/contacts/{contact_id}/archive.
+   Renders inside the contact card (contacts_tab.html).
+
+   Receives: company, contact
+   When is_archived=True: renders a gray "Archived" badge + a restore button.
+   When is_archived=False: renders a small "Archive" toggle (accessible, minimal).
+   Archived contacts are sorted to the bottom of the roster but stay visible —
+   NOT hidden (is_active is never used for archive).
+#}
+<div id='archive-toggle-{{ contact.id }}' class='inline-flex items-center gap-1'>
+  {% if contact.is_archived %}
+  {# Archived: badge + restore button #}
+  <span class='px-1.5 py-0.5 text-[9px] font-semibold rounded bg-gray-200 text-gray-600 border border-gray-300'
+        title='Archived — sorted to the bottom of the roster'>
+    Archived
+  </span>
+  <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
+        hx-target='#archive-toggle-{{ contact.id }}'
+        hx-swap='outerHTML'
+        class='inline'>
+    <input type='hidden' name='is_archived' value=''>
+    <button type='submit'
+            class='text-[9px] text-gray-500 hover:text-gray-700 underline ml-0.5 focus:outline-none focus:ring-1 focus:ring-gray-400 rounded'
+            title='Restore from archive'>
+      restore
+    </button>
+  </form>
+  {% else %}
+  {# Not archived: small toggle to archive #}
+  <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
+        hx-target='#archive-toggle-{{ contact.id }}'
+        hx-swap='outerHTML'
+        class='inline'>
+    <input type='hidden' name='is_archived' value='1'>
+    <button type='submit'
+            class='px-1.5 py-0.5 text-[9px] font-medium rounded bg-gray-50 text-gray-400 border border-dashed border-gray-200 hover:border-gray-400 hover:text-gray-500 transition-colors focus:outline-none focus:ring-1 focus:ring-gray-300'
+            title='Archive this contact'>
+      Archive
+    </button>
+  </form>
+  {% endif %}
+</div>

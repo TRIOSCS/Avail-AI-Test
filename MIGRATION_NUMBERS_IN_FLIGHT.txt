@@ -42,3 +42,4 @@
 115 feat/p1c-subscription-health GraphSubscription health columns (last_renewed_at, renew_fail_count, last_error); chains onto 114_contact_sent_at
 116 feat/p2d-do-not-contact site_contacts.do_not_contact (Boolean NOT NULL server_default false); chains onto 115_subscription_health
 117 feat/datasheet-company-library material_card_datasheets.library_drive_id (RE-NUMBERED 116->117: 116_site_contact_dnc landed on main first; RE-CHAINED onto 116_site_contact_dnc)
+118 feat/crm-disposition Company.disposition(active/bucket)+disposition_reason/set_by/set_at + site_contacts.is_priority/is_archived (Boolean NOT NULL server_default false); chains onto 117_datasheet_library_drive_id

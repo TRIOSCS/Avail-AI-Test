@@ -43,6 +43,13 @@ class Company(Base):
     last_reply_at = Column(UTCDateTime, index=True)
     tier = Column(String(20), index=True)  # key | core | standard | prospect (NULL => standard)
 
+    # Account disposition (Increment 1) — salesperson-set lifecycle.
+    # active | bucket (NULL => active, like tier). NOT is_active (would vanish).
+    disposition = Column(String(20), index=True)
+    disposition_reason = Column(String)  # optional, free text
+    disposition_set_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    disposition_set_at = Column(UTCDateTime)
+
     # v1.4.0: Account management fields
     account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
     phone = Column(String(100))
@@ -181,6 +188,11 @@ class SiteContact(Base):
     is_active = Column(Boolean, default=True)
     contact_status = Column(String(20), default="new")
     do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Increment 1 — contact disposition. is_priority surfaces a contact to the
+    # top of the roster; is_archived sorts it to the bottom (still shown — NOT
+    # is_active, which would hide it). Both mirror do_not_contact exactly.
+    is_priority = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # CRM cadence — contact-level clocks
     last_activity_at = Column(UTCDateTime)
