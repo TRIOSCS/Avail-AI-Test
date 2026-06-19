@@ -396,16 +396,16 @@ capture_datasheet(mpn, user_id)
     |       |
     |       +-- PUT /drives/{DATASHEET_LIBRARY_DRIVE_ID}/root:/
     |               Datasheets/{manufacturer}/{MPN}-datasheet.pdf:/content
-    |       → {onedrive_item_id, onedrive_url, size_bytes, library_drive_id}
+    |       → {library_item_id, library_web_url, size_bytes, library_drive_id}
     |       DATASHEET_LIBRARY_DRIVE_ID unset or token unavailable → returns None
     |       (capture stamps datasheet_searched_at and returns; upload is optional)
     |
-    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 116)
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 111)
          UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
 ```
 
-`material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
-`onedrive_url`, `library_drive_id` (Graph drive id of the company library),
+`material_card_datasheets` stores one row per captured file: `library_item_id`,
+`library_web_url`, `library_drive_id` (Graph drive id of the company library),
 `source` ("connector"/"web"), `original_url`, `verified`, `uploaded_by_id`
 (optional; user who triggered the capture), `captured_at`.
 `MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and

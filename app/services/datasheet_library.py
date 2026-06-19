@@ -61,8 +61,8 @@ async def upload_datasheet_to_library(
         return None
     body = r.json()
     return {
-        "onedrive_item_id": body.get("id"),
-        "onedrive_url": body.get("webUrl"),
+        "library_item_id": body.get("id"),
+        "library_web_url": body.get("webUrl"),
         "size_bytes": len(content),
         "library_drive_id": drive_id,
     }
