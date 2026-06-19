@@ -79,11 +79,18 @@ class ProspectAccount(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
+    # SP4 Park provenance
+    swept_from_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    swept_at = Column(UTCDateTime, nullable=True)
+    parked_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     # Relationships
     company = relationship("Company", foreign_keys=[company_id])
     claimed_by_user = relationship("User", foreign_keys=[claimed_by])
     dismissed_by_user = relationship("User", foreign_keys=[dismissed_by])
     discovery_batch = relationship("DiscoveryBatch", foreign_keys=[discovery_batch_id])
+    swept_from_owner = relationship("User", foreign_keys=[swept_from_owner_id])
+    parked_by_user = relationship("User", foreign_keys=[parked_by_id])
 
     __table_args__ = (
         Index("ix_prospect_accounts_status", "status"),
