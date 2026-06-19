@@ -221,7 +221,8 @@ async def test_screen_prospect_llm_error_is_fire_and_forget(db_session, monkeypa
     monkeypatch.setattr(settings, "ai_screen_enabled", True)
     monkeypatch.setattr(settings, "ai_screen_daily_cap", 999)
 
-    p = _prospect(db_session, enrichment_data={}, trio_match_score=0)
+    # Provide industry so grounding check passes and we reach the LLM call
+    p = _prospect(db_session, enrichment_data={}, trio_match_score=0, industry="Aerospace")
 
     from app.services import prospect_screening as ps
 
