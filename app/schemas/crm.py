@@ -20,8 +20,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from app.services.offer_qualification import normalize_offer_condition
 from app.utils.normalization import (
-    normalize_condition,
     normalize_date_code,
     normalize_mpn,
     normalize_packaging,
@@ -156,6 +156,7 @@ class OfferCreate(BaseModel):
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost", "pending_review"] = "active"
     vendor_website: str | None = None
+    qualification: dict | None = None
 
     @field_validator("mpn")
     @classmethod
@@ -176,7 +177,7 @@ class OfferCreate(BaseModel):
     @field_validator("condition")
     @classmethod
     def normalize_condition_field(cls, v: str) -> str:
-        return normalize_condition(v) or v
+        return normalize_offer_condition(v) or v
 
     @field_validator("packaging")
     @classmethod
@@ -212,6 +213,7 @@ class OfferUpdate(BaseModel):
     valid_until: date | None = None
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost", "pending_review"] | None = None
+    qualification: dict | None = None
 
     @field_validator("mpn")
     @classmethod
@@ -225,7 +227,7 @@ class OfferUpdate(BaseModel):
     def normalize_condition_field(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        return normalize_condition(v) or v
+        return normalize_offer_condition(v) or v
 
     @field_validator("packaging")
     @classmethod

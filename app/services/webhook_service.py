@@ -28,7 +28,16 @@ from app.models import ActivityLog, GraphSubscription, User
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
+
+# HTTP status codes returned by GraphClient.patch_json that confirm the
+# subscription is definitively gone on the server side. Any other error code
+# (e.g. 401, 503) or the string "max_retries" is treated as transient.
+_SUBSCRIPTION_GONE_STATUSES = {404, 410}
 RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
+
+# Number of consecutive transient failures before surfacing to User.m365_error_reason
+RENEW_FAIL_THRESHOLD = 3
+_M365_SUB_ERROR_MSG = "Email tracking degraded — Graph subscription renewal failing"
 
 # Replay protection: reject duplicate notifications within this window
 REPLAY_WINDOW_SECONDS = 300  # 5 minutes
@@ -197,19 +206,51 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
             f"/subscriptions/{sub.subscription_id}",
             {"expirationDateTime": new_expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")},
         )
-        if "error" in result:
-            raise RuntimeError(result.get("detail") or f"Graph error {result.get('error')}")
     except Exception as e:
-        logger.error(f"Failed to renew subscription {sub.subscription_id}: {e}")
-        # Subscription may have expired — delete and let scheduler recreate
-        db.delete(sub)
-        db.commit()
+        # Network/timeout error — Graph has not confirmed the subscription is gone.
+        # Keep the record so the next renewal cycle can retry.
+        logger.warning(f"Transient error renewing subscription {sub.subscription_id}: {e}")
+        _record_renewal_failure(sub, user, f"exception: {e}", db)
         return False
 
+    if "error" in result:
+        error_code = result.get("error")
+        if error_code in _SUBSCRIPTION_GONE_STATUSES:
+            # Graph confirmed the subscription no longer exists (404/410).
+            # Delete our record so the scheduler recreates it.
+            logger.warning(f"Subscription {sub.subscription_id} is gone (Graph {error_code}), removing record")
+            db.delete(sub)
+            db.commit()
+        else:
+            # Transient or auth error (e.g. 401, 503, "max_retries").
+            # Keep the subscription — next renewal cycle will retry.
+            logger.warning(f"Transient Graph error renewing subscription {sub.subscription_id}: {error_code}")
+            detail = result.get("detail", "")
+            error_msg = f"{error_code}: {detail}" if detail else str(error_code)
+            _record_renewal_failure(sub, user, error_msg, db)
+        return False
+
+    # SUCCESS: reset health counters, set last_renewed_at, clear user error
     sub.expiration_dt = new_expiration
+    sub.last_renewed_at = datetime.now(timezone.utc)
+    sub.renew_fail_count = 0
+    sub.last_error = None
+    if user.m365_error_reason == _M365_SUB_ERROR_MSG:
+        user.m365_error_reason = None
     db.commit()
     logger.info(f"Renewed subscription {sub.subscription_id} until {new_expiration}")
     return True
+
+
+def _record_renewal_failure(sub, user, error_detail: str, db) -> None:
+    """Increment fail counter, set last_error, and surface to user when threshold
+    crossed."""
+    sub.renew_fail_count = (sub.renew_fail_count or 0) + 1
+    sub.last_error = error_detail[:500]
+    if sub.renew_fail_count >= RENEW_FAIL_THRESHOLD:
+        if user.m365_error_reason in (None, _M365_SUB_ERROR_MSG):
+            user.m365_error_reason = _M365_SUB_ERROR_MSG
+    db.commit()
 
 
 async def renew_expiring_subscriptions(db: Session):

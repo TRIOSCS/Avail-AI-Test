@@ -9,6 +9,7 @@ from loguru import logger
 
 def register_all_jobs(scheduler, settings):
     """Register all background jobs from domain modules."""
+    from .cadence_jobs import register_cadence_jobs
     from .core_jobs import register_core_jobs
     from .eight_by_eight_jobs import register_eight_by_eight_jobs
     from .email_jobs import register_email_jobs
@@ -17,17 +18,19 @@ def register_all_jobs(scheduler, settings):
     from .knowledge_jobs import register_knowledge_jobs
     from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
-    from .prospecting_jobs import register_prospecting_jobs
+    from .prospecting_jobs import register_prospecting_jobs, register_sweep_jobs
     from .quality_jobs import register_quality_jobs
     from .tagging_jobs import register_tagging_jobs
     from .task_jobs import register_task_jobs
     from .teams_call_jobs import register_teams_call_jobs
 
+    register_cadence_jobs(scheduler, settings)
     register_core_jobs(scheduler, settings)
     register_email_jobs(scheduler, settings)
     register_inventory_jobs(scheduler, settings)
     register_offers_jobs(scheduler, settings)
     register_prospecting_jobs(scheduler, settings)
+    register_sweep_jobs(scheduler, settings)
     register_tagging_jobs(scheduler, settings)
     register_maintenance_jobs(scheduler, settings)
     register_health_jobs(scheduler, settings)

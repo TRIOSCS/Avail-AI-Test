@@ -16,6 +16,7 @@ import json
 import re
 import time
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any, Final, Literal, NamedTuple, TypedDict
 from urllib.parse import urlsplit
 
@@ -47,6 +48,7 @@ from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
+from ..services.offer_qualification import prefill_from_vendor
 from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
@@ -2199,6 +2201,106 @@ def _parse_iso_date(v: str | None) -> date | None:
         return None
 
 
+def _qual_dict(
+    usage: str,
+    refurbished_by: str,
+    refurb_process: str,
+    cert_doc: str,
+    part_condition: str,
+    provenance_story: str,
+    terms: str,
+    lead_time_reason: str,
+) -> "dict | None":
+    """Build the qualification JSON blob from submitted form values.
+
+    Returns None when all fields are blank (no qualification data to store).
+    """
+    q = {
+        "usage": usage or None,
+        "refurbished_by": refurbished_by or None,
+        "refurb_process": refurb_process or None,
+        "cert_doc": cert_doc or None,
+        "part_condition": part_condition or None,
+        "provenance_story": provenance_story or None,
+        "terms": terms or None,
+        "lead_time_reason": lead_time_reason or None,
+        "requests": [],
+        "schema": 1,  # forward-version the qualification blob (spec §3.1)
+    }
+    _qual_keys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    return q if any(q[k] for k in _qual_keys) else None
+
+
+def _echo_prefill(
+    vendor_name: str,
+    mpn: str,
+    manufacturer: str,
+    qty_available: str,
+    unit_price: str,
+    lead_time: str,
+    date_code: str,
+    condition: str,
+    packaging: str,
+    firmware: str,
+    hardware_code: str,
+    moq: str,
+    spq: str,
+    warranty: str,
+    country_of_origin: str,
+    valid_until: str,
+    notes: str,
+    usage: str,
+    refurbished_by: str,
+    refurb_process: str,
+    cert_doc: str,
+    part_condition: str,
+    provenance_story: str,
+    terms: str,
+    lead_time_reason: str,
+) -> dict:
+    """Re-build a prefill dict from submitted form values so the modal preserves what
+    the buyer typed on a validation error re-render.
+
+    Keys match the input name= attributes in _offer_form_fields.html.
+    """
+    return {
+        "vendor_name": vendor_name,
+        "mpn": mpn,
+        "manufacturer": manufacturer,
+        "qty_available": qty_available,
+        "unit_price": unit_price,
+        "lead_time": lead_time,
+        "date_code": date_code,
+        "condition": condition,
+        "packaging": packaging,
+        "firmware": firmware,
+        "hardware_code": hardware_code,
+        "moq": moq,
+        "spq": spq,
+        "warranty": warranty,
+        "country_of_origin": country_of_origin,
+        "valid_until": valid_until,
+        "notes": notes,
+        "usage": usage,
+        "refurbished_by": refurbished_by,
+        "refurb_process": refurb_process,
+        "cert_doc": cert_doc,
+        "part_condition": part_condition,
+        "provenance_story": provenance_story,
+        "terms": terms,
+        "lead_time_reason": lead_time_reason,
+    }
+
+
 @router.get("/v2/partials/sightings/{requirement_id}/offer-form", response_class=HTMLResponse)
 async def sightings_offer_form(
     request: Request,
@@ -2227,6 +2329,9 @@ async def sightings_offer_form(
             "moq": moq,
             "lead_time": f"{lead_days} days" if lead_days else "",
         }
+        remembered = prefill_from_vendor(db, normalize_vendor_name(vendor_name))
+        for k, v in remembered.items():
+            prefill.setdefault(k, v)  # only fill empty keys; buyer overrides
     ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": None}
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
@@ -2252,6 +2357,14 @@ async def sightings_create_offer(
     country_of_origin: str = Form(""),
     valid_until: str = Form(""),
     notes: str = Form(""),
+    usage: str = Form(""),
+    refurbished_by: str = Form(""),
+    refurb_process: str = Form(""),
+    cert_doc: str = Form(""),
+    part_condition: str = Form(""),
+    provenance_story: str = Form(""),
+    terms: str = Form(""),
+    lead_time_reason: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
@@ -2262,11 +2375,14 @@ async def sightings_create_offer(
     """
     from ..routers.crm.offers import create_offer
     from ..schemas.crm import OfferCreate
+    from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
 
+    # Build (and structurally validate) the payload FIRST so a bad numeric/date is
+    # reported as a 422 (not masked by the essentials gate below or crashed as a 500).
     try:
         payload = OfferCreate(
             mpn=mpn,
@@ -2288,13 +2404,76 @@ async def sightings_create_offer(
             valid_until=_parse_iso_date(valid_until),
             notes=notes or None,
             source="manual",
+            qualification=_qual_dict(
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            ),
         )
     except ValidationError as e:
         # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
         raise RequestValidationError(e.errors()) from e
 
+    # Gate: validate the buyer's submitted essentials BEFORE delegating to the
+    # canonical builder (which no longer blocks). On a missing essential, re-render the
+    # modal with inline errors and do not persist. Uses the schema-normalized condition.
+    gate_errors = validate_essentials(
+        normalize_offer_condition(payload.condition) or "new",
+        essentials_data(
+            manufacturer=manufacturer,
+            packaging=packaging,
+            usage=usage,
+            refurbished_by=refurbished_by,
+            refurb_process=refurb_process,
+            cert_doc=cert_doc,
+            part_condition=part_condition,
+        ),
+    )
+    if gate_errors:
+        prefill = _echo_prefill(
+            vendor_name,
+            mpn,
+            manufacturer,
+            qty_available,
+            unit_price,
+            lead_time,
+            date_code,
+            condition,
+            packaging,
+            firmware,
+            hardware_code,
+            moq,
+            spq,
+            warranty,
+            country_of_origin,
+            valid_until,
+            notes,
+            usage,
+            refurbished_by,
+            refurb_process,
+            cert_doc,
+            part_condition,
+            provenance_story,
+            terms,
+            lead_time_reason,
+        )
+        ctx = {
+            "request": request,
+            "requirement": requirement,
+            "offer": None,
+            "prefill": prefill,
+            "errors": gate_errors,
+        }
+        return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
     # The canonical create_offer fires the offer-hook release itself
-    # (maybe_release_on_offer) — no route-level call needed here.
+    # (maybe_release_on_offer) — no route-level call needed here. Essentials were already
+    # gated above, so create_offer no longer rejects on qualification grounds.
     await create_offer(requirement.requisition_id, payload, user=user, db=db)
     db.commit()
     db.expire_all()
@@ -2316,6 +2495,11 @@ async def sightings_review_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard — prevents a guessed offer_id
+    # from a different requirement from being approved/rejected).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     if action == "approve":
         await approve_offer(offer_id, user=user, db=db)
     else:
@@ -2338,6 +2522,10 @@ async def sightings_reconfirm_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await reconfirm_offer(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
@@ -2357,6 +2545,10 @@ async def sightings_mark_offer_sold(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await mark_offer_sold(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
@@ -2376,6 +2568,10 @@ async def sightings_delete_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+    # Scope the offer to the path requirement (IDOR guard).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     await delete_offer(offer_id, user=user, db=db)
     db.expire_all()
     return _refresh_offers_panel(request, requirement_id, db)
@@ -2394,6 +2590,10 @@ async def sightings_offer_edit_form(
     offer = db.get(Offer, offer_id)
     if not requirement or not offer:
         raise HTTPException(404, "Not found")
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer belongs to another requirement.
+    if offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
     fields = [
         "vendor_name",
         "mpn",
@@ -2412,7 +2612,34 @@ async def sightings_offer_edit_form(
         "country_of_origin",
         "notes",
     ]
-    prefill = {f: ("" if getattr(offer, f) is None else getattr(offer, f)) for f in fields}
+
+    def _json_safe(v: object) -> object:
+        """Coerce DB field values to JSON-serializable types for |tojson in Alpine
+        x-data."""
+        if v is None:
+            return ""
+        if isinstance(v, Decimal):
+            return str(v)
+        if isinstance(v, (date, datetime)):
+            return v.isoformat()
+        return v
+
+    prefill = {f: _json_safe(getattr(offer, f)) for f in fields}
+    # Repopulate the qualification chips/inputs from the stored JSON so the Alpine panel
+    # reflects current state on edit (otherwise the chips render empty and a re-save would
+    # appear to clear them). Keys match the offerQualification x-data names.
+    _q = offer.qualification or {}
+    for _qk in (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    ):
+        prefill[_qk] = _json_safe(_q.get(_qk))
     ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": offer}
     return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
 
@@ -2439,16 +2666,61 @@ async def sightings_update_offer(
     country_of_origin: str = Form(""),
     valid_until: str = Form(""),
     notes: str = Form(""),
+    usage: str = Form(""),
+    refurbished_by: str = Form(""),
+    refurb_process: str = Form(""),
+    cert_doc: str = Form(""),
+    part_condition: str = Form(""),
+    provenance_story: str = Form(""),
+    terms: str = Form(""),
+    lead_time_reason: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
 ) -> HTMLResponse:
     """Update an offer via the canonical update_offer, then re-render the panel."""
     from ..routers.crm.offers import update_offer
     from ..schemas.crm import OfferUpdate
+    from ..services.offer_qualification import essentials_data, normalize_offer_condition, validate_essentials
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
+
+    # Load the offer FIRST and scope it to the path requirement (prevents cross-requirement
+    # IDOR via a guessed offer_id; 404 if missing or owned by another requirement).
+    offer = db.get(Offer, offer_id)
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+
+    # MERGE-not-overwrite: start from the stored qualification JSON and overlay only the
+    # SUBMITTED non-empty qual fields. This preserves the logged #7 `requests` array and any
+    # optional keys (provenance_story / terms / lead_time_reason) that aren't on this form
+    # submission — the previous always-rebuild path wiped them on every edit.
+    merged_qual = dict(offer.qualification or {})
+    _submitted_qual = {
+        "usage": usage or None,
+        "refurbished_by": refurbished_by or None,
+        "refurb_process": refurb_process or None,
+        "cert_doc": cert_doc or None,
+        "part_condition": part_condition or None,
+        "provenance_story": provenance_story or None,
+        "terms": terms or None,
+        "lead_time_reason": lead_time_reason or None,
+    }
+    for _k, _v in _submitted_qual.items():
+        if _v:
+            merged_qual[_k] = _v
+    # Always preserve the existing requests list (never reset it to []); copy it last so it
+    # can't be clobbered by anything overlaid above.
+    merged_qual["requests"] = list((offer.qualification or {}).get("requests") or [])
+    # Forward-version the blob (spec §3.1).
+    merged_qual["schema"] = 1
+    # If nothing meaningful is stored (only the structural keys), persist None.
+    _qual_value_keys = (*_submitted_qual.keys(),)
+    qualification_to_store = (
+        merged_qual if (any(merged_qual.get(k) for k in _qual_value_keys) or merged_qual["requests"]) else None
+    )
+
     try:
         payload = OfferUpdate(
             vendor_name=vendor_name or None,
@@ -2468,10 +2740,267 @@ async def sightings_update_offer(
             country_of_origin=country_of_origin or None,
             valid_until=_parse_iso_date(valid_until),
             notes=notes or None,
+            qualification=qualification_to_store,
         )
     except ValidationError as e:
         raise RequestValidationError(e.errors()) from e
 
+    # Gate: validate the MERGED essentials BEFORE delegating to the canonical builder
+    # (payload already structurally validated above, so a bad numeric is a 422 either way).
+    # Using merged data means editing an unrelated field on a pulls/refurb offer whose stored
+    # usage/process is intact is NOT falsely blocked. On a missing essential, re-render the
+    # modal with inline errors and do not persist.
+    norm_condition = normalize_offer_condition(payload.condition)
+    if norm_condition:
+        gate_errors = validate_essentials(
+            norm_condition,
+            essentials_data(
+                manufacturer=manufacturer,
+                packaging=packaging,
+                usage=merged_qual.get("usage"),
+                refurbished_by=merged_qual.get("refurbished_by"),
+                refurb_process=merged_qual.get("refurb_process"),
+                cert_doc=merged_qual.get("cert_doc"),
+                part_condition=merged_qual.get("part_condition"),
+            ),
+        )
+        if gate_errors:
+            prefill = _echo_prefill(
+                vendor_name,
+                mpn,
+                manufacturer,
+                qty_available,
+                unit_price,
+                lead_time,
+                date_code,
+                condition,
+                packaging,
+                firmware,
+                hardware_code,
+                moq,
+                spq,
+                warranty,
+                country_of_origin,
+                valid_until,
+                notes,
+                usage,
+                refurbished_by,
+                refurb_process,
+                cert_doc,
+                part_condition,
+                provenance_story,
+                terms,
+                lead_time_reason,
+            )
+            ctx = {
+                "request": request,
+                "requirement": requirement,
+                "offer": offer,
+                "prefill": prefill,
+                "errors": gate_errors,
+            }
+            return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
     await update_offer(offer_id, payload, user=user, db=db)
     db.expire_all()
     return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/request", response_class=HTMLResponse)
+async def sightings_offer_request(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    kind: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Log a pending vendor request (images / FPQ / cert / pkg qty) on an offer.
+
+    Logs the request to offer.qualification['requests'] (status="pending") and returns
+    the drafted RFQ-back line as a toast. This route is require_buyer-only (NO Graph
+    token) so logging never 401s on an expired token. Sending a logged PENDING request
+    as a real email is now available on demand via the separate token-bearing route
+    `.../offers/{offer_id}/request/{index}/send` (sightings_offer_request_send) — the
+    buyer no longer has to copy the draft into the solicit modal by hand.
+    """
+    from datetime import datetime, timezone
+
+    from ..services.offer_qualification import REQUEST_KINDS, request_template
+
+    if kind not in REQUEST_KINDS:
+        raise HTTPException(status_code=400, detail={"error": "invalid request kind"})
+    offer = db.get(Offer, offer_id)
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+    draft = request_template(kind, offer.mpn)
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    reqs.append(
+        {
+            "kind": kind,
+            "status": "pending",
+            "requested_at": datetime.now(timezone.utc).isoformat(),
+            "contact_id": None,
+        }
+    )
+    q["requests"] = reqs
+    offer.qualification = q
+    db.commit()
+    db.expire_all()
+    return _append_oob_toast(_refresh_offers_panel(request, requirement_id, db), f"Logged request: {draft}")
+
+
+@router.post(
+    "/v2/partials/sightings/{requirement_id}/offers/{offer_id}/request/{index}/send",
+    response_class=HTMLResponse,
+)
+async def sightings_offer_request_send(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    index: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+    token: str = Depends(require_fresh_token),
+):
+    """Send a previously-logged PENDING #7 vendor request as a real RFQ-back email.
+
+    Distinct from the logging route (sightings_offer_request) on purpose: this route
+    also requires a fresh Graph token (require_fresh_token) so the actual send fails
+    loudly on an expired token, while LOGGING a request never 401s. `index` addresses
+    the entry in offer.qualification['requests'] (append-only, so the index is stable).
+
+    Flow: resolve the vendor's best contact email (_best_contacts_by_card, mirroring the
+    batch send-inquiry path), draft the request body via request_template, and hand a
+    single vendor group to send_batch_rfq with the SCALAR requisition_id (single-req
+    mode; passing both the scalar and a parts-map raises ValueError). send_batch_rfq
+    commits internally and can expire the session, so the entry-status update is applied
+    AFTER it returns against a freshly re-fetched offer. Idempotent on an already-"sent"
+    entry; a single request is logged as an outreach activity but does NOT auto-progress
+    the sourcing status (one clarification is not a full RFQ round).
+    """
+    from datetime import datetime, timezone
+
+    from ..email_service import send_batch_rfq
+    from ..services.offer_qualification import request_template
+
+    offer = db.get(Offer, offer_id)
+    # Scope the offer to the path requirement (prevents cross-requirement IDOR via a
+    # guessed offer_id); 404 if the offer is missing or belongs to another requirement.
+    if offer is None or offer.requirement_id != requirement_id:
+        raise HTTPException(status_code=404, detail={"error": "offer not found for this requirement"})
+
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    if index < 0 or index >= len(reqs):
+        raise HTTPException(status_code=404, detail={"error": "request not found"})
+    # Copy the entry into a fresh nested dict (the dict()/list() above are SHALLOW, so
+    # reqs[index] is still the committed-JSON baseline object — see the post-send block).
+    entry = dict(reqs[index])
+    reqs[index] = entry
+
+    # Idempotency: a request already sent is never re-sent (the entry is the durable
+    # record of the outreach). Surface an info toast, leave state untouched.
+    if entry.get("status") == "sent":
+        return _append_oob_toast(
+            _refresh_offers_panel(request, requirement_id, db),
+            "Request already sent",
+            "info",
+        )
+
+    # Requisition guard: Contact.requisition_id is NOT NULL, so send_batch_rfq can write
+    # no tracking row without a requisition. An offer with no requisition (unsolicited
+    # inbound) is marked "skipped" rather than firing an untracked email.
+    if offer.requisition_id is None:
+        entry["status"] = "skipped"
+        q["requests"] = reqs
+        offer.qualification = q
+        db.commit()
+        return _append_oob_toast(
+            _refresh_offers_panel(request, requirement_id, db),
+            "No requisition on this offer — not sent",
+            "warning",
+        )
+
+    # Resolve the vendor's BEST contact email exactly as the batch send path does:
+    # worst-first ordering + last-wins dict so a real email always beats a NULL/'' row.
+    contact_map = (
+        {c.vendor_card_id: c for c in _best_contacts_by_card(db, [offer.vendor_card_id])}
+        if offer.vendor_card_id
+        else {}
+    )
+    contact = contact_map.get(offer.vendor_card_id)
+    vendor_email = contact.email if contact and contact.email else ""
+
+    draft = request_template(entry["kind"], offer.mpn)
+    requirement = db.get(Requirement, requirement_id)
+    parts = [{"mpn": offer.mpn, "qty": requirement.target_qty if requirement else None}]
+
+    # Single-requisition mode: pass the SCALAR requisition_id (one Contact row, parts
+    # from the vendor group). Passing requisition_parts_map AS WELL would raise ValueError.
+    results = await send_batch_rfq(
+        token=token,
+        db=db,
+        user_id=user.id,
+        requisition_id=offer.requisition_id,
+        vendor_groups=[
+            {
+                "vendor_name": offer.vendor_name,
+                "vendor_email": vendor_email,
+                "parts": parts,
+                "subject": f"Request: {entry['kind']} — {offer.mpn}",
+                "body": draft,
+            }
+        ],
+    )
+
+    # CRITICAL: send_batch_rfq does its own db.commit() and can expire the session, so
+    # re-fetch the offer and re-read the requests list before mutating the entry status.
+    offer = db.get(Offer, offer_id)
+    q = dict(offer.qualification or {})
+    reqs = list(q.get("requests") or [])
+    # COPY the target entry into a fresh nested dict before mutating: dict(q)/list(reqs)
+    # are SHALLOW, so reqs[index] is still the SAME object SQLAlchemy holds as the
+    # committed JSON baseline. Mutating it in place would make the new value equal the
+    # (already-mutated) old value and the JSON flush would write nothing. Re-slotting a
+    # fresh dict keeps the change detectable.
+    entry = dict(reqs[index])
+    reqs[index] = entry
+
+    r = results[0]
+    if r["status"] == "sent":
+        entry["status"] = "sent"
+        entry["contact_id"] = r.get("id")
+        entry["sent_at"] = datetime.now(timezone.utc).isoformat()
+        toast_msg, toast_level = (f"Request sent to {offer.vendor_name}", "success")
+        # Log the outreach (mirrors sightings_send_inquiry's rfq_sent), but deliberately
+        # NO auto_progress: one clarification request is not a full RFQ round.
+        log_rfq_activity(
+            db=db,
+            rfq_id=offer.requisition_id,
+            activity_type="rfq_sent",
+            description=f"Requested {entry['kind']} from {offer.vendor_name}",
+            user_id=user.id,
+            requirement_id=requirement_id,
+        )
+    elif r["status"] == "skipped":
+        entry["status"] = "skipped"
+        toast_msg, toast_level = ("Not sent — no contact email on file", "warning")
+    else:
+        entry["status"] = "failed"
+        entry["error"] = r.get("error")
+        toast_msg, toast_level = (f"Send failed for {offer.vendor_name}", "error")
+
+    # Reassign a NEW dict so SQLAlchemy's JSON change detection persists the mutation.
+    q["requests"] = reqs
+    offer.qualification = q
+    db.commit()
+
+    return _append_oob_toast(
+        _refresh_offers_panel(request, requirement_id, db),
+        toast_msg,
+        toast_level,
+    )

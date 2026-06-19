@@ -211,13 +211,17 @@ class TestBuyPlansRoutes:
     @pytest.mark.parametrize(
         "path",
         [
-            "/v2/partials/buy-plans",
-            "/v2/partials/buy-plans?q=test&status=pending",
-            "/v2/partials/buy-plans?mine=true",
+            "/v2/partials/buy-plans",  # default → role-derived lens
+            "/v2/partials/buy-plans?lens=deals",
+            "/v2/partials/buy-plans?lens=supervise",
         ],
     )
     def test_buy_plans_list_ok(self, client: TestClient, path: str):
-        assert client.get(path).status_code == 200
+        resp = client.get(path)
+        assert resp.status_code == 200
+        # Hub shell renders with the lazy body container + its explicit hx-target.
+        assert 'id="bp-hub-body"' in resp.text
+        assert 'hx-target="#bp-hub-body"' in resp.text
 
     def test_buy_plan_detail_404(self, client: TestClient):
         resp = client.get("/v2/partials/buy-plans/99999")

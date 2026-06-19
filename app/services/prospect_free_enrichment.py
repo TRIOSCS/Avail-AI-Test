@@ -17,6 +17,92 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.prospect_account import ProspectAccount
 
+# ── Seniority Inference + Prospect Helpers ──────────────────────────────────
+
+_DECISION_MAKER_KEYWORDS = (
+    "vp",
+    "vice president",
+    "director",
+    "chief",
+    "ceo",
+    "coo",
+    "cfo",
+    "cto",
+    "cpo",
+    "head of",
+    "owner",
+    "president",
+)
+_INFLUENCER_KEYWORDS = (
+    "manager",
+    "lead",
+    "senior",
+    "principal",
+    "buyer",
+    "sourcing",
+    "procurement",
+    "purchasing",
+    "commodity",
+)
+
+
+def infer_seniority(title: str | None) -> str:
+    """Bucket a job title into decision_maker | influencer | contributor (keyword
+    match)."""
+    t = (title or "").lower()
+    if any(kw in t for kw in _DECISION_MAKER_KEYWORDS):
+        return "decision_maker"
+    if any(kw in t for kw in _INFLUENCER_KEYWORDS):
+        return "influencer"
+    return "contributor"
+
+
+def _apply_company_to_prospect(prospect: ProspectAccount, company: dict | None) -> None:
+    """Fill-only firmographic write from enrich_entity output (never clobbers
+    existing)."""
+    if not company:
+        return
+    if company.get("industry") and not prospect.industry:
+        prospect.industry = company["industry"]
+    if company.get("employee_size") and not prospect.employee_count_range:
+        prospect.employee_count_range = company["employee_size"]
+    if company.get("revenue_range") and not prospect.revenue_range:
+        prospect.revenue_range = company["revenue_range"]
+    if company.get("naics") and not prospect.naics_code:  # preserve SAM.gov naics
+        prospect.naics_code = company["naics"]
+    if not prospect.hq_location and (company.get("hq_city") or company.get("hq_state")):
+        city, state = company.get("hq_city"), company.get("hq_state")
+        prospect.hq_location = ", ".join(part for part in (city, state) if part)
+
+
+def _apply_contacts_to_prospect(prospect: ProspectAccount, contacts: list[dict], limit: int) -> list[dict]:
+    """Map provider contacts → canonical preview rows (dedup, cap), write
+    contacts_preview."""
+    mapped: list[dict] = []
+    seen: set[str] = set()
+    for c in contacts:
+        name = c.get("full_name")
+        if not name:
+            continue
+        key = (c.get("email") or "").lower() or name.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        mapped.append(
+            {
+                "name": name,
+                "title": c.get("title"),
+                "seniority": infer_seniority(c.get("title")),
+                "email": c.get("email"),
+                "verified": bool(c.get("verified")),
+            }
+        )
+        if len(mapped) >= limit:
+            break
+    prospect.contacts_preview = mapped
+    return mapped
+
+
 # ── SAM.gov Enrichment ──────────────────────────────────────────────
 
 
@@ -282,6 +368,7 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
     tab spawns it via ``safe_background_task`` and polls the status endpoint.
     """
     from app.database import SessionLocal
+    from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
     from app.services.prospect_warm_intros import detect_warm_intros, generate_one_liner
 
     owns_session = db is None
@@ -295,12 +382,69 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         prospect = db.get(ProspectAccount, prospect_id)
         if prospect is None:
             return
+
+        # ── Paid enrichment (Lusha chain) — 24h skip gate ──
+        from app.config import settings as _settings
+        from app.enrichment_service import enrich_entity, find_suggested_contacts
+
+        ed = dict(prospect.enrichment_data or {})
+        last = ed.get("contacts_enriched_at")
+        recently = False
+        if last:
+            try:
+                recently = (datetime.now(timezone.utc) - datetime.fromisoformat(last)).total_seconds() < 86400
+            except (TypeError, ValueError):
+                recently = False
+
+        if not recently:
+            try:
+                company = await enrich_entity(prospect.domain, prospect.name or "")
+                contacts = await find_suggested_contacts(
+                    prospect.domain,
+                    prospect.name or "",
+                    limit=_settings.prospect_enrich_contacts_per_account,
+                )
+                _apply_company_to_prospect(prospect, company)
+                mapped = _apply_contacts_to_prospect(prospect, contacts, _settings.prospect_enrich_contacts_per_account)
+
+                signals = dict(prospect.readiness_signals or {})
+                signals["contacts_verified_count"] = sum(1 for c in mapped if c["verified"])
+                signals["contacts_unverified_count"] = sum(1 for c in mapped if not c["verified"])
+                prospect.readiness_signals = signals
+
+                ed["contact_provider"] = (company or {}).get("source") or "lusha"
+                ed["contacts_enriched_at"] = datetime.now(timezone.utc).isoformat()
+                prospect.enrichment_data = ed
+                flag_modified(prospect, "contacts_preview")
+                flag_modified(prospect, "readiness_signals")
+                flag_modified(prospect, "enrichment_data")
+            except Exception as exc:  # noqa: BLE001 — paid step is best-effort; free data already saved
+                logger.warning("Paid enrichment step failed for prospect {}: {}", prospect_id, exc)
+
         try:
             warm = detect_warm_intros(prospect, db)
             one_liner = generate_one_liner(prospect, warm)
         except Exception as exc:  # noqa: BLE001 — warm-intro is best-effort; free enrichment may have succeeded
             logger.warning("Warm-intro step failed for prospect {}: {}", prospect_id, exc)
             warm, one_liner = {}, ""
+
+        # Recompute readiness from the now news-augmented signals so enrichment actually
+        # moves the readiness tier + buyer-ready ranking — not just the displayed panels.
+        new_readiness, _ = calculate_readiness_score({"name": prospect.name}, prospect.readiness_signals or {})
+        prospect.readiness_score = new_readiness
+
+        new_fit, fit_reasoning = calculate_fit_score(
+            {
+                "industry": prospect.industry,
+                "naics_code": prospect.naics_code,
+                "employee_count_range": prospect.employee_count_range,
+                "region": prospect.region,
+                "has_procurement_staff": None,
+                "uses_brokers": None,
+            }
+        )
+        prospect.fit_score = new_fit
+        prospect.fit_reasoning = fit_reasoning
 
         ed = dict(prospect.enrichment_data or {})
         ed["warm_intro"] = warm
@@ -309,6 +453,14 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         prospect.enrichment_data = ed
         flag_modified(prospect, "enrichment_data")
         db.commit()
+
+        # ── SP3: AI screen — final step, fire-and-forget ──
+        try:
+            from app.services.prospect_screening import screen_prospect
+
+            await screen_prospect(prospect, db)
+        except Exception as _screen_exc:  # noqa: BLE001 — screen must not affect enrich_status
+            logger.warning("Screen step failed for prospect {}: {}", prospect_id, _screen_exc)
     except Exception as exc:  # noqa: BLE001 — fire-and-forget must never propagate
         logger.warning("Enrichment job failed for prospect {}: {}", prospect_id, exc)
         db.rollback()

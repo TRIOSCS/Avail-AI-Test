@@ -422,6 +422,39 @@ class TestFindSentMessage:
         assert result["id"] == "msg-1"
         assert gc.get_json.call_count == 1
 
+    @pytest.mark.asyncio
+    async def test_window_is_at_least_50(self):
+        """P1d #1: $top window must be >=50 so that vendor messages in large batches
+        (e.g. 30-40 recipients sent in one RFQ batch fan-out) are not pushed below the
+        lookup window before scan_sent_folder can reconcile them.
+
+        The previous value of 25 was provably insufficient for batches larger than ~25
+        vendors. Raising to >=50 halves the miss rate; scan_sent_folder covers the tail.
+        """
+        gc = AsyncMock()
+        # Simulate a large batch: vendor of interest is the 30th message in Sent Items
+        # (positions 0-29), only visible with $top >= 30.
+        target_recipient = "vendor30@example.com"
+        target_subject = "RFQ Batch [ref:42]"
+        # Fill slots 0-29 with other vendors sharing the same subject
+        filler = [
+            _sent_item(f"msg-{i}", f"conv-{i}", target_subject, recipient=f"other{i}@example.com") for i in range(29)
+        ]
+        target_msg = _sent_item("msg-target", "conv-target", target_subject, recipient=target_recipient)
+        all_msgs = filler + [target_msg]  # target is at index 29 (30th message)
+
+        gc.get_json.return_value = {"value": all_msgs}
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _find_sent_message(gc, target_subject, target_recipient)
+
+        # Message at slot 30 must be found — only possible if $top >= 30
+        assert result is not None, "Vendor at slot 30 fell below $top window — window too small"
+        assert result["id"] == "msg-target"
+        # Also verify the Graph API was called with $top >= 50
+        call_kwargs = gc.get_json.call_args_list[0]
+        params = call_kwargs[1].get("params") or call_kwargs[0][1]
+        assert int(params["$top"]) >= 50, f"$top must be >=50, got {params['$top']}"
+
 
 # ── send_batch_rfq ───────────────────────────────────────────────────
 

@@ -156,6 +156,67 @@
     </div>
   </div>
 
+  {# AI Screening verdict card — only when ai_screen has a verdict.
+     Shows match / opportunity / excess scores, verdict badge, rationale, evidence list,
+     confidence %, screened_at date, and model. Absent when screening is off or the
+     account has not been screened. #}
+  {% set ai_screen = enrichment.get('ai_screen', {}) %}
+  {% if ai_screen and ai_screen.get('verdict') %}
+  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+      AI Screening
+      {% set verdict = ai_screen.get('verdict', '') %}
+      <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
+        {% if verdict == 'pass' %}bg-emerald-100 text-emerald-700
+        {% elif verdict == 'screened_out' %}bg-amber-100 text-amber-700
+        {% else %}bg-gray-100 text-gray-600{% endif %}">
+        {{ verdict|replace('_', ' ')|capitalize }}
+      </span>
+    </h2>
+
+    {# Score trio #}
+    <div class="grid grid-cols-3 gap-3 mb-4">
+      {% set match = ai_screen.get('trio_match_score', 0) %}
+      <div class="text-center">
+        <p class="text-2xl font-bold {{ 'text-emerald-600' if match >= 70 else ('text-amber-600' if match >= 40 else 'text-rose-600') }}">
+          {{ match }}</p>
+        <p class="text-xs text-gray-500 mt-0.5">Match</p>
+      </div>
+      {% set opp = ai_screen.get('opportunity_score', 0) %}
+      <div class="text-center">
+        <p class="text-2xl font-bold text-gray-700">{{ opp }}</p>
+        <p class="text-xs text-gray-500 mt-0.5">Opportunity</p>
+      </div>
+      {% set excess = ai_screen.get('excess_likelihood', 0) %}
+      <div class="text-center">
+        <p class="text-2xl font-bold text-gray-500">{{ excess }}</p>
+        <p class="text-xs text-gray-500 mt-0.5">Excess</p>
+      </div>
+    </div>
+
+    {# Rationale #}
+    {% if ai_screen.get('rationale') %}
+    <p class="text-sm text-gray-700 mb-3">{{ ai_screen.rationale }}</p>
+    {% endif %}
+
+    {# Evidence list #}
+    {% if ai_screen.get('evidence') %}
+    <ul class="text-xs text-gray-500 space-y-0.5 mb-3">
+      {% for item in ai_screen.evidence %}
+      <li class="truncate">&bull; {{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+
+    {# Meta: confidence + model + screened_at #}
+    <p class="text-xs text-gray-400">
+      Confidence {{ ai_screen.get('confidence', '?') }}%
+      &middot; {{ ai_screen.get('model', '') }}
+      {% if ai_screen.get('screened_at') %}&middot; {{ ai_screen.screened_at[:10] }}{% endif %}
+    </p>
+  </div>
+  {% endif %}
+
   {# Contacts #}
   {% if contacts %}
   <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">

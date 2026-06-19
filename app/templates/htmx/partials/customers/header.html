@@ -1,0 +1,120 @@
+{# header.html — company-header-only partial (header card + cadence + commercial
+   strip), WITHOUT the per-tab strip. Loaded into #cdm-detail when a multi-site
+   account's accordion header is clicked (Increment 2 — left-panel IA). The
+   per-site work (contacts, open reqs) lives in the site-detail view; this header
+   is the company-level rollup that stays visible while drilling into sites.
+
+   Receives: company, cadence_state, next_best_touch, contact_count, site_count,
+             win_rate, revenue_90d, last_req_date, now_utc.
+   Called by: company_header_partial route in htmx_views.py.
+   Depends on: brand palette, _cadence_hero.html, _disposition_control.html,
+               shared/enrich_button.html.
+#}
+{% from "htmx/partials/shared/_macros.html" import account_type_badge, cadence_clocks %}
+
+<title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
+
+{# max-w-3xl: must fit the CDM right panel (~60% viewport), not just full-page #}
+<div class="max-w-3xl mx-auto space-y-6">
+
+  {# ── Header Card ─────────────────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
+    <div class="flex items-start justify-between">
+      <div class="flex items-start gap-4">
+        <div class="flex-shrink-0 h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center">
+          <span class="text-lg font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+            {% if company.domain %}
+              <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
+            {% endif %}
+            {% if company.industry %}
+              <span class="text-gray-300">|</span>
+              <span>{{ company.industry }}</span>
+            {% endif %}
+            {% if company.hq_city %}
+              <span class="text-gray-300">|</span>
+              <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        {% if company.account_type %}
+        {{ account_type_badge(company.account_type) }}
+        {% endif %}
+        {% set entity_type = "company" %}
+        {% set entity_id = company.id %}
+        {% include "htmx/partials/shared/enrich_button.html" %}
+      </div>
+    </div>
+
+    {# Quick info grid — 2 cols (the panel is far narrower than the viewport) #}
+    <div class="mt-6 grid grid-cols-2 gap-4">
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</p>
+        <p class="mt-1 text-sm font-medium text-gray-900">
+          {% if company.account_owner %}
+            <span class="inline-flex items-center gap-1.5">
+              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ company.account_owner.name[:1]|upper }}</span>
+              {{ company.account_owner.name }}
+            </span>
+          {% else %}
+            <span class="text-gray-400">Unassigned</span>
+          {% endif %}
+        </p>
+      </div>
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Terms</p>
+        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.credit_terms or "—" }}</p>
+      </div>
+    </div>
+  </div>
+
+  {# ── Account Cadence Card ──────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+    {% include 'htmx/partials/customers/_cadence_hero.html' %}
+    {% include 'htmx/partials/customers/_disposition_control.html' %}
+
+    {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
+    <div class="mb-3">
+      {{ cadence_clocks(company, now_utc) }}
+    </div>
+
+    {# Coverage badge — multi-site: drill into a site from the left accordion. #}
+    <p class="text-xs text-gray-500">
+      <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }}</span>
+      <span class="text-gray-300 mx-1">·</span>
+      <span class="font-medium text-gray-700">{{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+      <span class="text-gray-300 mx-1">·</span>
+      <span class="text-gray-400">Select a site on the left to see its contacts &amp; open requisitions.</span>
+    </p>
+  </div>
+
+  {# ── Commercial Context Strip ────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 px-4 py-3">
+    <div class="flex items-center gap-4 flex-wrap text-sm">
+      <span class="text-xs font-medium text-gray-400 uppercase tracking-wider mr-2">Commercial</span>
+      <span class="text-gray-600">
+        Win rate:
+        <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
+      </span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">
+        Rev 90d:
+        <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
+      </span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">
+        Last deal:
+        <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
+      </span>
+    </div>
+  </div>
+
+  {# Enrich results placeholder #}
+  <div id="enrich-results-{{ company.id }}"></div>
+
+</div>

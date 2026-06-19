@@ -13,7 +13,7 @@ from ...config import settings
 from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import Company, CustomerSite, Quote, Requisition, User
+from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
 from ...utils.async_helpers import safe_background_task
@@ -129,58 +129,11 @@ async def list_companies(
         total = query.count()
         companies = query.offset(offset).limit(limit).all()
 
-        # Compute per-company win_rate and last_req_date
+        # Compute per-company win_rate, revenue_90d, and last_req_date
+        from ...services.crm_service import company_commercial_stats
+
         company_ids = [c.id for c in companies]
-        stats_map: dict[int, dict] = {}
-        if company_ids:
-            from sqlalchemy import case as sa_case
-
-            stats_rows = (
-                db.query(
-                    CustomerSite.company_id,
-                    sqlfunc.count(sa_case((Requisition.status == RequisitionStatus.WON, 1))).label("won_count"),
-                    sqlfunc.count(
-                        sa_case((Requisition.status.in_([RequisitionStatus.WON, RequisitionStatus.LOST]), 1))
-                    ).label("decided_count"),
-                    sqlfunc.max(Requisition.created_at).label("last_req_date"),
-                )
-                .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
-                .filter(CustomerSite.company_id.in_(company_ids))
-                .group_by(CustomerSite.company_id)
-                .all()
-            )
-            for row in stats_rows:
-                wr = round(row.won_count / row.decided_count * 100) if row.decided_count > 0 else None
-                stats_map[row.company_id] = {
-                    "win_rate": wr,
-                    "last_req_date": row.last_req_date.isoformat() if row.last_req_date else None,
-                }
-
-        # 90-day won revenue per company
-        from datetime import datetime as _dt
-        from datetime import timedelta
-        from datetime import timezone as _tz
-
-        rev_cutoff = _dt.now(_tz.utc) - timedelta(days=90)
-        revenue_map: dict[int, float] = {}
-        if company_ids:
-            rev_rows = (
-                db.query(
-                    CustomerSite.company_id,
-                    sqlfunc.coalesce(sqlfunc.sum(Quote.subtotal), 0).label("revenue"),
-                )
-                .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
-                .join(Quote, Quote.requisition_id == Requisition.id)
-                .filter(
-                    CustomerSite.company_id.in_(company_ids),
-                    Requisition.status == RequisitionStatus.WON,
-                    Quote.created_at >= rev_cutoff,
-                )
-                .group_by(CustomerSite.company_id)
-                .all()
-            )
-            for row in rev_rows:
-                revenue_map[row.company_id] = float(row.revenue)
+        stats_map = company_commercial_stats(db, company_ids)
 
         items = []
         for c in companies:
@@ -222,7 +175,7 @@ async def list_companies(
                     "open_req_count": c.open_req_count or 0,
                     "win_rate": st.get("win_rate"),
                     "last_req_date": st.get("last_req_date"),
-                    "revenue_90d": revenue_map.get(c.id, 0),
+                    "revenue_90d": st.get("revenue_90d", 0),
                 }
             )
         return {"items": items, "total": total, "limit": limit, "offset": offset}
@@ -423,7 +376,12 @@ async def create_company(
     """
     from ...enrichment_service import normalize_company_input
 
+    # AI typo-fix + domain cleanup. SUGGEST-ONLY for the NAME (Increment 3): the
+    # AI-corrected name is used to strengthen the duplicate check, but the stored name is
+    # what the rep typed (whitespace-trimmed). Any normalization is surfaced post-create
+    # as the "Suggested name — Apply?" chip rather than silently overwriting the input.
     clean_name, clean_domain = await normalize_company_input(payload.name, payload.domain or "")
+    stored_name = (payload.name or "").strip() or clean_name
 
     # Duplicate check (unless force=True)
     if not force:
@@ -441,7 +399,7 @@ async def create_company(
             payload.website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
         )
     company = Company(
-        name=clean_name,
+        name=stored_name,
         website=payload.website,
         industry=payload.industry,
         notes=payload.notes,

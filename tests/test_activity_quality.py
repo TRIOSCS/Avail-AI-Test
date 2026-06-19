@@ -134,23 +134,23 @@ class TestAvailScoreInteractionQuality:
 
 
 class TestPerformanceTab:
-    """Test Performance tab in CRM shell."""
+    """The Team Performance dashboard is retired.
 
-    def test_performance_route_returns_200(self, client: TestClient):
-        """GET /v2/partials/crm/performance returns 200."""
+    It was relocated out of the CRM shell into the Reporting section (Phase 5a), then
+    removed entirely when the Reporting surface was retired (Buy Plan Deal Hub). The
+    route, JSON endpoint, and template no longer exist; the CRM shell has only Customers
+    + Vendors tabs.
+    """
+
+    def test_performance_route_gone(self, client: TestClient):
+        """GET /v2/partials/crm/performance no longer exists (route removed)."""
         resp = client.get("/v2/partials/crm/performance")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
+        assert resp.status_code == 404
 
-    def test_performance_shows_team_header(self, client: TestClient):
-        """Performance tab renders Team Performance header."""
-        resp = client.get("/v2/partials/crm/performance")
-        assert "Team Performance" in resp.text
-
-    def test_crm_shell_has_performance_tab(self, client: TestClient):
-        """CRM shell renders Performance tab button."""
+    def test_crm_shell_no_longer_has_performance_tab(self, client: TestClient):
+        """The CRM shell no longer links the retired performance dashboard."""
         resp = client.get("/v2/partials/crm/shell")
-        assert "Performance" in resp.text
+        assert "/v2/partials/crm/performance" not in resp.text
 
 
 class TestQualityJobRegistration:

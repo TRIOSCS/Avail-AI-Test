@@ -145,6 +145,8 @@ pydyf==0.12.1
     # via weasyprint
 pyee==13.0.1
     # via patchright
+pypdf==6.13.3
+    # via -r requirements.in
 pyphen==0.17.2
     # via weasyprint
 python-dotenv==1.2.2

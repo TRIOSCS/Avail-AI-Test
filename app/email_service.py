@@ -49,11 +49,14 @@ def _create_contact(
     body: str,
     status: str,
     error_message: str | None = None,
+    sent_at: datetime | None = None,
 ) -> Contact:
     """Create and flush a Contact record with common fields.
 
     Called by: send_batch_rfq (for success, exception-error, and API-error cases).
     Depends on: normalize_vendor_name.
+    sent_at: set only for status="sent" — records the true send moment so the
+    outbound clock advances immediately without waiting for scan_sent_folder.
     """
     now = datetime.now(timezone.utc)
     contact = Contact(
@@ -70,6 +73,7 @@ def _create_contact(
         error_message=error_message,
         status_updated_at=now,
         created_at=now,
+        sent_at=sent_at,
     )
     db.add(contact)
     db.flush()
@@ -168,6 +172,36 @@ async def send_batch_rfq(
             )
             continue
 
+        # DNC check — skip any email address that belongs to a do-not-contact
+        # SiteContact. Reported as "skipped" (same mechanism as no-email), with
+        # an explicit "do-not-contact" reason so the caller can surface it
+        # distinctly (compliance: the address must never appear in sendMail).
+        from .models.crm import SiteContact
+
+        dnc_match = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.email == email,
+                SiteContact.do_not_contact.is_(True),
+            )
+            .first()
+        )
+        if dnc_match:
+            logger.warning(
+                "RFQ skipped — do-not-contact flag set for vendor '{}' ({})",
+                group.get("vendor_name"),
+                email,
+            )
+            results.append(
+                {
+                    "vendor_name": group.get("vendor_name"),
+                    "vendor_email": email,
+                    "status": "skipped",
+                    "error": "do-not-contact",
+                }
+            )
+            continue
+
         html_body = _build_html_body(group["body"])
         raw_subject = group["subject"]
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject
@@ -251,6 +285,7 @@ async def send_batch_rfq(
             continue
 
         per_req_parts = _per_req_parts(group)
+        send_time = datetime.now(timezone.utc)
         try:
             with db.begin_nested():
                 contacts = [
@@ -264,9 +299,28 @@ async def send_batch_rfq(
                         tagged_subject,
                         group["body"],
                         "sent",
+                        sent_at=send_time,
                     )
                     for rid, parts in per_req_parts
                 ]
+                # Write the outbound ActivityLog IMMEDIATELY at send time (one row per
+                # involved requisition) so the outbound clock advances now rather than
+                # waiting up to 30 min for scan_sent_folder.  graph_message_id /
+                # graph_conversation_id are not available yet — scan_sent_folder will
+                # reconcile by setting ActivityLog.external_id on the EXISTING row
+                # instead of creating a second one.
+                for contact in contacts:
+                    log_email_activity(
+                        user_id=user_id,
+                        direction="sent",
+                        email_addr=email,
+                        subject=tagged_subject,
+                        external_id=None,  # filled in later by scan_sent_folder
+                        contact_name=group["vendor_name"],
+                        db=db,
+                        requisition_id=contact.requisition_id,
+                        occurred_at=send_time,  # ensures reconcile filter matches (no dup)
+                    )
         except Exception:
             # The email WAS delivered — report a tracking error for this vendor
             # only; the rest of the batch keeps its rows.
@@ -388,7 +442,7 @@ async def _find_sent_message(gc, subject: str, vendor_email: str) -> dict | None
             data = await gc.get_json(
                 "/me/mailFolders/sentItems/messages",
                 params={
-                    "$top": "25",
+                    "$top": "50",
                     "$orderby": "sentDateTime desc",
                     "$select": "id,conversationId,subject,toRecipients",
                 },
@@ -1107,7 +1161,7 @@ async def _submit_parse_batch(
         )
         request_map[cid] = vr.id
 
-    batch_id = await claude_batch_submit(requests)
+    batch_id = await claude_batch_submit(requests, cost_bucket="email_mining")
     if not batch_id:
         raise RuntimeError("Batch API returned no batch_id")
 
@@ -1507,7 +1561,7 @@ async def process_batch_results(db: Session) -> int:
 
     for pb in pending_batches:
         try:
-            results = await claude_batch_results(pb.batch_id)
+            results = await claude_batch_results(pb.batch_id, cost_bucket="email_mining")
         except Exception as e:
             logger.warning(f"Batch results check failed for {pb.batch_id}: {e}")
             # Mark as failed if submitted >24h ago

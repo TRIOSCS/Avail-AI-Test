@@ -5,10 +5,11 @@ Handles notifications for all buy plan state transitions:
 - Approve → email + Teams + in-app to buyers + salesperson
 - Reject  → email + in-app to salesperson
 - SO Verified → in-app to buyers
-- SO Rejected/Halted → email + in-app to salesperson
-- PO Confirmed → in-app to ops
+- SO Rejected/Halted → email + Teams DM + in-app to salesperson (urgent)
+- PO Confirmed → in-app to ops (routine)
+- PO Rejected → email + Teams DM + in-app to the line's buyer (urgent)
 - Issue Flagged → in-app + Teams to manager
-- Completed → email + Teams + in-app to salesperson
+- Completed → in-app to salesperson (routine)
 - Resubmit → email + in-app to managers
 - Stock Sale Approved → email to logistics/accounting + in-app + Teams
 - Cancelled → in-app + Teams to submitter (lines cascade-cancelled)
@@ -419,10 +420,18 @@ async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
             activity_type="buyplan_rejected",
             channel="system",
             requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
             subject=f"SO# {plan.sales_order_number} {label} — plan #{plan.id}",
         )
     )
     db.commit()
+
+    # Urgent tier: SO kickback → salesperson also gets a Teams DM.
+    await _teams_dm(
+        ctx["submitter"],
+        f"SO verification for Buy Plan #{plan.id} was {label}: {plan.so_rejection_note or 'No reason given'}",
+        db,
+    )
 
 
 async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
@@ -448,37 +457,75 @@ async def notify_po_confirmed(plan: BuyPlan, db: Session, line_id: int):
     db.commit()
 
 
+async def notify_po_rejected(plan: BuyPlan, db: Session, line_id: int):
+    """Notify the line's buyer that ops kicked back their PO (urgent tier).
+
+    Urgent = email + Teams DM + in-app. The line is reset to AWAITING_PO with a
+    ``po_rejection_note`` (set by buyplan_workflow.verify_po reject path); this tells
+    the buyer to re-issue the PO. Skips silently if the line has no assigned buyer.
+    """
+    line = db.get(BuyPlanLine, line_id)
+    if not line:
+        return
+    buyer = db.get(User, line.buyer_id) if line.buyer_id else None
+    if not buyer:
+        logger.warning("PO rejected: line {} has no buyer, skipping notify", line_id)
+        return
+
+    ctx = _plan_context(plan, db)
+    offer = line.offer
+    mpn = offer.mpn if offer else "—"
+    reason = line.po_rejection_note or "No reason given"
+
+    body = (
+        f"<p>Your PO for buy plan #{plan.id} was <strong>kicked back</strong> by ops "
+        f"and needs to be re-issued.</p>"
+        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
+        f"MPN: <strong>{html_mod.escape(str(mpn))}</strong> | "
+        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong></p>"
+        f'<p style="background:#fef2f2;padding:10px;border-left:3px solid #dc2626;margin:12px 0">'
+        f"<strong>Reason:</strong> {html_mod.escape(str(reason))}</p>"
+    )
+    html_body = _wrap_email("PO Kicked Back — Action Required", body)
+    await _send_email(buyer, f"[AVAIL] PO Kicked Back — {ctx['customer_name']}", html_body, db)
+
+    db.add(
+        ActivityLog(
+            user_id=buyer.id,
+            activity_type="buyplan_rejected",
+            channel="system",
+            requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
+            subject=f"PO kicked back — re-issue PO for {mpn} (plan #{plan.id}): {reason}",
+        )
+    )
+    db.commit()
+
+    await _teams_dm(
+        buyer,
+        f"PO for Buy Plan #{plan.id} ({mpn}) was kicked back — re-issue required. Reason: {reason}",
+        db,
+    )
+
+
 async def notify_completed(plan: BuyPlan, db: Session):
     """Notify salesperson that the plan is complete."""
     ctx = _plan_context(plan, db)
     if not ctx["submitter"]:
         return
 
-    _, total = _lines_html(plan)
-    body = (
-        f"<p>Buy plan #{plan.id} is now <strong>complete</strong>.</p>"
-        f"<p>Customer: <strong>{html_mod.escape(ctx['customer_name'])}</strong> | "
-        f"SO#: <strong>{html_mod.escape(plan.sales_order_number or '')}</strong> | "
-        f"Total: <strong>${total:,.2f}</strong></p>"
-    )
-    html_body = _wrap_email("Buy Plan Completed", body)
-    await _send_email(ctx["submitter"], f"[AVAIL] Buy Plan Complete — {ctx['customer_name']}", html_body, db)
-
+    # Routine tier: completion is in-app only (no email, no Teams).
     db.add(
         ActivityLog(
             user_id=ctx["submitter"].id,
             activity_type="buyplan_completed",
             channel="system",
             requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
             subject=f"Buy plan #{plan.id} completed — {ctx['customer_name']}",
         )
     )
     db.commit()
-
-    await _teams_channel(
-        f"**Buy Plan #{plan.id} — Completed**\n\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'} | ${total:,.2f}"
-    )
 
 
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
@@ -584,10 +631,11 @@ async def notify_cancelled(plan: BuyPlan, db: Session):
             f"Buy Plan #{plan.id} was cancelled by {canceller_name}: {reason}",
             db,
         )
+    _so_num = plan.sales_order_number or "\u2014"
     await _teams_channel(
         f"**Buy Plan #{plan.id} \u2014 Cancelled**\n\n"
         f"Cancelled by: {canceller_name}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {_so_num}\n"
         f"Reason: {reason}"
     )
 
@@ -619,11 +667,12 @@ async def notify_nudge_buyer(plan: BuyPlan, line: BuyPlanLine, db: Session):
             notes=f"nudge line_id={line.id} status=awaiting_po",
         )
     )
+    _so_num_buyer = plan.sales_order_number or "\u2014"
     await _teams_dm(
         buyer,
         f"**Reminder \u2014 PO Required**\n\n"
         f"Plan #{plan.id} | {mpn} from {vendor}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '—'}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {_so_num_buyer}\n"
         f"This line has been awaiting a PO for over {settings.buyplan_nudge_buyer_hours}h.",
         db,
     )

@@ -107,6 +107,77 @@ def test_parse_missing_optional_fields(connector):
     assert results[0]["unit_price"] is None
 
 
+# A capacitor product shaped like the live Element14 catalog response: structured
+# parametrics in `attributes` ([{attributeLabel, attributeValue}, …]) + a category string.
+CAP_RESPONSE = {
+    "manufacturerPartNumberSearchReturn": {
+        "numberOfResults": 1,
+        "products": [
+            {
+                "brandName": "Murata",
+                "translatedManufacturerPartNumber": "GRM155R71C104KA88D",
+                "displayName": "SMD Multilayer Ceramic Capacitor, 0.1 µF, 16 V",
+                "sku": "1234567",
+                "stock": {"level": 5000},
+                "prices": [{"cost": "0.01", "from": 1, "to": 9}],
+                "category": {"name": "Capacitors"},
+                "attributes": [
+                    {"attributeLabel": "Capacitance", "attributeValue": "0.1µF"},
+                    {"attributeLabel": "Voltage Rating DC", "attributeValue": "16V"},
+                    {"attributeLabel": "Dielectric", "attributeValue": "X7R"},
+                    {"attributeLabel": "Capacitance Tolerance", "attributeValue": "± 10%"},
+                    {"attributeLabel": "Case Style", "attributeValue": "0402 [1005 Metric]"},
+                    {"attributeLabel": "Operating Temperature Min", "attributeValue": "-55°C"},
+                ],
+            }
+        ],
+    }
+}
+
+
+def test_parse_emits_normalized_specs(connector):
+    """The structured `attributes` map to seeded spec keys in `specs`; unmapped land in
+    `dropped`."""
+    r = connector._parse(CAP_RESPONSE, "GRM155R71C104KA88D")[0]
+    assert r["specs"] == {
+        "capacitance": "0.1µF",
+        "voltage_rating": "16V",
+        "dielectric": "X7R",
+        "tolerance": "±10%",
+        "package": "0402",
+    }
+    assert r["dropped"] == {"Operating Temperature Min": "-55°C"}
+    # The result still carries a category string for the writer's commodity resolution.
+    assert r["category"] == "Capacitors"
+
+
+def test_parse_unmapped_category_has_empty_specs(connector):
+    """A product whose category resolves to no mapped commodity emits an empty specs
+    dict."""
+    results = connector._parse(SAMPLE_RESPONSE, "LM358N")
+    assert results[0]["specs"] == {}
+    assert results[0]["dropped"] == {}
+
+
+def test_parse_missing_attributes_emits_empty_specs(connector):
+    data = {
+        "manufacturerPartNumberSearchReturn": {
+            "products": [
+                {
+                    "translatedManufacturerPartNumber": "ABC123",
+                    "brandName": "X",
+                    "displayName": "",
+                    "sku": "",
+                    "category": {"name": "Capacitors"},
+                }
+            ]
+        }
+    }
+    r = connector._parse(data, "ABC123")[0]
+    assert r["specs"] == {}
+    assert r["dropped"] == {}
+
+
 @pytest.mark.asyncio
 async def test_no_api_key_returns_empty():
     conn = Element14Connector(api_key="")

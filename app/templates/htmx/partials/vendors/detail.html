@@ -1,8 +1,12 @@
 {# Vendor detail partial — tabbed layout with safety review, analytics, enrich, click-to-call.
-   Receives: vendor, contacts, recent_sightings, safety_band, safety_summary, safety_flags.
+   Receives: vendor, contacts, recent_sightings, safety_band, safety_summary, safety_flags,
+             cadence_state, next_best_touch, now_utc (added P3-5).
    Called by: vendor_detail_partial route in htmx_views.py.
-   Depends on: brand palette, partials/shared/safety_review.html, partials/shared/enrich_button.html, partials/shared/source_badge.html.
+   Depends on: brand palette, partials/shared/safety_review.html,
+               partials/shared/enrich_button.html, partials/shared/source_badge.html,
+               partials/shared/_macros.html (cadence_hero).
 #}
+{% from "htmx/partials/shared/_macros.html" import cadence_hero %}
 
 <title hx-swap-oob="true">{{ vendor.display_name }} — Vendors — AvailAI</title>
 
@@ -90,6 +94,9 @@
       <p class="text-xs font-medium text-gray-500 mt-1">Avg Response Time</p>
     </div>
   </div>
+
+  {# ── Vendor Cadence Hero Card (P3-5) ─────────────────────────────── #}
+  {{ cadence_hero(vendor, cadence_state, next_best_touch, now_utc) }}
 
   {# Enrich results placeholder #}
   <div id="enrich-results-{{ vendor.id }}"></div>

@@ -164,6 +164,15 @@
 | selected_for_quote | Boolean | Included in quote? |
 | vendor_response_id | FK -> vendor_responses | |
 | entered_by_id | FK -> users | |
+| qualification_status | String 20, indexed, nullable | `QualificationStatus` snapshot: `unset`\|`incomplete`\|`essentials`\|`complete`. Written by `apply_qualification()`; recomputed live on `Offer.qualification_summary` (col is filter/report convenience). Migration 108. |
+| qualification_note | Text, nullable | System-composed standardized note (NOT free buyer notes). Produced by `compose_note(condition, data)` in `offer_qualification.py`; overwritten on every save. Migration 108. |
+| qualification | JSON, nullable | Condition-specific qualification detail + pending vendor requests. Shape: `{usage, refurbished_by, refurb_process, cert_doc, part_condition, provenance_story, terms, lead_time_reason, requests:[{kind, status, requested_at, contact_id}]}`. Migration 108. |
+
+> **Qualification enums (app/constants.py):**
+> - `OfferCondition` (StrEnum) — `new` \| `new_no_pkg` \| `pulls` \| `refurb`. Governs the condition-spine validation and note composition. Distinct from `MaterialCondition` (the capitalized card/facet vocab).
+> - `QualificationStatus` (StrEnum) — `unset` (no condition chosen) \| `incomplete` (an essential is missing; legacy/API only) \| `essentials` (essentials met, some recommended fields missing) \| `complete` (all essentials + recommended present).
+
+> **Migration 108 (`108_offer_qualification`)** — adds the 3 columns + `ix_offers_qualification_status` index; also migrates legacy `condition = 'used'` → `'pulls'` (one-way data change, not reversed on downgrade).
 
 **`quotes`** — Formal quotes sent to customers
 | Column | Type | Notes |
@@ -255,6 +264,12 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
+| disposition | String 20, indexed | Migration 118. `active`\|`bucket` (`CompanyDisposition` StrEnum); NULL ⇒ active (mirrors `tier`'s NULL ⇒ standard). `bucket` accounts are suppressed from the "needs a call" call-list (chip COUNT + click-through) via the shared `crm_service._needs_call_filter` and from `cdm_company_query`'s base, NULL-safe (`or_(disposition != 'bucket', disposition.is_(None))`) — re-surfaced ONLY by the explicit `staleness='bucket'` facet. Set via `POST /v2/partials/customers/{id}/disposition` (owner-or-admin). NEVER overloaded onto `is_active`. |
+| disposition_reason | String, nullable | Optional free-text rationale for the disposition (parity with prospect dismiss audit). |
+| disposition_set_by | FK -> users (SET NULL) | Who set the disposition. |
+| disposition_set_at | UTCDateTime, nullable | When the disposition was last set. |
+| normalized_name | String 255, indexed (btree + Postgres GIN pg_trgm), **nullable, NOT unique** | Migration 120 (Increment 3, AI-org). Suffix-stripped/lowercased dedup match key, kept in lockstep with `name` by `Company._sync_normalized_name` (`@validates("name")`) using `vendor_utils.normalize_vendor_name` — the SAME normalizer the dedup scanner scores with. Mirrors VendorCard but is **nullable + non-unique** on purpose (companies legitimately share a normalized form across the dedup window; the policy keeps different-owner accounts separate). The `ix_companies_normalized_name_trgm` GIN index is Postgres-guarded (`dialect.name == 'postgresql'`); SQLite gets only the btree and the scanner falls back to rapidfuzz. |
+| alternate_names | JSON (default []) | Migration 120. Names this company has been known by. `merge_companies` appends the loser's `name` (+ its own `alternate_names`, deduped, never keep's display name) so a re-import of the old name fuzzy-matches the survivor instead of recreating the duplicate (mirrors `VendorCard._record_alternate_name`). |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -279,6 +294,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | phone | String 100 | |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
 | contact_role | String 50 | buyer\|technical\|decision_maker\|operations |
+| do_not_contact | Boolean NOT NULL (server_default false) | Migration 116. Suppresses outreach affordances; toggled via `POST .../contacts/{id}/do-not-contact` (`_dnc_toggle.html`). |
+| is_priority | Boolean NOT NULL (server_default false) | Migration 118. Surfaces the contact to the TOP of the roster (`company_contact_rows` order_by). Toggled via `POST .../contacts/{id}/priority` (`_priority_toggle.html`). Mirrors `do_not_contact`. |
+| is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
 
@@ -515,6 +533,17 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 
 **`change_log`** — Field-level edit history on offers/requirements/requisitions
 
+**`alert_seen`** — Per-user read-state for the cross-app nav alerts (migration 117). One row records that a user has SEEN one alert item. FYI alert counts EXCLUDE seen items (seeing drains the badge); ACTION alert counts ignore this table for counting and use it only to suppress re-pulsing an already-viewed row. Written/read only via `app/services/alerts/` (`record_seen` / `seen_ref_ids`). See APP_MAP_INTERACTIONS § Cross-app alerts.
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| user_id | FK -> users (CASCADE) | |
+| alert_kind | String 40 | `AlertKind` value (offer_confirmed\|inbound_customer\|inbound_vendor\|buyplan_action) |
+| ref_id | Integer | Source item's id (offer.id, activity_log.id, buy_plan(_line).id — no DB-level FK, kind-scoped) |
+| seen_at | UTCDateTime | When marked seen (Python default) |
+
+> UNIQUE `uq_alert_seen_user_kind_ref` (user_id, alert_kind, ref_id) — `record_seen` is an idempotent check-then-insert with an `IntegrityError` fallback for the concurrent case. Index `ix_alert_seen_user_kind` (user_id, alert_kind) backs `seen_ref_ids`.
+
 **`email_intelligence`** — Classified inbox emails (offer, stock_list, ooo, spam)
 
 **`knowledge_entries`** — Q&A, facts, AI insights linked to entities
@@ -528,6 +557,22 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 **`email_signature_extracts`** — Parsed email signatures (unique by sender_email)
 **`prospect_contacts`** — Web-found contacts awaiting import
 **`prospect_accounts`** — Discovered prospect companies (unique by domain)
+
+Key columns:
+| Column | Type | Notes |
+|---|---|---|
+| trio_match_score | Integer | default 0, indexed; AI procurement-fit score (0-100); 0 until screened (SP3) |
+| opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
+| swept_from_owner_id | INT FK users (SET NULL) | owner whose account was auto-swept by the daily 90-day sweep (SP4) |
+| swept_at | UTCDateTime | when the account was swept into the pool (SP4) |
+| parked_by_id | INT FK users (SET NULL) | user who manually parked the account via the sales-park flow (SP4) |
+
+`enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
+`{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.
+`grounding_fingerprint` (SHA-256 of the assembled context) drives cache invalidation — a
+re-screen with materially new grounding produces a different hash and bypasses the cached verdict.
+Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
+
 **`discovery_batches`** — Import batch tracking
 
 ---
@@ -557,6 +602,16 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 
 **`api_sources`** — Supplier connector config (credentials, quotas, health)
 **`system_config`** — Key-value app settings
+
+SP4 Account Reclamation config keys (sourced from `.env` / `app/config.py`):
+| Key | Type | Default | Description |
+|---|---|---|---|
+| prospecting_resurface_days | int | 180 | days before a dismissed prospect can resurface |
+| account_sweep_enabled | bool | False | enable/disable the daily 90-day hardline sweep |
+| account_sweep_inactivity_days | int | 90 | days of inactivity before an account is swept into the pool |
+| account_sweep_manager_email | str | "" | CC email for sweep digest notifications (blank = no digest) |
+| account_reactivation_sweep_enabled | bool | True | enable/disable auto-surface of past-customer unassigned accounts |
+
 **`graph_subscriptions`** — Microsoft Graph webhook registrations
 **`intel_cache`** — PostgreSQL fallback cache (when Redis unavailable)
 **`processed_messages`** — Idempotency tracking for email processing

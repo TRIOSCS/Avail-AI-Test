@@ -1037,3 +1037,84 @@ class TestSendManagerDigestEmail:
             await send_manager_digest_email(db_session)
 
         mock_gc.post_json.assert_awaited_once()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  READER DICT SHAPE — locks batch-company-load refactor (no N+1)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestReaderDictShape:
+    """get_open_pool_sites / get_my_sites / get_sites_at_risk return stable row dicts.
+
+    These exercise multiple sites across multiple companies (the N+1 path) and pin the
+    exact returned dict shape + ordering so the batch-load refactor stays behavior-
+    preserving.
+    """
+
+    def test_open_pool_sites_dicts(self, db_session: Session):
+        from app.services.ownership_service import get_open_pool_sites
+
+        co_a = Company(name="Alpha Co", is_active=True)
+        co_b = Company(name="Bravo Co", is_active=True)
+        db_session.add_all([co_a, co_b])
+        db_session.flush()
+        # Two sites under co_a (dedup), one under co_b, one orphan (no company)
+        s1 = CustomerSite(company_id=co_a.id, site_name="A-2nd", contact_name="N1", contact_email="n1@x.com")
+        s2 = CustomerSite(company_id=co_a.id, site_name="A-1st", contact_email="n0@x.com", city="Austin", state="TX")
+        s3 = CustomerSite(company_id=co_b.id, site_name="B-site")
+        db_session.add_all([s1, s2, s3])
+        db_session.commit()
+
+        rows = get_open_pool_sites(db_session)
+        # ordered by site_name
+        names = [r["site_name"] for r in rows]
+        assert names == sorted(names)
+        by_name = {r["site_name"]: r for r in rows}
+        assert by_name["A-1st"] == {
+            "site_id": s2.id,
+            "site_name": "A-1st",
+            "company_id": co_a.id,
+            "company_name": "Alpha Co",
+            "contact_name": None,
+            "contact_email": "n0@x.com",
+            "city": "Austin",
+            "state": "TX",
+            "last_activity_at": None,
+            "ownership_cleared_at": None,
+        }
+        assert by_name["B-site"]["company_name"] == "Bravo Co"
+
+    def test_my_sites_dicts(self, db_session: Session, sales_user: User):
+        from app.services.ownership_service import get_my_sites
+
+        co_a = Company(name="Alpha Co", is_active=True)
+        co_b = Company(name="Bravo Co", is_active=True)
+        db_session.add_all([co_a, co_b])
+        db_session.flush()
+        s1 = CustomerSite(company_id=co_a.id, site_name="M-2", owner_id=sales_user.id, is_active=True)
+        s2 = CustomerSite(company_id=co_a.id, site_name="M-1", owner_id=sales_user.id, is_active=True)
+        s3 = CustomerSite(company_id=co_b.id, site_name="M-3", owner_id=sales_user.id, is_active=True)
+        db_session.add_all([s1, s2, s3])
+        db_session.commit()
+
+        rows = get_my_sites(sales_user.id, db_session)
+        names = [r["site_name"] for r in rows]
+        assert names == ["M-1", "M-2", "M-3"]
+        assert {r["company_name"] for r in rows} == {"Alpha Co", "Bravo Co"}
+        first = next(r for r in rows if r["site_name"] == "M-1")
+        assert set(first.keys()) == {
+            "site_id",
+            "site_name",
+            "company_id",
+            "company_name",
+            "contact_name",
+            "contact_email",
+            "city",
+            "state",
+            "days_inactive",
+            "inactivity_limit",
+            "status",
+            "last_activity_at",
+        }
+        assert first["company_id"] == co_a.id

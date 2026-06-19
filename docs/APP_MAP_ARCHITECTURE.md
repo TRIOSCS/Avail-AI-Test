@@ -120,14 +120,16 @@ authoritative reference. Static-analysis tests in
 | Tickets | 4 | partials/tickets/ |
 | Settings | 5 | partials/settings/ |
 | Shared | 16 | partials/shared/ |
-| Buy Plans | 3 | partials/buy_plans/ |
+| Buy Plans | 6 | partials/buy_plans/ — the **Deal Hub**, a role-lens shell at `/v2/buy-plans` (own primary-nav tab). `hub.html` is the shell (lens switcher + lazy `#bp-hub-body`); `_board.html` (sales "My Deals" stage board), `_orders_queue.html` (buyer "My Orders" PO-cut queue), `_supervise.html` (manager/ops "Supervise" triage strip + all-scope board) are the three lens bodies; `detail.html`/`_macros.html` are the single-plan view. Lens partial routes: `GET /v2/partials/buy-plans` (shell, `lens=` param → role-derived default), `/orders`, `/board?scope=`, `/supervise` (all in `routers/htmx_views.py`). Read models in `services/buyplan_hub.py` (`buyer_line_queue` / `deals_board` / `supervise_overview`). The retired `/v2/reporting` page folded its analytics in here (supervise strip) + the Sales Hub pipeline chip + the CRM coverage chip — `partials/reporting/` and the `reporting_dashboard` route are gone. |
 
 ### Shared Template Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
 | `_mpn_chips.html` | partials/shared/ | Renders all MPNs (primary + substitutes) as equal inline pill chips with overflow toggle; clickable chips open material card modal when a `link_map` entry exists |
-| `status_badge` macro | partials/shared/_macros.html | Unified status badge rendering used by all pages (requisitions, sightings, parts, etc.) |
+| `status_badge` macro | partials/shared/_macros.html | Unified status badge rendering used by all pages (requisitions, sightings, parts, etc.). Thin wrappers over it apply entity-specific color maps: `req_status_badge` (Requisition.status), `quote_status_badge` (Quote.status + RFQ Contact.status — one canonical map so "sent" is brand everywhere), `account_type_badge` (Company.account_type). |
+| `activity_icon` / `activity_row` macros | partials/shared/_macros.html | Canonical activity-timeline icon + row. Every entity timeline (requisitions, parts, sightings, vendors, customers) renders through these — the customer activity tab calls `activity_icon` directly rather than re-declaring an inline icon map. |
+| `cadence_hero` / `cadence_clocks` macros | partials/shared/_macros.html | Shared cadence card. `cadence_clocks(entity, now_utc)` is the dual-clock (Last Out / Last Reply) render used by both `cadence_hero` (vendor) and the customer Account Cadence card in `customers/detail.html` + `customers/header.html`. |
 | `list.html` | partials/customers/ | CDM account workspace: split-panel layout (left = scrollable account list, right = `#cdm-detail`), resizable divider via the `splitPanel` Alpine component (panel id `cdm`). Modeled on the requisitions2 workspace. |
 | `_account_list.html` | partials/customers/ | Left-panel account list only — swapped in on filter/sort/pagination refreshes by `GET /v2/partials/customers/account-list`. |
 | `_detail_empty.html` | partials/customers/ | Right-panel placeholder shown before any account is selected in the CDM workspace. |
@@ -191,6 +193,7 @@ authoritative reference. Static-analysis tests in
 | `enrich_specs.py` | `python -m app.management.enrich_specs --limit N` | One-time / on-demand backfill of structured-spec extraction for cards missing `specs_enriched_at` |
 | `ingest_source_data.py` | `python -m app.management.ingest_source_data [--files GLOB] [--ai-correct] [--apply] [--limit N]` | SP-Ingest CLI: parse → clean → consolidate → (ai_correct) → ingest TRIO source files (SFDC part master + inventory sheets) into `material_cards` via the SP2 tier ladder. DRY RUN by default; `--apply` writes. |
 | `reconcile_decoded_facets.py` | `python -m app.management.reconcile_decoded_facets [--apply] [--limit N]` | Facet-accuracy reconcile: re-run the fixed MPN decoder + desc extractor over cards with mpn_decode/desc_parse facet rows for capacity_gb/gpu_family/memory_gb; corrects changed values (same source, newer ladder timestamp) and DELETES keys the fixed extractor no longer yields. DRY RUN by default with per-failure-class tallies; `--apply` writes. |
+| `backfill_vendor_specs.py` | `python -m app.management.backfill_vendor_specs [--apply] [--limit N] [--daily-cap N] [--source mouser\|element14]` | Vendor-API parametric enrichment: select uncategorized cards demand-first (`sourced_qty_90d DESC NULLS LAST`), search the source for each within a date-keyed per-day call cap (`vendor_api:{source}:calls:{date}`), then the per-source writer enriches through the F1 ladder. `--source mouser` (default, cap 800) → `vendor_spec_enrich.enrich_card_from_mouser` (Mouser's rich DESCRIPTION → desc grammar at connector_desc/84; Mouser carries no structured parametrics). `--source element14` (cap 100 — Element14 rate-limits hard) → `enrich_card_from_element14` (Element14's structured `attributes` ARE parametrics; the connector maps them to seeded keys via `_vendor_spec_map`, written at element14_api/90). DRY RUN by default (counts/searches/writes nothing); `--apply` writes. |
 
 ## TRIO Source Ingest (`app/services/source_ingest/`)
 
@@ -205,6 +208,46 @@ top-tier enrichment input (trio_source:95 / trio_source_ai:88 on the F1 ladder):
 | `consolidate.py` | Groups cleaned records by `normalized_mpn` → one `ConsolidatedPart` per MPN with per-field provenance (description=longest, manufacturer=modal, condition=modal, quantity=sum, specs merged with master-wins). |
 | `ai_correct.py` | Optional Claude (smart tier) standardization/inference pass — output tagged `trio_source_ai` (tier 88, below vendor APIs). Per-part failure isolation; fail-fast on ClaudeUnavailable/Auth; returns `{corrected, failed}` for the report. |
 | `ingest.py` | AUGMENTs `material_cards` (creates when absent; never clobbers an existing description), category via `spec_tiers.set_category`, specs via `record_spec`; per-card SAVEPOINTs with tallies merged only after a clean release; failed parts counted + sampled in the report; `apply=False` (default) is a true dry run through the SAME ladder/schema gates (`set_category(write=False)` + `spec_would_write`) so the report matches `--apply`. |
+
+## Offer Qualification Service (`app/services/offer_qualification.py`)
+
+Pure-function library that drives the condition-spine qualification capture for buyer-entered
+offers. Zero I/O except `apply_qualification` (writes onto an Offer ORM object) and
+`prefill_from_vendor` (one DB read). All other functions are pure Python — safe to call from
+templates, tests, or background jobs without a DB session.
+
+| Export | Role |
+|--------|------|
+| `validate_essentials` | Per-condition gate (new/new_no_pkg/pulls/refurb); returns error strings |
+| `compose_note` | System-composed standardized note for `offers.qualification_note` |
+| `meter` | `(filled, total)` qualification item counts |
+| `compute_status` | → `QualificationStatus` string |
+| `apply_qualification` | Composes note+status onto Offer ORM; never raises (gate is in buyer handlers) |
+| `normalize_offer_condition` | Normalizes raw condition incl. legacy `used`→`pulls` |
+| `prefill_from_vendor` | Vendor-memory (#8): stable answer prefill from the vendor's last offer |
+| `request_template` | RFQ-back request text for `images`/`fpq`/`cert`/`pkg_qty` |
+| `essentials_data` | Canonical `data` dict builder (keeps key-set in sync across callers) |
+| `PACKAGING_CHIPS` | Display strings for the packaging chip selector |
+| `REQUEST_KINDS` | Tuple of valid request kind tokens |
+
+Frontend: `partials/offers/_qualification_fields.html` (condition-spine partial) and
+the `offerQualification` Alpine.js factory in `htmx_app.js` (live note preview + meter).
+`_offer_row.html` renders the qualification badge and standardized note/request list on each
+offer row.
+
+## Cross-App Alerts (`app/services/alerts/`)
+
+Reusable framework behind the emerald nav-count badges and the in-tab fluid spotlight.
+Each nav tab registers one or more `AlertSource`s; a badge count is the SUM of its
+sources' counts. See APP_MAP_INTERACTIONS § Cross-app alerts.
+
+| Module | Purpose |
+|--------|---------|
+| `base.py` | `AlertSource` ABC (`count_for_user` + `new_items_for_user`) with two `Temperament`s — **FYI** (count excludes `alert_seen` rows; seeing drains the badge) and **ACTION** (count from work-state; `alert_seen` only gates the one-time pulse). `AlertItem` (ref_id + row anchor); `recency_floor` (rolling `alert_recency_days` window floored at `ALERTS_EPOCH` so the launch backlog never lights up); `record_seen` (idempotent) / `seen_ref_ids`. |
+| `registry.py` | tab→sources registry — `register`, `sources_for_tab`, `source_for_kind`, `tab_for_kind`, `count_for_tab` (sum, fail-quiet per source), `markers_for_tab` (per-anchor spotlight markers for the list partials). |
+| `sources/` | Concrete sources, registered centrally on import: `OfferConfirmedSource`→`requisitions` (Sales Hub, FYI), `BuyplanActionSource`→`buy-plans` (ACTION), `InboundCustomerSource`→`crm` (FYI). Tab keys match the `mobile_nav.html` nav ids. |
+
+Router `app/routers/alerts.py` (registered in `main.py`): `GET /v2/partials/alerts/{tab_key}/badge` (emerald nav pill, fail-quiet) + `POST /v2/partials/alerts/{kind}/seen` (idempotent; returns the owning tab's refreshed nav badge as an OOB swap). Constants: `AlertKind` StrEnum (`app/constants.py`). Config: `alert_recency_days` (30) + `alerts_epoch` (`app/config.py`). Frontend: emerald count badges in `mobile_nav.html` (Sales Hub / Buy Plans / CRM, polled every 60s — same pattern as Proactive); the shared spotlight module + `.alert-rail`/`.tab-alert-pill` styles in `htmx_app.js` / `styles.css`; rows stamped by the `alert_row_attrs` macro in `partials/shared/_alert_macros.html` (fed by `markers_for_tab` via the parts list, buy_plans list, and CDM account list).
 
 ## Enrichment Worker Modules (`app/services/enrichment_worker/`)
 

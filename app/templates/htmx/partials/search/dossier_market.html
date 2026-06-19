@@ -9,13 +9,15 @@
 
    Called by: part_dossier.dossier_market (GET /v2/partials/search/dossier/market).
    Depends on: mpn (display), cached_search_id (str|None), cached_rows (list[dict]|None),
-               market_health (dict|None), dossier_market_banner.html, results_shell.html /
-               vendor_card.html, $store.shortlist + lead-detail drawer (reused). #}
+               market_health (dict|None),
+               dossier_market_banner.html, results_shell.html / vendor_card.html,
+               $store.shortlist + lead-detail drawer (reused). #}
 
 {% include "htmx/partials/search/dossier_market_banner.html" %}
 
 {% if cached_rows %}
 {# ── CACHE HIT — cached rows in the light market card ── #}
+
 <div class="px-4 py-2.5 border-b border-brand-100 flex items-center gap-3 text-[11px]">
   <span class="inline-flex items-center gap-1.5 text-gray-500">
     <span class="h-1.5 w-1.5 rounded-full bg-gray-400"></span>cached

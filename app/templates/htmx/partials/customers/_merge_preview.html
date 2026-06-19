@@ -1,0 +1,73 @@
+{# _merge_preview.html — Merge-duplicate confirmation preview.
+   Shows what will be reassigned when "remove" is merged into "keep".
+   Renders inside the merge-duplicate modal (#modal-content).
+   Receives: keep (Company), remove (Company), site_count, contact_count,
+             activity_count, req_count.
+   Called by: company_merge_preview route in htmx_views.py.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="space-y-5 p-1">
+  <div>
+    <h2 class="text-lg font-bold text-gray-900">Confirm Merge</h2>
+    <p class="mt-1 text-sm text-gray-500">
+      Review what will change before confirming. This action is <strong>irreversible</strong>.
+    </p>
+  </div>
+
+  {# What's being merged #}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-4 space-y-2">
+    <p class="text-sm font-semibold text-rose-800">Will be deleted</p>
+    <p class="text-base font-bold text-gray-900">{{ remove.name }}</p>
+    {% if remove.domain %}
+      <p class="text-xs text-gray-500">{{ remove.domain }}</p>
+    {% endif %}
+  </div>
+
+  {# What gets reassigned #}
+  <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-4 space-y-2">
+    <p class="text-sm font-semibold text-emerald-800">Will be reassigned to {{ keep.name }}</p>
+    <ul class="mt-2 space-y-1 text-sm text-gray-700">
+      <li class="flex justify-between">
+        <span>Sites</span>
+        <span class="font-semibold">{{ site_count }}</span>
+      </li>
+      <li class="flex justify-between">
+        <span>Contacts</span>
+        <span class="font-semibold">{{ contact_count }}</span>
+      </li>
+      <li class="flex justify-between">
+        <span>Activity entries</span>
+        <span class="font-semibold">{{ activity_count }}</span>
+      </li>
+      <li class="flex justify-between">
+        <span>Requisitions</span>
+        <span class="font-semibold">{{ req_count }}</span>
+      </li>
+    </ul>
+  </div>
+
+  {# Hidden result area for merge response #}
+  <div id="merge-result"></div>
+
+  {# Confirm form — POST is required (destructive action) #}
+  <form hx-post="/v2/partials/customers/{{ keep.id }}/merge"
+        hx-target="#merge-result"
+        hx-swap="innerHTML"
+        class="flex items-center gap-3">
+    <input type="hidden" name="remove_id" value="{{ remove.id }}">
+    <input type="hidden" name="confirmed" value="true">
+
+    <button type="submit"
+            class="flex-1 rounded-md bg-rose-600 px-4 py-2 text-sm font-semibold text-white
+                   hover:bg-rose-700 focus:outline-none focus:ring-2 focus:ring-rose-500">
+      Merge and delete {{ remove.name }}
+    </button>
+
+    <button type="button"
+            @click="$dispatch('close-modal')"
+            class="rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium
+                   text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500">
+      Cancel
+    </button>
+  </form>
+</div>

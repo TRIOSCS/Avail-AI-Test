@@ -42,7 +42,14 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, has_buyer_role, require_admin, require_buyer, require_user
+from ..dependencies import (
+    get_quote_for_user,
+    get_user,
+    has_buyer_role,
+    require_admin,
+    require_buyer,
+    require_user,
+)
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -100,6 +107,13 @@ from .auth import _password_login_enabled
 
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
+
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
+# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
+# Reporting surface was retired, so no view needs to borrow another tab's highlight.
+# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
+# correct, since it has no parent tab to highlight.
+_NAV_ID_ALIAS: dict[str, str] = {}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -356,7 +370,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/{current_view}/{parts[1]}"
 
-    ctx = _base_ctx(request, user, current_view)
+    nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
+    ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
     return template_response("htmx/base_page.html", ctx)
 
@@ -425,7 +440,10 @@ async def parts_workspace_partial(
     db: Session = Depends(get_db),
 ):
     """Return the split-panel parts workspace shell."""
+    from ..services import forecast_service
+
     ctx = _base_ctx(request, user, "requisitions")
+    ctx["pipeline"] = forecast_service.pipeline_summary(db)
     return template_response("htmx/partials/parts/workspace.html", ctx)
 
 
@@ -1273,6 +1291,7 @@ async def requisition_tab(
     request: Request,
     req_id: int,
     tab: str,
+    qual: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1299,9 +1318,10 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
-        offers = (
-            db.query(Offer).filter(Offer.requisition_id == req_id).order_by(Offer.created_at.desc().nullslast()).all()
-        )
+        q = db.query(Offer).filter(Offer.requisition_id == req_id)
+        if qual in ("unset", "incomplete", "essentials", "complete"):
+            q = q.filter(Offer.qualification_status == qual)
+        offers = q.order_by(Offer.created_at.desc().nullslast()).all()
         # Check for existing draft quote to show "Add to Quote" button
         draft_quote = (
             db.query(Quote)
@@ -1311,6 +1331,7 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
+        ctx["qual"] = qual
         return template_response("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
@@ -2128,6 +2149,10 @@ async def add_offer(
 
     from datetime import date as date_type
 
+    from ..services.offer_qualification import (
+        apply_qualification,
+        normalize_offer_condition,
+    )
     from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
 
@@ -2143,7 +2168,7 @@ async def add_offer(
         unit_price=_safe_float(form.get("unit_price")),
         lead_time=form.get("lead_time") or None,
         date_code=form.get("date_code") or None,
-        condition=form.get("condition") or None,
+        condition=normalize_offer_condition(form.get("condition")) or form.get("condition") or None,
         moq=_safe_int(form.get("moq")),
         manufacturer=form.get("manufacturer") or None,
         spq=_safe_int(form.get("spq")),
@@ -2160,6 +2185,21 @@ async def add_offer(
         entered_by_id=user.id,
         created_at=datetime.now(timezone.utc),
     )
+    _qkeys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    qual = {k: (form.get(k) or None) for k in _qkeys}
+    qual["requests"] = []
+    qual["schema"] = 1  # forward-version the qualification blob (spec §3.1)
+    offer.qualification = qual if any(qual[k] for k in _qkeys) else None
+    apply_qualification(offer)  # non-raising: composes note + sets status
     db.add(offer)
     db.flush()  # offer.id populated; activity row + offer committed together below
     # Offer hook: a manually entered offer is user-initiated proof of availability —
@@ -2305,6 +2345,33 @@ async def edit_offer(
     if req_id_val:
         offer.requirement_id = int(req_id_val) if req_id_val.isdigit() else None
 
+    from ..services.offer_qualification import (
+        apply_qualification,
+        normalize_offer_condition,
+    )
+
+    _qkeys = (
+        "usage",
+        "refurbished_by",
+        "refurb_process",
+        "cert_doc",
+        "part_condition",
+        "provenance_story",
+        "terms",
+        "lead_time_reason",
+    )
+    submitted_qual = {k: (form.get(k) or None) for k in _qkeys}
+    if any(submitted_qual.values()):
+        merged = dict(offer.qualification or {})
+        merged.update(submitted_qual)
+        merged.setdefault("requests", [])
+        merged["schema"] = 1  # forward-version the qualification blob (spec §3.1)
+        offer.qualification = merged
+    cond_raw = form.get("condition", "").strip()
+    if cond_raw:
+        offer.condition = normalize_offer_condition(cond_raw) or cond_raw
+
+    apply_qualification(offer)  # non-raising: composes note + sets status
     offer.updated_at = now
     offer.updated_by_id = user.id
     db.commit()
@@ -3618,17 +3685,25 @@ async def vendors_list_partial(
 
     total = query.count()
 
-    # Sorting
-    sort_col_map = {
-        "display_name": VendorCard.display_name,
-        "sighting_count": VendorCard.sighting_count,
-        "overall_win_rate": VendorCard.overall_win_rate,
-        "hq_country": VendorCard.hq_country,
-        "industry": VendorCard.industry,
-    }
-    sort_col = sort_col_map.get(sort, VendorCard.sighting_count)
-    order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
-    vendors = query.order_by(order).offset(offset).limit(limit).all()
+    # Sorting — outbound_asc uses the generalized order_by_clock (VendorCard clocks)
+    now_utc = datetime.now(timezone.utc)
+    if sort == "outbound_asc":
+        vendors = _order_by_clock(query, "outbound", model=VendorCard).offset(offset).limit(limit).all()
+    else:
+        sort_col_map = {
+            "display_name": VendorCard.display_name,
+            "sighting_count": VendorCard.sighting_count,
+            "overall_win_rate": VendorCard.overall_win_rate,
+            "hq_country": VendorCard.hq_country,
+            "industry": VendorCard.industry,
+        }
+        sort_col = sort_col_map.get(sort, VendorCard.sighting_count)
+        order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
+        vendors = query.order_by(order).offset(offset).limit(limit).all()
+
+    # Attach cadence_state to each vendor (tier=None → standard/30d target)
+    for v in vendors:
+        v.cadence_state = _cadence_state(None, v.last_outbound_at, now_utc)
 
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
@@ -3644,6 +3719,7 @@ async def vendors_list_partial(
             "my_only": my_only,
             "hx_target": hx_target,
             "push_url_base": push_url_base,
+            "now_utc": now_utc,
         }
     )
     return template_response("htmx/partials/vendors/list.html", ctx)
@@ -3783,6 +3859,10 @@ async def vendor_detail_partial(
         safety_summary = lead.vendor_safety_summary
         safety_flags = lead.vendor_safety_flags
 
+    now_utc = datetime.now(timezone.utc)
+    vendor_cadence = _cadence_state(None, vendor.last_outbound_at, now_utc)
+    vendor_nbt = _next_best_touch(None, vendor.last_outbound_at, now_utc)
+
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
         {
@@ -3795,6 +3875,9 @@ async def vendor_detail_partial(
             "safety_score": None,
             "safety_available": False,
             "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
+            "cadence_state": vendor_cadence,
+            "next_best_touch": vendor_nbt,
+            "now_utc": now_utc,
         }
     )
     return template_response("htmx/partials/vendors/detail.html", ctx)
@@ -4440,9 +4523,28 @@ async def partials_companies_redirect(request: Request, path: str = ""):
 # additionally re-exported under its historical name because tests
 # (tests/test_htmx_views_nightly28.py) import it from this module — the F401
 # keeps ruff from stripping that alias.
+from ..services.crm_service import cadence_state as _cadence_state  # noqa: E402
 from ..services.crm_service import cdm_list_ctx as _cdm_list_ctx  # noqa: E402
+from ..services.crm_service import company_commercial_stats as _company_commercial_stats  # noqa: E402
 from ..services.crm_service import company_contact_rows as _company_contact_rows  # noqa: E402
+from ..services.crm_service import next_best_touch as _next_best_touch  # noqa: E402
+from ..services.crm_service import order_by_clock as _order_by_clock  # noqa: E402
 from ..services.crm_service import staleness_tier as _staleness_tier  # noqa: E402, F401
+from ..services.tagging import (  # noqa: E402
+    assign_segment_tag as _assign_segment_tag,
+)
+from ..services.tagging import (
+    get_or_create_segment_tag as _get_or_create_segment_tag,
+)
+from ..services.tagging import (
+    list_all_segment_tags as _list_all_segment_tags,
+)
+from ..services.tagging import (
+    list_company_segment_tags as _list_company_segment_tags,
+)
+from ..services.tagging import (
+    unassign_segment_tag as _unassign_segment_tag,
+)
 
 _ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
 _ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
@@ -4465,6 +4567,7 @@ async def companies_list_partial(
     account_type: str = "",
     my_only: bool = False,
     sort: str = "oldest",
+    segment: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4481,6 +4584,7 @@ async def companies_list_partial(
             account_type=account_type,
             my_only=my_only,
             sort=sort,
+            segment=segment,
             limit=limit,
             offset=offset,
             include_overdue=True,
@@ -4497,6 +4601,7 @@ async def companies_account_list_partial(
     account_type: str = "",
     my_only: bool = False,
     sort: str = "oldest",
+    segment: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -4517,6 +4622,7 @@ async def companies_account_list_partial(
             account_type=account_type,
             my_only=my_only,
             sort=sort,
+            segment=segment,
             limit=limit,
             offset=offset,
         )
@@ -4636,6 +4742,86 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
+def build_account_timeline(contacts, quotes, activities, *, req_map):
+    """Merge RFQ contacts, quotes, and activity logs into a single sorted list.
+
+    Each event dict has the shape:
+        {ts, kind, channel, direction, title, detail, is_meaningful,
+         quality_score, quality_classification, raw}
+
+    ``kind`` is one of "rfq" | "quote" | "activity".
+    Events are sorted descending by ``ts`` (newest first).
+    ``raw`` carries the original ORM object for template use.
+
+    Called by: company_tab (activity branch) in htmx_views.py.
+    """
+    from datetime import datetime, timezone
+
+    _epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    events: list[dict] = []
+
+    for c in contacts or []:
+        ts = c.created_at or _epoch
+        events.append(
+            {
+                "ts": ts,
+                "kind": "rfq",
+                "channel": "email",
+                "direction": "outbound",
+                "title": c.vendor_name or "Unknown Vendor",
+                "detail": c.subject or "",
+                "is_meaningful": True,
+                "quality_score": None,
+                "quality_classification": None,
+                "raw": c,
+                "req": req_map.get(c.requisition_id) if req_map and c.requisition_id else None,
+            }
+        )
+
+    for q in quotes or []:
+        ts = q.created_at or _epoch
+        # Use won_revenue for won quotes; fall back to subtotal then total_cost
+        if q.status == "won" and q.won_revenue:
+            display_value = q.won_revenue
+        else:
+            display_value = q.subtotal or q.total_cost
+        events.append(
+            {
+                "ts": ts,
+                "kind": "quote",
+                "channel": "internal",
+                "direction": None,
+                "title": q.quote_number or "Quote",
+                "detail": "${:,.2f}".format(float(display_value)) if display_value else "",
+                "is_meaningful": True,
+                "quality_score": None,
+                "quality_classification": None,
+                "raw": q,
+                "display_value": display_value,
+            }
+        )
+
+    for a in activities or []:
+        ts = a.occurred_at or a.created_at or _epoch
+        events.append(
+            {
+                "ts": ts,
+                "kind": "activity",
+                "channel": a.channel,
+                "direction": a.direction,
+                "title": (a.activity_type or "").replace("_", " ").title(),
+                "detail": a.summary or a.notes or a.subject or "",
+                "is_meaningful": a.is_meaningful,
+                "quality_score": a.quality_score,
+                "quality_classification": a.quality_classification,
+                "raw": a,
+            }
+        )
+
+    events.sort(key=lambda e: e["ts"], reverse=True)
+    return events
+
+
 def _company_quotes_query(db: Session, company):
     """Quotes belonging to an account: union of quotes linked via the
     company's customer sites OR via the company's requisitions (the latter
@@ -4663,6 +4849,734 @@ def _company_quotes_query(db: Session, company):
     if not conds:
         return None
     return db.query(Quote).filter(or_(*conds)).options(joinedload(Quote.requisition))
+
+
+def _company_buy_plans_query(db: Session, company):
+    """Buy plans belonging to an account: all buy-plans whose requisition links
+    to the company (via company_id FK or customer_name match). Returns a Query,
+    or None when the account has no requisitions.
+    Called by: company_detail_partial (count), company_tab (buy_plans).
+    """
+    req_ids = [
+        r.id
+        for r in db.query(Requisition.id)
+        .filter(
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            )
+        )
+        .all()
+    ]
+    if not req_ids:
+        return None
+    return (
+        db.query(BuyPlan)
+        .options(joinedload(BuyPlan.lines), joinedload(BuyPlan.requisition))
+        .filter(BuyPlan.requisition_id.in_(req_ids))
+    )
+
+
+@router.get("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
+async def company_segment_tags_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the segment-tag chips + editor partial for a company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/segment-tags", response_class=HTMLResponse)
+async def company_assign_segment_tag(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assign a segment tag to a company.
+
+    Accepts tag_id= (existing) or tag_name= (creates new).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    tag_id_raw = form.get("tag_id", "").strip()
+    tag_name_raw = form.get("tag_name", "").strip()
+
+    if tag_name_raw:
+        tag = _get_or_create_segment_tag(tag_name_raw, db)
+    elif tag_id_raw:
+        try:
+            tag_id = int(tag_id_raw)
+        except ValueError:
+            raise HTTPException(400, "tag_id must be an integer")
+        from ..models.tags import Tag as _Tag
+
+        tag = db.query(_Tag).filter_by(id=tag_id).first()
+        if not tag:
+            raise HTTPException(404, "Tag not found")
+    else:
+        raise HTTPException(400, "Provide tag_id or tag_name")
+
+    _assign_segment_tag(company_id=company_id, tag_id=tag.id, db=db)
+    db.commit()
+
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+@router.delete("/v2/partials/customers/{company_id}/segment-tags/{tag_id}", response_class=HTMLResponse)
+async def company_unassign_segment_tag(
+    request: Request,
+    company_id: int,
+    tag_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Remove a segment tag from a company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    _unassign_segment_tag(company_id=company_id, tag_id=tag_id, db=db)
+    db.commit()
+
+    tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+    return template_response(
+        "htmx/partials/customers/_segment_tags.html",
+        {
+            "request": request,
+            "company": company,
+            "segment_tags": tags,
+            "all_segment_tags": all_segment_tags,
+        },
+    )
+
+
+_VALID_TIERS = frozenset({"key", "core", "standard", "prospect"})
+
+# Canonical buying-role taxonomy (P2b).  Legacy values (buyer/technical/
+# decision_maker/operations) remain valid in the DB but can only be cleared
+# via the "— clear —" option; they are not in this set.
+CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+_VALID_ROLES = frozenset(CANONICAL_ROLES)
+
+
+@router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
+async def set_company_tier(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.tier; re-renders the cadence hero with updated badge + NBT.
+
+    Accepts tier= from the inline select.  Blank value clears the tier (NULL → behaves
+    as 'standard').  Invalid value → 400.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    tier_raw = (form.get("tier") or "").strip()
+
+    if tier_raw and tier_raw not in _VALID_TIERS:
+        raise HTTPException(400, f"Invalid tier '{tier_raw}'. Valid: {sorted(_VALID_TIERS)}")
+
+    company.tier = tier_raw or None
+    db.commit()
+    db.refresh(company)
+
+    _cadence = _cadence_state(company.tier, company.last_outbound_at)
+    _nbt = _next_best_touch(company.tier, company.last_outbound_at)
+    logger.info("Company {} tier set to {} by {}", company_id, company.tier, user.email)
+    return template_response(
+        "htmx/partials/customers/_cadence_hero.html",
+        {
+            "request": request,
+            "company": company,
+            "cadence_state": _cadence,
+            "next_best_touch": _nbt,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/role",
+    response_class=HTMLResponse,
+)
+async def set_contact_role(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set SiteContact.contact_role; re-renders the role chip editor.
+
+    Accepts contact_role= from the inline select.  Blank value clears the role (NULL).
+    Invalid value → 400 (legacy values that pre-exist in the DB are not accepted via
+    this endpoint; rep must choose a canonical role).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    role_raw = (form.get("contact_role") or "").strip()
+
+    if role_raw and role_raw not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{role_raw}'. Valid: {sorted(_VALID_ROLES)}")
+
+    contact.contact_role = role_raw or None
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} role set to {} by {} (company {})",
+        contact_id,
+        contact.contact_role,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_role_chip_editor.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/do-not-contact",
+    response_class=HTMLResponse,
+)
+async def set_contact_dnc(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.do_not_contact; re-renders the DNC toggle partial.
+
+    Accepts do_not_contact= from the inline form.  Non-empty value → True. Empty string
+    → False (clear the flag).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    dnc_raw = (form.get("do_not_contact") or "").strip()
+
+    contact.do_not_contact = bool(dnc_raw)
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} do_not_contact set to {} by {} (company {})",
+        contact_id,
+        contact.do_not_contact,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_dnc_toggle.html",
+        {
+            "request": request,
+            "company": company,
+            "contact": contact,
+        },
+    )
+
+
+_VALID_DISPOSITIONS = frozenset({"active", "bucket"})
+
+
+@router.post("/v2/partials/customers/{company_id}/disposition", response_class=HTMLResponse)
+async def set_company_disposition(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.disposition (active|bucket); re-renders the disposition control.
+
+    Owner-or-admin only (mirrors release_prospect). Validates against the allowlist
+    (invalid → 400). Writes disposition + optional reason + audit fields
+    (set_by/set_at). Reversible — set back to 'active'. Invalidates the cached
+    company_list / typeahead so the bucketed account drops out of the call-list.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can set disposition")
+
+    form = await request.form()
+    disp_raw = (form.get("disposition") or "").strip()
+    reason_raw = (form.get("disposition_reason") or "").strip()
+
+    if disp_raw not in _VALID_DISPOSITIONS:
+        raise HTTPException(400, f"Invalid disposition '{disp_raw}'. Valid: {sorted(_VALID_DISPOSITIONS)}")
+
+    company.disposition = disp_raw
+    company.disposition_reason = reason_raw or None
+    company.disposition_set_by = user.id
+    company.disposition_set_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    logger.info("Company {} disposition set to {} by {}", company_id, company.disposition, user.email)
+    return template_response(
+        "htmx/partials/customers/_disposition_control.html",
+        {"request": request, "company": company},
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
+async def send_company_to_prospecting_htmx(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send an owned account back to the prospecting pool.
+
+    Owner-or-admin only. Clears ownership, surfaces the account as a SUGGESTED prospect
+    (by domain), and re-renders the company detail partial with a toast.
+    """
+    from ..services.prospect_claim import send_company_to_prospecting
+
+    try:
+        result = send_company_to_prospecting(company_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+    except LookupError:
+        raise HTTPException(404, "Company not found")
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    msg = f"Sent {result['company_name']} back to prospecting"
+    if not result["pooled"]:
+        msg += " (no domain — ownership cleared, not pooled)"
+    response = await company_detail_partial(request, company_id, user=user, db=db)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    return response
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/priority",
+    response_class=HTMLResponse,
+)
+async def set_contact_priority(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_priority; re-renders the priority toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_priority= → True; empty → False (clear).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_priority = bool((form.get("is_priority") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_priority set to {} by {} (company {})",
+        contact_id,
+        contact.is_priority,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_priority_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/archive",
+    response_class=HTMLResponse,
+)
+async def set_contact_archive(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_archived; re-renders the archive toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_archived= → True; empty → False (restore). Archived contacts stay visible
+    (sorted to the bottom) — is_active is never touched here.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_archived = bool((form.get("is_archived") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_archived set to {} by {} (company {})",
+        contact_id,
+        contact.is_archived,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_archive_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
+# ── Increment 2: left-panel company→site IA partials ──────────────────────────
+# These three routes carry STATIC first segments after /customers/ (header,
+# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
+# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
+# the right panel and honors the response-targets contract (hx-target #cdm-detail,
+# hx-target-error #cdm-error) from the caller markup.
+
+
+@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
+async def company_header_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
+    the per-tab strip.
+
+    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
+    site children carry the per-site contacts + open reqs).
+    """
+    company = (
+        db.query(Company)
+        .options(joinedload(Company.account_owner), joinedload(Company.sites))
+        .filter(Company.id == company_id)
+        .first()
+    )
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    sites = [s for s in (company.sites or []) if s.is_active]
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
+            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/header.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
+async def company_sites_accordion_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
+    left-panel account accordion header.
+
+    Each links to the site-detail view.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update({"company": company, "sites": sites})
+    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+async def company_site_detail_partial(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
+    at this site").
+
+    IDOR-safe: the site must belong to the
+    company AND be active, else 404 (mirrors site_contacts_list).
+    """
+    site = (
+        db.query(CustomerSite)
+        .options(joinedload(CustomerSite.owner))
+        .filter(
+            CustomerSite.id == site_id,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .first()
+    )
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    now_utc = datetime.now(_tz.utc)
+    # Site-scoped contacts — pass this single site so the rows are filtered to it
+    # (keeps the is_active + Increment-1 priority/archive sort).
+    contact_rows = _company_contact_rows(db, company_id, sites=[site])
+
+    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
+    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
+    open_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.customer_site_id == site_id,
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
+        )
+        .order_by(Requisition.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "site": site,
+            "contact_rows": contact_rows,
+            "open_reqs": open_reqs,
+            "now_utc": now_utc,
+            # Per-site cadence (tier=None → standard 30d target, like contacts).
+            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
+            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
+        }
+    )
+    return template_response("htmx/partials/customers/site_detail.html", ctx)
+
+
+# ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
+# STATIC trailing segments (dup-suggestion / name-suggestion / apply-name), so they
+# MUST precede the GET /v2/partials/customers/{company_id} catch-all below. ADDITIVE —
+# the merge engine (merge_companies) and the dedup scanner are reused as-is; no merge
+# logic lives here. The dup banner reuses the existing merge-form → preview → POST
+# .../merge flow. Naming is suggest-only — never a silent rewrite.
+
+
+@router.get("/v2/partials/customers/{company_id}/dup-suggestion", response_class=HTMLResponse)
+async def company_dup_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy per-account duplicate banner — top dedup match for THIS company + a Merge
+    button reusing the merge-form/preview/merge flow.
+
+    Renders nothing (empty 200) when there is no near-duplicate.
+    """
+    from ..company_utils import find_company_dedup_candidates
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
+    # already honors the auto_keep heuristic; here we only need the OTHER side as the
+    # merge-away candidate.
+    try:
+        candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+    except Exception as e:  # pragma: no cover - defensive, mirrors data-ops scan guard
+        logger.warning("dup-suggestion scan failed for company {}: {}", company_id, e)
+        return HTMLResponse("")
+
+    match = None
+    for pair in candidates:
+        a, b = pair["company_a"], pair["company_b"]
+        if a["id"] == company_id:
+            match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
+            break
+        if b["id"] == company_id:
+            match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
+            break
+
+    if not match:
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "match": match}
+    return template_response("htmx/partials/customers/_dup_suggestion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/name-suggestion", response_class=HTMLResponse)
+async def company_name_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Suggest-only name-normalization chip: surface the suffix-stripped form of the
+    current name as "Suggested name: X — Apply?".
+
+    Uses the same normalizer the dedup scanner uses, re-cased from the original tokens
+    (so we only strip the legal suffix / leading "the", never lowercase the whole name).
+    Renders nothing (empty 200) when the current name is already clean.
+    """
+    from ..company_utils import suggest_clean_company_name
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    suggested = suggest_clean_company_name(company.name or "")
+    if not suggested or suggested == (company.name or "").strip():
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "suggested": suggested}
+    return template_response("htmx/partials/customers/_name_suggestion.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/apply-name", response_class=HTMLResponse)
+async def company_apply_name(
+    request: Request,
+    company_id: int,
+    name: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a suggested company name (rep-initiated; the suggest-only counterpart to a
+    silent rewrite).
+
+    normalized_name follows automatically via Company._sync_normalized_name
+    (@validates). Returns an empty 200 so the chip removes itself (hx-swap outerHTML).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    new_name = (name or "").strip()
+    if not new_name:
+        raise HTTPException(400, "Name is required")
+
+    company.name = new_name  # @validates resyncs normalized_name
+    db.commit()
+
+    from ..cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+    logger.info("Company {} renamed to '{}' (suggested) by {}", company_id, new_name, user.email)
+    return HTMLResponse("")
 
 
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
@@ -4709,6 +5623,19 @@ async def company_detail_partial(
     _cq = _company_quotes_query(db, company)
     quote_count = _cq.count() if _cq is not None else 0
 
+    _bpq = _company_buy_plans_query(db, company)
+    buy_plan_count = _bpq.count() if _bpq is not None else 0
+
+    # Cadence card + commercial strip context
+    from datetime import timezone as _tz
+
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+    _cadence = _cadence_state(company.tier, company.last_outbound_at)
+    _nbt = _next_best_touch(company.tier, company.last_outbound_at)
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    segment_tags = _list_company_segment_tags(company_id=company_id, db=db)
+    all_segment_tags = _list_all_segment_tags(db=db)
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
@@ -4716,11 +5643,26 @@ async def company_detail_partial(
             "sites": sites,
             "open_req_count": open_req_count,
             "quote_count": quote_count,
+            "buy_plan_count": buy_plan_count,
             # Pass the active-only sites list — contacts on deactivated sites must
             # not be shown (clicking them would log outreach against, and bump,
             # a deactivated entity).
-            "contact_rows": _company_contact_rows(db, company_id, sites=sites),
+            "contact_rows": contact_rows,
             "user": user,
+            # Cadence card
+            "cadence_state": _cadence,
+            "next_best_touch": _nbt,
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            # Commercial strip
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            # Clock day calculations
+            "now_utc": datetime.now(_tz.utc),
+            # Segment tags
+            "segment_tags": segment_tags,
+            "all_segment_tags": all_segment_tags,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -4739,7 +5681,7 @@ async def company_tab(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes"}
+    valid_tabs = {"sites", "contacts", "requisitions", "activity", "quotes", "buy_plans"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -4760,8 +5702,16 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
+        from datetime import timezone as _tz
+
         ctx = _base_ctx(request, user, "customers")
-        ctx.update({"company": company, "contact_rows": _company_contact_rows(db, company_id)})
+        ctx.update(
+            {
+                "company": company,
+                "contact_rows": _company_contact_rows(db, company_id),
+                "now_utc": datetime.now(_tz.utc),
+            }
+        )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
 
     elif tab == "requisitions":
@@ -4813,6 +5763,13 @@ async def company_tab(
         ctx = _base_ctx(request, user, "customers")
         ctx.update({"company": company, "quotes": quotes})
         return template_response("htmx/partials/customers/tabs/quotes_tab.html", ctx)
+
+    elif tab == "buy_plans":
+        bpq = _company_buy_plans_query(db, company)
+        buy_plans = bpq.order_by(BuyPlan.created_at.desc().nullslast()).all() if bpq is not None else []
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update({"company": company, "buy_plans": buy_plans})
+        return template_response("htmx/partials/customers/tabs/buy_plans_tab.html", ctx)
 
     else:  # activity
         from sqlalchemy import or_ as or_clause
@@ -4867,7 +5824,14 @@ async def company_tab(
             .all()
         )
 
-        # Load email intelligence for email activities
+        # Merge all three sources into a single chronological timeline
+        timeline = build_account_timeline(contacts, quotes, activities, req_map=req_map)
+
+        # Compute truncation flag: True if ANY source hit its limit
+        # (RFQ .limit(30), quotes .limit(20), activities .limit(30))
+        timeline_truncated = len(contacts) >= 30 or len(quotes) >= 20 or len(activities) >= 30
+
+        # Load email intelligence for email activities (retained for potential future use)
         email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
         email_intel_map: dict = {}
         if email_external_ids:
@@ -4880,6 +5844,9 @@ async def company_tab(
         ctx.update(
             {
                 "company": company,
+                "timeline": timeline,
+                "timeline_truncated": timeline_truncated,
+                # Keep raw lists available for summary counts
                 "contacts": contacts,
                 "quotes": quotes,
                 "activities": activities,
@@ -5216,6 +6183,154 @@ async def edit_company(
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
+# ── Merge Duplicate ─────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-preview", response_class=HTMLResponse)
+async def company_merge_preview(
+    request: Request,
+    company_id: int,
+    remove_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a preview of what will happen when remove_id is merged into company_id.
+
+    Shows counts: sites, contacts, activities that will be reassigned; confirms the
+    loser will be deleted. Used by the merge-confirm modal before the user commits.
+    """
+    from ..models.intelligence import ActivityLog as _AL
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    if keep.id == remove.id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    # Count what will move
+    site_count = db.query(sqlfunc.count(CustomerSite.id)).filter(CustomerSite.company_id == remove.id).scalar() or 0
+    contact_count = (
+        db.query(sqlfunc.count(SiteContact.id))
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(CustomerSite.company_id == remove.id)
+        .scalar()
+        or 0
+    )
+    activity_count = db.query(sqlfunc.count(_AL.id)).filter(_AL.company_id == remove.id).scalar() or 0
+    req_count = db.query(sqlfunc.count(Requisition.id)).filter(Requisition.company_id == remove.id).scalar() or 0
+
+    ctx = {
+        "request": request,
+        "keep": keep,
+        "remove": remove,
+        "site_count": site_count,
+        "contact_count": contact_count,
+        "activity_count": activity_count,
+        "req_count": req_count,
+    }
+    return template_response("htmx/partials/customers/_merge_preview.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/merge", response_class=HTMLResponse)
+async def company_merge(
+    request: Request,
+    company_id: int,
+    remove_id: int = Form(...),
+    confirmed: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Merge remove_id into company_id (the keeper).
+
+    Requires confirmed="true" to prevent accidental submissions. Calls the
+    canonical merge_companies() engine — no FK logic lives here.
+    POST is mandatory: this is a destructive, irreversible operation.
+    """
+    from ..services.company_merge_service import merge_companies as _merge
+
+    if confirmed.lower() != "true":
+        raise HTTPException(400, "Merge requires explicit confirmation (confirmed=true)")
+
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    if remove_id == company_id:
+        raise HTTPException(400, "Cannot merge a company with itself")
+
+    remove = db.query(Company).filter(Company.id == remove_id).first()
+    if not remove:
+        raise HTTPException(400, "Duplicate company not found")
+
+    try:
+        result = _merge(company_id, remove_id, db)
+        db.commit()
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    logger.info(
+        "Manual company merge: kept {} ({}), removed {} by {}",
+        company_id,
+        keep.name,
+        remove_id,
+        user.email,
+    )
+
+    # Redirect browser to keeper's detail page via HTMX redirect header
+    safe_name = html_mod.escape(keep.name or "")
+    response = HTMLResponse(
+        f'<p class="text-sm text-emerald-600 py-2">Merged into <strong>{safe_name}</strong>. '
+        f"{int(result.get('sites_moved', 0))} site(s) and {int(result.get('reassigned', 0))} record(s) reassigned.</p>",
+        status_code=200,
+    )
+    response.headers["HX-Redirect"] = f"/v2/partials/customers/{company_id}"
+    return response
+
+
+@router.get("/v2/partials/customers/{company_id}/merge-form", response_class=HTMLResponse)
+async def company_merge_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the merge-duplicate modal form for a company.
+
+    Renders a search input to find the duplicate and a submit button that triggers the
+    merge-preview step.
+    """
+    keep = db.query(Company).filter(Company.id == company_id).first()
+    if not keep:
+        raise HTTPException(404, "Company not found")
+
+    ctx = {"request": request, "keep": keep}
+    return template_response("htmx/partials/customers/_merge_form.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}/edit-form", response_class=HTMLResponse)
+async def site_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a customer site."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    users = db.query(User).order_by(User.name).all()
+    return template_response(
+        "htmx/partials/customers/tabs/site_edit_modal.html",
+        {"request": request, "site": site, "company_id": company_id, "users": users},
+    )
+
+
 @router.post("/v2/partials/customers/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
 async def edit_site(
     request: Request,
@@ -5231,15 +6346,120 @@ async def edit_site(
 
     form = await request.form()
     site_name = form.get("site_name", "").strip()
-    if site_name:
-        site.site_name = site_name
+    if not site_name:
+        raise HTTPException(400, "site_name is required")
+    site.site_name = site_name
+    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
+    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
     site.city = form.get("city", "").strip() or site.city
+    site.state = form.get("state", "").strip() or site.state
+    site.zip = form.get("zip", "").strip() or site.zip
     site.country = form.get("country", "").strip() or site.country
     site.site_type = form.get("site_type", "").strip() or site.site_type
+    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
+    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        site.notes = notes_val
+    owner_id = form.get("owner_id", "")
+    if owner_id and str(owner_id).isdigit():
+        site.owner_id = int(owner_id)
+    site.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Site {} edited by {}", site_id, user.email)
 
     return await company_tab(request=request, company_id=company_id, tab="sites", user=user, db=db)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
+    response_class=HTMLResponse,
+)
+async def contact_edit_form(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return modal edit form for a site contact."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    # Verify site belongs to company
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    return template_response(
+        "htmx/partials/customers/tabs/contact_edit_modal.html",
+        {"request": request, "contact": contact, "site": site, "company_id": company_id},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit",
+    response_class=HTMLResponse,
+)
+async def edit_site_contact(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update editable contact fields (never contact_role) and return refreshed contacts
+    panel."""
+    contact = (
+        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    form = await request.form()
+    full_name = form.get("full_name", "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    email_val = form.get("email", "").strip()
+    if email_val and "@" not in email_val:
+        raise HTTPException(400, "Invalid email address")
+
+    contact.full_name = full_name
+    contact.title = form.get("title", "").strip() or contact.title
+    contact.email = email_val or contact.email
+    phone_val = form.get("phone", "").strip()
+    if phone_val:
+        contact.phone = phone_val
+    wechat_val = form.get("wechat_id", "").strip()
+    if wechat_val:
+        contact.wechat_id = wechat_val
+    notes_val = form.get("notes", "").strip()
+    if notes_val:
+        contact.notes = notes_val
+    # contact_role is intentionally NOT updated here — owned by the P2b role setter
+    contact.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Contact {} edited by {}", contact_id, user.email)
+
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+    company = db.query(Company).filter(Company.id == company_id).first()
+    ctx = _base_ctx(request, user, "customers")
+    ctx["site"] = site
+    ctx["contacts"] = contacts
+    ctx["company"] = company
+    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 @router.post(
@@ -5344,9 +6564,7 @@ async def preview_quote(
     db: Session = Depends(get_db),
 ):
     """Render quote email preview before sending."""
-    quote = db.query(Quote).options(joinedload(Quote.quote_lines)).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id, options=[joinedload(Quote.quote_lines)])
 
     return template_response(
         "htmx/partials/quotes/preview.html",
@@ -5362,9 +6580,7 @@ async def delete_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete a draft quote and redirect to the requisitions page."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "draft":
         raise HTTPException(400, "Only draft quotes can be deleted")
 
@@ -5383,9 +6599,7 @@ async def reopen_quote(
     db: Session = Depends(get_db),
 ):
     """Reopen a sent/closed quote back to draft."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status not in ("sent", "won", "lost"):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
@@ -5466,9 +6680,7 @@ async def edit_quote_metadata(
 ):
     """Update quote metadata (payment terms, shipping, notes) and return refreshed
     detail."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
 
     form = await request.form()
     if form.get("payment_terms"):
@@ -5589,6 +6801,9 @@ async def log_phone_call(
 
     # Route through log_call_activity so the call is matched to a vendor/company,
     # recorded as the canonical CALL_LOGGED type, and bumps last_activity_at.
+    # force_meaningful=True: a manually logged call is a deliberate human interaction →
+    # always meaningful, regardless of the duration-gate (which targets auto-captured
+    # Teams/8x8 calls that carry a real duration).
     log = log_call_activity(
         user_id=user.id,
         direction="outbound",
@@ -5598,6 +6813,7 @@ async def log_phone_call(
         contact_name=vendor_name,
         db=db,
         requisition_id=req_id,
+        force_meaningful=True,
     )
     if log is not None:
         log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
@@ -6023,77 +7239,140 @@ def _is_ops_member(user: User, db: Session) -> bool:
     return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
 
 
+def _can_supervise(user: User, db: Session) -> bool:
+    """True when the user may see cross-user (scope=all) deal data.
+
+    Managers/admins and ops verification-group members qualify.
+    """
+    return user.role in (UserRole.MANAGER, UserRole.ADMIN) or _is_ops_member(user, db)
+
+
+def _default_lens(user: User, db: Session) -> str:
+    """Pick the landing lens for the Deal Hub based on the user's role.
+
+    - buyers land on their PO queue ("orders"),
+    - managers/admins/ops land on the supervise board ("supervise"),
+    - everyone else (sales/trader) lands on the deal board ("deals").
+    """
+    if user.role == UserRole.BUYER:
+        return "orders"
+    if _can_supervise(user, db):
+        return "supervise"
+    return "deals"
+
+
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
 async def buy_plans_list_partial(
     request: Request,
-    q: str = "",
-    status: str = "",
-    mine: bool = False,
+    lens: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return buy plans list as HTML partial."""
-    query = db.query(BuyPlan).options(
-        joinedload(BuyPlan.quote),
-        joinedload(BuyPlan.requisition),
-        joinedload(BuyPlan.submitted_by),
-        joinedload(BuyPlan.approved_by),
-        joinedload(BuyPlan.lines),
-    )
+    """Return the Buy Plan Deal Hub shell.
 
-    if status:
-        query = query.filter(BuyPlan.status == status)
-    if mine:
-        query = query.filter(BuyPlan.submitted_by_id == user.id)
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(BuyPlan.sales_order_number, BuyPlan.customer_po_number))
+    The shell renders only the lens switcher + a lazy body that loads the active
+    lens partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
+    """
+    active_lens = lens if lens in ("orders", "deals", "supervise") else _default_lens(user, db)
 
-    # Sales users only see their own
-    if user.role == UserRole.SALES:
-        query = query.filter(BuyPlan.submitted_by_id == user.id)
+    # Spotlight markers: plan rows that carry an open step needing this user's action.
+    # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
+    from ..services.alerts import markers_for_tab
 
-    plans = query.order_by(BuyPlan.created_at.desc()).limit(200).all()
-
-    # Build lightweight list items
-    buy_plans = []
-    for p in plans:
-        customer_name = None
-        if p.quote and p.quote.customer_site:
-            site = p.quote.customer_site
-            co = site.company if hasattr(site, "company") else None
-            customer_name = co.name if co else getattr(site, "site_name", None)
-
-        buy_plans.append(
-            {
-                "id": p.id,
-                "quote_id": p.quote_id,
-                "quote_number": p.quote.quote_number if p.quote else None,
-                "customer_name": customer_name,
-                "sales_order_number": p.sales_order_number,
-                "status": p.status,
-                "so_status": p.so_status,
-                "total_cost": float(p.total_cost) if p.total_cost else 0,
-                "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
-                "line_count": len(p.lines) if p.lines else 0,
-                "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
-                "auto_approved": p.auto_approved or False,
-                "is_stock_sale": p.is_stock_sale or False,
-                "created_at": str(p.created_at) if p.created_at else None,
-            }
-        )
+    alert_markers = markers_for_tab(db, user, "buy-plans")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
-            "buy_plans": buy_plans,
-            "q": q,
-            "status": status,
-            "mine": mine,
-            "total": len(buy_plans),
+            "lens": active_lens,
+            "alert_markers": alert_markers,
+            "can_supervise": _can_supervise(user, db),
         }
     )
-    return template_response("htmx/partials/buy_plans/list.html", ctx)
+    return template_response("htmx/partials/buy_plans/hub.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/orders", response_class=HTMLResponse)
+async def buy_plans_orders_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buyer "My Orders" lens body: the actionable per-line PO cut queue.
+
+    Also includes a read-only "Team Orders" awareness section listing open lines
+    assigned to OTHER buyers (see ``team_line_queue``).
+    """
+    from ..services.buyplan_hub import buyer_line_queue, team_line_queue
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["queue"] = buyer_line_queue(db, user)
+    ctx["team"] = team_line_queue(db, user)
+    return template_response("htmx/partials/buy_plans/_orders_queue.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/board", response_class=HTMLResponse)
+async def buy_plans_board_partial(
+    request: Request,
+    scope: str = "mine",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Sales "My Deals" / manager board body: stage-grouped deal cards.
+
+    ``scope=all`` is role-gated — a non-manager/non-ops user is forced to
+    ``scope=mine`` so no other rep's plans leak.
+    """
+    from ..services.buyplan_hub import deals_board
+
+    scope = scope if scope in ("mine", "all") else "mine"
+    if scope == "all" and not _can_supervise(user, db):
+        scope = "mine"
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update({"board": deals_board(db, user, scope=scope), "scope": scope})
+    return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+
+def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:
+    """Build + render the supervise lens body for ``user``.
+
+    Shared by the ``GET /supervise`` route and the supervise-origin action returns.
+    Non-supervisors never see cross-user data: they get the mine-scope board instead
+    (defense in depth — the hub also hides the Supervise button for them).
+    """
+    from ..services.buyplan_hub import deals_board, supervise_overview
+
+    if not _can_supervise(user, db):
+        ctx = _base_ctx(request, user, "buy-plans")
+        ctx.update({"board": deals_board(db, user, scope="mine"), "scope": "mine"})
+        return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "overview": supervise_overview(db),
+            "board": deals_board(db, user, scope="all"),
+            "is_ops": _is_ops_member(user, db),
+            "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
+            "user": user,
+        }
+    )
+    return template_response("htmx/partials/buy_plans/_supervise.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/supervise", response_class=HTMLResponse)
+async def buy_plans_supervise_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager/ops "Supervise" lens body: triage panel + all-scope deal board.
+
+    Role-gated — a non-supervisor is served the mine-scope board so no other
+    user's plans leak (see ``_render_supervise_body``).
+    """
+    return _render_supervise_body(request, user, db)
 
 
 @router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
@@ -6190,6 +7469,7 @@ async def buy_plan_approve_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Manager or admin role required")
@@ -6203,6 +7483,9 @@ async def buy_plan_approve_partial(
             await run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -6224,6 +7507,7 @@ async def buy_plan_verify_so_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         plan = verify_so(
@@ -6241,6 +7525,9 @@ async def buy_plan_verify_so_partial(
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -6252,7 +7539,12 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO — returns refreshed detail."""
+    """Buyer confirms PO.
+
+    Returns the refreshed detail partial by default (``origin=""``, the original
+    behavior). When ``origin == "queue"`` the call came from the buyer's Orders lens
+    and we return the re-rendered orders queue so the confirmed line drops out.
+    """
     from datetime import datetime
 
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
@@ -6261,6 +7553,7 @@ async def buy_plan_confirm_po_partial(
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
+    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -6281,6 +7574,9 @@ async def buy_plan_confirm_po_partial(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    if origin == "queue":
+        return await buy_plans_orders_partial(request, user, db)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -6293,21 +7589,31 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ..services.buyplan_notifications import notify_completed, run_notify_bg
+    from ..services.buyplan_notifications import (
+        notify_completed,
+        notify_po_rejected,
+        run_notify_bg,
+    )
     from ..services.buyplan_workflow import check_completion, verify_po
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
         db.commit()
+        if action == "reject":
+            await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
         updated = check_completion(plan_id, db)
         if updated and updated.status == BuyPlanStatus.COMPLETED:
             db.commit()
             await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -8023,18 +9329,16 @@ async def quote_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return quote detail as HTML partial."""
-    quote = (
-        db.query(Quote)
-        .options(
+    quote = get_quote_for_user(
+        db,
+        user,
+        quote_id,
+        options=[
             joinedload(Quote.customer_site).joinedload(CustomerSite.company),
             joinedload(Quote.requisition),
             joinedload(Quote.created_by),
-        )
-        .filter(Quote.id == quote_id)
-        .first()
+        ],
     )
-    if not quote:
-        raise HTTPException(404, "Quote not found")
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     offers = (
         db.query(Offer).filter(Offer.requisition_id == quote.requisition_id).order_by(Offer.created_at.desc()).all()
@@ -8056,6 +9360,8 @@ async def update_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     form = await request.form()
     if "mpn" in form:
         line.mpn = form["mpn"]
@@ -8096,6 +9402,8 @@ async def delete_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
     db.commit()
     return HTMLResponse("")
@@ -8114,9 +9422,8 @@ async def add_quote_line(
     db: Session = Depends(get_db),
 ):
     """Add a new line item to a quote, return the new row HTML."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    # Ownership/existence check (raises 404 if the quote isn't visible to the user).
+    get_quote_for_user(db, user, quote_id)
     margin_pct = 0.0
     if sell_price > 0:
         margin_pct = round((sell_price - cost_price) / sell_price * 100, 2)
@@ -8146,12 +9453,15 @@ async def add_offer_to_quote(
     db: Session = Depends(get_db),
 ):
     """Add an offer as a line item to a quote."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    if offer.requisition_id is not None and offer.requisition_id != quote.requisition_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "offer does not belong to this quote's requisition"},
+        )
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
@@ -8179,9 +9489,7 @@ async def send_quote_htmx(
 ):
     """Mark quote as sent — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
@@ -8199,9 +9507,7 @@ async def quote_result_htmx(
 ):
     """Mark quote result (won/lost) — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     form = await request.form()
     result = form.get("result", "")
     if result not in ("won", "lost"):
@@ -8224,9 +9530,7 @@ async def revise_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Create a new revision of the quote — returns the new quote detail."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     new_rev = (quote.revision or 1) + 1
     new_quote = Quote(
         requisition_id=quote.requisition_id,
@@ -8260,6 +9564,8 @@ async def apply_markup_htmx(
     db: Session = Depends(get_db),
 ):
     """Apply a markup percentage to all lines in the quote."""
+    # Scope ownership check before mutating any lines (raises 404 for SALES on other users' quotes).
+    get_quote_for_user(db, user, quote_id)
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     for line in lines:
         if line.cost_price and float(line.cost_price) > 0:
@@ -8298,8 +9604,8 @@ async def add_offers_to_draft_quote(
     if not offer_ids or not quote_id:
         raise HTTPException(400, "Missing offer_ids or quote_id")
 
-    quote = db.query(Quote).filter(Quote.id == quote_id, Quote.requisition_id == req_id).first()
-    if not quote:
+    quote = get_quote_for_user(db, user, quote_id)
+    if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
     if quote.status != "draft":
         raise HTTPException(400, "Can only add to draft quotes")
@@ -8350,9 +9656,7 @@ async def build_buy_plan_htmx(
     """
     from ..services.buyplan_builder import build_buy_plan
 
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "won":
         raise HTTPException(400, "Quote must be won to build a buy plan")
 
@@ -8447,6 +9751,8 @@ def _prospect_stats_ctx(db: Session) -> dict:
 
     "Buyer ready" = is_buyer_ready over SUGGESTED.
     """
+    from ..config import settings as _settings
+
     suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
     claimed = (
         db.query(sqlfunc.count(ProspectAccount.id))
@@ -8454,11 +9760,17 @@ def _prospect_stats_ctx(db: Session) -> dict:
         .scalar()
         or 0
     )
+    screened_out_count = (
+        sum(1 for p in suggested if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out")
+        if _settings.ai_screen_enabled
+        else 0
+    )
     return {
         "total": len(suggested),
         "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
         "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
         "claimed": claimed,
+        "screened_out": screened_out_count,
     }
 
 
@@ -8506,7 +9818,7 @@ async def prospecting_list_partial(
     request: Request,
     q: str = "",
     status: str = "",
-    sort: str = "buyer_ready_desc",
+    sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_user),
@@ -8514,9 +9826,10 @@ async def prospecting_list_partial(
 ):
     """Return the prospecting card grid as an HTML partial.
 
-    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
-    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
-    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    Sorts: ai_match_desc (default) ranks by trio_match_score DESC then opportunity_score
+    DESC then readiness_score DESC; buyer_ready_desc ranks by the composite buyer-ready
+    score from build_priority_snapshot; fit_desc and recent_desc sort in SQL.
+    Dismissed prospects are hidden unless filtered for.
     """
     base = db.query(ProspectAccount)
     if status:
@@ -8531,7 +9844,30 @@ async def prospecting_list_partial(
     total_pages = max(1, (total + per_page - 1) // per_page)
     offset = (page - 1) * per_page
 
-    if sort == "buyer_ready_desc":
+    if sort == "ai_match_desc":
+        from ..config import settings as _settings
+
+        rows = base.all()
+        if _settings.ai_screen_enabled:
+            screened_out_rows = [
+                p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
+            ]
+            rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
+        else:
+            screened_out_rows = []
+        rows.sort(
+            key=lambda p: (
+                -(p.trio_match_score or 0),
+                -(p.opportunity_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        total = len(rows)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        prospects = rows[offset : offset + per_page]
+    elif sort == "buyer_ready_desc":
+        screened_out_rows = []
         # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
         rows = base.all()
         snapshots = {p.id: build_priority_snapshot(p) for p in rows}
@@ -8545,6 +9881,7 @@ async def prospecting_list_partial(
         )
         prospects = rows[offset : offset + per_page]
     else:
+        screened_out_rows = []
         if sort == "fit_desc":
             base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
         elif sort == "recent_desc":
@@ -8565,6 +9902,8 @@ async def prospecting_list_partial(
     status_counts = dict(count_q.group_by(ProspectAccount.status).all())
     all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
 
+    from ..config import settings as _list_settings
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
@@ -8580,6 +9919,8 @@ async def prospecting_list_partial(
             "total_pages": total_pages,
             "status_counts": status_counts,
             "all_total": all_total,
+            "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
+            "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
@@ -8862,6 +10203,57 @@ async def enrich_status_partial(
     return resp
 
 
+# ── Reclaim endpoint ─────────────────────────────────────────────────
+
+
+@router.post("/v2/partials/prospects/{prospect_id}/reclaim", response_class=HTMLResponse)
+async def reclaim_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reclaim a swept prospect: re-assign Company owner, dismiss from pool.
+
+    Former owner, admin, or sweep manager only.
+    Returns refreshed prospect card or detail with showToast trigger.
+    """
+    from ..services.prospect_reclamation import reclaim_prospect_account
+
+    error = None
+    result = None
+    try:
+        result = reclaim_prospect_account(
+            prospect_id,
+            user.id,
+            db,
+            is_admin=(user.role == UserRole.ADMIN),
+        )
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except RuntimeError:
+        raise HTTPException(500, "Session user record not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
+    msg = error or f"Reclaimed {result['company_name']} — account re-assigned to you"
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=msg,
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
+
+
 # ── Settings partials ────────────────────────────────────────────────
 
 
@@ -9002,6 +10394,48 @@ async def settings_data_ops_tab(
     return template_response("htmx/partials/settings/data_ops.html", ctx)
 
 
+@router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
+async def settings_api_keys_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """API credentials management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..config import GRAPH_SCOPES
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    def _field(source: str, env_var: str) -> dict:
+        is_set = credential_is_set(db, source, env_var)
+        masked = ""
+        if is_set:
+            plain = get_credential(db, source, env_var)
+            masked = mask_value(plain) if plain else "••••••••"
+        return {"is_set": is_set, "masked": masked}
+
+    current_scopes = set(GRAPH_SCOPES.split())
+    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
+            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
+            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
+            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
+            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
+            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
+            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
+            "current_scopes": sorted(current_scopes),
+            "missing_scopes": sorted(needed_scopes - current_scopes),
+            "teams_ready": not (needed_scopes - current_scopes),
+        }
+    )
+    return template_response("htmx/partials/settings/api_keys.html", ctx)
+
+
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
 async def admin_vendor_merge(
     request: Request,
@@ -9079,6 +10513,31 @@ async def proactive_list_partial(
     ctx["tab"] = tab
     ctx["match_count"] = match_count
     ctx["success_msg"] = request.query_params.get("success_msg", "")
+    return template_response("htmx/partials/proactive/list.html", ctx)
+
+
+@router.post("/v2/partials/proactive/refresh", response_class=HTMLResponse)
+async def proactive_refresh(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger a proactive scan then return the matches list partial."""
+    from ..services.proactive_matching import run_proactive_scan
+    from ..services.proactive_service import get_matches_for_user
+
+    await asyncio.to_thread(run_proactive_scan, db)
+
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
+    groups = result.get("groups", []) if isinstance(result, dict) else result
+    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
+
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = groups
+    ctx["sent"] = []
+    ctx["tab"] = "matches"
+    ctx["match_count"] = match_count
+    ctx["success_msg"] = ""
     return template_response("htmx/partials/proactive/list.html", ctx)
 
 
@@ -9462,6 +10921,8 @@ async def proactive_convert(
     offer = db.query(ProactiveOffer).filter(ProactiveOffer.id == offer_id).first()
     if not offer:
         raise HTTPException(404, "Proactive offer not found")
+    if offer.salesperson_id and offer.salesperson_id != user.id:
+        raise HTTPException(403, "Not your proactive offer")
 
     try:
         from ..services.proactive_service import convert_proactive_to_win
@@ -9471,7 +10932,12 @@ async def proactive_convert(
             "htmx/partials/proactive/convert_success.html",
             {"request": request, "offer": offer, "result": result},
         )
-    except (ImportError, RuntimeError, Exception) as exc:
+    except ValueError as exc:
+        exc_str = str(exc).lower()
+        if "already converted" in exc_str:
+            raise HTTPException(409, "This offer has already been converted.")
+        raise HTTPException(403, str(exc))
+    except Exception as exc:
         logger.error("Proactive conversion failed: {}", exc)
         raise HTTPException(500, "Conversion failed. Please try again.")
 
@@ -10037,11 +11503,17 @@ async def parts_list_partial(
     # Team users for owner filter
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
+    # Spotlight markers: requirement rows carrying new confirmed offers the user hasn't seen.
+    from ..services.alerts import markers_for_tab
+
+    alert_markers = markers_for_tab(db, user, "requisitions")
+
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
             "requirements": requirements,
             "offer_stats": offer_stats,
+            "alert_markers": alert_markers,
             "q": q,
             "requisition_name": requisition_name,
             "customer": customer,

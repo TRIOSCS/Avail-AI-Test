@@ -6,6 +6,7 @@ Called by: htmx_views.py faceted search routes
 Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 """
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import NamedTuple
 
@@ -20,6 +21,11 @@ from app.utils.search_builder import SearchBuilder
 # Such facets get a typeahead search box + this many top-by-count values
 # (see get_subfilter_options); a fixed-vocabulary facet renders its full canonical list.
 TOP_N = 12
+
+# Max common-value chips rendered above a numeric facet's min/max range inputs.
+# Chips are the N most common discrete value_numeric values (by distinct-card count);
+# the range inputs still cover the long tail (see get_subfilter_options).
+NUMERIC_CHIP_N = 8
 
 # Operational (Layer-3) filter vocabularies. This service OWNS the vocabularies: the
 # maps below drive the query branches in search_materials_faceted, and the *_VALUES
@@ -44,6 +50,17 @@ SEARCHED_WITHIN_VALUES = ("any", *SEARCHED_WITHIN_DAYS)  # "any" = no-op sentine
 # GROUP BY / equality from ix_mc_cat_order_live (098_materials_perf_idx) instead of
 # heap-fetching the raw column.
 _CATEGORY_NORM = func.lower(func.trim(MaterialCard.category))
+
+
+def _natural_sort_key(s: str):
+    """Split on digit runs so '205' sorts before '1210' (numeric runs compared as ints).
+
+    Each token is type-ranked — (0, int) for a digit run, (1, str) for text — so an int
+    is never compared to a str. A mixed overflow set like ['1210', 'BGA'] then sorts
+    cleanly (numbers before letters) instead of raising ``TypeError: '<' not supported
+    between 'int' and 'str'``.
+    """
+    return [(0, int(t)) if t.isdigit() else (1, t) for t in re.split(r"(\d+)", s) if t != ""]
 
 
 def has_crosses_predicate():
@@ -95,7 +112,15 @@ def _apply_facet_filters(
         # Each branch narrows to the cards whose facet row for one spec_key satisfies a
         # value predicate. They share the same EXISTS-via-IN subquery shape — only the
         # spec_key derivation and the value predicate differ.
-        if key.endswith("_min"):
+        # The "__vals" branch (numeric common-value chips) MUST precede the generic list
+        # branch below, which would otherwise capture it and wrongly match value_text
+        # against the un-stripped "{spec_key}__vals" key.
+        if key.endswith("__vals"):
+            if not (isinstance(values, list) and values):
+                continue
+            spec_key = key[: -len("__vals")]
+            value_predicate = MaterialSpecFacet.value_numeric.in_(values)
+        elif key.endswith("_min"):
             spec_key, value_predicate = key[:-4], MaterialSpecFacet.value_numeric >= values
         elif key.endswith("_max"):
             spec_key, value_predicate = key[:-4], MaterialSpecFacet.value_numeric <= values
@@ -144,8 +169,9 @@ def get_facet_counts(
     """Return facet value counts for a commodity.
 
     Args:
-        active_filters: spec-facet narrowing ({spec_key: [values]} / {spec_key_min: n}),
-            counted with OR-within-facet self-exclusion (pass 2 below).
+        active_filters: spec-facet narrowing ({spec_key: [values]} / {spec_key_min: n} /
+            {spec_key__vals: [numbers]} for numeric common-value chips), counted with
+            OR-within-facet self-exclusion (pass 2 below).
         card_filters: card-level narrowing shared with the results list — keyword args
             of ``_apply_card_filters`` minus ``commodity``/``sub_filters`` (q,
             manufacturers, statuses, lifecycle, rohs, condition, has_* flags, internal,
@@ -153,7 +179,8 @@ def get_facet_counts(
             the sidebar overstates versus the visible results.
 
     Returns: {spec_key: {value: count, ...}, ...}
-    Only includes text-based facets (enums, booleans).
+    Includes text-based facets (enums, booleans) keyed by value_text, and numeric
+    common-value chips keyed by str(value_numeric).
     """
     commodity = commodity.lower().strip()
     active_filters = active_filters or {}
@@ -191,20 +218,66 @@ def get_facet_counts(
             q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
         return q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text).all()
 
+    def _grouped_numeric_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
+        # Twin of _grouped_counts for numeric common-value chips: groups by value_numeric
+        # (IS NOT NULL) instead of value_text. Same card_scope + facet-narrowing shape,
+        # so chip counts can never diverge from the enum/results predicates.
+        base = db.query(MaterialSpecFacet.material_card_id).filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.material_card_id.in_(db.query(card_scope.c.id)),
+        )
+        if narrow_filters:
+            base = _apply_facet_filters(base, db, commodity, narrow_filters)
+        card_ids_subq = base.distinct().subquery()
+        q = db.query(
+            MaterialSpecFacet.spec_key,
+            MaterialSpecFacet.value_numeric,
+            func.count(MaterialSpecFacet.material_card_id.distinct()),
+        ).filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.value_numeric.isnot(None),
+            MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq.c.material_card_id)),
+        )
+        if only_spec_key is not None:
+            q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
+        return q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_numeric).all()
+
     # Pass 1: every facet narrowed by ALL active filters — correct for facets the user has NOT
     # filtered on (they should reflect the full current narrowing).
     result: dict[str, dict[str, int]] = {}
     for spec_key, value, count in _grouped_counts(active_filters):
         result.setdefault(spec_key, {})[value] = count
+    # Pass 1 numeric: chip counts string-keyed by value so the template looks up by
+    # str(chip.value). A numeric spec_key never collides with an enum spec_key (a spec is
+    # one data_type), so this never overwrites enum counts.
+    for spec_key, value, count in _grouped_numeric_counts(active_filters):
+        result.setdefault(spec_key, {})[str(value)] = count
 
-    # Pass 2: OR-within-facet correctness — recompute each ACTIVELY-FILTERED enum facet's own
+    # Pass 2: OR-within-facet correctness — recompute each ACTIVELY-FILTERED facet's own
     # value counts against the set narrowed by every OTHER facet (excluding its own selection),
-    # so checking one value never collapses its siblings to 0. (Enum filters carry list values;
-    # numeric _min/_max filters have no value_text counts, so they are skipped.)
-    enum_filtered_keys = [k for k, v in active_filters.items() if isinstance(v, list)]
+    # so checking one value never collapses its siblings to 0.
+    # Enum facets carry a list under their bare spec_key; numeric chips carry a list under
+    # "{spec_key}__vals". Numeric _min/_max filters have no value_text/chip counts to recompute.
+    enum_filtered_keys = [k for k, v in active_filters.items() if isinstance(v, list) and not k.endswith("__vals")]
     for fk in enum_filtered_keys:
-        others = {k: v for k, v in active_filters.items() if k not in (fk, f"{fk}_min", f"{fk}_max")}
+        # Exclude the facet's own selection and any sibling variant of the same spec_key.
+        own_variants = (fk, f"{fk}_min", f"{fk}_max", f"{fk}__vals")
+        others = {k: v for k, v in active_filters.items() if k not in own_variants}
         result[fk] = {value: count for _sk, value, count in _grouped_counts(others, only_spec_key=fk)}
+
+    # Pass 2 numeric: each ACTIVELY-FILTERED "__vals" chip facet recomputed without its own
+    # selection (its siblings stay full — selecting one chip never zeroes the others).
+    chip_filtered_keys = [k for k, v in active_filters.items() if isinstance(v, list) and k.endswith("__vals")]
+    for fk in chip_filtered_keys:
+        spec_key = fk[: -len("__vals")]
+        # Exclude every variant of this spec (chip, enum, and _min/_max range) so a
+        # same-spec range never narrows the chip facet's own OR-within counts — mirrors
+        # the enum Pass-2 own_variants contract above.
+        own_variants = (spec_key, f"{spec_key}_min", f"{spec_key}_max", fk)
+        others = {k: v for k, v in active_filters.items() if k not in own_variants}
+        result[spec_key] = {
+            str(value): count for _sk, value, count in _grouped_numeric_counts(others, only_spec_key=spec_key)
+        }
     return result
 
 
@@ -602,6 +675,25 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
     for sk, mn, mx in numeric_rows:
         numeric_map[sk] = {"min": mn, "max": mx}
 
+    # Batch query: distinct-card count per discrete numeric value (mirrors text_count_rows).
+    # Drives the common-value chips — the top-NUMERIC_CHIP_N values per numeric spec.
+    numeric_count_rows = (
+        db.query(
+            MaterialSpecFacet.spec_key,
+            MaterialSpecFacet.value_numeric,
+            func.count(MaterialSpecFacet.material_card_id.distinct()),
+        )
+        .filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.value_numeric.isnot(None),
+        )
+        .group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_numeric)
+        .all()
+    )
+    numeric_count_map: dict[str, dict[float, int]] = {}
+    for sk, vn, cnt in numeric_count_rows:
+        numeric_count_map.setdefault(sk, {})[vn] = cnt
+
     result = []
     for schema in schemas:
         option = {
@@ -616,9 +708,10 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
                 # Fixed vocabulary: render the full canonical list (so unstocked values
                 # still show with a (0) count), then append any unexpected observed values.
                 observed = set(text_map.get(schema.spec_key, []))
-                option["values"] = list(schema.enum_values) + [
-                    v for v in sorted(observed) if v not in schema.enum_values
-                ]
+                option["values"] = list(schema.enum_values) + sorted(
+                    (v for v in observed if v not in schema.enum_values),
+                    key=_natural_sort_key,
+                )
                 option["widget"] = "checkbox"
             else:
                 # Open vocabulary (e.g. motherboard chipset): no canonical list to enumerate,
@@ -630,6 +723,15 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
         elif schema.data_type == "numeric":
             option["range"] = numeric_map.get(schema.spec_key)
             option["widget"] = "range"
+            # Common-value chips: the NUMERIC_CHIP_N most common discrete values
+            # (by distinct-card count), then displayed ascending by value. A numeric
+            # spec with no facet rows → empty list (template omits the chip row).
+            top = sorted(
+                numeric_count_map.get(schema.spec_key, {}).items(),
+                key=lambda kv: kv[1],
+                reverse=True,
+            )[:NUMERIC_CHIP_N]
+            option["chips"] = [{"value": v, "count": c} for v, c in sorted(top)]
         elif schema.data_type == "boolean":
             # Always offer Yes/No (with counts incl. 0) so the toggle renders consistently
             # regardless of whether data currently backs it.

@@ -154,18 +154,13 @@ class TestPresenceService:
 
 
 class TestPerformanceMetricsEndpoint:
-    """Test JSON metrics endpoint for Chart.js."""
+    """The Chart.js JSON metrics endpoint is retired with the Team Performance
+    dashboard."""
 
-    def test_metrics_returns_json(self, client: TestClient):
-        """GET /api/crm/performance-metrics returns JSON with score arrays."""
+    def test_metrics_endpoint_gone(self, client: TestClient):
+        """GET /api/crm/performance-metrics no longer exists (route removed)."""
         resp = client.get("/api/crm/performance-metrics")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "names" in data
-        assert "scores" in data
-        assert "behaviors" in data
-        assert "outcomes" in data
-        assert isinstance(data["names"], list)
+        assert resp.status_code == 404
 
 
 class TestACSService:

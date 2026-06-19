@@ -101,6 +101,9 @@
   {% set vendor_collapse_limit = 5 %}
   {% set extra_count = summaries|length - vendor_collapse_limit %}
   <div x-data="{ vendorsExpanded: false }">
+    {# overflow-x-auto: on a narrow split pane / phone the 5 columns scroll
+       horizontally instead of crushing (compact-table cells are nowrap). #}
+    <div class="overflow-x-auto">
     <table class="compact-table w-full">
       <thead>
         <tr>
@@ -120,6 +123,7 @@
       {% include "htmx/partials/sightings/_vendor_row.html" %}
       {% endfor %}
     </table>
+    </div>
     {% if extra_count > 0 %}
     <button @click="vendorsExpanded = !vendorsExpanded"
             class="w-full mt-1 py-1.5 text-xs text-brand-600 hover:text-brand-800 font-medium text-center transition-colors">

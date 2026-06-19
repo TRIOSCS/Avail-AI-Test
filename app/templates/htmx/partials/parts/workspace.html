@@ -2,9 +2,23 @@
    Left: filterable parts table with top scrollbar. Right: detail tabs for selected part.
    Called by: GET /v2/requisitions (full page load → partial swap)
    Depends on: parts/list.html, Alpine.js, HTMX
+   Receives: pipeline (forecast_service.pipeline_summary) for the slim context strip.
 #}
 
-<div class="h-[calc(100vh-90px)] flex"
+{# ── Pipeline context strip — slim, subordinate header (no card/dashboard). Open deals,
+     open value, and stage-weighted forecast, near the requisitions they summarize. The
+     split-panel height below subtracts this 26px strip so the layout doesn't overflow. #}
+{% if pipeline %}
+<div class="h-[26px] flex items-center gap-4 px-3 text-xs text-gray-500 bg-gray-50 border-b border-gray-200">
+  <span><span class="font-medium text-gray-700">{{ pipeline.open_count }}</span> open deal{{ "" if pipeline.open_count == 1 else "s" }}</span>
+  <span class="text-gray-300">·</span>
+  <span><span class="font-medium text-gray-700">${{ "{:,.0f}".format(pipeline.open_value) }}</span> open value</span>
+  <span class="text-gray-300">·</span>
+  <span><span class="font-medium text-gray-700">${{ "{:,.0f}".format(pipeline.weighted_value) }}</span> weighted forecast</span>
+</div>
+{% endif %}
+
+<div class="{{ 'h-[calc(100vh-116px)]' if pipeline else 'h-[calc(100vh-90px)]' }} flex"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.50'),
        dragging: false,

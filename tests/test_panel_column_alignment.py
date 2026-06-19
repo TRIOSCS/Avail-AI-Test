@@ -143,6 +143,41 @@ class TestSightingsVendorColumns:
         assert "$12.40" in body  # best_price
         assert "82%" in body  # score
 
+    def test_drawer_close_animates_via_inner_collapse(self, client: TestClient, req_with_vendor_summary):
+        """The expand drawer must animate closed smoothly: the collapse lives on the
+        inner div, and the drawer <tr> must NOT carry x-show — gating the row's display
+        directly hides it the instant the collapse starts (a visible snap)."""
+        _req, item = req_with_vendor_summary
+        resp = client.get(f"/v2/partials/sightings/{item.id}/detail")
+        table = _vendors_table(resp.text)
+        drawer_rows = [
+            tr
+            for tr in table.find_all("tr")
+            if len(tr.find_all("td", recursive=False)) == 1 and tr.find("td").get("colspan")
+        ]
+        assert drawer_rows, "expected a drawer row"
+        for tr in drawer_rows:
+            assert not tr.has_attr("x-show"), "drawer <tr> must not gate display with x-show (causes snap)"
+            assert tr.select("[x-collapse]"), "drawer must keep x-collapse on an inner element"
+            # The collapsed (always-present) row must be flush — padding/border zeroed via
+            # INLINE style, because `.compact-table td` (unlayered, higher specificity) beats
+            # Tailwind's p-0 class and would otherwise leave a ~12px gap row between vendors.
+            style = (tr.find("td", recursive=False).get("style") or "").replace(" ", "")
+            assert "padding:0" in style, "drawer <td> must zero padding inline (p-0 class loses to .compact-table td)"
+            assert "border-bottom:0" in style, "drawer <td> must zero its border inline"
+
+    def test_vendor_table_scrolls_horizontally_on_narrow(self, client: TestClient, req_with_vendor_summary):
+        """The 5-column vendor table must sit in an overflow-x-auto wrapper so it stays
+        readable (scrolls) on narrow / phone widths instead of crushing columns."""
+        _req, item = req_with_vendor_summary
+        resp = client.get(f"/v2/partials/sightings/{item.id}/detail")
+        node = _vendors_table(resp.text)
+        while node is not None:
+            if any("overflow-x-auto" in c for c in (node.get("class") or [])):
+                break
+            node = node.parent
+        assert node is not None, "vendors table must be inside an overflow-x-auto wrapper"
+
 
 # ── Track 2: requisitions2 detail panel tabs ────────────────────────────────
 class TestReqsDetailTabs:

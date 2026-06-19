@@ -19,6 +19,11 @@ from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCa
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
+# Minimum connected-call duration to be considered a real conversation.
+# Calls shorter than this (including duration=0 or None) are voicemails or
+# missed calls — they do NOT advance the reply clock.
+CALL_MEANINGFUL_MIN_SECONDS: int = 30
+
 # Activity types that are inherently meaningful — flagged is_meaningful=True at
 # write time (cheap, deterministic). The high-volume / free-text types
 # (sighting_added, email_received) are deliberately excluded: they are left
@@ -42,11 +47,46 @@ _RULE_MEANINGFUL_TYPES: frozenset[str] = frozenset(
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def _resolve_site_contact(email_lower: str, company_id: int, site_id: int | None, db: Session) -> int | None:
+    """Return the SiteContact.id whose email matches email_lower within the company's
+    sites.
+
+    Scoped to the matched site when known, otherwise searches all active sites for the
+    company. Prefers email_verified=True, then is_primary=True, then first found.
+    Returns None if no match — NO change to existing behaviour.
+    """
+    q = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(
+            func.lower(SiteContact.email) == email_lower,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+    )
+    if site_id is not None:
+        q = q.filter(SiteContact.customer_site_id == site_id)
+    candidates = q.all()
+    if not candidates:
+        return None
+    # Prefer verified, then primary, then first
+    for sc in candidates:
+        if sc.email_verified:
+            return sc.id
+    for sc in candidates:
+        if sc.is_primary:
+            return sc.id
+    return candidates[0].id
+
+
 def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     """Match an email address to a company or vendor card.
 
     Returns {"type": "company"|"vendor", "id": int, "name": str} or None. Checks
     customer sites first, then vendor contacts, then vendor card email lists.
+
+    For customer-side matches also resolves the SiteContact whose email equals the
+    address and includes site_contact_id in the result (None when no contact found).
     """
     if not email_addr:
         return None
@@ -63,7 +103,14 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         .first()
     )
     if site:
-        return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
+        sc_id = _resolve_site_contact(email_lower, site.company_id, site.id, db)
+        return {
+            "type": "company",
+            "id": site.company_id,
+            "name": site.site_name,
+            "site_id": site.id,
+            "site_contact_id": sc_id,
+        }
 
     # 2. Check vendor_contacts table (exact match)
     vc = db.query(VendorContact).filter(func.lower(VendorContact.email) == email_lower).first()
@@ -76,7 +123,8 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     if domain and domain not in _GENERIC_DOMAINS:
         company = db.query(Company).filter(func.lower(Company.domain) == domain, Company.is_active.is_(True)).first()
         if company:
-            return {"type": "company", "id": company.id, "name": company.name}
+            sc_id = _resolve_site_contact(email_lower, company.id, None, db)
+            return {"type": "company", "id": company.id, "name": company.name, "site_contact_id": sc_id}
 
     # 4. Domain match against vendor_cards
     if domain and domain not in _GENERIC_DOMAINS:
@@ -169,8 +217,8 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 def _match_entity_links(match: dict | None) -> dict:
     """Translate a contact-match dict into ActivityLog entity-link kwargs.
 
-    Returns company_id / vendor_card_id / vendor_contact_id / customer_site_id with only
-    the matched side populated (the other side stays None).
+    Returns company_id / vendor_card_id / vendor_contact_id / customer_site_id /
+    site_contact_id with only the matched side populated (the other side stays None).
     """
     if match and match["type"] == "company":
         return {
@@ -178,6 +226,7 @@ def _match_entity_links(match: dict | None) -> dict:
             "vendor_card_id": None,
             "vendor_contact_id": None,
             "customer_site_id": match.get("site_id"),
+            "site_contact_id": match.get("site_contact_id"),
         }
     if match and match["type"] == "vendor":
         return {
@@ -185,8 +234,15 @@ def _match_entity_links(match: dict | None) -> dict:
             "vendor_card_id": match["id"],
             "vendor_contact_id": match.get("vendor_contact_id"),
             "customer_site_id": None,
+            "site_contact_id": None,
         }
-    return {"company_id": None, "vendor_card_id": None, "vendor_contact_id": None, "customer_site_id": None}
+    return {
+        "company_id": None,
+        "vendor_card_id": None,
+        "vendor_contact_id": None,
+        "customer_site_id": None,
+        "site_contact_id": None,
+    }
 
 
 def log_email_activity(
@@ -199,10 +255,16 @@ def log_email_activity(
     db: Session,
     requisition_id: int | None = None,
     requirement_id: int | None = None,
+    occurred_at: datetime | None = None,
 ) -> ActivityLog | None:
     """Log an email activity, matching the contact to a company or vendor.
 
     Returns the ActivityLog record or None if dedup/no-match.
+
+    Pass occurred_at to stamp the exact send/receive time on the row.  When omitted the
+    column default (server-side UTC now) is used.  Always pass occurred_at for send-time
+    rows so the scan_sent_folder reconcile query (which filters ActivityLog.occurred_at
+    >= reconcile_window_start) can match the row and avoid creating a duplicate.
     """
     # Dedup by external_id
     if external_id:
@@ -228,9 +290,14 @@ def log_email_activity(
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
+        occurred_at=occurred_at,
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     if match:
         # Update last_activity_at on the matched entity
@@ -268,6 +335,7 @@ def log_call_activity(
     subject: str | None = None,
     requisition_id: int | None = None,
     requirement_id: int | None = None,
+    force_meaningful: bool | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     direction = _normalize_direction(direction)
@@ -301,10 +369,18 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=True,
+        is_meaningful=(
+            force_meaningful
+            if force_meaningful is not None
+            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
+        ),
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     if match:
         _update_last_activity(match, db, user_id)
@@ -502,6 +578,23 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
     return delta.days
 
 
+def get_last_activity_at(company_id: int, db: Session) -> datetime | None:
+    """Return the UTC datetime of the most recent ActivityLog entry for a company.
+
+    None if no activity ever. Covers ALL event types (email, call, note, meeting,
+    quote, RFQ, buy-plan updates) because all writers set ActivityLog.company_id.
+    Used by the SP4 90-day sweep to determine dormancy.
+
+    Called by: app/services/prospect_reclamation.py
+    """
+    latest = db.query(func.max(ActivityLog.created_at)).filter(ActivityLog.company_id == company_id).scalar()
+    if not latest:
+        return None
+    if latest.tzinfo is None:
+        return latest.replace(tzinfo=timezone.utc)
+    return latest
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════
@@ -543,6 +636,7 @@ def log_company_call(
     contact_name: str | None,
     notes: str | None,
     db: Session,
+    force_meaningful: bool | None = None,
 ) -> ActivityLog:
     """Log a manual call against a company."""
     activity_type = ActivityType.CALL_LOGGED
@@ -556,9 +650,18 @@ def log_company_call(
         duration_seconds=duration_seconds,
         direction=direction,
         notes=notes,
+        is_meaningful=(
+            force_meaningful
+            if force_meaningful is not None
+            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
+        ),
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
@@ -583,6 +686,10 @@ def log_company_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     bump_company_site_activity(db, company_id, None)
     logger.info(f"Activity logged: note -> company {company_id} by user {user_id}")
@@ -641,7 +748,19 @@ def log_outreach_initiated(
     last_activity_at on the company and site so staleness sorting reflects
     the touch immediately. Re-clicks within OUTREACH_DEDUP_SECONDS return the
     existing record instead of duplicating it. Caller commits.
+
+    Raises ValueError if site_contact_id refers to a DNC contact — caller must
+    convert this to a 403.
     """
+    # DNC check — must be enforced before any log is written so the flag holds
+    # even when the UI is bypassed (e.g. direct API calls).
+    if site_contact_id:
+        from ..models.crm import SiteContact
+
+        contact = db.get(SiteContact, site_contact_id)
+        if contact and contact.do_not_contact:
+            raise ValueError(f"Contact {site_contact_id} is marked do-not-contact")
+
     if channel not in _OUTREACH_CHANNEL_MAP:
         raise ValueError(f"Unknown outreach channel: {channel}")
     activity_type, log_channel, event_type, snapshot_col = _OUTREACH_CHANNEL_MAP[channel]
@@ -701,6 +820,10 @@ def log_outreach_initiated(
     db.add(record)
     db.flush()
 
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
+
     bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Outreach logged: {channel} -> company {company_id} by user {user_id}")
     return record
@@ -733,6 +856,10 @@ def log_site_contact_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     bump_company_site_activity(db, company_id, customer_site_id)
     logger.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
@@ -784,9 +911,14 @@ def log_vendor_call(
         direction=direction,
         notes=notes,
         requisition_id=requisition_id,
+        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     now = datetime.now(timezone.utc)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
@@ -821,6 +953,10 @@ def log_vendor_note(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     now = datetime.now(timezone.utc)
     db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
@@ -958,6 +1094,10 @@ def log_activity(
     )
     db.add(record)
     db.flush()
+
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, record)
 
     if company_id:
         _update_last_activity({"type": "company", "id": company_id}, db)

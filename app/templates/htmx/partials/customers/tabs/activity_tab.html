@@ -1,138 +1,199 @@
-{# activity_tab.html — Company activity timeline with RFQ contacts, quotes, and activity logs.
-   Receives: company (Company), contacts (list[Contact]), quotes (list[Quote]),
+{# activity_tab.html — Unified account activity timeline (P3-4).
+   Replaces the old 3-section layout (RFQ History / Quotes / Activity Log) with
+   a single chronological timeline.  Each row shows a kind/channel icon,
+   direction indicator, title/detail, relative timestamp, and — for activity
+   entries — a quality badge.  An Alpine hide-noise toggle filters out
+   non-meaningful (is_meaningful==False) activity events.
+
+   Receives: company (Company), timeline (list[dict] from build_account_timeline),
+             contacts (list[Contact]), quotes (list[Quote]),
              activities (list[ActivityLog]), req_map (dict[int, Requisition]).
    Called by: company_tab route (tab=="activity") in htmx_views.py.
-   Depends on: HTMX, Tailwind CSS with brand palette, activity_row macro.
+   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js.
 #}
-{% from "htmx/partials/shared/_macros.html" import activity_row %}
-<div class="space-y-4">
+{% from "htmx/partials/shared/_macros.html" import activity_icon, quote_status_badge %}
 
-  <div hx-get="/v2/partials/customers/{{ company.id }}/activity-digest"
-       hx-trigger="load" hx-target="this" hx-swap="innerHTML">
-    <div class="rounded-lg border border-brand-200 bg-white p-4 animate-pulse">
-      <div class="h-3 w-2/3 bg-gray-100 rounded"></div>
+<div class='space-y-4'>
+
+  {# ── AI Digest (lazy) ──────────────────────────────────────── #}
+  <div hx-get='/v2/partials/customers/{{ company.id }}/activity-digest'
+       hx-trigger='load' hx-target='this' hx-swap='innerHTML'>
+    <div class='rounded-lg border border-brand-200 bg-white p-4 animate-pulse'>
+      <div class='h-3 w-2/3 bg-gray-100 rounded'></div>
     </div>
   </div>
 
-  {# ── Summary Bar ───────────────────────────────────────── #}
+  {# ── Summary Bar ───────────────────────────────────────────── #}
   {% set rfq_count = contacts|length if contacts else 0 %}
   {% set quote_count = quotes|length if quotes else 0 %}
   {% set activity_count = activities|length if activities else 0 %}
-  <div class="grid grid-cols-3 gap-3">
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-brand-600">{{ rfq_count }}</p>
-      <p class="text-xs text-gray-500">RFQs Sent</p>
+  <div class='grid grid-cols-3 gap-3'>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-brand-600'>{{ rfq_count }}</p>
+      <p class='text-xs text-gray-500'>RFQs Sent</p>
     </div>
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-emerald-600">{{ quote_count }}</p>
-      <p class="text-xs text-gray-500">Quotes</p>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-emerald-600'>{{ quote_count }}</p>
+      <p class='text-xs text-gray-500'>Quotes</p>
     </div>
-    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
-      <p class="text-lg font-bold text-gray-600">{{ activity_count }}</p>
-      <p class="text-xs text-gray-500">Activities</p>
+    <div class='bg-white rounded-lg border border-gray-200 p-3 text-center'>
+      <p class='text-lg font-bold text-gray-600'>{{ activity_count }}</p>
+      <p class='text-xs text-gray-500'>Activities</p>
     </div>
   </div>
 
-  {# ── RFQ History ──────────────────────────────────────── #}
-  {% if contacts %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">RFQ History</h3>
+  {# ── Unified Timeline ──────────────────────────────────────── #}
+  {% if timeline %}
+  <div class='bg-white rounded-lg border border-gray-200 overflow-hidden'
+       x-data='{ hideNoise: false }'>
+
+    {# ── Timeline header + toggle ─────────────────────── #}
+    <div class='px-4 py-3 bg-gray-50 border-b flex items-center justify-between'>
+      <h3 class='text-sm font-semibold text-gray-900'>Timeline</h3>
+      <label class='flex items-center gap-1.5 cursor-pointer select-none'>
+        <input type='checkbox' x-model='hideNoise' class='h-3.5 w-3.5 rounded border-gray-300 text-brand-600 focus:ring-brand-500'>
+        <span class='text-xs text-gray-500'>Hide routine</span>
+      </label>
     </div>
-    <div class="divide-y divide-gray-100">
-      {% for c in contacts[:20] %}
-      <div class="flex items-center gap-3 px-4 py-2.5 hover:bg-brand-50">
-        {% set st_colors = {
-          'sent': 'bg-brand-50 text-brand-700',
-          'opened': 'bg-amber-50 text-amber-700',
-          'responded': 'bg-emerald-50 text-emerald-700',
-          'quoted': 'bg-emerald-50 text-emerald-700',
-          'declined': 'bg-rose-50 text-rose-700',
-          'bounced': 'bg-rose-50 text-rose-600',
-          'failed': 'bg-rose-50 text-rose-700'
-        } %}
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
-          {{ (c.status or 'sent')|capitalize }}
+
+    {# ── Timeline rows ────────────────────────────────── #}
+    <div class='divide-y divide-gray-50'>
+      {% for ev in timeline %}
+
+      {# Determine if this event is noise (only activity entries can be noise) #}
+      {% set is_noise = (ev.kind == 'activity' and ev.is_meaningful == false) %}
+
+      {# ── RFQ row ──────────────────────────────────────── #}
+      {% if ev.kind == 'rfq' %}
+      {% set c = ev.raw %}
+      <div class='flex items-start gap-3 px-4 py-3 hover:bg-brand-50'>
+        {# RFQ icon — paper-airplane #}
+        <span class='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-100 text-brand-600'>
+          <svg class='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='1.8' aria-hidden='true'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5'/>
+          </svg>
         </span>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm text-gray-900 truncate">
-            <span class="font-medium">{{ c.vendor_name or "Unknown" }}</span>
-            {% if c.vendor_contact %}<span class="text-gray-500"> — {{ c.vendor_contact }}</span>{% endif %}
-          </p>
-          {% if c.subject %}<p class="text-xs text-gray-400 truncate">{{ c.subject }}</p>{% endif %}
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            {{ quote_status_badge(c.status or 'sent') }}
+            <p class='text-sm font-medium text-gray-900'>RFQ — {{ c.vendor_name or "Unknown" }}</p>
+            {% if c.vendor_contact %}
+            <span class='text-xs text-gray-500'>{{ c.vendor_contact }}</span>
+            {% endif %}
+            {# outbound direction pill #}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-brand-50 text-brand-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25'/></svg>
+              Out
+            </span>
+          </div>
+          {% if c.subject %}<p class='text-xs text-gray-400 truncate mt-0.5'>{{ c.subject }}</p>{% endif %}
         </div>
-        {% set req = req_map.get(c.requisition_id) if req_map else None %}
-        {% if req %}
-        <a hx-get="/v2/partials/requisitions/{{ req.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/requisitions/{{ req.id }}"
-           class="text-xs text-brand-500 hover:text-brand-600 whitespace-nowrap cursor-pointer">
-          Req #{{ req.id }}
-        </a>
-        {% endif %}
-        <span class="text-xs text-gray-400 whitespace-nowrap">{{ c.created_at.strftime('%b %d') if c.created_at else "" }}</span>
+        <div class='text-right flex-shrink-0 flex flex-col items-end gap-1'>
+          {% if ev.req %}
+          <a hx-get='/v2/partials/requisitions/{{ ev.req.id }}'
+             hx-target='#main-content'
+             hx-push-url='/v2/requisitions/{{ ev.req.id }}'
+             class='text-xs text-brand-500 hover:text-brand-600 cursor-pointer whitespace-nowrap'>
+            Req #{{ ev.req.id }}
+          </a>
+          {% endif %}
+          <span class='text-[11px] text-gray-400 whitespace-nowrap'>{{ ev.ts.strftime('%b %d') if ev.ts else "" }}</span>
+        </div>
       </div>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
 
-  {# ── Quotes ────────────────────────────────────────────── #}
-  {% if quotes %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">Quotes</h3>
-    </div>
-    <div class="divide-y divide-gray-100">
-      {% for q in quotes[:20] %}
-      {% set q_colors = {
-        'draft': 'bg-gray-100 text-gray-600',
-        'sent': 'bg-brand-50 text-brand-700',
-        'won': 'bg-emerald-50 text-emerald-700',
-        'lost': 'bg-rose-50 text-rose-700',
-      } %}
-      <div class="flex items-center gap-3 px-4 py-2.5 hover:bg-brand-50 cursor-pointer"
-           hx-get="/v2/partials/quotes/{{ q.id }}"
-           hx-target="#main-content"
-           hx-push-url="/v2/quotes/{{ q.id }}">
-        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ q_colors.get(q.status, 'bg-gray-100 text-gray-600') }}">
-          {{ (q.status or 'draft')|capitalize }}
+      {# ── Quote row ─────────────────────────────────────── #}
+      {% elif ev.kind == 'quote' %}
+      {% set q = ev.raw %}
+      <div class='flex items-start gap-3 px-4 py-3 hover:bg-brand-50 cursor-pointer'
+           hx-get='/v2/partials/quotes/{{ q.id }}'
+           hx-target='#main-content'
+           hx-push-url='/v2/quotes/{{ q.id }}'>
+        {# Quote icon — document-text #}
+        <span class='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-emerald-100 text-emerald-600'>
+          <svg class='h-4 w-4' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='1.8' aria-hidden='true'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'/>
+          </svg>
         </span>
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900">{{ q.quote_number or "Quote" }}</p>
-          {% if q.total_amount %}
-          <p class="text-xs text-gray-500">${{ "{:,.2f}".format(q.total_amount) }}</p>
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            {{ quote_status_badge(q.status or 'draft') }}
+            <p class='text-sm font-medium text-gray-900'>{{ q.quote_number or "Quote" }}</p>
+          </div>
+          {% if ev.display_value %}
+          <p class='text-xs text-gray-500 mt-0.5'>${{ "{:,.2f}".format(ev.display_value|float) }}</p>
           {% endif %}
         </div>
-        <span class="text-xs text-gray-400 whitespace-nowrap">{{ q.created_at.strftime('%b %d') if q.created_at else "" }}</span>
+        <span class='text-[11px] text-gray-400 whitespace-nowrap flex-shrink-0'>{{ ev.ts.strftime('%b %d') if ev.ts else "" }}</span>
       </div>
+
+      {# ── Activity row ──────────────────────────────────── #}
+      {% else %}
+      {% set a = ev.raw %}
+      <div class='flex gap-3 py-3 px-4 border-b border-gray-50 last:border-0 hover:bg-gray-50 {% if is_noise %}js-timeline-noise{% endif %}'
+           {% if is_noise %}x-show='!hideNoise'{% endif %}>
+        {# Canonical activity icon (shared/_macros.html) — single source of truth. #}
+        {{ activity_icon(a.activity_type) }}
+        <div class='flex-1 min-w-0'>
+          <div class='flex items-center gap-2 flex-wrap'>
+            <p class='text-sm font-medium text-gray-900'>{{ ev.title }}</p>
+            {# Direction pill (inbound/outbound) #}
+            {% if ev.direction == 'inbound' %}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-blue-50 text-blue-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M19.5 4.5l-15 15m0 0h11.25m-11.25 0V8.25'/></svg>
+              In
+            </span>
+            {% elif ev.direction == 'outbound' %}
+            <span class='inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-brand-50 text-brand-600'>
+              <svg class='h-2.5 w-2.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2' aria-hidden='true'><path stroke-linecap='round' stroke-linejoin='round' d='M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25'/></svg>
+              Out
+            </span>
+            {% endif %}
+            {# Channel badge #}
+            {% if a.channel and a.channel not in ('system', 'manual', 'internal') %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600'>{{ a.channel|capitalize }}</span>
+            {% endif %}
+            {# Quality badge — only for activity events with quality data #}
+            {% if ev.is_meaningful == true %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700'>Meaningful</span>
+            {% elif ev.is_meaningful == false %}
+            <span class='inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-400'>Routine</span>
+            {% endif %}
+          </div>
+          {# Contact attribution #}
+          {% set who = a.vendor_card.display_name if a.vendor_card_id and a.vendor_card else a.contact_name %}
+          {% if who %}
+          <p class='text-xs text-gray-500 mt-0.5'>{{ who }}</p>
+          {% endif %}
+          {% if ev.detail %}
+          <p class='text-xs text-gray-600 mt-0.5 leading-relaxed line-clamp-2'>{{ ev.detail }}</p>
+          {% endif %}
+        </div>
+        <div class='text-right flex-shrink-0'>
+          <p class='text-[11px] text-gray-400 whitespace-nowrap'>{{ (a.occurred_at or a.created_at)|timeago }}</p>
+        </div>
+      </div>
+      {% endif %}
+
       {% endfor %}
     </div>
+
+    {# ── Truncation Footer ─────────────────────────────────── #}
+    {% if timeline_truncated %}
+    <div class='px-4 py-2 bg-gray-50 border-t border-gray-200'>
+      <p class='text-xs text-gray-400'>Showing most recent activity — older history may not appear.</p>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 
-  {# ── Activity Log ──────────────────────────────────────── #}
-  {% if activities %}
-  <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h3 class="text-sm font-semibold text-gray-900">Activity Log</h3>
-    </div>
-    <div class="px-4 py-2">
-      {% for a in activities[:30] %}
-      {{ activity_row(a) }}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
-
-  {# ── Empty State ───────────────────────────────────────── #}
-  {% if not contacts and not quotes and not activities %}
-  <div class="p-8 text-center">
-    <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  {# ── Empty State ───────────────────────────────────────────── #}
+  {% if not timeline %}
+  <div class='p-8 text-center'>
+    <svg class='mx-auto h-10 w-10 text-gray-300 mb-3' fill='none' viewBox='0 0 24 24' stroke='currentColor'>
+      <path stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z'/>
     </svg>
-    <p class="text-sm text-gray-500">No activity recorded for this company yet.</p>
-    <p class="text-xs text-gray-400 mt-1">Activity will appear here as you send RFQs, create quotes, and log interactions.</p>
+    <p class='text-sm text-gray-500'>No activity recorded for this company yet.</p>
+    <p class='text-xs text-gray-400 mt-1'>Activity will appear here as you send RFQs, create quotes, and log interactions.</p>
   </div>
   {% endif %}
 

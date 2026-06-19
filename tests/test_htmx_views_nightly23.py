@@ -357,6 +357,7 @@ class TestAddOfferDirect:
                 "qty_available": "200",
                 "unit_price": "1.25",
                 "condition": "new",
+                "manufacturer": "TI",  # essential for condition=new (qualification gate)
                 "lead_time": "2 weeks",
             },
         )
@@ -385,6 +386,43 @@ class TestAddOfferDirect:
             await add_offer(request=mock_req, req_id=99999, user=test_user, db=db_session)
         assert exc_info.value.status_code == 404
 
+    async def test_add_offer_relaxed_gate_missing_manufacturer_returns_200(self, db_session: Session, test_user: User):
+        """Relaxed gate: condition=new without manufacturer must return 200 (not 400).
+
+        Regression guard: before the gate removal this returned 400. After, the offer
+        is created with qualification_status='incomplete' (composed but not blocked).
+        """
+        from app.routers.htmx_views import add_offer
+
+        req = _make_requisition(db_session, test_user)
+        mock_req = _mock_form_request(
+            path=f"/v2/partials/requisitions/{req.id}/add-offer",
+            fields={
+                "vendor_name": "GateTestVendor",
+                "mpn": "LM7805",
+                "qty_available": "50",
+                "unit_price": "0.99",
+                "condition": "new",
+                # manufacturer intentionally omitted — was a gate trigger
+            },
+        )
+        with patch("app.routers.htmx_views.requisition_tab", new_callable=AsyncMock) as mock_tab:
+            mock_tab.return_value = HTMLResponse("tab OK")
+            result = await add_offer(request=mock_req, req_id=req.id, user=test_user, db=db_session)
+        assert result.status_code == 200, (
+            f"Expected 200 (gate relaxed) but got {result.status_code}; body: {result.body}"
+        )
+        # Verify the offer was persisted with qualification_status='incomplete'
+        from app.models.offers import Offer as OfferModel
+
+        offer = (
+            db_session.query(OfferModel).filter(OfferModel.requisition_id == req.id, OfferModel.mpn == "LM7805").first()
+        )
+        assert offer is not None, "Offer was not created"
+        assert offer.qualification_status == "incomplete", (
+            f"Expected qualification_status='incomplete', got {offer.qualification_status!r}"
+        )
+
 
 # ── edit_offer (2152–2215) ────────────────────────────────────────────────
 
@@ -403,6 +441,9 @@ class TestEditOfferDirect:
                 "unit_price": "3.00",
                 "qty_available": "750",
                 "condition": "refurbished",
+                # essentials for condition=refurb (qualification gate)
+                "refurbished_by": "supplier",
+                "refurb_process": "Cleaned and tested",
                 "lead_time": "3 weeks",
                 "notes": "Updated note",
             },

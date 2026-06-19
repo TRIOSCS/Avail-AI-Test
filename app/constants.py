@@ -58,6 +58,27 @@ class AttributionStatus(StrEnum):
     CONVERTED = "converted"
 
 
+class OfferCondition(StrEnum):
+    """Offer-row condition vocabulary (lowercase; distinct from MaterialCondition).
+
+    Drives the qualification capture spine. NOT the capitalized card/facet vocab.
+    """
+
+    NEW = "new"  # new, in original manufacturer packaging
+    NEW_NO_PKG = "new_no_pkg"  # new, no original manufacturer packaging
+    PULLS = "pulls"
+    REFURB = "refurb"
+
+
+class QualificationStatus(StrEnum):
+    """Snapshot of how complete an offer's standardized qualification is."""
+
+    UNSET = "unset"  # no condition chosen
+    INCOMPLETE = "incomplete"  # an essential is missing (legacy/API only)
+    ESSENTIALS = "essentials"  # essentials met, some recommended missing
+    COMPLETE = "complete"  # essentials + recommended all present
+
+
 class RequisitionStatus(StrEnum):
     """Status lifecycle for Requisition records."""
 
@@ -265,6 +286,19 @@ class ProspectAccountStatus(StrEnum):
     CLAIMED = "claimed"
     DISMISSED = "dismissed"
     CONVERTED = "converted"
+
+
+class CompanyDisposition(StrEnum):
+    """Salesperson-set lifecycle disposition for a Company.
+
+    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot — a
+    bucketed account is suppressed from the "needs a call" call-list (count + click-
+    through) but stays findable/un-bucketable via the explicit Bucket facet. Never
+    overloaded onto is_active.
+    """
+
+    ACTIVE = "active"
+    BUCKET = "bucket"
 
 
 class TaskStatus(StrEnum):
@@ -607,3 +641,17 @@ class OemCrosswalkStatus(StrEnum):
 
     RESOLVED = "resolved"
     NO_MATCH = "no_match"
+
+
+class AlertKind(StrEnum):
+    """alert_seen.alert_kind values — which cross-app alert a seen-row belongs to.
+
+    FYI kinds (offer_confirmed, inbound_customer, inbound_vendor) clear on see — the
+    badge count excludes seen rows. ACTION kinds (buyplan_action) clear on act — seen
+    rows only suppress the one-time in-tab spotlight pulse, never the count.
+    """
+
+    OFFER_CONFIRMED = "offer_confirmed"
+    INBOUND_CUSTOMER = "inbound_customer"
+    INBOUND_VENDOR = "inbound_vendor"
+    BUYPLAN_ACTION = "buyplan_action"

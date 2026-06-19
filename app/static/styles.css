@@ -623,3 +623,53 @@ th.resizable { position: relative; }
 .col-resize-handle:active {
   background: rgb(99 146 204 / 0.4);
 }
+
+/* ── Cross-app tab alerts: in-tab spotlight ──────────────────────────
+   Emerald accent rail on rows carrying new/actionable items (same palette as
+   the proactive badge). FYI rows pulse once then fade after being seen; ACTION
+   rows keep the rail. Applied by the tab-alerts module in htmx_app.js. */
+.alert-rail {
+  box-shadow: inset 3px 0 0 0 #10b981; /* emerald-500 left rail */
+  background-color: rgb(16 185 129 / 0.06);
+  transition: background-color 0.6s ease, box-shadow 0.6s ease;
+}
+.alert-rail-pulse {
+  animation: alertRailPulse 1.4s ease-out 1;
+}
+@keyframes alertRailPulse {
+  0% { background-color: rgb(16 185 129 / 0.24); }
+  100% { background-color: rgb(16 185 129 / 0.06); }
+}
+.alert-rail-fade {
+  background-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.tab-alert-pill {
+  position: fixed;
+  bottom: 4.75rem; /* clear of the fixed bottom nav */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.3rem 0.85rem;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background-color: #10b981; /* emerald-500 */
+  border: none;
+  border-radius: 9999px;
+  box-shadow: 0 4px 14px rgb(16 185 129 / 0.45);
+  cursor: pointer;
+  transition: transform 0.15s ease, background-color 0.15s ease;
+}
+.tab-alert-pill:hover {
+  background-color: #059669; /* emerald-600 */
+  transform: translateX(-50%) translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .alert-rail-pulse { animation: none; }
+}

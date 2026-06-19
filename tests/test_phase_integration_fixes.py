@@ -305,7 +305,7 @@ class TestCompanyActivityTab:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
         assert "Activity Vendor" in resp.text
-        assert "RFQ History" in resp.text
+        assert "RFQ — Activity Vendor" in resp.text  # unified timeline RFQ row title
         assert f"Req #{req.id}" in resp.text
 
     def test_company_activity_tab_empty(self, client: TestClient, db_session: Session, test_user: User):

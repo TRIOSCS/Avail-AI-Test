@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = True
     rate_limit_ai_search: str = "10/minute"
 
+    # --- Cross-app alerts ---
+    alert_recency_days: int = 30  # FYI alerts only count items newer than this
+    alerts_epoch: str = ""  # ISO datetime; FYI items dated before this never count (default: no epoch floor)
+
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
     cache_backend: str = "redis"
@@ -66,6 +70,9 @@ class Settings(BaseSettings):
     azure_client_id: str = ""
     azure_client_secret: str = ""
     azure_tenant_id: str = ""
+    # Company-wide SharePoint datasheet library (app-only Graph). Empty = storage skipped.
+    datasheet_library_drive_id: str = ""
+    datasheet_library_subpath: str = "Datasheets"
 
     # --- Nexar (Octopart) ---
     nexar_client_id: str = ""
@@ -278,6 +285,11 @@ class Settings(BaseSettings):
     # --- Apollo Enrichment ---
     apollo_api_key: str = ""
 
+    # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
+    lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today
+    lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
+    prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
+
     # --- Azure Communication Services ---
     acs_connection_string: str = ""
     acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)
@@ -309,6 +321,30 @@ class Settings(BaseSettings):
     prospecting_min_fit_for_contacts: int = 60
     prospecting_expire_days: int = 90
     prospecting_resurface_days: int = 180
+
+    # --- SP4: Account Reclamation ---
+    # Nightly sweep: reassigns accounts inactive beyond the threshold from their owner
+    # into the prospect pool for redistribution. Default off — enable at go-live.
+    account_sweep_enabled: bool = False
+    # Days without any CRM activity (note, RFQ, meeting, email) before an account is
+    # swept from its owner back into the prospect pool.
+    account_sweep_inactivity_days: int = 90
+    # Manager email that receives the nightly sweep digest (blank = no digest sent).
+    account_sweep_manager_email: str = ""
+    # Auto-surface previously swept accounts that have become active again (new RFQ,
+    # inbound email, etc.) — re-adds them to the prospect pool as suggested.
+    account_reactivation_sweep_enabled: bool = True
+
+    # --- SP3: AI Account Screening ---
+    # Feature gate — default off; flip on when ready to spend Claude credits on screening.
+    ai_screen_enabled: bool = False
+    # Minimum trio_match_score to pass the screen (< threshold → screened_out bucket).
+    ai_screen_min_match: int = 40
+    # Max accounts screened per UTC calendar day (mirrors enrichment daily_cap pattern).
+    ai_screen_daily_cap: int = 200
+    # When True, an insufficient_data verdict triggers a single web_search to try to
+    # resolve grounding gaps before falling back to insufficient_data.
+    ai_screen_web_search_enabled: bool = False
 
     @field_validator("database_url")
     @classmethod

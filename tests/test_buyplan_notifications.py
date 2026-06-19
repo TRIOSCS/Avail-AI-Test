@@ -807,7 +807,8 @@ class TestNotifyV3POConfirmed:
 
 class TestNotifyV3Completed:
     @pytest.mark.asyncio
-    async def test_completed_emails_submitter(self, db_session):
+    async def test_completed_is_routine_no_email(self, db_session):
+        """Completion is a routine event — in-app only, no email (Task 10 demotion)."""
         from app.services.buyplan_notifications import notify_completed
 
         user = _make_user(db_session)
@@ -817,8 +818,7 @@ class TestNotifyV3Completed:
             with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock):
                 await notify_completed(plan, db_session)
 
-        mock_email.assert_awaited_once()
-        assert mock_email.call_args[0][0].id == user.id
+        mock_email.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_completed_creates_activity(self, db_session):
@@ -835,7 +835,8 @@ class TestNotifyV3Completed:
         assert len(activities) == 1
 
     @pytest.mark.asyncio
-    async def test_completed_teams(self, db_session):
+    async def test_completed_is_routine_no_teams(self, db_session):
+        """Completion does NOT post to the Teams channel anymore (Task 10 demotion)."""
         from app.services.buyplan_notifications import notify_completed
 
         user = _make_user(db_session)
@@ -845,9 +846,7 @@ class TestNotifyV3Completed:
             with patch("app.services.buyplan_notifications._teams_channel", new_callable=AsyncMock) as mock_teams:
                 await notify_completed(plan, db_session)
 
-        mock_teams.assert_awaited_once()
-        msg = mock_teams.call_args[0][0]
-        assert "Completed" in msg
+        mock_teams.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_completed_no_submitter(self, db_session):

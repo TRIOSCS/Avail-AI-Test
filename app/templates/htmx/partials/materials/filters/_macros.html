@@ -8,9 +8,19 @@
    survives HTMX re-renders of this partial; no partial-local x-data. spec_key is [a-z0-9_]. #}
 <div class="mb-3">
   <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
-  <div class="space-y-0.5" :class="!ui.facetExpanded['{{ spec_key }}'] && {{ values|length }} > 6 ? 'max-h-[168px] overflow-hidden' : 'max-h-[320px] overflow-y-auto'">
+  {% if values|length > 12 %}
+  {# Long enum facet (>12 values): a search-within box (mirrors typeahead_group) so users
+     don't have to scroll a long list. State lives on the parent (ui.facetSearch[spec_key]). #}
+  <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
+         aria-label="Search {{ display_name }}"
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+  {% endif %}
+  {# A search box only helps if its matches are reachable: when present, the collapsed clamp
+     must scroll (overflow-y-auto) instead of hiding matches below the fold (overflow-hidden). #}
+  <div class="space-y-0.5" :class="!ui.facetExpanded['{{ spec_key }}'] && {{ values|length }} > 6 ? 'max-h-[168px] {{ 'overflow-y-auto' if values|length > 12 else 'overflow-hidden' }}' : 'max-h-[320px] overflow-y-auto'">
     {% for val in values %}
-    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group">
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group"{% if values|length > 12 %}
+           x-show='!ui.facetSearch["{{ spec_key }}"] || {{ val|tojson }}.toLowerCase().includes((ui.facetSearch["{{ spec_key }}"]||"").toLowerCase())' x-cloak{% endif %}>
       {# Single-quoted attributes: |tojson emits double quotes (and escapes single quotes),
          so spec_key/val are safe inside single quotes — a double-quoted attribute breaks. #}
       <input type="checkbox" value="{{ val }}"
@@ -29,6 +39,29 @@
           x-text="ui.facetExpanded['{{ spec_key }}'] ? 'Show less' : 'Show all ({{ values|length }})'"></button>
   {% endif %}
 </div>
+{% endmacro %}
+
+{% macro numeric_chips(spec_key, chips, counts) %}
+{# Common-value chips (P2): a multi-select button row of the most common discrete
+   value_numeric values, rendered ABOVE the range inputs. Clicking a chip toggles
+   membership in subFilters['{spec_key}__vals'] (OR-within / AND-across) via
+   toggleNumericChip; the range inputs handle the long tail. Omitted when chips is empty.
+   Live, self-excluding counts come from facet_counts keyed by str(value) (e.g. 8.0 →
+   "8.0"), matched here with chip.value|string. #}
+{% if chips %}
+<div class="mb-1.5 flex flex-wrap gap-1">
+  {% for chip in chips %}
+  {# Single-quoted attributes wherever |tojson appears: it emits double quotes (and escapes
+     single quotes), so chip.value is safe inside single quotes — a double-quoted attribute
+     would close early and break Alpine init. spec_key is [a-z0-9_]. #}
+  <button type="button" @click='toggleNumericChip({{ spec_key|tojson }}, {{ chip.value|tojson }})'
+          :class='(subFilters[{{ (spec_key ~ "__vals")|tojson }}] || []).includes({{ chip.value|tojson }}) ? "bg-brand-50 text-brand-700 border-brand-300" : "bg-white text-gray-500 border-gray-200 hover:border-gray-300"'
+          class="px-2 py-0.5 text-[12px] border rounded-md transition-colors tabular-nums">
+    {{ '%g'|format(chip.value) }} <span class="opacity-60">({{ counts.get(chip.value|string, 0) }})</span>
+  </button>
+  {% endfor %}
+</div>
+{% endif %}
 {% endmacro %}
 
 {% macro range_input(spec_key, display_name, range_data, unit, active_min, active_max) %}
@@ -128,6 +161,7 @@
   {% elif opt.data_type == 'enum' and opt['values'] %}
     {{ checkbox_group(opt.spec_key, opt.display_name, opt['values'], facet_counts.get(opt.spec_key, {}), []) }}
   {% elif opt.data_type == 'numeric' %}
+    {{ numeric_chips(opt.spec_key, opt.get('chips', []), facet_counts.get(opt.spec_key, {})) }}
     {{ range_input(opt.spec_key, opt.display_name, opt.range, opt.unit, None, None) }}
   {% elif opt.data_type == 'boolean' and opt['values'] %}
     {{ boolean_toggle(opt.spec_key, opt.display_name, facet_counts.get(opt.spec_key, {}), None) }}

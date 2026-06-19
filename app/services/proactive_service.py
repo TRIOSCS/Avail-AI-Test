@@ -414,7 +414,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     po = db.get(ProactiveOffer, proactive_offer_id)
     if not po:
         raise ValueError("Proactive offer not found")
-    if po.salesperson_id != user.id:
+    if po.salesperson_id and po.salesperson_id != user.id:
         raise ValueError("Not your proactive offer")
     if po.status == ProactiveOfferStatus.CONVERTED:
         raise ValueError("Already converted")
@@ -518,6 +518,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         payment_terms=site.payment_terms if site else None,
         shipping_terms=site.shipping_terms if site else None,
         created_by_id=user.id,
+        source="proactive",
         status=QuoteStatus.WON,
         result="won",
         result_at=datetime.now(timezone.utc),

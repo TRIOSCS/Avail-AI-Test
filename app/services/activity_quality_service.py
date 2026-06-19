@@ -17,7 +17,9 @@ from ..models.intelligence import ActivityLog
 
 # Activity types eligible for the AI quality pass. Explicit allow-list:
 # only these types are selected by score_unscored_activities().
-_AI_SCORED_TYPES = (ActivityType.SIGHTING_ADDED, ActivityType.EMAIL_RECEIVED)
+# TEAMS_MESSAGE is included so inbound Teams interactions feed the reply clock
+# via the score_activity → bump_clocks path (same as EMAIL_RECEIVED).
+_AI_SCORED_TYPES = (ActivityType.SIGHTING_ADDED, ActivityType.EMAIL_RECEIVED, ActivityType.TEAMS_MESSAGE)
 
 QUALITY_SCHEMA = {
     "type": "object",
@@ -193,6 +195,13 @@ async def score_activity(activity_id: int, db: Session) -> None:
     log.summary = (result.get("clean_summary") or "")[:500] or None
     log.quality_assessed_at = datetime.now(timezone.utc)
     db.flush()
+
+    # Advance reply clock in real time if this is a meaningful inbound activity.
+    # Email rows are created with is_meaningful=None and graded here — without this
+    # bump the clock would only update on the nightly recompute (up to ~24h stale).
+    from .cadence_service import bump_clocks_from_activity
+
+    bump_clocks_from_activity(db, log)
 
     logger.debug(f"Scored activity {activity_id}: {log.quality_classification} ({log.quality_score})")
 
