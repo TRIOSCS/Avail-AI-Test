@@ -61,29 +61,6 @@ class TestRequirementSchemas:
         assert data.need_by_date == date(2026, 5, 1)
         assert data.brand == "Analog Devices"
 
-    @pytest.mark.skip(reason="RequirementOut schema not yet implemented")
-    def test_out_includes_new_fields(self):
-        """RequirementOut includes all new fields."""
-        data = RequirementOut(  # noqa: F821
-            id=1,
-            primary_mpn="LM317T",
-            target_qty=100,
-            brand="TI",
-            customer_pn="CUST-001",
-            need_by_date=date(2026, 4, 15),
-            condition="new",
-            date_codes="2024+",
-            firmware="v1.2",
-            hardware_codes="REV-A",
-            packaging="T&R",
-            notes="Test note",
-        )
-        assert data.brand == "TI"
-        assert data.customer_pn == "CUST-001"
-        assert data.need_by_date == date(2026, 4, 15)
-        assert data.condition == "new"
-        assert data.notes == "Test note"
-
     def test_condition_normalization(self):
         """RequirementCreate normalizes condition values."""
         data = RequirementCreate(primary_mpn="LM317T", manufacturer="TI", condition="Refurbished")
@@ -114,21 +91,6 @@ class TestOfferSchemas:
         """OfferUpdate accepts spq field."""
         data = OfferUpdate(spq=25)
         assert data.spq == 25
-
-    @pytest.mark.skip(reason="OfferOut schema not yet implemented")
-    def test_out_includes_spq(self):
-        """OfferOut includes spq and other new fields."""
-        data = OfferOut(  # noqa: F821
-            id=1,
-            vendor_name="Arrow",
-            mpn="LM317T",
-            spq=100,
-            manufacturer="TI",
-            warranty="1 year",
-        )
-        assert data.spq == 100
-        assert data.manufacturer == "TI"
-        assert data.warranty == "1 year"
 
 
 # ── Model Tests ───────────────────────────────────────────────────────
