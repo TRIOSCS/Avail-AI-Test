@@ -598,3 +598,107 @@ def test_download_import_sighting_generic_exception_rolled_back(db_session, test
                 vendor_email="sales@arrow.com",
             )
         )
+
+
+# ── Ops per-line exception handler (lines 181-182) ────────────────────
+
+
+def test_job_buyplan_nudge_ops_per_line_exception_does_not_crash(
+    scheduler_db, test_user, test_requisition, test_company, test_customer_site, test_quote
+):
+    """Ops per-line notify exception is caught; job does not re-raise."""
+    from app.models.buy_plan import BuyPlan, BuyPlanLine, BuyPlanLineStatus
+
+    plan = BuyPlan(
+        requisition_id=test_requisition.id,
+        quote_id=test_quote.id,
+        status="active",
+        submitted_by_id=test_user.id,
+        approved_at=datetime.now(timezone.utc) - timedelta(hours=5),
+    )
+    scheduler_db.add(plan)
+    scheduler_db.flush()
+
+    line = BuyPlanLine(
+        buy_plan_id=plan.id,
+        quantity=10,
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
+        po_confirmed_at=datetime.now(timezone.utc) - timedelta(hours=5),
+    )
+    scheduler_db.add(line)
+    scheduler_db.commit()
+
+    with patch(
+        "app.services.buyplan_notifications.notify_nudge_ops",
+        new_callable=AsyncMock,
+        side_effect=Exception("Graph API down"),
+    ):
+        from app.jobs.inventory_jobs import _job_buyplan_nudge
+
+        # Must not raise — per-line ops exceptions are caught internally
+        asyncio.run(_job_buyplan_nudge())
+
+
+# ── Sighting: item in imported_for_matching with no match in req_map (line 495) ──
+
+
+def test_download_import_sighting_mixed_mpns_one_with_no_req(db_session, test_user, test_requisition):
+    """When import has two MPNs and only one matches an open req, the other
+    hits the 'no reqs' continue at line 495."""
+    from app.models import MaterialCard, MaterialVendorHistory, Sighting
+
+    test_user.access_token = "at_mixed"
+    test_requisition.status = "active"
+
+    # Pre-create cards + MVH for both MPNs to avoid unique constraint on MVH
+    for mpn_norm, mpn_disp in [("lm317t", "LM317T"), ("zzznomatch", "ZZZNOMATCH")]:
+        c = MaterialCard(normalized_mpn=mpn_norm, display_mpn=mpn_disp, manufacturer="TI")
+        db_session.add(c)
+        db_session.flush()
+        db_session.add(
+            MaterialVendorHistory(
+                material_card_id=c.id,
+                vendor_name="arrow",
+                vendor_name_normalized="arrow",
+                source_type="email_auto_import",
+                times_seen=1,
+                last_qty=50,
+            )
+        )
+    db_session.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={"contentBytes": base64.b64encode(b"data").decode()})
+
+    rows = [
+        {"mpn": "LM317T", "qty": 100, "unit_price": 0.50},
+        {"mpn": "ZZZNOMATCH", "qty": 200, "unit_price": 1.00},
+    ]
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")),
+        patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=rows),
+        patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"),
+        patch("app.services.activity_service.match_email_to_entity", return_value=None),
+    ):
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        asyncio.run(
+            _download_and_import_stock_list(
+                test_user,
+                db_session,
+                message_id="msg1",
+                attachment_id="att1",
+                filename="test.csv",
+                vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+    req_id = test_requisition.requirements[0].id
+    sightings = db_session.query(Sighting).filter_by(requirement_id=req_id).all()
+    # Only LM317T matched the open requirement; ZZZNOMATCH hit the 'no reqs' continue
+    assert len(sightings) == 1
+    assert sightings[0].mpn_matched == "LM317T"

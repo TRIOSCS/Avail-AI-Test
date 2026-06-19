@@ -90,6 +90,20 @@ class TestIsSafeUrl:
         )
         assert _is_safe_url("http://metadata.internal/data") is False
 
+    def test_empty_getaddrinfo_result_returns_false(self, monkeypatch):
+        """getaddrinfo returns empty list → False (line 48)."""
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [])
+        assert _is_safe_url("https://valid.example.com/file.pdf") is False
+
+    def test_invalid_ip_string_in_addrinfo_returns_false(self, monkeypatch):
+        """info[4][0] is not a parseable IP address string → ValueError caught → False."""
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **kw: [(None, None, None, None, ("not-a-valid-ip", 80))],
+        )
+        assert _is_safe_url("https://example.com/file.pdf") is False
+
 
 # ══════════════════════════════════════════════════════════════════════
 # download_pdf
@@ -327,3 +341,45 @@ class TestCaptureDatasheetAdditionalBranches:
 
         # No datasheets stored (mock_db.add never called with a datasheet)
         mock_db.add.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════
+# _load_user and _stamp_searched private helpers
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestPrivateHelpers:
+    def test_load_user_returns_user_by_id(self, db_session, test_user):
+        """_load_user finds a User by primary key via query."""
+        from app.services.datasheet_capture import _load_user
+
+        result = _load_user(db_session, test_user.id)
+        assert result is not None
+        assert result.id == test_user.id
+
+    def test_load_user_returns_none_for_missing_id(self, db_session):
+        """_load_user returns None when no User exists with given id."""
+        from app.services.datasheet_capture import _load_user
+
+        result = _load_user(db_session, 99999)
+        assert result is None
+
+    def test_stamp_searched_updates_card(self, db_session):
+        """_stamp_searched sets datasheet_searched_at on a non-None card."""
+        from app.models.intelligence import MaterialCard
+        from app.services.datasheet_capture import _stamp_searched
+
+        card = MaterialCard(normalized_mpn="ne555test", display_mpn="NE555TEST")
+        db_session.add(card)
+        db_session.commit()
+
+        assert card.datasheet_searched_at is None
+        _stamp_searched(db_session, card)
+        assert card.datasheet_searched_at is not None
+
+    def test_stamp_searched_none_card_is_noop(self, db_session):
+        """_stamp_searched with card=None does nothing (no error)."""
+        from app.services.datasheet_capture import _stamp_searched
+
+        # Should complete without error
+        _stamp_searched(db_session, None)
