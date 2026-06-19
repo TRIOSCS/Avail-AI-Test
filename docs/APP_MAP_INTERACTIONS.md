@@ -2008,6 +2008,26 @@ owns arbitration in one place:
        authoritative description beats the card's own prose — and loses to the
        deterministic decoders (85); structured facets at vendor tier 90 are authoritative.
        v1 = enrichment path only; the pricing-search path (search_service) is a follow-up.
+    3.7. vendor_spec_enrich.py + backfill_vendor_specs.py (the DEMAND-ORDERED, QUOTA-PACED
+       backfill CLI — `python -m app.management.backfill_vendor_specs --source mouser|
+       element14 [--apply]`)    — vendor-API parametric enrichment. Selects uncategorized
+       cards demand-first (sourced_qty_90d DESC), searches the source within a date-keyed
+       per-day call cap (`vendor_api:{source}:calls:{date}`, billed BEFORE each call), and
+       enriches via the per-source writer. TWO source strategies (measured — see spec
+       Revision 1): (a) MOUSER — Mouser carries a rich DESCRIPTION but NO structured
+       parametrics, so `enrich_card_from_mouser` runs the description through the desc
+       grammar and writes at connector_desc/84 (same identity as 3.6). (b) ELEMENT14 —
+       Element14's `attributes` ARE structured parametrics; `element14.py:_parse` maps them
+       to seeded spec keys (`app/connectors/_vendor_spec_map.VENDOR_SPEC_MAP`, a
+       per-commodity vendor-attribute→seeded-key alias table; unmapped attrs land in the
+       result's observable `dropped`) and `enrich_card_from_element14` records each via
+       record_spec at element14_api/90 (the seed schema's enum/numeric+unit gate is the
+       final arbiter — off-enum values are dropped, never coerced). Element14 rate-limits
+       hard → a much lower default daily cap (100 vs Mouser 800), so it is a bounded
+       top-demand SUPPLEMENT to the Mouser-description backbone. Both writers categorize
+       fill-only (distributor category string → desc-grammar fallback) and are commit-free
+       (the backfill owns per-chunk commits + per-card SAVEPOINT isolation). Commodities
+       mapped so far: capacitors, resistors (the top-demand passives).
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source

@@ -15,7 +15,7 @@ from app.models import MaterialCard, MaterialSpecFacet
 from app.services.commodity_registry import seed_commodity_schemas
 from app.services.spec_tiers import SOURCE_TIER, set_category
 from app.services.spec_write_service import load_schema_cache, record_spec
-from app.services.vendor_spec_enrich import enrich_card_from_mouser
+from app.services.vendor_spec_enrich import enrich_card_from_element14, enrich_card_from_mouser
 
 
 def _facets(db: Session, card_id: int) -> dict:
@@ -198,3 +198,177 @@ def test_no_commit_in_writer(db_session: Session):
     fresh = db_session.query(MaterialCard).filter_by(normalized_mpn="grm155r71c104ka88d").one_or_none()
     # The card itself was flushed-not-committed and is rolled back too.
     assert fresh is None or fresh.category is None
+
+
+# ── Element14 structured-attribute writer (tier 90, element14_api) ────────────────────
+
+# An Element14 capacitor result shaped like the live API: a category string + STRUCTURED
+# parametrics in `specs` (already mapped to seeded keys by the connector / _vendor_spec_map).
+_E14_CAP_RESULT = {
+    "manufacturer": "Murata",
+    "category": "Capacitors",
+    "description": "SMD Multilayer Ceramic Capacitor, 0.1 µF, 16 V",
+    "source_type": "element14",
+    "specs": {
+        "capacitance": "0.1µF",
+        "voltage_rating": "16V",
+        "dielectric": "X7R",
+        "tolerance": "±10%",
+        "package": "0402",
+    },
+    "dropped": {"Operating Temperature Min": "-55°C"},
+}
+
+
+def test_element14_categorizes_and_writes_specs_at_tier_90(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+
+    summary = enrich_card_from_element14(db_session, card, [_E14_CAP_RESULT])
+    db_session.commit()
+
+    assert card.category == "capacitors"
+    assert card.category_source == "element14_api"
+    assert card.category_tier == SOURCE_TIER["element14_api"] == 90
+
+    facets = _facets(db_session, card.id)
+    assert "capacitance" in facets
+    assert "voltage_rating" in facets
+    assert "dielectric" in facets and facets["dielectric"].value_text == "X7R"
+    assert "tolerance" in facets and facets["tolerance"].value_text == "±10%"
+    assert "package" in facets and facets["package"].value_text == "0402"
+    for f in facets.values():
+        assert f.source == "element14_api"
+        assert f.tier == 90
+
+    assert summary["categorized"] == 1
+    assert summary["specs_written"] == len(facets)
+
+
+def test_element14_tier_90_beats_lower_tier_desc_parse(db_session: Session):
+    # element14_api (90) is authoritative — it overrides a card already carrying a
+    # connector_desc (84) dielectric and even sets category over a desc_parse (83) one.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    assert set_category(card, "capacitors", source="connector_desc", confidence=0.9)
+    db_session.flush()
+    cache = load_schema_cache(db_session, "capacitors")
+    assert record_spec(
+        db_session, int(card.id), "dielectric", "X5R", source="connector_desc", confidence=0.9, schema_cache=cache
+    )
+    db_session.flush()
+    assert _facets(db_session, card.id)["dielectric"].value_text == "X5R"
+
+    enrich_card_from_element14(db_session, card, [_E14_CAP_RESULT])  # specs carry X7R
+    db_session.commit()
+
+    dielectric = _facets(db_session, card.id)["dielectric"]
+    assert dielectric.value_text == "X7R"
+    assert dielectric.source == "element14_api"
+    assert dielectric.tier == 90
+
+
+def test_element14_does_not_clobber_higher_tier_trio_source(db_session: Session):
+    # trio_source category (95) outranks element14_api (90): the card stays its trio
+    # commodity and a capacitor result writes no capacitor facets on it.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    assert set_category(card, "dram", source="trio_source", confidence=0.99)
+    db_session.flush()
+
+    summary = enrich_card_from_element14(db_session, card, [_E14_CAP_RESULT])
+    db_session.commit()
+
+    assert card.category == "dram"
+    assert summary["categorized"] == 0
+    assert "capacitance" not in _facets(db_session, card.id)
+
+
+def test_element14_bad_enum_value_dropped_by_schema_gate(db_session: Session):
+    # A tolerance that does not match the seed enum after normalization is rejected by
+    # record_spec's enum gate (never coerced); the valid specs still land.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "BADTOL")
+    result = {
+        "category": "Capacitors",
+        "description": "MLCC",
+        "specs": {"capacitance": "0.1µF", "tolerance": "±3%"},  # ±3% not in the cap enum
+    }
+    summary = enrich_card_from_element14(db_session, card, [result])
+    db_session.commit()
+
+    facets = _facets(db_session, card.id)
+    assert "capacitance" in facets
+    assert "tolerance" not in facets  # off-enum value dropped by the schema gate
+    assert summary["specs_written"] == 1
+
+
+def test_element14_no_specs_result_is_categorize_only(db_session: Session):
+    # A result with a category but no structured specs still categorizes the card.
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "CATONLY")
+    result = {"category": "Capacitors", "description": "MLCC", "specs": {}}
+
+    summary = enrich_card_from_element14(db_session, card, [result])
+    db_session.commit()
+
+    assert card.category == "capacitors"
+    assert summary["categorized"] == 1
+    assert summary["specs_written"] == 0
+
+
+def test_element14_empty_results_no_op(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "NOHIT")
+    summary = enrich_card_from_element14(db_session, card, [])
+    db_session.commit()
+    assert card.category is None
+    assert summary == {"categorized": 0, "specs_written": 0}
+
+
+def test_element14_no_commit_in_writer(db_session: Session):
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+    enrich_card_from_element14(db_session, card, [_E14_CAP_RESULT])
+    db_session.rollback()
+    fresh = db_session.query(MaterialCard).filter_by(normalized_mpn="grm155r71c104ka88d").one_or_none()
+    assert fresh is None or fresh.category is None
+
+
+def test_element14_resistor_tolerance_lands_end_to_end(db_session: Session):
+    # End-to-end through the REAL connector _parse: a resistor whose Element14 tolerance
+    # arrives as "± 1%" must land in the bare resistor enum ("1%") at tier 90 — the
+    # commodity-aware sign normalization is what makes the headline facet populate.
+    from app.connectors.element14 import Element14Connector
+
+    data = {
+        "manufacturerPartNumberSearchReturn": {
+            "products": [
+                {
+                    "brandName": "Yageo",
+                    "translatedManufacturerPartNumber": "RC0402FR-0710KL",
+                    "displayName": "SMD Chip Resistor, 10 kohm",
+                    "sku": "9",
+                    "category": {"name": "Resistors"},
+                    "attributes": [
+                        {"attributeLabel": "Resistance", "attributeValue": "10kΩ"},
+                        {"attributeLabel": "Power Rating", "attributeValue": "0.063W"},
+                        {"attributeLabel": "Resistance Tolerance", "attributeValue": "± 1%"},
+                        {"attributeLabel": "Case Style", "attributeValue": "0402 [1005 Metric]"},
+                    ],
+                }
+            ]
+        }
+    }
+    results = Element14Connector(api_key="k")._parse(data, "RC0402FR-0710KL")
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "RC0402FR-0710KL")
+
+    enrich_card_from_element14(db_session, card, results)
+    db_session.commit()
+
+    assert card.category == "resistors"
+    facets = _facets(db_session, card.id)
+    assert "tolerance" in facets and facets["tolerance"].value_text == "1%"
+    assert facets["tolerance"].source == "element14_api" and facets["tolerance"].tier == 90
+    assert "package" in facets and facets["package"].value_text == "0402"
