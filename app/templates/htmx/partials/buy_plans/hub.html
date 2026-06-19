@@ -1,0 +1,45 @@
+{#
+  buy_plans/hub.html — Buy Plan Deal Hub shell with role-lens switcher.
+  Three lenses: My Deals (sales board), My Orders (buyer PO queue), Supervise (manager).
+  The body lazy-loads the active lens partial into #bp-hub-body.
+  Receives: lens (str: 'orders'|'deals'|'supervise'), alert_markers (dict).
+  Called by: htmx_views.py buy_plans_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette;
+              _orders_queue.html / _board.html (lazy-loaded bodies).
+#}
+<title hx-swap-oob="true">Buy Plans — AvailAI</title>
+
+<div class="max-w-7xl mx-auto" x-data="{ lens: '{{ lens }}' }">
+
+  {# ── Lens switcher ──
+     Supervise is gated: only managers/admins/ops (can_supervise) see the button. #}
+  <div class="flex items-center gap-2 mb-5">
+    {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('supervise', 'Supervise')] %}
+    {% if l != 'supervise' or can_supervise %}
+    <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            hx-push-url="/v2/buy-plans?lens={{ l }}"
+            @click="lens = '{{ l }}'"
+            class="px-3.5 py-1.5 text-sm font-medium rounded-full transition-colors
+                   {% if lens == l %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}">
+      {{ label }}
+    </button>
+    {% endif %}
+    {% endfor %}
+  </div>
+
+  {# ── Lazy body ──
+     LANDMINE: hx-trigger="load" MUST carry the explicit hx-target="#bp-hub-body".
+     Without it the element inherits #main-content's hx-target="this" and the load
+     wipes the whole page (known cards-vanish regression). #}
+  <div id="bp-hub-body"
+       hx-get="{{ '/v2/partials/buy-plans/orders' if lens == 'orders'
+                 else '/v2/partials/buy-plans/supervise' if lens == 'supervise'
+                 else '/v2/partials/buy-plans/board?scope=mine' }}"
+       hx-trigger="load"
+       hx-target="#bp-hub-body"
+       hx-swap="innerHTML">
+    <div class="p-8 text-center text-gray-400 text-sm">Loading…</div>
+  </div>
+</div>

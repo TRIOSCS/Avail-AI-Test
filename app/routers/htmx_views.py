@@ -108,8 +108,12 @@ from .auth import _password_login_enabled
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
-# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
-_NAV_ID_ALIAS = {"buy-plans": "reporting", "quotes": "reporting"}
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
+# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
+# Reporting surface was retired, so no view needs to borrow another tab's highlight.
+# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
+# correct, since it has no parent tab to highlight.
+_NAV_ID_ALIAS: dict[str, str] = {}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -288,7 +292,6 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/reporting", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -318,7 +321,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "buy-plans",
         "excess",
         "quotes",
-        "reporting",
         "prospecting",
         "proactive",
         "settings",
@@ -438,7 +440,10 @@ async def parts_workspace_partial(
     db: Session = Depends(get_db),
 ):
     """Return the split-panel parts workspace shell."""
+    from ..services import forecast_service
+
     ctx = _base_ctx(request, user, "requisitions")
+    ctx["pipeline"] = forecast_service.pipeline_summary(db)
     return template_response("htmx/partials/parts/workspace.html", ctx)
 
 
@@ -7234,84 +7239,135 @@ def _is_ops_member(user: User, db: Session) -> bool:
     return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
 
 
+def _can_supervise(user: User, db: Session) -> bool:
+    """True when the user may see cross-user (scope=all) deal data.
+
+    Managers/admins and ops verification-group members qualify.
+    """
+    return user.role in (UserRole.MANAGER, UserRole.ADMIN) or _is_ops_member(user, db)
+
+
+def _default_lens(user: User, db: Session) -> str:
+    """Pick the landing lens for the Deal Hub based on the user's role.
+
+    - buyers land on their PO queue ("orders"),
+    - managers/admins/ops land on the supervise board ("supervise"),
+    - everyone else (sales/trader) lands on the deal board ("deals").
+    """
+    if user.role == UserRole.BUYER:
+        return "orders"
+    if _can_supervise(user, db):
+        return "supervise"
+    return "deals"
+
+
 @router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
 async def buy_plans_list_partial(
     request: Request,
-    q: str = "",
-    status: str = "",
-    mine: bool = False,
+    lens: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return buy plans list as HTML partial."""
-    query = db.query(BuyPlan).options(
-        joinedload(BuyPlan.quote),
-        joinedload(BuyPlan.requisition),
-        joinedload(BuyPlan.submitted_by),
-        joinedload(BuyPlan.approved_by),
-        joinedload(BuyPlan.lines),
-    )
+    """Return the Buy Plan Deal Hub shell.
 
-    if status:
-        query = query.filter(BuyPlan.status == status)
-    if mine:
-        query = query.filter(BuyPlan.submitted_by_id == user.id)
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(BuyPlan.sales_order_number, BuyPlan.customer_po_number))
-
-    # Sales users only see their own
-    if user.role == UserRole.SALES:
-        query = query.filter(BuyPlan.submitted_by_id == user.id)
-
-    plans = query.order_by(BuyPlan.created_at.desc()).limit(200).all()
-
-    # Build lightweight list items
-    buy_plans = []
-    for p in plans:
-        customer_name = None
-        if p.quote and p.quote.customer_site:
-            site = p.quote.customer_site
-            co = site.company if hasattr(site, "company") else None
-            customer_name = co.name if co else getattr(site, "site_name", None)
-
-        buy_plans.append(
-            {
-                "id": p.id,
-                "quote_id": p.quote_id,
-                "quote_number": p.quote.quote_number if p.quote else None,
-                "customer_name": customer_name,
-                "sales_order_number": p.sales_order_number,
-                "status": p.status,
-                "so_status": p.so_status,
-                "total_cost": float(p.total_cost) if p.total_cost else 0,
-                "total_margin_pct": float(p.total_margin_pct) if p.total_margin_pct else 0,
-                "line_count": len(p.lines) if p.lines else 0,
-                "submitted_by_name": p.submitted_by.name if p.submitted_by else None,
-                "auto_approved": p.auto_approved or False,
-                "is_stock_sale": p.is_stock_sale or False,
-                "created_at": str(p.created_at) if p.created_at else None,
-            }
-        )
+    The shell renders only the lens switcher + a lazy body that loads the active
+    lens partial into ``#bp-hub-body``. Row data is fetched by the body, not here.
+    """
+    active_lens = lens if lens in ("orders", "deals", "supervise") else _default_lens(user, db)
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
-    # Buy Plans lives under the Reporting nav now, so the source is registered there.
+    # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
     from ..services.alerts import markers_for_tab
 
-    alert_markers = markers_for_tab(db, user, "reporting")
+    alert_markers = markers_for_tab(db, user, "buy-plans")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
-            "buy_plans": buy_plans,
+            "lens": active_lens,
             "alert_markers": alert_markers,
-            "q": q,
-            "status": status,
-            "mine": mine,
-            "total": len(buy_plans),
+            "can_supervise": _can_supervise(user, db),
         }
     )
-    return template_response("htmx/partials/buy_plans/list.html", ctx)
+    return template_response("htmx/partials/buy_plans/hub.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/orders", response_class=HTMLResponse)
+async def buy_plans_orders_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Buyer "My Orders" lens body: the actionable per-line PO cut queue."""
+    from ..services.buyplan_hub import buyer_line_queue
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx["queue"] = buyer_line_queue(db, user)
+    return template_response("htmx/partials/buy_plans/_orders_queue.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/board", response_class=HTMLResponse)
+async def buy_plans_board_partial(
+    request: Request,
+    scope: str = "mine",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Sales "My Deals" / manager board body: stage-grouped deal cards.
+
+    ``scope=all`` is role-gated — a non-manager/non-ops user is forced to
+    ``scope=mine`` so no other rep's plans leak.
+    """
+    from ..services.buyplan_hub import deals_board
+
+    scope = scope if scope in ("mine", "all") else "mine"
+    if scope == "all" and not _can_supervise(user, db):
+        scope = "mine"
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update({"board": deals_board(db, user, scope=scope), "scope": scope})
+    return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+
+def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:
+    """Build + render the supervise lens body for ``user``.
+
+    Shared by the ``GET /supervise`` route and the supervise-origin action returns.
+    Non-supervisors never see cross-user data: they get the mine-scope board instead
+    (defense in depth — the hub also hides the Supervise button for them).
+    """
+    from ..services.buyplan_hub import deals_board, supervise_overview
+
+    if not _can_supervise(user, db):
+        ctx = _base_ctx(request, user, "buy-plans")
+        ctx.update({"board": deals_board(db, user, scope="mine"), "scope": "mine"})
+        return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "overview": supervise_overview(db),
+            "board": deals_board(db, user, scope="all"),
+            "is_ops": _is_ops_member(user, db),
+            "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
+            "user": user,
+        }
+    )
+    return template_response("htmx/partials/buy_plans/_supervise.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/supervise", response_class=HTMLResponse)
+async def buy_plans_supervise_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager/ops "Supervise" lens body: triage panel + all-scope deal board.
+
+    Role-gated — a non-supervisor is served the mine-scope board so no other
+    user's plans leak (see ``_render_supervise_body``).
+    """
+    return _render_supervise_body(request, user, db)
 
 
 @router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
@@ -7408,6 +7464,7 @@ async def buy_plan_approve_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Manager or admin role required")
@@ -7421,6 +7478,9 @@ async def buy_plan_approve_partial(
             await run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -7442,6 +7502,7 @@ async def buy_plan_verify_so_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         plan = verify_so(
@@ -7459,6 +7520,9 @@ async def buy_plan_verify_so_partial(
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -7470,7 +7534,12 @@ async def buy_plan_confirm_po_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Buyer confirms PO — returns refreshed detail."""
+    """Buyer confirms PO.
+
+    Returns the refreshed detail partial by default (``origin=""``, the original
+    behavior). When ``origin == "queue"`` the call came from the buyer's Orders lens
+    and we return the re-rendered orders queue so the confirmed line drops out.
+    """
     from datetime import datetime
 
     from ..services.buyplan_notifications import notify_po_confirmed, run_notify_bg
@@ -7479,6 +7548,7 @@ async def buy_plan_confirm_po_partial(
     form = await request.form()
     po_number = form.get("po_number", "").strip()
     ship_date_str = form.get("estimated_ship_date", "")
+    origin = form.get("origin", "")
 
     if not po_number:
         raise HTTPException(400, "PO number is required")
@@ -7499,6 +7569,9 @@ async def buy_plan_confirm_po_partial(
     except ValueError as e:
         raise HTTPException(400, str(e))
 
+    if origin == "queue":
+        return await buy_plans_orders_partial(request, user, db)
+
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
@@ -7511,21 +7584,31 @@ async def buy_plan_verify_po_partial(
     db: Session = Depends(get_db),
 ):
     """Ops verifies PO — returns refreshed detail."""
-    from ..services.buyplan_notifications import notify_completed, run_notify_bg
+    from ..services.buyplan_notifications import (
+        notify_completed,
+        notify_po_rejected,
+        run_notify_bg,
+    )
     from ..services.buyplan_workflow import check_completion, verify_po
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
         db.commit()
+        if action == "reject":
+            await run_notify_bg(notify_po_rejected, plan_id, line_id=line_id)
         updated = check_completion(plan_id, db)
         if updated and updated.status == BuyPlanStatus.COMPLETED:
             db.commit()
             await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

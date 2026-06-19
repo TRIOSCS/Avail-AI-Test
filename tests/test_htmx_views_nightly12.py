@@ -391,16 +391,20 @@ class TestBulkArchive:
 
 class TestBuyPlanListPartial:
     def test_buy_plan_list_200(self, client: TestClient) -> None:
+        """No lens param → role-derived default lens; hub shell renders."""
         resp = client.get("/v2/partials/buy-plans")
         assert resp.status_code == 200
+        assert 'id="bp-hub-body"' in resp.text
 
-    def test_buy_plan_list_with_status(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/buy-plans?status=draft")
+    def test_buy_plan_list_lens_deals(self, client: TestClient) -> None:
+        resp = client.get("/v2/partials/buy-plans?lens=deals")
         assert resp.status_code == 200
+        assert 'hx-target="#bp-hub-body"' in resp.text
 
-    def test_buy_plan_list_with_search(self, client: TestClient) -> None:
-        resp = client.get("/v2/partials/buy-plans?q=SO-1234")
+    def test_buy_plan_list_lens_orders(self, client: TestClient) -> None:
+        resp = client.get("/v2/partials/buy-plans?lens=orders")
         assert resp.status_code == 200
+        assert "My Orders" in resp.text
 
 
 class TestBuyPlanDetailPartial:

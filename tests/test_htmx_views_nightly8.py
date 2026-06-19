@@ -781,16 +781,19 @@ class TestCreateQuoteFromOffers:
 
 
 class TestBuyPlansListPartial:
-    """Covers lines 5891, 5898-5904 (buy plans list)."""
+    """Buy Plan Deal Hub shell over the real lens contract (lens-only param)."""
 
     @pytest.mark.parametrize(
         "query",
-        ["", "?status=pending", "?mine=true", "?q=SO-1234"],
-        ids=["empty", "status_filter", "mine_filter", "search"],
+        ["", "?lens=deals", "?lens=orders", "?lens=supervise"],
+        ids=["default_lens", "lens_deals", "lens_orders", "lens_supervise"],
     )
     def test_buy_plans_list(self, client: TestClient, db_session: Session, query):
         resp = client.get(f"/v2/partials/buy-plans{query}")
         assert resp.status_code == 200
+        # Hub shell: lens switcher + the lazy body with its own hx-target.
+        assert 'id="bp-hub-body"' in resp.text
+        assert 'hx-target="#bp-hub-body"' in resp.text
 
 
 # ── Section 15: sourcing workspace with filter params ────────────────

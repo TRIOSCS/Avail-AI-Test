@@ -1,0 +1,202 @@
+{#
+  buy_plans/_supervise.html — Manager/ops "Supervise" lens body.
+  A slim metric strip + needs-attention triage sections above the all-scope deal board.
+  Triage action forms post with origin=supervise so the handler re-renders THIS body
+  into #bp-hub-body (not the single-plan detail). Sections render only when non-empty.
+  Receives: overview (dict from buyplan_hub.supervise_overview: strip + triage),
+            board (dict from deals_board scope=all), is_ops (bool), is_manager (bool),
+            user.
+  Called by: htmx_views.py buy_plans_supervise_partial + the approve/verify-so/verify-po
+             handlers when origin=supervise.
+  Depends on: HTMX, Tailwind CSS with brand palette; _board.html (embedded board).
+#}
+{% set strip = overview.strip %}
+{% set tri = overview.triage %}
+{% set nothing = not (tri.approvals or tri.so_pending or tri.overdue_pos or tri.po_pending_verify or tri.flagged or tri.halted) %}
+
+{# ── Slim metric strip (contextual, non-dominating) ── #}
+<div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 text-xs text-gray-500">
+  <span>${{ '{:,.0f}'.format(strip.open_value) }} open value</span>
+  <span>{{ '{:.1f}'.format(strip.avg_margin) }}% avg margin</span>
+  <span>{{ strip.approval_count }} approval{{ 's' if strip.approval_count != 1 }} waiting</span>
+  <span>{{ strip.halted_count }} halted</span>
+  <span>{{ strip.overdue_po_count }} overdue PO{{ 's' if strip.overdue_po_count != 1 }}</span>
+  <span>{{ strip.flagged_count }} flagged</span>
+  {% if is_ops %}
+  <span>{{ strip.so_pending_count }} SO{{ 's' if strip.so_pending_count != 1 }} to verify</span>
+  <span>{{ strip.po_pending_verify_count }} PO{{ 's' if strip.po_pending_verify_count != 1 }} to verify</span>
+  {% endif %}
+</div>
+
+{% if nothing %}
+<div class="mb-4 text-sm text-gray-400">Nothing needs attention.</div>
+{% endif %}
+
+<div class="space-y-3 mb-6">
+
+  {# ── Approvals (manager/admin) ── #}
+  {% if is_manager and tri.approvals %}
+  <div class="bg-white rounded-lg shadow-sm border border-amber-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      Approvals waiting ({{ tri.approvals|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for p in tri.approvals %}
+      <div class="flex items-center justify-between gap-3 px-4 py-2">
+        <div class="min-w-0">
+          <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
+          <span class="ml-2 text-xs text-gray-400">{{ p.submitted_by_name or '—' }}</span>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <span class="text-sm font-semibold text-gray-700">${{ '{:,.2f}'.format(p.value|float) if p.value else '0.00' }}</span>
+          <form hx-post="/v2/partials/buy-plans/{{ p.plan_id }}/approve"
+                hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
+            <input type="hidden" name="origin" value="supervise">
+            <button type="submit" name="action" value="approve" data-loading-disable
+                    class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+              Approve
+            </button>
+            <button type="submit" name="action" value="reject" data-loading-disable
+                    hx-confirm="Reject this buy plan?"
+                    class="px-2.5 py-1 text-xs font-medium text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+              Reject
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Needs SO verification (ops) ── #}
+  {% if is_ops and tri.so_pending %}
+  <div class="bg-white rounded-lg shadow-sm border border-brand-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      Needs SO verification ({{ tri.so_pending|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for p in tri.so_pending %}
+      <div class="flex items-center justify-between gap-3 px-4 py-2">
+        <div class="min-w-0">
+          <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
+          <span class="ml-2 text-xs text-gray-400">{{ p.submitted_by_name or '—' }}</span>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <span class="text-sm font-semibold text-gray-700">${{ '{:,.2f}'.format(p.value|float) if p.value else '0.00' }}</span>
+          <form hx-post="/v2/partials/buy-plans/{{ p.plan_id }}/verify-so"
+                hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5">
+            <input type="hidden" name="origin" value="supervise">
+            <button type="submit" name="action" value="approve" data-loading-disable
+                    class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+              Verify SO
+            </button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── POs awaiting verification (ops) ── #}
+  {% if is_ops and tri.po_pending_verify %}
+  <div class="bg-white rounded-lg shadow-sm border border-brand-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      POs awaiting verification ({{ tri.po_pending_verify|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for ln in tri.po_pending_verify %}
+      <div class="flex items-center justify-between gap-3 px-4 py-2">
+        <div class="min-w-0">
+          <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
+          <span class="ml-2 text-xs text-gray-400">{{ ln.vendor_name or '—' }} · {{ ln.buyer_name or '—' }}</span>
+        </div>
+        <form hx-post="/v2/partials/buy-plans/{{ ln.plan_id }}/lines/{{ ln.line_id }}/verify-po"
+              hx-target="#bp-hub-body" hx-swap="innerHTML" class="flex items-center gap-1.5 flex-shrink-0">
+          <input type="hidden" name="origin" value="supervise">
+          <button type="submit" name="action" value="approve" data-loading-disable
+                  class="px-2.5 py-1 text-xs font-medium bg-emerald-500 text-white rounded-md hover:bg-emerald-600 transition-colors">
+            Verify PO
+          </button>
+          <button type="submit" name="action" value="reject" data-loading-disable
+                  hx-confirm="Kick this PO back to the buyer?"
+                  class="px-2.5 py-1 text-xs font-medium text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
+            Reject
+          </button>
+        </form>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Overdue POs ── #}
+  {% if tri.overdue_pos %}
+  <div class="bg-white rounded-lg shadow-sm border border-rose-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      Overdue POs ({{ tri.overdue_pos|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for ln in tri.overdue_pos %}
+      <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
+         hx-target="#main-content"
+         hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
+         preload="mouseover"
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40">
+        <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
+        <span class="text-xs text-gray-400 flex-shrink-0">{{ ln.vendor_name or '—' }} · {{ ln.buyer_name or '—' }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Flagged issues ── #}
+  {% if tri.flagged %}
+  <div class="bg-white rounded-lg shadow-sm border border-rose-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      Flagged issues ({{ tri.flagged|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for ln in tri.flagged %}
+      <a hx-get="/v2/partials/buy-plans/{{ ln.plan_id }}"
+         hx-target="#main-content"
+         hx-push-url="/v2/buy-plans/{{ ln.plan_id }}"
+         preload="mouseover"
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-rose-50/40">
+        <span class="text-sm font-mono font-medium text-gray-900">{{ ln.mpn or '—' }}</span>
+        <span class="text-xs text-rose-600 flex-shrink-0">{{ ln.issue_type or 'issue' }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Halted ── #}
+  {% if tri.halted %}
+  <div class="bg-white rounded-lg shadow-sm border border-gray-200">
+    <div class="px-4 py-2 border-b border-gray-100 text-xs font-semibold text-gray-600 uppercase tracking-wider">
+      Halted ({{ tri.halted|length }})
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for p in tri.halted %}
+      <a hx-get="/v2/partials/buy-plans/{{ p.plan_id }}"
+         hx-target="#main-content"
+         hx-push-url="/v2/buy-plans/{{ p.plan_id }}"
+         preload="mouseover"
+         class="flex items-center justify-between gap-3 px-4 py-2 cursor-pointer hover:bg-gray-50">
+        <span class="text-sm font-bold text-gray-900">{{ p.customer_name or '—' }}</span>
+        <span class="text-xs text-gray-400 flex-shrink-0">{{ p.submitted_by_name or '—' }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+</div>
+
+{# ── All-scope deal board (own strip suppressed; supervise strip is above) ── #}
+{% set scope = 'all' %}
+{% set hide_strip = True %}
+{% include "htmx/partials/buy_plans/_board.html" %}

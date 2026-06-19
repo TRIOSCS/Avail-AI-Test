@@ -4,7 +4,7 @@ routes.
 Targets:
   - dashboard_partial
   - requisition/vendor/company/pipeline insights (GET + refresh)
-  - buy_plans_list_partial
+  - buy_plans_list_partial (now the role-lens Deal Hub shell)
   - buy_plan_detail_partial
 
 Called by: pytest autodiscovery
@@ -117,15 +117,24 @@ class TestBuyPlansListPartial:
     @pytest.mark.parametrize(
         "url",
         [
-            pytest.param("/v2/partials/buy-plans", id="empty"),
-            pytest.param("/v2/partials/buy-plans?status=draft", id="filter_status"),
-            pytest.param("/v2/partials/buy-plans?mine=true", id="mine_only"),
-            pytest.param("/v2/partials/buy-plans?q=SO-12345", id="search"),
+            # No-param → role-derived default lens; explicit lenses per the real contract.
+            pytest.param("/v2/partials/buy-plans", id="default_lens"),
+            pytest.param("/v2/partials/buy-plans?lens=deals", id="lens_deals"),
+            pytest.param("/v2/partials/buy-plans?lens=orders", id="lens_orders"),
+            pytest.param("/v2/partials/buy-plans?lens=supervise", id="lens_supervise"),
         ],
     )
     def test_list_loads(self, client: TestClient, url: str):
+        """The hub shell renders: lens switcher + lazy #bp-hub-body with its hx-target."""
         resp = client.get(url)
         assert resp.status_code == 200
+        body = resp.text
+        # Lens switcher present (one button per lens).
+        assert "My Deals" in body
+        assert "My Orders" in body
+        # Lazy body container carries its own explicit hx-target (cards-vanish guard).
+        assert 'id="bp-hub-body"' in body
+        assert 'hx-target="#bp-hub-body"' in body
 
     def test_list_with_plan(self, client: TestClient, db_session: Session, test_requisition: Requisition):
         _make_buy_plan(db_session, test_requisition)

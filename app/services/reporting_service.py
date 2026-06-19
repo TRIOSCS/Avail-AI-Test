@@ -4,13 +4,15 @@ Public function: coverage_report — cadence coverage across active companies, b
 tier and by rep. Pipeline/forecast and the conversion funnel live in
 app/services/forecast_service.py (the Requisition is the opportunity).
 
-Called by: app/routers/crm/views.py (reporting_dashboard route)
+Called by: app/services/crm_service.py cdm_list_ctx (the CRM account-list / CDM
+           workspace context) — surfaces the coverage chip in the account-list header.
 Depends on: app/models (Company, User), app/services/crm_service (cadence_state)
 """
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint
 from ..models.auth import User
 from ..models.crm import Company
 from .crm_service import cadence_state
@@ -18,13 +20,21 @@ from .crm_service import cadence_state
 TIER_ORDER = ["key", "core", "standard", "prospect"]
 
 
+@cached_endpoint("crm_coverage_report", ttl_hours=0.05, key_params=[])
 def coverage_report(db: Session) -> dict:
     """Compute cadence coverage across all active companies.
 
     Returns {by_tier: list[dict], by_rep: list[dict], summary: dict}.
     by_tier rows: {tier, total, on_target, due, overdue, new, coverage_pct}
     by_rep rows:  {rep, total, on_target, due, overdue, new, coverage_pct}
-    summary:      {total, overdue, overdue_pct}
+    summary:      {total, overdue, overdue_pct, coverage_pct}
+
+    Cached (~3 min, global key): the figure is account-population-wide and does
+    NOT vary by the account-list filter/sort/page, yet cdm_list_ctx recomputes it
+    on every list refresh. The short TTL keeps repeated refreshes off the two
+    aggregation queries while staying fresh enough for a coverage chip. The chip
+    still re-renders (and re-reads this cache) on every filter, so it never
+    vanishes on a filtered list.
     """
     rows = db.execute(
         select(
@@ -86,16 +96,22 @@ def coverage_report(db: Session) -> dict:
         reverse=True,
     )
 
-    total = sum(b["total"] for b in tier_buckets.values())
-    total_overdue = sum(b["overdue"] for b in tier_buckets.values())
-    overdue_pct = round(total_overdue / total * 100, 1) if total else 0.0
+    overall = {
+        "total": sum(b["total"] for b in tier_buckets.values()),
+        "on_target": sum(b["on_target"] for b in tier_buckets.values()),
+        "due": sum(b["due"] for b in tier_buckets.values()),
+        "overdue": sum(b["overdue"] for b in tier_buckets.values()),
+    }
+    total = overall["total"]
+    overdue_pct = round(overall["overdue"] / total * 100, 1) if total else 0.0
 
     return {
         "by_tier": by_tier,
         "by_rep": by_rep,
         "summary": {
             "total": total,
-            "overdue": total_overdue,
+            "overdue": overall["overdue"],
             "overdue_pct": overdue_pct,
+            "coverage_pct": _coverage_pct(overall),
         },
     }
