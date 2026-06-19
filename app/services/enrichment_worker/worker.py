@@ -300,6 +300,25 @@ async def _oem_resolution_pass(
     return web_calls_today
 
 
+def _record_partsurfer_negative(db: Session, record_negative, spare: str, norm: str, reason: str) -> None:
+    """Upsert one PartSurfer-description miss inside a SAVEPOINT.
+
+    ``record_negative`` does not flush, but the upsert can hit a unique-key race (the
+    drain CLI or a sibling card committing the same spare during this batch) or a PG
+    DataError; isolating it in a nested transaction keeps that off the shared batch
+    session — the negative is best-effort throughput hygiene, never worth aborting the
+    batch's real enrichment writes. A blank norm is a no-op inside record_negative.
+    """
+    if not norm:
+        return
+    try:
+        with db.begin_nested():
+            record_negative(db, spare, norm, reason)
+            db.flush()
+    except (IntegrityError, DataError):
+        logger.warning("partsurfer-desc: negative-cache upsert lost a race for {} ({})", spare, reason)
+
+
 async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
     """PartSurfer description enrichment — categorize UNCATEGORIZED HP/HPE cards
     (network).
@@ -325,48 +344,82 @@ async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
     already fetched are kept. Each card's ``categorize_and_record`` is wrapped per-card so
     one bad card (an IntegrityError/DataError on the shared session) can't abort the pass
     and waste the other fetched descriptions; ``categorize_and_record`` also wraps its own
-    write in a per-card SAVEPOINT. Returns an aggregate
-    {fetched, categorized, specs_written, failed} summary for the log line.
+    write in a per-card SAVEPOINT.
+
+    Negative cache (durable, partsurfer_desc_negative): a spare with a FRESH negative row
+    (a prior no-result / ungrammatical miss inside its retry window) is dropped BEFORE the
+    fetch — so dead/ungrammatical HP spares are not re-queried every batch (the throughput
+    win on the 145k not_found cards). A ``None`` no-result is cached long (90d); a fetched
+    description the grammar declines is cached SHORT (14d) — a parse miss is not evidence
+    the OEM lacks the part. A throttle (``PartSurferTransient``) is NEVER cached. Returns
+    an aggregate {fetched, categorized, specs_written, failed, skipped_cached} summary.
     """
     from app.config import settings
     from app.services.desc_extractor._common import PARTSURFER_DESC_CONFIDENCE, PARTSURFER_DESC_SOURCE
     from app.services.desc_extractor.writer import categorize_and_record
     from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
+    from app.services.enrichment_worker.partsurfer_negative_cache import (
+        blocked_spare_norms,
+        record_negative,
+    )
     from app.services.enrichment_worker.partsurfer_resolver import (
         PartSurferTransient,
         fetch_partsurfer_description,
     )
+    from app.utils.normalization import normalize_mpn_key
 
     # Uncategorized HP/HPE cards only, deduped by display_mpn (one fetch covers every card
     # sharing the spare). dict preserves insertion order → deterministic fetch order.
+    # spare_norm (one per spare) is the negative-cache key; cache the norm here so it is
+    # computed once per spare and reused for both the block check and the miss write.
     candidates: dict[str, list] = {}
+    spare_norm: dict[str, str] = {}
     for card in batch:
         if (card.category or "").strip():
             continue
         if classify_oem_vendor(card.display_mpn) != "hpe":
             continue
         candidates.setdefault(card.display_mpn, []).append(card)
+        spare_norm.setdefault(card.display_mpn, normalize_mpn_key(card.display_mpn))
     if not candidates:
         return {"fetched": 0, "categorized": 0, "specs_written": 0, "failed": 0}
 
+    # Drop spares with a FRESH negative row (a prior no-result / ungrammatical miss still
+    # inside its retry window) so the worker never re-fetches a known-dead spare every
+    # batch — the throughput win on the 145k not_found cards. A stale row is NOT blocked
+    # (re-fetched; record_negative refreshes it in place).
+    blocked = blocked_spare_norms(db, spare_norm.values())
+
     fetch_cap = settings.partsurfer_fetch_per_batch
-    fetched = categorized = specs_written = failed = 0
-    for i, (spare, cards) in enumerate(candidates.items()):
+    fetched = categorized = specs_written = failed = skipped_cached = 0
+    paced = False  # whether a real fetch has run (so the 2s pace only spaces fetches)
+    for spare, cards in candidates.items():
         if fetched >= fetch_cap:
             break
-        if i:
-            # 1 request / 2s politeness — between fetches only (not before the first).
+        norm = spare_norm[spare]
+        if norm and norm in blocked:
+            # Negative-cache hit — do NOT fetch (no network, no pace).
+            skipped_cached += 1
+            continue
+        if paced:
+            # 1 request / 2s politeness — between actual fetches only.
             await asyncio.sleep(2.0)
+        paced = True
         try:
             desc = await fetch_partsurfer_description(spare)
         except PartSurferTransient as exc:
             # The host is throttling / down — stop hammering it for the rest of this batch.
-            # The aborted fetch is NOT counted; descriptions already fetched are kept.
+            # The aborted fetch is NOT counted, and a throttle is NEVER negative-cached
+            # (it is not a verdict on the spare); descriptions already fetched are kept.
             logger.warning("partsurfer-desc: backing off this batch — {}", exc)
             break
         fetched += 1
         if not desc:
+            # Genuine no-result (404/3xx, missing/empty lblDescription) — cache long
+            # (90d) so this dead spare is not re-fetched daily.
+            _record_partsurfer_negative(db, record_negative, spare, norm, "no_result")
             continue
+        spare_categorized = spare_failed = False
         for card in cards:
             # categorize_and_record is fill-only (no-op on an already-set category) and
             # wraps category + facets in one SAVEPOINT. Per-card try/except (mirrors
@@ -378,12 +431,26 @@ async def _partsurfer_desc_pass(db: Session, batch: list) -> dict[str, int]:
                 )
             except Exception:
                 failed += 1
+                spare_failed = True
                 logger.exception("partsurfer-desc: failed on card_id={}", card.id)
                 continue
             if was_categorized:
                 categorized += 1
                 specs_written += written
-    return {"fetched": fetched, "categorized": categorized, "specs_written": specs_written, "failed": failed}
+                spare_categorized = True
+        if not spare_categorized and not spare_failed:
+            # A description came back but the grammar declined every card — ungrammatical/
+            # opaque/truncated. NOT evidence the OEM lacks the part, so a SHORT (14d) retry,
+            # never the permanent/long window. A DB failure (spare_failed) is not a grammar
+            # verdict — do not cache it.
+            _record_partsurfer_negative(db, record_negative, spare, norm, "ungrammatical")
+    return {
+        "fetched": fetched,
+        "categorized": categorized,
+        "specs_written": specs_written,
+        "failed": failed,
+        "skipped_cached": skipped_cached,
+    }
 
 
 async def run_one_batch(

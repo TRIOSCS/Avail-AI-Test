@@ -81,6 +81,7 @@ from .oem_crosswalk import OemCrosswalk  # noqa: F401
 
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
+from .partsurfer_desc_negative import PartsurferDescNegative  # noqa: F401
 
 # Performance Tracking
 from .performance import (  # noqa: F401

@@ -447,6 +447,24 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 > the `''` sentinel; clamps LLM strings to column widths); read by
 > `app/services/oem_crosswalk_enrich.py` (the deterministic tier-80 partsurfer/psref writer pass).
 
+**`partsurfer_desc_negative`** — durable negative cache for PartSurfer DESCRIPTION misses (migration 125)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| spare_norm | String 64, NOT NULL, UNIQUE | `normalize_mpn_key(display_mpn)` — one row per spare (`uq_partsurfer_neg_spare_norm`; the upsert + lookup key) |
+| spare_raw | String 64, NOT NULL | Last-seen display form (forensics) |
+| reason | String 16, NOT NULL | `no_result` (fetch returned no description) \| `ungrammatical` (a description came back but the desc-grammar declined it) — `ck_partsurfer_neg_reason` CHECK |
+| looked_up_at / retry_after | UTCDateTime, NOT NULL | When the miss was recorded / when re-fetching is allowed again (= looked_up_at + window: 90d for `no_result`, 14d for `ungrammatical` — a parse miss is NOT a permanent verdict). `ix_partsurfer_neg_retry_after` indexes the freshness comparison |
+| created_at / updated_at | UTCDateTime | |
+
+> Distinct sub-resource from `oem_crosswalk`: that caches the spare→CANONICAL-MPN web
+> resolution (Pass A / Claude web_search); this caches the spare→verbatim-DESCRIPTION
+> direct fetch (`_partsurfer_desc_pass`). A spare can miss one and hit the other, so the
+> two negatives are kept on SEPARATE keys (reusing oem_crosswalk's `(spare_norm,'hpe','')`
+> no_match key would conflate "no description" with "no crosswalk"). Written + read by
+> `enrichment_worker/partsurfer_negative_cache.py` (`record_negative` writer / `blocked_spare_norms`
+> selector); a throttle (`PartSurferTransient`) is NEVER cached.
+
 ---
 
 ### Excess Inventory
