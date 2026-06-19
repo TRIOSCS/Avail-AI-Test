@@ -382,16 +382,16 @@ capture_datasheet(mpn, user_id)
     |       |
     |       +-- PUT /drives/{DATASHEET_LIBRARY_DRIVE_ID}/root:/
     |               Datasheets/{manufacturer}/{MPN}-datasheet.pdf:/content
-    |       → {onedrive_item_id, onedrive_url, size_bytes, library_drive_id}
+    |       → {library_item_id, library_web_url, size_bytes, library_drive_id}
     |       DATASHEET_LIBRARY_DRIVE_ID unset or token unavailable → returns None
     |       (capture stamps datasheet_searched_at and returns; upload is optional)
     |
-    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 116)
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 111)
          UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
 ```
 
-`material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
-`onedrive_url`, `library_drive_id` (Graph drive id of the company library),
+`material_card_datasheets` stores one row per captured file: `library_item_id`,
+`library_web_url`, `library_drive_id` (Graph drive id of the company library),
 `source` ("connector"/"web"), `original_url`, `verified`, `uploaded_by_id`
 (optional; user who triggered the capture), `captured_at`.
 `MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
@@ -1371,6 +1371,158 @@ assembly) live in `app/services/crm_service.py` (`staleness_tier`,
 (active SiteContacts across the company's active sites + legacy site-level
 contacts on active sites) and passes it to
 `tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
+`company_contact_rows` orders `is_archived ASC, is_priority DESC, is_primary DESC,
+full_name` — priority contacts surface to the top, archived sink to the bottom
+(still shown). Legacy rows (`contact is None`) are appended after, never sorted.
+
+**Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
+contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
+ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
+`release_prospect`):
+- `POST .../{company_id}/disposition` (`set_company_disposition`) — `_VALID_DISPOSITIONS`
+  allowlist (`active`/`bucket`, invalid → 400), writes `disposition`/`disposition_reason`/
+  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')` +
+  `('companies_typeahead')`, re-renders `_disposition_control.html`. Reversible.
+- `POST .../{company_id}/send-to-prospecting` (`send_company_to_prospecting_htmx`) →
+  `prospect_claim.send_company_to_prospecting` (FOR-UPDATE lock, clears
+  `account_owner_id` + sets `ownership_cleared_at`, find-or-create
+  `ProspectAccount(status=SUGGESTED)` by `Company.domain`; no-domain ⇒ ownership-clear
+  only, no pool row; commit/rollback). Returns the company detail partial + `HX-Trigger`
+  showToast.
+- `POST .../{company_id}/contacts/{contact_id}/priority` + `.../archive` —
+  IDOR-scoped via `SiteContact JOIN CustomerSite WHERE company_id == company_id`
+  (cross-company → 404); toggle the boolean, re-render `_priority_toggle.html` /
+  `_archive_toggle.html`.
+Bucket suppression is QUERY-LAYER only (never in `cadence_service.materialize_all_clocks`);
+the NULL-safe exclusion lives in the shared `_needs_call_filter` (count==list invariant)
++ `cdm_company_query`'s base, with `staleness='bucket'` the lone escape hatch.
+
+**Left-panel company→site IA (Increment 2, no migration).** The CDM left list
+(`_account_list.html`) branches on `c.site_count` (trigger-maintained on `Company`):
+- `site_count <= 1` → today's behavior: the row hx-gets `GET .../{company_id}`
+  (full company detail) into `#cdm-detail`, setting `selectedId` (+ clearing
+  `selectedSiteId`).
+- `site_count > 1` → the row becomes an Alpine accordion header
+  (`x-data="{expanded}"`, chevron, no window-level listeners). Clicking the name
+  toggles expand AND hx-gets the **company-header partial** into `#cdm-detail`;
+  the site children lazy-load on first expand (`intersect once`) from the
+  **sites-accordion partial**. Each site child hx-gets the **site-detail** route
+  and sets `selectedId` + `selectedSiteId`.
+
+Three additive routes in `htmx_views.py` (declared ABOVE the
+`GET /v2/partials/customers/{company_id}` catch-all):
+- `GET .../{company_id}/header` (`company_header_partial`) → `customers/header.html`
+  — header card + `_cadence_hero.html` + `_disposition_control.html` + dual clocks
+  + commercial strip, WITHOUT the per-tab strip (the company-level rollup that
+  stays visible while drilling into sites).
+- `GET .../{company_id}/sites-accordion` (`company_sites_accordion_partial`) →
+  `customers/_sites_accordion.html` — a `<ul>` of the company's ACTIVE sites
+  (name + type + city), each linking to the site-detail route.
+- `GET .../{company_id}/sites/{site_id}` (`company_site_detail_partial`) →
+  `customers/site_detail.html` — IDOR-safe (`CustomerSite.id == site_id AND
+  company_id == company_id AND is_active`, else 404; mirrors `site_contacts_list`).
+  Renders site fields + per-site clocks (tier=None standard target) + a mini tab
+  strip: **Contacts** (`company_contact_rows(db, company_id, sites=[this_site])`,
+  reusing the `contacts_tab.html` `contact_card` macro `with context`) and **Open
+  requisitions at this site** (`Requisition.customer_site_id == site_id`, open
+  statuses only). The **Notes tab is deferred** pending the ActivityLog FK scoping
+  fix. The `#cdm-workspace` x-data gains `selectedSiteId` for site-row highlight.
+The legacy in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is
+left intact (harmlessly redundant) — its retirement is a follow-up.
+
+**AI organization (Increment 3, migration 120).** Durable company-dedup foundation +
+review/banner surfaces — the merge engine (`company_merge_service.merge_companies`) and
+the locked nightly tiering (`auto_dedup_service`: ≥98 auto / 92-97 Claude-confirm, never
+merges different-`account_owner_id` accounts) are reused AS-IS.
+- **Durable foundation:** `companies.normalized_name` (kept in lockstep with `name` via
+  `Company._sync_normalized_name` `@validates`) + `companies.alternate_names`.
+  `merge_companies` now also appends the loser's `name` + its alternates into
+  `keep.alternate_names` (deduped) and backfills `keep.normalized_name` if empty, so a
+  re-import of the old name fuzzy-matches the survivor.
+- **Scanner** `company_utils.find_company_dedup_candidates(db, threshold, limit)` returns
+  NESTED pairs `{company_a:{id,name,site_count,has_owner}, company_b:{…}, score,
+  auto_keep_id}`. Dialect-split, same shape: **PostgreSQL** = pg_trgm self-join on
+  `normalized_name` via `func.similarity()` (drops the 500-row O(n²) cap, uses the GIN
+  index); **SQLite/fallback** = the original rapidfuzz `token_sort_ratio` scan (500-row
+  cap) so the test DB stays green.
+- **Review queue (home):** `settings/data_ops.html` Company-Duplicates loop rewritten
+  against the nested shape (was reading FLAT `pair.name_a/id_a/sightings_a` → rendered
+  blank + emitted empty merge ids; dead). Default keep/remove direction follows
+  `pair.auto_keep_id`; both buttons POST `/v2/partials/admin/company-merge`. Reached via
+  `GET /v2/partials/settings/data-ops` (`require_user` + explicit `is_admin` gate).
+- **Per-account banner:** `GET .../{company_id}/dup-suggestion` (`company_dup_suggestion`,
+  declared ABOVE the catch-all) → lazy `hx-trigger=load` panel in `detail.html` →
+  `_dup_suggestion.html`. Shows the top dedup match INVOLVING this company + a "Review &
+  merge" button reusing the existing `merge-form → merge-preview → POST .../merge` flow.
+  Empty 200 when no near-dup.
+- **Name-suggestion chip (suggest-only):** `GET .../{company_id}/name-suggestion`
+  (`company_name_suggestion`) → `_name_suggestion.html`, lazy in the header. Surfaces
+  `company_utils.suggest_clean_company_name` (display-cased suffix-strip) as "Suggested
+  name: X" with an Apply button → `POST .../{company_id}/apply-name`
+  (`company_apply_name`; sets `Company.name`, `@validates` resyncs `normalized_name`,
+  `invalidate_prefix('company_list','companies_typeahead')`). Empty 200 when already
+  clean. **create_company no longer silently stores the AI-typo-corrected name** — it
+  keeps the rep's typed name (the AI fix still strengthens the duplicate check), making
+  naming suggest-only end-to-end.
+
+---
+
+## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)
+
+A reusable alert layer (`app/services/alerts/`) drives an emerald count badge on
+three bottom-nav tabs and a one-time in-tab "spotlight" that glides to and rails
+the new rows. Each tab registers one or more `AlertSource`s; a tab's badge count
+is the SUM of its sources' counts.
+
+```
+Badge poll (every 60s, same pattern as Proactive):
+    GET /v2/partials/alerts/{tab_key}/badge   (tab_key ∈ requisitions|buy-plans|crm)
+        |
+        v
+    routers/alerts.py -> registry.count_for_tab(db, user, tab_key)
+        |  (sum of the tab's AlertSource.count_for_user; FAIL-QUIET per source —
+        |   a badge must never break the nav)
+        v
+    emerald pill HTML (empty at 0) swapped into #{tab_key}-nav-badge
+
+Tab list render (parts list / buy_plans list / CDM account list):
+    registry.markers_for_tab(db, user, tab_key)
+        |  -> {anchor: {kind, temperament, refs:[ref_id,...]}}
+        v
+    _alert_macros.alert_row_attrs(markers, anchor) stamps data-alert-* on each row
+        |  (anchor = "req-<id>" Sales Hub | "bp-<plan_id>" Buy Plans | "company-<id>" CRM)
+        v
+    htmx_app.js spotlight: emerald accent rail + one-time pulse, glide-to-first,
+    IntersectionObserver marks each row seen as it scrolls into view, floating jump-pill
+
+Mark-seen (per row, background, no spinner):
+    POST /v2/partials/alerts/{kind}/seen  (ref_id form field)
+        |
+        +---> alerts.record_seen() — idempotent INSERT alert_seen (unique upsert)
+        +---> returns the owning tab's refreshed badge as an OOB swap (tab_for_kind)
+```
+
+**Two temperaments** (`AlertSource.temperament`):
+
+- **FYI** — clears on *see*. The count EXCLUDES `alert_seen` rows, so viewing the
+  row drains the badge and fades its rail. Sources: `OfferConfirmedSource`
+  (Sales Hub — new APPROVED+qualified offers on the buyer's requirements) and
+  `InboundCustomerSource` (CRM — new inbound comms on a Customer account the user owns).
+- **ACTION** — clears on *act*. The count derives PURELY from work-state
+  (`BuyplanActionSource`: the user's open buy-plan steps — buyer PO line / manager
+  approval / ops SO-verify). `alert_seen` does NOT change the count — it only gates
+  the cosmetic one-time pulse; the row keeps its rail until the underlying work is done.
+
+`recency_floor()` keeps FYI badges from lighting up for the pre-launch backlog:
+an item only counts if newer than `max(now - alert_recency_days, ALERTS_EPOCH)`.
+
+**Inbound rides the existing ledger — no new capture path.** The CRM inbound
+alert reads `ActivityLog` rows already written by the inbox poll (§4): `poll_inbox`
+→ `log_email_activity` → `match_email_to_entity` resolves the sender by
+site-contact/vendor-contact email then company/vendor domain and stamps
+`company_id` / `vendor_card_id`. `InboundCustomerSource` simply filters those
+inbound rows to Customer accounts the user owns. (Known gap, deferred: non-RFQ
+OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ---
 
@@ -1386,9 +1538,12 @@ enrichment_service.py (orchestrator)
     |       +---> prospect_free_enrichment.py (web search)
     |       +---> signature_parser.py (from email_signature_extracts)
     |
-    +---> Phase 1b: API enrichment
-    |       +---> apollo.py --> Apollo.io API
+    +---> Phase 1b: API enrichment (ordered: Explorium → Lusha → Apollo → AI; gap-gated)
     |       +---> prospect_discovery_explorium.py --> Explorium API
+    |       +---> lusha.py --> Lusha API v2 (contacts + firmographics; gated by
+    |       |       lusha_enrichment_enabled + LUSHA_API_KEY; 402/429 → credit-guard
+    |       |       circuit cooldown via enrichment_credit_guard.py)
+    |       +---> apollo.py --> Apollo.io API (gap-gated: skipped if Lusha filled all gaps)
     |
     +---> Phase 2: AI analysis
     |       +---> ai_service.py --> Claude API (company intel, ICP fit)
@@ -2207,6 +2362,37 @@ Validation conflicts (storage: material_cards.validation_conflicts JSONB +
   `has_validation_conflict=true` validated in the faceted route → query branch in
   faceted_search_service (backed by the partial index).
 ```
+
+### SP3: AI Account Screening (`app/services/prospect_screening.py`)
+
+Called by: `run_enrichment_job` in `prospect_free_enrichment.py` (final step, fire-and-forget).
+Calls: `claude_structured` (smart tier, structured schema, 512 tokens, `cost_bucket="ai_screen"`).
+
+**Cost control:** daily cap via `intel_cache.get_count("ai_screen:daily:{date}")` /
+`incr_count(...)` (`ttl_days=1`). Default cap: 200/day (`ai_screen_daily_cap`). The cap is
+approximate (get/incr is non-atomic) — acceptable under the single-worker drain. Re-screens
+only when `enrichment_data['ai_screen']` is absent, verdict is `insufficient_data`, or the
+grounding has materially changed: each `pass`/`screened_out` verdict stores a
+`grounding_fingerprint` (SHA-256 of the assembled context), and a cache hit requires the
+current fingerprint to match — so a buyer re-triggering enrichment with new
+contacts/firmographics/news forces a fresh screen rather than reusing a stale score.
+
+**Verdict persistence:** `trio_match_score` + `opportunity_score` → indexed Integer columns
+on `prospect_accounts` (SQL-sortable for `ai_match_desc` sort); full verdict →
+`enrichment_data['ai_screen']` (JSONB). Scores only written for `pass`/`screened_out`;
+`insufficient_data` sets `needs_more_enrichment=True` without writing scores.
+
+**Gate:** `ai_screen_enabled=False` (default) → no LLM call; returns `{"verdict": "disabled"}`.
+
+**Screened-out bucket:** `verdict=screened_out` hides account from main queue grid when
+`sort=ai_match_desc`; recoverable via buyer "Claim anyway" override; threshold controlled
+by `ai_screen_min_match=40`. The score threshold override runs after the LLM: even if the
+LLM returns `pass`, the service sets `screened_out` when `trio_match_score < ai_screen_min_match`.
+
+**List route integration** (`htmx_views.py`):
+- Sort option `ai_match_desc`: ranks by `trio_match_score DESC → opportunity_score DESC → readiness_score DESC`.
+- `_prospect_stats_ctx` gains `"screened_out": <count>` (only when `ai_screen_enabled=True`).
+- `screened_out_prospects` context var passed to the list template for the collapsed bucket.
 
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
 
@@ -3117,7 +3303,7 @@ the current implementation.
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; recomputes readiness_score from the news-augmented signals so Enrich moves the tier + buyer-ready rank, not just the panels), enrich-status (poll; HTTP 286 stops) |
+| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |

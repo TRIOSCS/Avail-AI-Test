@@ -306,6 +306,30 @@ Before you run the import command:
 
 ---
 
+## Gate 10 — Datasheet company library (optional; non-blocking)
+
+The auto-datasheet-capture feature stores a permanent copy of each part's datasheet in a
+**company SharePoint library**, written by the app itself (app-only Graph). It is
+**inert-but-safe until configured** — with no library set it skips storage and stamps the
+30-day cooldown, so it never blocks rollout. To ENABLE it (do this whenever IT provisions
+the library; may be after rollout):
+
+1. **Create** a "Datasheets" document library in the chosen SharePoint site.
+2. **Grant** the Azure app the **`Sites.Selected`** *write* permission on that site (admin
+   consent) — least-privilege; the app can write ONLY that library.
+3. **Obtain** the library's Graph **drive id** and set **`DATASHEET_LIBRARY_DRIVE_ID`** in
+   `.env` (optional `DATASHEET_LIBRARY_SUBPATH`, default `Datasheets`); recreate the `app`
+   + `enrichment-worker` containers so they pick it up.
+4. **Verify** after setting: drive a real part search, confirm a copy lands in the library
+   and the in-app download (`/v2/partials/search/dossier/datasheet/{id}/download`) streams
+   the PDF.
+
+Reuses the existing `AZURE_CLIENT_ID` / `AZURE_CLIENT_SECRET` / `AZURE_TENANT_ID`. Until
+step 3, capture runs but skips storage (graceful). See `docs/APP_MAP_INTERACTIONS.md`
+(datasheet flow) for the full data path.
+
+---
+
 ## Post-import — don't forget to come back here
 
 Once the import succeeds and the system has been stable for 48h:

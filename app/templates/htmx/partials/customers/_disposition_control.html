@@ -1,0 +1,40 @@
+{# Disposition control — Active / Bucket select + Send-to-Prospecting action.
+   Renders inside the Account Cadence Card (detail.html), under the cadence hero.
+   Re-rendered by POST /v2/partials/customers/{company_id}/disposition to reflect
+   the new disposition. NULL disposition behaves as 'active'.
+
+   Receives: company
+#}
+{% set _disp = company.disposition or 'active' %}
+<div id='disposition-control' class='flex items-center justify-between flex-wrap gap-2 mt-2'>
+  <div class='flex items-center gap-2'>
+    {% if _disp == 'bucket' %}
+    <span class='px-2 py-0.5 text-[10px] font-semibold rounded-full bg-gray-200 text-gray-600 border border-gray-300'
+          title='Bucketed — suppressed from the "needs a call" list'>
+      Bucketed
+    </span>
+    {% endif %}
+    {# Disposition inline-select — POSTs on change; re-swaps this partial. #}
+    <form hx-post='/v2/partials/customers/{{ company.id }}/disposition'
+          hx-target='#disposition-control'
+          hx-swap='outerHTML'>
+      <select name='disposition'
+              onchange='this.form.requestSubmit()'
+              class='text-xs text-gray-600 font-medium bg-transparent border border-gray-200 rounded px-1.5 py-0.5 hover:border-brand-300 focus:outline-none focus:ring-1 focus:ring-brand-400 cursor-pointer'>
+        <option value='active' {% if _disp == 'active' %}selected{% endif %}>Active</option>
+        <option value='bucket' {% if _disp == 'bucket' %}selected{% endif %}>Bucket</option>
+      </select>
+    </form>
+  </div>
+  {# Send to Prospecting — relinquishes ownership + pools the account. #}
+  <form hx-post='/v2/partials/customers/{{ company.id }}/send-to-prospecting'
+        hx-target='#cdm-detail'
+        hx-swap='innerHTML'
+        hx-confirm='Send {{ company.name }} back to prospecting? This clears your ownership.'>
+    <button type='submit'
+            class='inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded border border-gray-200 text-gray-500 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200 transition-colors focus:outline-none focus:ring-1 focus:ring-brand-400'
+            title='Relinquish ownership and return this account to the prospecting pool'>
+      Send to Prospecting
+    </button>
+  </form>
+</div>

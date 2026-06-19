@@ -25,8 +25,8 @@ async def test_upload_returns_metadata_on_success():
             "LM317-datasheet.pdf", b"%PDF-1.4", "application/pdf", manufacturer="TI"
         )
     assert out == {
-        "onedrive_item_id": "ITM",
-        "onedrive_url": "https://sp/x",
+        "library_item_id": "ITM",
+        "library_web_url": "https://sp/x",
         "size_bytes": 8,
         "library_drive_id": "DRV",
     }

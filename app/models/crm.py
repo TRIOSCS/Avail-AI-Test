@@ -16,6 +16,18 @@ class Company(Base):
     __tablename__ = "companies"
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
+
+    # AI organization (Increment 3) — durable dedup foundation, mirrors VendorCard.
+    # normalized_name is the suffix-stripped/lowercased match key, kept in sync with
+    # `name` by the @validates hook below. Unlike VendorCard it is NULLABLE and NOT
+    # unique: companies legitimately share a normalized form across the dedup window
+    # (e.g. different-owner accounts the policy keeps separate). The pg_trgm GIN index
+    # (migration 120, Postgres-only) is for similarity scanning, not a constraint.
+    normalized_name = Column(String(255), index=True)
+    # Names this company has been known by (loser names absorbed on merge), so a
+    # re-import of the old name fuzzy-matches here instead of recreating the dupe.
+    alternate_names = Column(JSON, default=list)
+
     website = Column(String(500))
     industry = Column(String(255))
     notes = Column(Text)
@@ -42,6 +54,13 @@ class Company(Base):
     last_outbound_at = Column(UTCDateTime, index=True)
     last_reply_at = Column(UTCDateTime, index=True)
     tier = Column(String(20), index=True)  # key | core | standard | prospect (NULL => standard)
+
+    # Account disposition (Increment 1) — salesperson-set lifecycle.
+    # active | bucket (NULL => active, like tier). NOT is_active (would vanish).
+    disposition = Column(String(20), index=True)
+    disposition_reason = Column(String)  # optional, free text
+    disposition_set_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    disposition_set_at = Column(UTCDateTime)
 
     # v1.4.0: Account management fields
     account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
@@ -88,6 +107,21 @@ class Company(Base):
     def _validate_currency(self, _key, value):
         if value is not None and not re.fullmatch(r"[A-Z]{3}", value):
             raise ValueError(f"Invalid ISO 4217 currency code: {value}")
+        return value
+
+    @validates("name")
+    def _sync_normalized_name(self, _key, value):
+        """Keep normalized_name in lockstep with name on every create/rename.
+
+        Uses the same normalizer the dedup scanner uses
+        (vendor_utils.normalize_vendor_name via company_utils), so the durable match key
+        is identical to scan-time scoring. Covers all create paths (API create,
+        prospect-claim, importers) without touching each one. Empty/whitespace names
+        normalize to None (no spurious '' match key).
+        """
+        from ..vendor_utils import normalize_vendor_name
+
+        self.normalized_name = normalize_vendor_name(value) or None
         return value
 
     __table_args__ = (
@@ -181,6 +215,11 @@ class SiteContact(Base):
     is_active = Column(Boolean, default=True)
     contact_status = Column(String(20), default="new")
     do_not_contact = Column(Boolean, nullable=False, default=False, server_default="false")
+    # Increment 1 — contact disposition. is_priority surfaces a contact to the
+    # top of the roster; is_archived sorts it to the bottom (still shown — NOT
+    # is_active, which would hide it). Both mirror do_not_contact exactly.
+    is_priority = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
 
     # CRM cadence — contact-level clocks
     last_activity_at = Column(UTCDateTime)

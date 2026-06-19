@@ -13,9 +13,12 @@ from typing import Optional
 import httpx
 from loguru import logger
 
+from .config import settings
+from .connectors import lusha
 from .http_client import http
 from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
+from .services.enrichment_credit_guard import ProviderQuotaError, circuit_open, trip_circuit
 from .utils.claude_client import claude_json, claude_text
 
 # ── Normalization ────────────────────────────────────────────────────────
@@ -448,6 +451,11 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
 # ── Unified Enrichment ──────────────────────────────────────────────────
 
 
+def _lusha_enabled() -> bool:
+    """True when Lusha is feature-gated on AND a key is resolvable (DB or env)."""
+    return settings.lusha_enrichment_enabled and bool(get_credential_cached("lusha_enrichment", "LUSHA_API_KEY"))
+
+
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
@@ -503,19 +511,31 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         if source_label not in current:
             result["source"] = f"{current}+{source_label}" if current else source_label
 
+    def _gaps_remain() -> bool:
+        return any(not result.get(f) for f in _enrichable)
+
     # ── Phase 1: Explorium ──
     _merge(await _explorium_find_company(domain, name), "explorium")
 
-    # ── Phase 1b: Apollo enrichment (fills gaps from Phase 1) ──
-    from .config import settings as _settings
+    # ── Phase 1a: Lusha (verified contacts/firmographics) — gap-gated, circuit-guarded ──
+    if _lusha_enabled() and not circuit_open("lusha") and _gaps_remain():
+        try:
+            _merge(
+                await lusha.enrich_company(domain, get_credential_cached("lusha_enrichment", "LUSHA_API_KEY") or ""),
+                "lusha",
+            )
+        except ProviderQuotaError:
+            logger.warning("Lusha quota/rate-limit on company {} — tripping circuit", domain)
+            trip_circuit("lusha", settings.lusha_cooldown_minutes)
 
-    if _settings.apollo_api_key:
+    # ── Phase 1b: Apollo enrichment (fills gaps; gap-gated → spares credits) ──
+    if settings.apollo_api_key and _gaps_remain():
         from .connectors.apollo import search_company as apollo_search
 
-        _merge(await apollo_search(domain, _settings.apollo_api_key), "apollo")
+        _merge(await apollo_search(domain, settings.apollo_api_key), "apollo")
 
     # ── Phase 2: AI fills remaining gaps (conditional) ──
-    if any(not result.get(f) for f in _enrichable):
+    if _gaps_remain():
         _merge(await _ai_find_company(domain, name), "ai")
 
     # Layer 2: output normalization
@@ -556,28 +576,40 @@ async def _hunter_find_contacts(domain: str) -> list[dict]:
     return results
 
 
-async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "") -> list[dict]:
+async def find_suggested_contacts(domain: str, name: str = "", title_filter: str = "", limit: int = 10) -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    Explorium, Hunter.io, and AI sources run concurrently via asyncio.gather. Returns
-    deduplicated list sorted by relevance. Each contact has: full_name, title, email,
-    phone, linkedin_url, location, source
+    Lusha (verified) runs first; if it returns >= limit verified contacts the existing
+    concurrent Explorium+Hunter+AI gather is skipped, else they run and results are
+    merged. Returns a deduplicated, relevance-filtered list. Each contact has:
+    full_name, title, email, phone, linkedin_url, location, source (and verified for
+    Lusha rows).
     """
+    all_contacts: list[dict] = []
 
-    # Run all sources concurrently
-    results = await asyncio.gather(
-        _explorium_find_contacts(domain, title_filter),
-        _hunter_find_contacts(domain),
-        _ai_find_contacts(domain, name, title_filter),
-        return_exceptions=True,
-    )
+    # ── Lusha first (verified source) — circuit-guarded ──
+    if _lusha_enabled() and not circuit_open("lusha"):
+        try:
+            all_contacts = await lusha.search_contacts(
+                domain, get_credential_cached("lusha_enrichment", "LUSHA_API_KEY") or "", limit
+            )
+        except ProviderQuotaError:
+            logger.warning("Lusha quota/rate-limit on contacts {} — tripping circuit", domain)
+            trip_circuit("lusha", settings.lusha_cooldown_minutes)
 
-    all_contacts = []
-    for r in results:
-        if isinstance(r, Exception):
-            logger.warning("Contact provider failed: {}", r)
-            continue
-        all_contacts.extend(r)
+    # Fall through to the existing concurrent providers unless Lusha already satisfied the need.
+    if not (len(all_contacts) >= limit and any(c.get("verified") for c in all_contacts)):
+        results = await asyncio.gather(
+            _explorium_find_contacts(domain, title_filter),
+            _hunter_find_contacts(domain),
+            _ai_find_contacts(domain, name, title_filter),
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("Contact provider failed: {}", r)
+                continue
+            all_contacts.extend(r)
 
     # Deduplicate by email or linkedin_url or full_name
     seen = set()

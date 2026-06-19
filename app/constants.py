@@ -288,6 +288,19 @@ class ProspectAccountStatus(StrEnum):
     CONVERTED = "converted"
 
 
+class CompanyDisposition(StrEnum):
+    """Salesperson-set lifecycle disposition for a Company.
+
+    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot — a
+    bucketed account is suppressed from the "needs a call" call-list (count + click-
+    through) but stays findable/un-bucketable via the explicit Bucket facet. Never
+    overloaded onto is_active.
+    """
+
+    ACTIVE = "active"
+    BUCKET = "bucket"
+
+
 class TaskStatus(StrEnum):
     """Status lifecycle for RequisitionTask records."""
 
@@ -628,3 +641,17 @@ class OemCrosswalkStatus(StrEnum):
 
     RESOLVED = "resolved"
     NO_MATCH = "no_match"
+
+
+class AlertKind(StrEnum):
+    """alert_seen.alert_kind values — which cross-app alert a seen-row belongs to.
+
+    FYI kinds (offer_confirmed, inbound_customer, inbound_vendor) clear on see — the
+    badge count excludes seen rows. ACTION kinds (buyplan_action) clear on act — seen
+    rows only suppress the one-time in-tab spotlight pulse, never the count.
+    """
+
+    OFFER_CONFIRMED = "offer_confirmed"
+    INBOUND_CUSTOMER = "inbound_customer"
+    INBOUND_VENDOR = "inbound_vendor"
+    BUYPLAN_ACTION = "buyplan_action"

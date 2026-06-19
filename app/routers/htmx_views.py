@@ -5127,6 +5127,446 @@ async def set_contact_dnc(
     )
 
 
+_VALID_DISPOSITIONS = frozenset({"active", "bucket"})
+
+
+@router.post("/v2/partials/customers/{company_id}/disposition", response_class=HTMLResponse)
+async def set_company_disposition(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.disposition (active|bucket); re-renders the disposition control.
+
+    Owner-or-admin only (mirrors release_prospect). Validates against the allowlist
+    (invalid → 400). Writes disposition + optional reason + audit fields
+    (set_by/set_at). Reversible — set back to 'active'. Invalidates the cached
+    company_list / typeahead so the bucketed account drops out of the call-list.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can set disposition")
+
+    form = await request.form()
+    disp_raw = (form.get("disposition") or "").strip()
+    reason_raw = (form.get("disposition_reason") or "").strip()
+
+    if disp_raw not in _VALID_DISPOSITIONS:
+        raise HTTPException(400, f"Invalid disposition '{disp_raw}'. Valid: {sorted(_VALID_DISPOSITIONS)}")
+
+    company.disposition = disp_raw
+    company.disposition_reason = reason_raw or None
+    company.disposition_set_by = user.id
+    company.disposition_set_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    logger.info("Company {} disposition set to {} by {}", company_id, company.disposition, user.email)
+    return template_response(
+        "htmx/partials/customers/_disposition_control.html",
+        {"request": request, "company": company},
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
+async def send_company_to_prospecting_htmx(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send an owned account back to the prospecting pool.
+
+    Owner-or-admin only. Clears ownership, surfaces the account as a SUGGESTED prospect
+    (by domain), and re-renders the company detail partial with a toast.
+    """
+    from ..services.prospect_claim import send_company_to_prospecting
+
+    try:
+        result = send_company_to_prospecting(company_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+    except LookupError:
+        raise HTTPException(404, "Company not found")
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    msg = f"Sent {result['company_name']} back to prospecting"
+    if not result["pooled"]:
+        msg += " (no domain — ownership cleared, not pooled)"
+    response = await company_detail_partial(request, company_id, user=user, db=db)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    return response
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/priority",
+    response_class=HTMLResponse,
+)
+async def set_contact_priority(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_priority; re-renders the priority toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_priority= → True; empty → False (clear).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_priority = bool((form.get("is_priority") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_priority set to {} by {} (company {})",
+        contact_id,
+        contact.is_priority,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_priority_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/archive",
+    response_class=HTMLResponse,
+)
+async def set_contact_archive(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_archived; re-renders the archive toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_archived= → True; empty → False (restore). Archived contacts stay visible
+    (sorted to the bottom) — is_active is never touched here.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_archived = bool((form.get("is_archived") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_archived set to {} by {} (company {})",
+        contact_id,
+        contact.is_archived,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_archive_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
+# ── Increment 2: left-panel company→site IA partials ──────────────────────────
+# These three routes carry STATIC first segments after /customers/ (header,
+# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
+# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
+# the right panel and honors the response-targets contract (hx-target #cdm-detail,
+# hx-target-error #cdm-error) from the caller markup.
+
+
+@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
+async def company_header_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
+    the per-tab strip.
+
+    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
+    site children carry the per-site contacts + open reqs).
+    """
+    company = (
+        db.query(Company)
+        .options(joinedload(Company.account_owner), joinedload(Company.sites))
+        .filter(Company.id == company_id)
+        .first()
+    )
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    sites = [s for s in (company.sites or []) if s.is_active]
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
+            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/header.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
+async def company_sites_accordion_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
+    left-panel account accordion header.
+
+    Each links to the site-detail view.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update({"company": company, "sites": sites})
+    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+async def company_site_detail_partial(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
+    at this site").
+
+    IDOR-safe: the site must belong to the
+    company AND be active, else 404 (mirrors site_contacts_list).
+    """
+    site = (
+        db.query(CustomerSite)
+        .options(joinedload(CustomerSite.owner))
+        .filter(
+            CustomerSite.id == site_id,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .first()
+    )
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    now_utc = datetime.now(_tz.utc)
+    # Site-scoped contacts — pass this single site so the rows are filtered to it
+    # (keeps the is_active + Increment-1 priority/archive sort).
+    contact_rows = _company_contact_rows(db, company_id, sites=[site])
+
+    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
+    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
+    open_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.customer_site_id == site_id,
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
+        )
+        .order_by(Requisition.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "site": site,
+            "contact_rows": contact_rows,
+            "open_reqs": open_reqs,
+            "now_utc": now_utc,
+            # Per-site cadence (tier=None → standard 30d target, like contacts).
+            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
+            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
+        }
+    )
+    return template_response("htmx/partials/customers/site_detail.html", ctx)
+
+
+# ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
+# STATIC trailing segments (dup-suggestion / name-suggestion / apply-name), so they
+# MUST precede the GET /v2/partials/customers/{company_id} catch-all below. ADDITIVE —
+# the merge engine (merge_companies) and the dedup scanner are reused as-is; no merge
+# logic lives here. The dup banner reuses the existing merge-form → preview → POST
+# .../merge flow. Naming is suggest-only — never a silent rewrite.
+
+
+@router.get("/v2/partials/customers/{company_id}/dup-suggestion", response_class=HTMLResponse)
+async def company_dup_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy per-account duplicate banner — top dedup match for THIS company + a Merge
+    button reusing the merge-form/preview/merge flow.
+
+    Renders nothing (empty 200) when there is no near-duplicate.
+    """
+    from ..company_utils import find_company_dedup_candidates
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
+    # already honors the auto_keep heuristic; here we only need the OTHER side as the
+    # merge-away candidate.
+    try:
+        candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+    except Exception as e:  # pragma: no cover - defensive, mirrors data-ops scan guard
+        logger.warning("dup-suggestion scan failed for company {}: {}", company_id, e)
+        return HTMLResponse("")
+
+    match = None
+    for pair in candidates:
+        a, b = pair["company_a"], pair["company_b"]
+        if a["id"] == company_id:
+            match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
+            break
+        if b["id"] == company_id:
+            match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
+            break
+
+    if not match:
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "match": match}
+    return template_response("htmx/partials/customers/_dup_suggestion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/name-suggestion", response_class=HTMLResponse)
+async def company_name_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Suggest-only name-normalization chip: surface the suffix-stripped form of the
+    current name as "Suggested name: X — Apply?".
+
+    Uses the same normalizer the dedup scanner uses, re-cased from the original tokens
+    (so we only strip the legal suffix / leading "the", never lowercase the whole name).
+    Renders nothing (empty 200) when the current name is already clean.
+    """
+    from ..company_utils import suggest_clean_company_name
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    suggested = suggest_clean_company_name(company.name or "")
+    if not suggested or suggested == (company.name or "").strip():
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "suggested": suggested}
+    return template_response("htmx/partials/customers/_name_suggestion.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/apply-name", response_class=HTMLResponse)
+async def company_apply_name(
+    request: Request,
+    company_id: int,
+    name: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a suggested company name (rep-initiated; the suggest-only counterpart to a
+    silent rewrite).
+
+    normalized_name follows automatically via Company._sync_normalized_name
+    (@validates). Returns an empty 200 so the chip removes itself (hx-swap outerHTML).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    new_name = (name or "").strip()
+    if not new_name:
+        raise HTTPException(400, "Name is required")
+
+    company.name = new_name  # @validates resyncs normalized_name
+    db.commit()
+
+    from ..cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+    logger.info("Company {} renamed to '{}' (suggested) by {}", company_id, new_name, user.email)
+    return HTMLResponse("")
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -6357,6 +6797,9 @@ async def log_phone_call(
 
     # Route through log_call_activity so the call is matched to a vendor/company,
     # recorded as the canonical CALL_LOGGED type, and bumps last_activity_at.
+    # force_meaningful=True: a manually logged call is a deliberate human interaction →
+    # always meaningful, regardless of the duration-gate (which targets auto-captured
+    # Teams/8x8 calls that carry a real duration).
     log = log_call_activity(
         user_id=user.id,
         direction="outbound",
@@ -6366,15 +6809,10 @@ async def log_phone_call(
         contact_name=vendor_name,
         db=db,
         requisition_id=req_id,
+        force_meaningful=True,
     )
     if log is not None:
         log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
-        # A manually logged call is a deliberate human interaction → always meaningful,
-        # regardless of P1e's duration-gating in log_call_activity (which targets
-        # auto-captured Teams/8x8 calls that carry a real duration). Without this, a
-        # no-duration manual log lands is_meaningful=False and drops out of the
-        # meaningful-activity surfaces and the reply clock.
-        log.is_meaningful = True
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 
@@ -6857,10 +7295,17 @@ async def buy_plans_list_partial(
             }
         )
 
+    # Spotlight markers: plan rows that carry an open step needing this user's action.
+    # Buy Plans lives under the Reporting nav now, so the source is registered there.
+    from ..services.alerts import markers_for_tab
+
+    alert_markers = markers_for_tab(db, user, "reporting")
+
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(
         {
             "buy_plans": buy_plans,
+            "alert_markers": alert_markers,
             "q": q,
             "status": status,
             "mine": mine,
@@ -8926,6 +9371,11 @@ async def add_offer_to_quote(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    if offer.requisition_id is not None and offer.requisition_id != quote.requisition_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "offer does not belong to this quote's requisition"},
+        )
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
@@ -9221,6 +9671,8 @@ def _prospect_stats_ctx(db: Session) -> dict:
 
     "Buyer ready" = is_buyer_ready over SUGGESTED.
     """
+    from ..config import settings as _settings
+
     suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
     claimed = (
         db.query(sqlfunc.count(ProspectAccount.id))
@@ -9228,11 +9680,17 @@ def _prospect_stats_ctx(db: Session) -> dict:
         .scalar()
         or 0
     )
+    screened_out_count = (
+        sum(1 for p in suggested if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out")
+        if _settings.ai_screen_enabled
+        else 0
+    )
     return {
         "total": len(suggested),
         "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
         "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
         "claimed": claimed,
+        "screened_out": screened_out_count,
     }
 
 
@@ -9280,7 +9738,7 @@ async def prospecting_list_partial(
     request: Request,
     q: str = "",
     status: str = "",
-    sort: str = "buyer_ready_desc",
+    sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_user),
@@ -9288,9 +9746,10 @@ async def prospecting_list_partial(
 ):
     """Return the prospecting card grid as an HTML partial.
 
-    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
-    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
-    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    Sorts: ai_match_desc (default) ranks by trio_match_score DESC then opportunity_score
+    DESC then readiness_score DESC; buyer_ready_desc ranks by the composite buyer-ready
+    score from build_priority_snapshot; fit_desc and recent_desc sort in SQL.
+    Dismissed prospects are hidden unless filtered for.
     """
     base = db.query(ProspectAccount)
     if status:
@@ -9305,7 +9764,30 @@ async def prospecting_list_partial(
     total_pages = max(1, (total + per_page - 1) // per_page)
     offset = (page - 1) * per_page
 
-    if sort == "buyer_ready_desc":
+    if sort == "ai_match_desc":
+        from ..config import settings as _settings
+
+        rows = base.all()
+        if _settings.ai_screen_enabled:
+            screened_out_rows = [
+                p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
+            ]
+            rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
+        else:
+            screened_out_rows = []
+        rows.sort(
+            key=lambda p: (
+                -(p.trio_match_score or 0),
+                -(p.opportunity_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        total = len(rows)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        prospects = rows[offset : offset + per_page]
+    elif sort == "buyer_ready_desc":
+        screened_out_rows = []
         # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
         rows = base.all()
         snapshots = {p.id: build_priority_snapshot(p) for p in rows}
@@ -9319,6 +9801,7 @@ async def prospecting_list_partial(
         )
         prospects = rows[offset : offset + per_page]
     else:
+        screened_out_rows = []
         if sort == "fit_desc":
             base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
         elif sort == "recent_desc":
@@ -9339,6 +9822,8 @@ async def prospecting_list_partial(
     status_counts = dict(count_q.group_by(ProspectAccount.status).all())
     all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
 
+    from ..config import settings as _list_settings
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
@@ -9354,6 +9839,8 @@ async def prospecting_list_partial(
             "total_pages": total_pages,
             "status_counts": status_counts,
             "all_total": all_total,
+            "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
+            "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
@@ -10885,11 +11372,17 @@ async def parts_list_partial(
     # Team users for owner filter
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
+    # Spotlight markers: requirement rows carrying new confirmed offers the user hasn't seen.
+    from ..services.alerts import markers_for_tab
+
+    alert_markers = markers_for_tab(db, user, "requisitions")
+
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
             "requirements": requirements,
             "offer_stats": offer_stats,
+            "alert_markers": alert_markers,
             "q": q,
             "requisition_name": requisition_name,
             "customer": customer,

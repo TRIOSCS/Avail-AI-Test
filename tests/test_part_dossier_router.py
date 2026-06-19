@@ -299,8 +299,8 @@ def test_specs_shows_stored_datasheet(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name="LM317T-datasheet.pdf",
-        onedrive_item_id="ITM",
-        onedrive_url="https://od/x",
+        library_item_id="ITM",
+        library_web_url="https://od/x",
         library_drive_id="DRV",
         source="connector",
         verified=True,
@@ -327,7 +327,7 @@ def test_datasheet_download_streams_pdf(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name="LM317Z-datasheet.pdf",
-        onedrive_item_id="ITM",
+        library_item_id="ITM",
         library_drive_id="DRV",
         content_type="application/pdf",
     )
@@ -357,7 +357,7 @@ def test_datasheet_download_sanitizes_content_disposition(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name='x"\r\nSet-Cookie: pwned=1.pdf',
-        onedrive_item_id="ITM",
+        library_item_id="ITM",
         library_drive_id="DRV",
         content_type="application/pdf",
     )

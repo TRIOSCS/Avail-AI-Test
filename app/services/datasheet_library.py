@@ -2,8 +2,8 @@
 
 App-only Graph (get_app_graph_token) against the configured library drive
 (settings.datasheet_library_drive_id). Unconfigured or no-token => returns None so the
-caller skips storage gracefully. Separate from onedrive_files (per-user req/offer
-attachments).
+caller skips storage gracefully. Separate from the inline per-user req/offer attachment
+uploads in the requisitions/offers routers.
 """
 
 from __future__ import annotations
@@ -61,8 +61,8 @@ async def upload_datasheet_to_library(
         return None
     body = r.json()
     return {
-        "onedrive_item_id": body.get("id"),
-        "onedrive_url": body.get("webUrl"),
+        "library_item_id": body.get("id"),
+        "library_web_url": body.get("webUrl"),
         "size_bytes": len(content),
         "library_drive_id": drive_id,
     }

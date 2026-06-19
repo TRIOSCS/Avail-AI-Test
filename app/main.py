@@ -537,6 +537,7 @@ async def health(
 from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
+from .routers.alerts import router as alerts_router
 from .routers.auth import router as auth_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
@@ -561,6 +562,7 @@ from .routers.vendors_crud import router as vendors_crud_router
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(ai_router)
+app.include_router(alerts_router)
 app.include_router(activity_router)
 app.include_router(crm_router)
 app.include_router(documents_router)

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.constants import ProspectAccountStatus
@@ -219,6 +220,84 @@ def release_prospect(prospect_id: int, user_id: int, db: Session, *, is_admin: b
         "prospect_id": prospect.id,
         "company_name": prospect.name,
         "status": "suggested",
+    }
+
+
+def send_company_to_prospecting(company_id: int, user_id: int, db: Session, *, is_admin: bool = False) -> dict:
+    """Send an owned Company back to the prospecting pool.
+
+    Disposition counterpart of release_prospect, but keyed off the Company (not a
+    ProspectAccount): relinquish ownership (account_owner_id -> NULL,
+    ownership_cleared_at=now) and surface the account in the pool as a SUGGESTED
+    ProspectAccount keyed by domain (find-or-create dedupe, like
+    add_prospect_manually). When the Company has no domain we cannot key a pool
+    row — fall back to ownership-clear only. The Company row itself is always kept.
+
+    Perms: owner-or-admin. An admin may force-clear another owner's account
+    (mirrors release_prospect's is_admin override).
+
+    Returns: {company_id, company_name, prospect_id|None, pooled: bool}
+    Raises: LookupError if the company is missing; ValueError on permission.
+    """
+    company = db.query(Company).filter(Company.id == company_id).with_for_update().first()
+    if not company:
+        raise LookupError("Company not found")
+
+    if not is_admin and company.account_owner_id != user_id:
+        raise ValueError("Only the owner or an admin can send this account to prospecting")
+
+    try:
+        company.account_owner_id = None
+        company.ownership_cleared_at = datetime.now(timezone.utc)
+
+        prospect_id: int | None = None
+        domain = (company.domain or "").strip().lower()
+        if domain:
+            existing = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+            if existing:
+                prospect_id = existing.id
+            else:
+                # ProspectAccount.domain is UNIQUE NOT NULL. Insert inside a SAVEPOINT
+                # so a concurrent send claiming the same domain rolls back ONLY the
+                # failed insert (the ownership-clear above survives); then adopt the
+                # row the other writer created instead of bubbling a 500.
+                try:
+                    with db.begin_nested():
+                        prospect = ProspectAccount(
+                            name=company.name,
+                            domain=domain,
+                            discovery_source="sent_back",
+                            status=ProspectAccountStatus.SUGGESTED,
+                            fit_score=0,
+                            readiness_score=0,
+                            company_id=company.id,
+                            enrichment_data={"sent_back_by": user_id},
+                        )
+                        db.add(prospect)
+                        db.flush()
+                    prospect_id = prospect.id
+                except IntegrityError:
+                    dup = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+                    prospect_id = dup.id if dup else None
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    logger.info(
+        "Company {} ({}) sent to prospecting by user {} (pooled={})",
+        company.name,
+        company_id,
+        user_id,
+        prospect_id is not None,
+    )
+
+    return {
+        "company_id": company_id,
+        "company_name": company.name,
+        "prospect_id": prospect_id,
+        "pooled": prospect_id is not None,
     }
 
 

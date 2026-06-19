@@ -197,10 +197,11 @@ class MaterialCard(Base):
 
 
 class MaterialCardDatasheet(Base):
-    """A permanent datasheet copy stored in OneDrive, attached to a MaterialCard.
+    """A permanent datasheet copy stored in the company SharePoint library, attached to
+    a MaterialCard.
 
     Unlike MaterialCard.datasheet_url (an external link that rots when vendors pull EOL
-    datasheets), this is our own copy: download → verify → store in OneDrive.
+    datasheets), this is our own copy: download → verify → store in the company library.
     """
 
     __tablename__ = "material_card_datasheets"
@@ -208,8 +209,8 @@ class MaterialCardDatasheet(Base):
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
-    onedrive_item_id = Column(String(500))
-    onedrive_url = Column(Text)
+    library_item_id = Column(String(500))  # Graph driveItem id of the stored copy
+    library_web_url = Column(Text)  # Graph webUrl (convenience; the in-app download is the primary access path)
     library_drive_id = Column(String(200))  # Graph drive id of the company library this copy lives in
     content_type = Column(String(100))
     size_bytes = Column(Integer)

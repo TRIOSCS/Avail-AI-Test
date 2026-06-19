@@ -223,8 +223,8 @@ async def capture_datasheet(mpn: str, user_id: int) -> None:
             MaterialCardDatasheet(
                 material_card_id=card.id,
                 file_name=f"{card.display_mpn}-datasheet.pdf",
-                onedrive_item_id=meta["onedrive_item_id"],
-                onedrive_url=meta["onedrive_url"],
+                library_item_id=meta["library_item_id"],
+                library_web_url=meta["library_web_url"],
                 library_drive_id=meta["library_drive_id"],
                 content_type="application/pdf",
                 size_bytes=meta["size_bytes"],
