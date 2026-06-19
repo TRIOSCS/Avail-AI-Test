@@ -264,6 +264,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_strategic | Boolean | |
 | sf_account_id | String 255, unique | Salesforce link |
 | last_activity_at | UTCDateTime, nullable | Bumped by `log_outreach_initiated()` on every click-to-contact event; used by the CDM account workspace `staleness` sort (oldest = longest since activity first). |
+| disposition | String 20, indexed | Migration 118. `active`\|`bucket` (`CompanyDisposition` StrEnum); NULL ⇒ active (mirrors `tier`'s NULL ⇒ standard). `bucket` accounts are suppressed from the "needs a call" call-list (chip COUNT + click-through) via the shared `crm_service._needs_call_filter` and from `cdm_company_query`'s base, NULL-safe (`or_(disposition != 'bucket', disposition.is_(None))`) — re-surfaced ONLY by the explicit `staleness='bucket'` facet. Set via `POST /v2/partials/customers/{id}/disposition` (owner-or-admin). NEVER overloaded onto `is_active`. |
+| disposition_reason | String, nullable | Optional free-text rationale for the disposition (parity with prospect dismiss audit). |
+| disposition_set_by | FK -> users (SET NULL) | Who set the disposition. |
+| disposition_set_at | UTCDateTime, nullable | When the disposition was last set. |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -288,6 +292,9 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | phone | String 100 | |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
 | contact_role | String 50 | buyer\|technical\|decision_maker\|operations |
+| do_not_contact | Boolean NOT NULL (server_default false) | Migration 116. Suppresses outreach affordances; toggled via `POST .../contacts/{id}/do-not-contact` (`_dnc_toggle.html`). |
+| is_priority | Boolean NOT NULL (server_default false) | Migration 118. Surfaces the contact to the TOP of the roster (`company_contact_rows` order_by). Toggled via `POST .../contacts/{id}/priority` (`_priority_toggle.html`). Mirrors `do_not_contact`. |
+| is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha\|apollo\|hunter\|manual |
 

@@ -288,6 +288,19 @@ class ProspectAccountStatus(StrEnum):
     CONVERTED = "converted"
 
 
+class CompanyDisposition(StrEnum):
+    """Salesperson-set lifecycle disposition for a Company.
+
+    NULL ⇒ active (mirrors tier's NULL ⇒ standard). "bucket" is the parking lot — a
+    bucketed account is suppressed from the "needs a call" call-list (count + click-
+    through) but stays findable/un-bucketable via the explicit Bucket facet. Never
+    overloaded onto is_active.
+    """
+
+    ACTIVE = "active"
+    BUCKET = "bucket"
+
+
 class TaskStatus(StrEnum):
     """Status lifecycle for RequisitionTask records."""
 
