@@ -1,0 +1,209 @@
+{#
+  settings/api_keys.html — API credential management tab.
+  Lets admins save encrypted credentials for Lusha, Clay, 8x8, and review Teams scopes.
+  Called by: htmx_views.py settings_api_keys_tab
+  Depends on: credential_service (encrypt/mask), PUT /api/sources/{name}/credentials
+#}
+<div class="space-y-6">
+
+  {# ── Lusha ─────────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Lusha</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Contact enrichment — phone numbers and verified emails</p>
+      </div>
+      {% if lusha_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false}' class="space-y-3">
+      {% if lusha_api_key.is_set %}
+        <p class="text-xs text-brand-500 font-mono">Current: {{ lusha_api_key.masked }}</p>
+      {% endif %}
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input :type='show ? "text" : "password"' name="LUSHA_API_KEY" id="lusha_api_key"
+                 placeholder="Lusha API key"
+                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+          <button type="button" @click='show = !show'
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
+            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+          </button>
+        </div>
+        <button type="button"
+                hx-put="/api/sources/lusha_enrichment/credentials"
+                hx-include="[name='LUSHA_API_KEY']"
+                hx-vals='{"credentials": {}}'
+                hx-trigger="click"
+                hx-on::before-request="
+                  const val = document.getElementById('lusha_api_key').value;
+                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: {LUSHA_API_KEY: val}}))"
+                hx-swap="none"
+                hx-on::after-request="if(event.detail.successful){ document.getElementById('lusha_api_key').value=''; htmx.trigger('#lusha-status', 'reload') }"
+                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+          Save
+        </button>
+      </div>
+      <div id="lusha-status"></div>
+    </div>
+  </div>
+
+  {# ── Clay ──────────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Clay</h3>
+        <p class="text-xs text-brand-500 mt-0.5">AI-powered enrichment waterfall and contact discovery</p>
+      </div>
+      {% if clay_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false}' class="space-y-3">
+      {% if clay_api_key.is_set %}
+        <p class="text-xs text-brand-500 font-mono">Current: {{ clay_api_key.masked }}</p>
+      {% endif %}
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input :type='show ? "text" : "password"' name="CLAY_API_KEY" id="clay_api_key"
+                 placeholder="Clay API key"
+                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+          <button type="button" @click='show = !show'
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
+            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+          </button>
+        </div>
+        <button type="button"
+                hx-put="/api/sources/clay_enrichment/credentials"
+                hx-swap="none"
+                hx-on::before-request="
+                  const val = document.getElementById('clay_api_key').value;
+                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: {CLAY_API_KEY: val}}))"
+                hx-on::after-request="if(event.detail.successful){ document.getElementById('clay_api_key').value='' }"
+                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# ── 8x8 VoIP ─────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">8x8 VoIP</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Auto-capture call logs and activity from VoIP calls</p>
+      </div>
+      {% if eight_by_eight_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false, "fields": {}}' class="space-y-3">
+      <div class="grid grid-cols-1 gap-3">
+        {% set e8_fields = [
+          ("EIGHT_BY_EIGHT_API_KEY", "API Key", eight_by_eight_api_key),
+          ("EIGHT_BY_EIGHT_PBX_ID", "PBX ID", eight_by_eight_pbx_id),
+          ("EIGHT_BY_EIGHT_USERNAME", "Username", eight_by_eight_username),
+          ("EIGHT_BY_EIGHT_PASSWORD", "Password", eight_by_eight_password),
+          ("EIGHT_BY_EIGHT_TIMEZONE", "Timezone (e.g. America/New_York)", eight_by_eight_timezone),
+        ] %}
+        {% for var_name, label, field_state in e8_fields %}
+          <div>
+            <label class="block text-xs font-medium text-brand-700 mb-1">{{ label }}</label>
+            {% if field_state.is_set %}
+              <p class="text-xs text-brand-400 font-mono mb-1">Current: {{ field_state.masked }}</p>
+            {% endif %}
+            <div class="relative">
+              <input :type='show ? "text" : "password"' name="{{ var_name }}" id="e8_{{ var_name }}"
+                     placeholder="{{ label }}"
+                     @input='fields["{{ var_name }}"] = $el.value'
+                     class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="flex items-center justify-between pt-1">
+        <button type="button" @click='show = !show'
+                class="text-xs text-brand-500 hover:text-brand-700 flex items-center gap-1">
+          <span x-text='show ? "Hide values" : "Show values"'></span>
+        </button>
+        <button type="button"
+                hx-put="/api/sources/eight_by_eight/credentials"
+                hx-swap="none"
+                hx-on::before-request="
+                  const creds = {};
+                  document.querySelectorAll('[id^=e8_]').forEach(el => {
+                    if (el.value.trim()) creds[el.name] = el.value.trim();
+                  });
+                  if (!Object.keys(creds).length) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: creds}))"
+                hx-on::after-request="if(event.detail.successful){ document.querySelectorAll('[id^=e8_]').forEach(el => el.value='') }"
+                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+          Save All
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# ── Teams / Graph Scopes ─────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Microsoft Teams (Call Capture)</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Requires additional Graph API consent scopes for auto call capture</p>
+      </div>
+      {% if teams_ready %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Ready
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Scopes missing
+        </span>
+      {% endif %}
+    </div>
+    {% if missing_scopes %}
+      <div class="rounded-lg bg-amber-50 border border-amber-200 p-4 mb-4">
+        <p class="text-xs font-medium text-amber-800 mb-2">Missing Graph API scopes — add to Azure app registration:</p>
+        <ul class="space-y-1">
+          {% for scope in missing_scopes %}
+            <li class="text-xs font-mono text-amber-700 bg-amber-100 px-2 py-1 rounded">{{ scope }}</li>
+          {% endfor %}
+        </ul>
+        <p class="text-xs text-amber-700 mt-3">Azure Portal → App registrations → [your app] → API permissions → Add a permission → Microsoft Graph → Delegated → search for each scope above.</p>
+      </div>
+    {% endif %}
+    <div>
+      <p class="text-xs font-medium text-brand-700 mb-2">Currently consented scopes:</p>
+      <div class="flex flex-wrap gap-1.5">
+        {% for scope in current_scopes %}
+          <span class="text-xs font-mono px-2 py-0.5 rounded bg-brand-100 text-brand-700">{{ scope }}</span>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+</div>

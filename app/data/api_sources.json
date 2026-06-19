@@ -70,6 +70,16 @@
         "setup_notes": "Register at dev.sourcengine.com for API access. Bearer token auth."
     },
     {
+        "name": "element14",
+        "display_name": "Newark / element14 / Farnell",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Major authorized distributor (part of Avnet). element14 API covers Newark (Americas), Farnell (Europe), element14 (APAC).",
+        "signup_url": "https://partner.element14.com/docs",
+        "env_vars": ["ELEMENT14_API_KEY"],
+        "setup_notes": "Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands."
+    },
+    {
         "name": "email_mining",
         "display_name": "Email Intelligence (M365)",
         "category": "email",
@@ -140,114 +150,34 @@
         "setup_notes": "Sign up at lusha.com → API → Get API key. 6,400 credits/month. Phone pool (70%): 4,480 credits. Discovery pool (30%): 1,920 credits."
     },
     {
-        "name": "hunter_enrichment",
-        "display_name": "Hunter.io",
+        "name": "clay_enrichment",
+        "display_name": "Clay",
         "category": "enrichment",
         "source_type": "enrichment",
-        "description": "Email verification and domain contact discovery — finds verified email addresses and contacts at any company domain.",
-        "signup_url": "https://hunter.io",
-        "env_vars": ["HUNTER_API_KEY"],
-        "setup_notes": "Sign up at hunter.io → API → Get API key. Free tier: 25 searches + 50 verifications/month."
-    },
-    {
-        "name": "rocketreach_enrichment",
-        "display_name": "RocketReach",
-        "category": "enrichment",
-        "source_type": "enrichment",
-        "description": "Contact lookup and search — finds emails, phone numbers, and social profiles for decision-makers at target companies.",
-        "signup_url": "https://rocketreach.co",
-        "env_vars": ["ROCKETREACH_API_KEY"],
-        "setup_notes": "Sign up at rocketreach.co → API → Generate Key. Credits-based pricing with free trial."
-    },
-    {
-        "name": "clearbit_enrichment",
-        "display_name": "Clearbit (HubSpot)",
-        "category": "enrichment",
-        "source_type": "enrichment",
-        "description": "Company and person enrichment — firmographic data (industry, size, revenue, tech stack) and person data (name, title, social profiles).",
-        "signup_url": "https://clearbit.com",
-        "env_vars": ["CLEARBIT_API_KEY"],
-        "setup_notes": "Sign up at clearbit.com (now part of HubSpot) → API → Get key. Free tier available for basic enrichment."
+        "description": "AI-powered enrichment platform — waterfall contact lookup, intent signals, and automated outreach sequencing.",
+        "signup_url": "https://www.clay.com",
+        "env_vars": ["CLAY_API_KEY"],
+        "setup_notes": "Sign up at clay.com → Settings → API → Generate key. Credits-based pricing. Used for enrichment waterfalls and contact discovery."
     },
     {
         "name": "netcomponents",
         "display_name": "NetComponents",
         "category": "scraper",
         "source_type": "broker",
-        "description": "60M+ line items from hundreds of suppliers. Non-anonymous — shows vendor name and contact info. No public API.",
+        "description": "60M+ line items from hundreds of suppliers. Non-anonymous — shows vendor name and contact info. Runs as external nc worker (systemd).",
         "signup_url": "https://www.netcomponents.com",
         "env_vars": [],
-        "setup_notes": "PENDING: Need browser automation (Perplexity/Playwright) to search with your membership credentials. High-value target — shows vendor contacts directly."
+        "setup_notes": "Browser-automated via external nc worker systemd service. Membership credentials stored on host. Results ingested via shared DB."
     },
     {
         "name": "icsource",
         "display_name": "IC Source",
         "category": "scraper",
         "source_type": "broker",
-        "description": "Broker marketplace with 65M+ inventory listings and vendor contacts. Browser-automated search.",
+        "description": "Broker marketplace with 65M+ inventory listings and vendor contacts. Browser-automated search via external ics worker.",
         "signup_url": "https://www.icsource.com",
         "env_vars": ["ICS_USERNAME", "ICS_PASSWORD"],
-        "setup_notes": "Browser automation with membership login. Run ICS worker as systemd service alongside NC worker."
-    },
-    {
-        "name": "thebrokersite",
-        "display_name": "The Broker Forum (TBF)",
-        "category": "scraper",
-        "source_type": "broker",
-        "description": "60M+ line items from broker/distributor network. Has XML Search service (possible API). Escrow services available.",
-        "signup_url": "https://www.brokerforum.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Investigate XML Search — may have API. Otherwise browser automation. 100K+ parts searched daily by members."
-    },
-    {
-        "name": "findchips",
-        "display_name": "FindChips (Supplyframe)",
-        "category": "scraper",
-        "source_type": "aggregator",
-        "description": "Aggregates authorized distributor pricing and inventory. Parametric search, part alerts, and trend data.",
-        "signup_url": "https://www.findchips.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: No public API. Owned by Supplyframe (Siemens). Well-structured pages for scraping."
-    },
-    {
-        "name": "arrow",
-        "display_name": "Arrow Electronics",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Major authorized distributor ($28B revenue). Has API program for pricing and inventory.",
-        "signup_url": "https://developers.arrow.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Register at developers.arrow.com for API access. OAuth2 flow. Need to apply for production access."
-    },
-    {
-        "name": "avnet",
-        "display_name": "Avnet",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Global authorized distributor with API program. Design support and logistics services.",
-        "signup_url": "https://www.avnet.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Contact Avnet for API partnership. May require business relationship."
-    },
-    {
-        "name": "lcsc",
-        "display_name": "LCSC Electronics",
-        "category": "scraper",
-        "source_type": "authorized",
-        "description": "Chinese distributor with internal JSON API (unofficial). Low prices, wide SMD selection.",
-        "signup_url": "https://www.lcsc.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: No official API. Internal JSON API can be reverse-engineered. No auth required. Use at own risk."
-    },
-    {
-        "name": "partfuse",
-        "display_name": "PartFuse (Unified API)",
-        "category": "api",
-        "source_type": "aggregator",
-        "description": "Unified API on RapidAPI — DigiKey + Mouser + TME in one JSON shape. Simple integration.",
-        "signup_url": "https://rapidapi.com/partfuse/api/partfuse",
-        "env_vars": [],
-        "setup_notes": "PENDING: Sign up on RapidAPI → subscribe to PartFuse. Header-based auth. Good as backup/redundancy for DigiKey+Mouser."
+        "setup_notes": "Browser automation with membership login. Runs as external ics worker systemd service. Results ingested via shared DB."
     },
     {
         "name": "stock_list_import",
@@ -257,96 +187,16 @@
         "description": "Buyers upload Excel/CSV stock lists from vendors. Auto-parsed and imported as sightings + vendor card enrichment.",
         "signup_url": "",
         "env_vars": [],
-        "setup_notes": "PENDING: Build upload UI. Parse common stock list formats (MPN, Qty, Price, Manufacturer). Dedupe against existing data."
+        "setup_notes": "Upload via Sightings > Import Stock List. Supports common formats (MPN, Qty, Price, Manufacturer). Deduped against existing data."
     },
     {
-        "name": "element14",
-        "display_name": "Newark / element14 / Farnell",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Major authorized distributor (part of Avnet). element14 API covers Newark (Americas), Farnell (Europe), element14 (APAC).",
-        "signup_url": "https://partner.element14.com/docs",
-        "env_vars": ["ELEMENT14_API_KEY"],
-        "setup_notes": "PENDING: Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands."
-    },
-    {
-        "name": "rs_components",
-        "display_name": "RS Components",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Global authorized distributor with Product Search API. 700K+ products across electronics, industrial, and maintenance.",
-        "signup_url": "https://developerportal.rs-online.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Register at RS Developer Portal. REST API with OAuth2. Covers pricing, stock, and product specs."
-    },
-    {
-        "name": "future",
-        "display_name": "Future Electronics",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Top 3 global authorized distributor. Has developer API program for inventory and pricing.",
-        "signup_url": "https://www.futureelectronics.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Contact Future Electronics for API partnership. May require established business account."
-    },
-    {
-        "name": "rochester",
-        "display_name": "Rochester Electronics",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Specialist in EOL/obsolete and hard-to-find semiconductors. Licensed manufacturer of discontinued ICs. Critical for legacy parts.",
-        "signup_url": "https://www.rocelec.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Contact Rochester for API access. Essential for obsolete/EOL part sourcing. Also manufactures discontinued parts under license."
-    },
-    {
-        "name": "verical",
-        "display_name": "Verical (Arrow Marketplace)",
-        "category": "api",
-        "source_type": "marketplace",
-        "description": "Arrow Electronics' open marketplace. Connects buyers with verified suppliers beyond Arrow's own stock.",
-        "signup_url": "https://www.verical.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Check if Verical offers API access through Arrow's developer program. Marketplace model with supplier verification."
-    },
-    {
-        "name": "heilind",
-        "display_name": "Heilind Electronics",
-        "category": "api",
-        "source_type": "authorized",
-        "description": "Authorized distributor specializing in connectors, relays, sensors, switches, and thermal management.",
-        "signup_url": "https://www.heilind.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: Contact Heilind for API or EDI integration. Strong in interconnect and electromechanical components."
-    },
-    {
-        "name": "winsource",
-        "display_name": "WIN SOURCE",
-        "category": "api",
-        "source_type": "broker",
-        "description": "Global electronic component distributor with 1M+ SKUs. Strong in China-sourced components and hard-to-find parts.",
-        "signup_url": "https://www.win-source.net",
-        "env_vars": [],
-        "setup_notes": "PENDING: Check WIN SOURCE for API access. Large inventory, competitive pricing on Asian-sourced components."
-    },
-    {
-        "name": "siliconexpert",
-        "display_name": "SiliconExpert / Z2Data",
-        "category": "api",
-        "source_type": "intelligence",
-        "description": "Component lifecycle intelligence — EOL risk, cross-references, compliance (RoHS/REACH), market availability trends. Not a seller, but critical for material card enrichment.",
-        "signup_url": "https://www.siliconexpert.com/api",
-        "env_vars": [],
-        "setup_notes": "PENDING: API available for component lifecycle data, cross-refs, and compliance. Enriches material cards with lifecycle risk and alternates."
-    },
-    {
-        "name": "aliexpress",
-        "display_name": "AliExpress",
-        "category": "scraper",
-        "source_type": "marketplace",
-        "description": "Chinese marketplace with electronic components at reference pricing. Useful for cost benchmarking and identifying Chinese suppliers.",
-        "signup_url": "https://developers.aliexpress.com",
-        "env_vars": [],
-        "setup_notes": "PENDING: AliExpress has affiliate API. Useful for reference pricing and Chinese supplier discovery. Not for mission-critical procurement."
+        "name": "eight_by_eight",
+        "display_name": "8x8 VoIP",
+        "category": "platform",
+        "source_type": "telephony",
+        "description": "8x8 cloud telephony — auto-capture call logs, recordings, and activity from VoIP calls to vendor contacts.",
+        "signup_url": "https://developer.8x8.com",
+        "env_vars": ["EIGHT_BY_EIGHT_API_KEY", "EIGHT_BY_EIGHT_PBX_ID", "EIGHT_BY_EIGHT_USERNAME", "EIGHT_BY_EIGHT_PASSWORD", "EIGHT_BY_EIGHT_TIMEZONE"],
+        "setup_notes": "8x8 Admin Console → API Management → Create API key. PBX ID from your 8x8 account. Used for automatic call activity capture."
     }
 ]

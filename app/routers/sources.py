@@ -630,6 +630,50 @@ async def system_alerts(
 
 
 # ══════════════════════════════════════════════════════════════════════
+# CREDENTIAL MANAGEMENT
+# ══════════════════════════════════════════════════════════════════════
+
+
+@router.put("/api/sources/{source_name}/credentials")
+async def update_source_credentials(
+    source_name: str,
+    request: Request,
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    """Save encrypted credentials for an API source.
+
+    Skips blank values (preserves existing).
+    """
+    from ..services.credential_service import _cred_cache, encrypt_value
+
+    src = db.query(ApiSource).filter_by(name=source_name).first()
+    if not src:
+        raise HTTPException(
+            status_code=404,
+            detail={"error": f"Source '{source_name}' not found", "status_code": 404},
+        )
+    raw = await request.json()
+    credentials = raw.get("credentials") if isinstance(raw, dict) else None
+    if not credentials:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "credentials field required", "status_code": 400},
+        )
+    current = dict(src.credentials or {})
+    for key, value in credentials.items():
+        if value and str(value).strip():
+            current[key] = encrypt_value(str(value).strip())
+    src.credentials = current
+    db.commit()
+    keys_to_clear = [k for k in list(_cred_cache) if k[0] == source_name]
+    for k in keys_to_clear:
+        _cred_cache.pop(k, None)
+    logger.info("Credentials updated for source '{}' by user {}", source_name, user.email)
+    return {"saved": True, "source": source_name}
+
+
+# ══════════════════════════════════════════════════════════════════════
 # EMAIL INTELLIGENCE — Inbox Mining
 # ══════════════════════════════════════════════════════════════════════
 
