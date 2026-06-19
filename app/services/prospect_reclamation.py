@@ -184,12 +184,195 @@ async def _send_sweep_notification(
         logger.exception("SP4 sweep notification failed for {} company {}", owner.email, company.name)
 
 
-# ── Auto-surface (Task 6 stub) ────────────────────────────────────────────────
+# ── Auto-surface (Task 6) ─────────────────────────────────────────────────────
 
 
 async def job_auto_surface_reactivation() -> None:
     """Daily 2AM — surface unassigned past-customer Companies as reactivation prospects.
 
-    Stub — implemented in Task 6.
+    Opens its own database session. Delegates to job_auto_surface_with_db().
+    Called by: app/jobs/prospecting_jobs.py
     """
-    raise NotImplementedError("job_auto_surface_reactivation not yet implemented")
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        await job_auto_surface_with_db(db)
+    finally:
+        db.close()
+
+
+async def job_auto_surface_with_db(db: Session) -> None:
+    """Core auto-surface logic — injectable session for testability.
+
+    Criteria: Company.account_owner_id IS NULL AND (has Requisition OR has Quote via
+    CustomerSite). Skip if ProspectAccount already linked (company_id set, non-dismissed).
+    Sets discovery_source="reactivation".
+
+    Called by: job_auto_surface_reactivation(), tests
+    """
+    from sqlalchemy import exists
+
+    from ..models.crm import CustomerSite
+    from ..models.quotes import Quote
+    from ..models.sourcing import Requisition
+
+    req_subq = exists().where(Requisition.company_id == Company.id)
+    quote_subq = exists().where(Quote.customer_site_id == CustomerSite.id).where(CustomerSite.company_id == Company.id)
+
+    candidates = (
+        db.query(Company)
+        .filter(
+            Company.account_owner_id.is_(None),
+            req_subq | quote_subq,
+        )
+        .all()
+    )
+
+    from ..constants import ProspectAccountStatus
+
+    surfaced = 0
+    skipped = 0
+
+    for co in candidates:
+        # Skip if already in pool (any non-dismissed ProspectAccount by company_id)
+        existing = (
+            db.query(ProspectAccount)
+            .filter(
+                ProspectAccount.company_id == co.id,
+                ProspectAccount.status != ProspectAccountStatus.DISMISSED,
+            )
+            .first()
+        )
+        if existing:
+            skipped += 1
+            continue
+
+        domain = (co.domain or "").strip().lower()
+        if not domain:
+            logger.warning(
+                "SP4 reactivation: company {} ({}) has no domain; skipping surfacing",
+                co.name,
+                co.id,
+            )
+            skipped += 1
+            continue
+
+        # Handle domain collision (ProspectAccount.domain is UNIQUE)
+        domain_existing = db.query(ProspectAccount).filter(ProspectAccount.domain == domain).first()
+        if domain_existing:
+            if domain_existing.company_id is None:
+                domain_existing.company_id = co.id
+                db.commit()
+            skipped += 1
+            continue
+
+        try:
+            pa = ProspectAccount(
+                name=co.name,
+                domain=domain,
+                discovery_source="reactivation",
+                status=ProspectAccountStatus.SUGGESTED,
+                fit_score=0,
+                readiness_score=0,
+                company_id=co.id,
+            )
+            db.add(pa)
+            db.commit()
+            surfaced += 1
+            logger.info("SP4 reactivation: surfaced company {} ({})", co.name, co.id)
+        except Exception:
+            logger.exception("SP4 reactivation: failed to surface company {} ({})", co.name, co.id)
+            db.rollback()
+
+    logger.info("SP4 reactivation complete: surfaced={}, skipped={}", surfaced, skipped)
+
+
+# ── Reclaim (Task 7) ──────────────────────────────────────────────────────────
+
+
+def reclaim_prospect_account(
+    prospect_id: int,
+    user_id: int,
+    db: Session,
+    *,
+    is_admin: bool = False,
+    justification: str | None = None,
+) -> dict:
+    """Reclaim a swept prospect: re-assign Company owner, remove from pool, reset clock.
+
+    Permission: swept_from_owner_id == user_id OR is_admin OR
+                user.email == settings.account_sweep_manager_email.
+
+    Actions:
+    - Set Company.account_owner_id = user_id; Company.ownership_cleared_at = None
+    - Set ProspectAccount.status = DISMISSED (removes from pool)
+    - Log a "reclaim" ActivityLog entry (resets activity clock)
+
+    Returns: {prospect_id, company_id, company_name, status: "reclaimed"}
+    Raises: LookupError (not found), ValueError (permission denied / wrong status)
+
+    Called by: app/routers/htmx_views.py
+    """
+    from ..constants import ProspectAccountStatus
+    from ..models.auth import User as UserModel
+    from ..services.activity_service import log_activity
+
+    pa = db.get(ProspectAccount, prospect_id)
+    if pa is None:
+        raise LookupError(f"ProspectAccount {prospect_id} not found")
+
+    if pa.status not in (ProspectAccountStatus.SUGGESTED, ProspectAccountStatus.CLAIMED):
+        raise ValueError(f"Cannot reclaim a prospect with status '{pa.status}'")
+
+    user = db.get(UserModel, user_id)
+    if user is None:
+        raise LookupError(f"User {user_id} not found")
+
+    manager_email = settings.account_sweep_manager_email
+    is_former_owner = pa.swept_from_owner_id == user_id
+    is_manager = bool(manager_email and user.email == manager_email)
+
+    if not (is_former_owner or is_admin or is_manager):
+        raise ValueError("Reclaim permission denied: must be former owner, admin, or sweep manager")
+
+    pa.status = ProspectAccountStatus.DISMISSED
+    pa.dismissed_at = datetime.now(timezone.utc)
+    pa.dismissed_by = user_id
+    pa.dismiss_reason = "reclaimed"
+
+    company_id = pa.company_id
+    company_name = pa.name
+
+    if company_id:
+        co = db.get(Company, company_id)
+        if co:
+            co.account_owner_id = user_id
+            co.ownership_cleared_at = None
+            company_name = co.name
+
+    log_activity(
+        db,
+        activity_type="reclaim",
+        channel="system",
+        user_id=user_id,
+        company_id=company_id,
+        summary="Account reclaimed from prospecting pool",
+        details={"prospect_id": prospect_id, "justification": justification},
+    )
+
+    db.commit()
+
+    logger.info(
+        "SP4 reclaim: user {} reclaimed prospect {} (company {})",
+        user_id,
+        prospect_id,
+        company_id,
+    )
+
+    return {
+        "prospect_id": prospect_id,
+        "company_id": company_id,
+        "company_name": company_name,
+        "status": "reclaimed",
+    }

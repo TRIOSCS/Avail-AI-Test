@@ -1,7 +1,8 @@
 """test_sp4_reclamation.py — Unit tests for SP4 Account Reclamation feature.
 
 Covers: migration 123 round-trip (PG only), config defaults, get_last_activity_at,
-        job_account_sweep, _send_sweep_notification.
+        job_account_sweep, _send_sweep_notification, job_auto_surface_reactivation,
+        reclaim_prospect_account.
 
 Called by: pytest
 Depends on: conftest.py fixtures.
@@ -18,9 +19,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.constants import ProspectAccountStatus
+from app.models.auth import User
 from app.models.crm import Company
 from app.models.intelligence import ActivityLog
 from app.models.prospect_account import ProspectAccount
+from app.models.sourcing import Requisition
 
 PG_URL = os.environ.get("TEST_PG_URL", "")
 
@@ -229,3 +233,168 @@ def test_sweep_notification_skips_on_no_token(db_session, test_user):
         asyncio.run(
             _send_sweep_notification(owner=test_user, company=co, last_activity_at=None, prospect_id=1, db=db_session)
         )
+
+
+# ── Additional helpers for Tasks 6 & 7 ───────────────────────────────────────
+
+_user_counter = 0
+
+
+def _make_user(db, *, role: str = "buyer") -> User:
+    """Create a unique User for testing."""
+    global _user_counter
+    _user_counter += 1
+    u = User(
+        email=f"user_{_user_counter}@test.com",
+        name=f"Test User {_user_counter}",
+        role=role,
+    )
+    db.add(u)
+    db.commit()
+    db.refresh(u)
+    return u
+
+
+def _make_requisition(db, *, company_id: int) -> Requisition:
+    """Create a minimal Requisition linked to a company."""
+    req = Requisition(
+        name="Test Req",
+        status="active",
+        company_id=company_id,
+    )
+    db.add(req)
+    db.commit()
+    db.refresh(req)
+    return req
+
+
+def _make_swept_company(db, *, swept_owner: User):
+    """Create a Company with a ProspectAccount that was swept from swept_owner.
+
+    Returns dict with prospect_id and company_id.
+    """
+    co = Company(
+        name=f"Swept Corp {swept_owner.id}",
+        domain=f"swept-{swept_owner.id}.com",
+        account_owner_id=None,
+    )
+    db.add(co)
+    db.commit()
+    db.refresh(co)
+
+    pa = ProspectAccount(
+        name=co.name,
+        domain=co.domain,
+        discovery_source="auto_sweep",
+        status=ProspectAccountStatus.SUGGESTED,
+        fit_score=0,
+        readiness_score=0,
+        company_id=co.id,
+        swept_from_owner_id=swept_owner.id,
+    )
+    db.add(pa)
+    db.commit()
+    db.refresh(pa)
+    return {"prospect_id": pa.id, "company_id": co.id}
+
+
+# ── Task 6: job_auto_surface_reactivation ─────────────────────────────────────
+
+
+def test_reactivation_surfaces_past_customer_with_req(db_session, test_user):
+    """Unassigned company with a Requisition gets a ProspectAccount."""
+    from app.services.prospect_reclamation import job_auto_surface_with_db
+
+    co = _make_company(db_session, owner_id=None, name="Reactivate Me", domain="reactivateme.com")
+    _make_requisition(db_session, company_id=co.id)
+    asyncio.run(job_auto_surface_with_db(db_session))
+    pa = db_session.query(ProspectAccount).filter_by(company_id=co.id).first()
+    assert pa is not None
+    assert pa.discovery_source == "reactivation"
+
+
+def test_reactivation_skips_owned_company(db_session, test_user):
+    """Company with an owner is not auto-surfaced."""
+    from app.services.prospect_reclamation import job_auto_surface_with_db
+
+    co = _make_company(db_session, owner_id=test_user.id, name="Owned Corp", domain="ownedcorp.com")
+    _make_requisition(db_session, company_id=co.id)
+    asyncio.run(job_auto_surface_with_db(db_session))
+    assert db_session.query(ProspectAccount).filter_by(company_id=co.id).count() == 0
+
+
+def test_reactivation_skips_company_already_in_pool(db_session):
+    """Company already linked to an active ProspectAccount is not duplicated."""
+    from app.services.prospect_reclamation import job_auto_surface_with_db
+
+    co = _make_company(db_session, owner_id=None, name="Already Pooled", domain="alreadypooled.com")
+    _make_requisition(db_session, company_id=co.id)
+    db_session.add(
+        ProspectAccount(
+            name=co.name,
+            domain=co.domain,
+            discovery_source="reactivation",
+            status="suggested",
+            fit_score=0,
+            readiness_score=0,
+            company_id=co.id,
+        )
+    )
+    db_session.commit()
+    asyncio.run(job_auto_surface_with_db(db_session))
+    assert db_session.query(ProspectAccount).filter_by(company_id=co.id).count() == 1
+
+
+def test_reactivation_skips_no_history(db_session):
+    """Unassigned company with no quote or requisition is not surfaced."""
+    from app.services.prospect_reclamation import job_auto_surface_with_db
+
+    co = _make_company(db_session, owner_id=None, name="No History Corp", domain="nohistory.com")
+    asyncio.run(job_auto_surface_with_db(db_session))
+    assert db_session.query(ProspectAccount).filter_by(company_id=co.id).count() == 0
+
+
+# ── Task 7: reclaim_prospect_account ─────────────────────────────────────────
+
+
+def test_reclaim_by_former_owner(db_session, test_user):
+    """Former owner can reclaim their swept account."""
+    from app.services.prospect_reclamation import reclaim_prospect_account
+
+    co = _make_swept_company(db_session, swept_owner=test_user)
+    result = reclaim_prospect_account(co["prospect_id"], test_user.id, db_session)
+    assert result["status"] == "reclaimed"
+    co_fresh = db_session.get(Company, co["company_id"])
+    assert co_fresh.account_owner_id == test_user.id
+    pa = db_session.get(ProspectAccount, co["prospect_id"])
+    assert pa.status == ProspectAccountStatus.DISMISSED
+
+
+def test_reclaim_logs_activity(db_session, test_user):
+    """Reclaim creates an ActivityLog entry of type 'reclaim'."""
+    from app.services.prospect_reclamation import reclaim_prospect_account
+
+    co = _make_swept_company(db_session, swept_owner=test_user)
+    reclaim_prospect_account(co["prospect_id"], test_user.id, db_session)
+    log = db_session.query(ActivityLog).filter_by(company_id=co["company_id"], activity_type="reclaim").first()
+    assert log is not None
+
+
+def test_reclaim_permission_denied_for_stranger(db_session, test_user):
+    """Non-owner non-admin cannot reclaim."""
+    from app.services.prospect_reclamation import reclaim_prospect_account
+
+    other = _make_user(db_session)
+    co = _make_swept_company(db_session, swept_owner=test_user)
+    with pytest.raises(ValueError, match="permission"):
+        reclaim_prospect_account(co["prospect_id"], other.id, db_session)
+
+
+def test_reclaim_allowed_for_admin(db_session, test_user):
+    """Admin can reclaim any swept account."""
+    from app.services.prospect_reclamation import reclaim_prospect_account
+
+    other_admin = _make_user(db_session, role="admin")
+    co = _make_swept_company(db_session, swept_owner=test_user)
+    result = reclaim_prospect_account(co["prospect_id"], other_admin.id, db_session, is_admin=True)
+    assert result["status"] == "reclaimed"
