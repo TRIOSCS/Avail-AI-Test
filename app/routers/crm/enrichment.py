@@ -22,12 +22,15 @@ def _normalize_domain(value: str) -> str:
 
 def _require_enrichment_provider() -> None:
     """Raise 503 unless at least one enrichment provider credential is configured."""
-    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") and not get_credential_cached(
-        "anthropic_ai", "ANTHROPIC_API_KEY"
-    ):
+    has_provider = (
+        get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+        or get_credential_cached("hunter_enrichment", "HUNTER_API_KEY")
+    )
+    if not has_provider:
         raise HTTPException(
             503,
-            "No enrichment providers configured — set EXPLORIUM_API_KEY or ANTHROPIC_API_KEY in .env",
+            "No enrichment providers configured — set EXPLORIUM_API_KEY, ANTHROPIC_API_KEY, or HUNTER_API_KEY in .env",
         )
 
 

@@ -312,10 +312,6 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
     |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
     |     search/run SSE flow (results_shell.html). The banner sits OUTSIDE that
     |     hx-post div so it survives the cache-miss SSE swap.
-    |     On cache HIT a read-only market-baseline strip renders above the rows
-    |     (compute_market_baseline helper): franchise-median price, authorized stock,
-    |     and authorized source count — computed from cached rows, no new DB columns,
-    |     no persistence. Graceful empty state when no authorized rows exist.
     +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
     +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
 ```
@@ -328,16 +324,6 @@ freshest run. The search-flow templates (`dossier_shell` "Live market" section,
 `requisition_picker_modal`) use the **light brand-card skin** matching the rest of the
 site — the earlier dark "terminal" look was the visual outlier and has been removed.
 Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
-
-**Market-baseline strip (price-sanity step 1)** — `compute_market_baseline(rows)` in
-`app/routers/part_dossier.py` filters the already-fetched cached rows to
-`is_authorized=True` rows and computes: franchise-median price (same upper-median
-algorithm as `search_service._median`), authorized stock (sum of `qty_available`),
-and authorized source count. Passed as `market_baseline` to `dossier_market.html`,
-which renders a read-only strip above the vendor rows on cache HIT. No DB column,
-no persistence, no SSE change, no Alpine state — pure server-side summary. Graceful
-empty state ("No franchise/authorized pricing for this part.") when no authorized
-row exists. `market_baseline=None` on cache MISS (strip omitted entirely).
 
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
@@ -396,16 +382,16 @@ capture_datasheet(mpn, user_id)
     |       |
     |       +-- PUT /drives/{DATASHEET_LIBRARY_DRIVE_ID}/root:/
     |               Datasheets/{manufacturer}/{MPN}-datasheet.pdf:/content
-    |       → {onedrive_item_id, onedrive_url, size_bytes, library_drive_id}
+    |       → {library_item_id, library_web_url, size_bytes, library_drive_id}
     |       DATASHEET_LIBRARY_DRIVE_ID unset or token unavailable → returns None
     |       (capture stamps datasheet_searched_at and returns; upload is optional)
     |
-    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 116)
+    +-- INSERT MaterialCardDatasheet row (material_card_datasheets, migration 111)
          UPDATE MaterialCard.datasheet_captured_at / datasheet_searched_at
 ```
 
-`material_card_datasheets` stores one row per captured file: `onedrive_item_id`,
-`onedrive_url`, `library_drive_id` (Graph drive id of the company library),
+`material_card_datasheets` stores one row per captured file: `library_item_id`,
+`library_web_url`, `library_drive_id` (Graph drive id of the company library),
 `source` ("connector"/"web"), `original_url`, `verified`, `uploaded_by_id`
 (optional; user who triggered the capture), `captured_at`.
 `MaterialCard` carries two stamps: `datasheet_captured_at` (hit) and
@@ -1540,6 +1526,65 @@ OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ---
 
+## 11. Cross-App Alerts (Nav Badges + In-Tab Spotlight)
+
+A reusable alert layer (`app/services/alerts/`) drives an emerald count badge on
+three bottom-nav tabs and a one-time in-tab "spotlight" that glides to and rails
+the new rows. Each tab registers one or more `AlertSource`s; a tab's badge count
+is the SUM of its sources' counts.
+
+```
+Badge poll (every 60s, same pattern as Proactive):
+    GET /v2/partials/alerts/{tab_key}/badge   (tab_key ∈ requisitions|buy-plans|crm)
+        |
+        v
+    routers/alerts.py -> registry.count_for_tab(db, user, tab_key)
+        |  (sum of the tab's AlertSource.count_for_user; FAIL-QUIET per source —
+        |   a badge must never break the nav)
+        v
+    emerald pill HTML (empty at 0) swapped into #{tab_key}-nav-badge
+
+Tab list render (parts list / buy_plans list / CDM account list):
+    registry.markers_for_tab(db, user, tab_key)
+        |  -> {anchor: {kind, temperament, refs:[ref_id,...]}}
+        v
+    _alert_macros.alert_row_attrs(markers, anchor) stamps data-alert-* on each row
+        |  (anchor = "req-<id>" Sales Hub | "bp-<plan_id>" Buy Plans | "company-<id>" CRM)
+        v
+    htmx_app.js spotlight: emerald accent rail + one-time pulse, glide-to-first,
+    IntersectionObserver marks each row seen as it scrolls into view, floating jump-pill
+
+Mark-seen (per row, background, no spinner):
+    POST /v2/partials/alerts/{kind}/seen  (ref_id form field)
+        |
+        +---> alerts.record_seen() — idempotent INSERT alert_seen (unique upsert)
+        +---> returns the owning tab's refreshed badge as an OOB swap (tab_for_kind)
+```
+
+**Two temperaments** (`AlertSource.temperament`):
+
+- **FYI** — clears on *see*. The count EXCLUDES `alert_seen` rows, so viewing the
+  row drains the badge and fades its rail. Sources: `OfferConfirmedSource`
+  (Sales Hub — new APPROVED+qualified offers on the buyer's requirements) and
+  `InboundCustomerSource` (CRM — new inbound comms on a Customer account the user owns).
+- **ACTION** — clears on *act*. The count derives PURELY from work-state
+  (`BuyplanActionSource`: the user's open buy-plan steps — buyer PO line / manager
+  approval / ops SO-verify). `alert_seen` does NOT change the count — it only gates
+  the cosmetic one-time pulse; the row keeps its rail until the underlying work is done.
+
+`recency_floor()` keeps FYI badges from lighting up for the pre-launch backlog:
+an item only counts if newer than `max(now - alert_recency_days, ALERTS_EPOCH)`.
+
+**Inbound rides the existing ledger — no new capture path.** The CRM inbound
+alert reads `ActivityLog` rows already written by the inbox poll (§4): `poll_inbox`
+→ `log_email_activity` → `match_email_to_entity` resolves the sender by
+site-contact/vendor-contact email then company/vendor domain and stamps
+`company_id` / `vendor_card_id`. `InboundCustomerSource` simply filters those
+inbound rows to Customer accounts the user owns. (Known gap, deferred: non-RFQ
+OUTBOUND email is not captured — that would need a Sent-folder scan.)
+
+---
+
 ## Enrichment Pipeline
 
 ```
@@ -2376,6 +2421,37 @@ Validation conflicts (storage: material_cards.validation_conflicts JSONB +
   `has_validation_conflict=true` validated in the faceted route → query branch in
   faceted_search_service (backed by the partial index).
 ```
+
+### SP3: AI Account Screening (`app/services/prospect_screening.py`)
+
+Called by: `run_enrichment_job` in `prospect_free_enrichment.py` (final step, fire-and-forget).
+Calls: `claude_structured` (smart tier, structured schema, 512 tokens, `cost_bucket="ai_screen"`).
+
+**Cost control:** daily cap via `intel_cache.get_count("ai_screen:daily:{date}")` /
+`incr_count(...)` (`ttl_days=1`). Default cap: 200/day (`ai_screen_daily_cap`). The cap is
+approximate (get/incr is non-atomic) — acceptable under the single-worker drain. Re-screens
+only when `enrichment_data['ai_screen']` is absent, verdict is `insufficient_data`, or the
+grounding has materially changed: each `pass`/`screened_out` verdict stores a
+`grounding_fingerprint` (SHA-256 of the assembled context), and a cache hit requires the
+current fingerprint to match — so a buyer re-triggering enrichment with new
+contacts/firmographics/news forces a fresh screen rather than reusing a stale score.
+
+**Verdict persistence:** `trio_match_score` + `opportunity_score` → indexed Integer columns
+on `prospect_accounts` (SQL-sortable for `ai_match_desc` sort); full verdict →
+`enrichment_data['ai_screen']` (JSONB). Scores only written for `pass`/`screened_out`;
+`insufficient_data` sets `needs_more_enrichment=True` without writing scores.
+
+**Gate:** `ai_screen_enabled=False` (default) → no LLM call; returns `{"verdict": "disabled"}`.
+
+**Screened-out bucket:** `verdict=screened_out` hides account from main queue grid when
+`sort=ai_match_desc`; recoverable via buyer "Claim anyway" override; threshold controlled
+by `ai_screen_min_match=40`. The score threshold override runs after the LLM: even if the
+LLM returns `pass`, the service sets `screened_out` when `trio_match_score < ai_screen_min_match`.
+
+**List route integration** (`htmx_views.py`):
+- Sort option `ai_match_desc`: ranks by `trio_match_score DESC → opportunity_score DESC → readiness_score DESC`.
+- `_prospect_stats_ctx` gains `"screened_out": <count>` (only when `ai_screen_enabled=True`).
+- `screened_out_prospects` context var passed to the list template for the collapsed bucket.
 
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
 

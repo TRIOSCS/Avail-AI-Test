@@ -39,6 +39,10 @@ class ProspectAccount(Base):
     readiness_score = Column(Integer, default=0)
     readiness_signals = Column(JSONB, default=dict)
 
+    # AI screening scores (SP3) — populated by prospect_screening.screen_prospect
+    trio_match_score = Column(Integer, default=0)
+    opportunity_score = Column(Integer, default=0)
+
     # Discovery tracking
     discovery_source = Column(String(50), nullable=False)
     discovery_batch_id = Column(Integer, ForeignKey("discovery_batches.id", ondelete="SET NULL"))
@@ -92,4 +96,6 @@ class ProspectAccount(Base):
             "status",
             "fit_score",
         ),
+        Index("ix_prospect_accounts_trio_match_score", "trio_match_score"),
+        Index("ix_prospect_accounts_opportunity_score", "opportunity_score"),
     )

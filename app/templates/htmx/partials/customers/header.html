@@ -10,6 +10,7 @@
    Depends on: brand palette, _cadence_hero.html, _disposition_control.html,
                shared/enrich_button.html.
 #}
+{% from "htmx/partials/shared/_macros.html" import account_type_badge, cadence_clocks %}
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
@@ -42,15 +43,7 @@
       </div>
       <div class="flex items-center gap-3">
         {% if company.account_type %}
-        {% set type_colors = {
-          "Customer": "bg-emerald-50 text-emerald-700 border-emerald-200",
-          "Prospect": "bg-brand-100 text-brand-600 border-brand-200",
-          "Partner": "bg-brand-50 text-brand-400 border-brand-200",
-          "Competitor": "bg-rose-50 text-rose-700 border-rose-200"
-        } %}
-        <span class="px-3 py-1 text-sm font-medium rounded-full border {{ type_colors.get(company.account_type, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-          {{ company.account_type }}
-        </span>
+        {{ account_type_badge(company.account_type) }}
         {% endif %}
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
@@ -85,28 +78,9 @@
     {% include 'htmx/partials/customers/_cadence_hero.html' %}
     {% include 'htmx/partials/customers/_disposition_control.html' %}
 
-    {# Dual clocks: Outbound + Reply #}
-    <div class="grid grid-cols-2 gap-3 mb-3">
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Last Out</p>
-        {% if company.last_outbound_at %}
-          {% set out_days = ((now_utc - company.last_outbound_at).days) if now_utc is defined else 0 %}
-          <p class="text-lg font-bold text-gray-900">{{ out_days }}d</p>
-          <p class="text-[10px] text-gray-400">{{ company.last_outbound_at.strftime('%b %d') }}</p>
-        {% else %}
-          <p class="text-sm font-medium text-gray-400">Never</p>
-        {% endif %}
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Last Reply</p>
-        {% if company.last_reply_at %}
-          {% set reply_days = ((now_utc - company.last_reply_at).days) if now_utc is defined else 0 %}
-          <p class="text-lg font-bold text-gray-900">{{ reply_days }}d</p>
-          <p class="text-[10px] text-gray-400">{{ company.last_reply_at.strftime('%b %d') }}</p>
-        {% else %}
-          <p class="text-sm font-medium text-gray-400">—</p>
-        {% endif %}
-      </div>
+    {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
+    <div class="mb-3">
+      {{ cadence_clocks(company, now_utc) }}
     </div>
 
     {# Coverage badge — multi-site: drill into a site from the left accordion. #}

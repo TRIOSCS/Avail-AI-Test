@@ -2,8 +2,6 @@
    Renders the degraded-source banner (best-effort) above two branches:
      • CACHE HIT  — cached_rows present → render the cached vendor rows directly
                     (vendor_card.html) + a freshness stamp + "↻ Refresh market".
-                    A read-only market-baseline strip (market_baseline) renders above the
-                    rows showing franchise-median price / authorized stock / source count.
      • CACHE MISS — an inner element auto-fires the EXISTING /v2/partials/search/run flow
                     (hx-post, hx-trigger="load"), returning results_shell.html's SSE
                     experience. The SSE engine is UNCHANGED — we just embed it. The banner
@@ -11,7 +9,7 @@
 
    Called by: part_dossier.dossier_market (GET /v2/partials/search/dossier/market).
    Depends on: mpn (display), cached_search_id (str|None), cached_rows (list[dict]|None),
-               market_health (dict|None), market_baseline (dict|None),
+               market_health (dict|None),
                dossier_market_banner.html, results_shell.html / vendor_card.html,
                $store.shortlist + lead-detail drawer (reused). #}
 
@@ -19,39 +17,6 @@
 
 {% if cached_rows %}
 {# ── CACHE HIT — cached rows in the light market card ── #}
-
-{# ── Market-baseline strip (read-only, authorized rows only) ── #}
-{% if market_baseline %}
-<div class="px-4 py-2.5 border-b border-brand-100 bg-brand-50/60">
-  {% if market_baseline.has_authorized %}
-  <div class="flex flex-wrap items-center gap-x-6 gap-y-1 text-[11px]">
-    <span class="font-semibold text-brand-700 uppercase tracking-wide text-[10px]">Franchise baseline</span>
-    <span class="inline-flex items-center gap-1 text-gray-700">
-      <span class="text-gray-400">Median price</span>
-      {% if market_baseline.median_price is not none %}
-      <span class="font-mono font-semibold text-brand-900">${{ "%.4f"|format(market_baseline.median_price) }}</span>
-      {% else %}
-      <span class="text-gray-400 italic">n/a</span>
-      {% endif %}
-    </span>
-    <span class="inline-flex items-center gap-1 text-gray-700">
-      <span class="text-gray-400">Auth stock</span>
-      {% if market_baseline.total_stock is not none %}
-      <span class="font-semibold text-brand-900">{{ "{:,}".format(market_baseline.total_stock) }}</span>
-      {% else %}
-      <span class="text-gray-400 italic">unknown</span>
-      {% endif %}
-    </span>
-    <span class="inline-flex items-center gap-1 text-gray-700">
-      <span class="text-gray-400">Auth sources</span>
-      <span class="font-semibold text-brand-900">{{ market_baseline.sources }}</span>
-    </span>
-  </div>
-  {% else %}
-  <p class="text-[11px] text-gray-400 italic">No franchise/authorized pricing for this part.</p>
-  {% endif %}
-</div>
-{% endif %}
 
 <div class="px-4 py-2.5 border-b border-brand-100 flex items-center gap-3 text-[11px]">
   <span class="inline-flex items-center gap-1.5 text-gray-500">

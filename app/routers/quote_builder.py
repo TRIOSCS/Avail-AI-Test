@@ -13,7 +13,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import get_quote_for_user, require_user
 from ..models import User
 from ..schemas.quote_builder import QuoteBuilderSaveRequest
 
@@ -209,10 +209,8 @@ async def quote_builder_export_excel(
     db: Session = Depends(get_db),
 ):
     """Stream an Excel export of a saved quote."""
-    from ..models import Quote
-
-    quote = db.get(Quote, quote_id)
-    if not quote or quote.requisition_id != req_id:
+    quote = get_quote_for_user(db, user, quote_id)
+    if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
 
     from ..services.quote_builder_service import build_excel_export
@@ -249,10 +247,8 @@ async def quote_builder_export_pdf(
     """Stream a PDF export of a saved quote (reuses existing PDF generator)."""
     import asyncio
 
-    from ..models import Quote
-
-    quote = db.get(Quote, quote_id)
-    if not quote or quote.requisition_id != req_id:
+    quote = get_quote_for_user(db, user, quote_id)
+    if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
 
     from ..services.document_service import generate_quote_report_pdf
