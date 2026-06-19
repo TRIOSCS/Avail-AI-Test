@@ -101,6 +101,70 @@ def buyer_line_queue(db: Session, user: object) -> list[dict]:
     return rows
 
 
+def team_line_queue(db: Session, user: object) -> list[dict]:
+    """Return one dict per open buy-plan line assigned to OTHER buyers.
+
+    Read-only awareness model for the buyer "My Orders" lens: it lets a buyer
+    see what their teammates are working on. The requesting buyer's own lines are
+    excluded (they live in :func:`buyer_line_queue`).
+
+    A line qualifies when:
+    - parent ``BuyPlan.status == ACTIVE``
+    - ``BuyPlanLine.status`` is ``AWAITING_PO`` or ``PENDING_VERIFY``
+    - ``BuyPlanLine.buyer_id IS NOT NULL`` and ``buyer_id != user.id``
+
+    Rows are ordered by ``buyer_name`` then ``plan.created_at`` ascending so the
+    template can group consecutive rows under each buyer.
+
+    Each dict contains:
+        line_id, plan_id, customer_name, mpn, vendor_name, quantity, status,
+        kicked_back, buyer_name, plan_created_at
+    """
+    lines = (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+            BuyPlanLine.status.in_((BuyPlanLineStatus.AWAITING_PO, BuyPlanLineStatus.PENDING_VERIFY)),
+            BuyPlanLine.buyer_id.isnot(None),
+            BuyPlanLine.buyer_id != user.id,
+        )
+        .options(
+            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.requirement),
+            joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanLine.buyer),
+        )
+        .all()
+    )
+
+    rows = []
+    for ln in lines:
+        plan = ln.buy_plan
+        req = ln.requirement
+        offer = ln.offer
+        buyer = ln.buyer
+
+        rows.append(
+            {
+                "line_id": ln.id,
+                "plan_id": plan.id,
+                "customer_name": _customer_name(plan),
+                "mpn": req.primary_mpn if req else None,
+                "vendor_name": offer.vendor_name if offer else None,
+                "quantity": ln.quantity,
+                "status": ln.status,
+                "kicked_back": ln.po_rejection_note is not None,
+                "buyer_name": (buyer.name or buyer.email) if buyer else None,
+                "plan_created_at": plan.created_at,
+            }
+        )
+
+    # Group consecutive rows by buyer, oldest plan first within each buyer.
+    rows.sort(key=lambda r: (r["buyer_name"] or "", r["plan_created_at"]))
+    return rows
+
+
 # ── Column mapping ────────────────────────────────────────────────────
 
 _STATUS_TO_COLUMN: dict[str, str] = {
