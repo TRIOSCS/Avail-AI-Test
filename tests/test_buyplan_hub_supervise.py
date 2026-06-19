@@ -4,8 +4,9 @@ Covers:
 - PENDING plan with no approver appears in approvals strip count + triage list.
 - HALTED plan appears in halted strip count + triage list.
 - ISSUE line appears in flagged strip count + triage list (with issue_type).
-- Old AWAITING_PO line on ACTIVE plan appears in overdue_po strip count + triage list.
-- Fresh AWAITING_PO line (within SLA) is NOT overdue.
+- Old AWAITING_PO line on ACTIVE plan with old approved_at appears in overdue_po
+  strip count + triage list (anchor is BuyPlan.approved_at, not line.created_at).
+- Freshly-approved plan's AWAITING_PO line is NOT overdue (within SLA).
 - Strip open_value sums non-terminal plan costs; COMPLETED/CANCELLED excluded.
 - Strip avg_margin averages non-terminal plan margins; NULL rows skipped.
 
@@ -20,7 +21,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from app.constants import BuyPlanLineStatus, BuyPlanStatus, LineIssueType, SOVerificationStatus
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 
 
@@ -33,10 +34,15 @@ def _make_plan(
     so_status: str = SOVerificationStatus.APPROVED,
     submitted_by_id: int | None = None,
     approved_by_id: int | None = None,
+    approved_at: datetime | None = None,
     total_cost=None,
     total_margin_pct=None,
 ) -> BuyPlan:
-    """Create + flush a minimal BuyPlan header."""
+    """Create + flush a minimal BuyPlan header.
+
+    Pass ``approved_at`` to set the approval timestamp that drives the overdue
+    clock (back-dated via UPDATE after flush so the ORM default is overwritten).
+    """
     plan = BuyPlan(
         quote_id=quote_id,
         requisition_id=requisition_id,
@@ -49,6 +55,12 @@ def _make_plan(
     )
     db.add(plan)
     db.flush()
+    if approved_at is not None:
+        db.query(BuyPlan).filter(BuyPlan.id == plan.id).update(
+            {"approved_at": approved_at}, synchronize_session="fetch"
+        )
+        db.flush()
+        db.refresh(plan)
     return plan
 
 
@@ -171,7 +183,7 @@ def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
         buy_plan_id=plan.id,
         buyer_id=test_user.id,
         status=BuyPlanLineStatus.ISSUE,
-        issue_type="lead_time_changed",
+        issue_type=LineIssueType.LEAD_TIME_CHANGED,
     )
 
     result = supervise_overview(db_session)
@@ -182,7 +194,7 @@ def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
 
     row = next(d for d in result["triage"]["flagged"] if d["line_id"] == line.id)
     assert "issue_type" in row
-    assert row["issue_type"] == "lead_time_changed"
+    assert row["issue_type"] == LineIssueType.LEAD_TIME_CHANGED
     assert row["plan_id"] == plan.id
 
 
@@ -190,24 +202,28 @@ def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
 
 
 def test_supervise_overdue_po(db_session, test_user, test_quote, test_requisition):
-    """Old AWAITING_PO line on ACTIVE plan appears in overdue_po_count and overdue_pos
-    triage."""
+    """AWAITING_PO line on ACTIVE plan with old approved_at appears in overdue_po_count
+    and overdue_pos triage.
+
+    The anchor is BuyPlan.approved_at, not line.created_at.
+    """
     from app.services.buyplan_hub import supervise_overview
 
+    # Back-date approved_at well past the 4h SLA; last_nudge_at = None (never nudged)
+    old_approved_at = datetime.now(timezone.utc) - timedelta(hours=24)
     plan = _make_plan(
         db_session,
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
+        approved_at=old_approved_at,
     )
-    # Back-date created_at well past the 4h SLA; last_nudge_at = None (never nudged)
-    old_ts = datetime.now(timezone.utc) - timedelta(hours=24)
     line = _make_line(
         db_session,
         buy_plan_id=plan.id,
         buyer_id=test_user.id,
         status=BuyPlanLineStatus.AWAITING_PO,
-        created_at=old_ts,
+        # created_at left as default (now) — overdue is driven by approved_at, not created_at
     )
 
     result = supervise_overview(db_session)
@@ -222,7 +238,32 @@ def test_supervise_overdue_po(db_session, test_user, test_quote, test_requisitio
 
 
 def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quote, test_requisition):
-    """A fresh AWAITING_PO line (within SLA) is NOT counted as overdue."""
+    """A freshly-approved plan's AWAITING_PO line (approved_at = now) is NOT overdue."""
+    from app.services.buyplan_hub import supervise_overview
+
+    # approved_at set to just now — well within the SLA
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        approved_at=datetime.now(timezone.utc),
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.AWAITING_PO,
+    )
+
+    result = supervise_overview(db_session)
+    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
+    assert line.id not in overdue_ids
+
+
+def test_supervise_no_approved_at_not_overdue(db_session, test_user, test_quote, test_requisition):
+    """AWAITING_PO line on ACTIVE plan with approved_at=NULL is NOT overdue (the clock
+    hasn't started — plan was never formally approved)."""
     from app.services.buyplan_hub import supervise_overview
 
     plan = _make_plan(
@@ -230,8 +271,8 @@ def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quo
         quote_id=test_quote.id,
         requisition_id=test_requisition.id,
         status=BuyPlanStatus.ACTIVE,
+        approved_at=None,  # no approved_at → excluded from overdue
     )
-    # created_at defaults to now → well within the 4h SLA
     line = _make_line(
         db_session,
         buy_plan_id=plan.id,

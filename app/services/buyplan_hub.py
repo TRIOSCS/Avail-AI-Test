@@ -18,11 +18,6 @@ from ..config import settings
 from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
 
-# Nudge SLA threshold: reuse the buyer nudge hours from settings so the value
-# stays in one place.  Import is resolved at call time to avoid a circular
-# import when tests stub out the settings object.
-_NUDGE_BUYER_HOURS: int = settings.buyplan_nudge_buyer_hours
-
 
 def buyer_line_queue(db: Session, user: object) -> list[dict]:
     """Return one dict per actionable buy-plan line assigned to ``user``.
@@ -273,9 +268,13 @@ def supervise_overview(db: Session) -> dict:
                        returns 0.0 when no data.
     approval_count   : plans with status==PENDING and approved_by_id IS NULL.
     halted_count     : plans with status==HALTED.
-    overdue_po_count : AWAITING_PO lines on ACTIVE plans whose last_nudge_at (or
-                       created_at when never nudged) is older than the buyer nudge SLA
+    overdue_po_count : AWAITING_PO lines on ACTIVE plans where the plan has
+                       approved_at set AND coalesce(last_nudge_at, approved_at)
+                       is older than the buyer nudge SLA
                        (``settings.buyplan_nudge_buyer_hours``).
+                       Mirrors the predicate used by the buyer-nudge job in
+                       inventory_jobs.py. SLA is read at call time so test
+                       overrides take effect.
     flagged_count    : lines with status==ISSUE.
 
     Triage lists
@@ -293,7 +292,7 @@ def supervise_overview(db: Session) -> dict:
 
     from sqlalchemy import func
 
-    nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=_NUDGE_BUYER_HOURS)
+    nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=settings.buyplan_nudge_buyer_hours)
 
     # ── Strip aggregates (single query) ──────────────────────────────
     agg = (
@@ -329,13 +328,18 @@ def supervise_overview(db: Session) -> dict:
     )
 
     # ── Overdue AWAITING_PO lines on ACTIVE plans ────────────────────
+    # Mirrors the buyer-nudge predicate in inventory_jobs.py:
+    #   plan must be ACTIVE + approved_at set (approval is the start clock);
+    #   coalesce(last_nudge_at, approved_at) < threshold (line has not been
+    #   recently nudged, falling back to the plan approval timestamp).
     overdue_lines = (
         db.query(BuyPlanLine)
         .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
         .filter(
             BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
             BuyPlan.status == BuyPlanStatus.ACTIVE,
-            func.coalesce(BuyPlanLine.last_nudge_at, BuyPlanLine.created_at) < nudge_threshold,
+            BuyPlan.approved_at.isnot(None),
+            func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < nudge_threshold,
         )
         .options(
             joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
