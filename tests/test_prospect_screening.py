@@ -175,10 +175,16 @@ async def test_screen_prospect_daily_cap_blocks(db_session, monkeypatch):
 
 
 async def test_screen_prospect_cache_hit_skips_llm(db_session, monkeypatch):
-    """If ai_screen already has a verdict in enrichment_data, skip the LLM call."""
+    """If ai_screen has a verdict whose grounding fingerprint matches, skip the LLM
+    call."""
     monkeypatch.setattr(settings, "ai_screen_enabled", True)
     monkeypatch.setattr(settings, "ai_screen_daily_cap", 999)
 
+    from app.services import prospect_screening as ps
+
+    p = _prospect(db_session, industry="Aerospace & Defense", enrichment_data={})
+    # Stamp the cached verdict with the fingerprint of the prospect's CURRENT grounding,
+    # so the cache hit is valid (grounding unchanged since the last screen).
     cached_verdict = {
         "verdict": "pass",
         "trio_match_score": 80,
@@ -188,10 +194,10 @@ async def test_screen_prospect_cache_hit_skips_llm(db_session, monkeypatch):
         "confidence": 85,
         "model": "claude-sonnet-4-6",
         "screened_at": "2026-06-18T00:00:00+00:00",
+        "grounding_fingerprint": ps._grounding_fingerprint(p),
     }
-    p = _prospect(db_session, enrichment_data={"ai_screen": cached_verdict})
-
-    from app.services import prospect_screening as ps
+    p.enrichment_data = {"ai_screen": cached_verdict}
+    db_session.commit()
 
     mock_llm = AsyncMock()
     with patch.object(ps, "_call_screen_llm", mock_llm):
@@ -199,6 +205,62 @@ async def test_screen_prospect_cache_hit_skips_llm(db_session, monkeypatch):
 
     mock_llm.assert_not_called()
     assert result["verdict"] == "pass"
+
+
+async def test_screen_prospect_rescreens_when_grounding_changes(db_session, monkeypatch):
+    """A cached verdict is bypassed when new enrichment changes the grounding
+    fingerprint."""
+    monkeypatch.setattr(settings, "ai_screen_enabled", True)
+    monkeypatch.setattr(settings, "ai_screen_daily_cap", 999)
+    monkeypatch.setattr(settings, "ai_screen_min_match", 40)
+
+    from app.services import prospect_screening as ps
+
+    # Prior screen stamped against the OLD grounding (industry only, no contacts).
+    p = _prospect(db_session, industry="Aerospace & Defense", enrichment_data={})
+    stale_verdict = {
+        "verdict": "screened_out",
+        "trio_match_score": 30,
+        "opportunity_score": 20,
+        "rationale": "Thin signals at the time.",
+        "evidence": ["industry=Aerospace & Defense"],
+        "confidence": 50,
+        "model": "claude-sonnet-4-6",
+        "screened_at": "2026-06-18T00:00:00+00:00",
+        "grounding_fingerprint": ps._grounding_fingerprint(p),
+    }
+    p.enrichment_data = {"ai_screen": stale_verdict}
+    db_session.commit()
+
+    # Material new enrichment: a verified procurement decision-maker appears.
+    p.contacts_preview = [
+        {"name": "Jane VP", "title": "VP Procurement", "verified": True, "seniority": "decision_maker"}
+    ]
+    db_session.commit()
+
+    fresh_verdict = {
+        "trio_match_score": 88,
+        "opportunity_score": 75,
+        "excess_likelihood": 30,
+        "verdict": "pass",
+        "rationale": "Now has a verified procurement decision-maker.",
+        "evidence": ["industry=Aerospace & Defense", "contacts=1 verified decision-maker"],
+        "confidence": 85,
+        "model": "claude-sonnet-4-6",
+        "screened_at": "2026-06-19T00:00:00+00:00",
+    }
+
+    with patch.object(ps, "_call_screen_llm", new_callable=AsyncMock, return_value=fresh_verdict) as mock_llm:
+        with patch("app.cache.intel_cache.get_count", return_value=0):
+            with patch("app.cache.intel_cache.incr_count", return_value=1):
+                result = await ps.screen_prospect(p, db_session)
+
+    mock_llm.assert_called_once()
+    assert result["verdict"] == "pass"
+    db_session.refresh(p)
+    assert p.trio_match_score == 88
+    # Fingerprint is refreshed to match the new grounding.
+    assert p.enrichment_data["ai_screen"]["grounding_fingerprint"] == ps._grounding_fingerprint(p)
 
 
 async def test_screen_prospect_disabled_returns_skipped(db_session, monkeypatch):

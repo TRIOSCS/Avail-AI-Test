@@ -563,7 +563,9 @@ Key columns:
 | opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
 
 `enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
-`{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, needs_more_enrichment?}`.
+`{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, grounding_fingerprint, needs_more_enrichment?}`.
+`grounding_fingerprint` (SHA-256 of the assembled context) drives cache invalidation — a
+re-screen with materially new grounding produces a different hash and bypasses the cached verdict.
 Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
 
 **`discovery_batches`** — Import batch tracking

@@ -2315,8 +2315,13 @@ Called by: `run_enrichment_job` in `prospect_free_enrichment.py` (final step, fi
 Calls: `claude_structured` (smart tier, structured schema, 512 tokens, `cost_bucket="ai_screen"`).
 
 **Cost control:** daily cap via `intel_cache.get_count("ai_screen:daily:{date}")` /
-`incr_count(...)` (`ttl_days=1`). Default cap: 200/day (`ai_screen_daily_cap`). Re-screens
-only when `enrichment_data['ai_screen']` is absent or verdict is `insufficient_data`.
+`incr_count(...)` (`ttl_days=1`). Default cap: 200/day (`ai_screen_daily_cap`). The cap is
+approximate (get/incr is non-atomic) — acceptable under the single-worker drain. Re-screens
+only when `enrichment_data['ai_screen']` is absent, verdict is `insufficient_data`, or the
+grounding has materially changed: each `pass`/`screened_out` verdict stores a
+`grounding_fingerprint` (SHA-256 of the assembled context), and a cache hit requires the
+current fingerprint to match — so a buyer re-triggering enrichment with new
+contacts/firmographics/news forces a fresh screen rather than reusing a stale score.
 
 **Verdict persistence:** `trio_match_score` + `opportunity_score` → indexed Integer columns
 on `prospect_accounts` (SQL-sortable for `ai_match_desc` sort); full verdict →

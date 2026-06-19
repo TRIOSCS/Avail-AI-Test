@@ -12,6 +12,7 @@ Depends on: app.utils.claude_client.claude_structured, app.cache.intel_cache,
 
 from __future__ import annotations
 
+import hashlib
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -218,14 +219,28 @@ def _grounding_is_sufficient(prospect: ProspectAccount) -> bool:
     return bool(prospect.industry or prospect.naics_code or prospect.description or ed.get("sam_gov"))
 
 
+def _grounding_fingerprint(prospect: ProspectAccount) -> str:
+    """Stable hash of the exact grounding the screen reasons over.
+
+    Built from the assembled context string so it captures every field
+    ``_assemble_context`` consumes (firmographics, contacts, news, events, history) and
+    nothing else — any material new enrichment changes the fingerprint, while unrelated
+    column writes do not. Used to invalidate a cached verdict when the grounding has
+    materially changed (a buyer re-triggering enrichment must get a fresh screen).
+    """
+    return hashlib.sha256(_assemble_context(prospect).encode("utf-8")).hexdigest()
+
+
 # ── LLM call (isolated for mocking) ─────────────────────────────────────────
 
 
-async def _call_screen_llm(context: str, *, use_web_search: bool = False) -> dict:
+async def _call_screen_llm(context: str) -> dict:
     """Call Claude with the screening schema. Returns the verdict dict.
 
     Isolated into its own function so tests can patch it without touching the full
-    claude_structured call chain.
+    claude_structured call chain. ``claude_structured`` forces ``tool_choice`` to the
+    structured-output tool, so the server-side ``web_search`` tool cannot be attached
+    here — web-search grounding rescue is intentionally not wired (see ``screen_prospect``).
     """
     from app.utils.claude_client import claude_structured
 
@@ -261,13 +276,19 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
     if not settings.ai_screen_enabled:
         return {"verdict": "disabled"}
 
-    # ── Cache hit: already screened, return stored verdict ──
+    # ── Cache hit: already screened on the SAME grounding, return stored verdict ──
+    # A stored pass/screened_out is only reused when the grounding fingerprint matches;
+    # a buyer re-triggering enrichment with new contacts/firmographics/news changes the
+    # fingerprint and forces a fresh screen (spec: re-screen only on material new data).
     ed = dict(prospect.enrichment_data or {})
     existing = ed.get("ai_screen") or {}
-    if existing.get("verdict") in ("pass", "screened_out"):
+    fingerprint = _grounding_fingerprint(prospect)
+    if existing.get("verdict") in ("pass", "screened_out") and existing.get("grounding_fingerprint") == fingerprint:
         return existing
 
     # ── Daily cap gate ──
+    # Cap is approximate: get_count → incr_count is not atomic, so concurrent screens can
+    # modestly overshoot. Acceptable given the single enrichment-worker drain + soft budget.
     today_count = intel_cache.get_count(_cap_key())
     if today_count >= settings.ai_screen_daily_cap:
         logger.debug(
@@ -280,38 +301,31 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
 
     try:
         # ── Grounding check — prefer to fetch more enrichment than guess ──
-        if not _grounding_is_sufficient(prospect):
-            # Optionally try a single web_search to resolve; else return insufficient_data
-            if settings.ai_screen_web_search_enabled:
-                logger.debug(
-                    "Thin grounding for prospect {} — attempting web_search supplemented screen",
-                    prospect.id,
-                )
-                use_web = True
-            else:
-                verdict_dict: dict = {
-                    "trio_match_score": 0,
-                    "opportunity_score": 0,
-                    "excess_likelihood": 0,
-                    "verdict": "insufficient_data",
-                    "rationale": "Insufficient firmographic data to make a reliable judgment.",
-                    "evidence": [],
-                    "confidence": 0,
-                    "model": "none",
-                    "screened_at": datetime.now(timezone.utc).isoformat(),
-                    "needs_more_enrichment": True,
-                }
-                ed["ai_screen"] = verdict_dict
-                prospect.enrichment_data = ed
-                flag_modified(prospect, "enrichment_data")
-                db.commit()
-                return verdict_dict
-        else:
-            use_web = False
+        # ai_screen_web_search_enabled lets the LLM screen thin-grounding accounts anyway
+        # (it reasons over whatever context exists); otherwise we short-circuit to
+        # insufficient_data and let SP4 enrich first rather than have the model guess.
+        if not _grounding_is_sufficient(prospect) and not settings.ai_screen_web_search_enabled:
+            verdict_dict: dict = {
+                "trio_match_score": 0,
+                "opportunity_score": 0,
+                "excess_likelihood": 0,
+                "verdict": "insufficient_data",
+                "rationale": "Insufficient firmographic data to make a reliable judgment.",
+                "evidence": [],
+                "confidence": 0,
+                "model": "none",
+                "screened_at": datetime.now(timezone.utc).isoformat(),
+                "needs_more_enrichment": True,
+            }
+            ed["ai_screen"] = verdict_dict
+            prospect.enrichment_data = ed
+            flag_modified(prospect, "enrichment_data")
+            db.commit()
+            return verdict_dict
 
         # ── LLM call ──
         context = _assemble_context(prospect)
-        raw = await _call_screen_llm(context, use_web_search=use_web)
+        raw = await _call_screen_llm(context)
 
         if not raw or "verdict" not in raw:
             logger.warning("AI screen returned empty/invalid response for prospect {}", prospect.id)
@@ -336,6 +350,9 @@ async def screen_prospect(prospect: ProspectAccount, db: Session) -> dict:
             "confidence": int(raw.get("confidence") or 0),
             "model": raw.get("model", settings.anthropic_model),
             "screened_at": now_iso,
+            # Grounding hash drives cache invalidation: a re-screen with materially new
+            # enrichment data produces a different fingerprint and bypasses the cache hit.
+            "grounding_fingerprint": fingerprint,
         }
 
         # ── Persist ──
