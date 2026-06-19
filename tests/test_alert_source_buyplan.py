@@ -257,3 +257,37 @@ def test_pending_plan_not_double_counted_for_admin_ops_member(db_session, admin_
     db_session.add(VerificationGroupMember(user_id=admin_user.id, is_active=True))
     db_session.flush()
     assert SOURCE.count_for_user(db_session, admin_user) == 1
+
+
+# ── 8. Task 5 — alert source registered under 'buy-plans' tab ─────────────
+
+
+def test_buyplan_source_registered_under_buy_plans_tab():
+    """tab_for_kind(AlertKind.BUYPLAN_ACTION) returns 'buy-plans' (not 'reporting')."""
+    from app.services.alerts import tab_for_kind
+
+    assert tab_for_kind(AlertKind.BUYPLAN_ACTION) == "buy-plans"
+
+
+def test_sources_for_buy_plans_tab_contains_buyplan_source():
+    """sources_for_tab('buy-plans') includes a source with kind == BUYPLAN_ACTION."""
+    from app.services.alerts import sources_for_tab
+
+    tab_sources = sources_for_tab("buy-plans")
+    kinds = [s.kind for s in tab_sources]
+    assert AlertKind.BUYPLAN_ACTION in kinds
+
+
+def test_alert_seen_returns_buy_plans_nav_badge(client):
+    """POST /v2/partials/alerts/buyplan_action/seen returns OOB span id='buy-plans-nav-
+    badge'.
+
+    Uses ref_ids="0" (no matching row — handler is fail-quiet) to satisfy the required
+    Form field while keeping the DB clean.
+    """
+    resp = client.post(
+        "/v2/partials/alerts/buyplan_action/seen",
+        data={"ref_ids": "0"},
+    )
+    assert resp.status_code == 200
+    assert 'id="buy-plans-nav-badge"' in resp.text

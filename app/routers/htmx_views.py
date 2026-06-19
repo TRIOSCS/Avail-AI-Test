@@ -109,7 +109,7 @@ router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
 # Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
-_NAV_ID_ALIAS = {"buy-plans": "reporting", "quotes": "reporting"}
+_NAV_ID_ALIAS = {"quotes": "reporting"}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -288,7 +288,6 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/reporting", response_class=HTMLResponse)
 @router.get("/v2/excess", response_class=HTMLResponse)
 @router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
@@ -318,7 +317,6 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "buy-plans",
         "excess",
         "quotes",
-        "reporting",
         "prospecting",
         "proactive",
         "settings",
@@ -7295,10 +7293,10 @@ async def buy_plans_list_partial(
         )
 
     # Spotlight markers: plan rows that carry an open step needing this user's action.
-    # Buy Plans lives under the Reporting nav now, so the source is registered there.
+    # Buy Plans is its own primary nav tab, so the source is registered under "buy-plans".
     from ..services.alerts import markers_for_tab
 
-    alert_markers = markers_for_tab(db, user, "reporting")
+    alert_markers = markers_for_tab(db, user, "buy-plans")
 
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update(

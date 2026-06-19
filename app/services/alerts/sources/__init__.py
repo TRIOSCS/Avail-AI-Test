@@ -11,7 +11,7 @@ from .inbound_customer import InboundCustomerSource
 from .offers import OfferConfirmedSource
 
 register("requisitions", OfferConfirmedSource())  # Sales Hub
-register("reporting", BuyplanActionSource())  # Buy Plans now lives under the Reporting nav
+register("buy-plans", BuyplanActionSource())  # Buy Plans is its own primary nav tab
 register("crm", InboundCustomerSource())  # CRM — inbound from a customer
 
 __all__ = ["OfferConfirmedSource", "BuyplanActionSource", "InboundCustomerSource"]
