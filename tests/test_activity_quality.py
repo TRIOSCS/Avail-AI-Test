@@ -134,26 +134,21 @@ class TestAvailScoreInteractionQuality:
 
 
 class TestPerformanceTab:
-    """Test the Performance dashboard.
+    """The Team Performance dashboard is retired.
 
-    The dashboard partial route still serves Team Performance, but it was relocated out
-    of the CRM shell into the Reporting section (Phase 5a). The CRM shell now only has
-    Customers + Vendors tabs.
+    It was relocated out of the CRM shell into the Reporting section (Phase 5a), then
+    removed entirely when the Reporting surface was retired (Buy Plan Deal Hub). The
+    route, JSON endpoint, and template no longer exist; the CRM shell has only Customers
+    + Vendors tabs.
     """
 
-    def test_performance_route_returns_200(self, client: TestClient):
-        """GET /v2/partials/crm/performance returns 200."""
+    def test_performance_route_gone(self, client: TestClient):
+        """GET /v2/partials/crm/performance no longer exists (route removed)."""
         resp = client.get("/v2/partials/crm/performance")
-        assert resp.status_code == 200
-        assert "text/html" in resp.headers.get("content-type", "")
-
-    def test_performance_shows_team_header(self, client: TestClient):
-        """Performance tab renders Team Performance header."""
-        resp = client.get("/v2/partials/crm/performance")
-        assert "Team Performance" in resp.text
+        assert resp.status_code == 404
 
     def test_crm_shell_no_longer_has_performance_tab(self, client: TestClient):
-        """Performance moved to Reporting — the CRM shell no longer links it."""
+        """The CRM shell no longer links the retired performance dashboard."""
         resp = client.get("/v2/partials/crm/shell")
         assert "/v2/partials/crm/performance" not in resp.text
 

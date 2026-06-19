@@ -84,6 +84,23 @@ def test_hub_shell_buyer_defaults_to_orders(client: TestClient):
     assert "/v2/partials/buy-plans/orders" in body
 
 
+def test_hub_lens_highlight_is_alpine_reactive(client: TestClient):
+    """The active-lens pill highlight is Alpine-reactive (:class on lens), so a lens
+    click updates the indicator instantly instead of waiting for the server swap.
+
+    The shell must carry the lens state in x-data and bind the active pill class to it,
+    not bake the highlight into static Jinja (which goes stale on the @click).
+    """
+    resp = client.get("/v2/partials/buy-plans?lens=orders")
+    assert resp.status_code == 200
+    body = resp.text
+    # Alpine holds the lens state, seeded from the server-resolved lens.
+    assert "x-data=\"{ lens: 'orders' }\"" in body
+    # Active-pill highlight is bound reactively to that lens var.
+    assert ':class="lens ===' in body
+    assert "bg-brand-500 text-white shadow-sm" in body
+
+
 def test_hub_shell_lens_deals_loads_board_mine(client: TestClient):
     """Lens=deals loads the board scoped to mine by default."""
     resp = client.get("/v2/partials/buy-plans?lens=deals")
