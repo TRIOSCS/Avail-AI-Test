@@ -9478,7 +9478,7 @@ async def prospecting_list_partial(
     request: Request,
     q: str = "",
     status: str = "",
-    sort: str = "buyer_ready_desc",
+    sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_user),
@@ -9486,9 +9486,10 @@ async def prospecting_list_partial(
 ):
     """Return the prospecting card grid as an HTML partial.
 
-    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
-    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
-    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    Sorts: ai_match_desc (default) ranks by trio_match_score DESC then opportunity_score
+    DESC then readiness_score DESC; buyer_ready_desc ranks by the composite buyer-ready
+    score from build_priority_snapshot; fit_desc and recent_desc sort in SQL.
+    Dismissed prospects are hidden unless filtered for.
     """
     base = db.query(ProspectAccount)
     if status:
@@ -9561,6 +9562,8 @@ async def prospecting_list_partial(
     status_counts = dict(count_q.group_by(ProspectAccount.status).all())
     all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
 
+    from ..config import settings as _list_settings
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
@@ -9577,6 +9580,7 @@ async def prospecting_list_partial(
             "status_counts": status_counts,
             "all_total": all_total,
             "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
+            "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
