@@ -59,11 +59,16 @@ class TestNavIdAlias:
 
         assert "buy-plans" not in _NAV_ID_ALIAS
 
-    def test_quotes_alias_survives(self):
-        """'quotes': 'reporting' alias must survive the buy-plans removal."""
+    def test_no_alias_resolves_to_reporting(self):
+        """Task 11 retired the Reporting surface — no nav alias may target 'reporting'.
+
+        The quotes→reporting alias was removed (quote detail falls through to 'quotes',
+        which highlights no nav item — correct, it has no parent tab).
+        """
         from app.routers.htmx_views import _NAV_ID_ALIAS
 
-        assert _NAV_ID_ALIAS.get("quotes") == "reporting"
+        assert "reporting" not in _NAV_ID_ALIAS.values()
+        assert "quotes" not in _NAV_ID_ALIAS
 
     def test_alias_is_dict(self):
         """_NAV_ID_ALIAS is a dict (shape check)."""

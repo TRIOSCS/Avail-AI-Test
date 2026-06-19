@@ -306,10 +306,12 @@ def cdm_list_ctx(
 
     # Spotlight markers: accounts with new, unseen inbound customer comms (the owner's).
     from app.services.alerts import markers_for_tab
+    from app.services.reporting_service import coverage_report
 
     ctx = {
         "companies": companies,
         "alert_markers": markers_for_tab(db, user, "crm"),
+        "coverage": coverage_report(db),
         "search": search,
         "staleness": staleness,
         "account_type": account_type,

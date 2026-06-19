@@ -108,8 +108,12 @@ from .auth import _password_login_enabled
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
 
-# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent instead.
-_NAV_ID_ALIAS = {"quotes": "reporting"}
+# Nav-id aliases: routes that were demoted into a parent nav item highlight the parent
+# instead. Empty now: the standalone Quotes list redirects to /v2/requisitions and the
+# Reporting surface was retired, so no view needs to borrow another tab's highlight.
+# Quote detail (/v2/quotes/{id}) falls through to "quotes", which matches no nav item —
+# correct, since it has no parent tab to highlight.
+_NAV_ID_ALIAS: dict[str, str] = {}
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -436,7 +440,10 @@ async def parts_workspace_partial(
     db: Session = Depends(get_db),
 ):
     """Return the split-panel parts workspace shell."""
+    from ..services import forecast_service
+
     ctx = _base_ctx(request, user, "requisitions")
+    ctx["pipeline"] = forecast_service.pipeline_summary(db)
     return template_response("htmx/partials/parts/workspace.html", ctx)
 
 

@@ -24,7 +24,7 @@ def coverage_report(db: Session) -> dict:
     Returns {by_tier: list[dict], by_rep: list[dict], summary: dict}.
     by_tier rows: {tier, total, on_target, due, overdue, new, coverage_pct}
     by_rep rows:  {rep, total, on_target, due, overdue, new, coverage_pct}
-    summary:      {total, overdue, overdue_pct}
+    summary:      {total, overdue, overdue_pct, coverage_pct}
     """
     rows = db.execute(
         select(
@@ -86,16 +86,22 @@ def coverage_report(db: Session) -> dict:
         reverse=True,
     )
 
-    total = sum(b["total"] for b in tier_buckets.values())
-    total_overdue = sum(b["overdue"] for b in tier_buckets.values())
-    overdue_pct = round(total_overdue / total * 100, 1) if total else 0.0
+    overall = {
+        "total": sum(b["total"] for b in tier_buckets.values()),
+        "on_target": sum(b["on_target"] for b in tier_buckets.values()),
+        "due": sum(b["due"] for b in tier_buckets.values()),
+        "overdue": sum(b["overdue"] for b in tier_buckets.values()),
+    }
+    total = overall["total"]
+    overdue_pct = round(overall["overdue"] / total * 100, 1) if total else 0.0
 
     return {
         "by_tier": by_tier,
         "by_rep": by_rep,
         "summary": {
             "total": total,
-            "overdue": total_overdue,
+            "overdue": overall["overdue"],
             "overdue_pct": overdue_pct,
+            "coverage_pct": _coverage_pct(overall),
         },
     }
