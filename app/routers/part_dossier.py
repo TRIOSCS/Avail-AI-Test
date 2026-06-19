@@ -11,11 +11,6 @@ pointer (written by search_service.stream_search_mpn) to render cached vendor ro
 cache hit, else fires the existing /v2/partials/search/run SSE flow; a degraded-source
 banner (get_market_source_health) renders above both branches.
 
-A read-only market-baseline strip (compute_market_baseline) renders at the top of the
-Live-market section when cached rows are present, showing franchise-median price,
-authorized stock, and authorized source count — computed from cached rows, no new DB
-columns, no persistence.
-
 Called by: app/main.py (include_router); dossier_shell.html lazy-load divs.
 Depends on: services.part_history_service.get_part_history, services.fru_matrix_service
             .get_fru_view, search_service (_get_search_redis / _get_cached_search_results
@@ -192,7 +187,7 @@ async def dossier_market(
     900s). ``refresh=1`` (the "↻ Refresh market" button) skips the cache so the
     connector sweep re-runs.
     """
-    from ..search_service import _get_search_redis, compute_market_baseline, get_market_source_health
+    from ..search_service import _get_search_redis, get_market_source_health
 
     display_mpn = mpn.strip().upper()
     key = normalize_mpn_key(mpn)
@@ -224,8 +219,6 @@ async def dossier_market(
         logger.warning("dossier_market source-health lookup failed mpn={}", mpn, exc_info=True)
         market_health = None
 
-    market_baseline = compute_market_baseline(cached_rows) if cached_rows else None
-
     ctx = _ctx(request, user)
     ctx.update(
         {
@@ -233,7 +226,6 @@ async def dossier_market(
             "cached_search_id": cached_search_id,
             "cached_rows": cached_rows,
             "market_health": market_health,
-            "market_baseline": market_baseline,
         }
     )
     return template_response("htmx/partials/search/dossier_market.html", ctx)
@@ -361,9 +353,9 @@ async def dossier_datasheet_download(
 ):
     """Stream our stored datasheet copy from the company library (app-only fetch)."""
     row = db.query(MaterialCardDatasheet).filter(MaterialCardDatasheet.id == datasheet_id).first()
-    if row is None or not row.onedrive_item_id:
+    if row is None or not row.library_item_id:
         raise HTTPException(404, "Datasheet not found")
-    data = await fetch_datasheet_bytes(row.library_drive_id, row.onedrive_item_id)
+    data = await fetch_datasheet_bytes(row.library_drive_id, row.library_item_id)
     if data is None:
         raise HTTPException(502, "Datasheet temporarily unavailable")
     # Allowlist the filename for the Content-Disposition header — file_name derives from
