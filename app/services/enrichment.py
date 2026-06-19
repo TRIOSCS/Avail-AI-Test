@@ -167,19 +167,27 @@ async def enrich_batch(mpns: list[str], db: Session, concurrency: int = 5) -> di
         nonlocal matched, skipped
         async with sem:
             result = await enrich_material_card(mpn, db)
-            if not result:
-                skipped += 1
-                return
 
-            # Apply to card
             card = db.query(MaterialCard).filter_by(normalized_mpn=mpn).first()
             if not card:
                 skipped += 1
                 return
 
-            _apply_enrichment_to_card(card, result, db)
-            matched += 1
-            sources[result["source"]] = sources.get(result["source"], 0) + 1
+            if result:
+                _apply_enrichment_to_card(card, result, db)
+                matched += 1
+                sources[result["source"]] = sources.get(result["source"], 0) + 1
+            else:
+                skipped += 1
+
+            # eBay-title mining runs on EVERY card, not just manufacturer-matched ones:
+            # eBay returns no structured manufacturer, so its value (a free-text title fed
+            # to the desc grammar) is independent of the distributor connectors above and
+            # is exactly what an uncategorized, no-distributor-match card needs. No-op when
+            # the flag is off or eBay creds are absent. Best-effort (swallows its own errors).
+            ebay_written = await harvest_ebay_titles(mpn, card, db)
+            if ebay_written:
+                sources["ebay_title"] = sources.get("ebay_title", 0) + ebay_written
 
     # Process sequentially within the semaphore to avoid SQLAlchemy session issues
     for i, mpn in enumerate(mpns):
@@ -303,6 +311,70 @@ def _harvest_connector_enrichment(card: MaterialCard, enrichment: dict, ladder_s
             record_spec(
                 db, int(card.id), facet_key, value, source=ladder_source, confidence=0.95, schema_cache=schema_cache
             )
+
+
+async def harvest_ebay_titles(mpn: str, card: MaterialCard, db: Session) -> int:
+    """eBay-title mining: feed an eBay listing's TITLE through the desc-grammar ladder.
+
+    eBay titles are free-text part descriptions (the connector returns no structured
+    manufacturer), so — unlike the distributor connectors — eBay has no place in the
+    manufacturer-finding ``_CONNECTOR_CONFIGS`` loop. Instead each Browse listing's title
+    is run through the SAME description-grammar path distributor descriptions use
+    (``categorize_and_record``): it categorizes an UNCATEGORIZED card and fills facets, all
+    arbitrated by the F1 ladder at ``ebay_title``/tier 83 (= the card's own desc_parse, below
+    the curated distributor description connector_desc 84 and the decoders 85). Returns the
+    number of facets written across all titles.
+
+    Gating: a no-op (returns 0, no network) when ``settings.ebay_title_mining_enabled`` is
+    off OR the eBay credentials are absent — so the feature stays dormant until
+    EBAY_CLIENT_ID/EBAY_CLIENT_SECRET are set, exactly like every other connector.
+
+    Best-effort: each title is harvested in its own per-card SAVEPOINT inside
+    ``categorize_and_record`` (a DB-level failure rolls back only that write and re-raises).
+    The caller (``enrich_batch._process_one``) is unguarded, so this function swallows and
+    logs any error to keep the rest of the batch alive. Does not commit — the caller owns
+    the transaction.
+    """
+    from app.config import settings
+
+    if not settings.ebay_title_mining_enabled:
+        return 0
+
+    client_id = get_credential_cached("ebay", "EBAY_CLIENT_ID")
+    client_secret = get_credential_cached("ebay", "EBAY_CLIENT_SECRET")
+    if not client_id or not client_secret:
+        return 0  # dormant until eBay creds exist — safe no-op
+
+    from app.connectors.ebay import EbayConnector
+    from app.services.desc_extractor._common import EBAY_TITLE_CONFIDENCE, EBAY_TITLE_SOURCE
+    from app.services.desc_extractor.writer import categorize_and_record
+
+    written = 0
+    try:
+        connector = EbayConnector(client_id, client_secret)
+        results = await asyncio.wait_for(connector.search(mpn), timeout=15)
+        seen: set[str] = set()
+        for r in results:
+            title = (r.get("ebay_title") or "").strip()
+            if not title or title.lower() in seen:
+                continue
+            seen.add(title.lower())
+            # Fill-only categorize + facet fill; the ladder arbitrates every write, so an
+            # eBay title can never displace a higher-tier (mpn_decode/connector_desc) value.
+            _categorized, n = categorize_and_record(
+                db, card, description=title, source=EBAY_TITLE_SOURCE, confidence=EBAY_TITLE_CONFIDENCE
+            )
+            written += n
+            # Once the card is categorized, later titles for the same MPN only refine facets;
+            # categorize_and_record is fill-only, so it stays cheap. Stop after the first
+            # title that categorizes an uncategorized card to avoid re-parsing every listing.
+            if _categorized:
+                break
+    except TimeoutError:
+        logger.warning("eBay-title mining timed out for {}", mpn)
+    except Exception:
+        logger.exception("eBay-title mining failed for card_id={}", card.id)
+    return written
 
 
 def _run_boost_loop(db: Session, base_query, confidence: float, source: str, label: str, batch_size: int) -> int:

@@ -87,6 +87,11 @@ SOURCE_TIER: dict[str, int] = {
     # more authoritative than the card's own desc_parse (83), below the deterministic decoders (85).
     "partsurfer_desc": 84,
     "desc_parse": 83,
+    # eBay listing titles are external marketplace free-text part descriptions — the same
+    # desc grammar run over an eBay Browse title we fetch. Same evidence class as the
+    # card's own desc_parse (83): below the curated distributor description (connector_desc
+    # 84) and the deterministic decoders (mpn_decode 85). See eBay-title-mining.
+    "ebay_title": 83,
     "fru_desc_parse": 82,
     "partsurfer": 80,
     "psref": 80,

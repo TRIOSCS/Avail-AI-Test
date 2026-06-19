@@ -144,6 +144,11 @@ class Settings(BaseSettings):
     # ladder at partsurfer_desc (tier 84). See app/services/enrichment_worker/partsurfer_resolver.
     partsurfer_desc_enabled: bool = True
     connector_desc_harvest_enabled: bool = True
+    # eBay-title mining: eBay listing TITLES are free-text part descriptions; feed each into
+    # the desc grammar (categorize uncategorized cards + fill facets) at ebay_title/tier 83,
+    # arbitrated by the F1 ladder. Dormant no-op until EBAY_CLIENT_ID/EBAY_CLIENT_SECRET are
+    # set (creds absent → skipped, like every other connector). See enrichment.harvest_ebay_titles.
+    ebay_title_mining_enabled: bool = True
     # Cap on live PartSurfer fetches per batch (each is a polite 1-req/2s GET — the worker
     # paces them). Keeps a batch's wall-time bounded; uncategorized HP cards drain over batches.
     partsurfer_fetch_per_batch: int = 5

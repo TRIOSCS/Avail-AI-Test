@@ -2030,6 +2030,22 @@ owns arbitration in one place:
        return a typed `EnrichSummary(categorized, specs_written)` (frozen dataclass — the
        backfill aggregates it by attribute, not by dict key). Commodities mapped so far:
        capacitors, resistors (the top-demand passives).
+    3.8. enrichment.py::harvest_ebay_titles    — eBay-TITLE mining,
+       source="ebay_title" (tier 83), conf 0.90 (settings.ebay_title_mining_enabled,
+       default ON). Called by enrich_batch._process_one for EVERY card (not only the
+       manufacturer-matched ones): eBay's connector returns NO structured manufacturer,
+       so unlike the distributor connectors eBay has no place in the manufacturer-finding
+       _CONNECTOR_CONFIGS loop — its sole value is the listing TITLE, a free-text part
+       description. Each Browse listing's `ebay_title` is run through the SAME desc grammar
+       distributor descriptions use → writer.categorize_and_record(source="ebay_title",
+       tier 83, conf 0.90): categorizes an UNCATEGORIZED card + fills facets via the F1
+       ladder. ebay_title (83) ties the card's own desc_parse (external marketplace
+       free-text, noisier than a curated distributor description connector_desc 84) and
+       loses to the deterministic decoders (85), so an eBay title can never displace a
+       higher-tier value. DORMANT no-op (returns 0, no network) when the flag is off OR
+       EBAY_CLIENT_ID/EBAY_CLIENT_SECRET are absent (creds gated via get_credential_cached,
+       like every other connector). Best-effort: swallows + logs its own errors so a
+       failure never aborts the unguarded batch loop; commit-free (caller owns the txn).
     4. spec_enrichment_service.py::enrich_card_specs    — AI spec reader,
        source="spec_extraction" (tier 60), facets gated at confidence >= 0.85
        (FACET_MIN_CONF — an AI output-quality floor, not cross-source
@@ -2094,6 +2110,11 @@ SOURCE_TIER  manual:100
                desc grammar; outranks the card's own desc_parse 83, loses to mpn_decode 85,
                ties fru_matrix_decode 84 — different vendors, tie not load-bearing)
              · desc_parse:83
+             · ebay_title:83 (eBay-title mining — an eBay Browse listing TITLE is an
+               external marketplace free-text part description, fed to the same desc
+               grammar; written by enrichment.harvest_ebay_titles. Same evidence class as
+               the card's own desc_parse — external free-text, noisier than a curated
+               distributor description, so below connector_desc 84 and ties desc_parse 83)
              · fru_desc_parse:82 (FRU-linked qual-sheet descriptions — below the card's
                OWN description, above the OEM scrapers)
              · {partsurfer,psref,oem_official}:80 (partsurfer/psref are written by the
