@@ -1,0 +1,22 @@
+{# _name_suggestion.html — suggest-only company-name normalization chip (Increment 3).
+   Surfaces the cleaned name (suffix-stripped via the same normalizer the importer uses)
+   as "Suggested name: X — Apply?". NEVER rewrites silently: the rep clicks Apply, which
+   POSTs to the apply-name route. After applying, the chip swaps itself out (empty).
+   Renders nothing (empty 200) when the current name is already clean.
+   Receives: company (Company), suggested (str).
+   Called by: company_name_suggestion route in htmx_views.py.
+   Depends on: HTMX, Tailwind brand palette.
+#}
+<div class="inline-flex items-center gap-2 rounded-md border border-brand-200 bg-brand-50
+            px-2.5 py-1 text-xs text-brand-700">
+  <span>Suggested name: <span class="font-semibold">{{ suggested }}</span></span>
+  <button type="button"
+          class="rounded bg-brand-500 px-2 py-0.5 text-[11px] font-medium text-white
+                 hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500"
+          hx-post="/v2/partials/customers/{{ company.id }}/apply-name"
+          hx-vals='{"name": {{ suggested|tojson }}}'
+          hx-target="closest div"
+          hx-swap="outerHTML">
+    Apply
+  </button>
+</div>
