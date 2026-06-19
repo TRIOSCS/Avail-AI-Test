@@ -75,6 +75,14 @@ PARTSURFER_DESC_CONFIDENCE = 0.90
 CONNECTOR_DESC_SOURCE = "connector_desc"
 CONNECTOR_DESC_CONFIDENCE = 0.90
 
+# eBay-title mining: eBay listing TITLES are external marketplace free-text part
+# descriptions — the same desc grammar run over an eBay Browse title we fetch. External
+# (noisier than a curated distributor description), so it ranks with the card's own
+# desc_parse rather than connector_desc (spec_tiers.SOURCE_TIER: ebay_title=83 = desc_parse
+# 83 < connector_desc 84). See app/services/enrichment.harvest_ebay_titles.
+EBAY_TITLE_SOURCE = "ebay_title"
+EBAY_TITLE_CONFIDENCE = 0.90
+
 # The only commodities the extractor fills specs for — single source of truth shared
 # by extract_desc (routing) and writer.py (card eligibility / the spec'd _HANDLED
 # set). The PSU-vs-CPU wattage guard is structural: only extract_psu can emit the

@@ -484,6 +484,7 @@ class TestEnrichBatch:
                 return_value={"manufacturer": "TI", "source": "digikey", "confidence": 0.95, "category": None},
             ),
             patch("app.services.enrichment._apply_enrichment_to_card"),
+            patch("app.services.enrichment.harvest_ebay_titles", new_callable=AsyncMock, return_value=0),
         ):
             result = await enrich_batch(["lm317t"], db_session)
 
@@ -538,6 +539,7 @@ class TestEnrichBatch:
                 return_value={"manufacturer": "TI", "source": "digikey", "confidence": 0.95, "category": None},
             ),
             patch("app.services.enrichment._apply_enrichment_to_card"),
+            patch("app.services.enrichment.harvest_ebay_titles", new_callable=AsyncMock, return_value=0),
         ):
             result = await enrich_batch(mpns, db_session)
 
@@ -569,6 +571,7 @@ class TestEnrichBatch:
         with (
             patch("app.services.enrichment.enrich_material_card", side_effect=mock_enrich),
             patch("app.services.enrichment._apply_enrichment_to_card"),
+            patch("app.services.enrichment.harvest_ebay_titles", new_callable=AsyncMock, return_value=0),
         ):
             result = await enrich_batch(["p1", "p2"], db_session)
 

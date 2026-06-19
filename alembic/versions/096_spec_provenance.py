@@ -68,6 +68,7 @@ _SOURCE_TIER_SQL_CASE = (
     "WHEN 'partsurfer_desc' THEN 84 "
     "WHEN 'connector_desc' THEN 84 "
     "WHEN 'desc_parse' THEN 83 "
+    "WHEN 'ebay_title' THEN 83 "
     "WHEN 'fru_desc_parse' THEN 82 "
     "WHEN 'partsurfer' THEN 80 "
     "WHEN 'psref' THEN 80 "
