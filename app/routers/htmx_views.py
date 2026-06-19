@@ -10123,6 +10123,55 @@ async def enrich_status_partial(
     return resp
 
 
+# ── Reclaim endpoint ─────────────────────────────────────────────────
+
+
+@router.post("/v2/partials/prospects/{prospect_id}/reclaim", response_class=HTMLResponse)
+async def reclaim_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reclaim a swept prospect: re-assign Company owner, dismiss from pool.
+
+    Former owner, admin, or sweep manager only.
+    Returns refreshed prospect card or detail with showToast trigger.
+    """
+    from ..services.prospect_reclamation import reclaim_prospect_account
+
+    error = None
+    result = None
+    try:
+        result = reclaim_prospect_account(
+            prospect_id,
+            user.id,
+            db,
+            is_admin=(user.role == UserRole.ADMIN),
+        )
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+    except ValueError as e:
+        error = str(e)
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    form = await request.form()
+    flt_status = form.get("flt_status", "")
+    msg = error or f"Reclaimed {result['company_name']} — account re-assigned to you"
+    return _prospect_action_response(
+        request,
+        user,
+        db,
+        prospect,
+        message=msg,
+        kind="error" if error else "success",
+        flt_status=flt_status,
+    )
+
+
 # ── Settings partials ────────────────────────────────────────────────
 
 
