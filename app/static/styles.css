@@ -16,23 +16,94 @@
 }
 
 @layer components {
-  /* ── Buttons ────────────────────────────────────────────────────── */
-  .btn-primary {
-    @apply bg-brand-500 text-white hover:bg-brand-600 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
-  }
+  /* ══════════════════════════════════════════════════════════════════
+     CANONICAL COMPONENT LAYER — single source of truth for the design
+     system. Templates/macros use these classes instead of inline utility
+     stacks so spacing, radius, shadow, type, and focus stay consistent
+     app-wide. Every value is derived from the existing tokens (Aptos type,
+     brand grays, semantic status colors) — adopting a canonical class is a
+     visual no-op where the page was already correct.
 
-  /* ── Status badges — unified system ─────────────────────────────── */
-  .badge-success {
-    @apply bg-emerald-50 text-emerald-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
-  }
+     Radius language (3 tiers): rounded (4px)=badges/chips ·
+     rounded-lg (8px)=buttons/inputs/modals · rounded-xl (12px)=cards.
+     Genuinely-circular pills keep rounded-full as a deliberate shape.
+     ══════════════════════════════════════════════════════════════════ */
 
-  .badge-warning {
-    @apply bg-amber-50 text-amber-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
+  /* ── Buttons — .btn base (default md size) + color variants + size
+     overrides. Compose as `btn-primary` (full md button) or add a size
+     modifier `btn-primary btn-sm`. Sizes are defined AFTER the variants so
+     an explicit size wins over the variant's default md padding. ─────── */
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
+  .btn-primary   { @apply btn bg-brand-500 text-white hover:bg-brand-600 focus:ring-brand-500; }
+  .btn-secondary { @apply btn bg-white text-gray-700 border border-gray-200 hover:bg-gray-50 focus:ring-brand-500; }
+  .btn-danger    { @apply btn bg-rose-500 text-white hover:bg-rose-600 focus:ring-rose-500; }
+  .btn-ghost     { @apply btn bg-transparent text-gray-600 hover:bg-gray-100 focus:ring-brand-500; }
+  /* size overrides — defined last so they beat the variant's baked-in md size */
+  .btn-sm { @apply px-3 py-1.5 text-xs; }
+  .btn-md { @apply px-4 py-2 text-sm; }
+  .btn-lg { @apply px-5 py-2.5 text-sm; }
 
-  .badge-info {
-    @apply bg-brand-100 text-brand-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
+  /* ── Badges — three locked families. .badge=status/lifecycle pill
+     (semantic color comes from the macro color map); .chip=rectangular
+     metadata tag (MPN/source/channel); .badge-mini=uppercase micro tag.
+     Family floor is text-[11px] — never text-[10px]. ───────────────── */
+  .badge      { @apply inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full border; }
+  .chip       { @apply inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-medium rounded border; }
+  .badge-mini { @apply inline-flex items-center px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide rounded; }
+  /* Semantic helper badges — converge onto .badge so the whole family
+     shares one shape. */
+  .badge-success { @apply badge bg-emerald-50 text-emerald-700 border-emerald-200; }
+  .badge-warning { @apply badge bg-amber-50 text-amber-700 border-amber-200; }
+  .badge-info    { @apply badge bg-brand-100 text-brand-700 border-brand-200; }
+
+  /* ── Cards — resting surfaces. Border is brand-200 (the dominant card
+     border) so cards never depend on the legacy border-gray override. ── */
+  .card    { @apply bg-white rounded-xl border border-brand-200 shadow-card p-4; }
+  .card-sm { @apply bg-white rounded-xl border border-brand-200 p-3; }
+  .card-lg { @apply bg-white rounded-xl border border-brand-200 shadow-card p-6; }
+
+  /* ── Typography scale — 4 heading levels + label + secondary/tertiary
+     text. Floor for secondary/caption copy is text-[11px]; secondary uses
+     gray-600 (not gray-500) for contrast. ──────────────────────────── */
+  .h1 { @apply text-2xl font-bold text-gray-900 leading-tight; }
+  .h2 { @apply text-lg font-semibold text-gray-900; }
+  .h3 { @apply text-sm font-semibold text-gray-700; }
+  .h4 { @apply text-xs font-semibold uppercase tracking-wider text-brand-600; }
+  .form-label     { @apply block text-xs font-medium text-gray-700 mb-1; }
+  .text-secondary { @apply text-xs text-gray-600; }
+  .text-tertiary  { @apply text-[11px] text-brand-400; }
+
+  /* ── Inputs — one focus spec (ring-2 brand). .input-focus is the mixin
+     for native controls (checkbox/select) that can't take full .input. ─ */
+  .input {
+    @apply w-full px-3 py-2 text-sm bg-white border border-gray-300 rounded-lg text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 disabled:bg-gray-50 disabled:text-gray-400;
   }
+  .input-sm    { @apply px-2 py-1 text-xs; }
+  .input-focus { @apply focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500; }
+
+  /* ── Modal chrome — locked header/body/footer padding + close button
+     (retires the top-2.5 right-2.5 magic numbers in base.html). ─────── */
+  .modal-header { @apply flex items-center justify-between px-5 py-4 border-b border-brand-200; }
+  .modal-body   { @apply px-5 py-4; }
+  .modal-footer { @apply flex items-center justify-end gap-2 px-5 py-4 border-t border-brand-200; }
+  .modal-close  { @apply absolute top-3 right-3 z-20 inline-flex items-center justify-center h-8 w-8 rounded-full bg-white/80 text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors; }
+
+  /* ── Table cell padding — named utilities so one-off cells stop inlining
+     px-4 py-3. Values match the .data-table / .compact-table locks below. */
+  .table-cell          { padding: 14px 16px; }
+  .table-cell--head    { padding: 12px 16px; }
+  .compact-cell        { padding: 6px 10px; }
+  .compact-cell--head  { padding: 8px 10px; }
+  .compact-cell--dense { padding: 4px 10px; }
+
+  /* ── Border tokens — the unified line colors as classes. Conversion
+     target for the legacy `.border-gray-200/100 !important` override
+     below: sweeps migrate border-gray-* → border-line-* page by page;
+     once drained, the !important block is deleted. ─────────────────── */
+  .border-line-base   { border-color: #BFC4CE; }
+  .border-line-subtle { border-color: #D5D8DF; }
 
   /* ── Table wrapper ──────────────────────────────────────────────── */
   .table-wrapper {

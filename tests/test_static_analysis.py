@@ -399,3 +399,165 @@ def test_materials_fold_state_defaults_pinned():
         "prior visitors carry a persisted `false` under it that would re-collapse the "
         "trust fold if the key were ever reused."
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Design-system consistency guards
+#
+# Lock the drift the front-end UX pass consolidated onto the canonical
+# component layer (app/static/styles.css `@layer components` +
+# shared/_macros.html): badge/button/card/table spacing, radius, shadow, type
+# scale, focus ring, and the unified-border !important hack.
+#
+# High-volume drift is enforced as a COUNT RATCHET — green today, and it can
+# only SHRINK as the per-page sweeps drain it. When a sweep drains its slice,
+# LOWER the matching BASELINE; never raise one. Structural facts (the classes
+# exist, the modal uses the canonical close) are asserted directly.
+# ─────────────────────────────────────────────────────────────────────────
+
+_TEMPLATES = sorted(Path("app/templates").rglob("*.html"))
+
+
+def _tpl_substring_count(needle: str) -> int:
+    return sum(p.read_text().count(needle) for p in _TEMPLATES)
+
+
+def _tpl_regex_count(pattern: str, exclude: set[str] | None = None) -> int:
+    rx = re.compile(pattern)
+    skip = exclude or set()
+    return sum(len(rx.findall(p.read_text())) for p in _TEMPLATES if p.name not in skip)
+
+
+def test_design_system_classes_defined():
+    """The canonical component layer must exist in styles.css.
+
+    The macros and every page sweep depend on these classes; if a refactor drops one,
+    dozens of templates silently lose their styling.
+    """
+    css = Path("app/static/styles.css").read_text()
+    required = [
+        ".btn",
+        ".btn-primary",
+        ".btn-secondary",
+        ".btn-danger",
+        ".btn-ghost",
+        ".btn-sm",
+        ".btn-md",
+        ".btn-lg",
+        ".badge",
+        ".chip",
+        ".badge-mini",
+        ".card",
+        ".card-sm",
+        ".card-lg",
+        ".input",
+        ".input-focus",
+        ".modal-header",
+        ".modal-body",
+        ".modal-footer",
+        ".modal-close",
+        ".h1",
+        ".h2",
+        ".h3",
+        ".h4",
+        ".form-label",
+        ".text-secondary",
+        ".text-tertiary",
+        ".table-cell",
+        ".compact-cell",
+        ".border-line-base",
+        ".border-line-subtle",
+    ]
+    missing = [sel for sel in required if not re.search(r"(?m)^\s*" + re.escape(sel) + r"[\s:{]", css)]
+    assert not missing, f"canonical component classes missing from styles.css: {missing}"
+
+
+def test_styles_important_count_capped():
+    """The `.border-gray-* !important` unified-border hack (2 of the 6) is the
+    conversion target for the border-gray-* → border-line-* sweep; the rest are
+    deliberate animation/display resets.
+
+    Cap the count so no NEW !important is added and the hack can't quietly return after
+    removal. Comments are stripped so prose mentions of the word don't count.
+    """
+    css = re.sub(r"/\*.*?\*/", "", Path("app/static/styles.css").read_text(), flags=re.S)
+    count = css.count("!important")
+    assert count <= 6, (
+        f"styles.css has {count} !important declarations (cap 6). Don't add "
+        f"!important — use a component class or specificity."
+    )
+
+
+def test_tiny_text_does_not_grow():
+    """Text-[10px] is below the readability floor (text-[11px]); the mobile-nav labels
+    are the one intentional exception.
+
+    Ratchet — sweeps lower this as they bump 10px → text-xs / text-[11px].
+    """
+    BASELINE = 270
+    count = _tpl_substring_count("text-[10px]")
+    assert count <= BASELINE, (
+        f"text-[10px] usages rose to {count} (baseline {BASELINE}). Use text-xs "
+        f"or text-[11px]; 10px is below the readability floor."
+    )
+
+
+def test_low_contrast_secondary_text_does_not_grow():
+    """Secondary/body copy should use text-gray-600 (or .text-secondary), not the lower-
+    contrast text-gray-500.
+
+    Ratchet only (decorative icon grays are fine) — caps growth rather than banning
+    outright.
+    """
+    BASELINE = 998
+    count = _tpl_substring_count("text-gray-500")
+    assert count <= BASELINE, (
+        f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "
+        f"text-gray-600 / .text-secondary for readable secondary text."
+    )
+
+
+def test_focus_ring_1_does_not_grow():
+    """One focus-ring spec: ring-2 (see .input / .btn). Ratchet down the legacy
+    ring-1 usages; never add a new one."""
+    BASELINE = 81
+    count = _tpl_substring_count("focus:ring-1")
+    assert count <= BASELINE, (
+        f"focus:ring-1 usages rose to {count} (baseline {BASELINE}). Use the "
+        f".input / .input-focus / .btn focus spec (ring-2)."
+    )
+
+
+def test_inline_table_cell_padding_does_not_grow():
+    """Table cells should use the locked .table-cell / .compact-cell utilities, not
+    inline px-/py- (which is how cell padding drifted).
+
+    Ratchet.
+    """
+    BASELINE = 726
+    count = _tpl_regex_count(r'<t[dh][^>]*class="[^"]*\bp[xy]-[0-9]')
+    assert count <= BASELINE, (
+        f"inline-padded <td>/<th> rose to {count} (baseline {BASELINE}). Use "
+        f".table-cell / .compact-cell* instead of inline px-/py- on cells."
+    )
+
+
+def test_inline_button_sizing_does_not_grow():
+    """Buttons should size via .btn-sm/md/lg (or the btn_* macros), not inline px-/py-.
+
+    Macro files are the canonical source and are excluded. Ratchet.
+    """
+    BASELINE = 341
+    count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
+    assert count <= BASELINE, (
+        f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."
+    )
+
+
+def test_modal_uses_canonical_close_class():
+    """The global modal close button uses the .modal-close component (not the old
+    top-2.5 right-2.5 magic numbers), so every modal's close affordance is positioned
+    consistently."""
+    html = Path("app/templates/htmx/base.html").read_text()
+    assert 'class="modal-close"' in html, "global modal close button must use .modal-close"
+    assert "top-2.5 right-2.5" not in html, "modal close button still uses magic-number positioning — use .modal-close"

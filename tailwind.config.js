@@ -13,11 +13,22 @@ module.exports = {
       pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet|sky)-(50|100|200|300|400|500|600|700|800|900)$/,
       variants: ['hover'],
     },
+    // Design-system shadow tiers — keep available even before the page
+    // sweeps reference them directly in templates.
+    'shadow-card',
+    'shadow-float',
   ],
   theme: {
     extend: {
       fontFamily: {
         sans: ['Aptos', 'Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
+      },
+      // Two-tier shadow language: `card` for resting surfaces (≈ the old
+      // shadow-sm, brand-tinted), `float` for modals/dropdowns/action rails.
+      // Replaces the five ad-hoc shadow levels that had drifted across pages.
+      boxShadow: {
+        card: '0 1px 2px 0 rgb(28 33 48 / 0.06), 0 1px 3px 0 rgb(28 33 48 / 0.10)',
+        float: '0 4px 16px rgb(28 33 48 / 0.12)',
       },
       colors: {
         brand: {
