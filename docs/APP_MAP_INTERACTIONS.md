@@ -2363,6 +2363,37 @@ Validation conflicts (storage: material_cards.validation_conflicts JSONB +
   faceted_search_service (backed by the partial index).
 ```
 
+### SP3: AI Account Screening (`app/services/prospect_screening.py`)
+
+Called by: `run_enrichment_job` in `prospect_free_enrichment.py` (final step, fire-and-forget).
+Calls: `claude_structured` (smart tier, structured schema, 512 tokens, `cost_bucket="ai_screen"`).
+
+**Cost control:** daily cap via `intel_cache.get_count("ai_screen:daily:{date}")` /
+`incr_count(...)` (`ttl_days=1`). Default cap: 200/day (`ai_screen_daily_cap`). The cap is
+approximate (get/incr is non-atomic) — acceptable under the single-worker drain. Re-screens
+only when `enrichment_data['ai_screen']` is absent, verdict is `insufficient_data`, or the
+grounding has materially changed: each `pass`/`screened_out` verdict stores a
+`grounding_fingerprint` (SHA-256 of the assembled context), and a cache hit requires the
+current fingerprint to match — so a buyer re-triggering enrichment with new
+contacts/firmographics/news forces a fresh screen rather than reusing a stale score.
+
+**Verdict persistence:** `trio_match_score` + `opportunity_score` → indexed Integer columns
+on `prospect_accounts` (SQL-sortable for `ai_match_desc` sort); full verdict →
+`enrichment_data['ai_screen']` (JSONB). Scores only written for `pass`/`screened_out`;
+`insufficient_data` sets `needs_more_enrichment=True` without writing scores.
+
+**Gate:** `ai_screen_enabled=False` (default) → no LLM call; returns `{"verdict": "disabled"}`.
+
+**Screened-out bucket:** `verdict=screened_out` hides account from main queue grid when
+`sort=ai_match_desc`; recoverable via buyer "Claim anyway" override; threshold controlled
+by `ai_screen_min_match=40`. The score threshold override runs after the LLM: even if the
+LLM returns `pass`, the service sets `screened_out` when `trio_match_score < ai_screen_min_match`.
+
+**List route integration** (`htmx_views.py`):
+- Sort option `ai_match_desc`: ranks by `trio_match_score DESC → opportunity_score DESC → readiness_score DESC`.
+- `_prospect_stats_ctx` gains `"screened_out": <count>` (only when `ai_screen_enabled=True`).
+- `screened_out_prospects` context var passed to the list template for the collapsed bucket.
+
 ### SP-Ingest — TRIO source-data pipeline (`app/services/source_ingest/`, SP2)
 
 ```

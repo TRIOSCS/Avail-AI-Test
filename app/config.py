@@ -322,6 +322,17 @@ class Settings(BaseSettings):
     prospecting_expire_days: int = 90
     prospecting_resurface_days: int = 180
 
+    # --- SP3: AI Account Screening ---
+    # Feature gate — default off; flip on when ready to spend Claude credits on screening.
+    ai_screen_enabled: bool = False
+    # Minimum trio_match_score to pass the screen (< threshold → screened_out bucket).
+    ai_screen_min_match: int = 40
+    # Max accounts screened per UTC calendar day (mirrors enrichment daily_cap pattern).
+    ai_screen_daily_cap: int = 200
+    # When True, an insufficient_data verdict triggers a single web_search to try to
+    # resolve grounding gaps before falling back to insufficient_data.
+    ai_screen_web_search_enabled: bool = False
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:

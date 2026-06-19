@@ -66,6 +66,26 @@
       </div>
     </div>
 
+    {# AI Match + Opportunity scores — only when ai_screen has a real verdict (pass or screened_out).
+       Absent when screening is off or the account has not been screened yet. #}
+    {% set ai_screen = (prospect.enrichment_data or {}).get('ai_screen', {}) %}
+    {% if ai_screen.get('verdict') in ('pass', 'screened_out') %}
+    <div class="mb-2">
+      {% set match = ai_screen.get('trio_match_score', 0) %}
+      <div class="flex items-center justify-between text-xs mb-0.5">
+        <span class="text-gray-500">AI Match <span class="text-gray-300">(procurement fit)</span></span>
+        <span class="font-medium {{ score.score_text_color(match) }}">{{ match }}%</span>
+      </div>
+      <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full rounded-full {{ score.score_bar_color(match) }}" style="width: {{ match }}%"></div>
+      </div>
+    </div>
+    {% if ai_screen.get('rationale') %}
+    <p class="text-[11px] text-gray-400 italic mb-1.5 line-clamp-1"
+       title="{{ ai_screen.rationale }}">{{ ai_screen.rationale }}</p>
+    {% endif %}
+    {% endif %}
+
     {# Top buyer-ready reasons #}
     {% if snap.priority_reasons %}
     <div class="flex flex-wrap gap-1 mb-2">
