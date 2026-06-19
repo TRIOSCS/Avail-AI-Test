@@ -654,6 +654,50 @@ class TestQuotesPartials:
         resp = client.post(f"/v2/partials/quotes/{q.id}/add-offer/999999")
         assert resp.status_code == 404
 
+    def test_add_offer_to_quote_same_requisition(self, client, db_session: Session, test_user: User):
+        """Same-requisition offer attaches successfully (200, QuoteLine created)."""
+        req = _req(db_session, test_user)
+        vendor = _vendor(db_session)
+        offer = _offer(db_session, req, vendor)
+        q = _quote(db_session, req, test_user)
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/quotes/{q.id}/add-offer/{offer.id}")
+        assert resp.status_code == 200
+
+        line = db_session.query(QuoteLine).filter_by(quote_id=q.id, offer_id=offer.id).first()
+        assert line is not None
+
+    def test_add_offer_to_quote_null_requisition_allowed(self, client, db_session: Session, test_user: User):
+        """Null-requisition offer (unsolicited Tier-5) attaches successfully (Option A
+        allows it)."""
+        req = _req(db_session, test_user)
+        vendor = _vendor(db_session)
+        offer = _offer(db_session, req, vendor, requisition_id=None)
+        q = _quote(db_session, req, test_user)
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/quotes/{q.id}/add-offer/{offer.id}")
+        assert resp.status_code == 200
+
+        line = db_session.query(QuoteLine).filter_by(quote_id=q.id, offer_id=offer.id).first()
+        assert line is not None
+
+    def test_add_offer_to_quote_cross_requisition_forbidden(self, client, db_session: Session, test_user: User):
+        """Cross-requisition offer → 403, no QuoteLine created."""
+        req_a = _req(db_session, test_user)
+        req_b = _req(db_session, test_user)
+        vendor = _vendor(db_session)
+        offer = _offer(db_session, req_b, vendor)  # belongs to req_b
+        q = _quote(db_session, req_a, test_user)  # quote is for req_a
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/quotes/{q.id}/add-offer/{offer.id}")
+        assert resp.status_code == 403
+
+        line = db_session.query(QuoteLine).filter_by(quote_id=q.id, offer_id=offer.id).first()
+        assert line is None
+
     def test_send_quote(self, client, db_session: Session, test_user: User):
         req = _req(db_session, test_user)
         q = _quote(db_session, req, test_user, status=QuoteStatus.DRAFT)

@@ -312,6 +312,10 @@ dossier_shell.html lazy-loads (each div has an explicit hx-target="this"):
     |     (or ?refresh=1) → inner div auto-fires the EXISTING POST /v2/partials/
     |     search/run SSE flow (results_shell.html). The banner sits OUTSIDE that
     |     hx-post div so it survives the cache-miss SSE swap.
+    |     On cache HIT a read-only market-baseline strip renders above the rows
+    |     (compute_market_baseline helper): franchise-median price, authorized stock,
+    |     and authorized source count — computed from cached rows, no new DB columns,
+    |     no persistence. Graceful empty state when no authorized rows exist.
     +-- GET /v2/partials/search/history?mpn=         (EXISTING search_history_panel)
     +-- GET /v2/partials/search/dossier/specs?mpn=   part_dossier.dossier_specs
 ```
@@ -324,6 +328,16 @@ freshest run. The search-flow templates (`dossier_shell` "Live market" section,
 `requisition_picker_modal`) use the **light brand-card skin** matching the rest of the
 site — the earlier dark "terminal" look was the visual outlier and has been removed.
 Page-level + per-row RFQ/offer actions (the quick-source endpoints) are wired.
+
+**Market-baseline strip (price-sanity step 1)** — `compute_market_baseline(rows)` in
+`app/routers/part_dossier.py` filters the already-fetched cached rows to
+`is_authorized=True` rows and computes: franchise-median price (same upper-median
+algorithm as `search_service._median`), authorized stock (sum of `qty_available`),
+and authorized source count. Passed as `market_baseline` to `dossier_market.html`,
+which renders a read-only strip above the vendor rows on cache HIT. No DB column,
+no persistence, no SSE change, no Alpine state — pure server-side summary. Graceful
+empty state ("No franchise/authorized pricing for this part.") when no authorized
+row exists. `market_baseline=None` on cache MISS (strip omitted entirely).
 
 **Degraded-source banner** — `search_service.get_market_source_health(db)` reuses
 `_build_connectors` to partition the live-market connectors into available / `down`
