@@ -1730,6 +1730,23 @@ class TestTryConnectorConfig:
 
 
 class TestEnrichBatch:
+    @pytest.fixture(autouse=True)
+    def _isolate_ebay_harvest(self):
+        """enrich_batch (PR #418) calls harvest_ebay_titles for every found card, which
+        looks the eBay credential up in the api_sources table.
+
+        These unit tests drive enrich_batch with a MagicMock db, so that lookup escapes
+        the mock and hits the table-less in-memory engine (no such table: api_sources).
+        eBay harvesting has its own coverage in test_ebay_title_mining.py; isolate it
+        here so these tests stay focused on enrich_batch's match/skip counting.
+        """
+        with patch(
+            "app.services.enrichment.harvest_ebay_titles",
+            new_callable=AsyncMock,
+            return_value=0,
+        ):
+            yield
+
     def test_batch_enrichment(self):
         from app.services.enrichment import enrich_batch
 
