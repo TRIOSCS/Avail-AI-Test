@@ -1,0 +1,332 @@
+"""Tests for buyplan_hub.supervise_overview — manager metric strip + triage.
+
+Covers:
+- PENDING plan with no approver appears in approvals strip count + triage list.
+- HALTED plan appears in halted strip count + triage list.
+- ISSUE line appears in flagged strip count + triage list (with issue_type).
+- Old AWAITING_PO line on ACTIVE plan appears in overdue_po strip count + triage list.
+- Fresh AWAITING_PO line (within SLA) is NOT overdue.
+- Strip open_value sums non-terminal plan costs; COMPLETED/CANCELLED excluded.
+- Strip avg_margin averages non-terminal plan margins; NULL rows skipped.
+
+Depends on: app/services/buyplan_hub.supervise_overview,
+            conftest fixtures (db_session, test_user, manager_user, test_quote,
+            test_requisition).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy.orm import Session
+
+from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from app.models.buy_plan import BuyPlan, BuyPlanLine
+
+
+def _make_plan(
+    db: Session,
+    *,
+    quote_id: int,
+    requisition_id: int,
+    status: str = BuyPlanStatus.ACTIVE,
+    so_status: str = SOVerificationStatus.APPROVED,
+    submitted_by_id: int | None = None,
+    approved_by_id: int | None = None,
+    total_cost=None,
+    total_margin_pct=None,
+) -> BuyPlan:
+    """Create + flush a minimal BuyPlan header."""
+    plan = BuyPlan(
+        quote_id=quote_id,
+        requisition_id=requisition_id,
+        status=status,
+        so_status=so_status,
+        submitted_by_id=submitted_by_id,
+        approved_by_id=approved_by_id,
+        total_cost=total_cost,
+        total_margin_pct=total_margin_pct,
+    )
+    db.add(plan)
+    db.flush()
+    return plan
+
+
+def _make_line(
+    db: Session,
+    *,
+    buy_plan_id: int,
+    status: str = BuyPlanLineStatus.AWAITING_PO,
+    buyer_id: int | None = None,
+    issue_type: str | None = None,
+    quantity: int = 10,
+    last_nudge_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> BuyPlanLine:
+    """Create + flush a minimal BuyPlanLine, optionally back-dating created_at."""
+    line = BuyPlanLine(
+        buy_plan_id=buy_plan_id,
+        buyer_id=buyer_id,
+        quantity=quantity,
+        status=status,
+        issue_type=issue_type,
+        last_nudge_at=last_nudge_at,
+    )
+    db.add(line)
+    db.flush()
+    # Back-date created_at after flush so the ORM default is overwritten
+    if created_at is not None:
+        db.query(BuyPlanLine).filter(BuyPlanLine.id == line.id).update(
+            {"created_at": created_at}, synchronize_session="fetch"
+        )
+        db.flush()
+        db.refresh(line)
+    return line
+
+
+# ── 1. Approval count + triage ────────────────────────────────────────
+
+
+def test_supervise_approvals(db_session, test_user, test_quote, test_requisition):
+    """PENDING plan with no approver appears in approval_count and approvals triage."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=test_user.id,
+        approved_by_id=None,  # no approver yet
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["approval_count"] >= 1
+    approval_ids = [d["plan_id"] for d in result["triage"]["approvals"]]
+    assert plan.id in approval_ids
+
+    # Check plan dict has required keys
+    row = next(d for d in result["triage"]["approvals"] if d["plan_id"] == plan.id)
+    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+
+
+def test_supervise_approved_plan_not_in_approvals(db_session, manager_user, test_quote, test_requisition):
+    """PENDING plan that already has approved_by_id is NOT in the approval queue."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        approved_by_id=manager_user.id,  # already approved
+    )
+
+    result = supervise_overview(db_session)
+    approval_ids = [d["plan_id"] for d in result["triage"]["approvals"]]
+    assert plan.id not in approval_ids
+
+
+# ── 2. Halted count + triage ──────────────────────────────────────────
+
+
+def test_supervise_halted(db_session, test_user, test_quote, test_requisition):
+    """HALTED plan appears in halted_count and halted triage."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.HALTED,
+        submitted_by_id=test_user.id,
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["halted_count"] >= 1
+    halted_ids = [d["plan_id"] for d in result["triage"]["halted"]]
+    assert plan.id in halted_ids
+
+    row = next(d for d in result["triage"]["halted"] if d["plan_id"] == plan.id)
+    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+
+
+# ── 3. Flagged (ISSUE) lines ─────────────────────────────────────────
+
+
+def test_supervise_flagged(db_session, test_user, test_quote, test_requisition):
+    """ISSUE line appears in flagged_count and flagged triage with issue_type."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.ISSUE,
+        issue_type="lead_time_changed",
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["flagged_count"] >= 1
+    flagged_ids = [d["line_id"] for d in result["triage"]["flagged"]]
+    assert line.id in flagged_ids
+
+    row = next(d for d in result["triage"]["flagged"] if d["line_id"] == line.id)
+    assert "issue_type" in row
+    assert row["issue_type"] == "lead_time_changed"
+    assert row["plan_id"] == plan.id
+
+
+# ── 4. Overdue AWAITING_PO lines ─────────────────────────────────────
+
+
+def test_supervise_overdue_po(db_session, test_user, test_quote, test_requisition):
+    """Old AWAITING_PO line on ACTIVE plan appears in overdue_po_count and overdue_pos
+    triage."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    # Back-date created_at well past the 4h SLA; last_nudge_at = None (never nudged)
+    old_ts = datetime.now(timezone.utc) - timedelta(hours=24)
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.AWAITING_PO,
+        created_at=old_ts,
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["overdue_po_count"] >= 1
+    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
+    assert line.id in overdue_ids
+
+    row = next(d for d in result["triage"]["overdue_pos"] if d["line_id"] == line.id)
+    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name"}
+    assert row["plan_id"] == plan.id
+
+
+def test_supervise_fresh_awaiting_po_not_overdue(db_session, test_user, test_quote, test_requisition):
+    """A fresh AWAITING_PO line (within SLA) is NOT counted as overdue."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    # created_at defaults to now → well within the 4h SLA
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.AWAITING_PO,
+    )
+
+    result = supervise_overview(db_session)
+    overdue_ids = [d["line_id"] for d in result["triage"]["overdue_pos"]]
+    assert line.id not in overdue_ids
+
+
+# ── 5. Open value + avg margin ────────────────────────────────────────
+
+
+def test_supervise_open_value_and_avg_margin(db_session, test_quote, test_requisition):
+    """open_value sums non-terminal plans; COMPLETED/CANCELLED excluded.
+
+    avg_margin averages.
+    """
+    from app.services.buyplan_hub import supervise_overview
+
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        total_cost="1000.00",
+        total_margin_pct="20.00",
+    )
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.HALTED,
+        total_cost="500.00",
+        total_margin_pct="10.00",
+    )
+    # COMPLETED — must be excluded from open_value
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.COMPLETED,
+        total_cost="9999.00",
+        total_margin_pct="50.00",
+    )
+
+    result = supervise_overview(db_session)
+    strip = result["strip"]
+
+    # open_value must include at least 1000 + 500 from the two open plans
+    assert strip["open_value"] >= 1500.0
+    # avg_margin must be between the two non-terminal margins (10–20)
+    assert 10.0 <= strip["avg_margin"] <= 20.0
+
+
+def test_supervise_null_cost_treated_as_zero(db_session, test_quote, test_requisition):
+    """Plans with NULL total_cost contribute 0 to open_value (no crash, no None)."""
+    from app.services.buyplan_hub import supervise_overview
+
+    _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        total_cost=None,
+        total_margin_pct=None,
+    )
+
+    result = supervise_overview(db_session)
+    # Must return a numeric, not None
+    assert isinstance(result["strip"]["open_value"], float)
+    assert isinstance(result["strip"]["avg_margin"], float)
+
+
+# ── 6. All-clean baseline ─────────────────────────────────────────────
+
+
+def test_supervise_empty_db(db_session):
+    """supervise_overview returns zero strip counts on an empty DB."""
+    from app.services.buyplan_hub import supervise_overview
+
+    result = supervise_overview(db_session)
+    strip = result["strip"]
+
+    assert strip["open_value"] == 0.0
+    assert strip["avg_margin"] == 0.0
+    assert strip["approval_count"] == 0
+    assert strip["halted_count"] == 0
+    assert strip["overdue_po_count"] == 0
+    assert strip["flagged_count"] == 0
+
+    triage = result["triage"]
+    assert triage["approvals"] == []
+    assert triage["halted"] == []
+    assert triage["overdue_pos"] == []
+    assert triage["flagged"] == []

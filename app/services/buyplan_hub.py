@@ -3,7 +3,7 @@
 Purpose: Role-aware read models for the Buy Plan Deal Hub page.
          Provides the buyer's per-line PO queue (lines the buyer must cut a PO for)
          across all their active deals, plus the stage-grouped deal board for sales
-         and manager views.
+         and manager views, plus the manager supervise overview (metric strip + triage).
 
 Called by: routers/htmx_views.py (buy plan hub partials)
 Depends on: models.buy_plan (BuyPlan, BuyPlanLine), models.auth (User),
@@ -14,8 +14,14 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session, joinedload
 
+from ..config import settings
 from ..constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
 from ..models.buy_plan import BuyPlan, BuyPlanLine
+
+# Nudge SLA threshold: reuse the buyer nudge hours from settings so the value
+# stays in one place.  Import is resolved at call time to avoid a circular
+# import when tests stub out the settings object.
+_NUDGE_BUYER_HOURS: int = settings.buyplan_nudge_buyer_hours
 
 
 def buyer_line_queue(db: Session, user: object) -> list[dict]:
@@ -239,3 +245,169 @@ def deals_board(db: Session, user: object, *, scope: str) -> dict[str, list[dict
         )
 
     return board
+
+
+# ── Supervise overview ────────────────────────────────────────────────
+
+#: Non-terminal plan statuses that contribute to the "open value" strip metric.
+_OPEN_STATUSES: frozenset[str] = frozenset(
+    {
+        BuyPlanStatus.DRAFT,
+        BuyPlanStatus.PENDING,
+        BuyPlanStatus.ACTIVE,
+        BuyPlanStatus.HALTED,
+    }
+)
+
+
+def supervise_overview(db: Session) -> dict:
+    """Return the manager metric strip and needs-attention triage for the supervise
+    lens.
+
+    Strip metrics
+    -------------
+    open_value       : sum of total_cost over non-terminal plans (DRAFT/PENDING/ACTIVE/HALTED).
+                       NULL total_cost rows contribute 0.
+    avg_margin       : average of total_margin_pct over those same plans.
+                       Plans with NULL total_margin_pct are excluded from the average;
+                       returns 0.0 when no data.
+    approval_count   : plans with status==PENDING and approved_by_id IS NULL.
+    halted_count     : plans with status==HALTED.
+    overdue_po_count : AWAITING_PO lines on ACTIVE plans whose last_nudge_at (or
+                       created_at when never nudged) is older than the buyer nudge SLA
+                       (``settings.buyplan_nudge_buyer_hours``).
+    flagged_count    : lines with status==ISSUE.
+
+    Triage lists
+    ------------
+    approvals    : list of plan dicts for plans awaiting approval.
+    halted       : list of plan dicts for halted plans.
+    overdue_pos  : list of line dicts for overdue AWAITING_PO lines.
+    flagged      : list of line dicts for ISSUE lines.
+
+    Plan dicts contain: plan_id, customer_name, value, submitted_by_name.
+    Line dicts contain: line_id, plan_id, mpn, vendor_name, buyer_name,
+                        plus issue_type for flagged items.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import func
+
+    nudge_threshold = datetime.now(timezone.utc) - timedelta(hours=_NUDGE_BUYER_HOURS)
+
+    # ── Strip aggregates (single query) ──────────────────────────────
+    agg = (
+        db.query(
+            func.coalesce(func.sum(BuyPlan.total_cost), 0).label("open_value"),
+            func.coalesce(func.avg(BuyPlan.total_margin_pct), 0).label("avg_margin"),
+        )
+        .filter(BuyPlan.status.in_(_OPEN_STATUSES))
+        .one()
+    )
+    open_value = float(agg.open_value)
+    avg_margin = float(agg.avg_margin)
+
+    # ── Approval queue ───────────────────────────────────────────────
+    approval_plans = (
+        db.query(BuyPlan)
+        .filter(
+            BuyPlan.status == BuyPlanStatus.PENDING,
+            BuyPlan.approved_by_id.is_(None),
+        )
+        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+    # ── Halted plans ─────────────────────────────────────────────────
+    halted_plans = (
+        db.query(BuyPlan)
+        .filter(BuyPlan.status == BuyPlanStatus.HALTED)
+        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
+    # ── Overdue AWAITING_PO lines on ACTIVE plans ────────────────────
+    overdue_lines = (
+        db.query(BuyPlanLine)
+        .join(BuyPlan, BuyPlanLine.buy_plan_id == BuyPlan.id)
+        .filter(
+            BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO,
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+            func.coalesce(BuyPlanLine.last_nudge_at, BuyPlanLine.created_at) < nudge_threshold,
+        )
+        .options(
+            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanLine.buyer),
+        )
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+    # ── Flagged (ISSUE) lines ────────────────────────────────────────
+    flagged_lines = (
+        db.query(BuyPlanLine)
+        .filter(BuyPlanLine.status == BuyPlanLineStatus.ISSUE)
+        .options(
+            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanLine.buyer),
+        )
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+    # ── Helpers ──────────────────────────────────────────────────────
+    def _customer(plan: BuyPlan) -> str | None:
+        if plan.quote and plan.quote.customer_site:
+            site = plan.quote.customer_site
+            co = site.company if hasattr(site, "company") else None
+            return co.name if co else getattr(site, "site_name", None)
+        return None
+
+    def _submitted_by_name(plan: BuyPlan) -> str | None:
+        sub = plan.submitted_by
+        if sub:
+            return sub.name or sub.email
+        return None
+
+    def _plan_dict(plan: BuyPlan) -> dict:
+        return {
+            "plan_id": plan.id,
+            "customer_name": _customer(plan),
+            "value": plan.total_cost,
+            "submitted_by_name": _submitted_by_name(plan),
+        }
+
+    def _line_dict(ln: BuyPlanLine, *, include_issue_type: bool = False) -> dict:
+        offer = ln.offer
+        buyer = ln.buyer
+        row = {
+            "line_id": ln.id,
+            "plan_id": ln.buy_plan_id,
+            "mpn": offer.mpn if offer else None,
+            "vendor_name": offer.vendor_name if offer else None,
+            "buyer_name": (buyer.name or buyer.email) if buyer else None,
+        }
+        if include_issue_type:
+            row["issue_type"] = ln.issue_type
+        return row
+
+    return {
+        "strip": {
+            "open_value": open_value,
+            "avg_margin": avg_margin,
+            "approval_count": len(approval_plans),
+            "halted_count": len(halted_plans),
+            "overdue_po_count": len(overdue_lines),
+            "flagged_count": len(flagged_lines),
+        },
+        "triage": {
+            "approvals": [_plan_dict(p) for p in approval_plans],
+            "halted": [_plan_dict(p) for p in halted_plans],
+            "overdue_pos": [_line_dict(ln) for ln in overdue_lines],
+            "flagged": [_line_dict(ln, include_issue_type=True) for ln in flagged_lines],
+        },
+    }
