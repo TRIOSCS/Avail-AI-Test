@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models.auth import User
 from ..models.crm import Company
-from ..models.intelligence import ActivityLog  # noqa: F401 — imported for type clarity
 from ..models.prospect_account import ProspectAccount
 
 # ── Internal DB-injectable sweep (testable) ───────────────────────────────────
@@ -78,8 +77,7 @@ async def job_account_sweep_with_db(db: Session) -> None:
         # Check dormancy
         last_activity = get_last_activity_at(co.id, db)
         if last_activity is not None:
-            la = last_activity.replace(tzinfo=timezone.utc) if last_activity.tzinfo is None else last_activity
-            days_dormant = (now - la).days
+            days_dormant = (now - last_activity).days
             if days_dormant < inactivity_days:
                 skipped_count += 1
                 continue
@@ -315,7 +313,6 @@ def reclaim_prospect_account(
     Called by: app/routers/htmx_views.py
     """
     from ..constants import ProspectAccountStatus
-    from ..models.auth import User as UserModel
     from ..services.activity_service import log_activity
 
     pa = db.get(ProspectAccount, prospect_id)
@@ -325,9 +322,9 @@ def reclaim_prospect_account(
     if pa.status not in (ProspectAccountStatus.SUGGESTED, ProspectAccountStatus.CLAIMED):
         raise ValueError(f"Cannot reclaim a prospect with status '{pa.status}'")
 
-    user = db.get(UserModel, user_id)
+    user = db.get(User, user_id)
     if user is None:
-        raise LookupError(f"User {user_id} not found")
+        raise RuntimeError(f"User {user_id} not found")
 
     manager_email = settings.account_sweep_manager_email
     is_former_owner = pa.swept_from_owner_id == user_id

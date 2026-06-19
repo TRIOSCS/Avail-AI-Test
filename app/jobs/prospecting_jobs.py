@@ -49,14 +49,14 @@ def register_prospecting_jobs(scheduler, settings):
 
 def register_sweep_jobs(scheduler, settings):
     """Register SP4 account-sweep + reactivation jobs."""
-    if settings.account_sweep_enabled:
+    if settings.prospecting_enabled and settings.account_sweep_enabled:
         scheduler.add_job(
             _job_account_sweep,
             CronTrigger(hour=1, minute=0),
             id="account_sweep",
             name="90-day account hardline sweep",
         )
-    if settings.account_reactivation_sweep_enabled:
+    if settings.prospecting_enabled and settings.account_reactivation_sweep_enabled:
         scheduler.add_job(
             _job_auto_surface_reactivation,
             CronTrigger(hour=2, minute=0),

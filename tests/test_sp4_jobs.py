@@ -106,3 +106,31 @@ def test_reactivation_job_delegates(scheduler_db):
         job = getattr(importlib.import_module("app.jobs.prospecting_jobs"), "_job_auto_surface_reactivation")
         asyncio.run(job())
     mock_fn.assert_awaited_once()
+
+
+# ── prospecting_enabled gate tests ───────────────────────────────────────────
+
+
+def test_no_sweep_jobs_when_prospecting_disabled(scheduler_db):
+    """Neither sweep job registers when prospecting_enabled=False."""
+    from app.config import Settings
+    from app.jobs.prospecting_jobs import register_sweep_jobs
+
+    s = Settings(prospecting_enabled=False, account_sweep_enabled=True, account_reactivation_sweep_enabled=True)
+    register_sweep_jobs(scheduler, s)
+    ids = [j.id for j in scheduler.get_jobs()]
+    assert "account_sweep" not in ids
+    assert "auto_surface_reactivation" not in ids
+
+
+def test_both_sweep_jobs_register_when_both_flags_true(scheduler_db):
+    """Both sweep jobs register when prospecting_enabled=True and per-feature flags are
+    True."""
+    from app.config import Settings
+    from app.jobs.prospecting_jobs import register_sweep_jobs
+
+    s = Settings(prospecting_enabled=True, account_sweep_enabled=True, account_reactivation_sweep_enabled=True)
+    register_sweep_jobs(scheduler, s)
+    ids = [j.id for j in scheduler.get_jobs()]
+    assert "account_sweep" in ids
+    assert "auto_surface_reactivation" in ids

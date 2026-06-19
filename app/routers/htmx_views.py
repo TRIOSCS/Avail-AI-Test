@@ -10143,6 +10143,8 @@ async def reclaim_prospect_htmx(
         )
     except LookupError:
         raise HTTPException(404, "Prospect not found")
+    except RuntimeError:
+        raise HTTPException(500, "Session user record not found")
     except ValueError as e:
         error = str(e)
 
