@@ -157,6 +157,19 @@ def enrich_card_from_element14(db: Session, card: MaterialCard, results: list[di
     if result is None:
         return summary
 
+    # Surface coverage gaps: attributes Element14 returned that mapped to no seeded key
+    # (the connector collects them in `dropped`). This log IS the consumer the field was
+    # added for — without it, unmapped parametrics are an invisible coverage signal that
+    # tells us which aliases to add to VENDOR_SPEC_MAP next.
+    dropped = result.get("dropped") or {}
+    if dropped:
+        logger.info(
+            "element14 card={}: {} unmapped attribute(s) (spec-map coverage gap): {}",
+            card.id,
+            len(dropped),
+            sorted(dropped),
+        )
+
     commodity = _resolve_commodity(result)
     if set_category(card, commodity, source=_E14_SOURCE, confidence=_E14_CONFIDENCE):
         summary["categorized"] = 1

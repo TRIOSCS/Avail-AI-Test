@@ -64,8 +64,12 @@ def normalize_value(
     if not from_unit or not canonical_unit:
         return value
 
-    from_lower = from_unit.lower()
-    canonical_lower = canonical_unit.lower()
+    # Canonicalize GREEK SMALL LETTER MU (U+03BC) to MICRO SIGN (U+00B5): Element14 and
+    # other distributors routinely encode micro- prefixes (µF/µH/µA) with U+03BC, but the
+    # _CONVERSIONS keys use U+00B5. Without this they miss the conversion rule and the value
+    # is stored unconverted (e.g. 0.1µF logged as 0.1pF — a 1e6× error).
+    from_lower = from_unit.lower().replace("μ", "µ")
+    canonical_lower = canonical_unit.lower().replace("μ", "µ")
 
     if from_lower == canonical_lower:
         return value

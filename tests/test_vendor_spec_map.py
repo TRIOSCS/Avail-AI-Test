@@ -122,3 +122,27 @@ def test_map_only_lists_seeded_commodities():
         seeded_keys = {s["spec_key"] for s in seeds[commodity]}
         for spec_key in key_map:
             assert spec_key in seeded_keys, f"{commodity}.{spec_key} not a seeded key"
+
+
+def test_dielectric_letter_o_codes_normalize_to_seed_digit_zero():
+    """Vendors write C0G/NP0 with a letter O (COG/NPO); map to the seed's digit-zero so
+    the real value reaches its enum instead of being dropped by record_spec's enum
+    gate."""
+    specs, _ = extract_vendor_specs(_attrs([("Dielectric", "COG")]), "capacitors", **_E14_KEYS)
+    assert specs["dielectric"] == "C0G"
+    specs, _ = extract_vendor_specs(_attrs([("Dielectric", "NPO")]), "capacitors", **_E14_KEYS)
+    assert specs["dielectric"] == "NP0"
+    # an already-correct spelling is preserved unchanged
+    specs, _ = extract_vendor_specs(_attrs([("Dielectric", "X7R")]), "capacitors", **_E14_KEYS)
+    assert specs["dielectric"] == "X7R"
+
+
+def test_mounting_spellings_normalize_to_seed_enum():
+    for raw, want in [
+        ("Surface Mount", "SMD"),
+        ("SMD/SMT", "SMD"),
+        ("Through Hole", "through-hole"),
+        ("Thru-Hole", "through-hole"),
+    ]:
+        specs, _ = extract_vendor_specs(_attrs([("Mounting Type", raw)]), "capacitors", **_E14_KEYS)
+        assert specs.get("mounting") == want, f"{raw!r} -> {specs.get('mounting')!r}, want {want!r}"

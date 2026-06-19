@@ -245,6 +245,24 @@ def test_element14_categorizes_and_writes_specs_at_tier_90(db_session: Session):
     assert summary["specs_written"] == len(facets)
 
 
+def test_element14_logs_dropped_coverage_gap(db_session: Session):
+    """The connector's ``dropped`` (attributes that mapped to no seeded key) must be
+    SURFACED as an INFO coverage-gap log — not computed and silently discarded."""
+    from loguru import logger
+
+    seed_commodity_schemas(db_session)
+    card = _card(db_session, "GRM155R71C104KA88D")
+
+    messages: list[str] = []
+    sink = logger.add(lambda m: messages.append(m.record["message"]), level="INFO")
+    try:
+        enrich_card_from_element14(db_session, card, [_E14_CAP_RESULT])  # carries a dropped attr
+    finally:
+        logger.remove(sink)
+
+    assert any("unmapped attribute" in m for m in messages), messages
+
+
 def test_element14_tier_90_beats_lower_tier_desc_parse(db_session: Session):
     # element14_api (90) is authoritative — it overrides a card already carrying a
     # connector_desc (84) dielectric and even sets category over a desc_parse (83) one.

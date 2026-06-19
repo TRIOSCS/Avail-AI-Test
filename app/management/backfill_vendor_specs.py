@@ -44,7 +44,10 @@ from app.search_service import _build_connectors
 
 # Imported as module symbols so the per-source dispatch can resolve them by name via
 # globals() at call time (honoring monkeypatched writers in the isolation tests).
-from app.services.vendor_spec_enrich import (  # noqa: F401  (referenced by name in _SOURCE_CONFIG)
+from app.services.vendor_spec_enrich import (  # noqa: F401 — DO NOT REMOVE
+    # Resolved BY NAME at call time via `globals()[config["writer"]]` in run() (so tests can
+    # monkeypatch the module symbol). They look unused to static analysis, but removing them
+    # turns the dispatch into a KeyError at runtime with no warning. Keep both imports.
     enrich_card_from_element14,
     enrich_card_from_mouser,
 )

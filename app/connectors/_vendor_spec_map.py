@@ -101,11 +101,37 @@ def _normalize_tolerance(value: str, commodity: str) -> str:
     return f"{sign}{m.group(1)}%"
 
 
+def _normalize_dielectric(value: str, _commodity: str) -> str:
+    """Re-spell a capacitor dielectric code to the SEED enum: distributors often write the
+    zero-digit codes with a letter O ("COG"/"NPO") — map them to the seed's "C0G"/"NP0"
+    (digit zero) so a correct value lands in its enum instead of being dropped."""
+    return {"COG": "C0G", "NPO": "NP0"}.get(value.strip().upper(), value)
+
+
+def _normalize_mounting(value: str, _commodity: str) -> str:
+    """Re-spell a mounting/termination style to the SEED enum (SMD / through-hole /
+    press-fit).
+
+    Element14 writes "Surface Mount"/"SMD/SMT"/"SMT" and "Through Hole"/ "Thru-Hole";
+    map the common spellings so they reach the enum instead of being dropped.
+    """
+    v = value.strip().lower().replace("-", " ")
+    if v in ("surface mount", "smd", "smt", "smd/smt", "smt/smd"):
+        return "SMD"
+    if v in ("through hole", "thru hole", "throughhole"):
+        return "through-hole"
+    if v in ("press fit", "pressfit"):
+        return "press-fit"
+    return value
+
+
 # seeded spec_key -> commodity-aware value normalizer (only the enum keys whose vendor
 # SPELLING differs from the seed; every normalizer takes (value, commodity)).
 _VALUE_NORMALIZERS = {
     "package": _normalize_case_code,
     "tolerance": _normalize_tolerance,
+    "dielectric": _normalize_dielectric,
+    "mounting": _normalize_mounting,
 }
 
 
