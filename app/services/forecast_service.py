@@ -145,9 +145,9 @@ def pipeline_summary(db: Session, *, owner_id: int | None = None) -> dict:
             bucket["value"] += val
             bucket["weighted"] += weighted
 
-    won_count = base.filter(Requisition.status == "won").count()
-    lost_count = base.filter(Requisition.status == "lost").count()
     won_reqs = base.filter(Requisition.status == "won").all()
+    won_count = len(won_reqs)
+    lost_count = base.filter(Requisition.status == "lost").count()
     won_values = bulk_deal_values(db, [r.id for r in won_reqs])
     won_value = sum(won_values.values())
     decided = won_count + lost_count
@@ -232,10 +232,12 @@ def pipeline_by_owner(db: Session) -> list[dict]:
 
     real_ids = [oid for oid in by_owner if oid is not None]
     if real_ids:
-        names = dict(db.query(User.id, User.name).filter(User.id.in_(real_ids)).all())
-        emails = dict(db.query(User.id, User.email).filter(User.id.in_(real_ids)).all())
+        owner_names = {
+            uid: (name or email)
+            for uid, name, email in db.query(User.id, User.name, User.email).filter(User.id.in_(real_ids)).all()
+        }
         for oid in real_ids:
-            by_owner[oid]["owner_name"] = names.get(oid) or emails.get(oid) or f"User #{oid}"
+            by_owner[oid]["owner_name"] = owner_names.get(oid) or f"User #{oid}"
 
     return sorted(by_owner.values(), key=lambda a: a["weighted_value"], reverse=True)
 
