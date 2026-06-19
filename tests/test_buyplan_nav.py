@@ -5,7 +5,8 @@ Covers:
 - mobile_nav.html contains the 'buy-plans' nav item and NOT the 'reporting' item
 - urlToNav maps /v2/buy-plans to 'buy-plans' (not 'reporting'); no /v2/reporting entry
 - Badge elif contains 'buy-plans'
-- _NAV_ID_ALIAS has no 'buy-plans' key; quotes alias survives
+- _NAV_ID_ALIAS has no 'buy-plans' key; no alias resolves to 'reporting'
+  (the quotes->reporting alias was removed in Task 11 when Reporting was retired)
 
 Called by: pytest
 Depends on: app.routers.htmx_views, app/templates/htmx/partials/shared/mobile_nav.html

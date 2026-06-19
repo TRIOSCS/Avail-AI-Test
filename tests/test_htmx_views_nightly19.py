@@ -4,7 +4,7 @@ routes.
 Targets:
   - dashboard_partial
   - requisition/vendor/company/pipeline insights (GET + refresh)
-  - buy_plans_list_partial
+  - buy_plans_list_partial (now the role-lens Deal Hub shell)
   - buy_plan_detail_partial
 
 Called by: pytest autodiscovery
