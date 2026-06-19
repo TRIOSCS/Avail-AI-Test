@@ -6,7 +6,7 @@
 <div>
   {% if buy_plans %}
   <div class="flex items-center justify-between mb-4">
-    <p class="text-sm text-gray-500">
+    <p class="text-sm text-gray-600">
       <span class="font-semibold text-gray-900">{{ buy_plans|length }}</span> buy plan{{ "s" if buy_plans|length != 1 }}
     </p>
   </div>
@@ -29,7 +29,7 @@
             hx-target="#main-content"
             hx-push-url="/v2/buy-plans/{{ bp.id }}">
           <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">#{{ bp.id }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-500 font-mono">{{ bp.sales_order_number or "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600 font-mono">{{ bp.sales_order_number or "—" }}</td>
           <td class="px-4 py-2.5">
             {% set bp_colors = {
               "draft": "bg-slate-50 text-slate-600",
@@ -43,21 +43,21 @@
               {{ (bp.status or 'unknown')|replace('_', ' ')|capitalize }}
             </span>
           </td>
-          <td class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
           <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "—" }}</td>
-          <td class="px-4 py-2.5 text-sm text-gray-500">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-600">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="py-12 text-center">
+  <div class="py-6 sm:py-8 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
     </svg>
-    <p class="text-sm font-medium text-gray-500 mt-3">No buy plans linked.</p>
+    <p class="text-sm font-medium text-gray-600 mt-3">No buy plans linked.</p>
     <p class="text-xs text-gray-400 mt-1">Buy plans are created after a quote is won and a sales order is received.</p>
   </div>
   {% endif %}

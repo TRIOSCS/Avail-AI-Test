@@ -494,7 +494,7 @@ def test_tiny_text_does_not_grow():
 
     Ratchet — sweeps lower this as they bump 10px → text-xs / text-[11px].
     """
-    BASELINE = 270
+    BASELINE = 229
     count = _tpl_substring_count("text-[10px]")
     assert count <= BASELINE, (
         f"text-[10px] usages rose to {count} (baseline {BASELINE}). Use text-xs "
@@ -509,7 +509,7 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 998
+    BASELINE = 839
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "
@@ -520,7 +520,7 @@ def test_low_contrast_secondary_text_does_not_grow():
 def test_focus_ring_1_does_not_grow():
     """One focus-ring spec: ring-2 (see .input / .btn). Ratchet down the legacy
     ring-1 usages; never add a new one."""
-    BASELINE = 81
+    BASELINE = 65
     count = _tpl_substring_count("focus:ring-1")
     assert count <= BASELINE, (
         f"focus:ring-1 usages rose to {count} (baseline {BASELINE}). Use the "
@@ -534,7 +534,7 @@ def test_inline_table_cell_padding_does_not_grow():
 
     Ratchet.
     """
-    BASELINE = 726
+    BASELINE = 647
     count = _tpl_regex_count(r'<t[dh][^>]*class="[^"]*\bp[xy]-[0-9]')
     assert count <= BASELINE, (
         f"inline-padded <td>/<th> rose to {count} (baseline {BASELINE}). Use "
@@ -547,7 +547,7 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 341
+    BASELINE = 321
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."

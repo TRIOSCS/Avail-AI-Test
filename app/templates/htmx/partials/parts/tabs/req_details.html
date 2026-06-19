@@ -29,7 +29,7 @@
     ] %}
     {% for field_key, field_label, field_value in spec_fields %}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">{{ field_label }}:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">{{ field_label }}:</span>
       {% if not is_archived %}
       <div id="reqd-spec-{{ field_key }}"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
@@ -49,7 +49,7 @@
 
   {# ── Description (click-to-edit, full width) ─────────────── #}
   <div class="mt-2">
-    <span class="text-xs text-gray-500">Description:</span>
+    <span class="text-xs text-gray-600">Description:</span>
     {% if not is_archived %}
     <div id="reqd-description"
          class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors mt-0.5"
@@ -73,7 +73,7 @@
   <div class="grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
     {# Name #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Name:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Name:</span>
       {% if not is_archived %}
       <div id="reqd-name"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
@@ -89,7 +89,7 @@
 
     {# Status #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Status:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Status:</span>
       {% if not is_archived %}
       <div id="reqd-status"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
@@ -105,7 +105,7 @@
 
     {# Customer (read-only) #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Customer:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Customer:</span>
       <div class="px-1 py-0.5">
         <span class="text-gray-900">{{ req.customer_name or '—' }}</span>
       </div>
@@ -113,7 +113,7 @@
 
     {# Urgency #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Urgency:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Urgency:</span>
       {% if not is_archived %}
       <div id="reqd-urgency"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
@@ -129,7 +129,7 @@
 
     {# Deadline #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Deadline:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Deadline:</span>
       {% if not is_archived %}
       <div id="reqd-deadline"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
@@ -145,7 +145,7 @@
 
     {# Owner #}
     <div class="flex items-center gap-1">
-      <span class="text-xs text-gray-500 whitespace-nowrap">Owner:</span>
+      <span class="text-xs text-gray-600 whitespace-nowrap">Owner:</span>
       {% if not is_archived %}
       <div id="reqd-owner"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"

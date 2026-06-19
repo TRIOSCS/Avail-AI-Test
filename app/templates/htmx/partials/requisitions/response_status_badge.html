@@ -9,6 +9,6 @@
   'rejected': 'bg-rose-50 text-rose-700',
   'flagged': 'bg-amber-50 text-amber-700',
 } %}
-<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(response.status, 'bg-gray-100 text-gray-600') }}">
+<span class="badge {{ status_colors.get(response.status, 'bg-gray-100 text-gray-600') }}">
   {{ response.status|capitalize }}
 </span>

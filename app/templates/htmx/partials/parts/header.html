@@ -21,7 +21,7 @@
           {% if requirement.primary_mpn or requirement.substitutes %}
             {{ mpn_chips(requirement) }}
           {% else %}
-            <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add part numbers</span>
+            <span class="text-xs text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add part numbers</span>
           {% endif %}
         </div>
         {% if requirement.manufacturer %}
@@ -29,7 +29,7 @@
         <span id="hdr-manufacturer"
               hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/manufacturer"
               hx-target="#hdr-manufacturer" hx-swap="outerHTML"
-              class="text-sm text-gray-500 cursor-pointer hover:text-brand-500 truncate"
+              class="text-sm text-gray-600 cursor-pointer hover:text-brand-500 truncate"
               title="Click to edit manufacturer">
           {{ requirement.manufacturer }}
         </span>
@@ -38,7 +38,7 @@
         <span id="hdr-brand"
               hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/brand"
               hx-target="#hdr-brand" hx-swap="outerHTML"
-              class="text-sm text-gray-500 cursor-pointer hover:text-brand-500 truncate"
+              class="text-sm text-gray-600 cursor-pointer hover:text-brand-500 truncate"
               title="Click to edit brand">
           {{ requirement.brand or 'No brand' }}
         </span>
@@ -52,7 +52,7 @@
       <p id="hdr-description"
          hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/description"
          hx-target="#hdr-description" hx-swap="outerHTML"
-         class="text-xs text-gray-500 mt-0.5 cursor-pointer hover:text-brand-500 truncate"
+         class="text-xs text-gray-600 mt-0.5 cursor-pointer hover:text-brand-500 truncate"
          title="Click to edit description">
         {{ requirement|part_description or '+ Add description' }}
       </p>
@@ -74,7 +74,7 @@
       <span id="hdr-condition"
             hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/condition"
             hx-target="#hdr-condition" hx-swap="outerHTML"
-            class="text-xs text-gray-500 cursor-pointer hover:text-brand-500"
+            class="text-xs text-gray-600 cursor-pointer hover:text-brand-500"
             title="Click to edit condition">
         {{ requirement.condition or '—' }}
       </span>
@@ -88,7 +88,7 @@
               title="Click to edit qty">
           {{ '{:,}'.format(requirement.target_qty) if requirement.target_qty else '—' }}
         </span>
-        <span class="text-[10px] text-gray-400 block">qty</span>
+        <span class="text-xs text-gray-400 block">qty</span>
       </div>
 
       {# Target Price — inline editable #}
@@ -100,7 +100,7 @@
               title="Click to edit target price">
           {{ '${:,.4f}'.format(requirement.target_price) if requirement.target_price else '—' }}
         </span>
-        <span class="text-[10px] text-gray-400 block">target</span>
+        <span class="text-xs text-gray-400 block">target</span>
       </div>
 
     </div>

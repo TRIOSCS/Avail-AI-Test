@@ -157,7 +157,7 @@
                     {{ mpn_chips(req, sub_card_map) }}
                   {% elif col_key == 'description' %}
                     {% set desc = req|part_description %}
-                    <span class="text-xs text-gray-500 truncate max-w-[200px] block" title="{{ desc }}">{{ desc or '—' }}</span>
+                    <span class="text-xs text-gray-600 truncate max-w-[200px] block" title="{{ desc }}">{{ desc or '—' }}</span>
                   {% elif col_key == 'brand' %}
                     {{ req.brand or '—' }}
                   {% elif col_key == 'requisition' %}
@@ -196,12 +196,12 @@
       </table>
   </div>
   {% else %}
-  <div class="flex-1 flex flex-col items-center justify-center text-gray-400 py-12">
+  <div class="flex-1 flex flex-col items-center justify-center text-gray-400 py-6 sm:py-8">
     <svg class="h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
     </svg>
     <p class="text-xs font-medium">No parts found</p>
-    <p class="text-[10px] mt-0.5 text-gray-300">Adjust filters or add requirements</p>
+    <p class="text-xs mt-0.5 text-gray-300">Adjust filters or add requirements</p>
   </div>
   {% endif %}
 
