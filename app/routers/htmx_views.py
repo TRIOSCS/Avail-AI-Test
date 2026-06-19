@@ -9411,6 +9411,8 @@ def _prospect_stats_ctx(db: Session) -> dict:
 
     "Buyer ready" = is_buyer_ready over SUGGESTED.
     """
+    from ..config import settings as _settings
+
     suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
     claimed = (
         db.query(sqlfunc.count(ProspectAccount.id))
@@ -9418,11 +9420,17 @@ def _prospect_stats_ctx(db: Session) -> dict:
         .scalar()
         or 0
     )
+    screened_out_count = (
+        sum(1 for p in suggested if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out")
+        if _settings.ai_screen_enabled
+        else 0
+    )
     return {
         "total": len(suggested),
         "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
         "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
         "claimed": claimed,
+        "screened_out": screened_out_count,
     }
 
 
@@ -9495,7 +9503,30 @@ async def prospecting_list_partial(
     total_pages = max(1, (total + per_page - 1) // per_page)
     offset = (page - 1) * per_page
 
-    if sort == "buyer_ready_desc":
+    if sort == "ai_match_desc":
+        from ..config import settings as _settings
+
+        rows = base.all()
+        if _settings.ai_screen_enabled:
+            screened_out_rows = [
+                p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
+            ]
+            rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
+        else:
+            screened_out_rows = []
+        rows.sort(
+            key=lambda p: (
+                -(p.trio_match_score or 0),
+                -(p.opportunity_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        total = len(rows)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        prospects = rows[offset : offset + per_page]
+    elif sort == "buyer_ready_desc":
+        screened_out_rows = []
         # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
         rows = base.all()
         snapshots = {p.id: build_priority_snapshot(p) for p in rows}
@@ -9509,6 +9540,7 @@ async def prospecting_list_partial(
         )
         prospects = rows[offset : offset + per_page]
     else:
+        screened_out_rows = []
         if sort == "fit_desc":
             base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
         elif sort == "recent_desc":
@@ -9544,6 +9576,7 @@ async def prospecting_list_partial(
             "total_pages": total_pages,
             "status_counts": status_counts,
             "all_total": all_total,
+            "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
