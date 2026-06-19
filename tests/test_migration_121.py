@@ -16,7 +16,7 @@ PG_URL = os.environ.get("TEST_PG_URL", "")
 
 
 @pytest.mark.skipif(not PG_URL, reason="TEST_PG_URL not set — PG required for migration tests")
-def test_migration_120_upgrade_downgrade():
+def test_migration_121_upgrade_downgrade():
     """Upgrade adds columns; downgrade removes them; re-upgrade restores them."""
     import subprocess
 
@@ -33,7 +33,7 @@ def test_migration_120_upgrade_downgrade():
         )
         assert result.returncode == 0, f"alembic {cmd} failed:\n{result.stderr}"
 
-    alembic("upgrade 120_prospect_ai_scores")
+    alembic("upgrade 121_prospect_ai_scores")
 
     from sqlalchemy import create_engine, inspect
 

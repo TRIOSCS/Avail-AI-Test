@@ -5454,6 +5454,119 @@ async def company_site_detail_partial(
     return template_response("htmx/partials/customers/site_detail.html", ctx)
 
 
+# ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
+# STATIC trailing segments (dup-suggestion / name-suggestion / apply-name), so they
+# MUST precede the GET /v2/partials/customers/{company_id} catch-all below. ADDITIVE —
+# the merge engine (merge_companies) and the dedup scanner are reused as-is; no merge
+# logic lives here. The dup banner reuses the existing merge-form → preview → POST
+# .../merge flow. Naming is suggest-only — never a silent rewrite.
+
+
+@router.get("/v2/partials/customers/{company_id}/dup-suggestion", response_class=HTMLResponse)
+async def company_dup_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy per-account duplicate banner — top dedup match for THIS company + a Merge
+    button reusing the merge-form/preview/merge flow.
+
+    Renders nothing (empty 200) when there is no near-duplicate.
+    """
+    from ..company_utils import find_company_dedup_candidates
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
+    # already honors the auto_keep heuristic; here we only need the OTHER side as the
+    # merge-away candidate.
+    try:
+        candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+    except Exception as e:  # pragma: no cover - defensive, mirrors data-ops scan guard
+        logger.warning("dup-suggestion scan failed for company {}: {}", company_id, e)
+        return HTMLResponse("")
+
+    match = None
+    for pair in candidates:
+        a, b = pair["company_a"], pair["company_b"]
+        if a["id"] == company_id:
+            match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
+            break
+        if b["id"] == company_id:
+            match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
+            break
+
+    if not match:
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "match": match}
+    return template_response("htmx/partials/customers/_dup_suggestion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/name-suggestion", response_class=HTMLResponse)
+async def company_name_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Suggest-only name-normalization chip: surface the suffix-stripped form of the
+    current name as "Suggested name: X — Apply?".
+
+    Uses the same normalizer the dedup scanner uses, re-cased from the original tokens
+    (so we only strip the legal suffix / leading "the", never lowercase the whole name).
+    Renders nothing (empty 200) when the current name is already clean.
+    """
+    from ..company_utils import suggest_clean_company_name
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    suggested = suggest_clean_company_name(company.name or "")
+    if not suggested or suggested == (company.name or "").strip():
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "suggested": suggested}
+    return template_response("htmx/partials/customers/_name_suggestion.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/apply-name", response_class=HTMLResponse)
+async def company_apply_name(
+    request: Request,
+    company_id: int,
+    name: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a suggested company name (rep-initiated; the suggest-only counterpart to a
+    silent rewrite).
+
+    normalized_name follows automatically via Company._sync_normalized_name
+    (@validates). Returns an empty 200 so the chip removes itself (hx-swap outerHTML).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    new_name = (name or "").strip()
+    if not new_name:
+        raise HTTPException(400, "Name is required")
+
+    company.name = new_name  # @validates resyncs normalized_name
+    db.commit()
+
+    from ..cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+    logger.info("Company {} renamed to '{}' (suggested) by {}", company_id, new_name, user.email)
+    return HTMLResponse("")
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,

@@ -376,7 +376,12 @@ async def create_company(
     """
     from ...enrichment_service import normalize_company_input
 
+    # AI typo-fix + domain cleanup. SUGGEST-ONLY for the NAME (Increment 3): the
+    # AI-corrected name is used to strengthen the duplicate check, but the stored name is
+    # what the rep typed (whitespace-trimmed). Any normalization is surfaced post-create
+    # as the "Suggested name — Apply?" chip rather than silently overwriting the input.
     clean_name, clean_domain = await normalize_company_input(payload.name, payload.domain or "")
+    stored_name = (payload.name or "").strip() or clean_name
 
     # Duplicate check (unless force=True)
     if not force:
@@ -394,7 +399,7 @@ async def create_company(
             payload.website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
         )
     company = Company(
-        name=clean_name,
+        name=stored_name,
         website=payload.website,
         industry=payload.industry,
         notes=payload.notes,

@@ -268,6 +268,8 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | disposition_reason | String, nullable | Optional free-text rationale for the disposition (parity with prospect dismiss audit). |
 | disposition_set_by | FK -> users (SET NULL) | Who set the disposition. |
 | disposition_set_at | UTCDateTime, nullable | When the disposition was last set. |
+| normalized_name | String 255, indexed (btree + Postgres GIN pg_trgm), **nullable, NOT unique** | Migration 120 (Increment 3, AI-org). Suffix-stripped/lowercased dedup match key, kept in lockstep with `name` by `Company._sync_normalized_name` (`@validates("name")`) using `vendor_utils.normalize_vendor_name` — the SAME normalizer the dedup scanner scores with. Mirrors VendorCard but is **nullable + non-unique** on purpose (companies legitimately share a normalized form across the dedup window; the policy keeps different-owner accounts separate). The `ix_companies_normalized_name_trgm` GIN index is Postgres-guarded (`dialect.name == 'postgresql'`); SQLite gets only the btree and the scanner falls back to rapidfuzz. |
+| alternate_names | JSON (default []) | Migration 120. Names this company has been known by. `merge_companies` appends the loser's `name` (+ its own `alternate_names`, deduped, never keep's display name) so a re-import of the old name fuzzy-matches the survivor instead of recreating the duplicate (mirrors `VendorCard._record_alternate_name`). |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
