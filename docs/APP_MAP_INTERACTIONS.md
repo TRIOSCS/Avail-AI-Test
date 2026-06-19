@@ -1371,6 +1371,31 @@ assembly) live in `app/services/crm_service.py` (`staleness_tier`,
 (active SiteContacts across the company's active sites + legacy site-level
 contacts on active sites) and passes it to
 `tabs/contacts_tab.html`, which is now the default (first-rendered) tab.
+`company_contact_rows` orders `is_archived ASC, is_priority DESC, is_primary DESC,
+full_name` — priority contacts surface to the top, archived sink to the bottom
+(still shown). Legacy rows (`contact is None`) are appended after, never sorted.
+
+**Disposition (Increment 1, migration 118).** Salespeople dispose of accounts +
+contacts via setter routes in `htmx_views.py` (all owner-or-admin where they touch
+ownership/disposition; `is_admin = user.role == UserRole.ADMIN`, mirroring
+`release_prospect`):
+- `POST .../{company_id}/disposition` (`set_company_disposition`) — `_VALID_DISPOSITIONS`
+  allowlist (`active`/`bucket`, invalid → 400), writes `disposition`/`disposition_reason`/
+  `disposition_set_by`/`disposition_set_at`, `invalidate_prefix('company_list')` +
+  `('companies_typeahead')`, re-renders `_disposition_control.html`. Reversible.
+- `POST .../{company_id}/send-to-prospecting` (`send_company_to_prospecting_htmx`) →
+  `prospect_claim.send_company_to_prospecting` (FOR-UPDATE lock, clears
+  `account_owner_id` + sets `ownership_cleared_at`, find-or-create
+  `ProspectAccount(status=SUGGESTED)` by `Company.domain`; no-domain ⇒ ownership-clear
+  only, no pool row; commit/rollback). Returns the company detail partial + `HX-Trigger`
+  showToast.
+- `POST .../{company_id}/contacts/{contact_id}/priority` + `.../archive` —
+  IDOR-scoped via `SiteContact JOIN CustomerSite WHERE company_id == company_id`
+  (cross-company → 404); toggle the boolean, re-render `_priority_toggle.html` /
+  `_archive_toggle.html`.
+Bucket suppression is QUERY-LAYER only (never in `cadence_service.materialize_all_clocks`);
+the NULL-safe exclusion lives in the shared `_needs_call_filter` (count==list invariant)
++ `cdm_company_query`'s base, with `staleness='bucket'` the lone escape hatch.
 
 ---
 

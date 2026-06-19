@@ -148,6 +148,8 @@
           <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
           {% endif %}
           {% include 'htmx/partials/customers/_role_chip_editor.html' %}
+          {% include 'htmx/partials/customers/_priority_toggle.html' %}
+          {% include 'htmx/partials/customers/_archive_toggle.html' %}
           {% include 'htmx/partials/customers/_dnc_toggle.html' %}
         </div>
         <p class="text-[11px] text-gray-500 mt-0.5">{{ contact.title or "—" }}</p>

@@ -5127,6 +5127,186 @@ async def set_contact_dnc(
     )
 
 
+_VALID_DISPOSITIONS = frozenset({"active", "bucket"})
+
+
+@router.post("/v2/partials/customers/{company_id}/disposition", response_class=HTMLResponse)
+async def set_company_disposition(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.disposition (active|bucket); re-renders the disposition control.
+
+    Owner-or-admin only (mirrors release_prospect). Validates against the allowlist
+    (invalid → 400). Writes disposition + optional reason + audit fields
+    (set_by/set_at). Reversible — set back to 'active'. Invalidates the cached
+    company_list / typeahead so the bucketed account drops out of the call-list.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can set disposition")
+
+    form = await request.form()
+    disp_raw = (form.get("disposition") or "").strip()
+    reason_raw = (form.get("disposition_reason") or "").strip()
+
+    if disp_raw not in _VALID_DISPOSITIONS:
+        raise HTTPException(400, f"Invalid disposition '{disp_raw}'. Valid: {sorted(_VALID_DISPOSITIONS)}")
+
+    company.disposition = disp_raw
+    company.disposition_reason = reason_raw or None
+    company.disposition_set_by = user.id
+    company.disposition_set_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    logger.info("Company {} disposition set to {} by {}", company_id, company.disposition, user.email)
+    return template_response(
+        "htmx/partials/customers/_disposition_control.html",
+        {"request": request, "company": company},
+    )
+
+
+@router.post("/v2/partials/customers/{company_id}/send-to-prospecting", response_class=HTMLResponse)
+async def send_company_to_prospecting_htmx(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send an owned account back to the prospecting pool.
+
+    Owner-or-admin only. Clears ownership, surfaces the account as a SUGGESTED prospect
+    (by domain), and re-renders the company detail partial with a toast.
+    """
+    from ..services.prospect_claim import send_company_to_prospecting
+
+    try:
+        result = send_company_to_prospecting(company_id, user.id, db, is_admin=(user.role == UserRole.ADMIN))
+    except LookupError:
+        raise HTTPException(404, "Company not found")
+    except ValueError as e:
+        raise HTTPException(403, str(e))
+
+    from app.cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+
+    msg = f"Sent {result['company_name']} back to prospecting"
+    if not result["pooled"]:
+        msg += " (no domain — ownership cleared, not pooled)"
+    response = await company_detail_partial(request, company_id, user=user, db=db)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    return response
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/priority",
+    response_class=HTMLResponse,
+)
+async def set_contact_priority(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_priority; re-renders the priority toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_priority= → True; empty → False (clear).
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_priority = bool((form.get("is_priority") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_priority set to {} by {} (company {})",
+        contact_id,
+        contact.is_priority,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_priority_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/archive",
+    response_class=HTMLResponse,
+)
+async def set_contact_archive(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set or clear SiteContact.is_archived; re-renders the archive toggle partial.
+
+    IDOR-safe: the contact must belong to a site under this company. Non-empty
+    is_archived= → True; empty → False (restore). Archived contacts stay visible
+    (sorted to the bottom) — is_active is never touched here.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    contact.is_archived = bool((form.get("is_archived") or "").strip())
+    db.commit()
+    db.refresh(contact)
+
+    logger.info(
+        "Contact {} is_archived set to {} by {} (company {})",
+        contact_id,
+        contact.is_archived,
+        user.email,
+        company_id,
+    )
+    return template_response(
+        "htmx/partials/customers/_archive_toggle.html",
+        {"request": request, "company": company, "contact": contact},
+    )
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
