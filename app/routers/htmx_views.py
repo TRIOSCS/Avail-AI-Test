@@ -10255,6 +10255,48 @@ async def settings_data_ops_tab(
     return template_response("htmx/partials/settings/data_ops.html", ctx)
 
 
+@router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
+async def settings_api_keys_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """API credentials management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..config import GRAPH_SCOPES
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    def _field(source: str, env_var: str) -> dict:
+        is_set = credential_is_set(db, source, env_var)
+        masked = ""
+        if is_set:
+            plain = get_credential(db, source, env_var)
+            masked = mask_value(plain) if plain else "••••••••"
+        return {"is_set": is_set, "masked": masked}
+
+    current_scopes = set(GRAPH_SCOPES.split())
+    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
+            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
+            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
+            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
+            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
+            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
+            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
+            "current_scopes": sorted(current_scopes),
+            "missing_scopes": sorted(needed_scopes - current_scopes),
+            "teams_ready": not (needed_scopes - current_scopes),
+        }
+    )
+    return template_response("htmx/partials/settings/api_keys.html", ctx)
+
+
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
 async def admin_vendor_merge(
     request: Request,
