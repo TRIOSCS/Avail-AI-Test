@@ -8,7 +8,7 @@ What:
     false) — mirror do_not_contact exactly.
 Downgrade: drops the added columns + index (reversible).
 
-Revision ID: 118_company_disposition_and_contact_flags
+Revision ID: 118_company_disposition
 Revises: 117_datasheet_library_drive_id
 Create Date: 2026-06-18
 """
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "118_company_disposition_and_contact_flags"
+revision = "118_company_disposition"
 down_revision = "117_datasheet_library_drive_id"
 branch_labels = None
 depends_on = None
