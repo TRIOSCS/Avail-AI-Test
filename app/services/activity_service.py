@@ -335,6 +335,7 @@ def log_call_activity(
     subject: str | None = None,
     requisition_id: int | None = None,
     requirement_id: int | None = None,
+    force_meaningful: bool | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     direction = _normalize_direction(direction)
@@ -368,7 +369,11 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
-        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
+        is_meaningful=(
+            force_meaningful
+            if force_meaningful is not None
+            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
+        ),
     )
     db.add(record)
     db.flush()

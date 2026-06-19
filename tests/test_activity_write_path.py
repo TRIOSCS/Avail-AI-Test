@@ -367,6 +367,37 @@ def test_log_call_activity_writes_canonical_call_logged(db_session, test_user):
     assert rec.direction == "outbound"
 
 
+@pytest.mark.parametrize(
+    ("force_meaningful", "duration_seconds", "expected"),
+    [
+        pytest.param(True, None, True, id="force_true_no_duration"),
+        pytest.param(None, None, False, id="auto_gate_no_duration"),
+        pytest.param(None, 5, True, id="auto_gate_above_threshold"),
+    ],
+)
+def test_log_call_activity_force_meaningful(db_session, test_user, force_meaningful, duration_seconds, expected):
+    """force_meaningful overrides the duration gate; None falls through to the existing
+    auto-capture logic (unchanged)."""
+    from app.services.activity_service import CALL_MEANINGFUL_MIN_SECONDS
+
+    # Ensure the parametrized "above threshold" case is genuinely above it.
+    if duration_seconds is not None and expected is True:
+        duration_seconds = CALL_MEANINGFUL_MIN_SECONDS
+
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550000001",
+        duration_seconds=duration_seconds,
+        external_id=f"force-meaningful-{force_meaningful}-{duration_seconds}",
+        contact_name="Test Vendor",
+        db=db_session,
+        force_meaningful=force_meaningful,
+    )
+    assert rec is not None
+    assert rec.is_meaningful is expected
+
+
 def test_activity_tab_renders_rfq_sent_event(client, db_session, test_requisition, test_user):
     """An RFQ-sent event written via log_activity() appears on the Activity tab.
 
