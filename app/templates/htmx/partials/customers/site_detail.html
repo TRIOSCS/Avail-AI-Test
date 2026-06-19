@@ -19,7 +19,7 @@
 <title hx-swap-oob="true">{{ site.site_name }} — {{ company.name }} — AvailAI</title>
 
 {% set badge_colors = {
-  'new': 'bg-gray-100 text-gray-500',
+  'new': 'bg-gray-100 text-gray-600',
   'on_target': 'bg-emerald-100 text-emerald-700',
   'due': 'bg-amber-100 text-amber-700',
   'overdue': 'bg-rose-100 text-rose-700'
@@ -28,7 +28,7 @@
 <div class="max-w-3xl mx-auto space-y-6">
 
   {# ── Breadcrumb back to the company header ───────────────── #}
-  <div class="flex items-center gap-1.5 text-xs text-gray-500">
+  <div class="flex items-center gap-1.5 text-xs text-gray-600">
     <a role="button" tabindex="0"
        class="text-brand-500 hover:text-brand-600 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500 rounded"
        hx-get="/v2/partials/customers/{{ company.id }}/header"
@@ -42,16 +42,16 @@
   </div>
 
   {# ── Site Header Card ────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
+  <div class="card-lg">
     <div class="flex items-start justify-between flex-wrap gap-3">
       <div>
         <div class="flex items-center gap-2 flex-wrap">
           <h1 class="text-xl font-bold text-gray-900">{{ site.site_name }}</h1>
           {% if site.site_type %}
-          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ site.site_type }}</span>
+          <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ site.site_type }}</span>
           {% endif %}
         </div>
-        <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+        <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
           {% if site.city %}
             <span>{{ site.city }}{% if site.state %}, {{ site.state }}{% endif %}{% if site.country %} · {{ site.country }}{% endif %}</span>
           {% endif %}
@@ -61,7 +61,7 @@
           {% endif %}
         </div>
       </div>
-      <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(site_cadence, 'bg-gray-100 text-gray-500') }}">
+      <span class="px-2.5 py-1 text-xs font-semibold rounded-full {{ badge_colors.get(site_cadence, 'bg-gray-100 text-gray-600') }}">
         {{ {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'}.get(site_cadence, site_cadence|title) }}
       </span>
     </div>
@@ -93,7 +93,7 @@
         {% endif %}
       </div>
     </div>
-    <p class="mt-2 text-xs text-gray-500 italic">{{ site_next_best_touch }}</p>
+    <p class="mt-2 text-xs text-gray-600 italic">{{ site_next_best_touch }}</p>
   </div>
 
   {# ── Mini tab strip — Contacts + Open requisitions at this site ──── #}
@@ -108,7 +108,7 @@
           Contacts
           {% set _real = contact_rows|selectattr('contact')|list|length %}
           {% if _real > 0 %}
-          <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-[10px] font-bold rounded-full bg-brand-100 text-brand-600">{{ _real }}</span>
+          <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ _real }}</span>
           {% endif %}
         </button>
         <button @click="siteTab = 'reqs'"
@@ -118,7 +118,7 @@
                 class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           Open requisitions at this site
           {% if open_reqs %}
-          <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-[10px] font-bold rounded-full bg-brand-100 text-brand-600">{{ open_reqs|length }}</span>
+          <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ open_reqs|length }}</span>
           {% endif %}
         </button>
         {# Notes tab deferred — pending the ActivityLog FK scoping fix (Increment 2 follow-up) #}
@@ -129,7 +129,7 @@
     <div x-show="siteTab === 'contacts'" class="mt-4" role="tabpanel">
       {% if not contact_rows %}
       <div class="p-6 text-center">
-        <p class="text-sm text-gray-500">No contacts at this site yet.</p>
+        <p class="text-sm text-gray-600">No contacts at this site yet.</p>
       </div>
       {% else %}
       <div class="space-y-2">
@@ -160,8 +160,8 @@
                 hx-target="#main-content"
                 hx-push-url="/v2/requisitions/{{ r.id }}">
               <td class="px-4 py-2 text-sm font-medium text-brand-500">{{ r.name }}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{{ r.status or "—" }}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{{ r.created_at.strftime('%b %d, %Y') if r.created_at else "—" }}</td>
+              <td class="px-4 py-2 text-sm text-gray-600">{{ r.status or "—" }}</td>
+              <td class="px-4 py-2 text-sm text-gray-600">{{ r.created_at.strftime('%b %d, %Y') if r.created_at else "—" }}</td>
             </tr>
             {% endfor %}
           </tbody>
@@ -169,7 +169,7 @@
       </div>
       {% else %}
       <div class="p-6 text-center">
-        <p class="text-sm text-gray-500">No open requisitions at this site.</p>
+        <p class="text-sm text-gray-600">No open requisitions at this site.</p>
       </div>
       {% endif %}
     </div>

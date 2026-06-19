@@ -10,7 +10,7 @@
 {# data-offset/data-limit: read by the outreach logger's system-initiated list
    refresh (htmx_app.js) so logging a touch doesn't snap a paginated list back
    to page 1 — the filter form itself intentionally carries no offset field. #}
-<div class="sticky top-0 z-10 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-gray-500 bg-gray-50 border-b border-gray-200"
+<div class="sticky top-0 z-10 flex items-center justify-between px-3 py-1.5 text-[11px] font-medium text-gray-600 bg-gray-50 border-b border-gray-200"
      data-offset="{{ offset }}" data-limit="{{ limit }}">
   <span>{{ total }} account{{ "s" if total != 1 }}</span>
   {# Slim cadence-coverage figure (reporting_service.coverage_report) — on-target+due ÷ active. #}
@@ -60,10 +60,10 @@
             title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
-        <p class="text-[11px] text-gray-500 truncate">
+        <p class="text-[11px] text-gray-600 truncate">
           {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
-          {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">{{ c.tier }}</span>{% endif %}
-          <span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">{{ c.site_count }} sites</span>
+          {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
+          <span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.site_count }} sites</span>
         </p>
       </div>
       <div class="flex-shrink-0 text-right">
@@ -106,9 +106,9 @@
           title="{{ c.cadence_state|replace('_', ' ')|title }}"></span>
     <div class="flex-1 min-w-0">
       <p class="text-sm font-medium text-gray-900 truncate">{{ c.name }}</p>
-      <p class="text-[11px] text-gray-500 truncate">
+      <p class="text-[11px] text-gray-600 truncate">
         {{ c.account_type or "—" }}{% if c.account_owner %} &middot; {{ c.account_owner.name }}{% endif %}
-        {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-[10px] bg-gray-100 text-gray-500">{{ c.tier }}</span>{% endif %}
+        {% if c.tier %}<span class="ml-1 px-1 py-0.5 rounded text-xs bg-gray-100 text-gray-600">{{ c.tier }}</span>{% endif %}
       </p>
     </div>
     <div class="flex-shrink-0 text-right">
@@ -138,7 +138,7 @@
      hx-trigger="click, keyup[key=='Enter']"
      class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand-500">Prev</a>
   {% endif %}
-  <span class="px-2 py-1 text-xs text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+  <span class="px-2 py-1 text-xs text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
   {% if offset + limit < total %}
   <a role="button" tabindex="0"
      hx-get="/v2/partials/customers/account-list?offset={{ offset + limit }}&limit={{ limit }}"
@@ -155,6 +155,6 @@
 {% else %}
 <div class="p-8 text-center">
   <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-  <p class="mt-2 text-sm text-gray-500">No accounts found</p>
+  <p class="mt-2 text-sm text-gray-600">No accounts found</p>
 </div>
 {% endif %}

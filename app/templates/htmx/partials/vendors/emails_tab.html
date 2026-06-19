@@ -12,16 +12,16 @@
   <div class="grid grid-cols-3 gap-3">
     <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
       <p class="text-lg font-bold text-brand-600">{{ total_sent }}</p>
-      <p class="text-xs text-gray-500">RFQs Sent</p>
+      <p class="text-xs text-gray-600">RFQs Sent</p>
     </div>
     <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
       <p class="text-lg font-bold text-emerald-600">{{ total_responses }}</p>
-      <p class="text-xs text-gray-500">Responses</p>
+      <p class="text-xs text-gray-600">Responses</p>
     </div>
     <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
       {% set response_rate = (total_responses / total_sent * 100) if total_sent > 0 else 0 %}
       <p class="text-lg font-bold text-amber-600">{{ "%.0f"|format(response_rate) }}%</p>
-      <p class="text-xs text-gray-500">Response Rate</p>
+      <p class="text-xs text-gray-600">Response Rate</p>
     </div>
   </div>
 
@@ -50,11 +50,11 @@
             'bounced': 'bg-rose-50 text-rose-600',
             'failed': 'bg-rose-50 text-rose-700',
           } %}
-          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
+          <span class="px-1.5 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
             {{ (c.status or 'sent')|capitalize }}
           </span>
         </div>
-        <div class="flex items-center gap-3 text-xs text-gray-500">
+        <div class="flex items-center gap-3 text-xs text-gray-600">
           <span>To: {{ c.vendor_contact or "" }}</span>
           <span>{{ c.created_at.strftime('%b %d, %Y %H:%M') if c.created_at else "" }}</span>
           {% if c.parts_included %}
@@ -94,21 +94,21 @@
               "quote": "bg-emerald-50 text-emerald-700",
               "decline": "bg-rose-50 text-rose-700",
               "ooo": "bg-amber-50 text-amber-700",
-              "bounce": "bg-gray-100 text-gray-500",
+              "bounce": "bg-gray-100 text-gray-600",
             } %}
             {% if r.classification %}
-            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
+            <span class="px-1.5 py-0.5 text-xs font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
               {{ r.classification|capitalize }}
             </span>
             {% endif %}
             {% if r.confidence is not none %}
-            <span class="text-[10px] font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">
+            <span class="text-xs font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">
               {{ "%.0f"|format(r.confidence * 100) }}%
             </span>
             {% endif %}
           </div>
         </div>
-        <div class="flex items-center gap-3 text-xs text-gray-500">
+        <div class="flex items-center gap-3 text-xs text-gray-600">
           <span>From: {{ r.vendor_email or "" }}</span>
           <span>{{ r.received_at.strftime('%b %d, %Y %H:%M') if r.received_at else "" }}</span>
           {% if r.requisition_id %}
@@ -140,7 +140,7 @@
     <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
     </svg>
-    <p class="text-sm text-gray-500 mb-1">No email history with this vendor.</p>
+    <p class="text-sm text-gray-600 mb-1">No email history with this vendor.</p>
     <p class="text-xs text-gray-400">Email history appears when RFQs are sent or responses are received.</p>
   </div>
   {% endif %}

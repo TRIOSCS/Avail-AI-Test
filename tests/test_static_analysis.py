@@ -494,7 +494,7 @@ def test_tiny_text_does_not_grow():
 
     Ratchet — sweeps lower this as they bump 10px → text-xs / text-[11px].
     """
-    BASELINE = 165
+    BASELINE = 125
     count = _tpl_substring_count("text-[10px]")
     assert count <= BASELINE, (
         f"text-[10px] usages rose to {count} (baseline {BASELINE}). Use text-xs "
@@ -509,7 +509,7 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 718
+    BASELINE = 583
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
         f"text-gray-500 usages rose to {count} (baseline {BASELINE}). Prefer "
@@ -547,7 +547,7 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 300
+    BASELINE = 299
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."

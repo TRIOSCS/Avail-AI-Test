@@ -6,7 +6,7 @@
 <div x-data="{ showAdd: false }">
   {# Add contact form #}
   <div class="flex items-center justify-between mb-2">
-    <span class="text-xs text-gray-500">{{ contacts|length }} contact{{ "s" if contacts|length != 1 }}</span>
+    <span class="text-xs text-gray-600">{{ contacts|length }} contact{{ "s" if contacts|length != 1 }}</span>
     <button @click="showAdd = !showAdd"
             class="text-xs text-brand-500 hover:text-brand-600"
             x-text="showAdd ? 'Cancel' : '+ Add'">+ Add</button>
@@ -46,7 +46,7 @@
           <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
           {% endif %}
         </div>
-        <div class="flex items-center gap-3 text-[11px] text-gray-500">
+        <div class="flex items-center gap-3 text-[11px] text-gray-600">
           {% if c.title %}<span>{{ c.title }}</span>{% endif %}
           {% if c.email %}<a href="mailto:{{ c.email }}" class="text-brand-500"
               data-outreach-log data-channel="email" data-value="{{ c.email }}"
@@ -61,7 +61,7 @@
       </div>
       <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
         <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}/edit-form'})"
-                class="text-[10px] text-brand-500 hover:text-brand-700" title="Edit contact">
+                class="text-xs text-brand-500 hover:text-brand-700" title="Edit contact">
           Edit
         </button>
         {% if not c.is_primary %}
@@ -69,7 +69,7 @@
                 hx-target="#site-{{ site.id }}-contacts"
                 hx-swap="innerHTML"
                 data-loading-disable
-                class="text-[10px] text-brand-500 hover:text-brand-700" title="Set as primary">
+                class="text-xs text-brand-500 hover:text-brand-700" title="Set as primary">
           Primary
         </button>
         {% endif %}
@@ -78,7 +78,7 @@
                 hx-swap="outerHTML"
                 hx-confirm="Delete contact {{ c.full_name }}?"
                 data-loading-disable
-                class="text-[10px] text-rose-500 hover:text-rose-700" title="Delete">
+                class="text-xs text-rose-500 hover:text-rose-700" title="Delete">
           Delete
         </button>
       </div>

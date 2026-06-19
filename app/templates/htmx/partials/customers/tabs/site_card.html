@@ -13,11 +13,11 @@
       <div>
         <span class="text-sm font-medium text-gray-900">{{ s.site_name }}</span>
         {% if s.site_type %}
-        <span class="ml-2 px-1.5 py-0.5 text-[10px] font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
+        <span class="ml-2 px-1.5 py-0.5 text-xs font-medium rounded bg-brand-50 text-brand-600 uppercase">{{ s.site_type }}</span>
         {% endif %}
       </div>
     </div>
-    <div class="flex items-center gap-3 text-xs text-gray-500">
+    <div class="flex items-center gap-3 text-xs text-gray-600">
       {% if s.city %}{{ s.city }}{% if s.country %}, {{ s.country }}{% endif %}{% endif %}
       {% if s.owner %}<span class="text-brand-500">{{ s.owner.name or s.owner.email }}</span>{% endif %}
     </div>
@@ -28,16 +28,16 @@
     {# Site details #}
     <div class="px-4 py-3 bg-gray-50 grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
       {% if s.contact_name %}
-      <div><span class="text-gray-500">Primary:</span> {{ s.contact_name }}</div>
+      <div><span class="text-gray-600">Primary:</span> {{ s.contact_name }}</div>
       {% endif %}
       {% if s.contact_email %}
-      <div><span class="text-gray-500">Email:</span> <a href="mailto:{{ s.contact_email }}" class="text-brand-500">{{ s.contact_email }}</a></div>
+      <div><span class="text-gray-600">Email:</span> <a href="mailto:{{ s.contact_email }}" class="text-brand-500">{{ s.contact_email }}</a></div>
       {% endif %}
       {% if s.contact_phone %}
-      <div><span class="text-gray-500">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
+      <div><span class="text-gray-600">Phone:</span> <a href="tel:{{ s.contact_phone }}" class="text-brand-500">{{ s.contact_phone }}</a></div>
       {% endif %}
       {% if s.payment_terms %}
-      <div><span class="text-gray-500">Terms:</span> {{ s.payment_terms }}</div>
+      <div><span class="text-gray-600">Terms:</span> {{ s.payment_terms }}</div>
       {% endif %}
     </div>
 

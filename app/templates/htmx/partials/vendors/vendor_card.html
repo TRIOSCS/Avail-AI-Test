@@ -36,7 +36,7 @@
   {% if v.vendor_score %}
   <div>
     <div class="flex items-center justify-between mb-1">
-      <span class="text-xs text-gray-500">Score</span>
+      <span class="text-xs text-gray-600">Score</span>
       <span class="text-sm font-semibold
         {% if v.vendor_score >= 66 %}text-emerald-700
         {% elif v.vendor_score >= 33 %}text-brand-600
@@ -60,16 +60,16 @@
   {% if v.brand_tags or v.commodity_tags %}
   <div class="flex flex-wrap gap-1">
     {% for tag in (v.brand_tags or [])[:5] %}
-    <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-violet-50 text-violet-600">{{ tag }}</span>
+    <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-violet-50 text-violet-600">{{ tag }}</span>
     {% endfor %}
     {% if (v.brand_tags or [])|length > 5 %}
-    <span class="px-1.5 py-0.5 text-[10px] text-gray-400">+{{ (v.brand_tags|length) - 5 }} more</span>
+    <span class="px-1.5 py-0.5 text-xs text-gray-400">+{{ (v.brand_tags|length) - 5 }} more</span>
     {% endif %}
     {% for tag in (v.commodity_tags or [])[:4] %}
-    <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-sky-50 text-sky-600">{{ tag }}</span>
+    <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-sky-50 text-sky-600">{{ tag }}</span>
     {% endfor %}
     {% if (v.commodity_tags or [])|length > 4 %}
-    <span class="px-1.5 py-0.5 text-[10px] text-gray-400">+{{ (v.commodity_tags|length) - 4 }} more</span>
+    <span class="px-1.5 py-0.5 text-xs text-gray-400">+{{ (v.commodity_tags|length) - 4 }} more</span>
     {% endif %}
   </div>
   {% endif %}
@@ -89,7 +89,7 @@
   {% endif %}
 
   {# Row 5: Stats #}
-  <div class="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
+  <div class="flex items-center justify-between text-xs text-gray-600 pt-2 border-t border-gray-100">
     <span>{{ v.sighting_count or 0 }} sightings</span>
     <span>{{ '%.0f%%'|format((v.overall_win_rate or 0) * 100) }} win</span>
     <span>{{ '%.0f%%'|format((v.response_rate or 0) * 100) }} resp</span>

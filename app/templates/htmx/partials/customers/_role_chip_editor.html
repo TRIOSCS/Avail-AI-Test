@@ -58,7 +58,7 @@
             onchange='this.form.requestSubmit()'
             @blur='editing = false'
             x-init='$nextTick(() => { if (editing) $el.focus() })'
-            class='text-[10px] border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400'>
+            class='text-xs border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-brand-400'>
       <option value=''>— clear —</option>
       <option value='specifier' {% if contact.contact_role == 'specifier' %}selected{% endif %}>Specifier</option>
       <option value='buyer_po' {% if contact.contact_role == 'buyer_po' %}selected{% endif %}>Buyer / PO</option>

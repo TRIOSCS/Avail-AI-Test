@@ -13,7 +13,7 @@
 <div class="max-w-5xl mx-auto space-y-6">
 
   {# ── Header Card ─────────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
+  <div class="card">
     <div class="flex items-start justify-between">
       <div class="flex items-start gap-4">
         {# Initial avatar #}
@@ -24,13 +24,13 @@
           <div class="flex items-center gap-3">
             <h1 class="text-2xl font-bold text-gray-900">{{ vendor.display_name }}</h1>
             {% if vendor.is_blacklisted %}
-              <span class="inline-flex items-center gap-1 px-2.5 py-0.5 text-xs font-semibold rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+              <span class="badge font-semibold bg-rose-50 text-rose-700 border-rose-200">
                 <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524l8.367 8.368zm1.414-1.414L6.524 5.11a6 6 0 018.367 8.367zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/></svg>
                 Blacklisted
               </span>
             {% endif %}
           </div>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
             {% if vendor.domain %}
               <a href="https://{{ vendor.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ vendor.domain }}</a>
             {% endif %}
@@ -50,7 +50,7 @@
         {% if vendor.vendor_score and not vendor.is_blacklisted %}
           <div class="text-center px-3">
             <p class="text-3xl font-bold text-emerald-600">{{ "%.0f"|format(vendor.vendor_score) }}</p>
-            <p class="text-xs font-medium text-gray-500">Score</p>
+            <p class="text-xs font-medium text-gray-600">Score</p>
           </div>
         {% endif %}
         {# Toggle blacklist #}
@@ -79,19 +79,19 @@
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
     <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-2xl font-bold text-gray-900">{{ vendor.sighting_count or 0 }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Sightings</p>
+      <p class="text-xs font-medium text-gray-600 mt-1">Sightings</p>
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-2xl font-bold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "—" }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Win Rate</p>
+      <p class="text-xs font-medium text-gray-600 mt-1">Win Rate</p>
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-2xl font-bold text-gray-900">{{ vendor.total_pos or 0 }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Total POs</p>
+      <p class="text-xs font-medium text-gray-600 mt-1">Total POs</p>
     </div>
     <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-2xl font-bold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "—" }}</p>
-      <p class="text-xs font-medium text-gray-500 mt-1">Avg Response Time</p>
+      <p class="text-xs font-medium text-gray-600 mt-1">Avg Response Time</p>
     </div>
   </div>
 
@@ -149,7 +149,7 @@
         {% else %}
           <div class="bg-white rounded-xl border border-gray-200 p-5">
             <h3 class="text-base font-semibold text-gray-900 mb-2">Vendor Trust & Safety Review</h3>
-            <p class="text-sm text-gray-500">No safety data available — safety is assessed when sourcing leads are created for this vendor.</p>
+            <p class="text-sm text-gray-600">No safety data available — safety is assessed when sourcing leads are created for this vendor.</p>
           </div>
         {% endif %}
 
@@ -223,8 +223,8 @@
               {% for c in contacts[:5] %}
               <tr class="hover:bg-brand-50 transition-colors">
                 <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ c.full_name or "—" }}</td>
-                <td class="px-4 py-2.5 text-sm text-gray-500">{{ c.title or "—" }}</td>
-                <td class="px-4 py-2.5 text-sm text-gray-500">
+                <td class="px-4 py-2.5 text-sm text-gray-600">{{ c.title or "—" }}</td>
+                <td class="px-4 py-2.5 text-sm text-gray-600">
                   {% if c.email %}
                     <a href="mailto:{{ c.email }}" class="hover:text-brand-500">{{ c.email }}</a>
                   {% else %}
@@ -287,13 +287,13 @@
               {% for s in recent_sightings %}
               <tr class="hover:bg-brand-50 transition-colors">
                 <td class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900">{{ s.mpn_matched or "—" }}</td>
-                <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">{{ "{:,}".format(s.qty_available) if s.qty_available else "—" }}</td>
-                <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
+                <td class="px-4 py-2.5 text-sm text-right text-gray-600 tabular-nums">{{ "{:,}".format(s.qty_available) if s.qty_available else "—" }}</td>
+                <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-600' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
                 <td class="px-4 py-2.5">
                   {% set source_name = s.source_type %}
                   {% include "htmx/partials/shared/source_badge.html" %}
                 </td>
-                <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
+                <td class="px-4 py-2.5 text-sm text-gray-600">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
               </tr>
               {% endfor %}
             </tbody>

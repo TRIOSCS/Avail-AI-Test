@@ -37,7 +37,7 @@
                hx-trigger="load"
                hx-swap="innerHTML"
                class="mt-1 empty:hidden"></div>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
             {% endif %}
@@ -82,7 +82,7 @@
         <p class="mt-1 text-sm font-medium text-gray-900">
           {% if company.account_owner %}
             <span class="inline-flex items-center gap-1.5">
-              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ company.account_owner.name[:1]|upper }}</span>
+              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-xs font-bold">{{ company.account_owner.name[:1]|upper }}</span>
               {{ company.account_owner.name }}
             </span>
           {% else %}
@@ -128,7 +128,7 @@
     </div>
 
     {# Coverage badge #}
-    <p class="text-xs text-gray-500">
+    <p class="text-xs text-gray-600">
       <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }}</span>
       <span class="text-gray-300 mx-1">·</span>
       <span class="font-medium text-gray-700">{{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
@@ -195,7 +195,7 @@
                 class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           {{ tab_label }}
           {% if tab_count is not none and tab_count > 0 %}
-            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-[10px] font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
+            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-xs font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
           {% endif %}
         </button>
         {% endfor %}
