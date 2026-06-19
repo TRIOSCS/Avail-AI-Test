@@ -47,6 +47,40 @@ def register_prospecting_jobs(scheduler, settings):
     )
 
 
+def register_sweep_jobs(scheduler, settings):
+    """Register SP4 account-sweep + reactivation jobs."""
+    if settings.account_sweep_enabled:
+        scheduler.add_job(
+            _job_account_sweep,
+            CronTrigger(hour=1, minute=0),
+            id="account_sweep",
+            name="90-day account hardline sweep",
+        )
+    if settings.account_reactivation_sweep_enabled:
+        scheduler.add_job(
+            _job_auto_surface_reactivation,
+            CronTrigger(hour=2, minute=0),
+            id="auto_surface_reactivation",
+            name="Auto-surface unassigned past customers",
+        )
+
+
+@_traced_job
+async def _job_account_sweep():
+    """Daily 1AM — sweep dormant owned accounts into prospecting pool."""
+    from ..services.prospect_reclamation import job_account_sweep
+
+    await job_account_sweep()
+
+
+@_traced_job
+async def _job_auto_surface_reactivation():
+    """Daily 2AM — surface unassigned past customers."""
+    from ..services.prospect_reclamation import job_auto_surface_reactivation
+
+    await job_auto_surface_reactivation()
+
+
 @_traced_job
 async def _job_pool_health_report():
     """1st of month 8AM — log pool statistics."""
