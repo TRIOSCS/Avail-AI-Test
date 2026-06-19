@@ -18,7 +18,7 @@ def register_all_jobs(scheduler, settings):
     from .knowledge_jobs import register_knowledge_jobs
     from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
-    from .prospecting_jobs import register_prospecting_jobs
+    from .prospecting_jobs import register_prospecting_jobs, register_sweep_jobs
     from .quality_jobs import register_quality_jobs
     from .tagging_jobs import register_tagging_jobs
     from .task_jobs import register_task_jobs
@@ -30,6 +30,7 @@ def register_all_jobs(scheduler, settings):
     register_inventory_jobs(scheduler, settings)
     register_offers_jobs(scheduler, settings)
     register_prospecting_jobs(scheduler, settings)
+    register_sweep_jobs(scheduler, settings)
     register_tagging_jobs(scheduler, settings)
     register_maintenance_jobs(scheduler, settings)
     register_health_jobs(scheduler, settings)
