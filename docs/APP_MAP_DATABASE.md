@@ -555,6 +555,17 @@ Self-invalidates: service regens when `basis_last_activity_at` or `basis_activit
 **`email_signature_extracts`** — Parsed email signatures (unique by sender_email)
 **`prospect_contacts`** — Web-found contacts awaiting import
 **`prospect_accounts`** — Discovered prospect companies (unique by domain)
+
+Key columns:
+| Column | Type | Notes |
+|---|---|---|
+| trio_match_score | Integer | default 0, indexed; AI procurement-fit score (0-100); 0 until screened (SP3) |
+| opportunity_score | Integer | default 0, indexed; AI opportunity size score (0-100); 0 until screened (SP3) |
+
+`enrichment_data['ai_screen']` (JSONB) holds the full AI screen verdict:
+`{trio_match_score, opportunity_score, excess_likelihood, verdict, rationale, evidence, confidence, model, screened_at, needs_more_enrichment?}`.
+Verdict values: `pass`, `screened_out`, `insufficient_data`, `disabled`, `cap_reached`, `error`.
+
 **`discovery_batches`** — Import batch tracking
 
 ---
