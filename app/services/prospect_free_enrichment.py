@@ -453,6 +453,14 @@ async def run_enrichment_job(prospect_id: int, db: Session | None = None) -> Non
         prospect.enrichment_data = ed
         flag_modified(prospect, "enrichment_data")
         db.commit()
+
+        # ── SP3: AI screen — final step, fire-and-forget ──
+        try:
+            from app.services.prospect_screening import screen_prospect
+
+            await screen_prospect(prospect, db)
+        except Exception as _screen_exc:  # noqa: BLE001 — screen must not affect enrich_status
+            logger.warning("Screen step failed for prospect {}: {}", prospect_id, _screen_exc)
     except Exception as exc:  # noqa: BLE001 — fire-and-forget must never propagate
         logger.warning("Enrichment job failed for prospect {}: {}", prospect_id, exc)
         db.rollback()
