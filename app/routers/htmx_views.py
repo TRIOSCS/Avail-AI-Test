@@ -42,7 +42,14 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, has_buyer_role, require_admin, require_buyer, require_user
+from ..dependencies import (
+    get_quote_for_user,
+    get_user,
+    has_buyer_role,
+    require_admin,
+    require_buyer,
+    require_user,
+)
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -6552,9 +6559,7 @@ async def preview_quote(
     db: Session = Depends(get_db),
 ):
     """Render quote email preview before sending."""
-    quote = db.query(Quote).options(joinedload(Quote.quote_lines)).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id, options=[joinedload(Quote.quote_lines)])
 
     return template_response(
         "htmx/partials/quotes/preview.html",
@@ -6570,9 +6575,7 @@ async def delete_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete a draft quote and redirect to the requisitions page."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "draft":
         raise HTTPException(400, "Only draft quotes can be deleted")
 
@@ -6591,9 +6594,7 @@ async def reopen_quote(
     db: Session = Depends(get_db),
 ):
     """Reopen a sent/closed quote back to draft."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status not in ("sent", "won", "lost"):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
@@ -6674,9 +6675,7 @@ async def edit_quote_metadata(
 ):
     """Update quote metadata (payment terms, shipping, notes) and return refreshed
     detail."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
 
     form = await request.form()
     if form.get("payment_terms"):
@@ -9242,18 +9241,16 @@ async def quote_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return quote detail as HTML partial."""
-    quote = (
-        db.query(Quote)
-        .options(
+    quote = get_quote_for_user(
+        db,
+        user,
+        quote_id,
+        options=[
             joinedload(Quote.customer_site).joinedload(CustomerSite.company),
             joinedload(Quote.requisition),
             joinedload(Quote.created_by),
-        )
-        .filter(Quote.id == quote_id)
-        .first()
+        ],
     )
-    if not quote:
-        raise HTTPException(404, "Quote not found")
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     offers = (
         db.query(Offer).filter(Offer.requisition_id == quote.requisition_id).order_by(Offer.created_at.desc()).all()
@@ -9275,6 +9272,8 @@ async def update_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     form = await request.form()
     if "mpn" in form:
         line.mpn = form["mpn"]
@@ -9315,6 +9314,8 @@ async def delete_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
     db.commit()
     return HTMLResponse("")
@@ -9333,9 +9334,8 @@ async def add_quote_line(
     db: Session = Depends(get_db),
 ):
     """Add a new line item to a quote, return the new row HTML."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    # Ownership/existence check (raises 404 if the quote isn't visible to the user).
+    get_quote_for_user(db, user, quote_id)
     margin_pct = 0.0
     if sell_price > 0:
         margin_pct = round((sell_price - cost_price) / sell_price * 100, 2)
@@ -9365,9 +9365,7 @@ async def add_offer_to_quote(
     db: Session = Depends(get_db),
 ):
     """Add an offer as a line item to a quote."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -9403,9 +9401,7 @@ async def send_quote_htmx(
 ):
     """Mark quote as sent — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
@@ -9423,9 +9419,7 @@ async def quote_result_htmx(
 ):
     """Mark quote result (won/lost) — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     form = await request.form()
     result = form.get("result", "")
     if result not in ("won", "lost"):
@@ -9448,9 +9442,7 @@ async def revise_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Create a new revision of the quote — returns the new quote detail."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     new_rev = (quote.revision or 1) + 1
     new_quote = Quote(
         requisition_id=quote.requisition_id,
@@ -9484,6 +9476,8 @@ async def apply_markup_htmx(
     db: Session = Depends(get_db),
 ):
     """Apply a markup percentage to all lines in the quote."""
+    # Scope ownership check before mutating any lines (raises 404 for SALES on other users' quotes).
+    get_quote_for_user(db, user, quote_id)
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     for line in lines:
         if line.cost_price and float(line.cost_price) > 0:
@@ -9522,8 +9516,8 @@ async def add_offers_to_draft_quote(
     if not offer_ids or not quote_id:
         raise HTTPException(400, "Missing offer_ids or quote_id")
 
-    quote = db.query(Quote).filter(Quote.id == quote_id, Quote.requisition_id == req_id).first()
-    if not quote:
+    quote = get_quote_for_user(db, user, quote_id)
+    if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
     if quote.status != "draft":
         raise HTTPException(400, "Can only add to draft quotes")
@@ -9574,9 +9568,7 @@ async def build_buy_plan_htmx(
     """
     from ..services.buyplan_builder import build_buy_plan
 
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "won":
         raise HTTPException(400, "Quote must be won to build a buy plan")
 
@@ -10310,6 +10302,48 @@ async def settings_data_ops_tab(
     ctx["vendor_dupes"] = vendor_dupes
     ctx["company_dupes"] = company_dupes
     return template_response("htmx/partials/settings/data_ops.html", ctx)
+
+
+@router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
+async def settings_api_keys_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """API credentials management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..config import GRAPH_SCOPES
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    def _field(source: str, env_var: str) -> dict:
+        is_set = credential_is_set(db, source, env_var)
+        masked = ""
+        if is_set:
+            plain = get_credential(db, source, env_var)
+            masked = mask_value(plain) if plain else "••••••••"
+        return {"is_set": is_set, "masked": masked}
+
+    current_scopes = set(GRAPH_SCOPES.split())
+    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
+            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
+            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
+            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
+            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
+            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
+            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
+            "current_scopes": sorted(current_scopes),
+            "missing_scopes": sorted(needed_scopes - current_scopes),
+            "teams_ready": not (needed_scopes - current_scopes),
+        }
+    )
+    return template_response("htmx/partials/settings/api_keys.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
