@@ -6357,6 +6357,9 @@ async def log_phone_call(
 
     # Route through log_call_activity so the call is matched to a vendor/company,
     # recorded as the canonical CALL_LOGGED type, and bumps last_activity_at.
+    # force_meaningful=True: a manually logged call is a deliberate human interaction →
+    # always meaningful, regardless of the duration-gate (which targets auto-captured
+    # Teams/8x8 calls that carry a real duration).
     log = log_call_activity(
         user_id=user.id,
         direction="outbound",
@@ -6366,15 +6369,10 @@ async def log_phone_call(
         contact_name=vendor_name,
         db=db,
         requisition_id=req_id,
+        force_meaningful=True,
     )
     if log is not None:
         log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
-        # A manually logged call is a deliberate human interaction → always meaningful,
-        # regardless of P1e's duration-gating in log_call_activity (which targets
-        # auto-captured Teams/8x8 calls that carry a real duration). Without this, a
-        # no-duration manual log lands is_meaningful=False and drops out of the
-        # meaningful-activity surfaces and the reply clock.
-        log.is_meaningful = True
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 
@@ -8926,6 +8924,11 @@ async def add_offer_to_quote(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    if offer.requisition_id is not None and offer.requisition_id != quote.requisition_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "offer does not belong to this quote's requisition"},
+        )
     line = QuoteLine(
         quote_id=quote_id,
         offer_id=offer_id,
