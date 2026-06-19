@@ -12,7 +12,7 @@
   {# ── Hero Header ─────────────────────────────────────────── #}
   {# pr-8 keeps the top-right stats/Enrich cluster clear of the global modal
      close X (base.html chrome), which floats over the panel's top-right. #}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
     <div class="flex items-start justify-between pr-8">
       <div>
         <h1 class="text-3xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
@@ -51,11 +51,11 @@
           {% endif %}
         </div>
         {% if card.description %}
-        <p class="text-sm text-gray-500 mt-2">{{ card.description }}</p>
+        <p class="text-sm text-gray-600 mt-2">{{ card.description }}</p>
         {% endif %}
       </div>
       <div class="text-right space-y-1.5 ml-6 flex-shrink-0">
-        <p class="text-sm text-gray-500">Searches: <span class="font-bold text-brand-600">{{ card.search_count or 0 }}</span></p>
+        <p class="text-sm text-gray-600">Searches: <span class="font-bold text-brand-600">{{ card.search_count or 0 }}</span></p>
         {% if card.last_searched_at %}
         <p class="text-xs text-gray-400">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
         {% endif %}
@@ -116,7 +116,7 @@
               <span class="font-medium text-gray-900">{{ conflict.get('key', '')|replace('_', ' ') }}</span>:
               manual <span class="font-mono">{{ conflict.get('manual', {}).get('value') }}</span> kept —
               {{ ev.get('source') }} reported <span class="font-mono">{{ ev.get('value') }}</span>
-              <span class="text-gray-500">(conf {{ ev.get('confidence') }}{% if ev.get('observed_at') %}, {{ ev.get('observed_at')[:10] }}{% endif %})</span>
+              <span class="text-gray-600">(conf {{ ev.get('confidence') }}{% if ev.get('observed_at') %}, {{ ev.get('observed_at')[:10] }}{% endif %})</span>
             </span>
           </div>
           {# hx-vals quoting is intentional: SINGLE-quoted attribute + |tojson is the
@@ -164,22 +164,22 @@
             data-loading-disable
             class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>
+          <label class="form-label">Manufacturer</label>
           <input type="text" name="manufacturer" value="{{ card.manufacturer or '' }}"
                  class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Category</label>
+          <label class="form-label">Category</label>
           <input type="text" name="category" value="{{ card.category or '' }}"
                  class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Package</label>
+          <label class="form-label">Package</label>
           <input type="text" name="package_type" value="{{ card.package_type or '' }}"
                  class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Lifecycle</label>
+          <label class="form-label">Lifecycle</label>
           <select name="lifecycle_status" class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">Unknown</option>
             {% for val in ['active', 'eol', 'obsolete', 'nrfnd', 'ltb'] %}
@@ -188,12 +188,12 @@
           </select>
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Pin Count</label>
+          <label class="form-label">Pin Count</label>
           <input type="number" name="pin_count" value="{{ card.pin_count or '' }}"
                  class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">RoHS</label>
+          <label class="form-label">RoHS</label>
           <select name="rohs_status" class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
             <option value="">Unknown</option>
             {% for val in ['compliant', 'non-compliant', 'exempt'] %}
@@ -202,7 +202,7 @@
           </select>
         </div>
         <div class="col-span-2">
-          <label class="block text-xs font-medium text-gray-500 mb-1">Description</label>
+          <label class="form-label">Description</label>
           <input type="text" name="description" value="{{ card.description or '' }}"
                  class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>

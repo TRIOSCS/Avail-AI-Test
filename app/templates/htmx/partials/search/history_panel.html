@@ -13,10 +13,10 @@
 <div class="p-6 text-center">
   {% if fru_hit %}
   {# A crosswalk-known part isn't "new to us" — only its trading history is empty. #}
-  <p class="text-sm font-medium text-gray-500">No trading history yet</p>
+  <p class="text-sm font-medium text-gray-600">No trading history yet</p>
   <p class="text-xs text-gray-400 mt-1">We know this part from the FRU crosswalk below.</p>
   {% else %}
-  <p class="text-sm font-medium text-gray-500">No prior history</p>
+  <p class="text-sm font-medium text-gray-600">No prior history</p>
   <p class="text-xs text-gray-400 mt-1">This part looks new to us.</p>
   {% endif %}
 </div>
@@ -27,10 +27,10 @@
     <div class="flex items-center justify-between gap-2">
       <div class="min-w-0">
         <p class="text-sm font-semibold text-gray-900 truncate">{{ history.display_mpn }}</p>
-        <p class="text-xs text-gray-500 truncate">
+        <p class="text-xs text-gray-600 truncate">
           {{ history.manufacturer or "—" }}
           {% if history.lifecycle_status %}
-          <span class="ml-1 inline-block rounded px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600">
+          <span class="ml-1 inline-block rounded px-1.5 py-0.5 text-xs font-medium bg-gray-100 text-gray-600">
             {{ history.lifecycle_status }}</span>
           {% endif %}
         </p>
@@ -72,7 +72,7 @@
     {% for o in history.offers %}
     <div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
       <span class="truncate">{{ o.vendor_name }}</span>
-      <span class="shrink-0 text-gray-500">{{ o.qty_available or "—" }} · ${{ o.unit_price or "—" }} · {{ o.status }}</span>
+      <span class="shrink-0 text-gray-600">{{ o.qty_available or "—" }} · ${{ o.unit_price or "—" }} · {{ o.status }}</span>
     </div>
     {% else %}<p class="py-1 text-gray-400">None.</p>{% endfor %}
     {% if history.offers_count > history.offers|length %}
@@ -89,7 +89,7 @@
     {% for c in history.customer_purchases %}
     <div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
       <span class="truncate">{{ c.company.name if c.company else "Customer" }}</span>
-      <span class="shrink-0 text-gray-500">×{{ c.purchase_count }} · ${{ c.avg_unit_price or "—" }}</span>
+      <span class="shrink-0 text-gray-600">×{{ c.purchase_count }} · ${{ c.avg_unit_price or "—" }}</span>
     </div>
     {% endfor %}
     {% if not history.won_offers and not history.customer_purchases %}<p class="py-1 text-gray-400">None.</p>{% endif %}
@@ -99,7 +99,7 @@
     {% for s in history.sightings %}
     <div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
       <span class="truncate">{{ s.vendor_name }}</span>
-      <span class="shrink-0 text-gray-500">{{ s.qty_available or "—" }} · ${{ s.unit_price or "—" }} · {{ s.source_type or "—" }}</span>
+      <span class="shrink-0 text-gray-600">{{ s.qty_available or "—" }} · ${{ s.unit_price or "—" }} · {{ s.source_type or "—" }}</span>
     </div>
     {% else %}<p class="py-1 text-gray-400">None.</p>{% endfor %}
   {% endcall %}
@@ -108,7 +108,7 @@
     {% for r in history.requirements %}
     <div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
       <span class="truncate">Req #{{ r.requisition_id }}</span>
-      <span class="shrink-0 text-gray-500">{{ r.sourcing_status }}</span>
+      <span class="shrink-0 text-gray-600">{{ r.sourcing_status }}</span>
     </div>
     {% else %}<p class="py-1 text-gray-400">None.</p>{% endfor %}
   {% endcall %}

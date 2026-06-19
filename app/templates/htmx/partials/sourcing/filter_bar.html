@@ -15,7 +15,7 @@
                  'f_freshness': f_freshness, 'f_source': f_source, 'f_status': f_status,
                  'f_contactability': f_contactability, 'f_corroborated': f_corroborated,
                  'f_sort': f_sort} %}
-<div id="sourcing-filters" class="bg-white rounded-lg border border-brand-200 p-3 space-y-2"
+<div id="sourcing-filters" class="card-sm space-y-2"
      x-data="{ showMore: false }">
   {# Row 1: always visible — Confidence + Safety + Sort + toggle #}
   <div class="flex flex-wrap items-center gap-3">
@@ -24,7 +24,7 @@
     {{ filter_pill_group('Safety', 'safety', [('low_risk', 'Low'), ('medium_risk', 'Med'), ('high_risk', 'High')], f_safety, **_state) | indent(4, false) }}
 
     <div class="flex items-center gap-1.5">
-      <span class="text-[11px] text-gray-500 font-medium">Sort:</span>
+      <span class="text-[11px] text-gray-600 font-medium">Sort:</span>
       <select hx-get="/v2/partials/sourcing/{{ requirement.id }}"
               hx-target="{{ target }}" hx-push-url="true"
               hx-include="#sourcing-filters"
@@ -50,7 +50,7 @@
 
       {# Source checkboxes #}
       <div class="flex items-center gap-1.5">
-        <span class="text-[11px] text-gray-500 font-medium">Source:</span>
+        <span class="text-[11px] text-gray-600 font-medium">Source:</span>
         {% for src in ['brokerbin', 'nexar', 'digikey', 'mouser', 'oemsecrets', 'element14'] %}
         <label class="flex items-center gap-0.5 text-[11px] cursor-pointer">
           <input type="checkbox" name="source" value="{{ src }}"

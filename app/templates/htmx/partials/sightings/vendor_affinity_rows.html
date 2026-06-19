@@ -22,9 +22,9 @@
            class="rounded border-gray-300">
     <div class="flex-1 min-w-0">
       <span class="text-sm font-medium text-gray-700">{{ v.vendor_name }}</span>
-      <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700"
+      <span class="ml-2 badge bg-indigo-50 text-indigo-700 border-indigo-200"
             title="{{ v.reasoning }}">affinity</span>
-      <span class="ml-2 text-[10px] text-gray-400">{{ (v.confidence * 100)|round|int }}% match</span>
+      <span class="ml-2 text-xs text-gray-400">{{ (v.confidence * 100)|round|int }}% match</span>
     </div>
   </label>
   {% endfor %}
@@ -33,5 +33,5 @@
 <p class="text-xs text-gray-400 italic">No additional vendors found by affinity.</p>
 {% endif %}
 {% if affinity_partial %}
-<p class="mt-1 text-[10px] text-gray-400 italic">Suggestions incomplete — some parts could not be checked.</p>
+<p class="mt-1 text-xs text-gray-400 italic">Suggestions incomplete — some parts could not be checked.</p>
 {% endif %}

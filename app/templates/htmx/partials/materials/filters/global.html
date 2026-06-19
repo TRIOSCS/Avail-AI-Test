@@ -15,7 +15,7 @@
   ('obsolete', 'Obsolete'), ('ltb', 'LTB')
 ] %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Lifecycle</h4>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Lifecycle</h4>
   <div class="space-y-0.5">
     {% for value, label in lifecycle_opts %}
     {% if lc_counts.get(value, 0) > 0 %}
@@ -37,7 +37,7 @@
   ('compliant', 'Compliant'), ('non-compliant', 'Non-compliant'), ('exempt', 'Exempt')
 ] %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">RoHS</h4>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">RoHS</h4>
   <div class="space-y-0.5">
     {% for value, label in rohs_opts %}
     {% if rohs_counts.get(value, 0) > 0 %}
@@ -62,7 +62,7 @@
 ] %}
 {% if condition_counts %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Condition</h4>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Condition</h4>
   <div class="space-y-0.5">
     {% for value, label in condition_opts %}
     {% if condition_counts.get(value, 0) > 0 %}
@@ -83,7 +83,7 @@
 {# Has-datasheet boolean toggle — datasheet_url IS NOT NULL #}
 {% if ds_count > 0 %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Datasheet</h4>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Datasheet</h4>
   <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
     <input aria-label="Only parts with a datasheet" type="checkbox"
            :checked="hasDatasheet"
@@ -99,7 +99,7 @@
    a manual value). Hidden until conflicts exist, matching the Datasheet toggle. #}
 {% if nr_count > 0 %}
 <div class="mb-3">
-  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Review</h4>
+  <h4 class="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Review</h4>
   <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
     <input aria-label="Only parts needing conflict review" type="checkbox"
            :checked="needsReview"

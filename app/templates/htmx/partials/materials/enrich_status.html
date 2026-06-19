@@ -30,7 +30,7 @@
 {% set badge = es_styles.get(es) %}
 <p class="inline-flex items-center gap-1.5 text-xs text-emerald-600">
   {% if badge %}
-  <span class="inline-flex px-2 py-0.5 text-[10px] font-medium rounded-full border {{ badge[0] }}">{{ badge[1] }}</span>
+  <span class="badge {{ badge[0] }}">{{ badge[1] }}</span>
   {% endif %}
   {% if card.enriched_at %}
   <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">

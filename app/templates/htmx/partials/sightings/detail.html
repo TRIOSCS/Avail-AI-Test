@@ -15,7 +15,7 @@
     <div>
       {{ mpn_chips(requirement, link_map=link_map) }}
       {% if requirement.manufacturer %}
-      <p class="text-xs text-gray-500 mt-1">{{ requirement.manufacturer }}</p>
+      <p class="text-xs text-gray-600 mt-1">{{ requirement.manufacturer }}</p>
       {% endif %}
     </div>
     {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
@@ -107,11 +107,11 @@
     <table class="compact-table w-full">
       <thead>
         <tr>
-          <th class="px-2 py-1.5 text-left">Vendor</th>
-          <th class="px-2 py-1.5 text-right">Qty</th>
-          <th class="px-2 py-1.5 text-right">Best Price</th>
-          <th class="px-2 py-1.5 text-right">Score</th>
-          <th class="px-2 py-1.5 w-8" aria-hidden="true"></th>
+          <th class="compact-cell--head text-left">Vendor</th>
+          <th class="compact-cell--head text-right">Qty</th>
+          <th class="compact-cell--head text-right">Best Price</th>
+          <th class="compact-cell--head text-right">Score</th>
+          <th class="compact-cell--head w-8" aria-hidden="true"></th>
         </tr>
       </thead>
       {# Each vendor renders its own <tbody> for an isolated Alpine `expanded`

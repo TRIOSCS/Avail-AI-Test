@@ -27,7 +27,7 @@
         </div>
         <h2 class="text-sm font-semibold text-gray-900 tracking-tight">FRU matrix</h2>
         <span class="font-mono text-sm font-semibold text-gray-800">{{ fru_view.fru_raw }}</span>
-        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">
+        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">
           {{ fru_view.total_links }}
         </span>
       </div>
@@ -50,8 +50,8 @@
       {% set section_idx = loop.index0 %}
       <div class="{{ 'mb-6' if not loop.last else '' }}">
         <div class="flex items-center gap-2 mb-1">
-          <h3 class="text-xs font-medium text-gray-500">{{ section.label }}</h3>
-          <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">{{ section.items|length }}</span>
+          <h3 class="text-xs font-medium text-gray-600">{{ section.label }}</h3>
+          <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">{{ section.items|length }}</span>
         </div>
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
           {% for item in section.items %}
@@ -108,7 +108,7 @@
           </svg>
         </div>
         <h2 class="text-sm font-semibold text-gray-900 tracking-tight">Used in FRUs</h2>
-        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-[10px] font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">
+        <span class="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 text-xs font-bold text-brand-600 bg-brand-50 border border-brand-200 rounded-full tabular-nums">
           {{ fru_usages_total }}
         </span>
       </div>
@@ -143,7 +143,7 @@
               </span>
               {% else %}<span class="text-gray-400">-</span>{% endif %}
             </td>
-            <td class="py-2 px-3 text-gray-500">
+            <td class="py-2 px-3 text-gray-600">
               {{ [u.manufacturer, u.description, u.machine, u.series]|select|join(' · ') or '-' }}
             </td>
           </tr>

@@ -19,10 +19,10 @@
        data-vendor-norm="{{ vendor.normalized_name }}">
   <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
   <div class="flex-1 min-w-0">
-    <span class="text-sm font-medium text-gray-500">{{ vendor.display_name }}</span>
-    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-rose-100 text-rose-700">marked unavailable</span>
+    <span class="text-sm font-medium text-gray-600">{{ vendor.display_name }}</span>
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-rose-100 text-rose-700">marked unavailable</span>
     {% if matched_existing %}
-    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
     {% endif %}
   </div>
 </label>
@@ -37,7 +37,7 @@
   <div class="flex-1 min-w-0">
     <span class="text-sm font-medium text-gray-700">{{ vendor.display_name }}</span>
     {% if matched_existing %}
-    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
+    <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded-full bg-indigo-50 text-indigo-700">matched existing vendor{% if contact_added %} — contact email added{% endif %}</span>
     {% endif %}
   </div>
 </label>

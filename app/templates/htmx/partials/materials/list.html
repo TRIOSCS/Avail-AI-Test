@@ -25,7 +25,7 @@
    many parts matched the current search/filters (vs the bare "N parts"). #}
 <div class="flex items-baseline gap-2 mb-2 px-1">
   <span class="text-sm font-semibold text-gray-700 tabular-nums">{{ "{:,}".format(total) }}</span>
-  <span class="text-sm text-gray-500">result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} &middot; matching &ldquo;{{ q }}&rdquo;{% endif %}</span>
+  <span class="text-sm text-gray-600">result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} &middot; matching &ldquo;{{ q }}&rdquo;{% endif %}</span>
 </div>
 {# Screen-reader announcement of the new count on each swap. #}
 <div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} result{{ '' if total == 1 else 's' }}{% if commodity_display %} in {{ commodity_display }}{% endif %}{% if q %} matching {{ q }}{% endif %}</div>
@@ -89,7 +89,7 @@
               {% if m.cross_references %}
               {# Neutral gray — count metadata, not a status; indigo means exactly
                  "OEM-official" (the OEM-SOURCED badge below). #}
-              <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200"
+              <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-600 border-gray-200"
                     title="Known cross-references / substitutes">
                 {{ m.cross_references|length }} alternate{{ '' if m.cross_references|length == 1 else 's' }}
               </span>
@@ -100,7 +100,7 @@
               {% for spec in m._primary_specs[:3] %}
               {# title keeps the label visible on hover when the commodity-scoped
                  rendering shows the value only. leading-none trims pill height. #}
-              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] leading-none text-gray-500 rounded font-data"
+              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-xs leading-none text-gray-600 rounded font-data"
                     title="{{ spec.label }}: {{ spec.value }}">
                 {%- if not commodity and spec.label %}{{ spec.label }}: {% endif %}{{ spec.value }}
               </span>
@@ -108,7 +108,7 @@
             </div>
             {% endif %}
           </td>
-          <td class="td-label text-gray-500 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
+          <td class="td-label text-gray-600 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
           {# Dual-brand cell with category folded in as a muted sub-line (no standalone
              Category column). Dual-brand: "IBM · Seagate Technology" when brand (OEM
              label) and manufacturer (actual maker) are both set and DIFFERENT COMPANIES
@@ -129,47 +129,47 @@
             <div class="flex flex-wrap items-center gap-1">
               {% set es = m.enrichment_status %}
               {% if es == "verified" %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200"
+              <span class="badge bg-emerald-50 text-emerald-700 border-emerald-200"
                     title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
                 VERIFIED
               </span>
               {% elif es == "web_sourced" %}
               {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
               <a href="{{ _u or '#' }}" target="_blank" rel="noopener"
-                 class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-sky-50 text-sky-700 border-sky-200"
+                 class="badge bg-sky-50 text-sky-700 border-sky-200"
                  title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
                 WEB-SOURCED
               </a>
               {% elif es == "oem_sourced" %}
               {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
               <a href="{{ _ou or '#' }}" target="_blank" rel="noopener"
-                 class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200"
+                 class="badge bg-indigo-50 text-indigo-700 border-indigo-200"
                  title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
                 OEM-SOURCED
               </a>
               {% elif es == "ai_inferred" %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
+              <span class="badge bg-amber-50 text-amber-700 border-amber-200"
                     title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">
                 AI GUESS · RECONFIRM
               </span>
               {% elif es == "not_found" %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-500 border-gray-200"
+              <span class="badge bg-gray-100 text-gray-500 border-gray-200"
                     title="No authoritative source found this part">
                 NOT FOUND
               </span>
               {% elif es == "not_catalogued" %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-slate-100 text-slate-600 border-slate-300"
+              <span class="badge bg-slate-100 text-slate-600 border-slate-300"
                     title="Recognised OEM service/FRU part; no public specs published">
                 NOT CATALOGUED
               </span>
               {% endif %}
               {% if m.lifecycle_status %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+              <span class="badge {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
                 {{ m.lifecycle_status|upper }}
               </span>
               {% endif %}
               {% if m.condition %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ cond_colors.get(m.condition, 'bg-gray-100 text-gray-600 border-gray-200') }}"
+              <span class="badge {{ cond_colors.get(m.condition, 'bg-gray-100 text-gray-600 border-gray-200') }}"
                     title="Stock condition">
                 {{ m.condition|upper }}
               </span>
@@ -189,27 +189,27 @@
             <span class="text-gray-400 text-xs">--</span>
             {% endif %}
           </td>
-          <td class="td-label text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
+          <td class="td-label text-gray-600">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="text-center py-12 text-gray-400">
+  <div class="text-center py-6 sm:py-8 text-gray-400">
     <svg class="mx-auto h-10 w-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
     </svg>
     {% if parametric_active and spec_coverage and spec_coverage.with_specs < spec_coverage.total %}
     {# Coverage-aware nudge: parametric facets only exist on spec-enriched cards, so a
        zero here mostly means "not yet spec-enriched", not "no such parts". #}
-    <p class="text-sm font-medium text-gray-500">No matches — but most parts here haven't been spec-enriched yet. Try clearing parametric filters.</p>
+    <p class="text-sm font-medium text-gray-600">No matches — but most parts here haven't been spec-enriched yet. Try clearing parametric filters.</p>
     <p class="text-xs text-gray-400 mt-1">
       Only {{ "{:,}".format(spec_coverage.with_specs) }} of {{ "{:,}".format(spec_coverage.total) }}
       {% if commodity_display %}{{ commodity_display }} {% endif %}parts have filterable specs so far
     </p>
     {% else %}
-    <p class="text-sm font-medium text-gray-500">No results match your filters</p>
+    <p class="text-sm font-medium text-gray-600">No results match your filters</p>
     <p class="text-xs text-gray-400 mt-1">Try removing a filter or broadening your search</p>
     {% endif %}
   </div>
@@ -224,7 +224,7 @@
     <button @click="goToPage({{ (offset - limit) // limit }})"
        class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</button>
     {% endif %}
-    <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+    <span class="px-3 py-1.5 text-sm text-gray-600">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
     {% if offset + limit < total %}
     <button @click="goToPage({{ (offset + limit) // limit }})"
        class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</button>

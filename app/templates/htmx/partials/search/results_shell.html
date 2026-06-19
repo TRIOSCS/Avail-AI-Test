@@ -24,7 +24,7 @@
 
   {# source progress chips #}
   <div id="source-progress" class="px-4 py-3 border-b border-brand-100 flex flex-wrap gap-1.5 items-center">
-    <span class="text-[11px] text-gray-500 mr-1">Sources:</span>
+    <span class="text-[11px] text-gray-600 mr-1">Sources:</span>
     {% for source in enabled_sources %}
     <span id="source-chip-{{ source.name }}" class="source-chip source-chip--searching">
       <span class="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1"></span>{{ source.name }}
@@ -46,7 +46,7 @@
     <div sse-swap="done" hx-swap="none"></div>
   </div>
 
-  <div id="search-stats" class="hidden px-4 py-2.5 border-t border-brand-100 text-[11px] text-gray-500"></div>
+  <div id="search-stats" class="hidden px-4 py-2.5 border-t border-brand-100 text-[11px] text-gray-600"></div>
 
   {# Empty state — reframed as a pivot to knowledge. #}
   <div id="search-empty-state" class="hidden px-6 py-12 text-center">
@@ -54,7 +54,7 @@
       <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
     </svg>
     <p class="text-base font-semibold text-brand-900">No live stock right now.</p>
-    <p class="text-sm text-gray-500 mt-1">Here's what we already know about this part.</p>
+    <p class="text-sm text-gray-600 mt-1">Here's what we already know about this part.</p>
     <a href="#know" class="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-50 border border-brand-200 text-brand-700 text-sm hover:bg-brand-100">
       Jump to What we know
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M19 14l-7 7m0 0l-7-7m7 7V3"/></svg>

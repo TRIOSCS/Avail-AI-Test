@@ -19,7 +19,7 @@
     <div class="flex items-center gap-3">
       {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
       <div>{{ mpn_chips(requirement) }}</div>
-      <span class="text-xs text-gray-500">
+      <span class="text-xs text-gray-600">
         {{ requirement.brand or '' }}{% if requirement.brand %} · {% endif %}{{ total }} lead{{ 's' if total != 1 }}
       </span>
     </div>
@@ -27,13 +27,12 @@
       <a href="/sourcing/{{ requirement.id }}"
          hx-get="/v2/partials/sourcing/{{ requirement.id }}"
          hx-target="#main-content" hx-push-url="/sourcing/{{ requirement.id }}"
-         class="text-xs text-gray-500 hover:text-brand-500"
+         class="text-xs text-gray-600 hover:text-brand-500"
          title="Switch to card grid view">Grid view</a>
       <button hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
               hx-target="#main-content"
               data-loading-disable
-              class="px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-lg
-                     hover:bg-brand-600">
+              class="btn-primary btn-sm">
         Re-search
       </button>
     </div>
@@ -74,7 +73,7 @@
 
         {# Pagination #}
         {% if total_pages > 1 %}
-        <div class="px-3 py-2 flex items-center justify-between text-xs text-gray-500 border-t border-gray-200">
+        <div class="px-3 py-2 flex items-center justify-between text-xs text-gray-600 border-t border-gray-200">
           <span>{{ page }} / {{ total_pages }}</span>
           <div class="flex gap-1">
             {% if page > 1 %}
@@ -92,7 +91,7 @@
         {% endif %}
 
         {% else %}
-        <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+        <div class="flex flex-col items-center justify-center py-6 sm:py-8 text-gray-400">
           <svg class="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                   d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>

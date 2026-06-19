@@ -18,7 +18,7 @@
                            f_confidence, f_safety, f_freshness, f_source, f_status,
                            f_contactability, f_corroborated, f_sort) -%}
 <div class="flex items-center gap-1.5">
-  <span class="text-[11px] text-gray-500 font-medium">{{ label }}:</span>
+  <span class="text-[11px] text-gray-600 font-medium">{{ label }}:</span>
   {% for val, opt_label in options %}
   <a hx-get="/v2/partials/sourcing/{{ requirement_id }}?confidence={{ val if param == 'confidence' else f_confidence }}&safety={{ val if param == 'safety' else f_safety }}&freshness={{ val if param == 'freshness' else f_freshness }}&source={{ f_source }}&status={{ val if param == 'status' else f_status }}&contactability={{ val if param == 'contactability' else f_contactability }}&corroborated={{ val if param == 'corroborated' else f_corroborated }}&sort={{ f_sort }}"
      hx-target="{{ target }}" hx-push-url="true"
