@@ -1484,9 +1484,12 @@ enrichment_service.py (orchestrator)
     |       +---> prospect_free_enrichment.py (web search)
     |       +---> signature_parser.py (from email_signature_extracts)
     |
-    +---> Phase 1b: API enrichment
-    |       +---> apollo.py --> Apollo.io API
+    +---> Phase 1b: API enrichment (ordered: Explorium → Lusha → Apollo → AI; gap-gated)
     |       +---> prospect_discovery_explorium.py --> Explorium API
+    |       +---> lusha.py --> Lusha API v2 (contacts + firmographics; gated by
+    |       |       lusha_enrichment_enabled + LUSHA_API_KEY; 402/429 → credit-guard
+    |       |       circuit cooldown via enrichment_credit_guard.py)
+    |       +---> apollo.py --> Apollo.io API (gap-gated: skipped if Lusha filled all gaps)
     |
     +---> Phase 2: AI analysis
     |       +---> ai_service.py --> Claude API (company intel, ICP fit)
@@ -3215,7 +3218,7 @@ the current implementation.
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
-| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; recomputes readiness_score from the news-augmented signals so Enrich moves the tier + buyer-ready rank, not just the panels), enrich-status (poll; HTTP 286 stops) |
+| Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
 | Sources | 35 | Connector config, test, stocklist, webhooks |
 | Tags | 4 | List, entity tags |
 | Activity | 14 | Log calls, timeline, dashboards |
