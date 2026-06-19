@@ -79,6 +79,39 @@ async def graph_webhook(
     return {"status": "accepted"}
 
 
+@router.post("/api/webhooks/clay")
+@limiter.limit("120/minute")
+async def clay_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Clay enrichment callback endpoint.
+
+    Clay's outbound HTTP action POSTs an enriched row here, echoing the
+    shared secret (x-clay-secret header) and the correlation token we sent.
+    We verify the secret, then route the enriched fields into the queue.
+    """
+    from app.services.clay_service import handle_clay_callback, verify_clay_secret
+
+    secret = request.headers.get("x-clay-secret")
+    if not verify_clay_secret(secret):
+        raise HTTPException(403, "Invalid Clay webhook secret")
+
+    try:
+        payload = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Expected a JSON object")
+
+    try:
+        result = handle_clay_callback(payload, db)
+    except Exception:
+        logger.exception("Clay callback processing failed")
+        raise HTTPException(502, "Clay callback processing failed")
+    return result
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  ACTIVITY LOG
 # ═══════════════════════════════════════════════════════════════════════

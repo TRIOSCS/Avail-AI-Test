@@ -4,6 +4,7 @@
 # Testing
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+nest_asyncio>=1.6.0  # required by tests/conftest.py (nested event loops)
 pytest-cov>=4.1.0
 pytest-xdist>=3.5.0
 responses>=0.25.0

@@ -1159,35 +1159,34 @@ async def test_apollo_test_connector_api_error():
 
 @pytest.mark.asyncio
 async def test_clay_test_connector_success():
-    """_ClayTestConnector succeeds when API returns 200."""
+    """_ClayTestConnector succeeds when the inbound webhook accepts the ping row."""
     from app.routers.sources import _ClayTestConnector
 
     mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"name": "Anthropic"}
+    mock_resp.status_code = 202
 
     connector = _ClayTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
+    with patch("app.routers.sources.get_credential_cached", return_value="https://clay/webhook"), \
          patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
         results = await connector.search("LM358N")
     assert len(results) == 1
-    assert "Anthropic" in results[0]["mpn_matched"]
+    assert "Webhook accepted" in results[0]["mpn_matched"]
 
 
 @pytest.mark.asyncio
-async def test_clay_test_connector_no_key():
-    """_ClayTestConnector raises if no API key."""
+async def test_clay_test_connector_no_webhook():
+    """_ClayTestConnector raises if the inbound webhook URL is not configured."""
     from app.routers.sources import _ClayTestConnector
 
     connector = _ClayTestConnector()
     with patch("app.routers.sources.get_credential_cached", return_value=None):
-        with pytest.raises(ValueError, match="CLAY_API_KEY not configured"):
+        with pytest.raises(ValueError, match="CLAY_WEBHOOK_URL not configured"):
             await connector.search("LM358N")
 
 
 @pytest.mark.asyncio
 async def test_clay_test_connector_api_error():
-    """_ClayTestConnector raises on non-200 response."""
+    """_ClayTestConnector raises when the webhook returns a non-2xx status."""
     from app.routers.sources import _ClayTestConnector
 
     mock_resp = MagicMock()
@@ -1195,48 +1194,37 @@ async def test_clay_test_connector_api_error():
     mock_resp.text = "Unauthorized"
 
     connector = _ClayTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
+    with patch("app.routers.sources.get_credential_cached", return_value="https://clay/webhook"), \
          patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
-        with pytest.raises(ValueError, match="Clay API returned 401"):
+        with pytest.raises(ValueError, match="Clay webhook returned 401"):
             await connector.search("LM358N")
 
 
 @pytest.mark.asyncio
 async def test_explorium_test_connector_success():
-    """_ExploriumTestConnector succeeds when API returns 200."""
+    """_ExploriumTestConnector succeeds when the match endpoint returns businesses."""
     from app.routers.sources import _ExploriumTestConnector
 
     mock_resp = MagicMock()
     mock_resp.status_code = 200
-    mock_resp.json.return_value = {"firmo_name": "Anthropic Inc"}
+    mock_resp.json.return_value = {"matched_businesses": [{"business_id": "biz-1"}]}
 
     connector = _ExploriumTestConnector()
     with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp) as mock_post:
         results = await connector.search("LM358N")
     assert len(results) == 1
-    assert "Anthropic" in results[0]["mpn_matched"]
+    assert "1 business" in results[0]["mpn_matched"]
+    # Uses api_key header (not Bearer) and the /businesses/match endpoint
+    call = mock_post.call_args
+    assert call.args[0].endswith("/businesses/match")
+    assert "api_key" in call.kwargs["headers"]
+    assert "Authorization" not in call.kwargs["headers"]
 
 
 @pytest.mark.asyncio
-async def test_explorium_test_connector_fallback_name():
-    """_ExploriumTestConnector falls back to 'name' when 'firmo_name' missing."""
-    from app.routers.sources import _ExploriumTestConnector
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"name": "Some Corp"}
-
-    connector = _ExploriumTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
-        results = await connector.search("LM358N")
-    assert "Some Corp" in results[0]["mpn_matched"]
-
-
-@pytest.mark.asyncio
-async def test_explorium_test_connector_no_name():
-    """_ExploriumTestConnector falls back to 'matched' when both name keys missing."""
+async def test_explorium_test_connector_no_match():
+    """_ExploriumTestConnector reports 0 businesses when none matched."""
     from app.routers.sources import _ExploriumTestConnector
 
     mock_resp = MagicMock()
@@ -1247,7 +1235,7 @@ async def test_explorium_test_connector_no_name():
     with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
          patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
         results = await connector.search("LM358N")
-    assert "matched" in results[0]["mpn_matched"]
+    assert "0 business" in results[0]["mpn_matched"]
 
 
 @pytest.mark.asyncio

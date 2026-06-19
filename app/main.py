@@ -535,7 +535,7 @@ def _seed_api_sources():
                 "description": "Claude API — powers RFQ response parsing, attachment column mapping, AI chat, and intelligent data extraction.",
                 "signup_url": "https://console.anthropic.com",
                 "env_vars": ["ANTHROPIC_API_KEY"],
-                "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-20250514 (configurable via ANTHROPIC_MODEL).",
+                "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-6 (configurable via ANTHROPIC_MODEL). Auth via the 'x-api-key' header.",
             },
             {
                 "name": "teams_notifications",
@@ -559,14 +559,28 @@ def _seed_api_sources():
                 "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts.",
             },
             {
+                "name": "lusha_enrichment",
+                "display_name": "Lusha",
+                "category": "enrichment",
+                "source_type": "enrichment",
+                "description": "Contact + company enrichment — decision-maker emails (with confidence), direct dials, titles, and firmographics. v3 search→enrich.",
+                "signup_url": "https://www.lusha.com",
+                "env_vars": ["LUSHA_API_KEY"],
+                "setup_notes": "Sign up at lusha.com → Settings → API → Generate Key. Auth via the 'api_key' request header. Used to enrich vendor/company contacts.",
+            },
+            {
                 "name": "clay_enrichment",
                 "display_name": "Clay",
                 "category": "enrichment",
                 "source_type": "enrichment",
-                "description": "Data enrichment platform — waterfall enrichment across 75+ providers for contact emails, phones, LinkedIn, and company data.",
+                "description": "Async enrichment platform (no real-time API). We POST a domain to a Clay table's inbound webhook; Clay enriches and POSTs the row back to our callback.",
                 "signup_url": "https://www.clay.com",
-                "env_vars": ["CLAY_API_KEY"],
-                "setup_notes": "Sign up at clay.com → Settings → API → Generate Key. Credits-based pricing. Excellent for bulk vendor contact enrichment.",
+                "env_vars": ["CLAY_WEBHOOK_URL", "CLAY_CALLBACK_SECRET"],
+                "setup_notes": (
+                    "In Clay: create a table with an inbound webhook → copy its URL into CLAY_WEBHOOK_URL. "
+                    "Add an HTTP-API action that POSTs the enriched row to {APP_URL}/api/webhooks/clay, "
+                    "sending header x-clay-secret = CLAY_CALLBACK_SECRET and echoing the correlation_token field."
+                ),
             },
             {
                 "name": "explorium_enrichment",

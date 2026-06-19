@@ -4,7 +4,7 @@ test_enrichment_service.py — Tests for the unified enrichment service.
 Covers:
 - _clean_domain, _name_looks_suspicious, _title_case_preserve_acronyms
 - normalize_company_output, normalize_company_input
-- _clay_find_company, _clay_find_contacts
+- _lusha_find_company, _lusha_find_contacts
 - _explorium_find_company, _explorium_find_contacts
 - _gradient_find_company
 - _ai_find_company, _ai_find_contacts
@@ -238,110 +238,84 @@ class TestNormalizeCompanyInput:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Provider: Clay
+# Provider: Lusha (synchronous; takes Clay's former waterfall slot)
+# Raw connector behaviour is covered in tests/test_lusha_client.py.
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestClayFindCompany:
+class TestLushaFindCompany:
     def test_no_api_key_returns_none(self):
-        from app.enrichment_service import _clay_find_company
+        from app.enrichment_service import _lusha_find_company
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(_clay_find_company("example.com"))
-            assert result is None
+            assert asyncio.run(_lusha_find_company("example.com")) is None
 
-    def test_success(self):
-        from app.enrichment_service import _clay_find_company
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "name": "Example Corp",
+    def test_delegates_to_connector(self):
+        from app.enrichment_service import _lusha_find_company
+        company = {
+            "source": "lusha",
+            "legal_name": "Example Corp",
+            "domain": "example.com",
             "industry": "Electronics",
-            "size": "100-500",
-            "locality": "Austin, TX",
-            "country": "US",
-            "website": "https://example.com",
         }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result["source"] == "clay"
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.enrich_company",
+                new_callable=AsyncMock,
+                return_value=company,
+            ):
+                result = asyncio.run(_lusha_find_company("example.com"))
+                assert result["source"] == "lusha"
                 assert result["legal_name"] == "Example Corp"
                 assert result["industry"] == "Electronics"
-                assert result["hq_city"] == "Austin"
-                assert result["hq_state"] == "TX"
 
-    def test_api_error_returns_none(self):
-        from app.enrichment_service import _clay_find_company
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result is None
-
-    def test_exception_returns_none(self):
-        from app.enrichment_service import _clay_find_company
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("timeout"))
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result is None
+    def test_connector_exception_returns_none(self):
+        from app.enrichment_service import _lusha_find_company
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.enrich_company",
+                new_callable=AsyncMock,
+                side_effect=Exception("timeout"),
+            ):
+                assert asyncio.run(_lusha_find_company("example.com")) is None
 
 
-class TestClayFindContacts:
+class TestLushaFindContacts:
     def test_no_api_key_returns_empty(self):
-        from app.enrichment_service import _clay_find_contacts
+        from app.enrichment_service import _lusha_find_contacts
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _clay_find_contacts("example.com")
-            )
-            assert result == []
+            assert asyncio.run(_lusha_find_contacts("example.com")) == []
 
-    def test_success(self):
-        from app.enrichment_service import _clay_find_contacts
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "title": "VP Sales", "email": "jane@example.com"},
-                {"name": "John Smith", "title": "Buyer", "email": "john@example.com"},
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert len(result) == 2
+    def test_delegates_and_reshapes(self):
+        from app.enrichment_service import _lusha_find_contacts
+        raw = [
+            {"full_name": "Jane Doe", "title": "VP Sales", "email": "jane@example.com",
+             "email_status": "high", "phone": None, "linkedin_url": None},
+        ]
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.search_contacts",
+                new_callable=AsyncMock,
+                return_value=raw,
+            ):
+                result = asyncio.run(_lusha_find_contacts("example.com"))
+                assert len(result) == 1
+                assert result[0]["source"] == "lusha"
                 assert result[0]["full_name"] == "Jane Doe"
-                assert result[0]["source"] == "clay"
+                assert result[0]["email_status"] == "high"
 
     def test_filters_nameless_contacts(self):
-        from app.enrichment_service import _clay_find_contacts
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "email": "jane@example.com"},
-                {"email": "nope@example.com"},  # no name
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
+        from app.enrichment_service import _lusha_find_contacts
+        raw = [
+            {"full_name": "Jane Doe", "email": "jane@example.com"},
+            {"full_name": None, "email": "nope@example.com"},
+        ]
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.search_contacts",
+                new_callable=AsyncMock,
+                return_value=raw,
+            ):
+                result = asyncio.run(_lusha_find_contacts("example.com"))
                 assert len(result) == 1
 
 
@@ -359,28 +333,39 @@ class TestExploriumFindCompany:
             )
             assert result is None
 
-    def test_success_strips_firmo_prefix(self):
+    def test_success_match_then_firmographics(self):
+        """match → business_id, then firmographics/enrich. Tolerates firmo_ prefix."""
         from app.enrichment_service import _explorium_find_company
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "firmo_name": "Example Corp",
-            "firmo_linkedin_industry_category": "Semiconductors",
-            "firmo_number_of_employees_range": "50-100",
-            "firmo_city_name": "Dallas",
-            "firmo_region_name": "TX",
-            "firmo_country_name": "US",
-            "firmo_website": "https://example.com",
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"matched_businesses": [{"business_id": "biz-123"}]}
+        firmo_resp = MagicMock()
+        firmo_resp.status_code = 200
+        firmo_resp.json.return_value = {
+            "data": [{
+                "firmo_name": "Example Corp",
+                "firmo_linkedin_industry_category": "Semiconductors",
+                "firmo_number_of_employees_range": "50-100",
+                "firmo_city_name": "Dallas",
+                "firmo_region_name": "TX",
+                "firmo_country_name": "US",
+                "firmo_website": "https://example.com",
+            }]
         }
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+                mock_http.post = AsyncMock(side_effect=[match_resp, firmo_resp])
                 result = asyncio.run(
                     _explorium_find_company("example.com")
                 )
                 assert result["source"] == "explorium"
                 assert result["legal_name"] == "Example Corp"
                 assert result["industry"] == "Semiconductors"
+                # First call hits /businesses/match with api_key header (not Bearer)
+                first_call = mock_http.post.call_args_list[0]
+                assert first_call.args[0].endswith("/businesses/match")
+                assert "api_key" in first_call.kwargs["headers"]
+                assert "Authorization" not in first_call.kwargs["headers"]
 
 
 class TestExploriumFindContacts:
@@ -394,22 +379,35 @@ class TestExploriumFindContacts:
 
     def test_success(self):
         from app.enrichment_service import _explorium_find_contacts
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"matched_businesses": [{"business_id": "biz-1"}]}
+        prospects_resp = MagicMock()
+        prospects_resp.status_code = 200
+        prospects_resp.json.return_value = {
             "prospects": [
-                {"full_name": "Alice", "job_title": "Sales Director", "email": "alice@example.com"},
+                {"prospect_id": "p1", "full_name": "Alice", "job_title": "Sales Director"},
+            ]
+        }
+        contacts_resp = MagicMock()
+        contacts_resp.status_code = 200
+        contacts_resp.json.return_value = {
+            "data": [
+                {"prospect_id": "p1", "professional_email": "alice@example.com",
+                 "professional_email_status": "valid", "phone_number": "+1-555-0100"},
             ]
         }
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+                mock_http.post = AsyncMock(side_effect=[match_resp, prospects_resp, contacts_resp])
                 result = asyncio.run(
                     _explorium_find_contacts("example.com")
                 )
                 assert len(result) == 1
                 assert result[0]["source"] == "explorium"
                 assert result[0]["full_name"] == "Alice"
+                assert result[0]["email"] == "alice@example.com"
+                assert result[0]["email_status"] == "valid"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -583,12 +581,12 @@ class TestEnrichEntity:
             "hq_country": "US",
         }
         with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Clay", "clay.com")):
-            with patch("app.enrichment_service._clay_find_company", new_callable=AsyncMock, return_value=clay_data):
+            with patch("app.enrichment_service._lusha_find_company", new_callable=AsyncMock, return_value=clay_data):
                 with patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None):
                     result = asyncio.run(
                         enrich_entity("clay.com")
                     )
-                    assert "clay" in result.get("source", "")
+                    assert "lusha" in result.get("source", "")
                     assert result["legal_name"] == "Clay CORP"
 
 
@@ -616,7 +614,7 @@ class TestFindSuggestedContacts:
             {"full_name": "Jane", "title": "Sales Manager", "email": "jane@example.com", "source": "clay"},
             {"full_name": "Jane Doe", "title": "Sales Manager", "email": "jane@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
+        with patch("app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
             with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[1:]):
                 result = asyncio.run(
                     find_suggested_contacts("example.com")
@@ -630,7 +628,7 @@ class TestFindSuggestedContacts:
             {"full_name": "Sales VP", "title": "VP Sales", "email": "vp@example.com", "source": "clay"},
             {"full_name": "Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -643,7 +641,7 @@ class TestFindSuggestedContacts:
         contacts = [
             {"full_name": "Receptionist", "title": "Receptionist", "email": "front@example.com", "source": "clay"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -828,61 +826,32 @@ class TestNormalizeCompanyOutputEmployeeEdgeCases:
         assert result["employee_size"] == "5,000+"
 
 
-class TestClayFindContactsTitleFilter:
-    """Line 319: _clay_find_contacts with title_filter set."""
+class TestLushaFindContactsConnectorErrors:
+    """_lusha_find_contacts swallows connector errors and reshapes title filter."""
 
-    def test_title_filter_included_in_payload(self):
-        from app.enrichment_service import _clay_find_contacts
+    def test_connector_exception_returns_empty_list(self):
+        from app.enrichment_service import _lusha_find_contacts
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "title": "VP Sales", "email": "jane@example.com"},
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com", title_filter="VP")
-                )
-                assert len(result) == 1
-                # Verify payload included title
-                call_kwargs = mock_http.post.call_args
-                assert call_kwargs.kwargs["json"]["title"] == "VP"
-
-
-class TestClayFindContactsNon200:
-    """Lines 330-331: _clay_find_contacts returns [] on non-200 status."""
-
-    def test_non_200_returns_empty_list(self):
-        from app.enrichment_service import _clay_find_contacts
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.search_contacts",
+                new_callable=AsyncMock,
+                side_effect=Exception("network error"),
+            ):
+                result = asyncio.run(_lusha_find_contacts("example.com"))
                 assert result == []
 
+    def test_title_filter_forwarded_to_connector(self):
+        from app.enrichment_service import _lusha_find_contacts
 
-class TestClayFindContactsException:
-    """Lines 347-349: _clay_find_contacts catches exception and returns []."""
-
-    def test_exception_returns_empty_list(self):
-        from app.enrichment_service import _clay_find_contacts
-
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("network error"))
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert result == []
+        with patch("app.enrichment_service.get_credential_cached", return_value="lusha-key"):
+            with patch(
+                "app.connectors.lusha_client.search_contacts",
+                new_callable=AsyncMock,
+                return_value=[],
+            ) as mock_search:
+                asyncio.run(_lusha_find_contacts("example.com", title_filter="VP"))
+                assert mock_search.call_args.kwargs["title_keywords"] == ["VP"]
 
 
 class TestExploriumFindCompanyNon200:
@@ -918,27 +887,34 @@ class TestExploriumFindCompanyException:
 
 
 class TestExploriumFindContactsTitleFilter:
-    """Line 408: _explorium_find_contacts with title_filter set."""
+    """_explorium_find_contacts passes title_filter as a prospects filter."""
 
-    def test_title_filter_included_as_keywords(self):
+    def test_title_filter_included_as_filter(self):
         from app.enrichment_service import _explorium_find_contacts
 
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
+        match_resp = MagicMock()
+        match_resp.status_code = 200
+        match_resp.json.return_value = {"matched_businesses": [{"business_id": "biz-1"}]}
+        prospects_resp = MagicMock()
+        prospects_resp.status_code = 200
+        prospects_resp.json.return_value = {
             "prospects": [
-                {"full_name": "Alice", "job_title": "Director", "email": "alice@example.com"},
+                {"prospect_id": "p1", "full_name": "Alice", "job_title": "Director"},
             ]
         }
+        contacts_resp = MagicMock()
+        contacts_resp.status_code = 200
+        contacts_resp.json.return_value = {"data": []}
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
+                mock_http.post = AsyncMock(side_effect=[match_resp, prospects_resp, contacts_resp])
                 result = asyncio.run(
                     _explorium_find_contacts("example.com", title_filter="Director")
                 )
                 assert len(result) == 1
-                call_kwargs = mock_http.post.call_args
-                assert call_kwargs.kwargs["json"]["job_title_keywords"] == ["Director"]
+                # The /prospects call (2nd) carries the title filter
+                prospects_call = mock_http.post.call_args_list[1]
+                assert prospects_call.kwargs["json"]["filters"]["job_title"] == ["Director"]
 
 
 class TestExploriumFindContactsNon200:
@@ -1087,7 +1063,7 @@ class TestEnrichEntityAIFillsGaps:
                 return_value=("Partial", "partial.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._lusha_find_company",
                     new_callable=AsyncMock,
                     return_value=clay_data,
                 ):
@@ -1108,8 +1084,8 @@ class TestEnrichEntityAIFillsGaps:
                             assert result["legal_name"] == "Partial CORP"
                             # AI should have filled the missing industry
                             assert result["industry"] == "Electronics"
-                            # Source should be merged: clay+ai
-                            assert "clay" in result["source"]
+                            # Source should be merged: lusha+ai
+                            assert "lusha" in result["source"]
                             assert "ai" in result["source"]
 
     def test_ai_only_source_when_no_other_providers(self):
@@ -1143,7 +1119,7 @@ class TestEnrichEntityAIFillsGaps:
                 return_value=("Only AI", "onlyai.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._lusha_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1199,7 +1175,7 @@ class TestEnrichEntitySafeProviderExceptions:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._lusha_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1240,7 +1216,7 @@ class TestEnrichEntitySafeProviderExceptions:
                 # internally. But if the import itself fails they'd be caught by the try/except.
                 # Let's force the inner imports to fail by patching at connector level.
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._lusha_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1294,7 +1270,7 @@ class TestFindSuggestedContactsProviderExceptions:
             {"full_name": "No Title Person", "title": None, "email": "notitle@example.com", "source": "clay"},
             {"full_name": "Irrelevant Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -1309,7 +1285,7 @@ class TestFindSuggestedContactsProviderExceptions:
         contacts = [
             {"full_name": "Ghost Person", "title": "", "email": None, "source": "clay"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -1326,7 +1302,7 @@ class TestFindSuggestedContactsProviderExceptions:
             {"full_name": "Good Contact", "title": "Sales Manager", "email": "good@example.com", "source": "clay"},
         ]
         with patch(
-            "app.enrichment_service._clay_find_contacts",
+            "app.enrichment_service._lusha_find_contacts",
             new_callable=AsyncMock,
             return_value=good_contacts,
         ):
@@ -1374,7 +1350,7 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._lusha_find_company",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):

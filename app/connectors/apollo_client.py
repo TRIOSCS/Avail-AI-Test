@@ -40,7 +40,7 @@ async def search_contacts(
 ) -> list[dict]:
     """Search Apollo for contacts at a company, then enrich top results.
 
-    Step 1: api_search finds people by title (free, no emails)
+    Step 1: mixed_people/search finds people by title (free, no emails)
     Step 2: people/match enriches each to get email + phone
 
     Returns: [{
@@ -57,6 +57,8 @@ async def search_contacts(
     titles = title_keywords or DEFAULT_TITLES
 
     # Build search payload
+    # Apollo people search: POST /mixed_people/search.
+    # Domains are passed as a list via q_organization_domains_list[].
     payload: dict[str, Any] = {
         "q_organization_name": company_name,
         "person_titles": titles,
@@ -65,11 +67,11 @@ async def search_contacts(
     }
 
     if domain:
-        payload["q_organization_domains"] = domain
+        payload["q_organization_domains_list"] = [domain]
 
     try:
         resp = await http.post(
-            f"{APOLLO_BASE}/mixed_people/api_search",
+            f"{APOLLO_BASE}/mixed_people/search",
             json=payload,
             headers={
                 "Content-Type": "application/json",

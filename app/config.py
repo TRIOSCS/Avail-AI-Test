@@ -89,6 +89,18 @@ class Settings:
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
     apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))
 
+    # Lusha — contact + company enrichment (api_key header, v3 search→enrich)
+    lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
+    lusha_api_base_url: str = os.getenv("LUSHA_API_BASE_URL", "https://api.lusha.com")
+
+    # Clay — asynchronous enrichment (no real-time API):
+    #   we POST a domain to the table's inbound webhook (CLAY_WEBHOOK_URL),
+    #   Clay enriches and POSTs the row back to /api/webhooks/clay, echoing
+    #   CLAY_CALLBACK_SECRET in the x-clay-secret header.
+    clay_api_key: str = os.getenv("CLAY_API_KEY", "")  # legacy; unused for real-time
+    clay_webhook_url: str = os.getenv("CLAY_WEBHOOK_URL", "")
+    clay_callback_secret: str = os.getenv("CLAY_CALLBACK_SECRET", "")
+
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
     hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))

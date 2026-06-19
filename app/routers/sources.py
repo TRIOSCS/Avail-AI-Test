@@ -118,6 +118,8 @@ def _get_connector_for_source(name: str, db: Session = None):
         return _ApolloTestConnector()
     if name == "clay_enrichment":
         return _ClayTestConnector()
+    if name == "lusha_enrichment":
+        return _LushaTestConnector()
     if name == "explorium_enrichment":
         return _ExploriumTestConnector()
     if name == "azure_oauth":
@@ -208,9 +210,9 @@ class _ApolloTestConnector:
         if not api_key:
             raise ValueError("APOLLO_API_KEY not configured")
         resp = await http.post(
-            "https://api.apollo.io/v1/mixed_people/search",
-            headers={"Content-Type": "application/json"},
-            json={"api_key": api_key, "q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
+            "https://api.apollo.io/api/v1/mixed_people/search",
+            headers={"Content-Type": "application/json", "X-Api-Key": api_key},
+            json={"q_organization_domains_list": ["anthropic.com"], "page": 1, "per_page": 1},
             timeout=15,
         )
         if resp.status_code != 200:
@@ -220,24 +222,54 @@ class _ApolloTestConnector:
 
 
 class _ClayTestConnector:
-    """Test Clay API key with a company enrichment call."""
+    """Test Clay by posting a ping row to the inbound webhook.
+
+    Clay has no real-time REST API — it's an async webhook → callback flow.
+    A successful test means the table's inbound webhook accepted our row.
+    """
 
     async def search(self, mpn: str) -> list[dict]:
         from ..http_client import http
 
-        api_key = get_credential_cached("clay_enrichment", "CLAY_API_KEY")
-        if not api_key:
-            raise ValueError("CLAY_API_KEY not configured")
+        webhook_url = get_credential_cached("clay_enrichment", "CLAY_WEBHOOK_URL")
+        if not webhook_url:
+            raise ValueError("CLAY_WEBHOOK_URL not configured")
+        secret = get_credential_cached("clay_enrichment", "CLAY_CALLBACK_SECRET")
+        headers = {"Content-Type": "application/json"}
+        if secret:
+            headers["x-clay-secret"] = secret
         resp = await http.post(
-            "https://api.clay.com/v3/sources/enrich-company",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"domain": "anthropic.com"},
+            webhook_url,
+            headers=headers,
+            json={"domain": "anthropic.com", "correlation_token": "avail-connection-test", "ping": True},
+            timeout=15,
+        )
+        if resp.status_code not in (200, 201, 202):
+            raise ValueError(f"Clay webhook returned {resp.status_code}: {resp.text[:200]}")
+        return [{"vendor_name": "Clay", "mpn_matched": "Webhook accepted ping row", "status": "ok"}]
+
+
+class _LushaTestConnector:
+    """Test Lusha API key with a lightweight company lookup."""
+
+    async def search(self, mpn: str) -> list[dict]:
+        from ..http_client import http
+
+        api_key = get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
+        if not api_key:
+            raise ValueError("LUSHA_API_KEY not configured")
+        resp = await http.get(
+            "https://api.lusha.com/company",
+            params={"domain": "anthropic.com"},
+            headers={"api_key": api_key, "Content-Type": "application/json"},
             timeout=15,
         )
         if resp.status_code != 200:
-            raise ValueError(f"Clay API returned {resp.status_code}: {resp.text[:200]}")
-        name = resp.json().get("name", "Unknown")
-        return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
+            raise ValueError(f"Lusha API returned {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        info = data.get("data") or data.get("company") or data
+        name = info.get("name") if isinstance(info, dict) else None
+        return [{"vendor_name": "Lusha", "mpn_matched": f"Connected — {name or 'OK'}", "status": "ok"}]
 
 
 class _ExploriumTestConnector:
@@ -250,16 +282,22 @@ class _ExploriumTestConnector:
         if not api_key:
             raise ValueError("EXPLORIUM_API_KEY not configured")
         resp = await http.post(
-            "https://api.explorium.ai/v1/match/business",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"domain": "anthropic.com"},
+            "https://api.explorium.ai/v1/businesses/match",
+            headers={"api_key": api_key, "Content-Type": "application/json"},
+            json={"businesses_to_match": [{"domain": "anthropic.com"}]},
             timeout=15,
         )
         if resp.status_code != 200:
             raise ValueError(f"Explorium API returned {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
-        name = data.get("firmo_name", data.get("name", "matched"))
-        return [{"vendor_name": "Explorium", "mpn_matched": f"Match: {name}", "status": "ok"}]
+        matched = (
+            data.get("matched_businesses")
+            or data.get("data")
+            or data.get("businesses")
+            or []
+        )
+        count = len(matched) if isinstance(matched, list) else 0
+        return [{"vendor_name": "Explorium", "mpn_matched": f"Match OK — {count} business(es)", "status": "ok"}]
 
 
 class _AzureOAuthTestConnector:

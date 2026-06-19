@@ -369,7 +369,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                 if email and email not in existing_emails:
                     confidence = 0.7
                     src = contact_data.get("source", "unknown")
-                    if src == "apollo":
+                    if src in ("apollo", "lusha"):
                         confidence = 0.85
                     elif src in ("hunter", "rocketreach", "clearbit"):
                         confidence = 0.8
@@ -387,6 +387,14 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                     enriched_fields.append(f"contact:{email}")
         except Exception as e:
             errors.append(f"contact_discovery: {e}")
+
+        # Kick off async Clay enrichment (webhook → callback). No-op unless
+        # CLAY_WEBHOOK_URL is configured; results arrive later via the callback.
+        try:
+            from .clay_service import request_clay_enrichment
+            await request_clay_enrichment(card.domain, "vendor_card", card.id)
+        except Exception as e:
+            errors.append(f"clay_request: {e}")
 
     # ── PRIORITY 2: Email verification via Hunter.io ──
     try:
@@ -572,7 +580,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                     if email and email not in existing_emails:
                         confidence = 0.7
                         src = contact_data.get("source", "unknown")
-                        if src == "apollo":
+                        if src in ("apollo", "lusha"):
                             confidence = 0.85
                         elif src in ("hunter", "rocketreach", "clearbit"):
                             confidence = 0.8
@@ -590,6 +598,14 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                         enriched_fields.append(f"contact:{email}")
         except Exception as e:
             errors.append(f"contact_discovery: {e}")
+
+        # Kick off async Clay enrichment (webhook → callback). No-op unless
+        # CLAY_WEBHOOK_URL is configured; results arrive later via the callback.
+        try:
+            from .clay_service import request_clay_enrichment
+            await request_clay_enrichment(domain, "company", company_id)
+        except Exception as e:
+            errors.append(f"clay_request: {e}")
 
     # ── PRIORITY 2: Company firmographics ──
     if domain:

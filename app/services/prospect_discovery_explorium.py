@@ -118,7 +118,8 @@ async def discover_companies_with_signals(
             json=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                # Explorium authenticates via the `api_key` header (not Bearer).
+                "api_key": api_key,
             },
             timeout=60,
         )

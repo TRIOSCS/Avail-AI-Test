@@ -301,8 +301,9 @@ class TestApolloClient:
             assert result == []
             call_args = mock_http.post.call_args_list[0]
             payload = call_args.kwargs.get("json") or call_args[1].get("json")
-            assert payload["q_organization_domains"] == "acme.com"
+            assert payload["q_organization_domains_list"] == ["acme.com"]
             assert payload["person_titles"] == ["CEO"]
+            assert call_args.kwargs["url"].endswith("/mixed_people/search") if "url" in call_args.kwargs else call_args[0][0].endswith("/mixed_people/search")
 
     @pytest.mark.asyncio
     async def test_search_contacts_person_with_no_names(self):

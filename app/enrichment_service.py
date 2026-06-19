@@ -1,8 +1,10 @@
 """AVAIL v1.2.0 — Unified Enrichment Service
 
 Shared enrichment workflow for both vendor cards and customer companies.
-Supports Clay, Explorium (Vibe Prospecting), and AI (Claude + web search)
-as enrichment providers. AI runs last to fill any remaining gaps.
+Synchronous providers: Lusha, Apollo, Explorium (Vibe Prospecting), Clearbit,
+Gradient, and AI (Claude + web search). AI runs last to fill remaining gaps.
+Clay enrichment is asynchronous (webhook → callback) and lives in
+app.services.clay_service — it feeds results back via the EnrichmentQueue.
 """
 
 import asyncio
@@ -260,138 +262,164 @@ def normalize_company_output(data: dict) -> dict:
     return out
 
 
-# ── Provider: Clay ──────────────────────────────────────────────────────
+# ── Provider: Lusha ──────────────────────────────────────────────────────
+#
+# Lusha is a synchronous provider (api_key header, v3 search → enrich).
+# (Clay is intentionally NOT a synchronous provider here — it has no
+# real-time API; it runs asynchronously via app.services.clay_service and
+# feeds results back through the EnrichmentQueue callback.)
 
-CLAY_BASE = "https://api.clay.com/v3/sources"
 
-
-async def _clay_find_company(domain: str) -> Optional[dict]:
-    """Look up a company on Clay by domain. Returns normalized company data."""
-    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
-        log.debug("Clay API key not configured — skipping")
+async def _lusha_find_company(domain: str, name: str = "") -> Optional[dict]:
+    """Look up a company on Lusha by domain. Returns normalized company data."""
+    if not get_credential_cached("lusha_enrichment", "LUSHA_API_KEY"):
+        log.debug("Lusha API key not configured — skipping")
         return None
     try:
-        resp = await http.post(
-            f"{CLAY_BASE}/enrich-company",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json={"domain": domain},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            log.warning(
-                "Clay company lookup failed: %s %s",
-                resp.status_code,
-                resp.text[:200],
-            )
-            return None
-        data = resp.json()
-        return {
-                "source": "clay",
-                "legal_name": data.get("name"),
-                "domain": domain,
-                "linkedin_url": data.get("linkedin_url") or data.get("url"),
-                "industry": data.get("industry"),
-                "employee_size": data.get("size"),
-                "hq_city": data.get("locality", "").split(",")[0].strip()
-                if data.get("locality")
-                else None,
-                "hq_state": data.get("locality", "").split(",")[-1].strip()
-                if data.get("locality") and "," in data.get("locality", "")
-                else None,
-                "hq_country": data.get("country"),
-                "website": data.get("website"),
-            }
+        from .connectors.lusha_client import enrich_company as lusha_enrich
+        return await lusha_enrich(domain)
     except Exception as e:
-        log.error("Clay company lookup error: %s", e)
+        log.error("Lusha company lookup error: %s", e)
         return None
 
 
-async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Find contacts at a company via Clay. Returns list of contact dicts."""
-    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
+async def _lusha_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
+    """Find contacts at a company via Lusha. Returns list of contact dicts."""
+    if not get_credential_cached("lusha_enrichment", "LUSHA_API_KEY"):
         return []
     try:
-        payload = {"domain": domain}
-        if title_filter:
-            payload["title"] = title_filter
-        resp = await http.post(
-            f"{CLAY_BASE}/find-people",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=20,
+        from .connectors.lusha_client import search_contacts as lusha_search
+        raw = await lusha_search(
+            domain=domain,
+            title_keywords=[title_filter] if title_filter else None,
+            limit=5,
         )
-        if resp.status_code != 200:
-            log.warning("Clay contacts lookup failed: %s", resp.status_code)
-            return []
-        people = resp.json().get("people") or resp.json().get("contacts") or []
         return [
             {
-                "source": "clay",
-                "full_name": p.get("name") or p.get("full_name"),
-                "title": p.get("title") or p.get("latest_experience_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url") or p.get("url"),
-                "location": p.get("location_name") or p.get("location"),
-                "company": p.get("company") or p.get("latest_experience_company"),
+                "source": "lusha",
+                "full_name": c.get("full_name"),
+                "title": c.get("title"),
+                "email": c.get("email"),
+                "email_status": c.get("email_status"),
+                "phone": c.get("phone"),
+                "linkedin_url": c.get("linkedin_url"),
+                "location": None,
+                "company": domain,
             }
-            for p in people
-            if p.get("name") or p.get("full_name")
+            for c in raw
+            if c.get("full_name")
         ]
     except Exception as e:
-        log.error("Clay contacts lookup error: %s", e)
+        log.error("Lusha contacts lookup error: %s", e)
         return []
 
 
 # ── Provider: Explorium (Vibe Prospecting) ──────────────────────────────
+#
+# Explorium uses an `api_key` header (NOT Bearer) and a match → enrich flow:
+#   1. POST /v1/businesses/match            → business_id
+#   2. POST /v1/businesses/firmographics/enrich (business_ids)   → firmographics
+#   3. POST /v1/prospects                   (business_ids)       → prospect_ids
+#   4. POST /v1/prospects/contacts_information/enrich (prospect_ids) → emails/phones
+# Email-verified field on contacts is `professional_email_status` (valid/catch-all/invalid).
 
 EXPLORIUM_BASE = "https://api.explorium.ai/v1"
 
 
+def _explorium_headers() -> dict:
+    """Auth headers for Explorium — key goes in the `api_key` header."""
+    return {
+        "api_key": get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"),
+        "Content-Type": "application/json",
+    }
+
+
+def _explorium_records(data) -> list[dict]:
+    """Pull the list of records out of an Explorium response (tolerant of shape)."""
+    if isinstance(data, list):
+        return [r for r in data if isinstance(r, dict)]
+    if not isinstance(data, dict):
+        return []
+    for key in ("data", "results", "matched_businesses", "businesses", "prospects", "contacts"):
+        val = data.get(key)
+        if isinstance(val, list):
+            return [r for r in val if isinstance(r, dict)]
+    # Single record at top level
+    return [data] if data else []
+
+
+def _explorium_business_id(record: dict) -> Optional[str]:
+    """Extract a business_id from an Explorium match record."""
+    return (
+        record.get("business_id")
+        or record.get("businessId")
+        or record.get("id")
+    )
+
+
+async def _explorium_match_business(domain: str, name: str = "") -> Optional[str]:
+    """Match a company to an Explorium business_id by domain. Returns the id or None."""
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
+        return None
+    business = {"domain": domain}
+    if name:
+        business["name"] = name
+    resp = await http.post(
+        f"{EXPLORIUM_BASE}/businesses/match",
+        headers=_explorium_headers(),
+        json={"businesses_to_match": [business]},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        log.warning("Explorium match failed: %s %s", resp.status_code, resp.text[:200])
+        return None
+    records = _explorium_records(resp.json())
+    if not records:
+        return None
+    return _explorium_business_id(records[0])
+
+
 async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company on Explorium by domain. Returns normalized company data."""
+    """Look up a company on Explorium by domain (match → firmographics enrich)."""
     if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         log.debug("Explorium API key not configured — skipping")
         return None
     try:
+        business_id = await _explorium_match_business(domain, name)
+        if not business_id:
+            return None
+
         resp = await http.post(
-            f"{EXPLORIUM_BASE}/match/business",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json={"domain": domain, "name": name},
+            f"{EXPLORIUM_BASE}/businesses/firmographics/enrich",
+            headers=_explorium_headers(),
+            json={"business_ids": [business_id]},
             timeout=15,
         )
         if resp.status_code != 200:
-            log.warning("Explorium company lookup failed: %s", resp.status_code)
+            log.warning("Explorium firmographics failed: %s", resp.status_code)
             return None
-        data = resp.json()
-        firmo = {
-            k.replace("firmo_", ""): v
-            for k, v in data.items()
-            if k.startswith("firmo_")
-        }
+
+        records = _explorium_records(resp.json())
+        if not records:
+            return None
+        firmo = records[0]
+        # Tolerate both flat and firmo_-prefixed field names.
+        firmo = {k.replace("firmo_", ""): v for k, v in firmo.items()}
+
         return {
             "source": "explorium",
-            "legal_name": firmo.get("name"),
+            "legal_name": firmo.get("name") or firmo.get("business_name"),
             "domain": domain,
-            "linkedin_url": firmo.get("linkedin_profile"),
-            "industry": firmo.get("linkedin_industry_category"),
-            "employee_size": firmo.get("number_of_employees_range"),
-            "hq_city": firmo.get("city_name"),
-            "hq_state": firmo.get("region_name"),
-            "hq_country": firmo.get("country_name"),
+            "linkedin_url": firmo.get("linkedin") or firmo.get("linkedin_profile"),
+            "industry": firmo.get("linkedin_industry_category") or firmo.get("industry"),
+            "employee_size": firmo.get("number_of_employees_range") or firmo.get("company_size"),
+            "hq_city": firmo.get("city_name") or firmo.get("city"),
+            "hq_state": firmo.get("region_name") or firmo.get("region"),
+            "hq_country": firmo.get("country_name") or firmo.get("country"),
             "website": firmo.get("website"),
             "ticker": firmo.get("ticker"),
             "naics": firmo.get("naics"),
-            "revenue_range": firmo.get("yearly_revenue_range"),
+            "revenue_range": firmo.get("yearly_revenue_range") or firmo.get("revenue_range"),
         }
     except Exception as e:
         log.error("Explorium company lookup error: %s", e)
@@ -399,39 +427,67 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
 
 
 async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Find contacts at a company via Explorium."""
+    """Find contacts at a company via Explorium (match → prospects → contact enrich)."""
     if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         return []
     try:
-        payload = {"company_domain": domain}
+        business_id = await _explorium_match_business(domain)
+        if not business_id:
+            return []
+
+        payload = {"business_ids": [business_id], "size": 10}
         if title_filter:
-            payload["job_title_keywords"] = [title_filter]
+            payload["filters"] = {"job_title": [title_filter]}
         resp = await http.post(
-            f"{EXPLORIUM_BASE}/fetch/prospects",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
-                "Content-Type": "application/json",
-            },
+            f"{EXPLORIUM_BASE}/prospects",
+            headers=_explorium_headers(),
             json=payload,
             timeout=20,
         )
         if resp.status_code != 200:
             return []
-        prospects = resp.json().get("prospects") or []
-        return [
-            {
-                "source": "explorium",
-                "full_name": p.get("full_name"),
-                "title": p.get("job_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url"),
-                "location": p.get("location"),
-                "company": p.get("company_name"),
-            }
-            for p in prospects
-            if p.get("full_name")
+        prospects = _explorium_records(resp.json())
+        if not prospects:
+            return []
+
+        # Enrich the matched prospects to get emails + phones (+ verification status).
+        prospect_ids = [
+            p.get("prospect_id") or p.get("id") for p in prospects
+            if p.get("prospect_id") or p.get("id")
         ]
+        contact_info: dict[str, dict] = {}
+        if prospect_ids:
+            eresp = await http.post(
+                f"{EXPLORIUM_BASE}/prospects/contacts_information/enrich",
+                headers=_explorium_headers(),
+                json={"prospect_ids": prospect_ids},
+                timeout=20,
+            )
+            if eresp.status_code == 200:
+                for rec in _explorium_records(eresp.json()):
+                    pid = rec.get("prospect_id") or rec.get("id")
+                    if pid:
+                        contact_info[pid] = rec
+
+        out = []
+        for p in prospects:
+            pid = p.get("prospect_id") or p.get("id")
+            ci = contact_info.get(pid, {})
+            email = ci.get("professional_email") or ci.get("email") or p.get("email")
+            out.append(
+                {
+                    "source": "explorium",
+                    "full_name": p.get("full_name") or p.get("name"),
+                    "title": p.get("job_title") or p.get("title"),
+                    "email": email,
+                    "email_status": ci.get("professional_email_status"),
+                    "phone": ci.get("phone_number") or ci.get("mobile_phone") or p.get("phone"),
+                    "linkedin_url": p.get("linkedin") or p.get("linkedin_url"),
+                    "location": p.get("location"),
+                    "company": p.get("company_name"),
+                }
+            )
+        return [c for c in out if c["full_name"]]
     except Exception as e:
         log.error("Explorium contacts lookup error: %s", e)
         return []
@@ -594,10 +650,13 @@ async def _ai_find_contacts(
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Clay, Apollo, Explorium, Clearbit, Gradient run concurrently.
+    Phase 1: Lusha, Apollo, Explorium, Clearbit, Gradient run concurrently.
     Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Clay > Apollo > Explorium > Clearbit > Gradient > AI.
+    Merge priority: Lusha > Apollo > Explorium > Clearbit > Gradient > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
+
+    Note: Clay is async (webhook → callback) and is not part of this
+    synchronous waterfall — see app.services.clay_service.
     """
     from .cache.intel_cache import get_cached, set_cached
 
@@ -628,7 +687,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "hq_city", "hq_state", "hq_country", "website", "linkedin_url",
     ]
 
-    # ── Phase 1: Clay + Apollo + Explorium + Clearbit concurrently ──
+    # ── Phase 1: Lusha + Apollo + Explorium + Clearbit concurrently ──
     async def _safe_apollo_company(domain: str):
         try:
             from .connectors.apollo_client import enrich_company as apollo_enrich
@@ -645,8 +704,8 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             log.debug("Clearbit enrichment skipped: %s", e)
             return None
 
-    clay_result, apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
-        _clay_find_company(domain),
+    lusha_result, apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
+        _lusha_find_company(domain, name),
         _safe_apollo_company(domain),
         _explorium_find_company(domain, name),
         _safe_clearbit(domain),
@@ -654,10 +713,10 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         return_exceptions=True,
     )
 
-    # Merge in priority order: Clay > Apollo > Explorium > Clearbit > Gradient
+    # Merge in priority order: Lusha > Apollo > Explorium > Clearbit > Gradient
     sources = []
     for provider_data, provider_name in [
-        (clay_result, "clay"),
+        (lusha_result, "lusha"),
         (apollo_result, "apollo"),
         (exp_result, "explorium"),
         (cb_result, "clearbit"),
@@ -781,7 +840,7 @@ async def find_suggested_contacts(
 
     # Run all 6 sources concurrently
     results = await asyncio.gather(
-        _clay_find_contacts(domain, title_filter),
+        _lusha_find_contacts(domain, title_filter),
         _explorium_find_contacts(domain, title_filter),
         _safe_hunter(domain),
         _safe_rocketreach(domain),

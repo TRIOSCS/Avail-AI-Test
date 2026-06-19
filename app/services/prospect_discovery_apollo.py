@@ -47,14 +47,14 @@ async def check_people_signals(domain: str) -> dict:
 
     try:
         payload = {
-            "q_organization_domains": domain,
+            "q_organization_domains_list": [domain],
             "person_titles": PROCUREMENT_TITLES,
             "per_page": 10,
             "page": 1,
         }
 
         resp = await http.post(
-            f"{APOLLO_BASE}/mixed_people/api_search",
+            f"{APOLLO_BASE}/mixed_people/search",
             json=payload,
             headers={
                 "Content-Type": "application/json",
