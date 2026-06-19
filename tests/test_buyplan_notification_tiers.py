@@ -303,6 +303,10 @@ class TestVerifyPoWiring:
 
     @pytest.mark.asyncio
     async def test_approve_does_not_fire_po_rejected(self, db_session):
+        # The confirm → notify_po_confirmed path lives in a DIFFERENT handler
+        # (buy_plan_confirm_po_partial) and is covered by the broader regression
+        # in test_buyplan_v3_notifications.py; this file only asserts the verify-po
+        # reject path, so here we just verify approve does NOT fire the reject notice.
         mock_bg = AsyncMock()
         await _drive_verify_po("approve", db_session, mock_bg)
 

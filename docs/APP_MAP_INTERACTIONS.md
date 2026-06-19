@@ -1132,6 +1132,45 @@ buyplan_workflow.py (state machine)
             ops (PO unverified >2h) until lines advance; idempotent via buy_plan_lines.last_nudge_at
 ```
 
+**Buy Plan Deal Hub — role-lens read flow.** `/v2/buy-plans` is its own primary-nav
+tab rendering a lens shell (`partials/buy_plans/hub.html`): a lens switcher + a lazy
+`#bp-hub-body` that loads the active lens body. The shell route
+`GET /v2/partials/buy-plans?lens=` resolves the lens (`deals`/`orders`/`supervise`),
+falling back to a **role-derived default** (`_default_lens`): managers/admins/ops →
+Supervise, buyers → My Orders, everyone else → My Deals. The Supervise button + lens
+are gated by `_can_supervise` (manager/admin OR ops verification-group member); a
+non-supervisor who requests it is served the mine-scope board (defense in depth).
+
+```
+GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
+    |
+    +-- lens=deals     --> GET /partials/buy-plans/board?scope=mine|all
+    |                        services/buyplan_hub.deals_board   (sales stage board;
+    |                        scope=all role-gated to supervisors)
+    +-- lens=orders    --> GET /partials/buy-plans/orders
+    |                        services/buyplan_hub.buyer_line_queue (buyer PO-cut queue)
+    +-- lens=supervise --> GET /partials/buy-plans/supervise
+                             services/buyplan_hub.supervise_overview (triage strip:
+                             approvals / SO+PO verify / overdue / flagged / halted)
+                             + deals_board(scope=all). Triage forms post origin=supervise
+                             so the action re-renders THIS body into #bp-hub-body.
+```
+
+**Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
+- **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback
+  (`notify_po_rejected`, fired from the verify-po reject path), new assignment / approval
+  (`notify_approved`, per assigned buyer).
+- **Routine → in-app only**: plan completion (`notify_completed`) — no email, no Teams.
+All tiers write an `activity_log` row linked via `buy_plan_id` (+ `requisition_id`).
+
+**Reporting fold.** The retired `/v2/reporting` page's analytics now live where the work
+happens: the **Supervise** lens strip (open value / avg margin / approvals / halted /
+overdue / flagged counts), the **Sales Hub** pipeline chip (`forecast_service.pipeline_summary`
+in `parts_workspace_partial`), and the **CRM** coverage chip (`reporting_service.coverage_report`
+in `crm_service.cdm_list_ctx`). `coverage_report` is global (population-wide, filter-independent),
+so it is short-TTL cached (`@cached_endpoint`) to stay off the aggregation queries on every
+CRM list refresh while the chip still re-renders.
+
 **Buy-plan completion → CPH feed (proactive backbone).** When `check_completion`
 (app/services/buyplan_workflow.py) transitions a plan to COMPLETE, it calls
 `record_buyplan_purchase_history(db, plan)` (app/services/purchase_history_service.py)

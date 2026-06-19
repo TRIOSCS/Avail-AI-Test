@@ -420,6 +420,7 @@ async def notify_so_rejected(plan: BuyPlan, db: Session, action: str):
             activity_type="buyplan_rejected",
             channel="system",
             requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
             subject=f"SO# {plan.sales_order_number} {label} — plan #{plan.id}",
         )
     )

@@ -4,12 +4,12 @@ The Requisition IS the opportunity (locked CRM decision — no separate deal
 object). Forecast = sum(deal_value * stage win-probability) over open
 requisitions. Account- and owner-level rollups plus an
 interactions -> RFQs -> quotes -> orders conversion funnel.
-Lives in Reporting, never the daily hub.
 
 Forecast dollars reuse the canonical _resolve_deal_value so they reconcile with
 what the requisition list shows per row.
 
-Called by: app/routers/crm/views.py reporting_dashboard
+Called by: app/routers/htmx_views.py parts_workspace_partial (the Sales Hub /
+           parts workspace) — pipeline_summary feeds the pipeline chip there.
 Depends on: app.models (Requisition, Requirement, Quote, Company, User),
             app.services.requisition_list_service._resolve_deal_value
 """

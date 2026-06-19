@@ -4,13 +4,15 @@ Public function: coverage_report — cadence coverage across active companies, b
 tier and by rep. Pipeline/forecast and the conversion funnel live in
 app/services/forecast_service.py (the Requisition is the opportunity).
 
-Called by: app/routers/crm/views.py (reporting_dashboard route)
+Called by: app/services/crm_service.py cdm_list_ctx (the CRM account-list / CDM
+           workspace context) — surfaces the coverage chip in the account-list header.
 Depends on: app/models (Company, User), app/services/crm_service (cadence_state)
 """
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint
 from ..models.auth import User
 from ..models.crm import Company
 from .crm_service import cadence_state
@@ -18,6 +20,7 @@ from .crm_service import cadence_state
 TIER_ORDER = ["key", "core", "standard", "prospect"]
 
 
+@cached_endpoint("crm_coverage_report", ttl_hours=0.05, key_params=[])
 def coverage_report(db: Session) -> dict:
     """Compute cadence coverage across all active companies.
 
@@ -25,6 +28,13 @@ def coverage_report(db: Session) -> dict:
     by_tier rows: {tier, total, on_target, due, overdue, new, coverage_pct}
     by_rep rows:  {rep, total, on_target, due, overdue, new, coverage_pct}
     summary:      {total, overdue, overdue_pct, coverage_pct}
+
+    Cached (~3 min, global key): the figure is account-population-wide and does
+    NOT vary by the account-list filter/sort/page, yet cdm_list_ctx recomputes it
+    on every list refresh. The short TTL keeps repeated refreshes off the two
+    aggregation queries while staying fresh enough for a coverage chip. The chip
+    still re-renders (and re-reads this cache) on every filter, so it never
+    vanishes on a filtered list.
     """
     rows = db.execute(
         select(

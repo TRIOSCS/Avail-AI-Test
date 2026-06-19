@@ -45,9 +45,13 @@ class TestMobileNavTemplate:
         assert "'/v2/reporting'" not in src
 
     def test_badge_elif_has_buy_plans(self):
-        """Badge elif block contains 'buy-plans' (alert badge wiring)."""
+        """Badge elif block wires 'buy-plans' into the cross-app alert-badge tuple.
+
+        Anchored on the exact ``{% elif id in (...) %}`` membership tuple so this
+        verifies the badge wiring, not an incidental 'buy-plans' string elsewhere.
+        """
         src = _TEMPLATE.read_text()
-        assert "'buy-plans'" in src
+        assert "{% elif id in ('requisitions', 'buy-plans', 'crm') %}" in src
 
 
 class TestNavIdAlias:
