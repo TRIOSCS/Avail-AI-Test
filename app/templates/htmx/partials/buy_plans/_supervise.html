@@ -15,7 +15,7 @@
 {% set nothing = not (tri.approvals or tri.so_pending or tri.overdue_pos or tri.po_pending_verify or tri.flagged or tri.halted) %}
 
 {# ── Slim metric strip (contextual, non-dominating) ── #}
-<div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 text-xs text-gray-500">
+<div class="flex flex-wrap items-center gap-x-4 gap-y-1 mb-4 text-xs text-gray-600">
   <span>${{ '{:,.0f}'.format(strip.open_value) }} open value</span>
   <span>{{ '{:.1f}'.format(strip.avg_margin) }}% avg margin</span>
   <span>{{ strip.approval_count }} approval{{ 's' if strip.approval_count != 1 }} waiting</span>
