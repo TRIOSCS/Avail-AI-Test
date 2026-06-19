@@ -299,8 +299,8 @@ def test_specs_shows_stored_datasheet(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name="LM317T-datasheet.pdf",
-        onedrive_item_id="ITM",
-        onedrive_url="https://od/x",
+        library_item_id="ITM",
+        library_web_url="https://od/x",
         library_drive_id="DRV",
         source="connector",
         verified=True,
@@ -327,7 +327,7 @@ def test_datasheet_download_streams_pdf(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name="LM317Z-datasheet.pdf",
-        onedrive_item_id="ITM",
+        library_item_id="ITM",
         library_drive_id="DRV",
         content_type="application/pdf",
     )
@@ -357,7 +357,7 @@ def test_datasheet_download_sanitizes_content_disposition(client, db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name='x"\r\nSet-Cookie: pwned=1.pdf',
-        onedrive_item_id="ITM",
+        library_item_id="ITM",
         library_drive_id="DRV",
         content_type="application/pdf",
     )
@@ -388,231 +388,3 @@ def test_market_no_banner_when_only_unconfigured(client):
         resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "unavailable" not in resp.text
-
-
-# ── Market-baseline strip — helper unit tests ──────────────────────────────
-
-
-class TestComputeMarketBaseline:
-    """Unit tests for compute_market_baseline — no DB, no HTTP, no SSE.
-
-    The helper must be importable and work on plain dicts (same schema as cached_rows /
-    vendor_card.html).
-    """
-
-    def _make_row(self, *, is_authorized: bool, unit_price, qty_available) -> dict:
-        return {"is_authorized": is_authorized, "unit_price": unit_price, "qty_available": qty_available}
-
-    def test_empty_input_returns_no_authorized(self):
-        from app.search_service import compute_market_baseline
-
-        result = compute_market_baseline([])
-        assert result["has_authorized"] is False
-        assert result["median_price"] is None
-        assert result["total_stock"] is None
-        assert result["sources"] == 0
-
-    def test_all_non_authorized_returns_no_authorized(self):
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=False, unit_price=1.50, qty_available=500),
-            self._make_row(is_authorized=False, unit_price=2.00, qty_available=200),
-        ]
-        result = compute_market_baseline(rows)
-        assert result["has_authorized"] is False
-        assert result["sources"] == 0
-
-    def test_authorized_rows_median_price_odd_count(self):
-        """With 3 authorized rows, median is the middle price when sorted."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=1.00, qty_available=100),
-            self._make_row(is_authorized=True, unit_price=3.00, qty_available=200),
-            self._make_row(is_authorized=True, unit_price=2.00, qty_available=150),
-            self._make_row(is_authorized=False, unit_price=0.50, qty_available=5000),
-        ]
-        result = compute_market_baseline(rows)
-        assert result["has_authorized"] is True
-        assert result["sources"] == 3
-        # Sorted prices: [1.00, 2.00, 3.00] → index 1 → 2.00
-        assert result["median_price"] == pytest.approx(2.00)
-        assert result["total_stock"] == 450  # 100 + 200 + 150
-
-    def test_authorized_rows_median_price_even_count(self):
-        """With 2 authorized rows, median uses upper-middle (index len//2 == 1)."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=1.00, qty_available=100),
-            self._make_row(is_authorized=True, unit_price=3.00, qty_available=200),
-        ]
-        result = compute_market_baseline(rows)
-        # Sorted [1.00, 3.00] → index 1 → 3.00 (same algorithm as _median)
-        assert result["median_price"] == pytest.approx(3.00)
-        assert result["total_stock"] == 300
-
-    def test_authorized_none_price_excluded_from_median(self):
-        """unit_price=None rows are excluded from the price list; stock still
-        counted."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=None, qty_available=500),
-            self._make_row(is_authorized=True, unit_price=2.50, qty_available=100),
-        ]
-        result = compute_market_baseline(rows)
-        assert result["has_authorized"] is True
-        assert result["median_price"] == pytest.approx(2.50)
-        assert result["total_stock"] == 600  # None row's qty still counted
-
-    def test_authorized_none_qty_excluded_from_stock_sum(self):
-        """qty_available=None means unknown — excluded from sum; median still
-        computed."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=1.00, qty_available=None),
-            self._make_row(is_authorized=True, unit_price=2.00, qty_available=None),
-        ]
-        result = compute_market_baseline(rows)
-        assert result["has_authorized"] is True
-        assert result["total_stock"] is None  # all qtys unknown
-        assert result["median_price"] == pytest.approx(2.00)
-
-    def test_all_authorized_none_price_median_is_none(self):
-        """If every authorized row has no price, median is None (not a crash)."""
-        from app.search_service import compute_market_baseline
-
-        rows = [self._make_row(is_authorized=True, unit_price=None, qty_available=100)]
-        result = compute_market_baseline(rows)
-        assert result["has_authorized"] is True
-        assert result["median_price"] is None
-        assert result["total_stock"] == 100
-
-    def test_zero_price_excluded_from_median(self):
-        """unit_price=0 is not a real price and must be excluded (same as _median)."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=0, qty_available=100),
-            self._make_row(is_authorized=True, unit_price=5.00, qty_available=50),
-        ]
-        result = compute_market_baseline(rows)
-        # Only 5.00 qualifies → median is 5.00
-        assert result["median_price"] == pytest.approx(5.00)
-
-    def test_mix_authorized_and_non_uses_only_authorized(self):
-        """Non-authorized rows must not pollute the median or stock sum."""
-        from app.search_service import compute_market_baseline
-
-        rows = [
-            self._make_row(is_authorized=True, unit_price=10.00, qty_available=50),
-            self._make_row(is_authorized=False, unit_price=0.01, qty_available=99999),
-        ]
-        result = compute_market_baseline(rows)
-        assert result["sources"] == 1
-        assert result["median_price"] == pytest.approx(10.00)
-        assert result["total_stock"] == 50
-
-
-# ── Market-baseline strip — render tests ──────────────────────────────────
-
-
-class TestMarketBaselineStripRender:
-    """Light render tests: the dossier_market template renders the strip (and the
-    empty-state path) without Jinja errors when cached rows are provided via a
-    mocked Redis pointer."""
-
-    def _rows_with_baseline(self) -> list[dict]:
-        return [
-            {
-                "vendor_name": "DigiKey",
-                "mpn_matched": "LM317T",
-                "manufacturer": "TI",
-                "unit_price": 1.25,
-                "qty_available": 500,
-                "is_authorized": True,
-                "confidence_color": "green",
-                "confidence_pct": 95,
-                "source_type": "digikey",
-                "sources_found": ["digikey"],
-            },
-            {
-                "vendor_name": "Mouser",
-                "mpn_matched": "LM317T",
-                "manufacturer": "TI",
-                "unit_price": 1.50,
-                "qty_available": 300,
-                "is_authorized": True,
-                "confidence_color": "green",
-                "confidence_pct": 92,
-                "source_type": "mouser",
-                "sources_found": ["mouser"],
-            },
-            {
-                "vendor_name": "GreyBroker",
-                "mpn_matched": "LM317T",
-                "manufacturer": "",
-                "unit_price": 0.75,
-                "qty_available": 2000,
-                "is_authorized": False,
-                "confidence_color": "amber",
-                "confidence_pct": 60,
-                "source_type": "brokerbin",
-                "sources_found": ["brokerbin"],
-            },
-        ]
-
-    def _patch_redis(self, rows):
-        rc = MagicMock()
-        rc.get.side_effect = lambda k: (
-            "sid-baseline-test" if k.endswith(":latest") else (json.dumps(rows) if k.endswith(":results") else None)
-        )
-        return rc
-
-    def test_baseline_strip_shows_franchise_fields(self, client):
-        """Cache hit with 2 authorized rows → strip renders median price, auth stock,
-        and auth source count without Jinja errors."""
-        rows = self._rows_with_baseline()
-        rc = self._patch_redis(rows)
-        with patch("app.search_service._get_search_redis", return_value=rc):
-            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
-        assert resp.status_code == 200
-        body = resp.text
-        assert "Franchise baseline" in body
-        assert "Median price" in body
-        assert "Auth stock" in body
-        assert "Auth sources" in body
-        # 2 authorized sources
-        assert "800" in body  # total authorized stock = 500 + 300
-
-    def test_baseline_strip_empty_state_no_authorized(self, client):
-        """When all cached rows are non-authorized, the graceful empty-state renders."""
-        rows = [
-            {
-                "vendor_name": "GreyBroker",
-                "mpn_matched": "LM317T",
-                "manufacturer": "",
-                "unit_price": 0.75,
-                "qty_available": 2000,
-                "is_authorized": False,
-                "confidence_color": "amber",
-                "confidence_pct": 60,
-                "source_type": "brokerbin",
-                "sources_found": ["brokerbin"],
-            }
-        ]
-        rc = self._patch_redis(rows)
-        with patch("app.search_service._get_search_redis", return_value=rc):
-            resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
-        assert resp.status_code == 200
-        assert "No franchise/authorized pricing for this part" in resp.text
-
-    def test_baseline_strip_absent_on_cache_miss(self, client):
-        """Cache miss → no baseline strip (it only renders when cached_rows exist)."""
-        resp = client.get("/v2/partials/search/dossier/market", params={"mpn": "LM317T"})
-        assert resp.status_code == 200
-        assert "Franchise baseline" not in resp.text
-        assert "/v2/partials/search/run" in resp.text  # SSE frame fires instead

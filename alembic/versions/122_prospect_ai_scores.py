@@ -6,8 +6,8 @@ What:
   Both columns store 0-100 scalars from the AI screen verdict; full verdict in JSONB enrichment_data['ai_screen'].
 Downgrade: drops the two columns and their indexes.
 
-Revision ID: 121_prospect_ai_scores
-Revises: 120_company_name_matching
+Revision ID: 122_prospect_ai_scores
+Revises: 121_datasheet_lib_col_rename
 Create Date: 2026-06-18
 
 RE-NUMBERED 120->121: feat/crm-aiorg claimed 120_company_name_matching and merged to main
@@ -18,8 +18,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "121_prospect_ai_scores"
-down_revision = "120_company_name_matching"
+revision = "122_prospect_ai_scores"
+down_revision = "121_datasheet_lib_col_rename"
 branch_labels = None
 depends_on = None
 
