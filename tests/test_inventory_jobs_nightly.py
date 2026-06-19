@@ -331,7 +331,8 @@ def test_scan_stock_list_attachments_valueerror_caught(db_session, test_user):
 
 
 def test_download_import_skips_row_when_norm_key_is_none(db_session, test_user):
-    """Rows where normalize_mpn_key returns None are skipped (no MaterialCard created)."""
+    """Rows where normalize_mpn_key returns None are skipped (no MaterialCard
+    created)."""
     from app.models import MaterialCard
 
     test_user.access_token = "at_normkey"
@@ -375,7 +376,8 @@ def test_download_import_skips_row_when_norm_key_is_none(db_session, test_user):
 
 
 def test_download_import_sighting_no_reqs_continue(db_session, test_user, test_requisition):
-    """Items whose MPN has no open requirements hit the 'no reqs' continue (line 495)."""
+    """Items whose MPN has no open requirements hit the 'no reqs' continue (line
+    495)."""
     from app.models import Sighting
 
     test_user.access_token = "at_noreqs"
@@ -561,7 +563,8 @@ def test_download_import_sighting_sqlalchemy_error_rolled_back(db_session, test_
 
 
 def test_download_import_sighting_generic_exception_rolled_back(db_session, test_user, test_requisition):
-    """Generic Exception during sighting creation phase rolls back without re-raising."""
+    """Generic Exception during sighting creation phase rolls back without re-
+    raising."""
 
     test_user.access_token = "at_generr"
     test_requisition.status = "active"
@@ -643,8 +646,8 @@ def test_job_buyplan_nudge_ops_per_line_exception_does_not_crash(
 
 
 def test_download_import_sighting_mixed_mpns_one_with_no_req(db_session, test_user, test_requisition):
-    """When import has two MPNs and only one matches an open req, the other
-    hits the 'no reqs' continue at line 495."""
+    """When import has two MPNs and only one matches an open req, the other hits the 'no
+    reqs' continue at line 495."""
     from app.models import MaterialCard, MaterialVendorHistory, Sighting
 
     test_user.access_token = "at_mixed"
