@@ -404,7 +404,7 @@ class TestComputeMarketBaseline:
         return {"is_authorized": is_authorized, "unit_price": unit_price, "qty_available": qty_available}
 
     def test_empty_input_returns_no_authorized(self):
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         result = compute_market_baseline([])
         assert result["has_authorized"] is False
@@ -413,7 +413,7 @@ class TestComputeMarketBaseline:
         assert result["sources"] == 0
 
     def test_all_non_authorized_returns_no_authorized(self):
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=False, unit_price=1.50, qty_available=500),
@@ -425,7 +425,7 @@ class TestComputeMarketBaseline:
 
     def test_authorized_rows_median_price_odd_count(self):
         """With 3 authorized rows, median is the middle price when sorted."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=1.00, qty_available=100),
@@ -442,7 +442,7 @@ class TestComputeMarketBaseline:
 
     def test_authorized_rows_median_price_even_count(self):
         """With 2 authorized rows, median uses upper-middle (index len//2 == 1)."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=1.00, qty_available=100),
@@ -456,7 +456,7 @@ class TestComputeMarketBaseline:
     def test_authorized_none_price_excluded_from_median(self):
         """unit_price=None rows are excluded from the price list; stock still
         counted."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=None, qty_available=500),
@@ -470,7 +470,7 @@ class TestComputeMarketBaseline:
     def test_authorized_none_qty_excluded_from_stock_sum(self):
         """qty_available=None means unknown — excluded from sum; median still
         computed."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=1.00, qty_available=None),
@@ -483,7 +483,7 @@ class TestComputeMarketBaseline:
 
     def test_all_authorized_none_price_median_is_none(self):
         """If every authorized row has no price, median is None (not a crash)."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [self._make_row(is_authorized=True, unit_price=None, qty_available=100)]
         result = compute_market_baseline(rows)
@@ -493,7 +493,7 @@ class TestComputeMarketBaseline:
 
     def test_zero_price_excluded_from_median(self):
         """unit_price=0 is not a real price and must be excluded (same as _median)."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=0, qty_available=100),
@@ -505,7 +505,7 @@ class TestComputeMarketBaseline:
 
     def test_mix_authorized_and_non_uses_only_authorized(self):
         """Non-authorized rows must not pollute the median or stock sum."""
-        from app.routers.part_dossier import compute_market_baseline
+        from app.search_service import compute_market_baseline
 
         rows = [
             self._make_row(is_authorized=True, unit_price=10.00, qty_available=50),

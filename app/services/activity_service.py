@@ -619,6 +619,7 @@ def log_company_call(
     contact_name: str | None,
     notes: str | None,
     db: Session,
+    force_meaningful: bool | None = None,
 ) -> ActivityLog:
     """Log a manual call against a company."""
     activity_type = ActivityType.CALL_LOGGED
@@ -632,7 +633,11 @@ def log_company_call(
         duration_seconds=duration_seconds,
         direction=direction,
         notes=notes,
-        is_meaningful=(duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS),
+        is_meaningful=(
+            force_meaningful
+            if force_meaningful is not None
+            else (duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS)
+        ),
     )
     db.add(record)
     db.flush()

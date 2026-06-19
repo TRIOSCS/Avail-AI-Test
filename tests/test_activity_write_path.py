@@ -398,6 +398,42 @@ def test_log_call_activity_force_meaningful(db_session, test_user, force_meaning
     assert rec.is_meaningful is expected
 
 
+def test_log_company_call_manual_is_meaningful(db_session, test_user, test_company):
+    """Manual company-call log (force_meaningful=True) is is_meaningful even with no
+    duration — mirrors the requisition log_call_activity fix (T3 / Fix C).
+
+    The auto-capture path (force_meaningful=None with real duration) is unchanged.
+    """
+    from app.services.activity_service import log_company_call
+
+    # Manual log — no duration, but must be meaningful
+    rec = log_company_call(
+        user_id=test_user.id,
+        company_id=test_company.id,
+        direction="outbound",
+        phone="+15550000099",
+        duration_seconds=None,
+        contact_name="Test Contact",
+        notes="Called to follow up on quote",
+        db=db_session,
+        force_meaningful=True,
+    )
+    assert rec.is_meaningful is True
+
+    # Auto-capture path unchanged: no force_meaningful, no duration → not meaningful
+    rec2 = log_company_call(
+        user_id=test_user.id,
+        company_id=test_company.id,
+        direction="inbound",
+        phone="+15550000088",
+        duration_seconds=None,
+        contact_name=None,
+        notes=None,
+        db=db_session,
+    )
+    assert rec2.is_meaningful is False
+
+
 def test_activity_tab_renders_rfq_sent_event(client, db_session, test_requisition, test_user):
     """An RFQ-sent event written via log_activity() appears on the Activity tab.
 

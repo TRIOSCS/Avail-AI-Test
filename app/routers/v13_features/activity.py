@@ -266,6 +266,7 @@ async def log_company_phone_call(
         contact_name=payload.contact_name,
         notes=payload.notes,
         db=db,
+        force_meaningful=True,
     )
     db.commit()
     return {"status": "logged", "activity_id": record.id}

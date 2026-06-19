@@ -51,47 +51,6 @@ router = APIRouter(tags=["part-dossier"])
 _RECENT_LIMIT = 12
 
 
-def compute_market_baseline(rows: list[dict]) -> dict:
-    """Compute a read-only franchise-price summary from already-fetched market rows.
-
-    Restricted to rows where ``is_authorized is True`` (franchise / authorized
-    distributor). Uses the same median algorithm as search_service._median.
-
-    Args:
-        rows: List of market-row dicts (same schema as cached_rows / vendor_card.html).
-              Each may carry ``unit_price`` (float|None), ``qty_available`` (int|None),
-              and ``is_authorized`` (bool, default False).
-
-    Returns:
-        A dict with keys:
-          - ``has_authorized``: bool — True if any authorized row exists.
-          - ``median_price``:   float|None — median of authorized unit_prices (non-None,
-                                >0 only); None when no such prices exist.
-          - ``total_stock``:    int|None — sum of authorized qty_available values (non-
-                                None only); None when no authorized row has a known qty.
-          - ``sources``:        int — count of authorized rows.
-
-    No DB access, no side-effects. Safe to call with an empty or all-non-authorized list.
-    """
-    auth_rows = [r for r in rows if r.get("is_authorized")]
-    if not auth_rows:
-        return {"has_authorized": False, "median_price": None, "total_stock": None, "sources": 0}
-
-    prices = [r["unit_price"] for r in auth_rows if r.get("unit_price") and r["unit_price"] > 0]
-    sorted_prices = sorted(prices)
-    median_price: float | None = sorted_prices[len(sorted_prices) // 2] if sorted_prices else None
-
-    known_qtys = [r["qty_available"] for r in auth_rows if r.get("qty_available") is not None]
-    total_stock: int | None = sum(known_qtys) if known_qtys else None
-
-    return {
-        "has_authorized": True,
-        "median_price": median_price,
-        "total_stock": total_stock,
-        "sources": len(auth_rows),
-    }
-
-
 def _ctx(request: Request, user: User) -> dict:
     """Shared base context.
 
@@ -233,7 +192,7 @@ async def dossier_market(
     900s). ``refresh=1`` (the "↻ Refresh market" button) skips the cache so the
     connector sweep re-runs.
     """
-    from ..search_service import _get_search_redis, get_market_source_health
+    from ..search_service import _get_search_redis, compute_market_baseline, get_market_source_health
 
     display_mpn = mpn.strip().upper()
     key = normalize_mpn_key(mpn)
