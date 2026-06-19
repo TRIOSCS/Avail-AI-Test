@@ -192,7 +192,8 @@ def test_flag_off_is_noop(db_session: Session, monkeypatch):
 
 
 def test_harvest_failure_does_not_propagate(db_session: Session):
-    """A harvest failure is best-effort — caught + logged, never re-raised to the caller."""
+    """A harvest failure is best-effort — caught + logged, never re-raised to the
+    caller."""
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="boom1", display_mpn="BOOM1", category=None)
     db_session.add(card)
