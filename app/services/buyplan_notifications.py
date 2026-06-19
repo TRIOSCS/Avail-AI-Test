@@ -584,10 +584,11 @@ async def notify_cancelled(plan: BuyPlan, db: Session):
             f"Buy Plan #{plan.id} was cancelled by {canceller_name}: {reason}",
             db,
         )
+    _so_num = plan.sales_order_number or "\u2014"
     await _teams_channel(
         f"**Buy Plan #{plan.id} \u2014 Cancelled**\n\n"
         f"Cancelled by: {canceller_name}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '\u2014'}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {_so_num}\n"
         f"Reason: {reason}"
     )
 
@@ -619,11 +620,12 @@ async def notify_nudge_buyer(plan: BuyPlan, line: BuyPlanLine, db: Session):
             notes=f"nudge line_id={line.id} status=awaiting_po",
         )
     )
+    _so_num_buyer = plan.sales_order_number or "\u2014"
     await _teams_dm(
         buyer,
         f"**Reminder \u2014 PO Required**\n\n"
         f"Plan #{plan.id} | {mpn} from {vendor}\n"
-        f"Customer: {ctx['customer_name']} | SO#: {plan.sales_order_number or '\u2014'}\n"
+        f"Customer: {ctx['customer_name']} | SO#: {_so_num_buyer}\n"
         f"This line has been awaiting a PO for over {settings.buyplan_nudge_buyer_hours}h.",
         db,
     )
