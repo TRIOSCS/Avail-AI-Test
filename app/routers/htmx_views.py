@@ -7275,7 +7275,13 @@ async def buy_plans_list_partial(
     alert_markers = markers_for_tab(db, user, "buy-plans")
 
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx.update({"lens": active_lens, "alert_markers": alert_markers})
+    ctx.update(
+        {
+            "lens": active_lens,
+            "alert_markers": alert_markers,
+            "can_supervise": _can_supervise(user, db),
+        }
+    )
     return template_response("htmx/partials/buy_plans/hub.html", ctx)
 
 
@@ -7314,6 +7320,47 @@ async def buy_plans_board_partial(
     ctx = _base_ctx(request, user, "buy-plans")
     ctx.update({"board": deals_board(db, user, scope=scope), "scope": scope})
     return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+
+def _render_supervise_body(request: Request, user: User, db: Session) -> HTMLResponse:
+    """Build + render the supervise lens body for ``user``.
+
+    Shared by the ``GET /supervise`` route and the supervise-origin action returns.
+    Non-supervisors never see cross-user data: they get the mine-scope board instead
+    (defense in depth — the hub also hides the Supervise button for them).
+    """
+    from ..services.buyplan_hub import deals_board, supervise_overview
+
+    if not _can_supervise(user, db):
+        ctx = _base_ctx(request, user, "buy-plans")
+        ctx.update({"board": deals_board(db, user, scope="mine"), "scope": "mine"})
+        return template_response("htmx/partials/buy_plans/_board.html", ctx)
+
+    ctx = _base_ctx(request, user, "buy-plans")
+    ctx.update(
+        {
+            "overview": supervise_overview(db),
+            "board": deals_board(db, user, scope="all"),
+            "is_ops": _is_ops_member(user, db),
+            "is_manager": user.role in (UserRole.MANAGER, UserRole.ADMIN),
+            "user": user,
+        }
+    )
+    return template_response("htmx/partials/buy_plans/_supervise.html", ctx)
+
+
+@router.get("/v2/partials/buy-plans/supervise", response_class=HTMLResponse)
+async def buy_plans_supervise_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manager/ops "Supervise" lens body: triage panel + all-scope deal board.
+
+    Role-gated — a non-supervisor is served the mine-scope board so no other
+    user's plans leak (see ``_render_supervise_body``).
+    """
+    return _render_supervise_body(request, user, db)
 
 
 @router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
@@ -7410,6 +7457,7 @@ async def buy_plan_approve_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Manager or admin role required")
@@ -7423,6 +7471,9 @@ async def buy_plan_approve_partial(
             await run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -7444,6 +7495,7 @@ async def buy_plan_verify_so_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         plan = verify_so(
@@ -7460,6 +7512,9 @@ async def buy_plan_verify_so_partial(
             await run_notify_bg(notify_so_rejected, plan.id, action=action)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
@@ -7527,6 +7582,7 @@ async def buy_plan_verify_po_partial(
 
     form = await request.form()
     action = form.get("action", "approve")
+    origin = form.get("origin", "")
 
     try:
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
@@ -7537,6 +7593,9 @@ async def buy_plan_verify_po_partial(
             await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
+
+    if origin == "supervise":
+        return _render_supervise_body(request, user, db)
 
     return await buy_plan_detail_partial(request, plan_id, user, db)
 

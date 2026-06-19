@@ -11,7 +11,10 @@
 {% set open_cards = board.draft + board.pending + board.active %}
 {% set open_value = open_cards|map(attribute='value')|select|map('float')|sum %}
 
-{# ── Slim metric strip (contextual, non-dominating) ── #}
+{# ── Slim metric strip (contextual, non-dominating) ──
+   Suppressed via hide_strip when embedded under the supervise lens (which renders
+   its own strip above the board). Defaults to shown when the flag is absent. #}
+{% if not hide_strip %}
 <div class="flex items-center gap-4 mb-3 text-xs text-gray-500">
   <span>{{ open_cards|length }} open deal{{ 's' if open_cards|length != 1 }}</span>
   <span>${{ '{:,.0f}'.format(open_value) }} open value</span>
@@ -19,6 +22,7 @@
   <span class="text-brand-600 font-medium">all reps</span>
   {% endif %}
 </div>
+{% endif %}
 
 <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
   {% for key, label in columns %}

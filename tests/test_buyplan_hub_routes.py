@@ -73,10 +73,10 @@ def test_hub_shell_buyer_defaults_to_orders(client: TestClient):
     resp = client.get("/v2/partials/buy-plans")
     assert resp.status_code == 200
     body = resp.text
-    # Lens switcher
+    # Lens switcher — deals/orders for everyone; Supervise is gated (hidden for buyer)
     assert "My Deals" in body
     assert "My Orders" in body
-    assert "Supervise" in body
+    assert "?lens=supervise" not in body
     # Lazy body + the landmine guard: explicit hx-target on the load container
     assert 'id="bp-hub-body"' in body
     assert 'hx-target="#bp-hub-body"' in body
@@ -107,7 +107,7 @@ def test_hub_shell_sales_defaults_to_deals(client: TestClient, sales_user):
 
 
 def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_user):
-    """A manager with no lens lands on the supervise board (scope=all)."""
+    """A manager with no lens lands on the supervise lens body."""
     from app.dependencies import require_user
     from app.main import app
 
@@ -117,7 +117,35 @@ def test_hub_shell_manager_defaults_to_supervise(client: TestClient, manager_use
     finally:
         app.dependency_overrides.pop(require_user, None)
     assert resp.status_code == 200
-    assert "/v2/partials/buy-plans/board?scope=all" in resp.text
+    assert "/v2/partials/buy-plans/supervise" in resp.text
+
+
+def test_hub_supervise_button_hidden_for_sales(client: TestClient, sales_user):
+    """The Supervise switcher button is hidden for a non-supervisor (sales)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: sales_user
+    try:
+        resp = client.get("/v2/partials/buy-plans")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "?lens=supervise" not in resp.text
+
+
+def test_hub_supervise_button_shown_for_manager(client: TestClient, manager_user):
+    """The Supervise switcher button is present for a manager."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    assert "?lens=supervise" in resp.text
 
 
 # ── Orders queue (buyer) ───────────────────────────────────────────────────
@@ -269,4 +297,167 @@ def test_confirm_po_default_origin_returns_detail(client: TestClient, db_session
     )
     assert resp.status_code == 200
     # Detail partial has the "Line Items" section header.
+    assert "Line Items" in resp.text
+
+
+# ── Supervise lens ─────────────────────────────────────────────────────────
+
+
+def _add_ops(db: Session, user) -> None:
+    """Register ``user`` as an active ops verification-group member."""
+    from app.models.buy_plan import VerificationGroupMember
+
+    db.add(VerificationGroupMember(user_id=user.id, is_active=True))
+    db.flush()
+
+
+def test_supervise_manager_shows_strip_and_approvals(
+    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
+):
+    """As a manager: strip + Approvals section with an Approve form posting origin=supervise."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    q = _make_quote(db_session, test_requisition.id)
+    plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=sales_user.id,
+    )
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans/supervise")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "open value" in body  # metric strip
+    assert "Approvals waiting" in body
+    assert f"/v2/partials/buy-plans/{plan.id}/approve" in body
+    assert 'name="origin"' in body
+    assert 'value="supervise"' in body
+    # The embedded board carries an explicit hx-target (no cards-vanish landmine)
+    assert 'hx-target="#main-content"' in body
+
+
+def test_supervise_ops_shows_verify_sections(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """As an ops member: SO-verify and PO-verify sections render with their forms."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    _add_ops(db_session, manager_user)
+    q = _make_quote(db_session, test_requisition.id)
+    so_plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.PENDING,
+    )
+    pv_plan = _make_plan(db_session, quote_id=q.id, req_id=test_requisition.id, status=BuyPlanStatus.ACTIVE)
+    pv_line = _make_line(db_session, plan_id=pv_plan.id, buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY)
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.get("/v2/partials/buy-plans/supervise")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    assert "Needs SO verification" in body
+    assert f"/v2/partials/buy-plans/{so_plan.id}/verify-so" in body
+    assert "POs awaiting verification" in body
+    assert f"/v2/partials/buy-plans/{pv_plan.id}/lines/{pv_line.id}/verify-po" in body
+
+
+def test_supervise_non_supervisor_no_leak(
+    client: TestClient, db_session: Session, test_user, manager_user, test_requisition
+):
+    """A plain buyer hitting /supervise gets the mine-scope board, NOT other users'
+    plans."""
+    q = _make_quote(db_session, test_requisition.id)
+    other_plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.DRAFT,
+        submitted_by_id=manager_user.id,
+    )
+    db_session.commit()
+
+    # Default client user is a plain buyer (not ops, not manager).
+    resp = client.get("/v2/partials/buy-plans/supervise")
+    assert resp.status_code == 200
+    # No triage panel and no leak of another user's plan.
+    assert "Approvals waiting" not in resp.text
+    assert f"/v2/partials/buy-plans/{other_plan.id}" not in resp.text
+
+
+def test_approve_origin_supervise_returns_supervise_body(
+    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
+):
+    """Approve with origin=supervise returns the supervise body (not the full
+    detail)."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    q = _make_quote(db_session, test_requisition.id)
+    plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=sales_user.id,
+    )
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.post(
+            f"/v2/partials/buy-plans/{plan.id}/approve",
+            data={"action": "approve", "origin": "supervise"},
+        )
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
+    body = resp.text
+    # Supervise body carries the metric strip; the detail "Line Items" header is absent.
+    assert "open value" in body
+    assert "Line Items" not in body
+
+
+def test_approve_default_origin_returns_detail(
+    client: TestClient, db_session: Session, manager_user, sales_user, test_requisition
+):
+    """Default origin (no value) preserves today's behavior: returns the detail
+    partial."""
+    from app.dependencies import require_user
+    from app.main import app
+
+    q = _make_quote(db_session, test_requisition.id)
+    plan = _make_plan(
+        db_session,
+        quote_id=q.id,
+        req_id=test_requisition.id,
+        status=BuyPlanStatus.PENDING,
+        submitted_by_id=sales_user.id,
+    )
+    db_session.commit()
+
+    app.dependency_overrides[require_user] = lambda: manager_user
+    try:
+        resp = client.post(
+            f"/v2/partials/buy-plans/{plan.id}/approve",
+            data={"action": "approve"},
+        )
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+    assert resp.status_code == 200
     assert "Line Items" in resp.text

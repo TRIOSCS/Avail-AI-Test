@@ -349,7 +349,103 @@ def test_supervise_null_cost_treated_as_zero(db_session, test_quote, test_requis
     assert isinstance(result["strip"]["avg_margin"], float)
 
 
-# ── 6. All-clean baseline ─────────────────────────────────────────────
+# ── 6. SO needs verification (ops) ────────────────────────────────────
+
+
+def test_supervise_so_pending(db_session, test_user, test_quote, test_requisition):
+    """ACTIVE plan with so_status PENDING appears in so_pending_count + triage."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.PENDING,
+        submitted_by_id=test_user.id,
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["so_pending_count"] >= 1
+    so_ids = [d["plan_id"] for d in result["triage"]["so_pending"]]
+    assert plan.id in so_ids
+
+    row = next(d for d in result["triage"]["so_pending"] if d["plan_id"] == plan.id)
+    assert set(row.keys()) == {"plan_id", "customer_name", "value", "submitted_by_name"}
+
+
+def test_supervise_so_approved_not_pending(db_session, test_quote, test_requisition):
+    """An ACTIVE plan with so_status APPROVED is NOT in the so_pending bucket."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+        so_status=SOVerificationStatus.APPROVED,
+    )
+
+    result = supervise_overview(db_session)
+    so_ids = [d["plan_id"] for d in result["triage"]["so_pending"]]
+    assert plan.id not in so_ids
+
+
+# ── 7. POs awaiting verification (ops) ────────────────────────────────
+
+
+def test_supervise_po_pending_verify(db_session, test_user, test_quote, test_requisition):
+    """PENDING_VERIFY line appears in po_pending_verify_count + triage."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.PENDING_VERIFY,
+    )
+
+    result = supervise_overview(db_session)
+
+    assert result["strip"]["po_pending_verify_count"] >= 1
+    pv_ids = [d["line_id"] for d in result["triage"]["po_pending_verify"]]
+    assert line.id in pv_ids
+
+    row = next(d for d in result["triage"]["po_pending_verify"] if d["line_id"] == line.id)
+    assert set(row.keys()) == {"line_id", "plan_id", "mpn", "vendor_name", "buyer_name"}
+    assert row["plan_id"] == plan.id
+
+
+def test_supervise_awaiting_po_not_pending_verify(db_session, test_user, test_quote, test_requisition):
+    """An AWAITING_PO line is NOT in the po_pending_verify bucket."""
+    from app.services.buyplan_hub import supervise_overview
+
+    plan = _make_plan(
+        db_session,
+        quote_id=test_quote.id,
+        requisition_id=test_requisition.id,
+        status=BuyPlanStatus.ACTIVE,
+    )
+    line = _make_line(
+        db_session,
+        buy_plan_id=plan.id,
+        buyer_id=test_user.id,
+        status=BuyPlanLineStatus.AWAITING_PO,
+    )
+
+    result = supervise_overview(db_session)
+    pv_ids = [d["line_id"] for d in result["triage"]["po_pending_verify"]]
+    assert line.id not in pv_ids
+
+
+# ── 8. All-clean baseline ─────────────────────────────────────────────
 
 
 def test_supervise_empty_db(db_session):
@@ -362,12 +458,16 @@ def test_supervise_empty_db(db_session):
     assert strip["open_value"] == 0.0
     assert strip["avg_margin"] == 0.0
     assert strip["approval_count"] == 0
+    assert strip["so_pending_count"] == 0
     assert strip["halted_count"] == 0
     assert strip["overdue_po_count"] == 0
+    assert strip["po_pending_verify_count"] == 0
     assert strip["flagged_count"] == 0
 
     triage = result["triage"]
     assert triage["approvals"] == []
+    assert triage["so_pending"] == []
     assert triage["halted"] == []
     assert triage["overdue_pos"] == []
+    assert triage["po_pending_verify"] == []
     assert triage["flagged"] == []

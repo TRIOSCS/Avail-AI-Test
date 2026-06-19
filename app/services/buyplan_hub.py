@@ -284,10 +284,12 @@ def supervise_overview(db: Session) -> dict:
 
     Triage lists
     ------------
-    approvals    : list of plan dicts for plans awaiting approval.
-    halted       : list of plan dicts for halted plans.
-    overdue_pos  : list of line dicts for overdue AWAITING_PO lines.
-    flagged      : list of line dicts for ISSUE lines.
+    approvals        : list of plan dicts for plans awaiting approval.
+    so_pending       : list of plan dicts for ACTIVE plans with so_status PENDING.
+    halted           : list of plan dicts for halted plans.
+    overdue_pos      : list of line dicts for overdue AWAITING_PO lines.
+    po_pending_verify: list of line dicts for PENDING_VERIFY lines.
+    flagged          : list of line dicts for ISSUE lines.
 
     Plan dicts contain: plan_id, customer_name, value, submitted_by_name.
     Line dicts contain: line_id, plan_id, mpn, vendor_name, buyer_name,
@@ -319,6 +321,18 @@ def supervise_overview(db: Session) -> dict:
         .all()
     )
 
+    # ── ACTIVE plans needing SO verification ─────────────────────────
+    so_pending_plans = (
+        db.query(BuyPlan)
+        .filter(
+            BuyPlan.status == BuyPlanStatus.ACTIVE,
+            BuyPlan.so_status == SOVerificationStatus.PENDING,
+        )
+        .options(joinedload(BuyPlan.quote), joinedload(BuyPlan.submitted_by))
+        .order_by(BuyPlan.created_at.asc())
+        .all()
+    )
+
     # ── Halted plans ─────────────────────────────────────────────────
     halted_plans = (
         db.query(BuyPlan)
@@ -342,6 +356,19 @@ def supervise_overview(db: Session) -> dict:
             BuyPlan.approved_at.isnot(None),
             func.coalesce(BuyPlanLine.last_nudge_at, BuyPlan.approved_at) < nudge_threshold,
         )
+        .options(
+            joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
+            joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanLine.buyer),
+        )
+        .order_by(BuyPlanLine.created_at.asc())
+        .all()
+    )
+
+    # ── PENDING_VERIFY lines awaiting ops PO verification ────────────
+    po_pending_verify_lines = (
+        db.query(BuyPlanLine)
+        .filter(BuyPlanLine.status == BuyPlanLineStatus.PENDING_VERIFY)
         .options(
             joinedload(BuyPlanLine.buy_plan).joinedload(BuyPlan.quote),
             joinedload(BuyPlanLine.offer),
@@ -398,14 +425,18 @@ def supervise_overview(db: Session) -> dict:
             "open_value": open_value,
             "avg_margin": avg_margin,
             "approval_count": len(approval_plans),
+            "so_pending_count": len(so_pending_plans),
             "halted_count": len(halted_plans),
             "overdue_po_count": len(overdue_lines),
+            "po_pending_verify_count": len(po_pending_verify_lines),
             "flagged_count": len(flagged_lines),
         },
         "triage": {
             "approvals": [_plan_dict(p) for p in approval_plans],
+            "so_pending": [_plan_dict(p) for p in so_pending_plans],
             "halted": [_plan_dict(p) for p in halted_plans],
             "overdue_pos": [_line_dict(ln) for ln in overdue_lines],
+            "po_pending_verify": [_line_dict(ln) for ln in po_pending_verify_lines],
             "flagged": [_line_dict(ln, include_issue_type=True) for ln in flagged_lines],
         },
     }

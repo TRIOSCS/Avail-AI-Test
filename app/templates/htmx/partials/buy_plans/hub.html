@@ -11,9 +11,11 @@
 
 <div class="max-w-7xl mx-auto" x-data="{ lens: '{{ lens }}' }">
 
-  {# ── Lens switcher ── #}
+  {# ── Lens switcher ──
+     Supervise is gated: only managers/admins/ops (can_supervise) see the button. #}
   <div class="flex items-center gap-2 mb-5">
     {% for l, label in [('deals', 'My Deals'), ('orders', 'My Orders'), ('supervise', 'Supervise')] %}
+    {% if l != 'supervise' or can_supervise %}
     <button hx-get="/v2/partials/buy-plans?lens={{ l }}"
             hx-target="#main-content"
             hx-swap="innerHTML"
@@ -23,6 +25,7 @@
                    {% if lens == l %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}">
       {{ label }}
     </button>
+    {% endif %}
     {% endfor %}
   </div>
 
@@ -32,7 +35,7 @@
      wipes the whole page (known cards-vanish regression). #}
   <div id="bp-hub-body"
        hx-get="{{ '/v2/partials/buy-plans/orders' if lens == 'orders'
-                 else '/v2/partials/buy-plans/board?scope=all' if lens == 'supervise'
+                 else '/v2/partials/buy-plans/supervise' if lens == 'supervise'
                  else '/v2/partials/buy-plans/board?scope=mine' }}"
        hx-trigger="load"
        hx-target="#bp-hub-body"
