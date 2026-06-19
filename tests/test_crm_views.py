@@ -2888,3 +2888,150 @@ class TestAccountBuyPlansTab:
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
         assert "Buy Plans" in resp.text, "Buy Plans tab label must appear in detail"
+
+
+class TestCRMMacroDedup:
+    """Route-level guards for the CRM template-macro dedup (refactor/crm-template-
+    macros).
+
+    The customer partials now render badge/icon/clock markup via the canonical
+    shared/_macros.html macros instead of hand-rolled, drifted copies. These tests pin
+    the labels (unchanged) and the deliberate drift-fix on quote 'sent' color.
+    """
+
+    def _make_company(self, db_session: Session, **kwargs) -> Company:
+        co = Company(name="MacroDedup Co", is_active=True, **kwargs)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+        return co
+
+    def test_quotes_tab_sent_badge_is_brand_not_amber(self, client: TestClient, db_session: Session, test_user: User):
+        """DRIFT FIX: the quotes tab rendered a 'sent' quote amber; it now uses the
+        canonical quote_status_badge (brand), unifying it with the activity timeline."""
+        from decimal import Decimal
+
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        co = self._make_company(db_session)
+        req = Requisition(name="REQ-MD-001", customer_name=co.name, company_id=co.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-MD-001",
+            subtotal=Decimal("1000.00"),
+            status="sent",
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/quotes")
+        assert resp.status_code == 200
+        html = resp.text
+        # Label preserved.
+        assert "QT-MD-001" in html
+        assert "Sent" in html
+        # Canonical brand color for 'sent' — NOT the old amber drift.
+        assert "text-brand-700" in html
+        assert "bg-amber-50 text-amber-700" not in html
+
+    def test_account_type_badge_rendered_in_detail(self, client: TestClient, db_session: Session, test_user: User):
+        """The detail header renders the canonical account_type_badge with the type
+        label and emerald (Customer) color."""
+        co = self._make_company(db_session, account_type="Customer")
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Customer" in html
+        assert "emerald" in html
+
+    def test_detail_cadence_clocks_macro_renders(self, client: TestClient, db_session: Session, test_user: User):
+        """The Account Cadence card renders the dual clocks via cadence_clocks — both
+        labels present, 'Never' for the null outbound clock."""
+        co = self._make_company(db_session, last_outbound_at=None, last_reply_at=None)
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Last Out" in html
+        assert "Last Reply" in html
+        assert "Never" in html
+
+    def test_header_partial_uses_canonical_badge_and_clocks(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The multi-site company-header rollup (header.html) renders the canonical
+        account_type_badge + cadence_clocks (the third copy of those, now unified)."""
+        from app.models.crm import CustomerSite
+
+        co = self._make_company(db_session, account_type="Prospect", last_outbound_at=None)
+        # Two active sites → multi-site accordion → header partial.
+        db_session.add_all(
+            [
+                CustomerSite(company_id=co.id, site_name="HQ", is_active=True),
+                CustomerSite(company_id=co.id, site_name="Branch", is_active=True),
+            ]
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/header")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Prospect" in html
+        assert "Last Out" in html
+        assert "Last Reply" in html
+        assert "Never" in html
+
+    def test_activity_tab_quote_and_rfq_badges_render(self, client: TestClient, db_session: Session, test_user: User):
+        """The unified activity timeline renders quote + RFQ status via the shared
+        quote_status_badge and the canonical activity_icon — labels preserved."""
+        from decimal import Decimal
+
+        from app.models.intelligence import ActivityLog
+        from app.models.offers import Contact as RfqContact
+        from app.models.quotes import Quote
+        from app.models.sourcing import Requisition
+
+        co = self._make_company(db_session)
+        req = Requisition(name="REQ-MD-AT", customer_name=co.name, company_id=co.id, status="active")
+        db_session.add(req)
+        db_session.flush()
+        rfq = RfqContact(
+            requisition_id=req.id,
+            user_id=test_user.id,
+            contact_type="rfq",
+            vendor_name="Badge Vendor",
+            status="sent",
+            created_at=datetime(2026, 6, 10, tzinfo=timezone.utc),
+        )
+        q = Quote(
+            requisition_id=req.id,
+            quote_number="QT-MD-AT",
+            subtotal=Decimal("500.00"),
+            status="sent",
+            created_at=datetime(2026, 6, 11, tzinfo=timezone.utc),
+        )
+        act = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=co.id,
+            subject="RE: badge",
+            direction="inbound",
+            is_meaningful=True,
+            created_at=datetime(2026, 6, 12, tzinfo=timezone.utc),
+        )
+        db_session.add_all([rfq, q, act])
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{co.id}/tab/activity")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Badge Vendor" in html
+        assert "QT-MD-AT" in html
+        assert "Email Received" in html
+        # Canonical activity_icon emits the h-8 w-8 rounded icon circle.
+        assert "h-8 w-8" in html
+        # 'sent' badge is brand (unified) — no amber drift on either row.
+        assert "bg-amber-50 text-amber-700" not in html

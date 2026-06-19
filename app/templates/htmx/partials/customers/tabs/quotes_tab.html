@@ -3,6 +3,7 @@
    Called by: company_tab route (tab == "quotes").
    Depends on: Alpine.js (status filter), HTMX (row deep-link), brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import quote_status_badge %}
 <div x-data="{ status: 'all' }">
   {% if quotes %}
   <div class="flex items-center gap-2 mb-4">
@@ -54,16 +55,7 @@
             {% endif %}
           </td>
           <td class="px-4 py-2.5">
-            {% set quote_colors = {
-              "draft": "bg-brand-100 text-brand-600",
-              "sent": "bg-amber-50 text-amber-700",
-              "won": "bg-emerald-50 text-emerald-700",
-              "lost": "bg-rose-50 text-rose-700",
-              "revised": "bg-gray-100 text-gray-600"
-            } %}
-            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ quote_colors.get(q.status, 'bg-gray-100 text-gray-600') }}">
-              {{ q.status|capitalize }}
-            </span>
+            {{ quote_status_badge(q.status) }}
           </td>
           <td class="px-4 py-2.5 text-sm text-gray-500">{{ q.created_at.strftime('%b %d, %Y') if q.created_at else "—" }}</td>
         </tr>

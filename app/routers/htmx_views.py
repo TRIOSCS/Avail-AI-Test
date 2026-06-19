@@ -42,7 +42,14 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, has_buyer_role, require_admin, require_buyer, require_user
+from ..dependencies import (
+    get_quote_for_user,
+    get_user,
+    has_buyer_role,
+    require_admin,
+    require_buyer,
+    require_user,
+)
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -5307,6 +5314,266 @@ async def set_contact_archive(
     )
 
 
+# ── Increment 2: left-panel company→site IA partials ──────────────────────────
+# These three routes carry STATIC first segments after /customers/ (header,
+# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
+# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
+# the right panel and honors the response-targets contract (hx-target #cdm-detail,
+# hx-target-error #cdm-error) from the caller markup.
+
+
+@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
+async def company_header_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
+    the per-tab strip.
+
+    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
+    site children carry the per-site contacts + open reqs).
+    """
+    company = (
+        db.query(Company)
+        .options(joinedload(Company.account_owner), joinedload(Company.sites))
+        .filter(Company.id == company_id)
+        .first()
+    )
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    sites = [s for s in (company.sites or []) if s.is_active]
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
+            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/header.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
+async def company_sites_accordion_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
+    left-panel account accordion header.
+
+    Each links to the site-detail view.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update({"company": company, "sites": sites})
+    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+async def company_site_detail_partial(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
+    at this site").
+
+    IDOR-safe: the site must belong to the
+    company AND be active, else 404 (mirrors site_contacts_list).
+    """
+    site = (
+        db.query(CustomerSite)
+        .options(joinedload(CustomerSite.owner))
+        .filter(
+            CustomerSite.id == site_id,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .first()
+    )
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    now_utc = datetime.now(_tz.utc)
+    # Site-scoped contacts — pass this single site so the rows are filtered to it
+    # (keeps the is_active + Increment-1 priority/archive sort).
+    contact_rows = _company_contact_rows(db, company_id, sites=[site])
+
+    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
+    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
+    open_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.customer_site_id == site_id,
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
+        )
+        .order_by(Requisition.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "site": site,
+            "contact_rows": contact_rows,
+            "open_reqs": open_reqs,
+            "now_utc": now_utc,
+            # Per-site cadence (tier=None → standard 30d target, like contacts).
+            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
+            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
+        }
+    )
+    return template_response("htmx/partials/customers/site_detail.html", ctx)
+
+
+# ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
+# STATIC trailing segments (dup-suggestion / name-suggestion / apply-name), so they
+# MUST precede the GET /v2/partials/customers/{company_id} catch-all below. ADDITIVE —
+# the merge engine (merge_companies) and the dedup scanner are reused as-is; no merge
+# logic lives here. The dup banner reuses the existing merge-form → preview → POST
+# .../merge flow. Naming is suggest-only — never a silent rewrite.
+
+
+@router.get("/v2/partials/customers/{company_id}/dup-suggestion", response_class=HTMLResponse)
+async def company_dup_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy per-account duplicate banner — top dedup match for THIS company + a Merge
+    button reusing the merge-form/preview/merge flow.
+
+    Renders nothing (empty 200) when there is no near-duplicate.
+    """
+    from ..company_utils import find_company_dedup_candidates
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    # Scan, then pick the highest-scoring pair that INVOLVES this company. The scanner
+    # already honors the auto_keep heuristic; here we only need the OTHER side as the
+    # merge-away candidate.
+    try:
+        candidates = find_company_dedup_candidates(db, threshold=85, limit=50)
+    except Exception as e:  # pragma: no cover - defensive, mirrors data-ops scan guard
+        logger.warning("dup-suggestion scan failed for company {}: {}", company_id, e)
+        return HTMLResponse("")
+
+    match = None
+    for pair in candidates:
+        a, b = pair["company_a"], pair["company_b"]
+        if a["id"] == company_id:
+            match = {"id": b["id"], "name": b["name"], "score": pair["score"]}
+            break
+        if b["id"] == company_id:
+            match = {"id": a["id"], "name": a["name"], "score": pair["score"]}
+            break
+
+    if not match:
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "match": match}
+    return template_response("htmx/partials/customers/_dup_suggestion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/name-suggestion", response_class=HTMLResponse)
+async def company_name_suggestion(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Suggest-only name-normalization chip: surface the suffix-stripped form of the
+    current name as "Suggested name: X — Apply?".
+
+    Uses the same normalizer the dedup scanner uses, re-cased from the original tokens
+    (so we only strip the legal suffix / leading "the", never lowercase the whole name).
+    Renders nothing (empty 200) when the current name is already clean.
+    """
+    from ..company_utils import suggest_clean_company_name
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    suggested = suggest_clean_company_name(company.name or "")
+    if not suggested or suggested == (company.name or "").strip():
+        return HTMLResponse("")
+
+    ctx = {"request": request, "company": company, "suggested": suggested}
+    return template_response("htmx/partials/customers/_name_suggestion.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/apply-name", response_class=HTMLResponse)
+async def company_apply_name(
+    request: Request,
+    company_id: int,
+    name: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a suggested company name (rep-initiated; the suggest-only counterpart to a
+    silent rewrite).
+
+    normalized_name follows automatically via Company._sync_normalized_name
+    (@validates). Returns an empty 200 so the chip removes itself (hx-swap outerHTML).
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    new_name = (name or "").strip()
+    if not new_name:
+        raise HTTPException(400, "Name is required")
+
+    company.name = new_name  # @validates resyncs normalized_name
+    db.commit()
+
+    from ..cache.decorators import invalidate_prefix
+
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
+    logger.info("Company {} renamed to '{}' (suggested) by {}", company_id, new_name, user.email)
+    return HTMLResponse("")
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -6292,9 +6559,7 @@ async def preview_quote(
     db: Session = Depends(get_db),
 ):
     """Render quote email preview before sending."""
-    quote = db.query(Quote).options(joinedload(Quote.quote_lines)).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id, options=[joinedload(Quote.quote_lines)])
 
     return template_response(
         "htmx/partials/quotes/preview.html",
@@ -6310,9 +6575,7 @@ async def delete_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete a draft quote and redirect to the requisitions page."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "draft":
         raise HTTPException(400, "Only draft quotes can be deleted")
 
@@ -6331,9 +6594,7 @@ async def reopen_quote(
     db: Session = Depends(get_db),
 ):
     """Reopen a sent/closed quote back to draft."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status not in ("sent", "won", "lost"):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
@@ -6414,9 +6675,7 @@ async def edit_quote_metadata(
 ):
     """Update quote metadata (payment terms, shipping, notes) and return refreshed
     detail."""
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
 
     form = await request.form()
     if form.get("payment_terms"):
@@ -8982,18 +9241,16 @@ async def quote_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return quote detail as HTML partial."""
-    quote = (
-        db.query(Quote)
-        .options(
+    quote = get_quote_for_user(
+        db,
+        user,
+        quote_id,
+        options=[
             joinedload(Quote.customer_site).joinedload(CustomerSite.company),
             joinedload(Quote.requisition),
             joinedload(Quote.created_by),
-        )
-        .filter(Quote.id == quote_id)
-        .first()
+        ],
     )
-    if not quote:
-        raise HTTPException(404, "Quote not found")
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     offers = (
         db.query(Offer).filter(Offer.requisition_id == quote.requisition_id).order_by(Offer.created_at.desc()).all()
@@ -9015,6 +9272,8 @@ async def update_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     form = await request.form()
     if "mpn" in form:
         line.mpn = form["mpn"]
@@ -9055,6 +9314,8 @@ async def delete_quote_line(
     line = db.get(QuoteLine, line_id)
     if not line or line.quote_id != quote_id:
         raise HTTPException(404, "Line not found")
+    # Scope the parent quote through ownership (raises 404 for SALES accessing other users' quotes).
+    get_quote_for_user(db, user, line.quote_id)
     db.delete(line)
     db.commit()
     return HTMLResponse("")
@@ -9073,9 +9334,8 @@ async def add_quote_line(
     db: Session = Depends(get_db),
 ):
     """Add a new line item to a quote, return the new row HTML."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    # Ownership/existence check (raises 404 if the quote isn't visible to the user).
+    get_quote_for_user(db, user, quote_id)
     margin_pct = 0.0
     if sell_price > 0:
         margin_pct = round((sell_price - cost_price) / sell_price * 100, 2)
@@ -9105,9 +9365,7 @@ async def add_offer_to_quote(
     db: Session = Depends(get_db),
 ):
     """Add an offer as a line item to a quote."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -9143,9 +9401,7 @@ async def send_quote_htmx(
 ):
     """Mark quote as sent — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
@@ -9163,9 +9419,7 @@ async def quote_result_htmx(
 ):
     """Mark quote result (won/lost) — returns refreshed detail partial."""
 
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     form = await request.form()
     result = form.get("result", "")
     if result not in ("won", "lost"):
@@ -9188,9 +9442,7 @@ async def revise_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Create a new revision of the quote — returns the new quote detail."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     new_rev = (quote.revision or 1) + 1
     new_quote = Quote(
         requisition_id=quote.requisition_id,
@@ -9224,6 +9476,8 @@ async def apply_markup_htmx(
     db: Session = Depends(get_db),
 ):
     """Apply a markup percentage to all lines in the quote."""
+    # Scope ownership check before mutating any lines (raises 404 for SALES on other users' quotes).
+    get_quote_for_user(db, user, quote_id)
     lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
     for line in lines:
         if line.cost_price and float(line.cost_price) > 0:
@@ -9262,8 +9516,8 @@ async def add_offers_to_draft_quote(
     if not offer_ids or not quote_id:
         raise HTTPException(400, "Missing offer_ids or quote_id")
 
-    quote = db.query(Quote).filter(Quote.id == quote_id, Quote.requisition_id == req_id).first()
-    if not quote:
+    quote = get_quote_for_user(db, user, quote_id)
+    if quote.requisition_id != req_id:
         raise HTTPException(404, "Quote not found")
     if quote.status != "draft":
         raise HTTPException(400, "Can only add to draft quotes")
@@ -9314,9 +9568,7 @@ async def build_buy_plan_htmx(
     """
     from ..services.buyplan_builder import build_buy_plan
 
-    quote = db.query(Quote).filter(Quote.id == quote_id).first()
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+    quote = get_quote_for_user(db, user, quote_id)
     if quote.status != "won":
         raise HTTPException(400, "Quote must be won to build a buy plan")
 
@@ -9411,6 +9663,8 @@ def _prospect_stats_ctx(db: Session) -> dict:
 
     "Buyer ready" = is_buyer_ready over SUGGESTED.
     """
+    from ..config import settings as _settings
+
     suggested = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED).all()
     claimed = (
         db.query(sqlfunc.count(ProspectAccount.id))
@@ -9418,11 +9672,17 @@ def _prospect_stats_ctx(db: Session) -> dict:
         .scalar()
         or 0
     )
+    screened_out_count = (
+        sum(1 for p in suggested if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out")
+        if _settings.ai_screen_enabled
+        else 0
+    )
     return {
         "total": len(suggested),
         "buyer_ready": sum(1 for p in suggested if build_priority_snapshot(p)["is_buyer_ready"]),
         "call_now": sum(1 for p in suggested if (p.readiness_score or 0) >= 70),
         "claimed": claimed,
+        "screened_out": screened_out_count,
     }
 
 
@@ -9470,7 +9730,7 @@ async def prospecting_list_partial(
     request: Request,
     q: str = "",
     status: str = "",
-    sort: str = "buyer_ready_desc",
+    sort: str = "ai_match_desc",
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     user: User = Depends(require_user),
@@ -9478,9 +9738,10 @@ async def prospecting_list_partial(
 ):
     """Return the prospecting card grid as an HTML partial.
 
-    Sorts: buyer_ready_desc (default) ranks by the composite buyer-ready score from
-    build_priority_snapshot (the single source of truth for "buyer ready"); fit_desc
-    and recent_desc sort in SQL. Dismissed prospects are hidden unless filtered for.
+    Sorts: ai_match_desc (default) ranks by trio_match_score DESC then opportunity_score
+    DESC then readiness_score DESC; buyer_ready_desc ranks by the composite buyer-ready
+    score from build_priority_snapshot; fit_desc and recent_desc sort in SQL.
+    Dismissed prospects are hidden unless filtered for.
     """
     base = db.query(ProspectAccount)
     if status:
@@ -9495,7 +9756,30 @@ async def prospecting_list_partial(
     total_pages = max(1, (total + per_page - 1) // per_page)
     offset = (page - 1) * per_page
 
-    if sort == "buyer_ready_desc":
+    if sort == "ai_match_desc":
+        from ..config import settings as _settings
+
+        rows = base.all()
+        if _settings.ai_screen_enabled:
+            screened_out_rows = [
+                p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") == "screened_out"
+            ]
+            rows = [p for p in rows if (p.enrichment_data or {}).get("ai_screen", {}).get("verdict") != "screened_out"]
+        else:
+            screened_out_rows = []
+        rows.sort(
+            key=lambda p: (
+                -(p.trio_match_score or 0),
+                -(p.opportunity_score or 0),
+                -(p.readiness_score or 0),
+                (p.name or "").lower(),
+            )
+        )
+        total = len(rows)
+        total_pages = max(1, (total + per_page - 1) // per_page)
+        prospects = rows[offset : offset + per_page]
+    elif sort == "buyer_ready_desc":
+        screened_out_rows = []
         # buyer_ready_score is a Python composite (no SQL column), so rank in memory.
         rows = base.all()
         snapshots = {p.id: build_priority_snapshot(p) for p in rows}
@@ -9509,6 +9793,7 @@ async def prospecting_list_partial(
         )
         prospects = rows[offset : offset + per_page]
     else:
+        screened_out_rows = []
         if sort == "fit_desc":
             base = base.order_by(ProspectAccount.fit_score.desc(), ProspectAccount.readiness_score.desc())
         elif sort == "recent_desc":
@@ -9529,6 +9814,8 @@ async def prospecting_list_partial(
     status_counts = dict(count_q.group_by(ProspectAccount.status).all())
     all_total = sum(status_counts.get(s, 0) for s in _PROSPECT_DEFAULT_STATUSES)
 
+    from ..config import settings as _list_settings
+
     ctx = _base_ctx(request, user, "prospecting")
     ctx.update(
         {
@@ -9544,6 +9831,8 @@ async def prospecting_list_partial(
             "total_pages": total_pages,
             "status_counts": status_counts,
             "all_total": all_total,
+            "screened_out_prospects": screened_out_rows if sort == "ai_match_desc" else [],
+            "ai_screen_enabled": _list_settings.ai_screen_enabled,
         }
     )
     return template_response("htmx/partials/prospecting/list.html", ctx)
@@ -9964,6 +10253,48 @@ async def settings_data_ops_tab(
     ctx["vendor_dupes"] = vendor_dupes
     ctx["company_dupes"] = company_dupes
     return template_response("htmx/partials/settings/data_ops.html", ctx)
+
+
+@router.get("/v2/partials/settings/api-keys", response_class=HTMLResponse)
+async def settings_api_keys_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """API credentials management tab — admin only."""
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..config import GRAPH_SCOPES
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    def _field(source: str, env_var: str) -> dict:
+        is_set = credential_is_set(db, source, env_var)
+        masked = ""
+        if is_set:
+            plain = get_credential(db, source, env_var)
+            masked = mask_value(plain) if plain else "••••••••"
+        return {"is_set": is_set, "masked": masked}
+
+    current_scopes = set(GRAPH_SCOPES.split())
+    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
+
+    ctx = _base_ctx(request, user, "settings")
+    ctx.update(
+        {
+            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
+            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
+            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
+            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
+            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
+            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
+            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
+            "current_scopes": sorted(current_scopes),
+            "missing_scopes": sorted(needed_scopes - current_scopes),
+            "teams_ready": not (needed_scopes - current_scopes),
+        }
+    )
+    return template_response("htmx/partials/settings/api_keys.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)

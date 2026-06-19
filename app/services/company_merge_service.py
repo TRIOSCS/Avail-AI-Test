@@ -53,6 +53,24 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
         sep = f"\n\n--- Merged from {remove.name} ---\n"
         keep.notes = (keep.notes or "") + sep + remove.notes
 
+    # 2b. Absorb the loser's name + its alternates into keep.alternate_names so a
+    #     re-import of the old name fuzzy-matches the survivor instead of recreating the
+    #     duplicate (mirrors VendorCard._record_alternate_name). Dedup, and never store
+    #     keep's own display name as one of its alternates. Backfill keep.normalized_name
+    #     if it was never set (legacy rows pre-date migration 120).
+    alts = list(keep.alternate_names or [])
+    seen = set(alts)
+    for candidate in [remove.name, *(remove.alternate_names or [])]:
+        if candidate and candidate != keep.name and candidate not in seen:
+            alts.append(candidate)
+            seen.add(candidate)
+    keep.alternate_names = alts
+
+    if not keep.normalized_name:
+        from ..vendor_utils import normalize_vendor_name
+
+        keep.normalized_name = normalize_vendor_name(keep.name or "") or None
+
     # 3. Fill enrichment gaps
     for field in (
         "domain",

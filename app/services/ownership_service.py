@@ -378,12 +378,11 @@ def get_open_pool_sites(db: Session) -> list[dict]:
         .all()
     )
 
+    companies = _load_companies(db, sites)
+
     results = []
-    company_cache = {}
     for s in sites:
-        if s.company_id not in company_cache:
-            company_cache[s.company_id] = db.get(Company, s.company_id)
-        co = company_cache[s.company_id]
+        co = companies.get(s.company_id)
         results.append(
             {
                 "site_id": s.id,
@@ -443,12 +442,11 @@ def get_my_sites(user_id: int, db: Session) -> list[dict]:
         .all()
     )
 
+    companies = _load_companies(db, sites)
+
     results = []
-    company_cache = {}
     for s in sites:
-        if s.company_id not in company_cache:
-            company_cache[s.company_id] = db.get(Company, s.company_id)
-        co = company_cache[s.company_id]
+        co = companies.get(s.company_id)
 
         days_inactive = _site_days_since_activity(s, now)
         status = _health_status(days_inactive, warning_day, inactivity_limit)
@@ -488,8 +486,9 @@ def get_sites_at_risk(db: Session) -> list[dict]:
         .all()
     )
 
+    companies = _load_companies(db, (site for site, _ in owned))
+
     at_risk = []
-    company_cache = {}
     for site, owner in owned:
         days_inactive = _site_days_since_activity(site, now)
         if days_inactive is None:
@@ -497,9 +496,7 @@ def get_sites_at_risk(db: Session) -> list[dict]:
 
         if days_inactive >= warning_day:
             days_remaining = max(0, inactivity_limit - days_inactive)
-            if site.company_id not in company_cache:
-                company_cache[site.company_id] = db.get(Company, site.company_id)
-            co = company_cache[site.company_id]
+            co = companies.get(site.company_id)
             at_risk.append(
                 {
                     "site_id": site.id,
@@ -526,6 +523,19 @@ def _site_days_since_activity(site: CustomerSite, now: datetime) -> int | None:
 # ═══════════════════════════════════════════════════════════════════════
 #  INTERNAL HELPERS
 # ═══════════════════════════════════════════════════════════════════════
+
+
+def _load_companies(db: Session, sites) -> dict[int, Company]:
+    """Batch-load the parent Company for a collection of sites, keyed by id.
+
+    Replaces a per-site db.get(Company, ...) round-trip (N+1) with a single
+    query over the distinct company_ids. Missing/None company_ids are simply
+    absent from the returned dict (callers use .get()).
+    """
+    company_ids = {s.company_id for s in sites if s.company_id is not None}
+    if not company_ids:
+        return {}
+    return {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()}
 
 
 def _days_since(last_activity_at: datetime | None, now: datetime) -> int | None:

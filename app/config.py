@@ -285,6 +285,11 @@ class Settings(BaseSettings):
     # --- Apollo Enrichment ---
     apollo_api_key: str = ""
 
+    # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
+    lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today
+    lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
+    prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
+
     # --- Azure Communication Services ---
     acs_connection_string: str = ""
     acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)
@@ -316,6 +321,17 @@ class Settings(BaseSettings):
     prospecting_min_fit_for_contacts: int = 60
     prospecting_expire_days: int = 90
     prospecting_resurface_days: int = 180
+
+    # --- SP3: AI Account Screening ---
+    # Feature gate — default off; flip on when ready to spend Claude credits on screening.
+    ai_screen_enabled: bool = False
+    # Minimum trio_match_score to pass the screen (< threshold → screened_out bucket).
+    ai_screen_min_match: int = 40
+    # Max accounts screened per UTC calendar day (mirrors enrichment daily_cap pattern).
+    ai_screen_daily_cap: int = 200
+    # When True, an insufficient_data verdict triggers a single web_search to try to
+    # resolve grounding gaps before falling back to insufficient_data.
+    ai_screen_web_search_enabled: bool = False
 
     @field_validator("database_url")
     @classmethod

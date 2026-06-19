@@ -29,8 +29,8 @@ async def test_capture_stores_verified_connector_datasheet(_session, test_user):
             "app.services.datasheet_capture.upload_datasheet_to_library",
             AsyncMock(
                 return_value={
-                    "onedrive_item_id": "01",
-                    "onedrive_url": "https://od/x",
+                    "library_item_id": "01",
+                    "library_web_url": "https://od/x",
                     "size_bytes": 12,
                     "library_drive_id": "DRV1",
                 }
@@ -94,8 +94,8 @@ async def test_capture_stores_to_company_library(_session):
             "app.services.datasheet_capture.upload_datasheet_to_library",
             AsyncMock(
                 return_value={
-                    "onedrive_item_id": "ITM",
-                    "onedrive_url": "https://sp/x",
+                    "library_item_id": "ITM",
+                    "library_web_url": "https://sp/x",
                     "size_bytes": 12,
                     "library_drive_id": "DRV",
                 }
@@ -107,7 +107,7 @@ async def test_capture_stores_to_company_library(_session):
     card = _session.query(MaterialCard).filter_by(normalized_mpn="17p9905").first()
     assert len(card.datasheets) == 1
     d = card.datasheets[0]
-    assert d.library_drive_id == "DRV" and d.onedrive_item_id == "ITM" and d.verified is True
+    assert d.library_drive_id == "DRV" and d.library_item_id == "ITM" and d.verified is True
     assert d.uploaded_by_id is None  # unattended-capable
     assert card.datasheet_captured_at is not None
 

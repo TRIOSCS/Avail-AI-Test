@@ -13,8 +13,8 @@ def test_datasheet_row_links_to_card(db_session):
     ds = MaterialCardDatasheet(
         material_card_id=card.id,
         file_name="LM317T-datasheet.pdf",
-        onedrive_item_id="01ABC",
-        onedrive_url="https://onedrive/x",
+        library_item_id="01ABC",
+        library_web_url="https://onedrive/x",
         content_type="application/pdf",
         size_bytes=12345,
         source="connector",
