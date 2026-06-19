@@ -91,12 +91,13 @@ class TestIsSafeUrl:
         assert _is_safe_url("http://metadata.internal/data") is False
 
     def test_empty_getaddrinfo_result_returns_false(self, monkeypatch):
-        """getaddrinfo returns empty list → False (line 48)."""
+        """Getaddrinfo returns empty list → False (line 48)."""
         monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **kw: [])
         assert _is_safe_url("https://valid.example.com/file.pdf") is False
 
     def test_invalid_ip_string_in_addrinfo_returns_false(self, monkeypatch):
-        """info[4][0] is not a parseable IP address string → ValueError caught → False."""
+        """Info[4][0] is not a parseable IP address string → ValueError caught →
+        False."""
         monkeypatch.setattr(
             socket,
             "getaddrinfo",
@@ -233,7 +234,7 @@ class TestPdfContainsMpn:
         assert result is False
 
     def test_parse_failure_returns_false(self):
-        """pypdf raises on bad bytes → False, no crash."""
+        """Pypdf raises on bad bytes → False, no crash."""
         result = pdf_contains_mpn(b"not a pdf at all", "LM317T")
         assert result is False
 
@@ -283,7 +284,7 @@ class TestFindDatasheetUrl:
         assert result is None
 
     async def test_none_card_with_testing_env_returns_none(self):
-        """card=None and TESTING=1 → returns None."""
+        """Card=None and TESTING=1 → returns None."""
         result = await find_datasheet_url(None, "LM317T")
         assert result is None
 
@@ -316,7 +317,8 @@ class TestCaptureDatasheetAdditionalBranches:
         mock_find.assert_not_called()
 
     async def test_capture_no_card_resolve_returns_none(self, db_session):
-        """card=None and resolve_material_card also returns None → no datasheet stored."""
+        """Card=None and resolve_material_card also returns None → no datasheet
+        stored."""
         from app.services import datasheet_capture as dc
 
         # No card in DB — query returns None

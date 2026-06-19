@@ -1,5 +1,4 @@
-"""test_graph_app_auth_nightly.py — Coverage boost for
-app/services/graph_app_auth.py.
+"""test_graph_app_auth_nightly.py — Coverage boost for app/services/graph_app_auth.py.
 
 Targets missing lines: cached-token early return, missing-settings None return, HTTP
 error/bad-status/no-token None returns, token + cache update on success, cache expiry

@@ -5307,6 +5307,153 @@ async def set_contact_archive(
     )
 
 
+# ── Increment 2: left-panel company→site IA partials ──────────────────────────
+# These three routes carry STATIC first segments after /customers/ (header,
+# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
+# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
+# the right panel and honors the response-targets contract (hx-target #cdm-detail,
+# hx-target-error #cdm-error) from the caller markup.
+
+
+@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
+async def company_header_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
+    the per-tab strip.
+
+    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
+    site children carry the per-site contacts + open reqs).
+    """
+    company = (
+        db.query(Company)
+        .options(joinedload(Company.account_owner), joinedload(Company.sites))
+        .filter(Company.id == company_id)
+        .first()
+    )
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    sites = [s for s in (company.sites or []) if s.is_active]
+    contact_rows = _company_contact_rows(db, company_id, sites=sites)
+    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
+            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
+            "contact_count": len(contact_rows),
+            "site_count": len(sites),
+            "win_rate": _stats.get("win_rate"),
+            "revenue_90d": _stats.get("revenue_90d", 0.0),
+            "last_req_date": _stats.get("last_req_date"),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/header.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
+async def company_sites_accordion_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
+    left-panel account accordion header.
+
+    Each links to the site-detail view.
+    """
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update({"company": company, "sites": sites})
+    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+async def company_site_detail_partial(
+    request: Request,
+    company_id: int,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
+    at this site").
+
+    IDOR-safe: the site must belong to the
+    company AND be active, else 404 (mirrors site_contacts_list).
+    """
+    site = (
+        db.query(CustomerSite)
+        .options(joinedload(CustomerSite.owner))
+        .filter(
+            CustomerSite.id == site_id,
+            CustomerSite.company_id == company_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .first()
+    )
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from datetime import timezone as _tz
+
+    now_utc = datetime.now(_tz.utc)
+    # Site-scoped contacts — pass this single site so the rows are filtered to it
+    # (keeps the is_active + Increment-1 priority/archive sort).
+    contact_rows = _company_contact_rows(db, company_id, sites=[site])
+
+    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
+    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
+    open_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.customer_site_id == site_id,
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
+        )
+        .order_by(Requisition.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "site": site,
+            "contact_rows": contact_rows,
+            "open_reqs": open_reqs,
+            "now_utc": now_utc,
+            # Per-site cadence (tier=None → standard 30d target, like contacts).
+            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
+            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
+        }
+    )
+    return template_response("htmx/partials/customers/site_detail.html", ctx)
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
