@@ -19,7 +19,7 @@
 <div class="space-y-3 rounded-md bg-gray-50 p-3">
   {# Condition spine #}
   <div>
-    <label class="block text-xs text-gray-500 mb-1">Condition *</label>
+    <label class="block text-xs text-gray-600 mb-1">Condition *</label>
     <select name="condition" x-model="condition"
             class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       <option value="">— choose —</option>
@@ -40,7 +40,7 @@
     {{ chip_select('Packaging *', 'packaging', PACKAGING_OPTS, 'packaging') }}
     {{ chip_select('Usage *', 'usage', [('boards', 'Pulled from boards'), ('systems', 'Pulled from systems')], 'usage') }}
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Part condition</label>
+      <label class="block text-xs text-gray-600 mb-1">Part condition</label>
       <input type="text" name="part_condition" x-model="part_condition" value="{{ p.get('part_condition', '') }}"
              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
              placeholder="e.g. light wear, clean">
@@ -51,7 +51,7 @@
   <div x-show="condition === 'refurb'" x-cloak class="space-y-2">
     {{ chip_select('Refurbished by *', 'refurbished_by', [('supplier', 'Supplier'), ('third_party', '3rd party')], 'refurbished_by') }}
     <div>
-      <label class="block text-xs text-gray-500 mb-1">Process *</label>
+      <label class="block text-xs text-gray-600 mb-1">Process *</label>
       <input type="text" name="refurb_process" x-model="refurb_process" value="{{ p.get('refurb_process', '') }}"
              class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
              placeholder="What was done, and how">
@@ -65,7 +65,7 @@
   <div x-show="condition" x-cloak class="text-xs">
     <div class="text-gray-400 mb-0.5">Standardized note (auto)</div>
     <div class="rounded bg-white border border-gray-200 px-2 py-1 text-gray-700" x-text="noteText() || '—'"></div>
-    <div class="mt-1 text-gray-500" x-show="meterTotal() > 0">
+    <div class="mt-1 text-gray-600" x-show="meterTotal() > 0">
       Qualified <span x-text="meterFilled()"></span>/<span x-text="meterTotal()"></span>
     </div>
   </div>

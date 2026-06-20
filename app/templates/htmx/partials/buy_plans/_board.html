@@ -15,7 +15,7 @@
    Suppressed via hide_strip when embedded under the supervise lens (which renders
    its own strip above the board). Defaults to shown when the flag is absent. #}
 {% if not hide_strip %}
-<div class="flex items-center gap-4 mb-3 text-xs text-gray-500">
+<div class="flex items-center gap-4 mb-3 text-xs text-gray-600">
   <span>{{ open_cards|length }} open deal{{ 's' if open_cards|length != 1 }}</span>
   <span>${{ '{:,.0f}'.format(open_value) }} open value</span>
   {% if scope == 'all' %}
@@ -45,7 +45,7 @@
         <div class="flex items-start justify-between gap-2">
           <span class="text-sm font-bold text-gray-900 leading-tight">{{ d.customer_name or '-' }}</span>
           {% if d.is_stock_sale %}
-          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-50 text-purple-600 flex-shrink-0">stock</span>
+          <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-purple-50 text-purple-600 flex-shrink-0">stock</span>
           {% endif %}
         </div>
         {# Value + margin #}
@@ -60,7 +60,7 @@
         </div>
         {# Blocker #}
         {% if d.blocker %}
-        <div class="mt-1.5 text-xs text-gray-500">{{ d.blocker }}</div>
+        <div class="mt-1.5 text-xs text-gray-600">{{ d.blocker }}</div>
         {% endif %}
         {# PO progress bar #}
         {% if d.po_progress[1] %}

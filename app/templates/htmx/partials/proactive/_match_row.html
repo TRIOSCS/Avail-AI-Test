@@ -21,7 +21,7 @@
     <p class="text-xs text-gray-400 mt-0.5">{{ match.manufacturer }}</p>
     {% endif %}
     {% if match.customer_purchase_count %}
-    <span class="inline-flex items-center gap-0.5 text-[10px] text-gray-400 mt-0.5"
+    <span class="inline-flex items-center gap-0.5 text-xs text-gray-400 mt-0.5"
           title="Customer bought {{ match.customer_purchase_count }}x{% if match.customer_last_purchased_at %}, last {{ match.customer_last_purchased_at }}{% endif %}">
       <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       {{ match.customer_purchase_count }}&times;
@@ -32,9 +32,9 @@
   <td class="px-3 py-2.5 text-sm text-gray-700">
     {{ match.vendor_name | default('--') }}
     {% if match.ghost_rate is not none and match.ghost_rate > 30 %}
-    <span class="ml-1 text-[10px] text-rose-500 font-medium">unreliable</span>
+    <span class="ml-1 text-xs text-rose-500 font-medium">unreliable</span>
     {% elif match.vendor_score is not none and match.vendor_score >= 70 %}
-    <span class="ml-1 text-[10px] text-emerald-500 font-medium">trusted</span>
+    <span class="ml-1 text-xs text-emerald-500 font-medium">trusted</span>
     {% endif %}
   </td>
   {# Qty #}
@@ -48,23 +48,23 @@
   {# Margin pill #}
   <td class="px-3 py-2.5">
     {% if match.margin_pct is not none %}
-    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded
+    <span class="inline-flex px-1.5 py-0.5 text-xs font-semibold rounded
       {{ 'bg-emerald-50 text-emerald-700' if match.margin_pct >= 20 else
          'bg-amber-50 text-amber-700' if match.margin_pct >= 10 else
          'bg-rose-50 text-rose-700' }}">
       {{ "%.0f"|format(match.margin_pct) }}%
     </span>
     {% else %}
-    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-400">N/A</span>
+    <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-400">N/A</span>
     {% endif %}
   </td>
   {# Score pill #}
   <td class="px-3 py-2.5">
     {% set score = match.match_score|default(0) %}
-    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded
+    <span class="inline-flex px-1.5 py-0.5 text-xs font-bold rounded
       {{ 'bg-emerald-50 text-emerald-700' if score >= 75 else
          'bg-amber-50 text-amber-700' if score >= 50 else
-         'bg-gray-100 text-gray-500' }}">
+         'bg-gray-100 text-gray-600' }}">
       {{ score }}
     </span>
   </td>
@@ -79,7 +79,7 @@
       <input type='hidden' name='company_id' value='{{ group.company_id | default("") }}'>
       <button type='submit'
               title="Never offer this part to this customer"
-              class='text-[10px] text-gray-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50'>
+              class='text-xs text-gray-400 hover:text-rose-500 transition-colors px-1.5 py-0.5 rounded hover:bg-rose-50'>
         Don&rsquo;t offer
       </button>
     </form>
