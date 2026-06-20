@@ -566,7 +566,8 @@ class TestMainLoop:
 
     @pytest.mark.asyncio
     async def test_main_search_timeout_fails_item(self, db_session):
-        """A search that exceeds the timeout marks the item failed and continues (no hang)."""
+        """A search that exceeds the timeout marks the item failed and continues (no
+        hang)."""
         _seed_worker_status(db_session)
         import app.services.ics_worker.worker as worker_mod
 
@@ -626,7 +627,8 @@ class TestMainLoop:
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
                     "app.services.ics_worker.search_engine.search_part",
-                    new_callable=AsyncMock, side_effect=asyncio.TimeoutError,
+                    new_callable=AsyncMock,
+                    side_effect=asyncio.TimeoutError,
                 ),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):

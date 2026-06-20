@@ -13,7 +13,8 @@ from app.models import IcsWorkerStatus
 
 
 def _run(db_session):
-    """Run the watchdog job against the test DB with no debounce; return the Teams mock."""
+    """Run the watchdog job against the test DB with no debounce; return the Teams
+    mock."""
     teams = AsyncMock()
     with (
         patch("app.database.SessionLocal", return_value=db_session),
@@ -33,8 +34,7 @@ def _ics(db_session, **kwargs):
 
 
 def test_stale_running_worker_alerts(db_session):
-    _ics(db_session, is_running=True,
-         last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
     teams = _run(db_session)
     teams.assert_awaited_once()
     assert "ICS" in teams.await_args.args[0]
@@ -47,15 +47,19 @@ def test_fresh_worker_no_alert(db_session):
 
 
 def test_not_running_no_alert(db_session):
-    _ics(db_session, is_running=False,
-         last_heartbeat=datetime.now(timezone.utc) - timedelta(hours=5))
+    _ics(db_session, is_running=False, last_heartbeat=datetime.now(timezone.utc) - timedelta(hours=5))
     teams = _run(db_session)
     teams.assert_not_awaited()
 
 
 def test_breaker_open_alerts(db_session):
-    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc),
-         circuit_breaker_open=True, circuit_breaker_reason="Captcha detected")
+    _ics(
+        db_session,
+        is_running=True,
+        last_heartbeat=datetime.now(timezone.utc),
+        circuit_breaker_open=True,
+        circuit_breaker_reason="Captcha detected",
+    )
     teams = _run(db_session)
     teams.assert_awaited_once()
     assert "circuit breaker is OPEN" in teams.await_args.args[0]
@@ -67,8 +71,7 @@ def test_missing_rows_no_error(db_session):
 
 
 def test_debounce_suppresses_repeat(db_session):
-    _ics(db_session, is_running=True,
-         last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
+    _ics(db_session, is_running=True, last_heartbeat=datetime.now(timezone.utc) - timedelta(minutes=20))
     teams = AsyncMock()
     with (
         patch("app.database.SessionLocal", return_value=db_session),

@@ -250,7 +250,8 @@ async def main():
                     except asyncio.TimeoutError:
                         logger.error(
                             "ICS worker: search timed out after {}s (queue id={}) — failing item",
-                            config.ICS_SEARCH_TIMEOUT_SECONDS, item.id,
+                            config.ICS_SEARCH_TIMEOUT_SECONDS,
+                            item.id,
                         )
                         mark_status(db, item, "failed", error="Search timeout")
                         db.close()

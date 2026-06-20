@@ -1,7 +1,7 @@
 """Tests for the self-healing circuit-breaker cooldown in CircuitBreakerBase.
 
-Once tripped, should_stop() must auto-reset after cooldown_seconds so a transient
-block (captcha/rate-limit) doesn't wedge a worker until a process restart.
+Once tripped, should_stop() must auto-reset after cooldown_seconds so a transient block
+(captcha/rate-limit) doesn't wedge a worker until a process restart.
 """
 
 import time
@@ -22,13 +22,13 @@ def test_trip_blocks_until_cooldown_then_auto_resets(monkeypatch):
     b = CircuitBreakerBase(cooldown_seconds=60)
     b._trip("captcha detected")
     assert b.is_open is True
-    assert b.should_stop() is True          # just tripped
+    assert b.should_stop() is True  # just tripped
 
     clock[0] += 59
-    assert b.should_stop() is True          # still within cooldown
+    assert b.should_stop() is True  # still within cooldown
 
-    clock[0] += 2                           # now > 60s since trip
-    assert b.should_stop() is False         # auto-reset
+    clock[0] += 2  # now > 60s since trip
+    assert b.should_stop() is False  # auto-reset
     assert b.is_open is False
     assert b.trip_reason == ""
     assert b.consecutive_failures == 0
@@ -42,7 +42,7 @@ def test_ics_subclass_inherits_cooldown(monkeypatch):
     b._trip("rate limited")
     assert b.should_stop() is True
     clock[0] += 11
-    assert b.should_stop() is False         # self-healed
+    assert b.should_stop() is False  # self-healed
 
 
 def test_empty_results_trip_also_self_heals(monkeypatch):
