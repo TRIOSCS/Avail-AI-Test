@@ -244,8 +244,16 @@ class QueueManager:
             logger.info("Recovered {} stale queue items from 'searching' -> 'queued'", count)
         return count
 
+    # Items stuck in "searching" longer than this are presumed abandoned by a
+    # crashed/killed worker and are reclaimed back to "queued".
+    STUCK_SEARCH_TIMEOUT_MINUTES = 30
+
     def get_next_queued_item(self, db: Session):
-        """Get the next queued item — priority ASC (lowest first), then newest first."""
+        """Get the next queued item — priority ASC (lowest first), then newest first.
+
+        NOTE: read-only (does not claim). Prefer ``claim_next_queued_item`` in the
+        worker loop so concurrent workers don't double-pick the same row.
+        """
         model = self.queue_model
         return (
             db.query(model)
@@ -253,6 +261,70 @@ class QueueManager:
             .order_by(model.priority.asc(), model.created_at.desc())
             .first()
         )
+
+    def reclaim_stuck_searches(self, db: Session, max_age_minutes: int | None = None) -> int:
+        """Reset items stuck in 'searching' past the timeout back to 'queued'.
+
+        Unlike ``recover_stale_searches`` (startup-only), this is safe to call on a
+        cadence: a worker that crashed mid-search has its in-flight item picked up
+        by another worker without waiting for a restart.
+        """
+        model = self.queue_model
+        timeout = max_age_minutes or self.STUCK_SEARCH_TIMEOUT_MINUTES
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout)
+        stuck = (
+            db.query(model)
+            .filter(model.status == "searching", model.updated_at < cutoff)
+            .all()
+        )
+        for item in stuck:
+            item.status = "queued"
+            item.error_message = f"Reclaimed from stale 'searching' after {timeout}m"
+            item.updated_at = datetime.now(timezone.utc)
+        if stuck:
+            db.commit()
+            logger.warning(
+                "{} reclaimed {} stuck 'searching' item(s) -> 'queued'", self.log_prefix, len(stuck)
+            )
+        return len(stuck)
+
+    def claim_next_queued_item(self, db: Session):
+        """Atomically claim the next queued item.
+
+        Selects the next 'queued' row and marks it 'searching' in one short
+        transaction. On PostgreSQL it uses ``FOR UPDATE SKIP LOCKED`` so multiple
+        concurrent workers never grab the same row; SQLite (tests) has no such
+        support and is single-threaded, so it falls back to a plain read.
+
+        Also reclaims stale 'searching' items first, so a crashed worker's
+        in-flight work is recovered automatically. Returns the claimed item or None.
+        """
+        self.reclaim_stuck_searches(db)
+        model = self.queue_model
+        q = (
+            db.query(model)
+            .filter(model.status == "queued")
+            .order_by(model.priority.asc(), model.created_at.desc())
+        )
+        dialect = ""
+        try:
+            dialect = db.get_bind().dialect.name
+        except Exception:  # pragma: no cover - defensive
+            pass
+        if dialect == "postgresql":
+            q = q.with_for_update(skip_locked=True)
+
+        item = q.first()
+        if item is None:
+            return None
+        item.status = "searching"
+        item.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(item)
+        logger.debug(
+            "{} claimed queue item {} (mpn={})", self.log_prefix, item.id, item.normalized_mpn
+        )
+        return item
 
     def mark_status(self, db: Session, queue_item, new_status: str, error: str | None = None):
         """Update a queue item's status."""
