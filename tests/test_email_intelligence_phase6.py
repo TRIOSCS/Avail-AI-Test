@@ -48,6 +48,9 @@ def _scheduler_settings():
         eight_by_eight_enabled=False,
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
+        worker_liveness_check_minutes=5,
+        worker_heartbeat_stale_minutes=15,
+        worker_alert_debounce_minutes=60,
     )
 
 
