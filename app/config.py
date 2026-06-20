@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # --- Explorium / Vibe Prospecting ---
     explorium_api_key: str = ""
     explorium_api_base_url: str = "https://api.explorium.ai"
+    # Opt-in: Explorium only runs when explicitly enabled AND a key is configured.
+    # (Off by default — it was previously always-on, which wasted calls when the
+    # integration wasn't actually working.)
+    explorium_enrichment_enabled: bool = False
+    explorium_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Customer enrichment ---
     customer_enrichment_enabled: bool = True
