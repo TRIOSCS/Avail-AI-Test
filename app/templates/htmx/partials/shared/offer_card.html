@@ -85,7 +85,7 @@
               hx-target="#quote-lines-body"
               hx-swap="beforeend"
               data-loading-disable
-              class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">
+              class="btn btn-sm btn-primary">
         Select for Quote
       </button>
       {% endif %}
@@ -95,7 +95,7 @@
               class="px-2 py-1 text-xs bg-emerald-500 text-white rounded hover:bg-emerald-600">Approve</button>
       <button hx-put="/api/offers/{{ offer.id }}/reject" hx-swap="none"
               data-loading-disable
-              class="px-2 py-1 text-xs bg-rose-500 text-white rounded hover:bg-rose-600">Reject</button>
+              class="btn btn-sm btn-danger">Reject</button>
       {% endif %}
     </div>
   </div>

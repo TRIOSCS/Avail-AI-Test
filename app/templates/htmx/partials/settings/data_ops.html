@@ -47,7 +47,7 @@
             <span class="text-gray-400">&harr;</span>
             <span class="font-medium text-gray-900">{{ pair.name_b }}</span>
           </div>
-          <p class="text-xs text-gray-500 mt-0.5">
+          <p class="text-xs text-gray-600 mt-0.5">
             Score: {{ pair.score }}% match
             &middot; {{ pair.sightings_a or 0 }} vs {{ pair.sightings_b or 0 }} sightings
           </p>
@@ -63,7 +63,7 @@
     </div>
     {% else %}
     <div class="px-4 py-8 text-center">
-      <p class="text-sm text-gray-500">No duplicate vendors found at the current threshold.</p>
+      <p class="text-sm text-gray-600">No duplicate vendors found at the current threshold.</p>
     </div>
     {% endif %}
   </div>
@@ -92,7 +92,7 @@
             <span class="text-gray-400">&harr;</span>
             <span class="font-medium text-gray-900">{{ pair.company_b.name }}</span>
           </div>
-          <p class="text-xs text-gray-500 mt-0.5">
+          <p class="text-xs text-gray-600 mt-0.5">
             Score: {{ pair.score }}% match
             &middot; {{ pair.company_a.site_count or 0 }} vs {{ pair.company_b.site_count or 0 }} sites
             &middot; suggested keep: <span class="font-medium text-gray-700">{{ keeper.name|truncate(24) }}</span>
@@ -107,7 +107,7 @@
     </div>
     {% else %}
     <div class="px-4 py-8 text-center">
-      <p class="text-sm text-gray-500">No duplicate customers found at the current threshold.</p>
+      <p class="text-sm text-gray-600">No duplicate customers found at the current threshold.</p>
     </div>
     {% endif %}
   </div>

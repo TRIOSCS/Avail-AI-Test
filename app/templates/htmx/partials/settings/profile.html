@@ -6,7 +6,7 @@
 #}
 
 <div class="max-w-2xl">
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-5">Your Profile</h2>
 
     <div class="space-y-5">
@@ -17,7 +17,7 @@
         </div>
         <div>
           <p class="text-lg font-semibold text-gray-900">{{ profile_user.name }}</p>
-          <p class="text-sm text-gray-500">{{ profile_user.email }}</p>
+          <p class="text-sm text-gray-600">{{ profile_user.email }}</p>
         </div>
       </div>
 
@@ -25,7 +25,7 @@
 
       {# Role badge #}
       <div>
-        <label class="block text-sm font-medium text-gray-500 mb-1.5">Role</label>
+        <label class="block text-sm font-medium text-gray-600 mb-1.5">Role</label>
         {% set role_colors = {
           'admin': 'bg-brand-500 text-white',
           'buyer': 'bg-emerald-50 text-emerald-700',
@@ -40,14 +40,14 @@
 
       {# Email #}
       <div>
-        <label class="block text-sm font-medium text-gray-500 mb-1.5">Email</label>
+        <label class="block text-sm font-medium text-gray-600 mb-1.5">Email</label>
         <p class="text-sm text-gray-800">{{ profile_user.email }}</p>
       </div>
 
       {# Account created #}
       {% if profile_user.created_at %}
       <div>
-        <label class="block text-sm font-medium text-gray-500 mb-1.5">Member Since</label>
+        <label class="block text-sm font-medium text-gray-600 mb-1.5">Member Since</label>
         <p class="text-sm text-gray-800">{{ profile_user.created_at.strftime('%B %d, %Y') }}</p>
       </div>
       {% endif %}
@@ -55,12 +55,12 @@
   </div>
 
   {# 8x8 VoIP Toggle #}
-  <div class="bg-white border border-brand-200 rounded-lg p-6"
+  <div class="bg-white border border-brand-200 rounded-lg p-4"
        x-data="{ enabled: {{ 'true' if profile_user.eight_by_eight_enabled is defined and profile_user.eight_by_eight_enabled else 'false' }} }">
     <div class="flex items-center justify-between">
       <div>
         <h3 class="text-sm font-semibold text-gray-900">8x8 Click-to-Call</h3>
-        <p class="text-xs text-gray-500 mt-0.5">Enable click-to-call integration for phone numbers. When enabled, clicking a phone number will initiate a call through 8x8 VoIP.</p>
+        <p class="text-xs text-gray-600 mt-0.5">Enable click-to-call integration for phone numbers. When enabled, clicking a phone number will initiate a call through 8x8 VoIP.</p>
       </div>
       <label class="relative inline-flex items-center cursor-pointer ml-4">
         <input type="checkbox" x-model="enabled"

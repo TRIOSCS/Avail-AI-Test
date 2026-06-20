@@ -6,16 +6,16 @@
 {% set bid_status_colors = {
   "pending": "bg-amber-50 text-amber-700",
   "accepted": "bg-emerald-50 text-emerald-700",
-  "rejected": "bg-gray-100 text-gray-500",
+  "rejected": "bg-gray-100 text-gray-600",
   "expired": "bg-rose-50 text-rose-600",
-  "withdrawn": "bg-gray-100 text-gray-500",
+  "withdrawn": "bg-gray-100 text-gray-600",
 } %}
 
-<div class="p-6 max-w-3xl">
+<div class="p-4 max-w-3xl">
   <div class="flex items-center justify-between mb-4">
     <div>
       <h3 class="text-lg font-semibold text-gray-900">Bids for {{ item.part_number }}</h3>
-      <p class="text-sm text-gray-500">{{ "{:,}".format(item.quantity) }} pcs
+      <p class="text-sm text-gray-600">{{ "{:,}".format(item.quantity) }} pcs
         {% if item.asking_price is not none %} — asking ${{ "{:,.4f}".format(item.asking_price|float) }}{% endif %}
       </p>
     </div>
@@ -96,7 +96,7 @@
         </tr>
         {% if bid.notes %}
         <tr class="{{ 'bg-emerald-50/30' if bid.status == 'accepted' else '' }}">
-          <td colspan="6" class="px-3 py-1.5 text-xs text-gray-500 italic">{{ bid.notes }}</td>
+          <td colspan="6" class="px-3 py-1.5 text-xs text-gray-600 italic">{{ bid.notes }}</td>
         </tr>
         {% endif %}
         {% endfor %}

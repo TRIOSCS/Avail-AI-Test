@@ -9,7 +9,7 @@
   <div class="px-5 py-4 bg-gray-50 border-b border-brand-200 flex items-center justify-between">
     <div>
       <h2 class="text-lg font-semibold text-gray-900">Data Sources</h2>
-      <p class="text-xs text-gray-500 mt-0.5">Manage connector status and monitor health.</p>
+      <p class="text-xs text-gray-600 mt-0.5">Manage connector status and monitor health.</p>
     </div>
     {% if sources %}
     <span class="text-xs text-gray-400">
@@ -108,7 +108,7 @@
           </td>
 
           {# Last successful timestamp #}
-          <td class="px-5 py-3 text-sm text-gray-500">
+          <td class="px-5 py-3 text-sm text-gray-600">
             {% if source.last_success %}
             {{ source.last_success.strftime('%b %d, %H:%M') }}
             {% else %}
@@ -135,7 +135,7 @@
         {% endfor %}
         {% else %}
         <tr>
-          <td colspan="6" class="px-5 py-8 text-center text-sm text-gray-500">No sources configured.</td>
+          <td colspan="6" class="px-5 py-8 text-center text-sm text-gray-600">No sources configured.</td>
         </tr>
         {% endif %}
       </tbody>

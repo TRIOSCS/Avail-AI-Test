@@ -8,7 +8,7 @@
     {% if error_count %}
       <span class="font-medium text-red-500">{{ error_count }} errors</span>
     {% endif %}
-    <span class="text-gray-500">from {{ filename }}</span>
+    <span class="text-gray-600">from {{ filename }}</span>
   </div>
 
   {% if errors %}
@@ -26,30 +26,30 @@
     <table class="min-w-full text-sm">
       <thead class="bg-gray-50 dark:bg-gray-800">
         <tr>
-          <th class="px-3 py-2 text-left font-medium">Part Number</th>
-          <th class="px-3 py-2 text-left font-medium">Manufacturer</th>
-          <th class="px-3 py-2 text-right font-medium">Qty</th>
-          <th class="px-3 py-2 text-left font-medium">Date Code</th>
-          <th class="px-3 py-2 text-left font-medium">Condition</th>
-          <th class="px-3 py-2 text-right font-medium">Asking Price</th>
+          <th class="compact-cell--head text-left font-medium">Part Number</th>
+          <th class="compact-cell--head text-left font-medium">Manufacturer</th>
+          <th class="compact-cell--head text-right font-medium">Qty</th>
+          <th class="compact-cell--head text-left font-medium">Date Code</th>
+          <th class="compact-cell--head text-left font-medium">Condition</th>
+          <th class="compact-cell--head text-right font-medium">Asking Price</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
         {% for row in preview_rows %}
         <tr>
-          <td class="px-3 py-2 font-mono">{{ row.part_number or '-' }}</td>
-          <td class="px-3 py-2">{{ row.manufacturer or '-' }}</td>
-          <td class="px-3 py-2 text-right">{{ row.quantity or '-' }}</td>
-          <td class="px-3 py-2">{{ row.date_code or '-' }}</td>
-          <td class="px-3 py-2">{{ row.condition or '-' }}</td>
-          <td class="px-3 py-2 text-right">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '-' }}</td>
+          <td class="compact-cell font-mono">{{ row.part_number or '-' }}</td>
+          <td class="compact-cell">{{ row.manufacturer or '-' }}</td>
+          <td class="compact-cell text-right">{{ row.quantity or '-' }}</td>
+          <td class="compact-cell">{{ row.date_code or '-' }}</td>
+          <td class="compact-cell">{{ row.condition or '-' }}</td>
+          <td class="compact-cell text-right">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '-' }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% if valid_count > preview_rows|length %}
-    <p class="text-xs text-gray-500">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
+    <p class="text-xs text-gray-600">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
   {% endif %}
   {% endif %}
 
