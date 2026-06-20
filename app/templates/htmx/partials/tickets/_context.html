@@ -21,6 +21,6 @@ Usage:
   {{ context_field("Network Log:", ticket.network_errors|tojson(indent=2), variant="pre", scroll=True) }}
 #}
 {%- macro context_field(label, value, variant="inline", scroll=False) -%}
-<div><span class="text-xs font-medium text-gray-500">{{ label }}</span>
+<div><span class="text-xs font-medium text-gray-600">{{ label }}</span>
         {% if variant == "pre" %}<pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto{% if scroll %} max-h-40{% endif %}">{{ value }}</pre>{% else %}<span class="text-xs text-gray-700 ml-1">{{ value }}</span>{% endif %}</div>
 {%- endmacro -%}

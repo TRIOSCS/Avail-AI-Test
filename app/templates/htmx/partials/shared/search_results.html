@@ -57,7 +57,7 @@
         </div>
         <div class="min-w-0 flex-1">
           <p class="text-sm font-semibold text-gray-900 truncate">{{ bm.name|default(bm.display_name|default(bm.full_name|default(bm.primary_mpn|default(bm.mpn|default("—"))))) }}</p>
-          <p class="text-xs text-gray-500 truncate">
+          <p class="text-xs text-gray-600 truncate">
             <span class="inline-block rounded bg-brand-100 px-1.5 py-0.5 text-xs font-medium text-brand-700">{{ bm.type|replace("_", " ")|title }}</span>
             {% if bm.email %}<span class="ml-1">{{ bm.email }}</span>{% endif %}
             {% if bm.customer_name %}<span class="ml-1">{{ bm.customer_name }}</span>{% endif %}
@@ -257,7 +257,7 @@
   <div class="px-4 py-6 text-center text-sm text-gray-400">
     No results for "<strong class="text-gray-600">{{ query }}</strong>"
     {% if not ai_search %}
-    <p class="mt-1 text-xs">Press <kbd class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-mono text-xs">Enter</kbd> for AI-powered search</p>
+    <p class="mt-1 text-xs">Press <kbd class="px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 font-mono text-xs">Enter</kbd> for AI-powered search</p>
     {% endif %}
   </div>
   {% endif %}

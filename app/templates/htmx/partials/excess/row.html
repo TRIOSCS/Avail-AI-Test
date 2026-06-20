@@ -16,18 +16,18 @@
     hx-target="#main-content"
     hx-push-url="/v2/excess/{{ list.id }}"
     preload="mouseover">
-  <td class="px-4 py-3">
+  <td class="table-cell">
     <p class="text-sm font-medium text-brand-600">{{ list.title }}</p>
   </td>
-  <td class="px-4 py-3 text-sm text-gray-600">{{ list.company.name if list.company else "\u2014" }}</td>
-  <td class="px-4 py-3">
+  <td class="table-cell text-sm text-gray-600">{{ list.company.name if list.company else "\u2014" }}</td>
+  <td class="table-cell">
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(list.status, 'bg-gray-100 text-gray-600') }}">
       {{ list.status|capitalize }}
     </span>
   </td>
-  <td class="px-4 py-3 text-sm text-gray-600 text-center">{{ list.total_line_items or 0 }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ list.created_at.strftime('%Y-%m-%d') if list.created_at else "\u2014" }}</td>
-  <td class="px-4 py-3 text-right" @click.stop>
+  <td class="table-cell text-sm text-gray-600 text-center">{{ list.total_line_items or 0 }}</td>
+  <td class="table-cell text-sm text-gray-600">{{ list.created_at.strftime('%Y-%m-%d') if list.created_at else "\u2014" }}</td>
+  <td class="table-cell text-right" @click.stop>
     {{ excess_delete_button(
          "/api/excess-lists/" ~ list.id,
          "#excess-row-" ~ list.id,
