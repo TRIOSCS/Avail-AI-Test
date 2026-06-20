@@ -393,3 +393,56 @@ def api_subscription_health(
             for s in subs
         ]
     }
+
+
+@router.get("/api/admin/workers/status")
+def get_workers_status(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Liveness + queue snapshot for the sourcing-engine workers (ICS, NC, enrichment).
+
+    Glanceable "are they working?" surface: heartbeat age, stale flag, circuit-breaker
+    state, today's counts, and queue depth.
+    """
+    from ...config import settings
+    from ...models import EnrichmentWorkerStatus, IcsWorkerStatus, NcWorkerStatus
+    from ...services.ics_worker.queue_manager import get_queue_stats as ics_queue_stats
+    from ...services.nc_worker.queue_manager import get_queue_stats as nc_queue_stats
+
+    now = datetime.now(timezone.utc)
+    stale_secs = settings.worker_heartbeat_stale_minutes * 60
+
+    def _age(dt):
+        if dt is None:
+            return None
+        d = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return int((now - d).total_seconds())
+
+    def _worker(name, row, queue=None):
+        if row is None:
+            return {"name": name, "present": False}
+        age = _age(row.last_heartbeat)
+        out = {
+            "name": name,
+            "present": True,
+            "is_running": bool(row.is_running),
+            "last_heartbeat": _iso(row.last_heartbeat),
+            "heartbeat_age_seconds": age,
+            "stale": bool(row.is_running and (age is None or age > stale_secs)),
+            "circuit_breaker_open": bool(getattr(row, "circuit_breaker_open", False)),
+            "circuit_breaker_reason": getattr(row, "circuit_breaker_reason", None),
+        }
+        if queue is not None:
+            out["queue"] = queue
+        return out
+
+    return {
+        "checked_at": _iso(now),
+        "stale_threshold_seconds": stale_secs,
+        "workers": [
+            _worker("ics", db.get(IcsWorkerStatus, 1), ics_queue_stats(db)),
+            _worker("netcomponents", db.get(NcWorkerStatus, 1), nc_queue_stats(db)),
+            _worker("enrichment", db.get(EnrichmentWorkerStatus, 1)),
+        ],
+    }

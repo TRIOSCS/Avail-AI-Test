@@ -111,7 +111,7 @@ def main():
 
     config = NcConfig()
     scheduler = SearchScheduler(config)
-    breaker = CircuitBreaker()
+    breaker = CircuitBreaker(cooldown_seconds=config.NC_BREAKER_COOLDOWN_MINUTES * 60)
     searches_today = 0
     sightings_today = 0
     last_stats_date = None

@@ -300,6 +300,13 @@ class Settings(BaseSettings):
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
 
+    # --- Worker liveness watchdog (scheduler job in the supervised app) ---
+    # Workers heartbeat every loop tick; this job alerts when one that should be
+    # running goes silent (hung/crashed) or trips its circuit breaker.
+    worker_liveness_check_minutes: int = 5
+    worker_heartbeat_stale_minutes: int = 15
+    worker_alert_debounce_minutes: int = 60
+
     # --- Clay Enrichment (async webhook → callback; URL/secret via get_credential_cached) ---
     # Clay has no real-time API: we POST a domain to the table's inbound webhook
     # (CLAY_WEBHOOK_URL) and Clay POSTs the enriched row back to /api/webhooks/clay,
