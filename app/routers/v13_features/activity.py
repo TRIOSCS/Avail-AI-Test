@@ -121,9 +121,9 @@ async def clay_webhook(
 ):
     """Clay enrichment callback.
 
-    Clay's outbound HTTP action POSTs an enriched row here, echoing the shared
-    secret (x-clay-secret) and the correlation token we sent. We verify the
-    secret (and an optional HMAC signature), then apply the enriched fields.
+    Clay's outbound HTTP action POSTs an enriched row here, echoing the shared secret
+    (x-clay-secret) and the correlation token we sent. We verify the secret (and an
+    optional HMAC signature), then apply the enriched fields.
     """
     import json as _json
 

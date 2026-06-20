@@ -272,20 +272,14 @@ class QueueManager:
         model = self.queue_model
         timeout = max_age_minutes or self.STUCK_SEARCH_TIMEOUT_MINUTES
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=timeout)
-        stuck = (
-            db.query(model)
-            .filter(model.status == "searching", model.updated_at < cutoff)
-            .all()
-        )
+        stuck = db.query(model).filter(model.status == "searching", model.updated_at < cutoff).all()
         for item in stuck:
             item.status = "queued"
             item.error_message = f"Reclaimed from stale 'searching' after {timeout}m"
             item.updated_at = datetime.now(timezone.utc)
         if stuck:
             db.commit()
-            logger.warning(
-                "{} reclaimed {} stuck 'searching' item(s) -> 'queued'", self.log_prefix, len(stuck)
-            )
+            logger.warning("{} reclaimed {} stuck 'searching' item(s) -> 'queued'", self.log_prefix, len(stuck))
         return len(stuck)
 
     def claim_next_queued_item(self, db: Session):
@@ -301,11 +295,7 @@ class QueueManager:
         """
         self.reclaim_stuck_searches(db)
         model = self.queue_model
-        q = (
-            db.query(model)
-            .filter(model.status == "queued")
-            .order_by(model.priority.asc(), model.created_at.desc())
-        )
+        q = db.query(model).filter(model.status == "queued").order_by(model.priority.asc(), model.created_at.desc())
         dialect = ""
         try:
             dialect = db.get_bind().dialect.name
@@ -321,9 +311,7 @@ class QueueManager:
         item.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(item)
-        logger.debug(
-            "{} claimed queue item {} (mpn={})", self.log_prefix, item.id, item.normalized_mpn
-        )
+        logger.debug("{} claimed queue item {} (mpn={})", self.log_prefix, item.id, item.normalized_mpn)
         return item
 
     def mark_status(self, db: Session, queue_item, new_status: str, error: str | None = None):

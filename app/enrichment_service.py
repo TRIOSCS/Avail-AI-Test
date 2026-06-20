@@ -464,7 +464,8 @@ def _explorium_enabled() -> bool:
     """True when Explorium is feature-gated on AND a key is resolvable.
 
     Opt-in: Explorium only runs when the operator has confirmed it works and set
-    EXPLORIUM_ENRICHMENT_ENABLED=true (default off)."""
+    EXPLORIUM_ENRICHMENT_ENABLED=true (default off).
+    """
     return settings.explorium_enrichment_enabled and bool(
         get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
     )

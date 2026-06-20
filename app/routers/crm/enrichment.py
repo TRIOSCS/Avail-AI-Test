@@ -78,6 +78,7 @@ async def enrich_company(
 
     # Fire-and-forget async Clay enrichment (no-op unless Clay is enabled+configured).
     from ...services.clay_service import enabled_and_configured, request_enrichment
+
     if enabled_and_configured():
         result["clay"] = await request_enrichment(domain, "company", company.id)
     return result
@@ -111,6 +112,7 @@ async def enrich_vendor_card(
 
     # Fire-and-forget async Clay enrichment (no-op unless Clay is enabled+configured).
     from ...services.clay_service import enabled_and_configured, request_enrichment
+
     if enabled_and_configured():
         result["clay"] = await request_enrichment(domain, "vendor_card", card.id)
     return result

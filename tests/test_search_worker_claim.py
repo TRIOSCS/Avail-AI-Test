@@ -21,8 +21,11 @@ from app.services.ics_worker.queue_manager import (
 @pytest.fixture
 def requisition(db_session, test_user):
     r = Requisition(
-        name="wq-req", customer_name="Acme", status="active",
-        created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        name="wq-req",
+        customer_name="Acme",
+        status="active",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(r)
     db_session.flush()
@@ -32,8 +35,10 @@ def requisition(db_session, test_user):
 @pytest.fixture
 def requirement(db_session, requisition):
     req = Requirement(
-        requisition_id=requisition.id, primary_mpn="LM317",
-        target_qty=100, created_at=datetime.now(timezone.utc),
+        requisition_id=requisition.id,
+        primary_mpn="LM317",
+        target_qty=100,
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(req)
     db_session.commit()
@@ -79,7 +84,11 @@ def test_claim_respects_priority(db_session, requirement, requisition):
 
 def test_reclaim_resets_stuck_but_keeps_fresh(db_session, requirement, requisition):
     old = _row(
-        db_session, requirement, requisition, status="searching", mpn="STUCK",
+        db_session,
+        requirement,
+        requisition,
+        status="searching",
+        mpn="STUCK",
         updated_at=datetime.now(timezone.utc) - timedelta(minutes=45),
     )
     fresh = _row(db_session, requirement, requisition, status="searching", mpn="FRESH")
@@ -94,7 +103,11 @@ def test_reclaim_resets_stuck_but_keeps_fresh(db_session, requirement, requisiti
 def test_claim_auto_reclaims_then_claims(db_session, requirement, requisition):
     # Only a stuck 'searching' item exists — claim should reclaim then grab it.
     stuck = _row(
-        db_session, requirement, requisition, status="searching", mpn="STUCK",
+        db_session,
+        requirement,
+        requisition,
+        status="searching",
+        mpn="STUCK",
         updated_at=datetime.now(timezone.utc) - timedelta(minutes=60),
     )
     claimed = claim_next_queued_item(db_session)
@@ -105,10 +118,13 @@ def test_claim_auto_reclaims_then_claims(db_session, requirement, requisition):
 
 def test_reclaim_honors_custom_timeout(db_session, requirement, requisition):
     row = _row(
-        db_session, requirement, requisition, status="searching",
+        db_session,
+        requirement,
+        requisition,
+        status="searching",
         updated_at=datetime.now(timezone.utc) - timedelta(minutes=10),
     )
     assert reclaim_stuck_searches(db_session, max_age_minutes=30) == 0  # 10m < 30m
-    assert reclaim_stuck_searches(db_session, max_age_minutes=5) == 1   # 10m > 5m
+    assert reclaim_stuck_searches(db_session, max_age_minutes=5) == 1  # 10m > 5m
     db_session.refresh(row)
     assert row.status == "queued"

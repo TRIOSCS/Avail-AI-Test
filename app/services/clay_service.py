@@ -39,8 +39,14 @@ MAX_CALLBACK_CONTACTS = 100
 _QUOTA_STATUSES = (402, 429)
 
 _COMPANY_FIELDS = (
-    "legal_name", "industry", "employee_size",
-    "hq_city", "hq_state", "hq_country", "linkedin_url", "website",
+    "legal_name",
+    "industry",
+    "employee_size",
+    "hq_city",
+    "hq_state",
+    "hq_country",
+    "linkedin_url",
+    "website",
 )
 
 
@@ -115,7 +121,10 @@ async def request_enrichment(domain: str, entity_type: str, entity_id: int) -> d
 
 
 def verify_secret(provided: str | None) -> bool:
-    """Timing-safe shared-secret check. Rejects when no secret is configured."""
+    """Timing-safe shared-secret check.
+
+    Rejects when no secret is configured.
+    """
     expected = _secret()
     if not expected:
         logger.warning("Clay callback hit but CLAY_CALLBACK_SECRET not configured — rejecting")
@@ -124,8 +133,11 @@ def verify_secret(provided: str | None) -> bool:
 
 
 def verify_signature(raw_body: bytes, provided: str | None) -> bool:
-    """Optional HMAC-SHA256 body signature (keyed by the secret). Accepts a
-    ``sha256=`` prefix. False when no secret/signature present."""
+    """Optional HMAC-SHA256 body signature (keyed by the secret).
+
+    Accepts a
+    ``sha256=`` prefix. False when no secret/signature present.
+    """
     secret = _secret()
     if not secret or not provided:
         return False
@@ -143,12 +155,24 @@ def _confidence_from_marker(marker) -> int:
     if isinstance(marker, (int, float)):
         return int(min(100, marker)) if marker > 1 else int(marker * 100)
     m = str(marker).strip().lower()
-    return {"a": 90, "high": 90, "verified": 90, "valid": 90,
-            "b": 70, "medium": 70, "c": 40, "low": 40, "invalid": 40}.get(m, 70)
+    return {
+        "a": 90,
+        "high": 90,
+        "verified": 90,
+        "valid": 90,
+        "b": 70,
+        "medium": 70,
+        "c": 40,
+        "low": 40,
+        "invalid": 40,
+    }.get(m, 70)
 
 
 def handle_callback(payload: dict, db) -> dict:
-    """Apply an enriched row Clay POSTed back. Returns a summary dict."""
+    """Apply an enriched row Clay POSTed back.
+
+    Returns a summary dict.
+    """
     from app.enrichment_service import (
         apply_enrichment_to_company,
         apply_enrichment_to_vendor,
@@ -180,6 +204,7 @@ def handle_callback(payload: dict, db) -> dict:
 
     if entity_type == "vendor_card":
         from app.models import VendorCard, VendorContact
+
         card = db.get(VendorCard, entity_id)
         if not card:
             return {"status": "rejected", "reason": "vendor_not_found"}
@@ -187,6 +212,7 @@ def handle_callback(payload: dict, db) -> dict:
         contacts_added = _add_vendor_contacts(db, VendorContact, card.id, contacts)
     else:
         from app.models import Company, CustomerSite, SiteContact
+
         company = db.get(Company, entity_id)
         if not company:
             return {"status": "rejected", "reason": "company_not_found"}
@@ -207,7 +233,10 @@ def handle_callback(payload: dict, db) -> dict:
 
     logger.info(
         "Clay callback applied for {} #{}: {} field(s), {} contact(s)",
-        entity_type, entity_id, len(applied), contacts_added,
+        entity_type,
+        entity_id,
+        len(applied),
+        contacts_added,
     )
     return {
         "status": "applied",
@@ -227,21 +256,21 @@ def _add_vendor_contacts(db, VendorContact, vendor_card_id: int, contacts: list)
         name = c.get("full_name") or c.get("name")
         if not email and not name:
             continue
-        if email and db.query(VendorContact).filter_by(
-            vendor_card_id=vendor_card_id, email=email
-        ).first():
+        if email and db.query(VendorContact).filter_by(vendor_card_id=vendor_card_id, email=email).first():
             continue
-        db.add(VendorContact(
-            vendor_card_id=vendor_card_id,
-            full_name=name,
-            title=c.get("title"),
-            email=email or None,
-            phone=c.get("phone"),
-            linkedin_url=c.get("linkedin_url"),
-            source="clay",
-            confidence=_confidence_from_marker(c.get("email_confidence") or c.get("confidence")),
-            contact_type="individual",
-        ))
+        db.add(
+            VendorContact(
+                vendor_card_id=vendor_card_id,
+                full_name=name,
+                title=c.get("title"),
+                email=email or None,
+                phone=c.get("phone"),
+                linkedin_url=c.get("linkedin_url"),
+                source="clay",
+                confidence=_confidence_from_marker(c.get("email_confidence") or c.get("confidence")),
+                contact_type="individual",
+            )
+        )
         added += 1
     return added
 
@@ -255,17 +284,17 @@ def _add_site_contacts(db, SiteContact, customer_site_id: int, contacts: list) -
         if not name:
             continue  # SiteContact.full_name is NOT NULL
         email = (c.get("email") or "").strip().lower()
-        if email and db.query(SiteContact).filter_by(
-            customer_site_id=customer_site_id, email=email
-        ).first():
+        if email and db.query(SiteContact).filter_by(customer_site_id=customer_site_id, email=email).first():
             continue
-        db.add(SiteContact(
-            customer_site_id=customer_site_id,
-            full_name=name,
-            title=c.get("title"),
-            email=email or None,
-            phone=c.get("phone"),
-            enrichment_source="clay",
-        ))
+        db.add(
+            SiteContact(
+                customer_site_id=customer_site_id,
+                full_name=name,
+                title=c.get("title"),
+                email=email or None,
+                phone=c.get("phone"),
+                enrichment_source="clay",
+            )
+        )
         added += 1
     return added

@@ -507,10 +507,13 @@ class TestFindSuggestedContactsRelevantFilter:
     def _enable_explorium(self):
         """Explorium is opt-in now; these filter tests inject contacts via it."""
         from app.config import settings as _s
+
         with (
             patch.object(_s, "explorium_enrichment_enabled", True),
-            patch("app.enrichment_service.get_credential_cached",
-                  side_effect=lambda src, var: "exp-key" if "explorium" in src else None),
+            patch(
+                "app.enrichment_service.get_credential_cached",
+                side_effect=lambda src, var: "exp-key" if "explorium" in src else None,
+            ),
             patch("app.enrichment_service.circuit_open", return_value=False),
         ):
             yield
