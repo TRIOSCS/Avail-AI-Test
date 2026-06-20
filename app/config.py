@@ -123,6 +123,11 @@ class Settings(BaseSettings):
     # --- Explorium / Vibe Prospecting ---
     explorium_api_key: str = ""
     explorium_api_base_url: str = "https://api.explorium.ai"
+    # Opt-in: Explorium only runs when explicitly enabled AND a key is configured.
+    # (Off by default — it was previously always-on, which wasted calls when the
+    # integration wasn't actually working.)
+    explorium_enrichment_enabled: bool = False
+    explorium_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Customer enrichment ---
     customer_enrichment_enabled: bool = True
@@ -294,6 +299,13 @@ class Settings(BaseSettings):
     lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
+
+    # --- Clay Enrichment (async webhook → callback; URL/secret via get_credential_cached) ---
+    # Clay has no real-time API: we POST a domain to the table's inbound webhook
+    # (CLAY_WEBHOOK_URL) and Clay POSTs the enriched row back to /api/webhooks/clay,
+    # echoing CLAY_CALLBACK_SECRET in the x-clay-secret header.
+    clay_enrichment_enabled: bool = False  # feature gate; off → Clay not triggered
+    clay_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Azure Communication Services ---
     acs_connection_string: str = ""

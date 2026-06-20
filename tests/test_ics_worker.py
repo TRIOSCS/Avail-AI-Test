@@ -140,7 +140,7 @@ class TestMainLoop:
             patch("app.services.ics_worker.scheduler.SearchScheduler"),
             patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
             patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+            patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -168,7 +168,7 @@ class TestMainLoop:
             patch("app.services.ics_worker.scheduler.SearchScheduler"),
             patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
             patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+            patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -201,7 +201,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler"),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -246,7 +246,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -295,7 +295,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -347,7 +347,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate"),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -399,7 +399,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", return_value=None),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", return_value=None),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -469,7 +469,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status"),
                 patch("app.services.ics_worker.queue_manager.mark_completed") as mock_complete,
                 patch(
@@ -545,7 +545,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
@@ -601,7 +601,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -669,7 +669,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
                     "app.services.ics_worker.search_engine.search_part",
@@ -744,7 +744,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
                     "app.services.ics_worker.search_engine.search_part",
@@ -821,7 +821,7 @@ class TestMainLoop:
                 patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
                 patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
                 patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
-                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.claim_next_queued_item", side_effect=get_next),
                 patch("app.services.ics_worker.queue_manager.mark_status"),
                 patch("app.services.ics_worker.queue_manager.mark_completed"),
                 patch(

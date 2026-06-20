@@ -93,7 +93,7 @@ async def main():
     from .circuit_breaker import CircuitBreaker
     from .config import IcsConfig
     from .queue_manager import (
-        get_next_queued_item,
+        claim_next_queued_item,
         mark_completed,
         mark_status,
         recover_stale_searches,
@@ -220,7 +220,9 @@ async def main():
                 # Get next queued item
                 db = SessionLocal()
                 try:
-                    item = get_next_queued_item(db)
+                    # Atomically claim (marks 'searching'; skip-locked on PG) and
+                    # auto-reclaim any items a crashed worker left mid-search.
+                    item = claim_next_queued_item(db)
                     if not item:
                         logger.debug("ICS worker: queue empty, sleeping 60s")
                         db.close()
@@ -235,8 +237,7 @@ async def main():
                         await asyncio.sleep(5 * 60)
                         continue
 
-                    # Execute search
-                    mark_status(db, item, "searching")
+                    # Execute search (already marked 'searching' by the claim)
                     logger.info("ICS worker: searching '{}' (queue id={})", item.mpn, item.id)
 
                     search_result = await search_part(session.page, item.mpn)

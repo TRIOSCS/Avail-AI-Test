@@ -286,6 +286,8 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             json={"domain": domain, "name": name},
             timeout=15,
         )
+        if resp.status_code in (402, 429):
+            raise ProviderQuotaError(f"Explorium {resp.status_code}")
         if resp.status_code != 200:
             logger.warning("Explorium company lookup failed: {}", resp.status_code)
             return None
@@ -329,6 +331,8 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             json=payload,
             timeout=20,
         )
+        if resp.status_code in (402, 429):
+            raise ProviderQuotaError(f"Explorium {resp.status_code}")
         if resp.status_code != 200:
             logger.warning("Explorium contacts returned HTTP {} for {}", resp.status_code, domain)
             return []
@@ -456,6 +460,17 @@ def _lusha_enabled() -> bool:
     return settings.lusha_enrichment_enabled and bool(get_credential_cached("lusha_enrichment", "LUSHA_API_KEY"))
 
 
+def _explorium_enabled() -> bool:
+    """True when Explorium is feature-gated on AND a key is resolvable.
+
+    Opt-in: Explorium only runs when the operator has confirmed it works and set
+    EXPLORIUM_ENRICHMENT_ENABLED=true (default off).
+    """
+    return settings.explorium_enrichment_enabled and bool(
+        get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+    )
+
+
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
@@ -514,8 +529,13 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     def _gaps_remain() -> bool:
         return any(not result.get(f) for f in _enrichable)
 
-    # ── Phase 1: Explorium ──
-    _merge(await _explorium_find_company(domain, name), "explorium")
+    # ── Phase 1: Explorium (opt-in, circuit-guarded) ──
+    if _explorium_enabled() and not circuit_open("explorium"):
+        try:
+            _merge(await _explorium_find_company(domain, name), "explorium")
+        except ProviderQuotaError:
+            logger.warning("Explorium quota/rate-limit on company {} — tripping circuit", domain)
+            trip_circuit("explorium", settings.explorium_cooldown_minutes)
 
     # ── Phase 1a: Lusha (verified contacts/firmographics) — gap-gated, circuit-guarded ──
     if _lusha_enabled() and not circuit_open("lusha") and _gaps_remain():
@@ -599,13 +619,18 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
 
     # Fall through to the existing concurrent providers unless Lusha already satisfied the need.
     if not (len(all_contacts) >= limit and any(c.get("verified") for c in all_contacts)):
-        results = await asyncio.gather(
-            _explorium_find_contacts(domain, title_filter),
-            _hunter_find_contacts(domain),
-            _ai_find_contacts(domain, name, title_filter),
-            return_exceptions=True,
-        )
+        providers = []
+        explorium_on = _explorium_enabled() and not circuit_open("explorium")
+        if explorium_on:
+            providers.append(_explorium_find_contacts(domain, title_filter))
+        providers.append(_hunter_find_contacts(domain))
+        providers.append(_ai_find_contacts(domain, name, title_filter))
+        results = await asyncio.gather(*providers, return_exceptions=True)
         for r in results:
+            if isinstance(r, ProviderQuotaError):
+                logger.warning("Explorium quota/rate-limit on contacts {} — tripping circuit", domain)
+                trip_circuit("explorium", settings.explorium_cooldown_minutes)
+                continue
             if isinstance(r, Exception):
                 logger.warning("Contact provider failed: {}", r)
                 continue
