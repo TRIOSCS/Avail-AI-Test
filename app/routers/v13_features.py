@@ -91,14 +91,30 @@ async def clay_webhook(
     shared secret (x-clay-secret header) and the correlation token we sent.
     We verify the secret, then route the enriched fields into the queue.
     """
-    from app.services.clay_service import handle_clay_callback, verify_clay_secret
+    import json as _json
+
+    from app.services.clay_service import (
+        MAX_CALLBACK_BYTES,
+        handle_clay_callback,
+        verify_clay_secret,
+        verify_clay_signature,
+    )
 
     secret = request.headers.get("x-clay-secret")
     if not verify_clay_secret(secret):
         raise HTTPException(403, "Invalid Clay webhook secret")
 
+    raw = await request.body()
+    if len(raw) > MAX_CALLBACK_BYTES:
+        raise HTTPException(413, "Payload too large")
+
+    # Optional stronger check: if Clay sends an HMAC signature, it must verify.
+    signature = request.headers.get("x-clay-signature")
+    if signature is not None and not verify_clay_signature(raw, signature):
+        raise HTTPException(403, "Invalid Clay signature")
+
     try:
-        payload = await request.json()
+        payload = _json.loads(raw)
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(400, "Invalid JSON payload")
     if not isinstance(payload, dict):

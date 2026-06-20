@@ -23,6 +23,7 @@ Gracefully returns empty/None when the key is not configured.
 import logging
 from typing import Any
 
+from app.connectors.resilience import resilient_call
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
@@ -107,11 +108,14 @@ async def enrich_company(domain: str) -> dict | None:
         return None
 
     try:
-        resp = await http.get(
-            f"{LUSHA_BASE}/company",
-            params={"domain": domain},
-            headers=_headers(key),
-            timeout=15,
+        resp = await resilient_call(
+            "lusha",
+            lambda: http.get(
+                f"{LUSHA_BASE}/company",
+                params={"domain": domain},
+                headers=_headers(key),
+                timeout=15,
+            ),
         )
         if resp.status_code != 200:
             log.warning("Lusha company lookup failed: %s %s", resp.status_code, resp.text[:200])
@@ -178,11 +182,14 @@ async def search_contacts(
                 "contacts": {"include": {"jobTitles": titles}},
             },
         }
-        search_resp = await http.post(
-            f"{LUSHA_BASE}/prospecting/contact/search",
-            headers=_headers(key),
-            json=search_payload,
-            timeout=30,
+        search_resp = await resilient_call(
+            "lusha",
+            lambda: http.post(
+                f"{LUSHA_BASE}/prospecting/contact/search",
+                headers=_headers(key),
+                json=search_payload,
+                timeout=30,
+            ),
         )
         if search_resp.status_code != 200:
             log.warning("Lusha search failed: %s %s", search_resp.status_code, search_resp.text[:200])
@@ -199,11 +206,14 @@ async def search_contacts(
             return []
 
         # Step 2 — enrich the matched contactIds to get emails/phones.
-        enrich_resp = await http.post(
-            f"{LUSHA_BASE}/prospecting/contact/enrich",
-            headers=_headers(key),
-            json={"requestId": request_id, "contactIds": contact_ids[:limit]},
-            timeout=30,
+        enrich_resp = await resilient_call(
+            "lusha",
+            lambda: http.post(
+                f"{LUSHA_BASE}/prospecting/contact/enrich",
+                headers=_headers(key),
+                json={"requestId": request_id, "contactIds": contact_ids[:limit]},
+                timeout=30,
+            ),
         )
         if enrich_resp.status_code != 200:
             log.warning("Lusha enrich failed: %s %s", enrich_resp.status_code, enrich_resp.text[:200])

@@ -53,14 +53,18 @@ async def check_people_signals(domain: str) -> dict:
             "page": 1,
         }
 
-        resp = await http.post(
-            f"{APOLLO_BASE}/mixed_people/search",
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "X-Api-Key": api_key,
-            },
-            timeout=30,
+        from app.connectors.resilience import resilient_call
+        resp = await resilient_call(
+            "apollo",
+            lambda: http.post(
+                f"{APOLLO_BASE}/mixed_people/search",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Api-Key": api_key,
+                },
+                timeout=30,
+            ),
         )
 
         if resp.status_code != 200:

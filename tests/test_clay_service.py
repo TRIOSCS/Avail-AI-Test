@@ -183,3 +183,58 @@ def test_clay_webhook_rejects_non_object_payload(client):
             headers={"x-clay-secret": "right"},
         )
     assert resp.status_code == 400
+
+
+# ── HMAC signature + payload-size hardening ──────────────────────────
+
+
+class TestVerifyClaySignature:
+    def test_no_secret_or_sig_returns_false(self):
+        with patch.object(clay_service, "_clay_secret", return_value=""):
+            assert clay_service.verify_clay_signature(b"{}", "abc") is False
+        with patch.object(clay_service, "_clay_secret", return_value="s"):
+            assert clay_service.verify_clay_signature(b"{}", None) is False
+
+    def test_valid_signature(self):
+        import hashlib
+        import hmac
+        body = b'{"correlation_token":"t"}'
+        sig = hmac.new(b"s3cret", body, hashlib.sha256).hexdigest()
+        with patch.object(clay_service, "_clay_secret", return_value="s3cret"):
+            assert clay_service.verify_clay_signature(body, sig) is True
+            assert clay_service.verify_clay_signature(body, "sha256=" + sig) is True
+            assert clay_service.verify_clay_signature(body, "deadbeef") is False
+
+
+def test_clay_webhook_rejects_oversize_payload(client):
+    big = "x" * (clay_service.MAX_CALLBACK_BYTES + 1)
+    with patch("app.services.clay_service.verify_clay_secret", return_value=True):
+        resp = client.post(
+            "/api/webhooks/clay",
+            content=('{"correlation_token":"t","pad":"%s"}' % big).encode(),
+            headers={"x-clay-secret": "right", "Content-Type": "application/json"},
+        )
+    assert resp.status_code == 413
+
+
+def test_clay_webhook_rejects_bad_signature_when_present(client):
+    with patch("app.services.clay_service.verify_clay_secret", return_value=True), \
+         patch("app.services.clay_service.verify_clay_signature", return_value=False):
+        resp = client.post(
+            "/api/webhooks/clay",
+            json={"correlation_token": "t"},
+            headers={"x-clay-secret": "right", "x-clay-signature": "bad"},
+        )
+    assert resp.status_code == 403
+
+
+def test_clay_webhook_accepts_valid_signature(client):
+    with patch("app.services.clay_service.verify_clay_secret", return_value=True), \
+         patch("app.services.clay_service.verify_clay_signature", return_value=True), \
+         patch("app.services.clay_service.handle_clay_callback", return_value={"status": "applied"}):
+        resp = client.post(
+            "/api/webhooks/clay",
+            json={"correlation_token": "t", "industry": "Electronics"},
+            headers={"x-clay-secret": "right", "x-clay-signature": "sha256=deadbeef"},
+        )
+    assert resp.status_code == 200

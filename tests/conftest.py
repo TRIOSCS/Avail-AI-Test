@@ -100,6 +100,22 @@ _PG_ONLY_TABLES = {"buyer_profiles"}
 
 
 @pytest.fixture(autouse=True)
+def _reset_resilience():
+    """Reset per-provider circuit breakers + rate-limit buckets between tests
+    so outbound-resilience state never leaks across test cases."""
+    try:
+        from app.connectors import resilience
+        from app.connectors.sources import _breakers
+        resilience.reset_state()
+        _breakers.clear()
+        yield
+        resilience.reset_state()
+        _breakers.clear()
+    except Exception:
+        yield
+
+
+@pytest.fixture(autouse=True)
 def db_session():
     """Create all tables, yield a session, then tear down."""
     _sqlite_safe = [

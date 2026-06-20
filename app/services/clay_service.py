@@ -19,6 +19,7 @@ Depends on:
   - app.services.deep_enrichment_service.route_enrichment (confidence routing)
 """
 
+import hashlib
 import hmac
 import json
 import logging
@@ -34,6 +35,11 @@ log = logging.getLogger("avail.clay")
 # Clay to finish even a slow waterfall, short enough to self-clean.
 _CORR_PREFIX = "clay:corr:"
 _CORR_TTL_DAYS = 7
+
+# Reject callback bodies larger than this (defends against abuse / runaway rows).
+MAX_CALLBACK_BYTES = 256 * 1024
+# Cap how many contacts a single callback can enqueue.
+MAX_CALLBACK_CONTACTS = 100
 
 # Company firmographic fields Clay may return that we know how to apply.
 _COMPANY_FIELDS = (
@@ -109,7 +115,10 @@ async def request_clay_enrichment(
     }
 
     try:
-        resp = await http.post(webhook_url, headers=headers, json=body, timeout=15)
+        from app.connectors.resilience import resilient_call
+        resp = await resilient_call(
+            "clay", lambda: http.post(webhook_url, headers=headers, json=body, timeout=15)
+        )
     except Exception as e:
         log.warning("Clay webhook POST failed for %s: %s", domain, e)
         invalidate(_corr_key(token))
@@ -137,6 +146,20 @@ def verify_clay_secret(provided: str | None) -> bool:
         log.warning("Clay callback hit but CLAY_CALLBACK_SECRET is not configured — rejecting")
         return False
     return hmac.compare_digest(expected, provided or "")
+
+
+def verify_clay_signature(raw_body: bytes, provided: str | None) -> bool:
+    """Optional stronger check: HMAC-SHA256 of the raw body keyed by the secret.
+
+    Verifies body integrity (not just a shared header). Accepts an optional
+    ``sha256=`` prefix. Returns False if no secret/signature is present.
+    """
+    secret = _clay_secret()
+    if not secret or not provided:
+        return False
+    prov = provided.split("=", 1)[1] if provided.startswith("sha256=") else provided
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, prov)
 
 
 def _confidence_from_email_marker(marker) -> float:
@@ -195,7 +218,7 @@ def handle_clay_callback(payload: dict, db) -> dict:
     contacts = payload.get("contacts") or []
     contacts_added = 0
     if isinstance(contacts, list):
-        for c in contacts:
+        for c in contacts[:MAX_CALLBACK_CONTACTS]:
             if not isinstance(c, dict):
                 continue
             email = (c.get("email") or "").strip().lower()

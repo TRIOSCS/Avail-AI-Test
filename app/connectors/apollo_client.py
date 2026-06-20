@@ -13,6 +13,7 @@ import logging
 from typing import Any
 
 from app.config import settings
+from app.connectors.resilience import resilient_call
 from app.http_client import http
 
 log = logging.getLogger("avail.apollo")
@@ -70,14 +71,17 @@ async def search_contacts(
         payload["q_organization_domains_list"] = [domain]
 
     try:
-        resp = await http.post(
-            f"{APOLLO_BASE}/mixed_people/search",
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "X-Api-Key": api_key,
-            },
-            timeout=30,
+        resp = await resilient_call(
+            "apollo",
+            lambda: http.post(
+                f"{APOLLO_BASE}/mixed_people/search",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Api-Key": api_key,
+                },
+                timeout=30,
+            ),
         )
 
         if resp.status_code != 200:
@@ -178,14 +182,17 @@ async def enrich_person(
         return None
 
     try:
-        resp = await http.post(
-            f"{APOLLO_BASE}/people/match",
-            json=payload,
-            headers={
-                "Content-Type": "application/json",
-                "X-Api-Key": api_key,
-            },
-            timeout=30,
+        resp = await resilient_call(
+            "apollo",
+            lambda: http.post(
+                f"{APOLLO_BASE}/people/match",
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Api-Key": api_key,
+                },
+                timeout=30,
+            ),
         )
 
         if resp.status_code != 200:
@@ -246,11 +253,14 @@ async def enrich_company(domain: str) -> dict | None:
         return None
 
     try:
-        resp = await http.get(
-            f"{APOLLO_BASE}/organizations/enrich",
-            params={"domain": domain},
-            headers={"X-Api-Key": api_key},
-            timeout=15,
+        resp = await resilient_call(
+            "apollo",
+            lambda: http.get(
+                f"{APOLLO_BASE}/organizations/enrich",
+                params={"domain": domain},
+                headers={"X-Api-Key": api_key},
+                timeout=15,
+            ),
         )
 
         if resp.status_code != 200:

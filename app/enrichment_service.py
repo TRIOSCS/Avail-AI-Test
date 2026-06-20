@@ -13,6 +13,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
+from .connectors.resilience import resilient_call
 from .http_client import http
 from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
@@ -364,11 +365,14 @@ async def _explorium_match_business(domain: str, name: str = "") -> Optional[str
     business = {"domain": domain}
     if name:
         business["name"] = name
-    resp = await http.post(
-        f"{EXPLORIUM_BASE}/businesses/match",
-        headers=_explorium_headers(),
-        json={"businesses_to_match": [business]},
-        timeout=15,
+    resp = await resilient_call(
+        "explorium",
+        lambda: http.post(
+            f"{EXPLORIUM_BASE}/businesses/match",
+            headers=_explorium_headers(),
+            json={"businesses_to_match": [business]},
+            timeout=15,
+        ),
     )
     if resp.status_code != 200:
         log.warning("Explorium match failed: %s %s", resp.status_code, resp.text[:200])
@@ -389,11 +393,14 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
         if not business_id:
             return None
 
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/businesses/firmographics/enrich",
-            headers=_explorium_headers(),
-            json={"business_ids": [business_id]},
-            timeout=15,
+        resp = await resilient_call(
+            "explorium",
+            lambda: http.post(
+                f"{EXPLORIUM_BASE}/businesses/firmographics/enrich",
+                headers=_explorium_headers(),
+                json={"business_ids": [business_id]},
+                timeout=15,
+            ),
         )
         if resp.status_code != 200:
             log.warning("Explorium firmographics failed: %s", resp.status_code)
@@ -438,11 +445,14 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
         payload = {"business_ids": [business_id], "size": 10}
         if title_filter:
             payload["filters"] = {"job_title": [title_filter]}
-        resp = await http.post(
-            f"{EXPLORIUM_BASE}/prospects",
-            headers=_explorium_headers(),
-            json=payload,
-            timeout=20,
+        resp = await resilient_call(
+            "explorium",
+            lambda: http.post(
+                f"{EXPLORIUM_BASE}/prospects",
+                headers=_explorium_headers(),
+                json=payload,
+                timeout=20,
+            ),
         )
         if resp.status_code != 200:
             return []
@@ -457,11 +467,14 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
         ]
         contact_info: dict[str, dict] = {}
         if prospect_ids:
-            eresp = await http.post(
-                f"{EXPLORIUM_BASE}/prospects/contacts_information/enrich",
-                headers=_explorium_headers(),
-                json={"prospect_ids": prospect_ids},
-                timeout=20,
+            eresp = await resilient_call(
+                "explorium",
+                lambda: http.post(
+                    f"{EXPLORIUM_BASE}/prospects/contacts_information/enrich",
+                    headers=_explorium_headers(),
+                    json={"prospect_ids": prospect_ids},
+                    timeout=20,
+                ),
             )
             if eresp.status_code == 200:
                 for rec in _explorium_records(eresp.json()):

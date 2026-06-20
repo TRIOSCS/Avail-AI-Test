@@ -93,6 +93,15 @@ class Settings:
     lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
     lusha_api_base_url: str = os.getenv("LUSHA_API_BASE_URL", "https://api.lusha.com")
 
+    # Outbound API resilience — per-provider rate limits (requests/min) + retries.
+    provider_max_retries: int = int(os.getenv("PROVIDER_MAX_RETRIES", "2"))
+    lusha_rpm: int = int(os.getenv("LUSHA_RPM", "60"))
+    apollo_rpm: int = int(os.getenv("APOLLO_RPM", "60"))
+    explorium_rpm: int = int(os.getenv("EXPLORIUM_RPM", "200"))
+    clay_rpm: int = int(os.getenv("CLAY_RPM", "120"))
+    hunter_rpm: int = int(os.getenv("HUNTER_RPM", "30"))
+    default_provider_rpm: int = int(os.getenv("DEFAULT_PROVIDER_RPM", "120"))
+
     # Clay — asynchronous enrichment (no real-time API):
     #   we POST a domain to the table's inbound webhook (CLAY_WEBHOOK_URL),
     #   Clay enriches and POSTs the row back to /api/webhooks/clay, echoing
