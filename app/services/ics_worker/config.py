@@ -25,3 +25,8 @@ class IcsConfig:
         self.ICS_BUSINESS_HOURS_START = int(os.environ.get("ICS_BUSINESS_HOURS_START", "8"))
         self.ICS_BUSINESS_HOURS_END = int(os.environ.get("ICS_BUSINESS_HOURS_END", "18"))
         self.ICS_BROWSER_PROFILE_DIR = os.environ.get("ICS_BROWSER_PROFILE_DIR", "/root/ics_browser_profile")
+        # Hard cap on a single search (incl. human-behavior delays) so a wedged page
+        # can't stall the loop/heartbeat. Worst-case real search is ~90s.
+        self.ICS_SEARCH_TIMEOUT_SECONDS = int(os.environ.get("ICS_SEARCH_TIMEOUT_SECONDS", "150"))
+        # Circuit-breaker self-heal cooldown: auto-reset this long after a trip.
+        self.ICS_BREAKER_COOLDOWN_MINUTES = int(os.environ.get("ICS_BREAKER_COOLDOWN_MINUTES", "30"))

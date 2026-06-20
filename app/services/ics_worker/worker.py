@@ -106,7 +106,7 @@ async def main():
 
     config = IcsConfig()
     scheduler = SearchScheduler(config)
-    breaker = CircuitBreaker()
+    breaker = CircuitBreaker(cooldown_seconds=config.ICS_BREAKER_COOLDOWN_MINUTES * 60)
     searches_today = 0
     sightings_today = 0
     last_stats_date = None
@@ -219,6 +219,7 @@ async def main():
 
                 # Get next queued item
                 db = SessionLocal()
+                item = None  # pre-init so the except path's `if item` guard is safe
                 try:
                     # Atomically claim (marks 'searching'; skip-locked on PG) and
                     # auto-reclaim any items a crashed worker left mid-search.
@@ -237,10 +238,23 @@ async def main():
                         await asyncio.sleep(5 * 60)
                         continue
 
-                    # Execute search (already marked 'searching' by the claim)
+                    # Execute search (already marked 'searching' by the claim).
+                    # Hard timeout so a wedged page can't stall the loop/heartbeat forever.
                     logger.info("ICS worker: searching '{}' (queue id={})", item.mpn, item.id)
 
-                    search_result = await search_part(session.page, item.mpn)
+                    try:
+                        search_result = await asyncio.wait_for(
+                            search_part(session.page, item.mpn),
+                            timeout=config.ICS_SEARCH_TIMEOUT_SECONDS,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.error(
+                            "ICS worker: search timed out after {}s (queue id={}) — failing item",
+                            config.ICS_SEARCH_TIMEOUT_SECONDS, item.id,
+                        )
+                        mark_status(db, item, "failed", error="Search timeout")
+                        db.close()
+                        continue
 
                     # Check page health
                     health = await breaker.check_page_health(session.page)
