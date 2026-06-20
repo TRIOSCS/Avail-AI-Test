@@ -75,6 +75,11 @@ async def enrich_company(
     result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}
     if waterfall_result:
         result["customer_enrichment"] = waterfall_result
+
+    # Fire-and-forget async Clay enrichment (no-op unless Clay is enabled+configured).
+    from ...services.clay_service import enabled_and_configured, request_enrichment
+    if enabled_and_configured():
+        result["clay"] = await request_enrichment(domain, "company", company.id)
     return result
 
 
@@ -102,7 +107,13 @@ async def enrich_vendor_card(
     enrichment = await enrich_entity(domain, card.display_name)
     updated = apply_enrichment_to_vendor(card, enrichment)
     db.commit()
-    return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+    result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+
+    # Fire-and-forget async Clay enrichment (no-op unless Clay is enabled+configured).
+    from ...services.clay_service import enabled_and_configured, request_enrichment
+    if enabled_and_configured():
+        result["clay"] = await request_enrichment(domain, "vendor_card", card.id)
+    return result
 
 
 @router.get("/api/suggested-contacts")

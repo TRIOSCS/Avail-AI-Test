@@ -295,6 +295,13 @@ class Settings(BaseSettings):
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
 
+    # --- Clay Enrichment (async webhook → callback; URL/secret via get_credential_cached) ---
+    # Clay has no real-time API: we POST a domain to the table's inbound webhook
+    # (CLAY_WEBHOOK_URL) and Clay POSTs the enriched row back to /api/webhooks/clay,
+    # echoing CLAY_CALLBACK_SECRET in the x-clay-secret header.
+    clay_enrichment_enabled: bool = False  # feature gate; off → Clay not triggered
+    clay_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
+
     # --- Azure Communication Services ---
     acs_connection_string: str = ""
     acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)

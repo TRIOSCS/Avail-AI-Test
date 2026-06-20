@@ -109,6 +109,57 @@ async def teams_webhook(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  CLAY WEBHOOK (async enrichment callback)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.post("/api/webhooks/clay")
+@limiter.limit("120/minute")
+async def clay_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Clay enrichment callback.
+
+    Clay's outbound HTTP action POSTs an enriched row here, echoing the shared
+    secret (x-clay-secret) and the correlation token we sent. We verify the
+    secret (and an optional HMAC signature), then apply the enriched fields.
+    """
+    import json as _json
+
+    from app.services.clay_service import (
+        MAX_CALLBACK_BYTES,
+        handle_callback,
+        verify_secret,
+        verify_signature,
+    )
+
+    if not verify_secret(request.headers.get("x-clay-secret")):
+        raise HTTPException(403, "Invalid Clay webhook secret")
+
+    raw = await request.body()
+    if len(raw) > MAX_CALLBACK_BYTES:
+        raise HTTPException(413, "Payload too large")
+
+    signature = request.headers.get("x-clay-signature")
+    if signature is not None and not verify_signature(raw, signature):
+        raise HTTPException(403, "Invalid Clay signature")
+
+    try:
+        payload = _json.loads(raw)
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON payload")
+    if not isinstance(payload, dict):
+        raise HTTPException(400, "Expected a JSON object")
+
+    try:
+        return handle_callback(payload, db)
+    except Exception:
+        logger.exception("Clay callback processing failed")
+        raise HTTPException(500, "Processing failed")
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  ACS WEBHOOKS (Azure Communication Services)
 # ═══════════════════════════════════════════════════════════════════════
 
