@@ -10,7 +10,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.connectors.apollo_client import APOLLO_BASE, DEFAULT_TITLES
+from app.connectors.apollo_client import APOLLO_BASE, auth_headers
 from app.http_client import http
 from app.models.prospect_account import ProspectAccount
 
@@ -59,10 +59,7 @@ async def check_people_signals(domain: str) -> dict:
             lambda: http.post(
                 f"{APOLLO_BASE}/mixed_people/search",
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Api-Key": api_key,
-                },
+                headers=auth_headers(api_key),
                 timeout=30,
             ),
         )

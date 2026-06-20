@@ -926,6 +926,33 @@ async def find_suggested_contacts(
     return result
 
 
+# ── Provider configuration ───────────────────────────────────────────
+
+# Synchronous enrichment providers that can satisfy enrich_entity /
+# find_suggested_contacts (Clay is async-only and intentionally excluded).
+SYNC_PROVIDER_KEYS = [
+    ("lusha_enrichment", "LUSHA_API_KEY"),
+    ("apollo_enrichment", "APOLLO_API_KEY"),
+    ("explorium_enrichment", "EXPLORIUM_API_KEY"),
+    ("hunter_enrichment", "HUNTER_API_KEY"),
+    ("rocketreach_enrichment", "ROCKETREACH_API_KEY"),
+    ("clearbit_enrichment", "CLEARBIT_API_KEY"),
+    ("anthropic_ai", "ANTHROPIC_API_KEY"),
+]
+
+# Human-readable hint for the "nothing configured" error responses.
+ENRICHMENT_KEYS_HINT = "LUSHA_API_KEY, APOLLO_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY"
+
+
+def enrichment_provider_configured() -> bool:
+    """True if at least one synchronous enrichment provider key is configured.
+
+    Single source of truth for the "do we have any enrichment provider?" gate
+    that several routers share — avoids the per-router OR-chains drifting apart.
+    """
+    return any(get_credential_cached(src, key) for src, key in SYNC_PROVIDER_KEYS)
+
+
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
     """Apply enrichment data dict to a Company model. Returns list of fields updated."""
     updated = []

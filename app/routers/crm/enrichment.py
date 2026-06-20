@@ -12,7 +12,7 @@ from ...dependencies import require_admin, require_buyer, require_user, is_admin
 from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorCard, VendorContact
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...rate_limit import limiter
-from ...services.credential_service import get_credential_cached
+from ...enrichment_service import ENRICHMENT_KEYS_HINT, enrichment_provider_configured
 
 router = APIRouter()
 
@@ -28,15 +28,10 @@ async def enrich_company(
     db: Session = Depends(get_db),
 ):
     """Enrich a customer company with external data."""
-    if (
-        not get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
-        and not get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-    ):
+    if not enrichment_provider_configured():
         raise HTTPException(
             503,
-            "No enrichment providers configured — set LUSHA_API_KEY, APOLLO_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env",
+            f"No enrichment providers configured — set {ENRICHMENT_KEYS_HINT} in .env",
         )
     from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 
@@ -71,15 +66,10 @@ async def enrich_vendor_card(
     db: Session = Depends(get_db),
 ):
     """Enrich a vendor card with external data."""
-    if (
-        not get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
-        and not get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-    ):
+    if not enrichment_provider_configured():
         raise HTTPException(
             503,
-            "No enrichment providers configured — set LUSHA_API_KEY, APOLLO_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env",
+            f"No enrichment providers configured — set {ENRICHMENT_KEYS_HINT} in .env",
         )
     from ...enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
@@ -115,15 +105,10 @@ async def get_suggested_contacts(
     db: Session = Depends(get_db),
 ):
     """Find suggested contacts at a company from enrichment providers."""
-    if (
-        not get_credential_cached("lusha_enrichment", "LUSHA_API_KEY")
-        and not get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
-        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
-        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-    ):
+    if not enrichment_provider_configured():
         raise HTTPException(
             503,
-            "No enrichment providers configured — set LUSHA_API_KEY, APOLLO_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env",
+            f"No enrichment providers configured — set {ENRICHMENT_KEYS_HINT} in .env",
         )
     from ...enrichment_service import find_suggested_contacts
 

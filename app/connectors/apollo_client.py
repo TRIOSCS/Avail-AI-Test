@@ -76,10 +76,7 @@ async def search_contacts(
             lambda: http.post(
                 f"{APOLLO_BASE}/mixed_people/search",
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Api-Key": api_key,
-                },
+                headers=auth_headers(api_key),
                 timeout=30,
             ),
         )
@@ -187,10 +184,7 @@ async def enrich_person(
             lambda: http.post(
                 f"{APOLLO_BASE}/people/match",
                 json=payload,
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Api-Key": api_key,
-                },
+                headers=auth_headers(api_key),
                 timeout=30,
             ),
         )
@@ -258,7 +252,7 @@ async def enrich_company(domain: str) -> dict | None:
             lambda: http.get(
                 f"{APOLLO_BASE}/organizations/enrich",
                 params={"domain": domain},
-                headers={"X-Api-Key": api_key},
+                headers=auth_headers(api_key, json_body=False),
                 timeout=15,
             ),
         )
@@ -294,6 +288,14 @@ async def enrich_company(domain: str) -> dict | None:
     except Exception as e:
         log.warning("Apollo company enrich error: %s", e)
         return None
+
+
+def auth_headers(api_key: str, *, json_body: bool = True) -> dict:
+    """Apollo auth headers — single source of truth (X-Api-Key)."""
+    h = {"X-Api-Key": api_key}
+    if json_body:
+        h["Content-Type"] = "application/json"
+    return h
 
 
 def _full_name(person: dict) -> str:
