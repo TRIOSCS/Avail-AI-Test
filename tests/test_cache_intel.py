@@ -20,7 +20,6 @@ from app.cache.intel_cache import (
     set_cached,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════
 #  _get_redis — TESTING=1 returns None
 # ═══════════════════════════════════════════════════════════════════════
@@ -350,3 +349,37 @@ class TestInvalidatePgError:
         """PG error during invalidate is caught silently."""
         mock_session_local.side_effect = Exception("DB connection error")
         invalidate("company:test")  # Should not raise
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Per-provider usage counters
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestProviderUsage:
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_incr_no_redis_returns_none(self, _mock):
+        from app.cache.intel_cache import incr_provider_usage
+        assert incr_provider_usage("lusha") is None
+
+    @patch("app.cache.intel_cache._get_redis")
+    def test_incr_sets_expiry_on_first_hit(self, mock_get_redis):
+        from app.cache.intel_cache import incr_provider_usage
+        r = MagicMock()
+        r.incr.return_value = 1
+        mock_get_redis.return_value = r
+        assert incr_provider_usage("apollo") == 1
+        r.expire.assert_called_once()
+
+    @patch("app.cache.intel_cache._get_redis")
+    def test_get_usage_reads_count(self, mock_get_redis):
+        from app.cache.intel_cache import get_provider_usage
+        r = MagicMock()
+        r.get.return_value = "42"
+        mock_get_redis.return_value = r
+        assert get_provider_usage("explorium") == 42
+
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_get_usage_no_redis_returns_zero(self, _mock):
+        from app.cache.intel_cache import get_provider_usage
+        assert get_provider_usage("clay") == 0

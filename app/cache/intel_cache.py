@@ -191,6 +191,40 @@ def flush_enrichment_cache() -> int:
     return count
 
 
+def incr_provider_usage(provider: str, ttl_days: int = 35) -> int | None:
+    """Increment a per-provider monthly call counter (Redis only, best-effort).
+
+    Lets you see roughly how many billable calls each provider has had this
+    month (key ``usage:<provider>:<YYYYMM>``). Returns the new count or None.
+    """
+    r = _get_redis()
+    if not r:
+        return None
+    try:
+        month = datetime.now(timezone.utc).strftime("%Y%m")
+        key = f"{_REDIS_PREFIX}usage:{provider}:{month}"
+        val = r.incr(key)
+        if val == 1:
+            r.expire(key, int(ttl_days * 86400))
+        return val
+    except Exception as e:
+        log.debug("Provider usage incr error for %s: %s", provider, e)
+        return None
+
+
+def get_provider_usage(provider: str) -> int:
+    """Read the current month's call count for a provider (0 if unavailable)."""
+    r = _get_redis()
+    if not r:
+        return 0
+    try:
+        month = datetime.now(timezone.utc).strftime("%Y%m")
+        val = r.get(f"{_REDIS_PREFIX}usage:{provider}:{month}")
+        return int(val) if val else 0
+    except Exception:
+        return 0
+
+
 def cleanup_expired() -> int:
     """Remove expired cache entries in batches. Returns count deleted.
 

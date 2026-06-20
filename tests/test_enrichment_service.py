@@ -28,6 +28,15 @@ from app.enrichment_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _stub_intel_cache():
+    """Keep the intel cache out of unit tests (no real DB/Redis round-trips).
+    Tests that need a cache hit re-patch get_cached inside the test body."""
+    with patch("app.cache.intel_cache.get_cached", return_value=None), \
+         patch("app.cache.intel_cache.set_cached"):
+        yield
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # _clean_domain
 # ═══════════════════════════════════════════════════════════════════════
@@ -1239,6 +1248,48 @@ class TestEnrichEntitySafeProviderExceptions:
                                     enrich_entity("test.com")
                                 )
                                 assert result["domain"] == "test.com"
+
+
+class TestFindSuggestedContactsWaterfall:
+    """Phase B: caching + AI-gating in the contact waterfall."""
+
+    def test_cache_hit_short_circuits(self):
+        from app.enrichment_service import find_suggested_contacts
+        cached = [{"full_name": "Cached Person", "source": "lusha"}]
+        with patch("app.cache.intel_cache.get_cached", return_value=cached):
+            with patch(
+                "app.enrichment_service._lusha_find_contacts", new_callable=AsyncMock
+            ) as lusha:
+                result = asyncio.run(find_suggested_contacts("example.com"))
+                assert result == cached
+                lusha.assert_not_awaited()  # providers never run on a cache hit
+
+    def test_ai_skipped_when_tier1_has_enough(self):
+        from app.enrichment_service import find_suggested_contacts
+        rich = [
+            {"full_name": f"Buyer {i}", "title": "Buyer", "email": f"b{i}@x.com", "source": "lusha"}
+            for i in range(3)
+        ]
+        with patch("app.enrichment_service.get_credential_cached", return_value=None), \
+             patch("app.enrichment_service._lusha_find_contacts",
+                   new_callable=AsyncMock, return_value=rich), \
+             patch("app.enrichment_service._ai_find_contacts",
+                   new_callable=AsyncMock, return_value=[]) as ai:
+            result = asyncio.run(find_suggested_contacts("example.com"))
+            assert len(result) == 3
+            ai.assert_not_awaited()  # tier-1 was rich → don't spend on AI
+
+    def test_ai_called_when_sparse(self):
+        from app.enrichment_service import find_suggested_contacts
+        with patch("app.enrichment_service.get_credential_cached", return_value=None), \
+             patch("app.enrichment_service._lusha_find_contacts",
+                   new_callable=AsyncMock,
+                   return_value=[{"full_name": "Solo", "title": "Buyer",
+                                  "email": "s@x.com", "source": "lusha"}]), \
+             patch("app.enrichment_service._ai_find_contacts",
+                   new_callable=AsyncMock, return_value=[]) as ai:
+            asyncio.run(find_suggested_contacts("example.com"))
+            ai.assert_awaited()  # sparse tier-1 → fall through to AI
 
 
 class TestFindSuggestedContactsProviderExceptions:

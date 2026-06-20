@@ -760,9 +760,10 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     # Layer 2: output normalization
     normalized = normalize_company_output(result)
 
-    # Cache enrichment result for 14 days
-    if any(v for k, v in normalized.items() if k != "domain"):
-        set_cached(cache_key, normalized, ttl_days=14)
+    # Cache 14 days when we found data; negative-cache misses for 1 day so a
+    # domain with no provider coverage doesn't re-bill every lookup.
+    has_data = any(v for k, v in normalized.items() if k not in ("domain", "source"))
+    set_cached(cache_key, normalized, ttl_days=14 if has_data else 1)
 
     return normalized
 
@@ -770,12 +771,20 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
 async def find_suggested_contacts(
     domain: str, name: str = "", title_filter: str = ""
 ) -> list[dict]:
-    """Find suggested contacts at a company from all configured providers.
+    """Find suggested contacts at a company from configured providers.
 
-    All 5 sources run concurrently via asyncio.gather.
-    Returns deduplicated list sorted by relevance. Each contact has:
+    Cheaper/paid providers (Lusha, Explorium, Hunter, RocketReach, Apollo) run
+    concurrently first; the expensive AI web-search lookup only runs if those are
+    sparse. Results are cached 7 days per domain+title to avoid re-billing.
+    Returns a deduplicated, relevance-filtered list. Each contact has:
     full_name, title, email, phone, linkedin_url, location, source
     """
+    from .cache.intel_cache import get_cached, set_cached
+
+    cache_key = f"contacts:{_clean_domain(domain)}:{(title_filter or '').lower().strip()}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
 
     async def _safe_hunter(domain: str) -> list[dict]:
         try:
@@ -851,38 +860,6 @@ async def find_suggested_contacts(
             log.debug("Apollo contacts skipped: %s", e)
             return []
 
-    # Run all 6 sources concurrently
-    results = await asyncio.gather(
-        _lusha_find_contacts(domain, title_filter),
-        _explorium_find_contacts(domain, title_filter),
-        _safe_hunter(domain),
-        _safe_rocketreach(domain),
-        _safe_apollo_contacts(domain),
-        _ai_find_contacts(domain, name, title_filter),
-        return_exceptions=True,
-    )
-
-    all_contacts = []
-    for r in results:
-        if isinstance(r, Exception):
-            log.debug("Contact provider failed: %s", r)
-            continue
-        all_contacts.extend(r)
-
-    # Deduplicate by email or linkedin_url or full_name
-    seen = set()
-    unique = []
-    for c in all_contacts:
-        key = (
-            (c.get("email") or "").lower()
-            or c.get("linkedin_url")
-            or (c.get("full_name") or "").lower()
-        )
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        unique.append(c)
-
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
     _RELEVANT_KEYWORDS = {
         "procurement", "purchasing", "buyer", "sourcing", "supply chain",
@@ -898,9 +875,55 @@ async def find_suggested_contacts(
             return bool(contact.get("email"))  # Keep if has email but no title
         return any(kw in title for kw in _RELEVANT_KEYWORDS)
 
+    def _dedupe(contacts: list[dict]) -> list[dict]:
+        seen: set = set()
+        unique: list[dict] = []
+        for c in contacts:
+            key = (
+                (c.get("email") or "").lower()
+                or c.get("linkedin_url")
+                or (c.get("full_name") or "").lower()
+            )
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            unique.append(c)
+        return unique
+
+    def _collect(results) -> list[dict]:
+        out: list[dict] = []
+        for r in results:
+            if isinstance(r, Exception):
+                log.debug("Contact provider failed: %s", r)
+                continue
+            out.extend(r)
+        return out
+
+    # Tier 1: the paid/cheaper providers run concurrently.
+    tier1 = await asyncio.gather(
+        _lusha_find_contacts(domain, title_filter),
+        _explorium_find_contacts(domain, title_filter),
+        _safe_hunter(domain),
+        _safe_rocketreach(domain),
+        _safe_apollo_contacts(domain),
+        return_exceptions=True,
+    )
+    unique = _dedupe(_collect(tier1))
+
+    # Tier 2: only spend on the AI web-search lookup if results are still sparse.
+    AI_CONTACT_THRESHOLD = 3
+    if sum(1 for c in unique if _is_relevant(c)) < AI_CONTACT_THRESHOLD:
+        ai = await _ai_find_contacts(domain, name, title_filter)
+        if isinstance(ai, list):
+            unique = _dedupe(unique + ai)
+
     filtered = [c for c in unique if _is_relevant(c)]
     # If filter removed everything, return unfiltered (don't lose all results)
-    return filtered if filtered else unique
+    result = filtered if filtered else unique
+
+    if result:
+        set_cached(cache_key, result, ttl_days=7)
+    return result
 
 
 def apply_enrichment_to_company(company, data: dict) -> list[str]:

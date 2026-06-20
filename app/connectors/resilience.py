@@ -147,6 +147,14 @@ def record_provider_result(
     """
     if _testing():
         return
+    # Count every billable success (cheap Redis INCR) before any throttling.
+    if ok:
+        try:
+            from app.cache.intel_cache import incr_provider_usage
+            incr_provider_usage(provider)
+        except Exception:
+            pass
+
     source_name = _SOURCE_NAMES.get(provider)
     if not source_name:
         return
