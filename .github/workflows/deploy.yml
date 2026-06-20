@@ -81,7 +81,9 @@ jobs:
 
             echo "=== Extracting ==="
             cd /root/availai
-            find /root/availai -mindepth 1 -maxdepth 1 ! -name ".env" ! -name "fix_queue" -exec rm -rf {} +
+            # Preserve .env (secrets), fix_queue, and .venv (the host systemd ICS/NC
+            # workers run from /root/availai/.venv — wiping it would take them down).
+            find /root/availai -mindepth 1 -maxdepth 1 ! -name ".env" ! -name "fix_queue" ! -name ".venv" -exec rm -rf {} +
             unzip -o /tmp/release.zip -d /root/availai
 
             echo "=== Rebuilding ==="
@@ -93,6 +95,12 @@ jobs:
               sleep 5
               if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
                 echo "Health check passed after $((i*5))s"
+                # Refresh host systemd workers (ICS/NC) so they pick up new code +
+                # updated unit files. Guarded: a no-op when the workers run on a
+                # different host (the unit/services simply won't exist here).
+                cp deploy/avail-ics-worker.service deploy/avail-nc-worker.service /etc/systemd/system/ 2>/dev/null || true
+                systemctl daemon-reload 2>/dev/null || true
+                systemctl restart avail-ics-worker avail-nc-worker 2>/dev/null || true
                 rm -f /tmp/release.zip
                 # Prune backups older than 7 days
                 find /root/backups -name "avail_*.sql" -mtime +7 -delete 2>/dev/null || true
