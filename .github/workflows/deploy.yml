@@ -24,10 +24,12 @@ jobs:
               --jq ".check_runs[] | select(.name==\"$1\") | (if .status!=\"completed\" then .status else .conclusion end)" \
               2>/dev/null | head -1
           }
+          # NOTE: check-runs are named after the JOB (test, security), not the
+          # workflow ("CI — Tests" / "Security Scanning"). Match the job names.
           for attempt in $(seq 1 40); do
-            T=$(check_state "CI — Tests")
-            S=$(check_state "Security Scanning")
-            echo "attempt $attempt — CI — Tests=${T:-missing}  Security Scanning=${S:-missing}"
+            T=$(check_state "test")
+            S=$(check_state "security")
+            echo "attempt $attempt — test=${T:-missing}  security=${S:-missing}"
             case "$T" in failure|cancelled|timed_out|action_required|stale)
               echo "ERROR: 'CI — Tests' for $SHA = $T — refusing to deploy." >&2; exit 1;; esac
             case "$S" in failure|cancelled|timed_out|action_required|stale)
