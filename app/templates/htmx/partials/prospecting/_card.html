@@ -48,7 +48,7 @@
     <div class="mb-2">
       {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-500">Fit <span class="text-gray-300">(ICP match)</span></span>
+        <span class="text-gray-600">Fit <span class="text-gray-300">(ICP match)</span></span>
         <span class="font-medium {{ score.score_text_color(fit) }}">{{ fit }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
@@ -58,7 +58,7 @@
     <div class="mb-2.5">
       {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-500">Readiness <span class="text-gray-300">(timing)</span></span>
+        <span class="text-gray-600">Readiness <span class="text-gray-300">(timing)</span></span>
         <span class="font-medium {{ score.score_text_color(ready) }}">{{ ready }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
@@ -73,7 +73,7 @@
     <div class="mb-2">
       {% set match = ai_screen.get('trio_match_score', 0) %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-500">AI Match <span class="text-gray-300">(procurement fit)</span></span>
+        <span class="text-gray-600">AI Match <span class="text-gray-300">(procurement fit)</span></span>
         <span class="font-medium {{ score.score_text_color(match) }}">{{ match }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
@@ -96,7 +96,7 @@
     {% endif %}
 
     {# Industry · Region · contacts #}
-    <div class="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-500">
+    <div class="flex items-center flex-wrap gap-x-2 gap-y-0.5 text-xs text-gray-600">
       {% if prospect.industry %}<span class="truncate max-w-[55%]">{{ prospect.industry }}</span>{% endif %}
       {% if prospect.industry and prospect.region %}<span class="text-gray-300">&middot;</span>{% endif %}
       {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
@@ -109,10 +109,10 @@
     {# Discovery source + claimed-by #}
     <div class="mt-2 flex items-center justify-between">
       {% if prospect.discovery_source %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500 rounded-full">{{ prospect.discovery_source }}</span>
+      <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600 rounded-full">{{ prospect.discovery_source }}</span>
       {% else %}<span></span>{% endif %}
       {% if prospect.status == 'claimed' and prospect.claimed_by_user %}
-      <span class="text-xs text-gray-500">Claimed by {{ prospect.claimed_by_user.name|default('—') }}</span>
+      <span class="text-xs text-gray-600">Claimed by {{ prospect.claimed_by_user.name|default('—') }}</span>
       {% endif %}
     </div>
   </a>

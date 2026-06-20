@@ -7,31 +7,31 @@
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-lg font-bold text-gray-900">Quote Preview</h2>
-      <span class="text-sm text-gray-500">{{ quote.quote_number }}</span>
+      <span class="text-sm text-gray-600">{{ quote.quote_number }}</span>
     </div>
 
     {# Quote header info #}
     <div class="bg-gray-50 rounded-lg p-4 mb-4 text-sm">
       <div class="grid grid-cols-2 gap-3">
         <div>
-          <p class="text-xs text-gray-500">Status</p>
+          <p class="text-xs text-gray-600">Status</p>
           <p class="font-medium text-gray-900">{{ quote.status|title }}</p>
         </div>
         {% if quote.payment_terms %}
         <div>
-          <p class="text-xs text-gray-500">Payment Terms</p>
+          <p class="text-xs text-gray-600">Payment Terms</p>
           <p class="text-gray-900">{{ quote.payment_terms }}</p>
         </div>
         {% endif %}
         {% if quote.shipping_terms %}
         <div>
-          <p class="text-xs text-gray-500">Shipping Terms</p>
+          <p class="text-xs text-gray-600">Shipping Terms</p>
           <p class="text-gray-900">{{ quote.shipping_terms }}</p>
         </div>
         {% endif %}
         {% if quote.subtotal %}
         <div>
-          <p class="text-xs text-gray-500">Subtotal</p>
+          <p class="text-xs text-gray-600">Subtotal</p>
           <p class="font-medium text-gray-900">${{ "%.2f"|format(quote.subtotal) }}</p>
         </div>
         {% endif %}
@@ -55,8 +55,8 @@
         {% for line in quote.quote_lines %}
         <tr>
           <td class="px-3 py-2 text-sm font-mono text-gray-900">{{ line.mpn or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-gray-500">{{ line|part_description or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-gray-500">{{ line.manufacturer or '—' }}</td>
+          <td class="px-3 py-2 text-sm text-gray-600">{{ line|part_description or '—' }}</td>
+          <td class="px-3 py-2 text-sm text-gray-600">{{ line.manufacturer or '—' }}</td>
           <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "{:,}".format(line.qty) if line.qty else '—' }}</td>
           <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "$%.4f"|format(line.sell_price) if line.sell_price else '—' }}</td>
           <td class="px-3 py-2 text-sm text-right font-medium text-gray-900">

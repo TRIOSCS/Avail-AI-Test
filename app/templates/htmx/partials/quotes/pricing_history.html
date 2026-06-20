@@ -23,8 +23,8 @@
       <tr class="hover:bg-brand-50">
         <td class="px-3 py-2 text-sm text-gray-900">{{ o.vendor_name or '—' }}</td>
         <td class="px-3 py-2 text-sm text-right font-medium text-emerald-700">${{ "%.4f"|format(o.unit_price) }}</td>
-        <td class="px-3 py-2 text-sm text-right text-gray-500">{{ "{:,}".format(o.qty_available) if o.qty_available else '—' }}</td>
-        <td class="px-3 py-2 text-sm text-gray-500">{{ o.created_at.strftime('%b %d, %Y') if o.created_at else '—' }}</td>
+        <td class="px-3 py-2 text-sm text-right text-gray-600">{{ "{:,}".format(o.qty_available) if o.qty_available else '—' }}</td>
+        <td class="px-3 py-2 text-sm text-gray-600">{{ o.created_at.strftime('%b %d, %Y') if o.created_at else '—' }}</td>
       </tr>
       {% endfor %}
     </tbody>

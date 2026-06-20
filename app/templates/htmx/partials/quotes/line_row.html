@@ -52,7 +52,7 @@
     </template>
   </td>
   {% set desc = line|part_description %}
-  <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 truncate max-w-[200px]" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600" x-show="!editing" x-cloak>{{ line.manufacturer or '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>{{ '{:,}'.format(line.qty) if line.qty else '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>${{ '{:,.4f}'.format(line.cost_price|float) if line.cost_price else '-' }}</td>
