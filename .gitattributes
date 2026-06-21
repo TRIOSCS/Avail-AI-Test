@@ -1,2 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must always use LF — they run on the Linux droplet, where CRLF
+# would break the shebang and string comparisons.
+*.sh text eol=lf
