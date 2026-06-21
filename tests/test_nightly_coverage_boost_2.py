@@ -1,15 +1,4 @@
-"""test_nightly_coverage_boost_2.py — Coverage gap-filling for nightly CI.
-
-Targets modules below 85%:
-  app/company_utils.py               (suggest_clean_company_name, pg dedup path)
-  app/connectors/hunter.py           (email_finder errors, verify method)
-  app/management/backfill_buyplan_cph.py   (__main__ block)
-  app/management/backfill_quote_source.py  (__main__ block)
-  app/services/clay_service.py       (uncovered helpers, edge callbacks)
-  app/services/datasheet_library.py  (no-token, network-error fetch/upload paths)
-  app/services/prospect_screening.py (rich _assemble_context, _call_screen_llm body)
-  app/services/prospect_reclamation.py (outer jobs, error branches, edge cases)
-"""
+"""test_nightly_coverage_boost_2.py — Coverage gap-filling for nightly CI."""
 
 import asyncio
 import os
@@ -784,8 +773,8 @@ class TestScreenProspectEdgeCases:
 
     @pytest.mark.asyncio
     async def test_insufficient_data_from_llm_sets_needs_enrichment(self, db_session, monkeypatch):
-        """LLM returns insufficient_data when web_search mode is enabled (skips grounding
-        check)."""
+        """LLM returns insufficient_data when web_search mode is enabled (skips
+        grounding check)."""
         from app.config import settings
         from app.services import prospect_screening as ps
 
@@ -865,7 +854,8 @@ class TestJobAccountSweepOuter:
 class TestSweepEdgeCases:
     @pytest.mark.asyncio
     async def test_sweep_already_swept_is_skipped(self, db_session, test_user):
-        """Company with an existing swept ProspectAccount is skipped (idempotency path)."""
+        """Company with an existing swept ProspectAccount is skipped (idempotency
+        path)."""
         from app.models.prospect_account import ProspectAccount
         from app.services.prospect_reclamation import job_account_sweep_with_db
 
@@ -892,7 +882,8 @@ class TestSweepEdgeCases:
 
     @pytest.mark.asyncio
     async def test_sweep_owner_not_found_skips_gracefully(self, db_session, test_user):
-        """Company owner_id resolves to None (user deleted) — sweep logs warning and skips."""
+        """Company owner_id resolves to None (user deleted) — sweep logs warning and
+        skips."""
         from app.models.auth import User
         from app.models.prospect_account import ProspectAccount
         from app.services.prospect_reclamation import job_account_sweep_with_db
