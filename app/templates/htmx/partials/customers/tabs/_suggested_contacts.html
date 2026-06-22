@@ -40,6 +40,21 @@
 
 {# ── Contact list with per-row Add forms ────────────────────────────────── #}
 {% else %}
+{# ── Partial-failure notice (some providers errored but results present) ─── #}
+{% if errored_providers %}
+<div x-data='{"shown": true}' x-show='shown' x-cloak
+     class='mb-2 rounded-md bg-amber-50 border border-amber-200 px-3 py-2 flex items-start justify-between gap-2'>
+  <p class='text-xs text-amber-800'>
+    Results may be incomplete — couldn't reach
+    {% for p in errored_providers %}{{ p }}{% if not loop.last %}, {% endif %}{% endfor %}.
+  </p>
+  <button @click='shown = false' type='button' class='text-amber-500 hover:text-amber-700 flex-shrink-0'>
+    <svg class='h-3.5 w-3.5' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2'>
+      <path stroke-linecap='round' stroke-linejoin='round' d='M6 18L18 6M6 6l12 12'/>
+    </svg>
+  </button>
+</div>
+{% endif %}
 <ul class='divide-y divide-gray-100 rounded-md border border-gray-200 overflow-hidden'>
   {% for c in suggested %}
   <li class='px-4 py-3 bg-white hover:bg-gray-50 transition-colors'>
@@ -54,8 +69,13 @@
         <p class='text-xs text-brand-600 truncate'>{{ c.email | e }}</p>
         {% endif %}
         {% if c.source %}
-        <span class='inline-block mt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400'>
-          via {{ c.source | e }}{% if c.verified %} ✓{% endif %}
+        <span class='inline-flex items-center gap-1 mt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400'>
+          via {{ (c.provider or c.source or 'auto-found') | e }}
+          {% if c.verified %}
+          <svg class='h-3 w-3 text-emerald-500' fill='none' viewBox='0 0 24 24' stroke='currentColor' stroke-width='2.5'>
+            <path stroke-linecap='round' stroke-linejoin='round' d='M5 13l4 4L19 7'/>
+          </svg>
+          {% endif %}
         </span>
         {% endif %}
       </div>

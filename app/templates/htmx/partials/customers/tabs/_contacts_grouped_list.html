@@ -33,7 +33,7 @@
 {# ── Render ────────────────────────────────────────────────────────────────── #}
 {% if not contact_rows %}
 {% with
-   message='No contacts yet. Add your first contact to get started.',
+   message='No contacts on file for this company.',
    action_alpine_click='$dispatch(\'open-modal\', {url: \'/v2/partials/customers/' ~ company.id ~ '/contacts/add-form\'})',
    action_label='+ Add Contact'
 %}

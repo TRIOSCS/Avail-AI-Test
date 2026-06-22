@@ -382,7 +382,7 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
             if legacy_email and legacy_email in real_emails:
                 # A real SiteContact already covers this address — suppress the legacy row.
                 continue
-            rows.append({"contact": None, "site": s, "legacy": True})
+            rows.append({"contact": None, "site": s, "legacy": True, "cadence": "new"})
     return rows
 
 

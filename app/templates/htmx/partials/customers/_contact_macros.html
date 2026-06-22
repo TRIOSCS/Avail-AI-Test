@@ -162,7 +162,7 @@
           <div x-show='open' x-cloak
                class='absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left'>
             {# Edit — dispatches open-modal, form targets #contacts-tab-list #}
-            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}/edit-form'}); open = false"
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/edit-form'}); open = false"
                     class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Edit</button>
             {# Set Primary — only shown when not already primary #}
             {% if not contact.is_primary %}

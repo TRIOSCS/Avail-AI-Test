@@ -16,6 +16,41 @@ from app.models.crm import Company
 from tests.conftest import engine  # noqa: F401
 
 
+@pytest.fixture()
+def test_site(db_session: Session, test_company: Company):
+    """A CustomerSite (HQ) belonging to test_company."""
+    from app.models.crm import CustomerSite
+
+    site = CustomerSite(
+        company_id=test_company.id,
+        site_name="HQ",
+        site_type="hq",
+        is_active=True,
+    )
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+    return site
+
+
+@pytest.fixture()
+def test_contact(db_session: Session, test_site):
+    """A SiteContact belonging to test_site."""
+    from app.models.crm import SiteContact
+
+    contact = SiteContact(
+        customer_site_id=test_site.id,
+        full_name="Test Contact",
+        email="testcontact@acme.com",
+        contact_role="buyer",
+        is_primary=True,
+    )
+    db_session.add(contact)
+    db_session.commit()
+    db_session.refresh(contact)
+    return contact
+
+
 class TestCRMShell:
     """Test CRM shell partial route."""
 
@@ -3393,6 +3428,116 @@ class TestContactsTabHome:
         db_session.expire_all()
         updated = db_session.get(SiteContact, contact.id)
         assert updated.is_priority is True
+
+    # ── Company-scoped edit-form route ───────────────────────────────────
+
+    def test_contact_edit_form_company_scoped_returns_form(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """GET /v2/partials/customers/{id}/contacts/{cid}/edit-form returns
+        _contact_form with correct target and values."""
+        resp = client.get(f"/v2/partials/customers/{test_company.id}/contacts/{test_contact.id}/edit-form")
+        assert resp.status_code == 200
+        html = resp.text
+        # Form must target #contacts-tab-list (not any site-specific id)
+        assert "contacts-tab-list" in html
+        # Contact's name must appear
+        assert test_contact.full_name in html
+        # Role options must be present
+        assert "buyer_po" in html
+
+    def test_contacts_tab_create_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+    ):
+        """POST to create contact returns grouped list HTML with role options."""
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts",
+            data={"full_name": "Role Test", "site_id": str(test_site.id)},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_delete_contact_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """DELETE contact with HX-Target=contacts-tab-list returns grouped list with
+        role options.
+
+        A second contact is added so the list is non-empty after deletion.
+        """
+        from app.models.crm import SiteContact
+
+        # Add a second contact so the grouped list is non-empty after the first is deleted
+        second = SiteContact(
+            customer_site_id=test_site.id,
+            full_name="Second Contact",
+            email="second@acme.com",
+            contact_role="buyer_po",
+        )
+        db_session.add(second)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_set_primary_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """POST set-primary with HX-Target=contacts-tab-list returns grouped list with
+        role options."""
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
+
+    def test_edit_contact_response_contains_roles(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_user: User,
+        test_company: Company,
+        test_site,
+        test_contact,
+    ):
+        """POST edit contact with HX-Target=contacts-tab-list returns grouped list with
+        role options."""
+        resp = client.post(
+            f"/v2/partials/customers/{test_company.id}/sites/{test_site.id}/contacts/{test_contact.id}/edit",
+            data={"full_name": test_contact.full_name, "contact_role": "buyer_po"},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "buyer_po" in resp.text
 
 
 class TestC3KebabActionsAndCadence:

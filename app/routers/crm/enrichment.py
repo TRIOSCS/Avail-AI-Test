@@ -184,6 +184,10 @@ async def add_suggested_to_site(
     deduplicates per-site by case-insensitive email (or by case-insensitive
     full_name when email is absent), and creates a SiteContact with
     enrichment_source tagged for provenance.
+
+    WARNING: this is a JSON-only endpoint. Do NOT call it from HTMX with
+    hx-target/hx-swap — the Contacts-tab flow uses the HTML endpoint at
+    /v2/partials/customers/{company_id}/suggested-contacts/add instead.
     """
     site = db.get(CustomerSite, payload.site_id)
     if not site:
@@ -200,7 +204,7 @@ async def add_suggested_to_site(
             .first()
         )
         if existing:
-            logger.debug(
+            logger.info(
                 "add_suggested_to_site: dedup by email for site_id={} email={}",
                 payload.site_id,
                 c.email,
@@ -220,7 +224,7 @@ async def add_suggested_to_site(
                 .first()
             )
             if existing_name:
-                logger.debug(
+                logger.info(
                     "add_suggested_to_site: dedup by name for site_id={} name={}",
                     payload.site_id,
                     c.full_name,

@@ -282,7 +282,19 @@ document.body.addEventListener('click', (evt) => {
 
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
-    showToast('Request failed. Please try again.', 'error');
+    const status = evt.detail.xhr && evt.detail.xhr.status;
+    if (status >= 400 && status < 500) {
+        let msg = 'Request failed. Please try again.';
+        try {
+            const body = JSON.parse(evt.detail.xhr.responseText);
+            if (body && typeof body.detail === 'string' && body.detail) {
+                msg = body.detail;
+            }
+        } catch (_) { /* not JSON — use fallback */ }
+        showToast(msg, 'error');
+    } else {
+        showToast('Request failed. Please try again.', 'error');
+    }
 });
 
 // ── Server-driven toast bridge ───────────────────────────────

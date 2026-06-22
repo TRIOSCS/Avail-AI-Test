@@ -6050,6 +6050,7 @@ async def contacts_tab_create(
             "company": company,
             "contact_rows": _company_contact_rows(db, company_id),
             "now_utc": datetime.now(_tz.utc),
+            "roles": CANONICAL_ROLES,
         }
     )
     return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
@@ -6232,6 +6233,7 @@ async def contacts_tab_add_suggested(
             "company": company,
             "contact_rows": _company_contact_rows(db, company_id),
             "now_utc": datetime.now(_tz.utc),
+            "roles": CANONICAL_ROLES,
         }
     )
     response = template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
@@ -6479,6 +6481,7 @@ async def delete_site_contact(
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id),
                 "now_utc": datetime.now(_tz.utc),
+                "roles": CANONICAL_ROLES,
             }
         )
         return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
@@ -6534,6 +6537,7 @@ async def set_primary_contact(
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id),
                 "now_utc": datetime.now(_tz.utc),
+                "roles": CANONICAL_ROLES,
             }
         )
         return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
@@ -6826,6 +6830,56 @@ async def contact_edit_form(
     )
 
 
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form",
+    response_class=HTMLResponse,
+)
+async def contact_edit_form_company_scoped(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the shared _contact_form.html in edit mode for the Contacts tab.
+
+    This company-scoped route (no site_id in path) is called from the Contacts-tab
+    kebab Edit button. Unlike the site-scoped GET
+    /sites/{site_id}/contacts/{contact_id}/edit-form which returns
+    contact_edit_modal.html, this returns _contact_form.html in 'edit' mode so the
+    form posts to /contacts/{contact_id}/edit and targets #contacts-tab-list — the
+    correct swap target for the Contacts tab.
+
+    WARNING: Do NOT call this endpoint via HTMX hx-get with hx-target pointing at
+    a Sites-tab element. Use the site-scoped route for the Sites-tab path.
+    """
+    # Validate the contact belongs to a site that belongs to this company
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    site = db.get(CustomerSite, contact.customer_site_id)
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    return template_response(
+        "htmx/partials/customers/tabs/_contact_form.html",
+        {
+            "request": request,
+            "mode": "edit",
+            "company": company,
+            "contact": contact,
+            "site": site,
+            "sites": [],
+            "roles": CANONICAL_ROLES,
+        },
+    )
+
+
 @router.post(
     "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit",
     response_class=HTMLResponse,
@@ -6893,6 +6947,7 @@ async def edit_site_contact(
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id),
                 "now_utc": datetime.now(_tz.utc),
+                "roles": CANONICAL_ROLES,
             }
         )
         return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
