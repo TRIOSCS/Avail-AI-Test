@@ -29,6 +29,19 @@
      Genuinely-circular pills keep rounded-full as a deliberate shape.
      ══════════════════════════════════════════════════════════════════ */
 
+  /* ── Page-width policy ────────────────────────────────────────────────
+     Single knob for how pages use horizontal space. Applied on a page
+     shell's OUTERMOST wrapper (replaces ad-hoc `max-w-*xl mx-auto`).
+     `.page-fluid`    — dense data pages (tables, lists, dashboards, hubs)
+                        fill the viewport; the shell's responsive side
+                        padding (see .main-content) keeps content off the edge.
+     `.page-readable` — reading/form pages keep a comfortable measure
+                        (72rem ≈ 1152px), centered, for line-length comfort.
+     Short forms, document previews, and split-panel panes keep their own
+     deliberately-narrow caps and are intentionally NOT re-classed. ─────── */
+  .page-fluid    { @apply w-full; }
+  .page-readable { @apply mx-auto w-full max-w-6xl; }
+
   /* ── Buttons — .btn base (default md size) + color variants + size
      overrides. Compose as `btn-primary` (full md button) or add a size
      modifier `btn-primary btn-sm`. Sizes are defined AFTER the variants so
