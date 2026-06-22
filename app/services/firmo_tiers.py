@@ -63,7 +63,13 @@ def firmo_tier(field: str, source: str) -> int:
 
 
 def contact_tier(field: str, source: str) -> int:
-    return CONTACT_FIELD_TIER.get(field, {}).get(source, CONTACT_BASE_TIER.get(source, 0))
+    t = CONTACT_FIELD_TIER.get(field, {}).get(source)
+    if t is None:
+        t = CONTACT_BASE_TIER.get(source, 0)
+    if t == 0 and source not in _warned:
+        _warned.add(source)
+        logger.warning("contact_tier: unknown source {!r} → tier 0 (loses every conflict)", source)
+    return t
 
 
 _CONTACT_FIELDS = ("full_name", "email", "phone", "title", "linkedin_url", "location", "company")
@@ -104,6 +110,7 @@ def blend_contacts(results: list[dict]) -> list[dict]:
     verified email/phone gets a confidence bump so it beats an unverified peer)."""
     merged: dict[str, dict] = {}
     field_prov: dict[str, dict] = {}
+    contact_sources: dict[str, list[str]] = {}
     for c in results:
         if not c:
             continue
@@ -113,8 +120,12 @@ def blend_contacts(results: list[dict]) -> list[dict]:
         src = c.get("source") or "unknown"
         verified = bool(c.get("verified"))
         if key not in merged:
-            merged[key] = {"source": src, "verified": verified}
+            merged[key] = {"verified": verified}
             field_prov[key] = {}
+            contact_sources[key] = [src]
+        else:
+            if src not in contact_sources[key]:
+                contact_sources[key].append(src)
         row, fp = merged[key], field_prov[key]
         row["verified"] = row.get("verified") or verified
         for field in _CONTACT_FIELDS:
@@ -127,4 +138,6 @@ def blend_contacts(results: list[dict]) -> list[dict]:
             if cur is None or (tier, conf) > cur:
                 row[field] = value
                 fp[field] = (tier, conf)
+    for key, row in merged.items():
+        row["source"] = "+".join(contact_sources[key])
     return list(merged.values())

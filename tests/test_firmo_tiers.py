@@ -40,3 +40,17 @@ def test_blend_contacts_dedups_and_prefers_verified_email():
     assert out[0]["verified"] is True
     assert out[0]["phone"] == "+1"
     assert out[0]["title"] == "Buyer"
+
+
+def test_contact_tier_unknown_source_is_zero():
+    assert ft.contact_tier("email", "zoominfo") == 0
+
+
+def test_blend_contacts_composites_all_sources():
+    results = [
+        {"source": "apollo", "full_name": "Jane Doe", "email": "j@x.com", "title": "VP"},
+        {"source": "lusha", "full_name": "Jane Doe", "email": "j@x.com", "phone": "+1"},
+    ]
+    out = ft.blend_contacts(results)
+    assert len(out) == 1
+    assert set(out[0]["source"].split("+")) == {"apollo", "lusha"}
