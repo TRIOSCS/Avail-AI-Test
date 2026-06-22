@@ -43,7 +43,7 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
-from ..models.intelligence import ActivityLog, MaterialCard
+from ..models.intelligence import ActivityLog, MaterialCard, MaterialCardDatasheet
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
@@ -52,6 +52,7 @@ from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
 from ..services.offer_qualification import prefill_from_vendor
 from ..services.part_offers import part_offers_for
+from ..services.rfq_attachments import trim_datasheet_names_to_cap
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
@@ -1770,16 +1771,14 @@ async def sightings_vendor_modal(
     # Collapsed in the template when >3. No bytes fetched here; send-time only.
     available_datasheets: list[dict] = []
     if requirements:
-        from ..models.intelligence import MaterialCardDatasheet as _MCD
-
         mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
         if mc_ids:
             ds_rows = (
-                db.query(_MCD)
+                db.query(MaterialCardDatasheet)
                 .filter(
-                    _MCD.material_card_id.in_(mc_ids),
-                    _MCD.library_item_id.isnot(None),
-                    _MCD.library_drive_id.isnot(None),
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
+                    MaterialCardDatasheet.library_item_id.isnot(None),
+                    MaterialCardDatasheet.library_drive_id.isnot(None),
                 )
                 .all()
             )
@@ -2185,16 +2184,13 @@ async def sightings_preview_inquiry(
     selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
     preview_attachments: list[dict] = []
     if selected_ds_ids:
-        from ..models.intelligence import MaterialCardDatasheet as _PMCD
-        from ..services.rfq_attachments import trim_datasheet_names_to_cap
-
         mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
         if mc_ids:
             ds_rows = (
-                db.query(_PMCD)
+                db.query(MaterialCardDatasheet)
                 .filter(
-                    _PMCD.id.in_(selected_ds_ids),
-                    _PMCD.material_card_id.in_(mc_ids),
+                    MaterialCardDatasheet.id.in_(selected_ds_ids),
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
                 )
                 .all()
             )

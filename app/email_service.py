@@ -10,6 +10,7 @@ if TYPE_CHECKING:
     from .services.rfq_attachments import RfqAttachment
 
 from loguru import logger
+from sqlalchemy import func as sqla_func
 from sqlalchemy.orm import Session
 
 from .constants import ActivityType, PendingBatchStatus, VendorResponseStatus
@@ -21,6 +22,7 @@ from .models import (
     ProcessedMessage,
     Requirement,
     Requisition,
+    SiteContact,
     VendorCard,
     VendorResponse,
 )
@@ -188,10 +190,6 @@ async def send_batch_rfq(
         # SiteContact. Case-insensitive comparison (func.lower on both sides)
         # matches the advisory check in _dnc_emails_for_cards so advisory ⊆
         # send-time. Compliance: the address must never appear in sendMail.
-        from sqlalchemy import func as sqla_func
-
-        from .models.crm import SiteContact
-
         dnc_match = (
             db.query(SiteContact)
             .filter(
