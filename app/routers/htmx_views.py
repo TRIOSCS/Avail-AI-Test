@@ -4989,6 +4989,20 @@ CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "ot
 _VALID_ROLES = frozenset(CANONICAL_ROLES)
 
 
+def _validate_role(role_raw: str) -> str | None:
+    """Validate a contact_role value: blank → None, unknown → raises HTTPException 400.
+
+    Used by set_contact_role chip endpoint AND edit_site_contact form endpoint so
+    both paths share one source of truth for canonical-role enforcement.
+    """
+    cleaned = (role_raw or "").strip()
+    if not cleaned:
+        return None
+    if cleaned not in _VALID_ROLES:
+        raise HTTPException(400, f"Invalid contact_role '{cleaned}'. Valid: {sorted(_VALID_ROLES)}")
+    return cleaned
+
+
 @router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
 async def set_company_tier(
     request: Request,
@@ -5060,12 +5074,7 @@ async def set_contact_role(
         raise HTTPException(404, "Company not found")
 
     form = await request.form()
-    role_raw = (form.get("contact_role") or "").strip()
-
-    if role_raw and role_raw not in _VALID_ROLES:
-        raise HTTPException(400, f"Invalid contact_role '{role_raw}'. Valid: {sorted(_VALID_ROLES)}")
-
-    contact.contact_role = role_raw or None
+    contact.contact_role = _validate_role(form.get("contact_role") or "")
     db.commit()
     db.refresh(contact)
 
@@ -5704,12 +5713,20 @@ async def company_tab(
     elif tab == "contacts":
         from datetime import timezone as _tz
 
+        active_sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.site_name)
+            .all()
+        )
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id),
                 "now_utc": datetime.now(_tz.utc),
+                "active_sites": active_sites,
+                "roles": CANONICAL_ROLES,
             }
         )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
@@ -5855,6 +5872,191 @@ async def company_tab(
             }
         )
         return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)
+
+
+# ── Contacts-tab management (C2) ───────────────────────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/add-form",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_add_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the shared _contact_form.html in add mode for the Contacts tab modal."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+    return template_response(
+        "htmx/partials/customers/tabs/_contact_form.html",
+        {
+            "request": request,
+            "mode": "add",
+            "company": company,
+            "contact": None,
+            "site": None,
+            "sites": active_sites,
+            "roles": CANONICAL_ROLES,
+        },
+    )
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_create(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a contact from the Contacts tab modal and return the grouped list.
+
+    Site resolution order:
+      1. site_id == '__new__' + new_site_name → create site first (savepoint so a
+         contact failure rolls it back)
+      2. site_id valid int → use that site
+      3. site_id blank/missing → auto-create an 'HQ' site for zero-site companies;
+         for companies with sites default to the first active HQ-typed site.
+
+    After resolving the site, creates SiteContact with email dedup per-site.
+    Returns the grouped list HTML for swap into #contacts-tab-list.
+    """
+    from datetime import timezone as _tz
+
+    from sqlalchemy import func as sqlfunc2
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    full_name = (form.get("full_name") or "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    email_val = (form.get("email") or "").strip().lower() or None
+    if email_val and "@" not in email_val:
+        raise HTTPException(400, "Invalid email address")
+
+    site_id_raw = (form.get("site_id") or "").strip()
+    new_site_name = (form.get("new_site_name") or "").strip()
+
+    # ── Resolve or pre-validate the site (no writes yet) ───────────────
+    # For existing sites, resolve + validate before any writes so dedup
+    # can return cleanly without needing a rollback.
+    existing_site: CustomerSite | None = None  # already-persisted site
+
+    if site_id_raw == "__new__":
+        if not new_site_name:
+            raise HTTPException(400, "new_site_name is required when site_id=__new__")
+        # Site will be created in the commit below
+    elif site_id_raw:
+        try:
+            sid = int(site_id_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid site_id")
+        existing_site = (
+            db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
+        )
+        if not existing_site:
+            raise HTTPException(404, "Site not found")
+    else:
+        # No site_id provided — resolve default or mark for auto-create
+        current_sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+            .order_by(CustomerSite.site_name)
+            .all()
+        )
+        if current_sites:
+            hq_site = next((s for s in current_sites if (s.site_type or "") == "hq"), None)
+            existing_site = hq_site or current_sites[0]
+        # else: zero-site → will auto-create below
+
+    # ── Per-site email dedup (only possible for existing sites) ─────────
+    # For __new__ + zero-site cases the target site has no ID yet, so no dedup needed.
+    if email_val and existing_site:
+        dup = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == existing_site.id,
+                sqlfunc2.lower(SiteContact.email) == email_val,
+            )
+            .first()
+        )
+        if dup:
+            # Dedup: return current list without creating anything (no commit/rollback needed)
+            ctx = _base_ctx(request, user, "customers")
+            ctx.update(
+                {
+                    "company": company,
+                    "contact_rows": _company_contact_rows(db, company_id),
+                    "now_utc": datetime.now(_tz.utc),
+                }
+            )
+            return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+
+    # ── Create site if needed (inside one transaction with the contact) ──
+    if existing_site:
+        site = existing_site
+    elif site_id_raw == "__new__":
+        site = CustomerSite(company_id=company_id, site_name=new_site_name, is_active=True)
+        db.add(site)
+        db.flush()  # get site.id before creating contact
+    else:
+        # Zero-site auto-create HQ
+        site = CustomerSite(company_id=company_id, site_name="HQ", site_type="hq", is_active=True)
+        db.add(site)
+        db.flush()
+
+    # ── Validate role ───────────────────────────────────────────────────
+    role = _validate_role(form.get("contact_role") or "")
+    is_priority = bool((form.get("is_priority") or "").strip())
+
+    # ── Create contact ──────────────────────────────────────────────────
+    contact = SiteContact(
+        customer_site_id=site.id,
+        full_name=full_name,
+        email=email_val,
+        title=(form.get("title") or "").strip() or None,
+        phone=(form.get("phone") or "").strip() or None,
+        wechat_id=(form.get("wechat_id") or "").strip() or None,
+        notes=(form.get("notes") or "").strip() or None,
+        linkedin_url=(form.get("linkedin_url") or "").strip() or None,
+        contact_role=role,
+        is_priority=is_priority,
+    )
+    db.add(contact)
+    db.commit()
+    logger.info(
+        "Contact created for company {} site {} by {}",
+        company_id,
+        site.id,
+        user.email,
+    )
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "contact_rows": _company_contact_rows(db, company_id),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
 
 
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
@@ -6411,8 +6613,13 @@ async def edit_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update editable contact fields (never contact_role) and return refreshed contacts
-    panel."""
+    """Update editable contact fields and return refreshed contacts panel.
+
+    Writes contact_role (validated via _validate_role; blank→NULL, unknown→400),
+    is_priority, and linkedin_url.  Branches render target on HX-Target header:
+      - 'contacts-tab-list' → _contacts_grouped_list.html (Contacts tab)
+      - anything else → site_contacts.html (Sites tab path unchanged)
+    """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -6431,30 +6638,47 @@ async def edit_site_contact(
     if email_val and "@" not in email_val:
         raise HTTPException(400, "Invalid email address")
 
+    # Write all editable fields with explicit clear semantics (no OR-fallback)
     contact.full_name = full_name
-    contact.title = form.get("title", "").strip() or contact.title
-    contact.email = email_val or contact.email
-    phone_val = form.get("phone", "").strip()
-    if phone_val:
-        contact.phone = phone_val
-    wechat_val = form.get("wechat_id", "").strip()
-    if wechat_val:
-        contact.wechat_id = wechat_val
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        contact.notes = notes_val
-    # contact_role is intentionally NOT updated here — owned by the P2b role setter
+    contact.title = form.get("title", "").strip() or None
+    contact.email = email_val or None
+    contact.phone = form.get("phone", "").strip() or None
+    contact.wechat_id = form.get("wechat_id", "").strip() or None
+    contact.notes = form.get("notes", "").strip() or None
+    # contact_role — now writable; validated via shared helper (blank→NULL, unknown→400)
+    contact.contact_role = _validate_role(form.get("contact_role") or "")
+    # is_priority — checkbox: present+non-empty = True, absent = False
+    contact.is_priority = bool(form.get("is_priority", "").strip())
+    # linkedin_url — plain string, no validation beyond length
+    contact.linkedin_url = form.get("linkedin_url", "").strip() or None
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
+    company = db.query(Company).filter(Company.id == company_id).first()
+    hx_target = request.headers.get("HX-Target", "")
+
+    if hx_target == "contacts-tab-list":
+        # Contacts-tab path: re-render the grouped list
+        from datetime import timezone as _tz
+
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "company": company,
+                "contact_rows": _company_contact_rows(db, company_id),
+                "now_utc": datetime.now(_tz.utc),
+            }
+        )
+        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+
+    # Sites-tab path (default): re-render the per-site contacts list
     contacts = (
         db.query(SiteContact)
         .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
         .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
         .all()
     )
-    company = db.query(Company).filter(Company.id == company_id).first()
     ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts

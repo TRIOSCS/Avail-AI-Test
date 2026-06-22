@@ -2491,10 +2491,11 @@ class TestEditContact:
         assert updated.phone == "+16175550099"
         assert updated.notes == "updated note"
 
-    def test_post_contact_edit_does_not_touch_contact_role(
+    def test_post_contact_edit_sets_contact_role_canonical(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST contact edit never modifies contact_role (owned by P2b role setter)."""
+        """POST contact edit with a canonical role persists it (role now writable via
+        edit form)."""
         from app.models.crm import SiteContact
 
         company, site, contact = self._make_company_with_contact(db_session)
@@ -2502,19 +2503,31 @@ class TestEditContact:
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={
                 "full_name": "Alice Smith",
-                "contact_role": "decision_maker",  # attacker tries to override role
+                "contact_role": "buyer_po",  # canonical value — should persist
                 "title": "Buyer",
                 "email": "alice@editco.com",
                 "phone": "+16175550001",
-                "wechat_id": "alice_wc",
-                "notes": "original note",
             },
         )
         assert resp.status_code == 200
         db_session.expire_all()
         updated = db_session.query(SiteContact).filter(SiteContact.id == contact.id).first()
         assert updated is not None
-        assert updated.contact_role == "buyer"  # unchanged
+        assert updated.contact_role == "buyer_po"
+
+    def test_post_contact_edit_legacy_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST contact edit with legacy role 'decision_maker' returns 400."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Smith",
+                "contact_role": "decision_maker",  # legacy — must reject
+                "title": "Buyer",
+                "email": "alice@editco.com",
+            },
+        )
+        assert resp.status_code == 400
 
     def test_post_contact_edit_re_renders_contacts_panel(
         self, client: TestClient, db_session: Session, test_user: User
@@ -3013,3 +3026,349 @@ class TestCRMMacroDedup:
         assert "h-8 w-8" in html
         # 'sent' badge is brand (unified) — no amber drift on either row.
         assert "bg-amber-50 text-amber-700" not in html
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TestContactsTabHome — C2: Contacts tab as management home (add/edit/role)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestContactsTabHome:
+    """C2 TDD: Unified add/edit form + editable role + tab wrapper.
+
+    Written FIRST (failing) per TDD — implement endpoints + templates to pass.
+
+    Routes tested:
+      GET  /v2/partials/customers/{company_id}/contacts/add-form
+      POST /v2/partials/customers/{company_id}/contacts
+      POST /v2/partials/customers/{company_id}/sites/{sid}/contacts/{cid}/edit
+           (with HX-Target branch)
+    """
+
+    def _make_company_with_hq(self, db_session: Session, name: str = "Tab Home Co"):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name=name, is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alice Prime",
+            email="alice@tabco.com",
+            contact_role="buyer",
+            is_primary=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def _make_zero_site_company(self, db_session: Session):
+        company = Company(name="Zero Site Corp", is_active=True)
+        db_session.add(company)
+        db_session.commit()
+        return company
+
+    # ── GET add-form ─────────────────────────────────────────────────────
+
+    def test_get_add_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form renders 200 with site select and role select."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+
+    def test_get_add_form_contains_site_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a site_id select with the company's sites."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        # Template uses single-quote HTML attrs — check for either quoting style
+        assert "site_id" in resp.text
+        assert "HQ" in resp.text
+
+    def test_get_add_form_contains_role_select(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a contact_role select with canonical roles."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        assert "contact_role" in resp.text
+        assert "buyer_po" in resp.text
+        assert "specifier" in resp.text
+
+    def test_get_add_form_new_site_option_present(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form includes a '+ new site' option in the site select."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/add-form")
+        assert resp.status_code == 200
+        assert "__new__" in resp.text
+
+    def test_get_add_form_404_unknown_company(self, client: TestClient, db_session: Session, test_user: User):
+        """GET add-form for unknown company returns 404."""
+        resp = client.get("/v2/partials/customers/99999/contacts/add-form")
+        assert resp.status_code == 404
+
+    # ── contacts-tab header + wrapper ────────────────────────────────────
+
+    def test_contacts_tab_has_wrapper_div(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab HTML contains the #contacts-tab-list wrapper div."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert 'id="contacts-tab-list"' in resp.text
+
+    def test_contacts_tab_has_add_contact_button(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab header includes an '+ Add Contact' modal trigger."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Add Contact" in resp.text
+
+    def test_contacts_tab_shows_contact_count(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab header displays the total contact count."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Contacts" in resp.text
+        # Should show the count somewhere in the header
+        assert "1" in resp.text
+
+    # ── POST create (contacts-tab) ────────────────────────────────────────
+
+    def test_post_create_contact_on_existing_site(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with valid site_id creates a SiteContact and returns grouped
+        list."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": str(site.id),
+                "full_name": "New Bob",
+                "email": "newbob@tabco.com",
+                "title": "Manager",
+                "contact_role": "buyer_po",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        new_contact = db_session.query(SiteContact).filter_by(email="newbob@tabco.com").first()
+        assert new_contact is not None
+        assert new_contact.full_name == "New Bob"
+        assert new_contact.customer_site_id == site.id
+        # Response is the grouped list
+        assert "New Bob" in resp.text
+
+    def test_post_create_per_site_email_dedup(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with duplicate email on same site returns list without 500."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        # alice@tabco.com already exists on site
+        count_before = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Alice Duplicate",
+                "email": "alice@tabco.com",  # same email as existing contact
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        count_after = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
+        assert count_after == count_before  # no new row
+
+    def test_post_create_zero_site_auto_creates_hq(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create for a zero-site company auto-creates 'HQ' site + contact
+        atomically."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = self._make_zero_site_company(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": "",  # no site selected
+                "full_name": "First Contact",
+                "email": "first@zerocorp.com",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        site = db_session.query(CustomerSite).filter_by(company_id=company.id).first()
+        assert site is not None
+        contact = db_session.query(SiteContact).filter_by(customer_site_id=site.id).first()
+        assert contact is not None
+        assert contact.full_name == "First Contact"
+
+    def test_post_create_new_site_option(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create with site_id=__new__ + new_site_name creates site and contact."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={
+                "site_id": "__new__",
+                "new_site_name": "Shanghai Branch",
+                "full_name": "Wei Li",
+                "email": "wei@tabco.com",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        new_site = db_session.query(CustomerSite).filter_by(company_id=company.id, site_name="Shanghai Branch").first()
+        assert new_site is not None
+        wei = db_session.query(SiteContact).filter_by(customer_site_id=new_site.id).first()
+        assert wei is not None
+        assert wei.full_name == "Wei Li"
+
+    def test_post_create_new_site_blank_name_returns_400(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST create with site_id=__new__ but blank new_site_name returns 400."""
+        company, _, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": "__new__", "new_site_name": "", "full_name": "Orphan Bob"},
+        )
+        assert resp.status_code == 400
+
+    def test_post_create_missing_full_name_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create without full_name returns 400."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": str(site.id), "full_name": ""},
+        )
+        assert resp.status_code == 400
+
+    def test_post_create_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST create response contains contacts-tab-list contents (grouped list)."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts",
+            data={"site_id": str(site.id), "full_name": "Carol New", "email": "carol@tabco.com"},
+        )
+        assert resp.status_code == 200
+        # grouped list has site accordion headers
+        assert "HQ" in resp.text
+
+    # ── edit_site_contact — HX-Target branching + role writing ───────────
+
+    def test_edit_sets_contact_role_canonical(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with a canonical contact_role persists it to the DB."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "buyer_po",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.contact_role == "buyer_po"
+
+    def test_edit_invalid_role_returns_400(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with legacy 'decision_maker' role returns 400."""
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "decision_maker",
+            },
+        )
+        assert resp.status_code == 400
+
+    def test_edit_blank_role_clears_to_null(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with blank contact_role clears the field to NULL."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "contact_role": "",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.contact_role is None
+
+    def test_edit_hx_target_contacts_tab_list_renders_grouped_list(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit with HX-Target=contacts-tab-list returns the grouped list
+        partial."""
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # grouped list renders site accordion headers
+        assert "HQ" in resp.text
+        # should NOT be the site_contacts inline form (no showAdd Alpine state)
+        assert "showAdd" not in resp.text
+
+    def test_edit_hx_target_default_renders_site_contacts(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST edit without HX-Target returns site_contacts.html (Sites-tab path)."""
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
+        )
+        assert resp.status_code == 200
+        # site_contacts.html has showAdd Alpine state
+        assert "showAdd" in resp.text
+
+    def test_edit_writes_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with linkedin_url persists it to the DB."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "linkedin_url": "https://linkedin.com/in/alice-prime",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.linkedin_url == "https://linkedin.com/in/alice-prime"
+
+    def test_edit_writes_is_priority(self, client: TestClient, db_session: Session, test_user: User):
+        """POST edit with is_priority=1 sets the flag."""
+        from app.models.crm import SiteContact
+
+        company, site, contact = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
+            data={
+                "full_name": "Alice Prime",
+                "email": "alice@tabco.com",
+                "is_priority": "1",
+            },
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated = db_session.get(SiteContact, contact.id)
+        assert updated.is_priority is True

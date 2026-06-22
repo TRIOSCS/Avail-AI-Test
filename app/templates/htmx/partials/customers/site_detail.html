@@ -11,10 +11,10 @@
              open_reqs (list[Requisition]), now_utc, cadence_state (callable),
              site_cadence, site_next_best_touch.
    Called by: company_site_detail_partial route in htmx_views.py.
-   Depends on: brand palette, Alpine.js, contacts_tab.html (contact_card macro),
+   Depends on: brand palette, Alpine.js, _contact_macros.html (contact_card macro),
                crm_service.cadence_state (exposed as cadence_state global).
 #}
-{% from "htmx/partials/customers/tabs/contacts_tab.html" import contact_card with context %}
+{% from "htmx/partials/customers/_contact_macros.html" import contact_card with context %}
 
 <title hx-swap-oob="true">{{ site.site_name }} — {{ company.name }} — AvailAI</title>
 
