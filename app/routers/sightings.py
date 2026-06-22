@@ -137,6 +137,7 @@ RFQ_SENT_HEADER = "X-RFQ-Sent"
 RFQ_TOTAL_HEADER = "X-RFQ-Total"
 RFQ_SKIPPED_HEADER = "X-RFQ-Skipped"  # vendors with no contact email (not a delivery failure)
 RFQ_UNAVAILABLE_HEADER = "X-RFQ-Unavailable"  # vendors dropped by the active-only unavailability re-check
+RFQ_DATASHEETS_DROPPED_HEADER = "X-RFQ-Datasheets-Dropped"  # oversized datasheets dropped before send
 
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
@@ -1763,6 +1764,28 @@ async def sightings_vendor_modal(
         sv.normalized_name for sv in suggested_vendors if sv.has_contact and sv.normalized_name not in dnc_norms
     ]
 
+    # Resolve available datasheets for the basket's material cards — passed to the
+    # compose step as an opt-in checkbox list ("Attachments (N available)").
+    # Collapsed in the template when >3. No bytes fetched here; send-time only.
+    available_datasheets: list[dict] = []
+    if requirements:
+        from ..models.intelligence import MaterialCardDatasheet as _MCD
+
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(_MCD)
+                .filter(
+                    _MCD.material_card_id.in_(mc_ids),
+                    _MCD.library_item_id.isnot(None),
+                    _MCD.library_drive_id.isnot(None),
+                )
+                .all()
+            )
+            available_datasheets = [
+                {"id": ds.id, "file_name": ds.file_name, "size_bytes": ds.size_bytes} for ds in ds_rows
+            ]
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
@@ -1772,6 +1795,7 @@ async def sightings_vendor_modal(
         "requisition_count": requisition_count,
         "dnc_norms": dnc_norms,
         "contactable_non_dnc": contactable_non_dnc,
+        "available_datasheets": available_datasheets,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
@@ -2154,6 +2178,26 @@ async def sightings_preview_inquiry(
             }
         )
 
+    # Resolve selected datasheet names for the preview attachment list (display only —
+    # no bytes fetched at preview time; the names confirm what will attach at send time).
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    preview_attachments: list[dict] = []
+    if selected_ds_ids:
+        from ..models.intelligence import MaterialCardDatasheet as _PMCD
+
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(_PMCD)
+                .filter(
+                    _PMCD.id.in_(selected_ds_ids),
+                    _PMCD.material_card_id.in_(mc_ids),
+                )
+                .all()
+            )
+            preview_attachments = [{"id": ds.id, "file_name": ds.file_name} for ds in ds_rows]
+
     ctx = {
         "request": request,
         "previews": previews,
@@ -2161,6 +2205,7 @@ async def sightings_preview_inquiry(
         "vendor_names": vendor_names,
         "email_body": email_body,
         "unavailable_vendors": unavailable_vendors,
+        "preview_attachments": preview_attachments,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
@@ -2238,6 +2283,33 @@ async def sightings_send_inquiry(
             }
         )
 
+    # Collect datasheet attachments in their own guard: a fetch error DEGRADES to
+    # send-without-attachments (never a 500). The buyer opts in per send via
+    # datasheet_ids posted from the compose form.
+    attachments = None
+    dropped_datasheet_count = 0
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    if selected_ds_ids:
+        material_card_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        try:
+            from ..services.rfq_attachments import collect_rfq_attachments
+
+            attachments, ds_statuses = await collect_rfq_attachments(
+                db=db,
+                material_card_ids=material_card_ids,
+                selected_ids=selected_ds_ids,
+            )
+            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] == "oversized")
+            if dropped_datasheet_count:
+                logger.warning(
+                    "RFQ datasheet attachment: {} datasheet(s) dropped (oversized)",
+                    dropped_datasheet_count,
+                )
+        except Exception:
+            logger.warning("RFQ datasheet attachment collection failed — sending without attachments", exc_info=True)
+            attachments = None
+
     sent_count = 0
     progressed_count = 0
     failed_vendors: list[str] = []
@@ -2252,6 +2324,7 @@ async def sightings_send_inquiry(
                 user_id=user.id,
                 vendor_groups=vendor_groups,
                 requisition_parts_map=requisition_parts_map,
+                attachments=attachments or None,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check
@@ -2326,6 +2399,7 @@ async def sightings_send_inquiry(
     resp.headers[RFQ_TOTAL_HEADER] = str(total)
     resp.headers[RFQ_SKIPPED_HEADER] = str(len(no_email_vendors))
     resp.headers[RFQ_UNAVAILABLE_HEADER] = str(len(unavailable_vendors))
+    resp.headers[RFQ_DATASHEETS_DROPPED_HEADER] = str(dropped_datasheet_count)
     return resp
 
 

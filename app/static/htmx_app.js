@@ -1768,6 +1768,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // object key add/delete reliably, Set mutations less so.
   selectedVendors: Object.fromEntries((suggestedNames || []).map((n) => [n, true])),
   requirementIds: requirementIds || [],
+  // Opt-in datasheet attachment ids (array of integers). Included in _form() so the
+  // send-inquiry route can resolve + fetch + encode them. Same list sent to EVERY vendor.
+  selectedDatasheetIds: [],
   emailBody: '',
   previewing: false,
   sending: false,
@@ -1796,6 +1799,13 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // they arrive CHECKED — runtime-added keys flow into vendor_names via _form().
   selectVendor(name) {
     this.selectedVendors[name] = true;
+  },
+
+  // Toggle a datasheet id in/out of selectedDatasheetIds (opt-in attachment list).
+  toggleDatasheet(id) {
+    const idx = this.selectedDatasheetIds.indexOf(id);
+    if (idx >= 0) this.selectedDatasheetIds.splice(idx, 1);
+    else this.selectedDatasheetIds.push(id);
   },
 
   // Debounced (template-side @input.debounce.300ms) lookup against the existing
@@ -2002,6 +2012,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     this.requirementIds.forEach((id) => form.append('requirement_ids', id));
     Object.keys(this.selectedVendors).forEach((v) => form.append('vendor_names', v));
     form.append('email_body', this.emailBody);
+    // Opt-in datasheet attachment ids (integers). Empty selection → no fields posted
+    // → server treats as no attachments (regression-safe).
+    this.selectedDatasheetIds.forEach((id) => form.append('datasheet_ids', id));
     return form;
   },
 
@@ -2092,7 +2105,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // They are NOT delivery failures — without subtracting them they'd be
       // misattributed to the 'failed' bucket (total - sent - skipped).
       const unavailable = parseInt(resp.headers.get('X-RFQ-Unavailable') || '0', 10);
-      const outcome = this._sendOutcome(sent, total, skipped, unavailable);
+      // X-RFQ-Datasheets-Dropped = oversized datasheets silently dropped before send.
+      const datasheetsDropped = parseInt(resp.headers.get('X-RFQ-Datasheets-Dropped') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped, unavailable, datasheetsDropped);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -2105,31 +2120,33 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total/skipped/unavailable counts to a toast. `delivered` is
-  // false only when nothing went out, so the caller can keep the modal open for a retry.
-  // `skipped` = vendors with no contact email; `unavailable` = vendors dropped by the
-  // send-time unavailability re-check — both reported distinctly from send failures so a
-  // correctly-blocked vendor is never miscounted as 'failed'.
-  _sendOutcome(sent, total, skipped = 0, unavailable = 0) {
+  // Map the server's sent/total/skipped/unavailable/datasheetsDropped counts to a toast.
+  // `delivered` is false only when nothing went out, so the caller can keep the modal open
+  // for a retry. `skipped` = vendors with no contact email; `unavailable` = vendors dropped
+  // by the send-time unavailability re-check; `datasheetsDropped` = attachments silently
+  // dropped for exceeding the ~3 MB Graph simple-send cap (largest-first).
+  _sendOutcome(sent, total, skipped = 0, unavailable = 0, datasheetsDropped = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
+    let baseMsg;
     if (sent < total) {
       const failed = total - sent - skipped - unavailable;
       const reasons = [];
       if (failed > 0) reasons.push(failed + ' failed');
       if (skipped > 0) reasons.push(skipped + ' had no email');
       if (unavailable > 0) reasons.push(unavailable + ' marked unavailable');
-      return {
-        type: 'warning',
-        delivered: true,
-        message: 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : ''),
-      };
+      baseMsg = 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : '');
+    } else {
+      baseMsg = 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's');
+    }
+    if (datasheetsDropped > 0) {
+      baseMsg += ' (' + datasheetsDropped + ' attachment' + (datasheetsDropped === 1 ? '' : 's') + ' dropped — too large)';
     }
     return {
-      type: 'success',
+      type: sent < total ? 'warning' : 'success',
       delivered: true,
-      message: 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's'),
+      message: baseMsg,
     };
   },
 
