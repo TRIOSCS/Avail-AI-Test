@@ -33,9 +33,9 @@ def _fmt_band(obj) -> str | None:
     """Format a {min, max} range dict as 'min-max', 'min', or 'max'."""
     if isinstance(obj, dict):
         lo, hi = obj.get("min"), obj.get("max")
-        if lo and hi:
+        if lo is not None and hi is not None:
             return f"{lo}-{hi}"
-        return str(lo or hi) if (lo or hi) else None
+        return str(lo if lo is not None else hi) if (lo is not None or hi is not None) else None
     return str(obj) if obj else None
 
 
