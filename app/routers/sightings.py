@@ -35,6 +35,7 @@ from ..constants import (
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
+    RfqAttachmentStatus,
     SightingsSkipReason,
     SourcingStatus,
     UnavailabilityReason,
@@ -2300,7 +2301,7 @@ async def sightings_send_inquiry(
                 material_card_ids=material_card_ids,
                 selected_ids=selected_ds_ids,
             )
-            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] == "oversized")
+            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] == RfqAttachmentStatus.OVERSIZED)
             if dropped_datasheet_count:
                 logger.warning(
                     "RFQ datasheet attachment: {} datasheet(s) dropped (oversized)",

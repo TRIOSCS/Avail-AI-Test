@@ -25,6 +25,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+from app.constants import RfqAttachmentStatus
 from app.models import (
     MaterialCard,
     Requirement,
@@ -140,7 +141,7 @@ class TestCollectRfqAttachments:
 
         assert len(statuses) == 1
         assert statuses[0]["datasheet_id"] == ds.id
-        assert statuses[0]["status"] == "attached"
+        assert statuses[0]["status"] == RfqAttachmentStatus.ATTACHED
 
     @pytest.mark.asyncio
     async def test_status_missing_when_bytes_none(self, db_session: Session, test_user: User):
@@ -161,7 +162,7 @@ class TestCollectRfqAttachments:
             )
 
         assert len(attachments) == 0
-        assert statuses[0]["status"] == "missing"
+        assert statuses[0]["status"] == RfqAttachmentStatus.MISSING
 
     @pytest.mark.asyncio
     async def test_status_fetch_error_on_exception(self, db_session: Session, test_user: User):
@@ -182,7 +183,7 @@ class TestCollectRfqAttachments:
             )
 
         assert len(attachments) == 0
-        assert statuses[0]["status"] == "fetch_error"
+        assert statuses[0]["status"] == RfqAttachmentStatus.FETCH_ERROR
 
     @pytest.mark.asyncio
     async def test_oversized_largest_dropped_first(self, db_session: Session, test_user: User):
@@ -221,7 +222,7 @@ class TestCollectRfqAttachments:
         assert len(attachments) == 1
         assert attachments[0].name == "small.pdf"
         # Status list should have the oversized entry
-        oversized = [s for s in statuses if s["status"] == "oversized"]
+        oversized = [s for s in statuses if s["status"] == RfqAttachmentStatus.OVERSIZED]
         assert len(oversized) == 1
         assert oversized[0]["datasheet_id"] == ds1.id
 
@@ -271,7 +272,7 @@ class TestCollectRfqAttachments:
         )
 
         assert len(attachments) == 0
-        assert statuses[0]["status"] == "missing"
+        assert statuses[0]["status"] == RfqAttachmentStatus.MISSING
 
 
 # ── send_batch_rfq with attachments ─────────────────────────────────
@@ -468,3 +469,64 @@ class TestSendBatchRfqAttachments:
         assert len(msg_attachments) == 3
         names = {a["name"] for a in msg_attachments}
         assert names == {"file0.pdf", "file1.pdf", "file2.pdf"}
+
+
+# ── Router-level header test ─────────────────────────────────────────
+
+
+class TestSendInquiryDatasheetDroppedHeader:
+    """Verify the router sets X-RFQ-Datasheets-Dropped when collect_rfq_attachments
+    returns oversized statuses."""
+
+    def test_datasheets_dropped_header_set_on_oversized(self, client, db_session: Session, test_user: User):
+        """Endpoint sets X-RFQ-Datasheets-Dropped == '1' when collect returns one
+        oversized status entry."""
+        from app.models.sourcing import Requirement, Requisition
+        from app.services.rfq_attachments import RfqAttachment
+
+        # Seed a minimal requisition + requirement so the endpoint can resolve them.
+        req = Requisition(name="DS Test Req", status="active", customer_name="DS Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DS-MPN-001",
+            manufacturer="TestMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        # collect_rfq_attachments returns one attachment (kept) + one oversized status.
+        kept_att = RfqAttachment(
+            name="kept.pdf",
+            content_type="application/pdf",
+            content_bytes_b64="ZmFrZQ==",
+        )
+        ds_statuses = [
+            {"datasheet_id": 99, "file_name": "big.pdf", "status": RfqAttachmentStatus.OVERSIZED},
+        ]
+
+        async def _fake_collect(**_kwargs):
+            return [kept_att], ds_statuses
+
+        async def _fake_send(**_kwargs):
+            return [{"vendor_name": "Acme", "status": "sent"}]
+
+        with (
+            patch("app.services.rfq_attachments.collect_rfq_attachments", side_effect=_fake_collect),
+            patch("app.email_service.send_batch_rfq", side_effect=_fake_send),
+        ):
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": str(r.id),
+                    "vendor_names": ["Acme"],
+                    "email_body": "Please quote.",
+                    "datasheet_ids": "99",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Datasheets-Dropped"] == "1"

@@ -371,6 +371,15 @@ class SpecCodeSource(StrEnum):
     CSV_IMPORT = "csv_import"
 
 
+class RfqAttachmentStatus(StrEnum):
+    """Per-datasheet status in the RFQ attachment pipeline."""
+
+    ATTACHED = "attached"
+    MISSING = "missing"
+    OVERSIZED = "oversized"
+    FETCH_ERROR = "fetch_error"
+
+
 BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
 """api_sources rows backed by queue-driven browser workers, not request/response
 connectors.

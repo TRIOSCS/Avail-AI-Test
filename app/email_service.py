@@ -4,6 +4,10 @@ import asyncio
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .services.rfq_attachments import RfqAttachment
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -87,7 +91,7 @@ async def send_batch_rfq(
     requisition_id: int | None = None,
     vendor_groups: list[dict] | None = None,
     requisition_parts_map: dict[int, list] | None = None,
-    attachments: "list | None" = None,
+    attachments: "list[RfqAttachment] | None" = None,
 ) -> list[dict]:
     """Send one RFQ email per vendor group.
 

@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import RfqAttachmentStatus
 from ..models.intelligence import MaterialCardDatasheet
 from .datasheet_library import fetch_datasheet_bytes
 
@@ -87,7 +88,7 @@ async def collect_rfq_attachments(
     async def _fetch_one(ds: MaterialCardDatasheet) -> tuple[int, bytes | None, str]:
         """Return (datasheet_id, bytes_or_none, status_hint)."""
         if not (ds.library_drive_id and ds.library_item_id):
-            return ds.id, None, "missing"
+            return ds.id, None, RfqAttachmentStatus.MISSING
         async with sem:
             try:
                 data = await fetch_datasheet_bytes(ds.library_drive_id, ds.library_item_id)
@@ -98,10 +99,10 @@ async def collect_rfq_attachments(
                     ds.library_item_id,
                     exc_info=True,
                 )
-                return ds.id, None, "fetch_error"
+                return ds.id, None, RfqAttachmentStatus.FETCH_ERROR
         if data is None:
-            return ds.id, None, "missing"
-        return ds.id, data, "attached"
+            return ds.id, None, RfqAttachmentStatus.MISSING
+        return ds.id, data, RfqAttachmentStatus.ATTACHED
 
     fetch_results = await asyncio.gather(*(_fetch_one(row_map[sid]) for sid in selected_ids if sid in row_map))
 
@@ -149,9 +150,9 @@ async def collect_rfq_attachments(
     # Build status list in selected_ids order.
     statuses: list[dict] = list(error_statuses)
     for ds_id, _, fname in candidates:
-        statuses.append({"datasheet_id": ds_id, "file_name": fname, "status": "attached"})
+        statuses.append({"datasheet_id": ds_id, "file_name": fname, "status": RfqAttachmentStatus.ATTACHED})
     for ds_id in oversized_ids:
         ds = row_map[ds_id]
-        statuses.append({"datasheet_id": ds_id, "file_name": ds.file_name, "status": "oversized"})
+        statuses.append({"datasheet_id": ds_id, "file_name": ds.file_name, "status": RfqAttachmentStatus.OVERSIZED})
 
     return attachments, statuses
