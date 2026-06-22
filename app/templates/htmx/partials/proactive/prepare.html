@@ -6,7 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS.
 #}
 
-<div class="max-w-4xl mx-auto"
+<div class="page-readable"
      x-data="{
        selectedContacts: {
          {% for c in contacts %}{% if c.is_primary and c.has_email %}{{ c.id }}: true,{% endif %}{% endfor %}

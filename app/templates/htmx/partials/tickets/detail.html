@@ -1,7 +1,7 @@
 {# Trouble Ticket detail view #}
 {% from "htmx/partials/tickets/_icons.html" import sparkle_icon, chevron_icon -%}
 {% from "htmx/partials/tickets/_context.html" import context_field -%}
-<div class="max-w-4xl mx-auto px-4 py-6">
+<div class="page-readable px-4 py-6">
   {# Back button #}
   <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#main-content" hx-push-url="/v2/trouble-tickets"
      @click="currentView = 'tickets'"

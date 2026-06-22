@@ -8,7 +8,7 @@
 {% from "htmx/partials/quotes/_macros.html" import loading_spinner, margin_text_color %}
 <title hx-swap-oob="true">{{ quote.quote_number }} — Quotes — AvailAI</title>
 
-<div class="max-w-7xl mx-auto" x-data="{ showMarkup: false, showHistory: false }">
+<div class="page-fluid" x-data="{ showMarkup: false, showHistory: false }">
 
   {# Header card #}
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
