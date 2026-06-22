@@ -300,7 +300,8 @@ async def test_screen_prospect_grounding_check_bypasses_llm(db_session, monkeypa
 
 
 async def test_screen_prospect_llm_returns_insufficient_data_with_grounding(db_session, monkeypatch):
-    """When grounding is present but LLM says insufficient_data, scores are not written."""
+    """When grounding is present but LLM says insufficient_data, scores are not
+    written."""
     monkeypatch.setattr(settings, "ai_screen_enabled", True)
     monkeypatch.setattr(settings, "ai_screen_daily_cap", 999)
     monkeypatch.setattr(settings, "ai_screen_min_match", 40)

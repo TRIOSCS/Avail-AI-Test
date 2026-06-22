@@ -217,4 +217,3 @@ def test_backfill_quote_source_no_null_source_quotes(db_session: Session):
     assert q2.source == "proactive"
     db_session.refresh(q1)
     assert q1.source == "email"
-
