@@ -105,6 +105,16 @@ def _seed_sources(db_session) -> list[ApiSource]:
     return sources
 
 
+@pytest.fixture(autouse=True)
+def _stub_clay_oauth(monkeypatch):
+    """Stub clay_oauth helpers so they don't open a raw SessionLocal connection (which
+    bypasses the test-DB override and hits a missing table)."""
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
+    monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
+
+
 @pytest.fixture()
 def admin_client(db_session, admin_user):
     _seed_sources(db_session)
@@ -148,3 +158,22 @@ def test_put_hunter_credentials(admin_client):
         json={"credentials": {"HUNTER_API_KEY": "testval"}},
     )
     assert r.status_code == 200
+
+
+def test_clay_card_shows_connect_when_disconnected(admin_client, monkeypatch):
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
+    monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
+    html = admin_client.get("/v2/partials/settings/api-keys").text
+    assert "/auth/clay/connect" in html and "Connect Clay" in html
+    assert "CLAY_API_KEY" not in html  # the old key input is gone
+
+
+def test_clay_card_shows_connected(admin_client, monkeypatch):
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
+    monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
+    html = admin_client.get("/v2/partials/settings/api-keys").text
+    assert "Connected" in html and "/auth/clay/disconnect" in html

@@ -75,7 +75,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
-from ..services import task_service
+from ..services import clay_oauth, task_service
 from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
@@ -10425,7 +10425,8 @@ async def settings_api_keys_tab(
             "explorium_api_key": _field("explorium_enrichment", "EXPLORIUM_API_KEY"),
             "apollo_api_key": _field("apollo_enrichment", "APOLLO_API_KEY"),
             "hunter_api_key": _field("hunter_enrichment", "HUNTER_API_KEY"),
-            "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
+            "clay_connected": clay_oauth.is_connected(),
+            "clay_needs_reconnect": clay_oauth.needs_reconnect(),
             "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
             "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
             "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
