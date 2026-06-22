@@ -1,11 +1,14 @@
 {# _contacts_grouped_list.html — Grouped-by-site contact list, re-renderable as a
    standalone fragment into #contacts-tab-list.
 
-   Receives: company, contact_rows ([{contact, site, legacy}]), now_utc.
+   Receives: company, contact_rows ([{contact, site, legacy, cadence}]), now_utc.
    Called by:
      - {% include %} from contacts_tab.html (inside #contacts-tab-list)
      - template_response() in endpoints that branch on HX-Target=contacts-tab-list
    Depends on: _contact_macros.html, Alpine.js, cadence_state Jinja global.
+
+   Cadence sort: within each site group, overdue contacts are shown first
+   (secondary sort key after is_primary/is_priority from the service).
 #}
 
 {# ── Import shared macros ──────────────────────────────────────────────────── #}
@@ -30,10 +33,10 @@
 {# ── Render ────────────────────────────────────────────────────────────────── #}
 {% if not contact_rows %}
 <div class='p-8 text-center'>
-  <p class='text-sm text-gray-600 mb-3'>No contacts yet.</p>
+  <p class='text-sm text-gray-600 mb-3'>No contacts yet. Add your first contact to get started.</p>
   <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
           class='px-4 py-2 text-sm font-medium text-brand-600 border border-brand-300 rounded hover:bg-brand-50'>
-    + Add First Contact
+    + Add Contact
   </button>
 </div>
 {% else %}
@@ -42,6 +45,14 @@
     {% set group = site_groups.data[sk] %}
     {% set grp_site = group['site'] %}
     {% set grp_rows = group['rows'] %}
+    {#
+       Secondary sort within group: overdue first, then the rest.
+       cadence=='overdue' → sort key 0; anything else → sort key 1.
+       (Primary service sort: archived↓ priority↑ primary↑ name — preserved within each bucket.)
+    #}
+    {% set overdue_rows = grp_rows | selectattr('cadence', 'eq', 'overdue') | list %}
+    {% set other_rows   = grp_rows | rejectattr('cadence', 'eq', 'overdue') | list %}
+    {% set sorted_rows  = overdue_rows + other_rows %}
     {# Expand HQ / primary site by default (first group) — all others start closed #}
     {% set is_first = loop.first %}
     <div x-data='{"open": {{ "true" if is_first else "false" }}}' class="rounded-lg border border-gray-200">
@@ -65,8 +76,8 @@
       </button>
       {# Contacts list — shown/hidden via Alpine #}
       <div x-show='open' x-cloak x-transition class='space-y-2 p-2'>
-        {% for row in grp_rows %}
-          {{ contact_card(company, row.contact, row.site, row.legacy, now_utc) }}
+        {% for row in sorted_rows %}
+          {{ contact_card(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new') }}
         {% endfor %}
       </div>
     </div>

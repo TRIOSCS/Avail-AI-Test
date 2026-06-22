@@ -362,7 +362,16 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
             )
             .all()
         )
-    rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]
+    now_utc = datetime.now(timezone.utc)
+    rows = [
+        {
+            "contact": c,
+            "site": site_map.get(c.customer_site_id),
+            "legacy": False,
+            "cadence": cadence_state(None, c.last_outbound_at, now_utc),
+        }
+        for c in contacts
+    ]
     # Build a set of lowercased emails already covered by real SiteContacts so that
     # legacy site.contact_* rows with the same email are suppressed (dedup a migrated
     # site that now has a real SiteContact for the same person).

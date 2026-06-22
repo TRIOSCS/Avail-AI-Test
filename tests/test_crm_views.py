@@ -3392,3 +3392,287 @@ class TestContactsTabHome:
         db_session.expire_all()
         updated = db_session.get(SiteContact, contact.id)
         assert updated.is_priority is True
+
+
+class TestC3KebabActionsAndCadence:
+    """C3 TDD: kebab (Edit/Delete/Set-Primary) on Contacts tab + cadence badge/sort.
+
+    Written FIRST (failing) to drive implementation per Step C3.
+    """
+
+    def _make_two_contacts(self, db_session: Session, *, overdue_days: int = 0):
+        """One company, one site, two contacts.
+
+        If overdue_days > 0 the first contact has last_outbound_at that many days in the
+        past (overdue threshold is 30d).
+        """
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Kebab Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+
+        overdue_ts = None
+        if overdue_days > 0:
+            overdue_ts = datetime.now(timezone.utc) - timedelta(days=overdue_days)
+
+        contact_a = SiteContact(
+            customer_site_id=site.id,
+            full_name="Alpha Contact",
+            email="alpha@kebab.com",
+            is_primary=False,
+            last_outbound_at=overdue_ts,
+        )
+        contact_b = SiteContact(
+            customer_site_id=site.id,
+            full_name="Beta Contact",
+            email="beta@kebab.com",
+            is_primary=True,
+            last_outbound_at=None,
+        )
+        db_session.add_all([contact_a, contact_b])
+        db_session.commit()
+        return company, site, contact_a, contact_b
+
+    # ── Kebab menu rendered ─────────────────────────────────────────────
+
+    def test_contacts_tab_renders_kebab_button(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab includes the three-dot kebab button for real contacts."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Kebab three-dot SVG path is a distinctive substring
+        assert "10 6a2 2 0 110-4" in resp.text or "aria-label" in resp.text
+
+    def test_contacts_tab_renders_edit_action(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab kebab contains an Edit option dispatching open-modal."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "edit-form" in resp.text
+
+    def test_contacts_tab_renders_delete_action(self, client: TestClient, db_session: Session, test_user: User):
+        """Contacts tab kebab contains a Delete hx-delete button."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "hx-delete" in resp.text
+
+    def test_contacts_tab_renders_set_primary_when_not_primary(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Set-Primary kebab item only appears for non-primary contacts."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Set Primary option must appear (at least one non-primary contact)
+        assert "primary" in resp.text.lower()
+
+    # ── Set-Primary via tab ─────────────────────────────────────────────
+
+    def test_set_primary_via_tab_flips_flag(self, client: TestClient, db_session: Session, test_user: User):
+        """POST primary with HX-Target=contacts-tab-list flips is_primary and returns
+        the grouped list."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        # ca is not primary — make it primary via tab
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        updated_a = db_session.get(SiteContact, ca.id)
+        updated_b = db_session.get(SiteContact, cb.id)
+        assert updated_a.is_primary is True
+        # previous primary must be unset
+        assert updated_b.is_primary is False
+
+    def test_set_primary_via_tab_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST primary with HX-Target=contacts-tab-list re-renders grouped list (not
+        site_contacts.html)."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # grouped list has site accordion, not the inline showAdd form
+        assert "HQ" in resp.text
+        assert "showAdd" not in resp.text
+
+    def test_set_primary_via_tab_both_contacts_in_response(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Grouped list re-render after primary includes all contacts under the site."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}/primary",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "Alpha Contact" in resp.text
+        assert "Beta Contact" in resp.text
+
+    # ── Delete via tab ──────────────────────────────────────────────────
+
+    def test_delete_via_tab_removes_contact(self, client: TestClient, db_session: Session, test_user: User):
+        """DELETE with HX-Target=contacts-tab-list removes the contact and re-renders
+        the grouped list."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(SiteContact, ca.id) is None
+
+    def test_delete_via_tab_returns_grouped_list_not_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """DELETE via tab re-renders grouped list with remaining contact (not empty)."""
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        assert "Beta Contact" in resp.text
+        # Alpha is gone
+        assert "Alpha Contact" not in resp.text
+
+    def test_delete_last_contact_renders_invitational_empty_state(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Deleting the last contact via the tab renders the invitational empty state
+        with + Add Contact CTA."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Solo Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="Main", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Only One",
+            email="one@solo.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}",
+            headers={"HX-Target": "contacts-tab-list"},
+        )
+        assert resp.status_code == 200
+        # invitational CTA
+        assert "Add" in resp.text
+        # contact gone
+        assert "Only One" not in resp.text
+
+    def test_delete_via_tab_without_hx_target_returns_empty_string(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """DELETE without HX-Target header still deletes and returns empty string
+        (site_card path unchanged)."""
+        from app.models.crm import SiteContact
+
+        company, site, ca, cb = self._make_two_contacts(db_session)
+        resp = client.delete(
+            f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{ca.id}",
+        )
+        assert resp.status_code == 200
+        db_session.expire_all()
+        assert db_session.get(SiteContact, ca.id) is None
+
+    # ── Cadence badge and sort ──────────────────────────────────────────
+
+    def test_overdue_contact_shows_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """A contact with last_outbound_at 45d ago shows an overdue badge in the grouped
+        list."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=45)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Badge text like "Overdue 45d" must appear
+        assert "verdue" in resp.text  # case-insensitive partial
+
+    def test_null_clock_shows_no_badge(self, client: TestClient, db_session: Session, test_user: User):
+        """Contact with NULL last_outbound_at shows no overdue badge (NULL honesty)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=0)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # No "overdue" text when no clock is set
+        assert "verdue" not in resp.text.lower()
+
+    def test_overdue_contact_sorts_before_null_clock(self, client: TestClient, db_session: Session, test_user: User):
+        """Within a site group, overdue contacts appear before contacts with no clock
+        (secondary sort: overdue-first)."""
+        company, site, ca, cb = self._make_two_contacts(db_session, overdue_days=45)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        # Alpha Contact (overdue) should appear before Beta Contact (no clock)
+        pos_alpha = resp.text.find("Alpha Contact")
+        pos_beta = resp.text.find("Beta Contact")
+        assert pos_alpha != -1
+        assert pos_beta != -1
+        assert pos_alpha < pos_beta
+
+    def test_service_contact_rows_has_cadence_field(self, db_session: Session):
+        """company_contact_rows returns rows where real contacts have a 'cadence'
+        key."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        company = Company(name="Cadence Svc Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Has Cadence",
+            last_outbound_at=datetime.now(timezone.utc) - timedelta(days=45),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, company.id)
+        real_rows = [r for r in rows if not r["legacy"]]
+        assert len(real_rows) == 1
+        assert "cadence" in real_rows[0]
+        assert real_rows[0]["cadence"] == "overdue"
+
+    def test_service_null_clock_cadence_is_new(self, db_session: Session):
+        """company_contact_rows assigns cadence='new' for contacts with NULL
+        last_outbound_at."""
+        from app.models.crm import CustomerSite, SiteContact
+        from app.services.crm_service import company_contact_rows
+
+        company = Company(name="Null Clock Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="No Clock",
+            last_outbound_at=None,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        rows = company_contact_rows(db_session, company.id)
+        real_rows = [r for r in rows if not r["legacy"]]
+        assert len(real_rows) == 1
+        assert real_rows[0]["cadence"] == "new"

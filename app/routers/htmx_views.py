@@ -6261,7 +6261,12 @@ async def delete_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a site contact."""
+    """Delete a site contact.
+
+    Branches on HX-Target header:
+      - 'contacts-tab-list' → re-renders _contacts_grouped_list.html (Contacts tab)
+      - anything else       → returns empty string (site_card outerHTML-remove path)
+    """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -6269,6 +6274,23 @@ async def delete_site_contact(
         raise HTTPException(404, "Contact not found")
     db.delete(contact)
     db.commit()
+    logger.info("Contact {} deleted by {}", contact_id, user.email)
+
+    hx_target = request.headers.get("HX-Target", "")
+    if hx_target == "contacts-tab-list":
+        from datetime import timezone as _tz
+
+        company = db.query(Company).filter(Company.id == company_id).first()
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "company": company,
+                "contact_rows": _company_contact_rows(db, company_id),
+                "now_utc": datetime.now(_tz.utc),
+            }
+        )
+        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+
     return HTMLResponse("")
 
 
@@ -6309,7 +6331,22 @@ async def set_primary_contact(
     contact.is_primary = True
     db.commit()
 
-    # Return refreshed contacts list
+    hx_target = request.headers.get("HX-Target", "")
+    if hx_target == "contacts-tab-list":
+        # Contacts-tab path: re-render the full grouped list
+        from datetime import timezone as _tz
+
+        ctx = _base_ctx(request, user, "customers")
+        ctx.update(
+            {
+                "company": company,
+                "contact_rows": _company_contact_rows(db, company_id),
+                "now_utc": datetime.now(_tz.utc),
+            }
+        )
+        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+
+    # Sites-tab path (default): re-render the per-site contacts list
     contacts = (
         db.query(SiteContact)
         .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
