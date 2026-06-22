@@ -5003,6 +5003,24 @@ def _validate_role(role_raw: str) -> str | None:
     return cleaned
 
 
+def _render_contacts_list(request: Request, user: User, company: Company, db: Session) -> HTMLResponse:
+    """Build and return the contacts grouped-list partial for the Contacts tab.
+
+    Shared by create, add-suggested, delete, set-primary, and edit endpoints so the five
+    swap paths stay in sync with one another.
+    """
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "contact_rows": _company_contact_rows(db, company.id),
+            "now_utc": datetime.now(timezone.utc),
+            "roles": CANONICAL_ROLES,
+        }
+    )
+    return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+
+
 @router.post("/v2/partials/customers/{company_id}/tier", response_class=HTMLResponse)
 async def set_company_tier(
     request: Request,
@@ -5712,8 +5730,6 @@ async def company_tab(
         return template_response("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
-        from datetime import timezone as _tz
-
         active_sites = (
             db.query(CustomerSite)
             .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
@@ -5725,7 +5741,7 @@ async def company_tab(
             {
                 "company": company,
                 "contact_rows": _company_contact_rows(db, company_id),
-                "now_utc": datetime.now(_tz.utc),
+                "now_utc": datetime.now(timezone.utc),
                 "active_sites": active_sites,
                 "roles": CANONICAL_ROLES,
             }
@@ -5938,10 +5954,6 @@ async def contacts_tab_create(
     Duplicate email on the same site returns HTTP 409 with a user-visible error.
     Returns the grouped list HTML for swap into #contacts-tab-list.
     """
-    from datetime import timezone as _tz
-
-    from sqlalchemy import func as sqlfunc2
-
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
@@ -5997,7 +6009,7 @@ async def contacts_tab_create(
             db.query(SiteContact)
             .filter(
                 SiteContact.customer_site_id == existing_site.id,
-                sqlfunc2.lower(SiteContact.email) == email_val,
+                sqlfunc.lower(SiteContact.email) == email_val,
             )
             .first()
         )
@@ -6043,17 +6055,7 @@ async def contacts_tab_create(
         site.id,
         user.email,
     )
-
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "contact_rows": _company_contact_rows(db, company_id),
-            "now_utc": datetime.now(_tz.utc),
-            "roles": CANONICAL_ROLES,
-        }
-    )
-    return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Suggested-contacts UI (account-building loop) ──────────────────────
@@ -6136,10 +6138,6 @@ async def contacts_tab_add_suggested(
     toast — never a silent no-op or 409 error.
     Always returns _contacts_grouped_list.html + HX-Trigger toast.
     """
-    from datetime import timezone as _tz
-
-    from sqlalchemy import func as sqlfunc2
-
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
@@ -6183,7 +6181,7 @@ async def contacts_tab_add_suggested(
             db.query(SiteContact)
             .filter(
                 SiteContact.customer_site_id == site.id,
-                sqlfunc2.lower(SiteContact.email) == email_val,
+                sqlfunc.lower(SiteContact.email) == email_val,
             )
             .first()
         )
@@ -6195,7 +6193,7 @@ async def contacts_tab_add_suggested(
             .filter(
                 SiteContact.customer_site_id == site.id,
                 SiteContact.email.is_(None),
-                sqlfunc2.lower(SiteContact.full_name) == full_name.lower(),
+                sqlfunc.lower(SiteContact.full_name) == full_name.lower(),
             )
             .first()
         )
@@ -6227,16 +6225,7 @@ async def contacts_tab_add_suggested(
         toast_msg = f"{full_name} is already on file"
         toast_kind = "info"
 
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "contact_rows": _company_contact_rows(db, company_id),
-            "now_utc": datetime.now(_tz.utc),
-            "roles": CANONICAL_ROLES,
-        }
-    )
-    response = template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+    response = _render_contacts_list(request, user, company, db)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})
     return response
 
@@ -6473,18 +6462,7 @@ async def delete_site_contact(
 
     hx_target = request.headers.get("HX-Target", "")
     if hx_target == "contacts-tab-list":
-        from datetime import timezone as _tz
-
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "contact_rows": _company_contact_rows(db, company_id),
-                "now_utc": datetime.now(_tz.utc),
-                "roles": CANONICAL_ROLES,
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+        return _render_contacts_list(request, user, company, db)
 
     return HTMLResponse("")
 
@@ -6528,19 +6506,7 @@ async def set_primary_contact(
 
     hx_target = request.headers.get("HX-Target", "")
     if hx_target == "contacts-tab-list":
-        # Contacts-tab path: re-render the full grouped list
-        from datetime import timezone as _tz
-
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "contact_rows": _company_contact_rows(db, company_id),
-                "now_utc": datetime.now(_tz.utc),
-                "roles": CANONICAL_ROLES,
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+        return _render_contacts_list(request, user, company, db)
 
     # Sites-tab path (default): re-render the per-site contacts list
     contacts = (
@@ -6938,19 +6904,7 @@ async def edit_site_contact(
     hx_target = request.headers.get("HX-Target", "")
 
     if hx_target == "contacts-tab-list":
-        # Contacts-tab path: re-render the grouped list
-        from datetime import timezone as _tz
-
-        ctx = _base_ctx(request, user, "customers")
-        ctx.update(
-            {
-                "company": company,
-                "contact_rows": _company_contact_rows(db, company_id),
-                "now_utc": datetime.now(_tz.utc),
-                "roles": CANONICAL_ROLES,
-            }
-        )
-        return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+        return _render_contacts_list(request, user, company, db)
 
     # Sites-tab path (default): re-render the per-site contacts list
     contacts = (
