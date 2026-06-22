@@ -525,7 +525,7 @@ class TestPreviewInlineEmailFix:
         )
         db_session.add(item)
         card = VendorCard(
-            normalized_name="acme corp",
+            normalized_name="acme",
             display_name="Acme Corp",
             emails=[],
             phones=[],
@@ -555,8 +555,14 @@ class TestPreviewInlineEmailFix:
         # The no-email chip is rendered (vendor has no contact yet)
         assert "no email" in resp.text.lower()
         # The inline fix-email form must be present (input + button).
-        # We check for the normalized_name embedded in the form so JS can key it.
-        assert "acme corp" in resp.text.lower()
+        # Assert the tojson-encoded normalized_name is embedded in the @click attribute.
+        # tojson emits double-quoted strings — "acme" is the normalized form of "Acme Corp"
+        # (normalize_vendor_name strips common suffixes). This verifies the normalized_name
+        # field is in the fix-form attribute, distinct from display_name "Acme Corp" which
+        # renders unquoted; a regression dropping normalized_name from the preview dict
+        # would break the assertion because normalize_vendor_name('Acme Corp') == 'acme',
+        # not 'Acme Corp', so display_name presence alone cannot satisfy it.
+        assert '"acme"' in resp.text
 
     def test_add_email_then_repreview_resolves_vendor_email(
         self, client: TestClient, db_session: Session, test_user: User, _rfq_fixtures

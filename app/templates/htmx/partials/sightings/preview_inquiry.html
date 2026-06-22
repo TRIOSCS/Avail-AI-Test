@@ -61,7 +61,7 @@
            vendor has no email on file. Posts to composer-vendor via fixVendorEmail()
            which then calls loadPreview() to refresh this panel without closing the modal. #}
         {% if p.skip_reason == "no_email" %}
-        <div class='mt-2 flex items-center gap-2' x-data='{"fixEmail": ""}'>
+        <div class='mt-2 flex items-center gap-2' x-data='{"fixEmail": ""}' @rfq-email-fixed.window='fixEmail = ""'>
           <input
             type="email"
             x-model='fixEmail'
@@ -70,7 +70,7 @@
           />
           <button
             type='button'
-            @click='if (fixEmail) { fixVendorEmail({{ p.normalized_name|tojson }}, fixEmail); fixEmail = ""; }'
+            @click='if (fixEmail) { fixVendorEmail({{ p.normalized_name|tojson }}, fixEmail); }'
             class='text-xs px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 whitespace-nowrap'
           >Add &amp; re-check</button>
         </div>

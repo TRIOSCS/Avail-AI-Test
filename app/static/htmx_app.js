@@ -2061,6 +2061,8 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       }
       // Ensure the vendor is in selectedVendors so it is included in the re-preview POST.
       this.selectVendor(vendorName);
+      // Signal the nested x-data scope to clear its fixEmail input (success path only).
+      window.dispatchEvent(new CustomEvent('rfq-email-fixed'));
       await this.loadPreview();
     } catch (err) {
       console.error('[rfqVendorModal] fixVendorEmail failed', err);
