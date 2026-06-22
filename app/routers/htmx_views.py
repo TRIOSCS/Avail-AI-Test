@@ -10422,6 +10422,9 @@ async def settings_api_keys_tab(
     ctx.update(
         {
             "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
+            "explorium_api_key": _field("explorium_enrichment", "EXPLORIUM_API_KEY"),
+            "apollo_api_key": _field("apollo_enrichment", "APOLLO_API_KEY"),
+            "hunter_api_key": _field("hunter_enrichment", "HUNTER_API_KEY"),
             "clay_api_key": _field("clay_enrichment", "CLAY_API_KEY"),
             "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
             "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),

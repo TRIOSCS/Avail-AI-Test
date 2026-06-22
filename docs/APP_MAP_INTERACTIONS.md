@@ -1570,8 +1570,141 @@ OUTBOUND email is not captured — that would need a Sent-folder scan.)
 
 ## Enrichment Pipeline
 
+### CRM / Vendor Firmographic + Contact Enrichment
+
+`enrich_entity` and `find_suggested_contacts` in `app/enrichment_service.py` delegate
+to two new modules:
+
+- **`app/services/enrichment_router.py`** — cost-tiered, gap-gated provider
+  orchestration. For company firmographics, providers run in ascending cost order; each
+  metered provider is only called when at least one of the eight `_GAP_FIELDS`
+  (`legal_name`, `industry`, `employee_size`, `hq_city`, `hq_state`, `hq_country`,
+  `website`, `linkedin_url`) is still missing, the provider's feature gate is enabled,
+  and its circuit breaker is closed. Provider order:
+
+  | Tier | Provider | Cost | Notes |
+  |------|----------|------|-------|
+  | Free | SAM.gov | zero | `sam_gov_enrichment_enabled`; legal name + NAICS + HQ |
+  | Free | Apollo | flat-rate key | always-run when key configured |
+  | Metered | Clay | per-credit | MCP-only; gap-gated; `clay_enrichment_enabled` |
+  | Metered | Explorium | per-call | gap-gated; `explorium_enrichment_enabled` |
+  | Metered | Lusha | per-call | gap-gated; `lusha_enrichment_enabled` |
+  | Last resort | AI | Claude API | only when gaps remain after all above |
+
+  For contacts: Phase 1 runs Hunter + Apollo + Clay concurrently (cheap/free); Phase 2
+  escalates sequentially to Lusha → Explorium only when the verified-contact count is
+  below the requested limit.
+
+- **`app/services/firmo_tiers.py`** — per-field source-authority ladder (ported from
+  the materials F1 `spec_tiers` pattern). `blend_company` and `blend_contacts` iterate
+  the raw provider results and keep, for each field, the value from the highest-tier
+  source (tie broken by confidence). Unknown source → tier 0 (loses every conflict).
+  The blended result carries a `_provenance` dict `{field: {source, tier, confidence}}`
+  used by the apply functions.
+
+**Firmographic authority ladder (key fields):**
+
+| Field | Highest tier | Runner-up |
+|-------|-------------|-----------|
+| `legal_name` | SAM.gov (95) | Explorium (85) |
+| `naics` | SAM.gov (95) | Explorium (85) |
+| `ticker` | Explorium (90) | Clay (75) |
+| `revenue_range` | Explorium (90) | Clay (75) |
+| `employee_size` | Explorium (85) | Apollo (75) |
+| `linkedin_url` | Explorium (85) | Lusha (80) |
+| `hq_city/state/country` | Explorium (85) | SAM.gov (80) |
+
+**Contact authority ladder (key fields):**
+
+| Field | Highest tier | Runner-up |
+|-------|-------------|-----------|
+| `email` | Lusha (95) | Hunter (85) |
+| `phone` | Lusha (95) | Apollo (70) |
+| `title` | Explorium (80) | Apollo (75) |
+
+**Provenance-aware apply.** `apply_enrichment_to_company` / `apply_enrichment_to_vendor`
+in `enrichment_service.py` call the shared `_apply_enrichment` function, which writes
+with three rules:
+
+1. Empty field → always write.
+2. Existing value with no stored provenance (manual / legacy) → protect; never clobber.
+3. Existing value with stored provenance → overwrite only when incoming (tier, confidence)
+   strictly beats the stored pair.
+
+Provenance is persisted in the new `enrichment_provenance` JSONB column on both
+`companies` and `vendor_cards` (migration 125).
+
+**Connectors:**
+
+- `app/connectors/explorium.py` — 2-call pipeline: `/businesses/match` → business_id,
+  then `/businesses/firmographics/enrich`; contacts via `/prospects` +
+  `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
+  `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
+- `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
+  `https://api.clay.com/v3/mcp`, `Authorization: Bearer CLAY_API_KEY`). Company:
+  `find-and-enrich-company` (sync). Contacts: `find-and-enrich-contacts-at-company`;
+  emails polled via `get-task-context` (bounded: 5 polls × 3 s). 402/429 →
+  `ProviderQuotaError`. **The old Clay WEBHOOK path (`clay_service.py` +
+  `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
+- `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
+  SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
+
+**Config flags** (all boolean, default `False` unless noted; set in `.env`):
+`apollo_enrichment_enabled`, `hunter_enrichment_enabled`, `sam_gov_enrichment_enabled`,
+`clay_enrichment_enabled`, `explorium_enrichment_enabled`, `lusha_enrichment_enabled`.
+Each metered provider also has a `*_cooldown_minutes` knob used by the circuit breaker.
+Apollo and Hunter raise `ProviderQuotaError` on 402/429 (circuit-guarded, matching the
+existing Lusha contract).
+
 ```
-Trigger: user click OR background job OR bulk import
+Trigger: user click ("Enrich" on CRM account / vendor) OR background prospect scan
+    |
+    v
+enrichment_service.enrich_entity(domain, name)
+    |
+    +---> enrichment_router.gather_company(domain, name)
+    |       +---> sam_gov_company.enrich_company()       [free, always]
+    |       +---> apollo.search_company()                [free, always]
+    |       +---> clay_mcp.enrich_company()              [metered, gap-gated]
+    |       +---> explorium.enrich_company()             [metered, gap-gated]
+    |       +---> lusha.enrich_company()                 [metered, gap-gated]
+    |       +---> ai fallback                            [last resort]
+    |
+    +---> firmo_tiers.blend_company(results)   → blended dict + _provenance
+    |
+    +---> normalize_company_output()
+    |
+    +---> IntelCache (14-day TTL, keyed by domain)
+    |
+    v
+apply_enrichment_to_company(company, blended)  OR
+apply_enrichment_to_vendor(card, blended)
+    |
+    +---> _apply_enrichment: tier-arbitrated field writes
+    +---> companies/vendor_cards.enrichment_provenance = updated provenance store
+    +---> companies/vendor_cards.enrichment_source = blended source string
+```
+
+```
+Trigger: "Find Contacts" on CRM account
+    |
+    v
+enrichment_service.find_suggested_contacts(domain, name, title_filter, limit)
+    |
+    +---> enrichment_router.gather_contacts()
+    |       Phase 1 (concurrent): Hunter + Apollo + clay_mcp.find_contacts()
+    |       Phase 2 (escalation): Lusha → Explorium (only if verified < limit)
+    |
+    +---> firmo_tiers.blend_contacts(raw)   → deduped by email→linkedin→name,
+    |                                          per-field highest contact_tier wins
+    +---> relevance filter (_RELEVANT_KEYWORDS title check)
+    +---> returns list[dict], capped at limit
+```
+
+### Prospect Enrichment (legacy path)
+
+```
+Trigger: prospect scan OR background job
     |
     v
 enrichment_service.py (orchestrator)
@@ -1579,13 +1712,6 @@ enrichment_service.py (orchestrator)
     +---> Phase 1a: Free enrichment
     |       +---> prospect_free_enrichment.py (web search)
     |       +---> signature_parser.py (from email_signature_extracts)
-    |
-    +---> Phase 1b: API enrichment (ordered: Explorium → Lusha → Apollo → AI; gap-gated)
-    |       +---> prospect_discovery_explorium.py --> Explorium API
-    |       +---> lusha.py --> Lusha API v2 (contacts + firmographics; gated by
-    |       |       lusha_enrichment_enabled + LUSHA_API_KEY; 402/429 → credit-guard
-    |       |       circuit cooldown via enrichment_credit_guard.py)
-    |       +---> apollo.py --> Apollo.io API (gap-gated: skipped if Lusha filled all gaps)
     |
     +---> Phase 2: AI analysis
     |       +---> ai_service.py --> Claude API (company intel, ICP fit)

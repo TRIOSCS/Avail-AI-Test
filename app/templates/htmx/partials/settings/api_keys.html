@@ -49,11 +49,164 @@
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {LUSHA_API_KEY: val}}))"
                 hx-swap="none"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('lusha_api_key').value=''; htmx.trigger('#lusha-status', 'reload') }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
       <div id="lusha-status"></div>
+    </div>
+  </div>
+
+  {# ── Explorium ─────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Explorium</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Firmographics, intent &amp; contact data</p>
+      </div>
+      {% if explorium_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false}' class="space-y-3">
+      {% if explorium_api_key.is_set %}
+        <p class="text-xs text-brand-500 font-mono">Current: {{ explorium_api_key.masked }}</p>
+      {% endif %}
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input :type='show ? "text" : "password"' name="EXPLORIUM_API_KEY" id="explorium_api_key"
+                 placeholder="Explorium API key"
+                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+          <button type="button" @click='show = !show'
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
+            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+          </button>
+        </div>
+        <button type="button"
+                hx-put="/api/sources/explorium_enrichment/credentials"
+                hx-include="[name='EXPLORIUM_API_KEY']"
+                hx-vals='{"credentials": {}}'
+                hx-trigger="click"
+                hx-on::before-request="
+                  const val = document.getElementById('explorium_api_key').value;
+                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: {EXPLORIUM_API_KEY: val}}))"
+                hx-swap="none"
+                hx-on::after-request="if(event.detail.successful){ document.getElementById('explorium_api_key').value=''; htmx.trigger('#explorium-status', 'reload') }"
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
+          Save
+        </button>
+      </div>
+      <div id="explorium-status"></div>
+    </div>
+  </div>
+
+  {# ── Apollo ────────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Apollo</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Company + contact enrichment (free tier ~10k/mo)</p>
+      </div>
+      {% if apollo_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false}' class="space-y-3">
+      {% if apollo_api_key.is_set %}
+        <p class="text-xs text-brand-500 font-mono">Current: {{ apollo_api_key.masked }}</p>
+      {% endif %}
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input :type='show ? "text" : "password"' name="APOLLO_API_KEY" id="apollo_api_key"
+                 placeholder="Apollo API key"
+                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+          <button type="button" @click='show = !show'
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
+            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+          </button>
+        </div>
+        <button type="button"
+                hx-put="/api/sources/apollo_enrichment/credentials"
+                hx-include="[name='APOLLO_API_KEY']"
+                hx-vals='{"credentials": {}}'
+                hx-trigger="click"
+                hx-on::before-request="
+                  const val = document.getElementById('apollo_api_key').value;
+                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: {APOLLO_API_KEY: val}}))"
+                hx-swap="none"
+                hx-on::after-request="if(event.detail.successful){ document.getElementById('apollo_api_key').value=''; htmx.trigger('#apollo-status', 'reload') }"
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
+          Save
+        </button>
+      </div>
+      <div id="apollo-status"></div>
+    </div>
+  </div>
+
+  {# ── Hunter ────────────────────────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-xl p-5">
+    <div class="flex items-center justify-between mb-4">
+      <div>
+        <h3 class="text-sm font-semibold text-brand-900">Hunter</h3>
+        <p class="text-xs text-brand-500 mt-0.5">Email discovery by domain</p>
+      </div>
+      {% if hunter_api_key.is_set %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
+        </span>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
+        </span>
+      {% endif %}
+    </div>
+    <div x-data='{"show": false}' class="space-y-3">
+      {% if hunter_api_key.is_set %}
+        <p class="text-xs text-brand-500 font-mono">Current: {{ hunter_api_key.masked }}</p>
+      {% endif %}
+      <div class="flex gap-2">
+        <div class="relative flex-1">
+          <input :type='show ? "text" : "password"' name="HUNTER_API_KEY" id="hunter_api_key"
+                 placeholder="Hunter API key"
+                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
+          <button type="button" @click='show = !show'
+                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
+            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
+          </button>
+        </div>
+        <button type="button"
+                hx-put="/api/sources/hunter_enrichment/credentials"
+                hx-include="[name='HUNTER_API_KEY']"
+                hx-vals='{"credentials": {}}'
+                hx-trigger="click"
+                hx-on::before-request="
+                  const val = document.getElementById('hunter_api_key').value;
+                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
+                  this.setAttribute('hx-vals', JSON.stringify({credentials: {HUNTER_API_KEY: val}}))"
+                hx-swap="none"
+                hx-on::after-request="if(event.detail.successful){ document.getElementById('hunter_api_key').value=''; htmx.trigger('#hunter-status', 'reload') }"
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
+          Save
+        </button>
+      </div>
+      <div id="hunter-status"></div>
     </div>
   </div>
 
@@ -97,7 +250,7 @@
                   if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {CLAY_API_KEY: val}}))"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('clay_api_key').value='' }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
