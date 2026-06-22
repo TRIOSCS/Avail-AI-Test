@@ -979,6 +979,8 @@ class TestEnrichment:
         assert resp.status_code == 404
 
     def test_add_suggested_to_site_success(self, client, db_session, test_customer_site):
+        """Creates a real SiteContact row; does NOT write legacy site.contact_*
+        fields."""
         resp = client.post(
             "/api/suggested-contacts/add-to-site",
             json={
@@ -989,14 +991,101 @@ class TestEnrichment:
                     "phone": "+1-555-0100",
                     "title": "VP Sales",
                     "linkedin_url": "https://linkedin.com/in/suggested",
+                    "source": "hunter",
+                    "email_verified": True,
                 },
             },
         )
         assert resp.status_code == 200
-        assert resp.json()["ok"] is True
+        body = resp.json()
+        assert body["ok"] is True
+        assert body["added"] == 1
+        assert "contact_id" in body
+
+        sc = (
+            db_session.query(SiteContact)
+            .filter_by(customer_site_id=test_customer_site.id, email="suggested@acme.com")
+            .first()
+        )
+        assert sc is not None
+        assert sc.full_name == "Suggested Person"
+        assert sc.title == "VP Sales"
+        assert sc.phone == "+1-555-0100"
+        assert sc.linkedin_url == "https://linkedin.com/in/suggested"
+        assert sc.enrichment_source == "hunter"
+        assert sc.email_verified is True
+
+        # Legacy site.contact_* fields must NOT be used as storage anymore
         db_session.refresh(test_customer_site)
-        assert test_customer_site.contact_name == "Suggested Person"
-        assert test_customer_site.contact_email == "suggested@acme.com"
+        assert (
+            test_customer_site.contact_name != "Suggested Person"
+            or test_customer_site.contact_email != "suggested@acme.com"
+        )
+
+    def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site):
+        """Posting the same email twice returns added:0 on the second call; only one row
+        exists."""
+        payload = {
+            "site_id": test_customer_site.id,
+            "contact": {
+                "full_name": "First Post",
+                "email": "dedup@acme.com",
+            },
+        }
+        resp1 = client.post("/api/suggested-contacts/add-to-site", json=payload)
+        assert resp1.status_code == 200
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post("/api/suggested-contacts/add-to-site", json=payload)
+        assert resp2.status_code == 200
+        assert resp2.json()["added"] == 0
+
+        count = (
+            db_session.query(SiteContact)
+            .filter_by(customer_site_id=test_customer_site.id, email="dedup@acme.com")
+            .count()
+        )
+        assert count == 1
+
+    def test_add_suggested_to_site_lowercase_email_dedup(self, client, db_session, test_customer_site):
+        """Email dedup is case-insensitive (UPPER vs lower → still dedups)."""
+        resp1 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "Alice", "email": "Alice@ACME.COM"},
+            },
+        )
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "Alice Again", "email": "alice@acme.com"},
+            },
+        )
+        assert resp2.json()["added"] == 0
+
+    def test_add_suggested_to_site_name_dedup_null_email(self, client, db_session, test_customer_site):
+        """When email is absent, dedup by case-insensitive full_name within the site."""
+        resp1 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "No Email Person"},
+            },
+        )
+        assert resp1.json()["added"] == 1
+
+        resp2 = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {"full_name": "no email person"},
+            },
+        )
+        assert resp2.json()["added"] == 0
 
 
 # ── Sync logs ─────────────────────────────────────────────────────────

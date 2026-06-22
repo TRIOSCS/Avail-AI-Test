@@ -363,8 +363,16 @@ def company_contact_rows(db: Session, company_id: int, sites: list[CustomerSite]
             .all()
         )
     rows = [{"contact": c, "site": site_map.get(c.customer_site_id), "legacy": False} for c in contacts]
+    # Build a set of lowercased emails already covered by real SiteContacts so that
+    # legacy site.contact_* rows with the same email are suppressed (dedup a migrated
+    # site that now has a real SiteContact for the same person).
+    real_emails: set[str] = {c.email.lower() for c in contacts if c.email}
     for s in sites:
         if s.contact_name or s.contact_email:
+            legacy_email = (s.contact_email or "").strip().lower()
+            if legacy_email and legacy_email in real_emails:
+                # A real SiteContact already covers this address — suppress the legacy row.
+                continue
             rows.append({"contact": None, "site": s, "legacy": True})
     return rows
 

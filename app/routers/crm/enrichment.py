@@ -7,7 +7,7 @@ from ...config import settings
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_admin, require_buyer, require_user
-from ...models import Company, CustomerSite, SyncLog, User, VendorCard, VendorContact
+from ...models import Company, CustomerSite, SiteContact, SyncLog, User, VendorCard, VendorContact
 from ...rate_limit import limiter
 from ...schemas.crm import AddContactsToVendor, AddContactToSite, CustomerImportRow, EnrichDomainRequest
 from ...services.credential_service import get_credential_cached
@@ -178,23 +178,74 @@ async def add_suggested_to_site(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Set a suggested contact as the primary contact on a customer site."""
+    """Add a suggested contact as a real SiteContact on a customer site.
+
+    Mirrors add_suggested_to_vendor: resolves the site (404 if missing),
+    deduplicates per-site by case-insensitive email (or by case-insensitive
+    full_name when email is absent), and creates a SiteContact with
+    enrichment_source tagged for provenance.
+    """
     site = db.get(CustomerSite, payload.site_id)
     if not site:
         raise HTTPException(404, "Customer site not found")
     c = payload.contact
-    if c.full_name:
-        site.contact_name = c.full_name
+    # Email-based dedup (case-insensitive, mirrors create_site_contact :6003)
     if c.email:
-        site.contact_email = c.email
-    if c.phone:
-        site.contact_phone = c.phone
-    if c.title:
-        site.contact_title = c.title
-    if c.linkedin_url:
-        site.contact_linkedin = c.linkedin_url
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == payload.site_id,
+                sqlfunc.lower(SiteContact.email) == c.email,  # already lowercased by schema validator
+            )
+            .first()
+        )
+        if existing:
+            logger.debug(
+                "add_suggested_to_site: dedup by email for site_id={} email={}",
+                payload.site_id,
+                c.email,
+            )
+            return {"ok": True, "added": 0, "deduped": True}
+    else:
+        # Null-email dedup: case-insensitive full_name within the site
+        # (without this, PG allows multiple NULL-email rows — silent dupes)
+        if c.full_name:
+            existing_name = (
+                db.query(SiteContact)
+                .filter(
+                    SiteContact.customer_site_id == payload.site_id,
+                    SiteContact.email.is_(None),
+                    sqlfunc.lower(SiteContact.full_name) == c.full_name.strip().lower(),
+                )
+                .first()
+            )
+            if existing_name:
+                logger.debug(
+                    "add_suggested_to_site: dedup by name for site_id={} name={}",
+                    payload.site_id,
+                    c.full_name,
+                )
+                return {"ok": True, "added": 0, "deduped": True}
+
+    sc = SiteContact(
+        customer_site_id=payload.site_id,
+        full_name=(c.full_name or "").strip() or "Unknown",
+        title=c.title,
+        email=c.email or None,
+        phone=c.phone,
+        linkedin_url=c.linkedin_url,
+        enrichment_source=c.source or "enrichment",
+        email_verified=c.email_verified,
+    )
+    db.add(sc)
     db.commit()
-    return {"ok": True}
+    db.refresh(sc)
+    logger.info(
+        "add_suggested_to_site: created SiteContact id={} for site_id={}",
+        sc.id,
+        payload.site_id,
+    )
+    return {"ok": True, "added": 1, "contact_id": sc.id}
 
 
 @router.get("/api/admin/sync-logs")

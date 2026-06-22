@@ -315,6 +315,18 @@ class SuggestedSiteContact(BaseModel):
     phone: str | None = None
     title: str | None = None
     linkedin_url: str | None = None
+    source: str = "enrichment"
+    email_verified: bool = False
+
+    @field_validator("email")
+    @classmethod
+    def email_lower_or_none(cls, v: str | None) -> str | None:
+        """Lowercase and strip the email, or return None if blank — must not raise on
+        missing email so that the not_found 404 path (no email posted) still works."""
+        if v is None:
+            return v
+        v = v.strip()
+        return v.lower() if v else None
 
 
 class AddContactToSite(BaseModel):

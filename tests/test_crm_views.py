@@ -662,6 +662,47 @@ class TestContactPanel:
         assert "Ghost Contact" not in tab.text
         assert "Ghost Legacy" not in tab.text
 
+    def test_legacy_and_real_same_email_renders_one_row(self, client: TestClient, db_session: Session, test_user: User):
+        """When a site has both a legacy contact_* entry AND a real SiteContact with the
+        same email, company_contact_rows dedup ensures only one row is rendered — the
+        real SiteContact wins and the legacy duplicate is suppressed."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Dedup Legacy Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        # Site carries legacy contact_* fields
+        site = CustomerSite(
+            company_id=company.id,
+            site_name="HQ",
+            is_active=True,
+            contact_name="Legacy Jane",
+            contact_email="shared@dedup.com",
+        )
+        db_session.add(site)
+        db_session.flush()
+        # Real SiteContact with the same email
+        sc = SiteContact(
+            customer_site_id=site.id,
+            full_name="Real Jane",
+            email="shared@dedup.com",
+            enrichment_source="hunter",
+        )
+        db_session.add(sc)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        # The real SiteContact name must appear
+        assert "Real Jane" in html
+        # The legacy duplicate must NOT appear as a second card (its name is suppressed)
+        assert "Legacy Jane" not in html, (
+            "Legacy contact should be suppressed when a real SiteContact has the same email"
+        )
+        # Confirm only 1 contact entry rendered (the site grouping shows "1 contact")
+        assert "1 contact" in html, "Site group should show 1 contact, not 2"
+
 
 class TestEmailIntelligenceInActivity:
     """Test email intelligence data shown in activity tabs."""
