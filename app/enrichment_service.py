@@ -21,6 +21,38 @@ from .services.credential_service import get_credential_cached
 from .services.enrichment_credit_guard import ProviderQuotaError, circuit_open, trip_circuit
 from .utils.claude_client import claude_json, claude_text
 
+# ── Contact relevance ─────────────────────────────────────────────────────
+
+# B2B title keywords used to filter suggested contacts to procurement-relevant roles.
+# Referenced by find_suggested_contacts and find_suggested_contacts_with_errors — single source.
+_RELEVANT_CONTACT_KEYWORDS: frozenset[str] = frozenset(
+    {
+        "procurement",
+        "purchasing",
+        "buyer",
+        "sourcing",
+        "supply chain",
+        "component",
+        "commodity",
+        "materials",
+        "vendor",
+        "supplier",
+        "sales",
+        "account",
+        "business development",
+        "director",
+        "president",
+        "vp",
+        "manager",
+        "engineer",
+        "operations",
+        "logistics",
+        "inventory",
+        "planning",
+        "quality",
+    }
+)
+
 # ── Normalization ────────────────────────────────────────────────────────
 
 # Acronyms to preserve in Title Case conversions
@@ -647,39 +679,13 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
         unique.append(c)
 
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
-    _RELEVANT_KEYWORDS = {
-        "procurement",
-        "purchasing",
-        "buyer",
-        "sourcing",
-        "supply chain",
-        "component",
-        "commodity",
-        "materials",
-        "vendor",
-        "supplier",
-        "sales",
-        "account",
-        "business development",
-        "director",
-        "president",
-        "vp",
-        "manager",
-        "engineer",
-        "operations",
-        "logistics",
-        "inventory",
-        "planning",
-        "quality",
-    }
-
-    def _is_relevant(contact: dict) -> bool:
-        title = (contact.get("title") or "").lower()
-        if not title:
-            return bool(contact.get("email"))  # Keep if has email but no title
-        return any(kw in title for kw in _RELEVANT_KEYWORDS)
-
-    filtered = [c for c in unique if _is_relevant(c)]
+    filtered = [
+        c
+        for c in unique
+        if not (t := (c.get("title") or "").lower())
+        or any(kw in t for kw in _RELEVANT_CONTACT_KEYWORDS)
+        or bool(c.get("email"))
+    ]
     # If filter removed everything, return unfiltered (don't lose all results)
     return filtered if filtered else unique
 
@@ -750,39 +756,13 @@ async def find_suggested_contacts_with_errors(
         unique.append(c)
 
     # Filter to relevant B2B titles
-    _RELEVANT_KEYWORDS = {
-        "procurement",
-        "purchasing",
-        "buyer",
-        "sourcing",
-        "supply chain",
-        "component",
-        "commodity",
-        "materials",
-        "vendor",
-        "supplier",
-        "sales",
-        "account",
-        "business development",
-        "director",
-        "president",
-        "vp",
-        "manager",
-        "engineer",
-        "operations",
-        "logistics",
-        "inventory",
-        "planning",
-        "quality",
-    }
-
-    def _is_relevant(contact: dict) -> bool:
-        title = (contact.get("title") or "").lower()
-        if not title:
-            return bool(contact.get("email"))
-        return any(kw in title for kw in _RELEVANT_KEYWORDS)
-
-    filtered = [c for c in unique if _is_relevant(c)]
+    filtered = [
+        c
+        for c in unique
+        if not (t := (c.get("title") or "").lower())
+        or any(kw in t for kw in _RELEVANT_CONTACT_KEYWORDS)
+        or bool(c.get("email"))
+    ]
     contacts = filtered if filtered else unique
     return contacts, errored
 
