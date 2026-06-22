@@ -1015,11 +1015,11 @@ class TestEnrichment:
         assert sc.enrichment_source == "hunter"
         assert sc.email_verified is True
 
-        # Legacy site.contact_* fields must NOT be used as storage anymore
+        # Legacy site.contact_* fields must NOT be overwritten — neither field may change
         db_session.refresh(test_customer_site)
-        assert (
-            test_customer_site.contact_name != "Suggested Person"
-            or test_customer_site.contact_email != "suggested@acme.com"
+        assert test_customer_site.contact_name == "Jane Doe", "Legacy contact_name must not be overwritten"
+        assert test_customer_site.contact_email == "jane@acme-electronics.com", (
+            "Legacy contact_email must not be overwritten"
         )
 
     def test_add_suggested_to_site_dedup_same_email(self, client, db_session, test_customer_site):
