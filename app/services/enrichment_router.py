@@ -121,9 +121,12 @@ async def _gather_cheap_contacts(domain: str, title_filter: str, limit: int) -> 
     """
     _mod = sys.modules[__name__]
 
-    tasks = []
+    # Build (provider_name, coroutine) pairs so we can attribute ProviderQuotaError
+    # outcomes to the correct provider and call trip_circuit when appropriate.
+    # provider_name is None for Hunter (free tier — no circuit/cooldown).
+    named_tasks: list[tuple[str | None, object]] = []
 
-    # Hunter.io — free, always-run when key exists
+    # Hunter.io — free, always-run when key exists; no credit guard → no circuit trip
     if settings.hunter_enrichment_enabled:
 
         async def _hunter() -> list[dict]:
@@ -131,55 +134,47 @@ async def _gather_cheap_contacts(domain: str, title_filter: str, limit: int) -> 
 
             return await _hunter_find_contacts(domain)
 
-        tasks.append(_hunter())
+        named_tasks.append((None, _hunter()))
 
     # Apollo — cheap (API key is a flat-rate plan)
     if settings.apollo_api_key:
-        tasks.append(apollo.search_contacts(domain, settings.apollo_api_key, limit))
+        named_tasks.append(("apollo", apollo.search_contacts(domain, settings.apollo_api_key, limit)))
 
     # Clay — not verified, but cheap credit-wise
     if settings.clay_enrichment_enabled and not _mod.circuit_open("clay"):
-        tasks.append(clay_mcp.find_contacts(domain, title_filter, limit, want_email=False))
+        named_tasks.append(("clay", clay_mcp.find_contacts(domain, title_filter, limit, want_email=False)))
 
-    if not tasks:
+    if not named_tasks:
         return []
 
+    provider_names = [name for name, _ in named_tasks]
+    coros = [coro for _, coro in named_tasks]
+
     results: list[dict] = []
-    for outcome in await asyncio.gather(*tasks, return_exceptions=True):
+    for provider_name, outcome in zip(provider_names, await asyncio.gather(*coros, return_exceptions=True)):
         if isinstance(outcome, list):
             results.extend(outcome)
         elif isinstance(outcome, _cg.ProviderQuotaError):
-            logger.warning("Cheap contacts provider quota error: {}", outcome)
+            if provider_name is not None:
+                logger.warning("{} cheap-contacts quota/rate-limit — tripping circuit", provider_name)
+                _mod.trip_circuit(
+                    provider_name,
+                    settings.clay_cooldown_minutes if provider_name == "clay" else settings.apollo_cooldown_minutes,
+                )
+            else:
+                logger.warning("Cheap contacts provider quota error: {}", outcome)
     return results
 
 
 # ── circuit-guarded single-result helper ─────────────────────────────────────
 
 
-async def _guarded(provider: str, coro, cooldown: int, results: list) -> None:
-    """Await *coro*; append a non-None result to *results*; swallow ProviderQuotaError.
-
-    Uses the module-level circuit_open/trip_circuit wrappers so tests can monkeypatch
-    them. The coroutine must already be created by the caller (used for free providers
-    only).
-    """
-    _mod = sys.modules[__name__]
-    if _mod.circuit_open(provider):
-        return
-    try:
-        r = await coro
-        if r:
-            results.append(r)
-    except ProviderQuotaError:
-        logger.warning("{} quota/rate-limit — tripping circuit", provider)
-        _mod.trip_circuit(provider, cooldown)
-
-
 async def _guarded_lazy(provider: str, factory, cooldown: int, results: list) -> None:
-    """Like _guarded but accepts a factory callable instead of a pre-built coroutine.
+    """Invoke *factory()* to create a coroutine; await it; append non-None result.
 
     The factory is only called after the circuit_open check, preventing unawaited-
-    coroutine RuntimeWarnings when the circuit is open.
+    coroutine RuntimeWarnings when the circuit is open. Uses the module-level
+    circuit_open/trip_circuit wrappers so tests can monkeypatch them.
     """
     _mod = sys.modules[__name__]
     if _mod.circuit_open(provider):
@@ -209,13 +204,15 @@ async def gather_company(domain: str, name: str = "") -> list[dict]:
     results: list[dict] = []
 
     # FREE — always-run (guarded by feature flag only; no credit cost)
+    # Use _guarded_lazy so the coroutine is only created after the circuit_open check,
+    # preventing "coroutine was never awaited" RuntimeWarnings when the circuit is open.
     if settings.sam_gov_enrichment_enabled:
-        await _guarded("sam_gov", _mod._sam_company(domain, name), 15, results)
-    await _guarded("apollo", _mod._apollo_company(domain, name), settings.apollo_cooldown_minutes, results)
+        await _guarded_lazy("sam_gov", lambda: _mod._sam_company(domain, name), 15, results)
+    await _guarded_lazy("apollo", lambda: _mod._apollo_company(domain, name), settings.apollo_cooldown_minutes, results)
 
     # METERED — gap-gated, ascending cost order
-    # factory is called inside _guarded (after circuit_open check) to avoid creating an
-    # unawaited coroutine when the circuit is open.
+    # factory is called inside _guarded_lazy (after circuit_open check) to avoid creating
+    # an unawaited coroutine when the circuit is open.
     metered = [
         ("clay", lambda: _mod._clay_company(domain), settings.clay_cooldown_minutes, settings.clay_enrichment_enabled),
         (
@@ -237,7 +234,7 @@ async def gather_company(domain: str, name: str = "") -> list[dict]:
 
     # AI — last resort
     if _gaps_remain(results):
-        await _guarded("ai", _mod._ai_company(domain, name), 15, results)
+        await _guarded_lazy("ai", lambda: _mod._ai_company(domain, name), 15, results)
 
     return results
 

@@ -86,6 +86,7 @@ async def test_company_order_free_then_metered_and_gap_gates(monkeypatch):
     assert "explorium" not in calls
     assert "clay" not in calls
     assert "ai" not in calls
+    assert "lusha" not in calls
     assert len(results) == 2
 
 
@@ -409,6 +410,69 @@ async def test_contacts_escalation_circuit_open_skips_provider(monkeypatch):
     await er.gather_contacts("example.com", "Example", "", 5)
 
     assert not lusha_called
+
+
+# ── sam_gov_company adapter ───────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_company_free_provider_circuit_open_not_awaited(monkeypatch):
+    """When apollo circuit is open, _apollo_company is never invoked (lazy factory)."""
+    apollo_called = []
+
+    async def apollo_stub(d, n):
+        apollo_called.append("apollo")
+        return None
+
+    async def sam_stub(d, n):
+        return None
+
+    async def noop(d, n):
+        return None
+
+    async def noop_clay(d):
+        return None
+
+    monkeypatch.setattr(er, "_sam_company", sam_stub)
+    monkeypatch.setattr(er, "_apollo_company", apollo_stub)
+    monkeypatch.setattr(er, "_clay_company", noop_clay)
+    monkeypatch.setattr(er, "_explorium_company", noop)
+    monkeypatch.setattr(er, "_lusha_company", noop)
+    monkeypatch.setattr(er, "_ai_company", noop)
+    monkeypatch.setattr(er.settings, "sam_gov_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "explorium_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "lusha_enrichment_enabled", False)
+    # Only apollo circuit is open
+    monkeypatch.setattr(er, "circuit_open", lambda p: p == "apollo")
+
+    await er.gather_company("example.com", "Example")
+
+    assert apollo_called == [], "apollo stub must not be called when circuit is open"
+
+
+@pytest.mark.asyncio
+async def test_cheap_contacts_quota_trips_circuit(monkeypatch):
+    """ProviderQuotaError from clay in cheap gather trips the circuit for clay."""
+    tripped: list[tuple[str, int]] = []
+
+    async def clay_quota(domain, title_filter, limit, want_email=False):
+        raise er.ProviderQuotaError("clay quota")
+
+    monkeypatch.setattr(er, "trip_circuit", lambda p, m: tripped.append((p, m)))
+    monkeypatch.setattr(er, "circuit_open", lambda p: False)
+    monkeypatch.setattr(er.settings, "clay_enrichment_enabled", True)
+    monkeypatch.setattr(er.settings, "hunter_enrichment_enabled", False)
+    monkeypatch.setattr(er.settings, "apollo_api_key", "")
+
+    import app.connectors.clay_mcp as clay_mod
+
+    monkeypatch.setattr(clay_mod, "find_contacts", clay_quota)
+
+    results = await er._gather_cheap_contacts("example.com", "", 5)
+
+    assert any(p == "clay" for p, _ in tripped), "trip_circuit must be called with 'clay'"
+    assert isinstance(results, list)
 
 
 # ── sam_gov_company adapter ───────────────────────────────────────────────────
