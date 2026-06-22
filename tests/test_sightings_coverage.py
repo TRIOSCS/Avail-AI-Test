@@ -882,13 +882,18 @@ class TestSightingsSkipReasonEnum:
     """SightingsSkipReason StrEnum is defined in app/constants.py."""
 
     def test_skip_reason_enum_values(self):
-        """SightingsSkipReason has READY, NO_EMAIL, UNAVAILABLE, DO_NOT_CONTACT."""
+        """SightingsSkipReason has READY, NO_EMAIL, DO_NOT_CONTACT.
+
+        UNAVAILABLE is intentionally absent — unavailable vendors are partitioned
+        out before the per-entry skip_reason loop and reported in a separate
+        ``unavailable_vendors`` block, so skip_reason never carries that value.
+        """
         from app.constants import SightingsSkipReason
 
         assert SightingsSkipReason.READY == "ready"
         assert SightingsSkipReason.NO_EMAIL == "no_email"
-        assert SightingsSkipReason.UNAVAILABLE == "unavailable"
         assert SightingsSkipReason.DO_NOT_CONTACT == "do_not_contact"
+        assert not hasattr(SightingsSkipReason, "UNAVAILABLE")
 
 
 class TestDncEmailsForCards:
@@ -955,19 +960,34 @@ class TestDncEmailsForCards:
 
     def test_dnc_advisory_subset_of_send_path(self, db_session):
         """Advisory DNC set (from _dnc_emails_for_cards) is a subset of the emails
-        send_batch_rfq actually skips — guarantee advisory ⊆ send-time check."""
+        send_batch_rfq actually skips — guarantee advisory ⊆ send-time check.
+
+        Tests both exact-case and mixed-case: the SiteContact is stored lowercase,
+        the VendorContact email is mixed-case.  Both advisory and send-path use
+        case-insensitive comparison, so both must flag the vendor.
+        """
         from app.email_service import send_batch_rfq
         from app.routers.sightings import _dnc_emails_for_cards
 
+        # --- exact-case scenario ---
         email = "blocked@vendor.com"
         card = self._make_vendor_with_email(db_session, "Blockedco", "blockedco", email)
         _seed_dnc_site_contact(db_session, email)
+
+        # --- mixed-case scenario: VendorContact is mixed-case, SiteContact is lower ---
+        mixed_vendor_email = "Mixed@CaseVendor.COM"
+        mixed_site_email = mixed_vendor_email.lower()
+        card_mc = self._make_vendor_with_email(db_session, "Mixedcasevendor", "mixedcasevendor", mixed_vendor_email)
+        _seed_dnc_site_contact(db_session, mixed_site_email)
         db_session.commit()
 
-        advisory = _dnc_emails_for_cards(db_session, [card.id])
+        advisory = _dnc_emails_for_cards(db_session, [card.id, card_mc.id])
         assert email.lower() in advisory
+        assert mixed_vendor_email.lower() in advisory, (
+            "Advisory must flag mixed-case vendor email via case-insensitive join"
+        )
 
-        # Run the send path with a fake token — expect the email to be DNC-skipped.
+        # Run the send path — both emails must be DNC-skipped.
         # GraphClient is lazy-imported inside send_batch_rfq, so patch at that location.
         with patch("app.utils.graph_client.GraphClient") as mock_gc_cls:
             mock_gc = AsyncMock()
@@ -987,14 +1007,24 @@ class TestDncEmailsForCards:
                             "parts": [{"mpn": "BLK-001", "qty": 5}],
                             "subject": "RFQ test",
                             "body": "test body",
-                        }
+                        },
+                        {
+                            "vendor_name": "Mixedcasevendor",
+                            "vendor_email": mixed_vendor_email,
+                            "parts": [{"mpn": "BLK-002", "qty": 3}],
+                            "subject": "RFQ test",
+                            "body": "test body",
+                        },
                     ],
                 )
             )
 
-        # The send path must also skip it — advisory ⊆ send-path skip set
         send_skipped = {r["vendor_email"] for r in results if r["status"] == "skipped"}
+        # advisory ⊆ send-path skip set for both exact-case and mixed-case
         assert email in send_skipped
+        assert mixed_vendor_email in send_skipped, (
+            "send_batch_rfq must DNC-skip mixed-case vendor email (case-insensitive check)"
+        )
 
 
 class TestVendorModalDNCChip:

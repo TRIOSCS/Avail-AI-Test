@@ -664,13 +664,16 @@ class SightingsSkipReason(StrEnum):
     skipped. The authoritative skip stays in send_batch_rfq (TOCTOU guard) — this enum
     is advisory only and never gates the actual send.
 
-    READY          — vendor has a resolvable email and is not DNC/unavailable. NO_EMAIL
-    — no resolvable VendorContact email (amber badge). UNAVAILABLE    — vendor has an
-    active VendorPartUnavailability record (rose badge). DO_NOT_CONTACT — vendor contact
-    email matches a do_not_contact SiteContact (rose badge).
+    Unavailable vendors are partitioned out *before* the per-entry skip_reason loop
+    and placed in a separate ``unavailable_vendors`` list, so they never reach the
+    previews list and this enum never carries an UNAVAILABLE value.
+
+    READY          — vendor has a resolvable email and is not DNC (green / no badge).
+    NO_EMAIL       — no resolvable VendorContact email (amber badge).
+    DO_NOT_CONTACT — vendor contact email matches a do_not_contact SiteContact
+                     (rose badge).
     """
 
     READY = "ready"
     NO_EMAIL = "no_email"
-    UNAVAILABLE = "unavailable"
     DO_NOT_CONTACT = "do_not_contact"

@@ -173,15 +173,17 @@ async def send_batch_rfq(
             continue
 
         # DNC check — skip any email address that belongs to a do-not-contact
-        # SiteContact. Reported as "skipped" (same mechanism as no-email), with
-        # an explicit "do-not-contact" reason so the caller can surface it
-        # distinctly (compliance: the address must never appear in sendMail).
+        # SiteContact. Case-insensitive comparison (func.lower on both sides)
+        # matches the advisory check in _dnc_emails_for_cards so advisory ⊆
+        # send-time. Compliance: the address must never appear in sendMail.
+        from sqlalchemy import func as sqla_func
+
         from .models.crm import SiteContact
 
         dnc_match = (
             db.query(SiteContact)
             .filter(
-                SiteContact.email == email,
+                sqla_func.lower(SiteContact.email) == email.lower(),
                 SiteContact.do_not_contact.is_(True),
             )
             .first()

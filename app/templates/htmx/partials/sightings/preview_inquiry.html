@@ -2,8 +2,9 @@
    Called by: preview-inquiry endpoint via HTMX POST from vendor_modal.html
    Depends on: previews context (vendor_name, vendor_email, subject, html_body, parts,
                skip_reason), unavailable_vendors list.
-   skip_reason values: "ready" | "no_email" | "unavailable" | "do_not_contact"
-   Badge color: amber = no_email; rose = unavailable | do_not_contact.
+   skip_reason values: "ready" | "no_email" | "do_not_contact"
+   Badge color: amber = no_email; rose = do_not_contact.
+   Unavailable vendors are reported separately in the unavailable_vendors block above.
 #}
 
 <div class="space-y-4">
