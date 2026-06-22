@@ -215,45 +215,23 @@
     <div class="flex items-center justify-between mb-4">
       <div>
         <h3 class="text-sm font-semibold text-brand-900">Clay</h3>
-        <p class="text-xs text-brand-500 mt-0.5">AI-powered enrichment waterfall and contact discovery</p>
+        <p class="text-xs text-brand-500 mt-0.5">OAuth connection to Clay's MCP — enrichment waterfall + contact discovery.</p>
       </div>
-      {% if clay_api_key.is_set %}
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Configured
-        </span>
-      {% else %}
-        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
-          <span class="w-1.5 h-1.5 rounded-full bg-amber-400"></span>Not set
-        </span>
-      {% endif %}
     </div>
-    <div x-data='{"show": false}' class="space-y-3">
-      {% if clay_api_key.is_set %}
-        <p class="text-xs text-brand-500 font-mono">Current: {{ clay_api_key.masked }}</p>
+    <div class="flex items-center gap-3">
+      {% if clay_connected %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Connected
+        </span>
+        <a href="/auth/clay/connect" class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">Reconnect</a>
+        <button type="button" hx-post="/auth/clay/disconnect" hx-swap="none"
+                class="btn-md border border-brand-200 text-brand-700 font-medium rounded-lg hover:bg-brand-50">Disconnect</button>
+      {% else %}
+        <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium {{ 'bg-amber-50 text-amber-700' if clay_needs_reconnect else 'bg-brand-50 text-brand-600' }}">
+          <span class="w-1.5 h-1.5 rounded-full {{ 'bg-amber-400' if clay_needs_reconnect else 'bg-brand-300' }}"></span>{{ 'Needs reconnect' if clay_needs_reconnect else 'Not connected' }}
+        </span>
+        <a href="/auth/clay/connect" class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">Connect Clay</a>
       {% endif %}
-      <div class="flex gap-2">
-        <div class="relative flex-1">
-          <input :type='show ? "text" : "password"' name="CLAY_API_KEY" id="clay_api_key"
-                 placeholder="Clay API key"
-                 class="w-full text-sm border border-brand-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-brand-400 focus:border-brand-400 pr-10">
-          <button type="button" @click='show = !show'
-                  class="absolute right-2 top-1/2 -translate-y-1/2 text-brand-400 hover:text-brand-600">
-            <svg x-show='!show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-            <svg x-show='show' class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.542-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.542 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"/></svg>
-          </button>
-        </div>
-        <button type="button"
-                hx-put="/api/sources/clay_enrichment/credentials"
-                hx-swap="none"
-                hx-on::before-request="
-                  const val = document.getElementById('clay_api_key').value;
-                  if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
-                  this.setAttribute('hx-vals', JSON.stringify({credentials: {CLAY_API_KEY: val}}))"
-                hx-on::after-request="if(event.detail.successful){ document.getElementById('clay_api_key').value='' }"
-                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
-          Save
-        </button>
-      </div>
     </div>
   </div>
 

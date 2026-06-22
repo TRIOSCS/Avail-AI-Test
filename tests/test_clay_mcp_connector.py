@@ -1,12 +1,13 @@
 """Tests for the Clay MCP backend connector (app/connectors/clay_mcp.py).
 
-Monkeypatches _mcp_call / _poll_emails / _resolve_key — no network I/O.
+Monkeypatches _mcp_call / _poll_emails / clay_oauth.get_access_token — no network I/O.
 Covers:
 - enrich_company field mapping (legal_name, hq_state from locality, revenue_range,
   ticker from NYSE description)
 - find_contacts domain filter (ex-employees at foreign domains dropped)
-- disabled-without-key short-circuit (both functions)
+- disabled-without-token short-circuit (both functions)
 - ProviderQuotaError propagates out of enrich_company (not swallowed)
+- 401 response triggers one refresh + retry in _mcp_call
 """
 
 import pytest
@@ -65,7 +66,10 @@ CONTACTS_PAYLOAD = {
 async def test_enrich_company_maps_base_fields(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return COMPANY_PAYLOAD
@@ -87,7 +91,10 @@ async def test_enrich_company_maps_base_fields(monkeypatch):
 async def test_enrich_company_nasdaq_ticker(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return {
@@ -112,7 +119,10 @@ async def test_enrich_company_nasdaq_ticker(monkeypatch):
 async def test_enrich_company_returns_none_for_empty_payload(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return {}
@@ -128,7 +138,10 @@ async def test_enrich_company_propagates_quota_error(monkeypatch):
     """ProviderQuotaError must NOT be swallowed — it propagates to the caller."""
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         raise ProviderQuotaError("Clay MCP quota/rate-limit: 429")
@@ -140,13 +153,14 @@ async def test_enrich_company_propagates_quota_error(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_disabled_without_key_enrich_company(monkeypatch):
+async def test_enrich_company_none_when_not_connected(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "")
+    async def no_token():
+        return None
 
-    out = await clay_mcp.enrich_company("x.com")
-    assert out is None
+    monkeypatch.setattr(clay_mcp, "_access_token", no_token)
+    assert await clay_mcp.enrich_company("arrow.com") is None
 
 
 # ── find_contacts ────────────────────────────────────────────────────────────
@@ -156,7 +170,10 @@ async def test_disabled_without_key_enrich_company(monkeypatch):
 async def test_find_contacts_filters_to_target_domain(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return CONTACTS_PAYLOAD
@@ -179,7 +196,10 @@ async def test_find_contacts_filters_to_target_domain(monkeypatch):
 async def test_find_contacts_maps_fields(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return CONTACTS_PAYLOAD
@@ -205,7 +225,10 @@ async def test_find_contacts_maps_fields(monkeypatch):
 async def test_find_contacts_includes_polled_email(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         return CONTACTS_PAYLOAD
@@ -226,7 +249,10 @@ async def test_find_contacts_includes_polled_email(monkeypatch):
 async def test_find_contacts_respects_limit(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     many_contacts = {
         "contacts": [{"name": f"Person {i}", "domain": "arrow.com", "entityId": f"e{i}"} for i in range(20)]
@@ -251,7 +277,10 @@ async def test_find_contacts_propagates_quota_error(monkeypatch):
     """ProviderQuotaError must NOT be swallowed — it propagates to the caller."""
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+    async def fake_token():
+        return "TESTTOKEN"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", fake_token)
 
     async def fake_call(tool, args):
         raise ProviderQuotaError("Clay MCP quota/rate-limit: 429")
@@ -266,7 +295,81 @@ async def test_find_contacts_propagates_quota_error(monkeypatch):
 async def test_disabled_without_key_find_contacts(monkeypatch):
     from app.connectors import clay_mcp
 
-    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "")
+    async def no_token():
+        return None
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", no_token)
 
     out = await clay_mcp.find_contacts("x.com", "", 10, want_email=False)
     assert out == []
+
+
+# ── _mcp_call 401 refresh-retry ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_refreshes_on_401(monkeypatch):
+    from app.connectors import clay_mcp
+
+    calls = {"n": 0, "refreshed": 0}
+
+    async def tok():
+        return "AT"
+
+    async def refresh():
+        calls["refreshed"] += 1
+        return "AT2"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+    monkeypatch.setattr(clay_mcp.clay_oauth, "refresh", refresh)
+
+    class R:
+        def __init__(s, code):
+            s.status_code = code
+
+        def json(s):
+            return {"result": {"structuredContent": {"ok": True}}}
+
+    async def fake_post(url, **k):
+        calls["n"] += 1
+        return R(401) if calls["n"] == 1 else R(200)
+
+    monkeypatch.setattr(clay_mcp.http, "post", fake_post, raising=False)
+    out = await clay_mcp._mcp_call("find-and-enrich-company", {"companyIdentifier": "arrow.com"})
+    assert calls["refreshed"] == 1 and calls["n"] == 2 and out == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_quota_after_refresh_propagates(monkeypatch):
+    """After a 401→refresh, a 429 on the retry must raise ProviderQuotaError."""
+    from app.connectors import clay_mcp
+
+    calls = {"n": 0, "refreshed": 0}
+
+    async def tok():
+        return "AT"
+
+    async def refresh():
+        calls["refreshed"] += 1
+        return "AT2"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+    monkeypatch.setattr(clay_mcp.clay_oauth, "refresh", refresh)
+
+    class R:
+        def __init__(s, code):
+            s.status_code = code
+
+        def json(s):
+            return {}
+
+    async def fake_post(url, **k):
+        calls["n"] += 1
+        return R(401) if calls["n"] == 1 else R(429)
+
+    monkeypatch.setattr(clay_mcp.http, "post", fake_post, raising=False)
+
+    with pytest.raises(ProviderQuotaError):
+        await clay_mcp._mcp_call("find-and-enrich-company", {"companyIdentifier": "arrow.com"})
+
+    assert calls["refreshed"] == 1 and calls["n"] == 2
