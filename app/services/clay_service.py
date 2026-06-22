@@ -1,34 +1,24 @@
-"""Clay enrichment — asynchronous webhook + callback flow.
+"""Clay enrichment — MCP-driven callback helpers.
 
-Clay has NO real-time REST API. The integration is two-way:
+Clay is now called via the MCP connector (Clay MCP tool) routed through the
+enrichment router. The old outbound-webhook + callback round-trip has been
+removed.
 
-  1. We POST a row (a domain) to a Clay table's *inbound webhook*
-     (CLAY_WEBHOOK_URL) with a shared secret header and a correlation token.
-  2. Clay enriches asynchronously, then its outbound "HTTP API" action POSTs
-     the enriched row back to /api/webhooks/clay, echoing the correlation
-     token + the secret (and optionally an HMAC signature). We verify, look up
-     what the token was for, and apply the firmographics/contacts.
+This module retains only the inbound-callback helpers so that any Clay data
+delivered via MCP responses can be applied to VendorCard / Company records
+using the same field-mapping and contact-persistence logic.
 
-Gated behind ``settings.clay_enrichment_enabled`` and a configured
-CLAY_WEBHOOK_URL (resolved via the credential store, DB → env). Quota/rate-limit
-responses trip the shared cooldown circuit (provider "clay").
+Gated behind ``settings.clay_enrichment_enabled`` and
+``settings.clay_cooldown_minutes`` (the circuit breaker used by the MCP path).
 
-Called by: app/routers/crm/enrichment.py (trigger), app/routers/v13_features/activity.py (callback).
-Depends on: app/cache/intel_cache (correlation store), app/services/credential_service,
-            app/services/enrichment_credit_guard (circuit), app/enrichment_service (apply_*).
+Called by: (future MCP apply path, or directly in tests)
+Depends on: app/cache/intel_cache, app/services/enrichment_credit_guard,
+            app/enrichment_service (apply_*)
 """
-
-import hashlib
-import hmac
-import secrets
 
 from loguru import logger
 
 from app.cache.intel_cache import get_cached, set_cached
-from app.config import settings
-from app.http_client import http
-from app.services.credential_service import get_credential_cached
-from app.services.enrichment_credit_guard import circuit_open, trip_circuit
 
 _CORR_PREFIX = "clay:corr:"
 _CORR_TTL_DAYS = 7
@@ -36,7 +26,6 @@ _CONSUMED_TTL_DAYS = 1  # keep a tombstone briefly to block replays
 
 MAX_CALLBACK_BYTES = 256 * 1024
 MAX_CALLBACK_CONTACTS = 100
-_QUOTA_STATUSES = (402, 429)
 
 _COMPANY_FIELDS = (
     "legal_name",
@@ -50,103 +39,11 @@ _COMPANY_FIELDS = (
 )
 
 
-def _webhook_url() -> str:
-    return get_credential_cached("clay_enrichment", "CLAY_WEBHOOK_URL") or ""
-
-
-def _secret() -> str:
-    return get_credential_cached("clay_enrichment", "CLAY_CALLBACK_SECRET") or ""
-
-
 def _corr_key(token: str) -> str:
     return f"{_CORR_PREFIX}{token}"
 
 
-def enabled_and_configured() -> bool:
-    """True only when Clay is feature-on AND an inbound webhook URL is set."""
-    return bool(settings.clay_enrichment_enabled and _webhook_url())
-
-
-# ── Outbound: request an async enrichment ────────────────────────────
-
-
-async def request_enrichment(domain: str, entity_type: str, entity_id: int) -> dict:
-    """POST a domain to Clay's inbound webhook; Clay calls us back later.
-
-    Never raises — returns a status dict and degrades gracefully.
-    """
-    if not enabled_and_configured():
-        return {"status": "skipped", "reason": "clay_disabled_or_unconfigured"}
-    if entity_type not in ("company", "vendor_card"):
-        return {"status": "error", "reason": f"unsupported entity_type {entity_type}"}
-    if circuit_open("clay"):
-        return {"status": "skipped", "reason": "circuit_open"}
-
-    token = secrets.token_urlsafe(24)
-    set_cached(
-        _corr_key(token),
-        {"entity_type": entity_type, "entity_id": entity_id, "domain": domain},
-        ttl_days=_CORR_TTL_DAYS,
-    )
-
-    headers = {"Content-Type": "application/json"}
-    secret = _secret()
-    if secret:
-        headers["x-clay-secret"] = secret
-    body = {
-        "domain": domain,
-        "correlation_token": token,
-        "callback_url": f"{settings.app_url.rstrip('/')}/api/webhooks/clay",
-    }
-
-    try:
-        resp = await http.post(_webhook_url(), headers=headers, json=body, timeout=15)
-    except Exception as e:
-        logger.warning("Clay webhook POST failed for {}: {}", domain, e)
-        return {"status": "error", "reason": str(e)}
-
-    if resp.status_code in _QUOTA_STATUSES:
-        trip_circuit("clay", settings.clay_cooldown_minutes)
-        logger.warning("Clay quota/rate-limit ({}) — tripping circuit", resp.status_code)
-        return {"status": "error", "reason": f"quota {resp.status_code}"}
-    if resp.status_code not in (200, 201, 202):
-        logger.warning("Clay webhook rejected row for {}: {}", domain, resp.status_code)
-        return {"status": "error", "reason": f"webhook returned {resp.status_code}"}
-
-    logger.info("Clay enrichment requested for {} (token {}…)", domain, token[:8])
-    return {"status": "requested", "correlation_token": token}
-
-
-# ── Callback auth ────────────────────────────────────────────────────
-
-
-def verify_secret(provided: str | None) -> bool:
-    """Timing-safe shared-secret check.
-
-    Rejects when no secret is configured.
-    """
-    expected = _secret()
-    if not expected:
-        logger.warning("Clay callback hit but CLAY_CALLBACK_SECRET not configured — rejecting")
-        return False
-    return hmac.compare_digest(expected, provided or "")
-
-
-def verify_signature(raw_body: bytes, provided: str | None) -> bool:
-    """Optional HMAC-SHA256 body signature (keyed by the secret).
-
-    Accepts a
-    ``sha256=`` prefix. False when no secret/signature present.
-    """
-    secret = _secret()
-    if not secret or not provided:
-        return False
-    prov = provided.split("=", 1)[1] if provided.startswith("sha256=") else provided
-    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, prov)
-
-
-# ── Callback: apply the enriched row ─────────────────────────────────
+# ── Callback: apply an enriched row ──────────────────────────────────
 
 
 def _confidence_from_marker(marker) -> int:
@@ -169,7 +66,7 @@ def _confidence_from_marker(marker) -> int:
 
 
 def handle_callback(payload: dict, db) -> dict:
-    """Apply an enriched row Clay POSTed back.
+    """Apply an enriched row from Clay (via MCP or any caller).
 
     Returns a summary dict.
     """

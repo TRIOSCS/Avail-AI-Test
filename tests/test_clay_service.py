@@ -1,97 +1,25 @@
-"""Tests for the Clay async enrichment service (app/services/clay_service.py).
+"""Tests for the Clay enrichment service (app/services/clay_service.py).
 
-Covers the outbound webhook request (token + secret, circuit, quota), secret + HMAC
-verification, and the inbound callback applying firmographics + contacts.
+The webhook round-trip (request_enrichment / verify_secret / verify_signature /
+/api/webhooks/clay endpoint) was removed when Clay moved to the MCP connector.
+These tests cover the retained helpers: handle_callback (for potential future
+re-use), _add_vendor_contacts, _add_site_contacts, and _confidence_from_marker.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 from app.services import clay_service
 
-
-def _resp(status=200):
-    r = MagicMock()
-    r.status_code = status
-    return r
+# ── Removal assertions ───────────────────────────────────────────────
 
 
-# ── request_enrichment ───────────────────────────────────────────────
-
-
-class TestRequestEnrichment:
-    def test_skips_when_disabled(self):
-        with patch.object(clay_service, "enabled_and_configured", return_value=False):
-            out = asyncio.run(clay_service.request_enrichment("x.com", "company", 1))
-        assert out["status"] == "skipped"
-
-    def test_skips_when_circuit_open(self):
-        with (
-            patch.object(clay_service, "enabled_and_configured", return_value=True),
-            patch.object(clay_service, "circuit_open", return_value=True),
-        ):
-            out = asyncio.run(clay_service.request_enrichment("x.com", "company", 1))
-        assert out["status"] == "skipped"
-        assert out["reason"] == "circuit_open"
-
-    def test_success_posts_and_stores_token(self):
-        with (
-            patch.object(clay_service, "enabled_and_configured", return_value=True),
-            patch.object(clay_service, "circuit_open", return_value=False),
-            patch.object(clay_service, "_webhook_url", return_value="https://clay/webhook"),
-            patch.object(clay_service, "_secret", return_value="s3cret"),
-            patch.object(clay_service, "set_cached") as mock_set,
-            patch.object(clay_service, "http") as mock_http,
-        ):
-            mock_http.post = AsyncMock(return_value=_resp(202))
-            out = asyncio.run(clay_service.request_enrichment("x.com", "vendor_card", 9))
-        assert out["status"] == "requested"
-        token = out["correlation_token"]
-        assert token in mock_set.call_args.args[0]
-        assert mock_set.call_args.args[1] == {"entity_type": "vendor_card", "entity_id": 9, "domain": "x.com"}
-        call = mock_http.post.call_args
-        assert call.kwargs["json"]["correlation_token"] == token
-        assert call.kwargs["headers"]["x-clay-secret"] == "s3cret"
-
-    def test_quota_trips_circuit(self):
-        with (
-            patch.object(clay_service, "enabled_and_configured", return_value=True),
-            patch.object(clay_service, "circuit_open", return_value=False),
-            patch.object(clay_service, "_webhook_url", return_value="https://clay/webhook"),
-            patch.object(clay_service, "_secret", return_value="s"),
-            patch.object(clay_service, "set_cached"),
-            patch.object(clay_service, "trip_circuit") as mock_trip,
-            patch.object(clay_service, "http") as mock_http,
-        ):
-            mock_http.post = AsyncMock(return_value=_resp(429))
-            out = asyncio.run(clay_service.request_enrichment("x.com", "company", 1))
-        assert out["status"] == "error"
-        mock_trip.assert_called_once()
-
-
-# ── secret / signature ───────────────────────────────────────────────
-
-
-class TestVerify:
-    def test_secret_rejects_when_unconfigured(self):
-        with patch.object(clay_service, "_secret", return_value=""):
-            assert clay_service.verify_secret("x") is False
-
-    def test_secret_match(self):
-        with patch.object(clay_service, "_secret", return_value="abc"):
-            assert clay_service.verify_secret("abc") is True
-            assert clay_service.verify_secret("nope") is False
-
-    def test_signature(self):
-        import hashlib
-        import hmac
-
-        body = b'{"correlation_token":"t"}'
-        sig = hmac.new(b"k", body, hashlib.sha256).hexdigest()
-        with patch.object(clay_service, "_secret", return_value="k"):
-            assert clay_service.verify_signature(body, sig) is True
-            assert clay_service.verify_signature(body, "sha256=" + sig) is True
-            assert clay_service.verify_signature(body, "bad") is False
+def test_clay_webhook_path_removed():
+    """request_enrichment and the secret/signature helpers must be gone."""
+    assert not hasattr(clay_service, "request_enrichment")
+    assert not hasattr(clay_service, "verify_secret")
+    assert not hasattr(clay_service, "verify_signature")
+    assert not hasattr(clay_service, "_webhook_url")
+    assert not hasattr(clay_service, "_secret")
 
 
 # ── handle_callback ──────────────────────────────────────────────────
@@ -153,48 +81,3 @@ class TestHandleCallback:
             .count()
             == 1
         )
-
-
-# ── /api/webhooks/clay endpoint ──────────────────────────────────────
-
-
-def test_endpoint_rejects_bad_secret(client):
-    with patch("app.services.clay_service.verify_secret", return_value=False):
-        r = client.post("/api/webhooks/clay", json={"correlation_token": "t"}, headers={"x-clay-secret": "wrong"})
-    assert r.status_code == 403
-
-
-def test_endpoint_oversize_payload(client):
-    big = "x" * (clay_service.MAX_CALLBACK_BYTES + 1)
-    with patch("app.services.clay_service.verify_secret", return_value=True):
-        r = client.post(
-            "/api/webhooks/clay",
-            content=('{"correlation_token":"t","p":"%s"}' % big).encode(),
-            headers={"x-clay-secret": "ok", "Content-Type": "application/json"},
-        )
-    assert r.status_code == 413
-
-
-def test_endpoint_bad_signature(client):
-    with (
-        patch("app.services.clay_service.verify_secret", return_value=True),
-        patch("app.services.clay_service.verify_signature", return_value=False),
-    ):
-        r = client.post(
-            "/api/webhooks/clay",
-            json={"correlation_token": "t"},
-            headers={"x-clay-secret": "ok", "x-clay-signature": "bad"},
-        )
-    assert r.status_code == 403
-
-
-def test_endpoint_accepts_valid(client):
-    with (
-        patch("app.services.clay_service.verify_secret", return_value=True),
-        patch("app.services.clay_service.handle_callback", return_value={"status": "applied"}),
-    ):
-        r = client.post(
-            "/api/webhooks/clay", json={"correlation_token": "t", "industry": "X"}, headers={"x-clay-secret": "ok"}
-        )
-    assert r.status_code == 200
-    assert r.json()["status"] == "applied"
