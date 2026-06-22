@@ -64,12 +64,18 @@ async def callback(
         logger.warning("Clay callback unknown/expired state")
         return RedirectResponse(f"{_SETTINGS_URL}?clay=error", status_code=302)
 
+    verifier = stash.get("verifier")
+    client_id = stash.get("client_id")
+    if not verifier or not client_id:
+        logger.warning("Clay callback state already consumed/invalid")
+        return RedirectResponse(f"{_SETTINGS_URL}?clay=error", status_code=302)
+
     # Consume the state entry (one-time use) by expiring it to ~1 second.
     # intel_cache.set_cached does not accept None, so a near-zero TTL is the
     # invalidation mechanism.
     set_cached(f"{_STATE_PREFIX}{state}", {"consumed": True}, ttl_days=_EXPIRE_TTL_DAYS)
 
-    ok = await clay_oauth.exchange_code(code, stash["verifier"], stash["client_id"])
+    ok = await clay_oauth.exchange_code(code, verifier, client_id)
     target = "connected" if ok else "error"
     return RedirectResponse(f"{_SETTINGS_URL}?clay={target}", status_code=302)
 

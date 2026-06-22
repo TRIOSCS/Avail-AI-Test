@@ -139,6 +139,33 @@ def test_disconnect_redirects(admin_client, monkeypatch):
 
 
 def test_routes_admin_gated(unauthenticated_client):
-    """Unauthenticated client (no session/token) must not reach connect."""
-    resp = unauthenticated_client.get("/auth/clay/connect", follow_redirects=False)
-    assert resp.status_code in (401, 403, 302, 307)
+    """Unauthenticated client must not reach connect, callback, or disconnect."""
+    for method, path in [
+        ("GET", "/auth/clay/connect"),
+        ("GET", "/auth/clay/callback?code=x&state=y"),
+        ("POST", "/auth/clay/disconnect"),
+    ]:
+        resp = unauthenticated_client.request(method, path, follow_redirects=False)
+        assert resp.status_code in (401, 403, 302, 307), f"{method} {path} returned {resp.status_code}"
+
+
+def test_callback_replay_returns_error_not_500(admin_client, monkeypatch):
+    """A replayed callback (state already consumed) must redirect to clay=error, not
+    crash."""
+    import app.routers.clay_oauth as r
+
+    # After first call, consumed marker replaces the real stash value.
+    # Model this: store starts with the consumed marker (as it would be after a first call).
+    state_store = {"clay:oauth:state:REPLAY1": {"consumed": True}}
+
+    monkeypatch.setattr(r, "get_cached", lambda key: state_store.get(key))
+    monkeypatch.setattr(r, "set_cached", lambda key, data, ttl_days=7: state_store.update({key: data}))
+
+    async def fake_exchange(code, verifier, cid):  # pragma: no cover
+        raise AssertionError("exchange_code must not be called on a consumed state")
+
+    monkeypatch.setattr(r.clay_oauth, "exchange_code", fake_exchange)
+
+    resp = admin_client.get("/auth/clay/callback?code=CODE&state=REPLAY1", follow_redirects=False)
+    assert resp.status_code in (302, 307), f"Expected redirect, got {resp.status_code}"
+    assert "clay=error" in resp.headers["location"]
