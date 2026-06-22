@@ -9,13 +9,15 @@
    The vendor-name list and requirement ids are passed via |tojson inside a SINGLE-quoted
    x-data attribute — tojson emits double quotes, which would close a double-quoted
    attribute and break Alpine init (CLAUDE.md Alpine-quoting anti-pattern).
-   Seed selectedVendors from ONLY the CONTACTABLE rows (has_contact): non-contactable rows
-   render a DISABLED checkbox with no @change, so the buyer can't deselect them — seeding
-   their names would force-count and force-post a vendor the send path then silently skips.
-   Cardless vendors enter the selection only via the explicit Add-contact → createVendor
-   path. #}
+   Seed selectedVendors from ONLY the CONTACTABLE, NON-DNC rows (has_contact and not dnc):
+   non-contactable/DNC rows render a DISABLED checkbox with no @change, so the buyer can't
+   deselect them — seeding their names would force-count and force-post a vendor the send
+   path then silently skips. Cardless vendors enter the selection only via the explicit
+   Add-contact → createVendor path.
+   dnc_norms: set of normalized_names whose contact email is do_not_contact (server-computed).
+   contactable_non_dnc: list of normalized_names for the Alpine selectedVendors seed. #}
 <div class="p-4"
-     x-data='rfqVendorModal({{ suggested_vendors|selectattr("has_contact")|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'>
+     x-data='rfqVendorModal({{ contactable_non_dnc|tojson }}, {{ requirement_ids|tojson }})'>
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
   <div x-show="step === 'compose'" x-cloak>
@@ -30,8 +32,9 @@
       </label>
       <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
         {% for v in suggested_vendors %}
-        {% if v.has_contact %}
-        {# Contactable row — enabled checkbox + engagement/response badges (unchanged). #}
+        {% set is_dnc = v.normalized_name in dnc_norms %}
+        {% if v.has_contact and not is_dnc %}
+        {# Contactable, non-DNC row — enabled checkbox + engagement/response badges. #}
         <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
           <input type="checkbox"
                  :checked='isSelected({{ v.normalized_name|tojson }})'
@@ -52,6 +55,27 @@
           <span class="text-xs text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
           {% endif %}
         </label>
+        {% elif v.has_contact and is_dnc %}
+        {# DNC row — has an email but it is do-not-contact flagged. Disabled checkbox +
+           rose "do-not-contact" chip. The @click is single-quoted (CLAUDE.md landmine). #}
+        <label class="flex items-center gap-3 px-3 py-2">
+          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <div class="flex-1 min-w-0">
+            <span class="text-sm font-medium text-gray-500">{{ v.display_name }}</span>
+            {% set cov = coverage.get(v.id) %}
+            {% if cov %}
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
+                  title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
+            {% endif %}
+            {# Shared color-coded badge component — rose for DNC (compliance: must not send) #}
+            <span class="ml-2 inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-rose-50 text-rose-700">
+              <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 20 20">
+                <path fill-rule="evenodd" d="M13.477 14.89A6 6 0 015.11 6.524L13.477 14.89zm1.414-1.414L6.524 5.11A6 6 0 0114.89 13.476zM18 10a8 8 0 11-16 0 8 8 0 0116 0z" clip-rule="evenodd"/>
+              </svg>
+              do-not-contact
+            </span>
+          </div>
+        </label>
         {% else %}
         {# Non-contactable row (cardless OR carded-but-no-resolvable-email): coverage chip
            unchanged, but a DISABLED checkbox (you can't select what the send path skips),
@@ -67,6 +91,7 @@
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700"
                   title="Covers: {{ cov.mpns }}">{{ cov.count }}/{{ parts|length }} parts</span>
             {% endif %}
+            {# Amber badge for no-email — shared badge component vocabulary #}
             <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
           </div>
           <button type="button" @click='addContactFor({{ v.display_name|tojson }})'

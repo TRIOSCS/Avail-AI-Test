@@ -655,3 +655,22 @@ class AlertKind(StrEnum):
     INBOUND_CUSTOMER = "inbound_customer"
     INBOUND_VENDOR = "inbound_vendor"
     BUYPLAN_ACTION = "buyplan_action"
+
+
+class SightingsSkipReason(StrEnum):
+    """Advisory skip-reason for a vendor in the sightings RFQ modal / preview.
+
+    Computed up-front so the compose and preview steps can show WHY a vendor will be
+    skipped. The authoritative skip stays in send_batch_rfq (TOCTOU guard) — this enum
+    is advisory only and never gates the actual send.
+
+    READY          — vendor has a resolvable email and is not DNC/unavailable. NO_EMAIL
+    — no resolvable VendorContact email (amber badge). UNAVAILABLE    — vendor has an
+    active VendorPartUnavailability record (rose badge). DO_NOT_CONTACT — vendor contact
+    email matches a do_not_contact SiteContact (rose badge).
+    """
+
+    READY = "ready"
+    NO_EMAIL = "no_email"
+    UNAVAILABLE = "unavailable"
+    DO_NOT_CONTACT = "do_not_contact"

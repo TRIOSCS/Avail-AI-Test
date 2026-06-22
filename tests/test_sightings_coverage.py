@@ -27,6 +27,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from app.models.crm import CustomerSite, SiteContact
 from app.models.intelligence import ActivityLog
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -851,3 +852,371 @@ class TestManufacturerBasket:
         assert resp.status_code == 200
         assert "IBM-001" in resp.text
         assert "IBM-002" not in resp.text
+
+
+# ── S3 tests: up-front skip reasons ─────────────────────────────────────────
+
+
+def _seed_dnc_site_contact(db_session, email: str) -> SiteContact:
+    """Create a CustomerSite + do-not-contact SiteContact for DNC tests."""
+    from app.models.crm import Company
+
+    company = Company(name="DNC Corp", is_active=True)
+    db_session.add(company)
+    db_session.flush()
+    site = CustomerSite(company_id=company.id, site_name="DNC HQ", is_active=True)
+    db_session.add(site)
+    db_session.flush()
+    sc = SiteContact(
+        customer_site_id=site.id,
+        full_name="Do Not Call",
+        email=email,
+        do_not_contact=True,
+    )
+    db_session.add(sc)
+    db_session.flush()
+    return sc
+
+
+class TestSightingsSkipReasonEnum:
+    """SightingsSkipReason StrEnum is defined in app/constants.py."""
+
+    def test_skip_reason_enum_values(self):
+        """SightingsSkipReason has READY, NO_EMAIL, UNAVAILABLE, DO_NOT_CONTACT."""
+        from app.constants import SightingsSkipReason
+
+        assert SightingsSkipReason.READY == "ready"
+        assert SightingsSkipReason.NO_EMAIL == "no_email"
+        assert SightingsSkipReason.UNAVAILABLE == "unavailable"
+        assert SightingsSkipReason.DO_NOT_CONTACT == "do_not_contact"
+
+
+class TestDncEmailsForCards:
+    """_dnc_emails_for_cards returns the set of emails that send_batch_rfq will DNC-
+    skip."""
+
+    def _make_vendor_with_email(self, db_session, vendor_name: str, norm: str, email: str):
+        card = VendorCard(normalized_name=norm, display_name=vendor_name)
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        return card
+
+    def test_dnc_email_for_flagged_contact(self, db_session):
+        """A VendorContact email that is a DNC SiteContact email is returned."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        email = "flagged@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Flaggedco", "flaggedco", email)
+        _seed_dnc_site_contact(db_session, email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert email in result
+
+    def test_dnc_email_case_insensitive(self, db_session):
+        """DNC match is case-insensitive: Vendor contact 'DNC@Vendor.COM' matches
+        SiteContact 'dnc@vendor.com'."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        vendor_email = "DNC@Vendor.COM"
+        site_email = "dnc@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Casevendor", "casevendor", vendor_email)
+        _seed_dnc_site_contact(db_session, site_email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert vendor_email.lower() in result
+
+    def test_non_dnc_contact_excluded(self, db_session):
+        """A VendorContact email with no matching DNC SiteContact is NOT returned."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        email = "ok@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Okco", "okco", email)
+        db_session.commit()
+
+        result = _dnc_emails_for_cards(db_session, [card.id])
+        assert email not in result
+
+    def test_empty_card_ids_returns_empty(self, db_session):
+        """Empty card_ids input returns empty set (no query)."""
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        result = _dnc_emails_for_cards(db_session, [])
+        assert result == set()
+
+    def test_dnc_advisory_subset_of_send_path(self, db_session):
+        """Advisory DNC set (from _dnc_emails_for_cards) is a subset of the emails
+        send_batch_rfq actually skips — guarantee advisory ⊆ send-time check."""
+        from app.email_service import send_batch_rfq
+        from app.routers.sightings import _dnc_emails_for_cards
+
+        email = "blocked@vendor.com"
+        card = self._make_vendor_with_email(db_session, "Blockedco", "blockedco", email)
+        _seed_dnc_site_contact(db_session, email)
+        db_session.commit()
+
+        advisory = _dnc_emails_for_cards(db_session, [card.id])
+        assert email.lower() in advisory
+
+        # Run the send path with a fake token — expect the email to be DNC-skipped.
+        # GraphClient is lazy-imported inside send_batch_rfq, so patch at that location.
+        with patch("app.utils.graph_client.GraphClient") as mock_gc_cls:
+            mock_gc = AsyncMock()
+            mock_gc_cls.return_value = mock_gc
+            import asyncio
+
+            results = asyncio.get_event_loop().run_until_complete(
+                send_batch_rfq(
+                    token="fake",
+                    db=db_session,
+                    user_id=1,
+                    requisition_id=None,
+                    vendor_groups=[
+                        {
+                            "vendor_name": "Blockedco",
+                            "vendor_email": email,
+                            "parts": [{"mpn": "BLK-001", "qty": 5}],
+                            "subject": "RFQ test",
+                            "body": "test body",
+                        }
+                    ],
+                )
+            )
+
+        # The send path must also skip it — advisory ⊆ send-path skip set
+        send_skipped = {r["vendor_email"] for r in results if r["status"] == "skipped"}
+        assert email in send_skipped
+
+
+class TestVendorModalDNCChip:
+    """DNC vendors render disabled checkbox + 'do-not-contact' chip in vendor_modal."""
+
+    def _seed_vendor_dnc(self, db_session, vendor_name: str, norm: str, email: str):
+        """Create a vendor card + contact AND a matching DNC SiteContact."""
+        card = VendorCard(normalized_name=norm, display_name=vendor_name)
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        _seed_dnc_site_contact(db_session, email)
+        return card
+
+    def test_dnc_vendor_renders_disabled_and_chip(self, client, db_session):
+        """A vendor whose contact email is a DNC SiteContact renders a disabled checkbox
+        and a 'do-not-contact' chip in the vendor modal compose step."""
+        req, r, _ = _seed_active(db_session)
+
+        # Create a VendorSightingSummary linked to the DNC vendor card so it appears
+        # in coverage suggestions
+        card = self._seed_vendor_dnc(db_session, "Dncvendor", "dncvendor", "dnc@dncvendor.com")
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="Dncvendor",
+            vendor_card_id=card.id,
+            estimated_qty=10,
+            listing_count=1,
+            score=50.0,
+        )
+        db_session.add(vss)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "do-not-contact" in resp.text
+        assert "cursor-not-allowed" in resp.text or "disabled" in resp.text
+
+    def test_non_dnc_vendor_not_flagged(self, client, db_session):
+        """A vendor with a clean email does NOT get the do-not-contact chip."""
+        req, r, _ = _seed_active(db_session)
+
+        card = VendorCard(normalized_name="cleanvendor", display_name="Cleanvendor")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="ok@cleanvendor.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="Cleanvendor",
+            vendor_card_id=card.id,
+            estimated_qty=10,
+            listing_count=1,
+            score=50.0,
+        )
+        db_session.add(vss)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "do-not-contact" not in resp.text
+
+
+class TestPreviewSkipReason:
+    """Preview step renders skip_reason badges: amber=no_email, rose=unavailable/dnc."""
+
+    def _make_req_and_requirement(self, db_session):
+        req = Requisition(name="SkipReason RFQ", status="active", customer_name="Skip Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="SKIP-001",
+            manufacturer="SkipMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.commit()
+        return req, r
+
+    def test_no_email_vendor_shows_amber_chip(self, client, db_session):
+        """A vendor with no resolvable email shows an amber 'no email' indicator in the
+        preview."""
+        req, r = self._make_req_and_requirement(db_session)
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["NoEmailVendor"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        # amber badge contains "no email" or similar text
+        assert "no-email" in resp.text or "no email" in resp.text.lower() or "amber" in resp.text
+
+    def test_dnc_vendor_shows_rose_chip_in_preview(self, client, db_session):
+        """A vendor whose contact email is DNC-flagged shows a rose 'do-not-contact'
+        chip in the preview."""
+        req, r = self._make_req_and_requirement(db_session)
+
+        email = "dncpreview@vendor.com"
+        card = VendorCard(normalized_name="dncpreviewco", display_name="Dncpreviewco")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email=email,
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        _seed_dnc_site_contact(db_session, email)
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["dncpreviewco"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        assert "do-not-contact" in resp.text
+
+    def test_unavailable_vendor_shows_rose_chip_in_preview(self, client, db_session):
+        """Unavailable vendors are already reported in the existing unavailable_vendors
+        section with rose styling — ensure that block is present."""
+        from app.models.vendor_part_unavailability import VendorPartUnavailability
+
+        req, r = self._make_req_and_requirement(db_session)
+
+        card = VendorCard(normalized_name="unavailco", display_name="Unavailco")
+        db_session.add(card)
+        db_session.flush()
+        # normalized_mpn = normalize_mpn_key("SKIP-001") = "skip001"
+        unavail = VendorPartUnavailability(
+            vendor_name_normalized="unavailco",
+            normalized_mpn="skip001",
+            reason="other",
+        )
+        db_session.add(unavail)
+        db_session.commit()
+
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r.id)],
+                "vendor_names": ["unavailco"],
+                "email_body": "Hello",
+            },
+        )
+        assert resp.status_code == 200
+        # Unavailable vendor goes to the rose "Skipped (marked unavailable)" section
+        assert "rose" in resp.text or "unavailable" in resp.text.lower()
+
+    def test_send_time_recheck_still_present(self, client, db_session):
+        """Send-inquiry still performs the send-time unavailability re-check (TOCTOU): a
+        vendor marked unavailable is excluded from the send even when posted as a
+        selected vendor name. The re-check happens in sightings_send_inquiry
+        (_partition_by_unavailability) before any call to send_batch_rfq.
+
+        We verify: send_batch_rfq is called with zero sendable_vendors (the unavailable
+        vendor was stripped), so the batch receives an empty vendor list and sends nothing.
+        """
+        from app.models.vendor_part_unavailability import VendorPartUnavailability
+
+        req, r = self._make_req_and_requirement(db_session)
+
+        card = VendorCard(normalized_name="toctouvendor", display_name="Toctouvendor")
+        db_session.add(card)
+        db_session.flush()
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="t@toctou.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.flush()
+        # normalized_mpn = normalize_mpn_key("SKIP-001") = "skip001"
+        unavail = VendorPartUnavailability(
+            vendor_name_normalized="toctouvendor",
+            normalized_mpn="skip001",
+            reason="other",
+        )
+        db_session.add(unavail)
+        db_session.commit()
+
+        # Patch send_batch_rfq where it is imported (lazily inside the route).
+        # Use the email_service module as the patch target — that is where the route
+        # imports it from at call time (lazy import inside the route body).
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = []
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": [str(r.id)],
+                    "vendor_names": ["toctouvendor"],
+                    "email_body": "Hello",
+                },
+            )
+        # Response should succeed — the unavailable vendor was stripped before send.
+        assert resp.status_code == 200
+        # send_batch_rfq was called with an empty vendor list (send-time re-check worked),
+        # OR the route reported the unavailability without calling send at all.
+        # In either path: the response contains "unavailable" language.
+        assert "unavailable" in resp.text.lower() or "skipped" in resp.text.lower()

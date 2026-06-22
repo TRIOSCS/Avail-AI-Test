@@ -3447,7 +3447,8 @@ class TestPreviewInquiry:
         assert "Please quote" in resp.text
 
     def test_preview_vendor_no_email_shows_warning(self, client, db_session):
-        """Vendor with no email shows amber warning in preview."""
+        """Vendor with no email shows amber no-email badge in preview
+        (skip_reason=no_email)."""
         _, r, _ = _seed_data(db_session)
         resp = client.post(
             "/v2/partials/sightings/preview-inquiry",
@@ -3458,7 +3459,8 @@ class TestPreviewInquiry:
             },
         )
         assert resp.status_code == 200
-        assert "No email found" in resp.text
+        # The amber badge now says "no email — will be skipped" (S3 skip-reason badges)
+        assert "no email" in resp.text.lower()
 
     def test_preview_400_empty_requirement_ids(self, client, db_session):
         """Empty requirement_ids returns 400."""

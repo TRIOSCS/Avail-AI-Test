@@ -35,6 +35,7 @@ from ..constants import (
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
+    SightingsSkipReason,
     SourcingStatus,
     UnavailabilityReason,
 )
@@ -1401,6 +1402,44 @@ def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
     return {cid for (cid,) in rows}
 
 
+def _dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
+    """Return the lowercased email addresses (from VendorContact) that will be DNC-
+    skipped by send_batch_rfq for the given vendor card ids.
+
+    Mirrors the send-time DNC check in email_service.send_batch_rfq (line ~181):
+    join VendorContact → SiteContact by func.lower(email), filtered on
+    SiteContact.do_not_contact.is_(True). Uses func.lower on BOTH sides so the
+    advisory set is consistent with the case-insensitive send-time check.
+
+    Returns a set of lowercased emails — the caller compares contact.email.lower()
+    against this set. Advisory only; the authoritative skip stays in send_batch_rfq
+    (TOCTOU guard — a SiteContact can be flagged after the modal opens).
+
+    Called by: sightings_vendor_modal, sightings_preview_inquiry.
+    """
+    if not card_ids:
+        return set()
+
+    from ..models.crm import SiteContact
+
+    rows = (
+        db.query(VendorContact.email)
+        .join(
+            SiteContact,
+            sqlfunc.lower(VendorContact.email) == sqlfunc.lower(SiteContact.email),
+        )
+        .filter(
+            VendorContact.vendor_card_id.in_(card_ids),
+            VendorContact.email.isnot(None),
+            VendorContact.email != "",
+            SiteContact.do_not_contact.is_(True),
+        )
+        .distinct()
+        .all()
+    )
+    return {email.lower() for (email,) in rows}
+
+
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
     """Coverage-ranked suggested vendors — the single source shared by the vendor modal
     and the affinity endpoint (which must drop already-suggested vendors computed the
@@ -1678,6 +1717,35 @@ async def sightings_vendor_modal(
     # for the single-requirement case.
     requisition_count = len({r.requisition_id for r in requirements})
 
+    # Advisory DNC computation — determine which suggested vendors have a DNC-flagged
+    # contact email. Two steps:
+    # 1. Collect the card ids of all carded suggested vendors.
+    # 2. _dnc_emails_for_cards returns the lowercased DNC emails for those cards.
+    # 3. Fetch each carded vendor's best contact (same ordering as the send path), then
+    #    cross-reference: if the resolved email is in dnc_emails → vendor is advisory DNC.
+    # Result is `dnc_norms`: set of normalized_names passed to the template so it can
+    # disable the checkbox and render the rose chip WITHOUT lazy-loading relationships.
+    carded_ids = [sv.card.id for sv in suggested_vendors if sv.card is not None]
+    dnc_emails: set[str] = _dnc_emails_for_cards(db, carded_ids) if carded_ids else set()
+
+    dnc_norms: set[str] = set()
+    if dnc_emails and carded_ids:
+        # Best-contact-per-card (same ordering as send path) to determine which vendor's
+        # resolved email is in dnc_emails.
+        best_contacts = _best_contacts_by_card(db, carded_ids)
+        card_best_contact: dict[int, VendorContact] = {c.vendor_card_id: c for c in best_contacts}
+        for sv in suggested_vendors:
+            if sv.card is not None:
+                contact = card_best_contact.get(sv.card.id)
+                if contact and contact.email and contact.email.lower() in dnc_emails:
+                    dnc_norms.add(sv.normalized_name)
+
+    # Contactable, non-DNC normalized names for the Alpine selectedVendors seed.
+    # Passed explicitly so the template doesn't need Jinja2 set-member filtering.
+    contactable_non_dnc = [
+        sv.normalized_name for sv in suggested_vendors if sv.has_contact and sv.normalized_name not in dnc_norms
+    ]
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
@@ -1685,6 +1753,8 @@ async def sightings_vendor_modal(
         "requirement_ids": req_id_list,
         "parts": parts,
         "requisition_count": requisition_count,
+        "dnc_norms": dnc_norms,
+        "contactable_non_dnc": contactable_non_dnc,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
@@ -2030,6 +2100,10 @@ async def sightings_preview_inquiry(
     avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
+    # Advisory DNC set — look up which resolved emails are flagged do_not_contact.
+    # This mirrors the send-time check in email_service.py so preview ≈ what sends.
+    preview_dnc_emails: set[str] = _dnc_emails_for_cards(db, card_ids) if card_ids else set()
+
     previews = []
     for vn in vendor_names:
         card = card_map.get(normalize_vendor_name(vn))
@@ -2038,6 +2112,14 @@ async def sightings_preview_inquiry(
             contact = contact_map.get(card.id)
             if contact and contact.email:
                 vendor_email = contact.email
+
+        # Compute advisory skip reason for the badge in the preview template.
+        if not vendor_email:
+            skip_reason = SightingsSkipReason.NO_EMAIL
+        elif vendor_email.lower() in preview_dnc_emails:
+            skip_reason = SightingsSkipReason.DO_NOT_CONTACT
+        else:
+            skip_reason = SightingsSkipReason.READY
 
         raw_subject = f"RFQ — {len(requirements)} part{'s' if len(requirements) != 1 else ''}"
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token else raw_subject
@@ -2050,6 +2132,7 @@ async def sightings_preview_inquiry(
                 "subject": tagged_subject,
                 "html_body": html_body,
                 "parts": parts_list,
+                "skip_reason": skip_reason,
             }
         )
 
