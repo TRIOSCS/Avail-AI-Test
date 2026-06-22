@@ -686,6 +686,71 @@ class TestTableRFQButton:
         assert resp.status_code == 200
         assert 'colspan="9"' in resp.text
 
+    def test_render_row_tr_has_group_class_and_rfq_button(self):
+        """render_row's <tr> carries the `group` Tailwind class so group-
+        hover:opacity-100 on the RFQ icon button works.  If the class is removed the
+        per-row RFQ entry point becomes permanently invisible — this test prevents that
+        regression.
+
+        Also asserts the RFQ icon button (vendor-modal dispatch) is present in the same
+        macro, since the two are coupled: group-hover:opacity-100 is useless without the
+        button, and the button is invisible without group.
+        """
+        from pathlib import Path
+
+        src = Path("app/templates/htmx/partials/sightings/table.html").read_text()
+        lines = src.splitlines()
+
+        # Find the render_row macro definition line
+        macro_line = next(
+            (i for i, ln in enumerate(lines) if "macro render_row(" in ln),
+            None,
+        )
+        assert macro_line is not None, "render_row macro not found in table.html"
+
+        # Find the closing endmacro
+        end_line = next(
+            (i for i in range(macro_line + 1, len(lines)) if "endmacro" in lines[i]),
+            None,
+        )
+        assert end_line is not None, "endmacro not found after render_row"
+
+        macro_body = "\n".join(lines[macro_line:end_line])
+
+        # The render_row <tr> must carry `group` as a Tailwind class on its
+        # static class="..." attribute so group-hover:opacity-100 fires.
+        import re
+
+        # Search within the macro body for a line that starts a <tr element
+        # and has a static class= attribute containing `group`.  We search
+        # line-by-line on the opening <tr line specifically to avoid the
+        # multi-attribute/multi-line confusion between class= and :class=.
+        tr_class_line = None
+        for ln in macro_body.splitlines():
+            if ln.lstrip().startswith("<tr ") or ln.lstrip().startswith("<tr\t"):
+                m = re.search(r'\bclass="([^"]*)"', ln)
+                if m:
+                    tr_class_line = m.group(1)
+                    break
+        assert tr_class_line is not None, "render_row macro has no <tr class=...> — cannot verify group class"
+        # Extract individual class tokens (ignoring Jinja template fragments)
+        tokens = re.findall(r"\b([\w:-]+)\b", tr_class_line)
+        assert "group" in tokens, (
+            f"render_row <tr> is missing the `group` Tailwind class — "
+            f"group-hover:opacity-100 on the RFQ button will never fire. "
+            f"Found class attr: {tr_class_line!r}"
+        )
+
+        # The RFQ icon button (vendor-modal dispatch) must be present in the macro
+        assert "vendor-modal" in macro_body, (
+            "render_row macro is missing the per-row RFQ button (vendor-modal dispatch) — "
+            "the S1 per-row entry point has been removed."
+        )
+        assert "group-hover:opacity-100" in macro_body, (
+            "render_row RFQ button is missing group-hover:opacity-100 — "
+            "the button will be permanently visible instead of reveal-on-hover."
+        )
+
 
 class TestVendorRowRFQButton:
     """(S1b) _vendor_row.html must have a visible RFQ pill outside the kebab."""
