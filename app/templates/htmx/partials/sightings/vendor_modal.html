@@ -50,9 +50,17 @@
             {% if v.response_rate %}
             <span class="ml-2 text-xs text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
             {% endif %}
+            {# Lead time discrete span — own span, never middot-concatenated #}
+            {% if v.lead_time_days is not none %}
+            <span class="ml-2 text-xs text-gray-400">{{ v.lead_time_days }}d lead</span>
+            {% else %}
+            <span class="ml-2 text-xs text-gray-400">—</span>
+            {% endif %}
           </div>
           {% if v.engagement_score %}
           <span class="text-xs text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
+          {% elif v.vendor_score is not none %}
+          <span class="text-xs text-gray-400">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
         </label>
         {% elif v.has_contact and is_dnc %}

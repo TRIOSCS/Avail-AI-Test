@@ -1250,3 +1250,203 @@ class TestPreviewSkipReason:
         # OR the route reported the unavailability without calling send at all.
         # In either path: the response contains "unavailable" language.
         assert "unavailable" in resp.text.lower() or "skipped" in resp.text.lower()
+
+
+# ── S5 tests: compose-time vendor intel ──────────────────────────────────────
+
+
+class TestComposeTimeVendorIntel:
+    """S5: coverage rows carry lead_time_days/vendor_score; modal renders the spans."""
+
+    def _seed_vendor_with_intel(self, db_session):
+        """Create requirement + VendorSightingSummary + VendorCard with intel fields."""
+        req = Requisition(name="Intel RFQ", status="active", customer_name="Intel Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="INTEL-001",
+            manufacturer="IntelMfr",
+            target_qty=10,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="speedvendor",
+            display_name="SpeedVendor",
+            vendor_score=82.5,
+            response_rate=0.75,
+        )
+        db_session.add(card)
+        db_session.flush()
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="SpeedVendor",
+            estimated_qty=50,
+            listing_count=1,
+            score=70.0,
+            best_lead_time_days=14,
+            vendor_card_id=card.id,
+        )
+        db_session.add(vss)
+        db_session.commit()
+        return req, r, card, vss
+
+    def test_coverage_rows_carry_lead_time_days(self, client, db_session):
+        """_coverage_ranked_vendor_rows populates lead_time_days from VSS."""
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        assert rows, "expected at least one coverage row"
+        # The carded row should carry lead_time_days
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None, "expected a carded RankedVendor"
+        assert carded.lead_time_days == 14
+
+    def test_coverage_rows_carry_vendor_score(self, client, db_session):
+        """_coverage_ranked_vendor_rows populates vendor_score from VendorCard."""
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None
+        assert carded.vendor_score == 82.5
+
+    def test_suggested_vendor_carries_lead_time_days(self, client, db_session):
+        """SuggestedVendor built from coverage rows carries lead_time_days."""
+        from app.routers.sightings import SuggestedVendor, _coverage_ranked_vendor_rows
+        from app.vendor_utils import normalize_vendor_name
+
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        carded_rv = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded_rv is not None
+        # Build a SuggestedVendor the same way sightings_vendor_modal does
+        norm = normalize_vendor_name(carded_rv.vendor_name)
+        sv = SuggestedVendor(
+            id=card.id,
+            card=carded_rv.card,
+            normalized_name=card.normalized_name,
+            display_name=carded_rv.vendor_name,
+            vendor_name=carded_rv.vendor_name,
+            has_contact=carded_rv.has_contact,
+            response_rate=card.response_rate,
+            engagement_score=card.engagement_score,
+            vendor_score=carded_rv.vendor_score,
+            lead_time_days=carded_rv.lead_time_days,
+        )
+        assert sv.lead_time_days == 14
+        assert sv.vendor_score == 82.5
+
+    def test_vendor_modal_renders_lead_time_span(self, client, db_session):
+        """vendor_modal.html renders '{n}d lead' span for a vendor with lead time."""
+        _, r, card, _ = self._seed_vendor_with_intel(db_session)
+        # Add a contact so the vendor is in the contactable (non-DNC) set
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="fast@speedvendor.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        # Lead time discrete span: "14d lead"
+        assert "14d lead" in resp.text
+
+    def test_vendor_modal_renders_em_dash_when_no_lead_time(self, client, db_session):
+        """vendor_modal.html renders '—' for lead time when lead_time_days is None."""
+        req = Requisition(name="NoLead RFQ", status="active", customer_name="NoLead Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NOLEAD-001",
+            manufacturer="NoLeadMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="noleadvendor",
+            display_name="NoLeadVendor",
+            vendor_score=None,
+        )
+        db_session.add(card)
+        db_session.flush()
+        # VSS with no best_lead_time_days
+        vss = VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="NoLeadVendor",
+            estimated_qty=25,
+            listing_count=1,
+            score=55.0,
+            best_lead_time_days=None,
+            vendor_card_id=card.id,
+        )
+        db_session.add(vss)
+        contact = VendorContact(
+            vendor_card_id=card.id,
+            contact_type="sales",
+            email="info@nolead.com",
+            source="manual",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        # Should render em-dash "—" for the lead time
+        assert "—" in resp.text or "&mdash;" in resp.text
+
+    def test_coverage_rows_none_when_no_vss_lead_time(self, client, db_session):
+        """When VSS.best_lead_time_days is None, RankedVendor.lead_time_days is None
+        (not zero)."""
+        from app.routers.sightings import _coverage_ranked_vendor_rows
+
+        req = Requisition(name="NullLead RFQ", status="active", customer_name="NL Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NULLLEAD-001",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(normalized_name="nullleadvendor", display_name="NullLeadVendor")
+        db_session.add(card)
+        db_session.flush()
+        VendorSightingSummary(
+            requirement_id=r.id,
+            vendor_name="NullLeadVendor",
+            estimated_qty=10,
+            listing_count=1,
+            score=50.0,
+            best_lead_time_days=None,
+            vendor_card_id=card.id,
+        )
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="NullLeadVendor",
+                estimated_qty=10,
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=None,
+                vendor_card_id=card.id,
+            )
+        )
+        db_session.commit()
+
+        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
+        assert carded is not None
+        assert carded.lead_time_days is None  # must be None, not 0

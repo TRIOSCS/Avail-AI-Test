@@ -1337,6 +1337,8 @@ class RankedVendor(NamedTuple):
     covered_count: int
     avg_score: float | None
     has_contact: bool
+    lead_time_days: int | None = None
+    vendor_score: float | None = None
 
 
 class CoverageEntry(TypedDict):
@@ -1376,6 +1378,8 @@ class SuggestedVendor(NamedTuple):
     has_contact: bool
     response_rate: float | None
     engagement_score: float | None
+    vendor_score: float | None = None
+    lead_time_days: int | None = None
 
 
 def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
@@ -1487,13 +1491,15 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
                 continue  # un-normalizable cardless name — nothing to suggest
         g = groups.get(key)
         if g is None:
-            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": []}
+            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": [], "lead_times": []}
             groups[key] = g
         g["req_ids"].add(vss.requirement_id)
         if vss.score is not None:
             g["scores"].append(vss.score)
         if vss.vendor_name:
             g["raw_names"].append(vss.vendor_name)
+        if vss.best_lead_time_days is not None:
+            g["lead_times"].append(vss.best_lead_time_days)
         if g["card"] is None and card is not None:
             g["card"] = card
 
@@ -1517,6 +1523,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         dst["req_ids"].update(src["req_ids"])
         dst["scores"].extend(src["scores"])
         dst["raw_names"].extend(src["raw_names"])
+        dst["lead_times"].extend(src["lead_times"])
 
     # has_contact: one batched VendorContact lookup over all representative card ids.
     contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
@@ -1538,12 +1545,16 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         scores = g["scores"]
         avg_score = (sum(scores) / len(scores)) if scores else None
         has_contact = card is not None and card.id in contactable_card_ids
+        lead_times = g["lead_times"]
+        lead_time_days = min(lead_times) if lead_times else None
         rv = RankedVendor(
             card=card,
             vendor_name=display,
             covered_count=covered,
             avg_score=avg_score,
             has_contact=has_contact,
+            lead_time_days=lead_time_days,
+            vendor_score=(card.vendor_score if card is not None else None),
         )
         engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
         # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
@@ -1635,6 +1646,8 @@ async def sightings_vendor_modal(
                     has_contact=r.has_contact,
                     response_rate=(r.card.response_rate if r.card is not None else None),
                     engagement_score=(r.card.engagement_score if r.card is not None else None),
+                    vendor_score=r.vendor_score,
+                    lead_time_days=r.lead_time_days,
                 )
             )
             coverage[key] = CoverageEntry(
@@ -1696,6 +1709,8 @@ async def sightings_vendor_modal(
                     has_contact=has_contact,
                     response_rate=card.response_rate,
                     engagement_score=card.engagement_score,
+                    vendor_score=card.vendor_score,
+                    lead_time_days=None,  # preselect-only: no VSS context to compute min
                 )
             else:
                 # No matching card — cardless synthetic row, no contact resolvable
@@ -1708,6 +1723,8 @@ async def sightings_vendor_modal(
                     has_contact=False,
                     response_rate=None,
                     engagement_score=None,
+                    vendor_score=None,
+                    lead_time_days=None,
                 )
             suggested_vendors.append(sv)
             existing_norms.add(norm)
