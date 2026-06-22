@@ -74,8 +74,8 @@
           {{ grp_rows|length }} contact{{ "s" if grp_rows|length != 1 }}
         </span>
       </button>
-      {# Contacts list — shown/hidden via Alpine #}
-      <div x-show='open' x-cloak x-transition class='space-y-2 p-2'>
+      {# Contacts list — responsive multi-column grid (cards are self-contained cells) #}
+      <div x-show='open' x-cloak x-transition class='grid gap-2 sm:grid-cols-2 2xl:grid-cols-3 p-2'>
         {% for row in sorted_rows %}
           {{ contact_card(company, row.contact, row.site, row.legacy, now_utc, row.cadence if not row.legacy else 'new') }}
         {% endfor %}

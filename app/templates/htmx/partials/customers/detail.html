@@ -1,7 +1,9 @@
-{# Company detail partial — tabbed layout with enrich, quick info, stats, and click-to-contact.
+{# Company detail partial — full-width, contacts-forward layout.
    Renders inside the CDM workspace right panel (#cdm-detail) or full-page (#main-content).
-   Contacts tab is default and inlined so phones/emails/Teams/WeChat actions are
-   immediately available for call-list workflows.
+   A slim one-line account header sits above the tabs; CONTACTS is the default
+   inlined tab so phones/emails/Teams/WeChat actions are immediately available for
+   call-list workflows. Account cadence/disposition/clocks live in a collapsible
+   "Account settings" block to keep contacts front-and-center.
    Receives: company, sites, open_req_count, contact_rows, user.
    Called by: company_detail_partial route in htmx_views.py.
    Depends on: brand palette, partials/shared/enrich_button.html, tabs/contacts_tab.html.
@@ -10,8 +12,8 @@
 
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-{# max-w-3xl: must fit the CDM right panel (~60% viewport), not just full-page #}
-<div class="max-w-3xl mx-auto space-y-6">
+{# Full panel width — no max-w cap; the slim header + multi-column contacts use it all. #}
+<div class="space-y-4">
 
   {# Possible-duplicate banner — lazy (hx-target=this avoids inheriting the
      #main-content hx-target). Renders nothing when there is no near-dup. #}
@@ -21,157 +23,145 @@
        hx-swap="innerHTML"
        class="empty:hidden"></div>
 
-  {# ── Header Card ─────────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
-    <div class="flex items-start justify-between">
-      <div class="flex items-start gap-4">
-        {# Initial avatar circle #}
-        <div class="flex-shrink-0 h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center">
-          <span class="text-lg font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
+  {# ── Slim account header ─────────────────────────────────────────────────
+     One compact card: identity (left) · commercial/cadence chip strip (middle) ·
+     actions (right). Account cadence/disposition/clocks collapse below. #}
+  {% set cadence_dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
+  {% set cadence_label = {'new': 'New', 'on_target': 'On Target', 'due': 'Due', 'overdue': 'Overdue'} %}
+  <div x-data="{ showAcctSettings: false }"
+       class="bg-white rounded-xl border border-brand-200 px-4 py-3">
+    <div class="flex items-center justify-between gap-x-3 gap-y-1 flex-wrap">
+
+      {# LEFT: avatar + name + muted identity line #}
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div class="flex-shrink-0 h-9 w-9 rounded-full bg-brand-100 flex items-center justify-center">
+          <span class="text-base font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
         </div>
-        <div>
-          <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
-          {# Suggest-only name-normalization chip — lazy, renders nothing when clean. #}
-          <div hx-get="/v2/partials/customers/{{ company.id }}/name-suggestion"
-               hx-target="this"
-               hx-trigger="load"
-               hx-swap="innerHTML"
-               class="mt-1 empty:hidden"></div>
-          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 min-w-0">
+            <h1 class="text-lg font-bold text-gray-900 truncate">{{ company.name }}</h1>
+            {# Suggest-only name-normalization chip — lazy, renders nothing when clean. #}
+            <div hx-get="/v2/partials/customers/{{ company.id }}/name-suggestion"
+                 hx-target="this"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 class="empty:hidden"></div>
+          </div>
+          <div class="flex flex-wrap items-center gap-x-1.5 text-xs text-gray-600">
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
             {% endif %}
             {% if company.industry %}
-              <span class="text-gray-300">|</span>
+              {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.industry }}</span>
             {% endif %}
             {% if company.hq_city %}
-              <span class="text-gray-300">|</span>
+              {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
             {% endif %}
           </div>
         </div>
       </div>
-      <div class="flex items-center gap-3">
+
+      {# MIDDLE: commercial + cadence chip strip (·-separated, wraps) #}
+      <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-gray-600 min-w-0">
+        <span>Owner:
+          {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
+        </span>
+        <span class="text-gray-300">·</span>
+        <span>Terms: <span class="font-medium text-gray-700">{{ company.credit_terms or "—" }}</span></span>
+        <span class="text-gray-300">·</span>
+        <span class="inline-flex items-center gap-1">
+          <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
+                role="img" aria-label="{{ cadence_label.get(cadence_state, cadence_state|title) }}"></span>
+          <span class="font-medium text-gray-700">{{ cadence_label.get(cadence_state, cadence_state|title) }}</span>
+        </span>
+        <span class="text-gray-300">·</span>
+        <span>Win <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span>Rev 90d <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span>Last req <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span></span>
+        <span class="text-gray-300">·</span>
+        <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }} · {{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
+      </div>
+
+      {# RIGHT: type badge + enrich + Add Contact + kebab #}
+      <div class="flex items-center gap-2 flex-shrink-0">
         {% if company.account_type %}
         {{ account_type_badge(company.account_type) }}
         {% endif %}
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
-        {# Merge duplicate — opens modal with search + confirm flow #}
+        {# Primary "+ Add Contact" — dispatches the add-contact modal #}
         <button type="button"
-                title="Merge duplicate into this account"
-                class="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white
-                       px-2.5 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-50
-                       focus:outline-none focus:ring-2 focus:ring-brand-500"
-                hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
-                hx-target="#modal-content"
-                hx-swap="innerHTML"
-                @click="$dispatch('open-modal')">
-          Merge duplicate
+                @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
+                class="inline-flex items-center gap-1 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
+          + Add Contact
         </button>
+        {# Kebab — Merge duplicate / Account settings #}
+        <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
+          <button @click.stop="open = !open" type="button"
+                  class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
+                  aria-label="Account actions">
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+              <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+            </svg>
+          </button>
+          <div x-show="open" x-cloak
+               class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
+            {# Merge duplicate — opens modal with search + confirm flow #}
+            <button type="button"
+                    hx-get="/v2/partials/customers/{{ company.id }}/merge-form"
+                    hx-target="#modal-content"
+                    hx-swap="innerHTML"
+                    @click.stop="$dispatch('open-modal'); open = false"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Merge duplicate</button>
+            {# Account settings — reveal the collapsible cadence/disposition block #}
+            <button type="button"
+                    @click.stop="showAcctSettings = !showAcctSettings; open = false"
+                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50 border-t border-gray-100">Account settings</button>
+          </div>
+        </div>
       </div>
     </div>
 
-    {# Quick info grid — 2 cols: the md: viewport breakpoint lies inside a
-       split panel (panel is far narrower than the viewport) #}
-    <div class="mt-6 grid grid-cols-2 gap-4">
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">
-          {% if company.account_owner %}
-            <span class="inline-flex items-center gap-1.5">
-              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-xs font-bold">{{ company.account_owner.name[:1]|upper }}</span>
-              {{ company.account_owner.name }}
-            </span>
-          {% else %}
-            <span class="text-gray-400">Unassigned</span>
-          {% endif %}
-        </p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Terms</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.credit_terms or "—" }}</p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
-        <p class="mt-1 text-sm font-medium">
-          {% if company.phone %}
-            <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
-               data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
-               data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
-          {% else %}
-            <span class="text-gray-400">—</span>
-          {% endif %}
-        </p>
-      </div>
-      <div class="p-3 rounded-lg bg-gray-50">
-        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
-        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
-      </div>
-    </div>
-  </div>
+    {# ── Collapsible Account settings — cadence/disposition/clocks + phone/employees ── #}
+    <div x-show="showAcctSettings" x-cloak x-collapse class="mt-3 pt-3 border-t border-gray-100 space-y-3">
+      {# Hero row: cadence badge + settable tier + next-best-touch.
+         _cadence_hero.html is the HTMX swap target for tier updates. #}
+      {% include 'htmx/partials/customers/_cadence_hero.html' %}
 
-  {# ── Account Cadence Card ──────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    {# Hero row: cadence badge + settable tier + next-best-touch.
-       _cadence_hero.html is the HTMX swap target for tier updates. #}
-    {% include 'htmx/partials/customers/_cadence_hero.html' %}
+      {# Disposition control: Active / Bucket + Send to Prospecting. #}
+      {% include 'htmx/partials/customers/_disposition_control.html' %}
 
-    {# Disposition control: Active / Bucket + Send to Prospecting. #}
-    {% include 'htmx/partials/customers/_disposition_control.html' %}
-
-    {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
-    <div class="mb-3">
+      {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}
-    </div>
 
-    {# Coverage badge #}
-    <p class="text-xs text-gray-600">
-      <span class="font-medium text-gray-700">{{ contact_count }} contact{{ 's' if contact_count != 1 else '' }}</span>
-      <span class="text-gray-300 mx-1">·</span>
-      <span class="font-medium text-gray-700">{{ site_count }} site{{ 's' if site_count != 1 else '' }}</span>
-    </p>
-  </div>
-
-  {# ── Commercial Context Strip ────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 px-4 py-3">
-    <div class="flex items-center gap-4 flex-wrap text-sm">
-      <span class="text-xs font-medium text-gray-400 uppercase tracking-wider mr-2">Commercial</span>
-      <span class="text-gray-600">
-        Win rate:
-        <span class="font-semibold text-gray-900">{% if win_rate is not none %}{{ win_rate }}%{% else %}—{% endif %}</span>
-      </span>
-      <span class="text-gray-300">·</span>
-      <span class="text-gray-600">
-        Rev 90d:
-        <span class="font-semibold text-gray-900">{% if revenue_90d %}${{ "{:,.0f}".format(revenue_90d) }}{% else %}—{% endif %}</span>
-      </span>
-      <span class="text-gray-300">·</span>
-      <span class="text-gray-600">
-        Last deal:
-        <span class="font-semibold text-gray-900">{% if last_req_date %}{{ last_req_date[:10] }}{% else %}—{% endif %}</span>
-      </span>
+      {# Phone + Employees #}
+      <div class="grid grid-cols-2 gap-3">
+        <div class="p-3 rounded-lg bg-gray-50">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
+          <p class="mt-1 text-sm font-medium">
+            {% if company.phone %}
+              <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
+                 data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
+                 data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
+            {% else %}
+              <span class="text-gray-400">—</span>
+            {% endif %}
+          </p>
+        </div>
+        <div class="p-3 rounded-lg bg-gray-50">
+          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
+          <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
+        </div>
+      </div>
     </div>
   </div>
 
-  {# Enrich results placeholder #}
-  <div id="enrich-results-{{ company.id }}"></div>
-
-  {# AI Insights — lazy-loaded (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
-  <div hx-get="/v2/partials/customers/{{ company.id }}/insights"
-       hx-target="this"
-       hx-trigger="load"
-       hx-swap="innerHTML"
-       hx-indicator="#cust-insights-spinner"
-       class="empty:hidden">
-    <div id="cust-insights-spinner" class="htmx-indicator flex items-center justify-center py-4">
-      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-    </div>
-  </div>
-
-  {# ── Tabs — Contacts first (CDM call-list workflow) ───────── #}
+  {# ── Tabs — Contacts first + inlined (front-and-center call-list workflow) ── #}
   <div x-data="{ activeTab: 'contacts' }">
     <div class="border-b border-gray-200">
       <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections">
@@ -208,13 +198,28 @@
     </div>
   </div>
 
-  {# ── Segment Tags ────────────────────────────────────────── #}
+  {# Enrich results placeholder #}
+  <div id="enrich-results-{{ company.id }}"></div>
+
+  {# AI Insights — lazy-loaded (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
+  <div hx-get="/v2/partials/customers/{{ company.id }}/insights"
+       hx-target="this"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       hx-indicator="#cust-insights-spinner"
+       class="empty:hidden">
+    <div id="cust-insights-spinner" class="htmx-indicator flex items-center justify-center py-4">
+      <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+    </div>
+  </div>
+
+  {# ── Segment Tags ────────────────────────────────────────────────────────── #}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
     <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
     {% include "htmx/partials/customers/_segment_tags.html" %}
   </div>
 
-  {# ── Notes ───────────────────────────────────────────────── #}
+  {# ── Notes ───────────────────────────────────────────────────────────────── #}
   {% if company.notes %}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
     <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>

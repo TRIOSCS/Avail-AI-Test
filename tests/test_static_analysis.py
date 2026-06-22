@@ -547,7 +547,10 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 270  # main 269 + 1: C2 contacts-tab "+ Add Contact" header button (mirrors sites_tab)
+    BASELINE = 272  # 270 + net 2: full-width contacts-forward customer detail header —
+    # new primary "+ Add Contact" button + a kebab whose "Merge duplicate"/"Account settings"
+    # menu items mirror the existing contact-kebab menu-item pattern (px-3 py-1.5), minus the
+    # retired inline "Merge duplicate" button it replaced.
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."

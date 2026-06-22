@@ -10,7 +10,9 @@
 
 <title hx-swap-oob="true">{{ vendor.display_name }} — Vendors — AvailAI</title>
 
-<div class="max-w-5xl mx-auto space-y-6">
+{# Full panel width — no max-w cap; meta is compressed into a slim stat strip
+   so the tabbed main content uses the full width. #}
+<div class="space-y-4">
 
   {# ── Header Card ─────────────────────────────────────────── #}
   <div class="card">
@@ -75,23 +77,16 @@
     </div>
   </div>
 
-  {# ── 4-Stat Row ──────────────────────────────────────────── #}
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ vendor.sighting_count or 0 }}</p>
-      <p class="text-xs font-medium text-gray-600 mt-1">Sightings</p>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "—" }}</p>
-      <p class="text-xs font-medium text-gray-600 mt-1">Win Rate</p>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ vendor.total_pos or 0 }}</p>
-      <p class="text-xs font-medium text-gray-600 mt-1">Total POs</p>
-    </div>
-    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-2xl font-bold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "—" }}</p>
-      <p class="text-xs font-medium text-gray-600 mt-1">Avg Response Time</p>
+  {# ── Slim stat strip — Sightings · Win Rate · Total POs · Avg Response (inline) ── #}
+  <div class="bg-white rounded-xl border border-brand-200 px-4 py-2.5">
+    <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+      <span class="text-gray-600">Sightings <span class="font-semibold text-gray-900">{{ vendor.sighting_count or 0 }}</span></span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">Win Rate <span class="font-semibold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "—" }}</span></span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">Total POs <span class="font-semibold text-gray-900">{{ vendor.total_pos or 0 }}</span></span>
+      <span class="text-gray-300">·</span>
+      <span class="text-gray-600">Avg Response <span class="font-semibold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "—" }}</span></span>
     </div>
   </div>
 
