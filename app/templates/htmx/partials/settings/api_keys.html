@@ -49,7 +49,7 @@
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {LUSHA_API_KEY: val}}))"
                 hx-swap="none"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('lusha_api_key').value=''; htmx.trigger('#lusha-status', 'reload') }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
@@ -100,7 +100,7 @@
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {EXPLORIUM_API_KEY: val}}))"
                 hx-swap="none"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('explorium_api_key').value=''; htmx.trigger('#explorium-status', 'reload') }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
@@ -151,7 +151,7 @@
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {APOLLO_API_KEY: val}}))"
                 hx-swap="none"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('apollo_api_key').value=''; htmx.trigger('#apollo-status', 'reload') }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
@@ -202,7 +202,7 @@
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {HUNTER_API_KEY: val}}))"
                 hx-swap="none"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('hunter_api_key').value=''; htmx.trigger('#hunter-status', 'reload') }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
@@ -250,7 +250,7 @@
                   if (!val.trim()) { htmx.triggerEvent(this, 'htmx:abort'); return; }
                   this.setAttribute('hx-vals', JSON.stringify({credentials: {CLAY_API_KEY: val}}))"
                 hx-on::after-request="if(event.detail.successful){ document.getElementById('clay_api_key').value='' }"
-                class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-lg hover:bg-brand-700">
+                class="btn-md bg-brand-600 text-white font-medium rounded-lg hover:bg-brand-700">
           Save
         </button>
       </div>
