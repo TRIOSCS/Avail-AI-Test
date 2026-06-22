@@ -312,6 +312,9 @@ async def sightings_list(
             | Requisition.customer_name.ilike(f"%{safe_q}%")
             | Requirement.substitutes_text.ilike(f"%{safe_q}%")
         )
+    if filters.manufacturer:
+        safe_mfr = escape_like(filters.manufacturer)
+        query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%"))
 
     total = query.count()
 
@@ -500,6 +503,7 @@ async def sightings_list(
         "groups": groups,
         "link_map": link_map,
         "user": user,
+        "manufacturer": filters.manufacturer,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
 
@@ -1669,12 +1673,18 @@ async def sightings_vendor_modal(
             suggested_vendors.append(sv)
             existing_norms.add(norm)
 
+    # Compute how many distinct requisitions the basket spans (for the "Spanning N
+    # requisitions" note in the Parts panel). Only shown when >1 to keep the modal quiet
+    # for the single-requirement case.
+    requisition_count = len({r.requisition_id for r in requirements})
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
         "coverage": coverage,
         "requirement_ids": req_id_list,
         "parts": parts,
+        "requisition_count": requisition_count,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 

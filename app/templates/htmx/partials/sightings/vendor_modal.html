@@ -171,7 +171,11 @@
 
     {# Parts reference (read-only) #}
     <div class="mb-4">
-      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts</label>
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts
+        {% if requisition_count is defined and requisition_count > 1 %}
+        <span class="ml-2 font-normal normal-case text-brand-600">— Spanning {{ requisition_count }} requisitions</span>
+        {% endif %}
+      </label>
       <div class="text-xs text-gray-600 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
         {% for p in parts %}
         <div>{{ p.mpn }} — {{ p.qty }} pcs{{ ' @ $%.2f'|format(p.target_price) if p.target_price else '' }}</div>

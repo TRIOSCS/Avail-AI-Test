@@ -61,26 +61,40 @@
 
 {# ── Filter Bar ──────────────────────────────────────────────── #}
 <div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap"
-     x-data="{ sStatus: '{{ status }}', sGroupBy: '{{ group_by }}', sQ: '{{ q }}' }">
+     x-data="{ sStatus: '{{ status }}', sGroupBy: '{{ group_by }}', sQ: '{{ q }}', sManufacturer: '{{ manufacturer|default("") }}' }">
   <input aria-label="Search sightings" type="text" name="q" value="{{ q }}"
          placeholder="Search MPN or customer..."
          x-model="sQ"
          hx-get="/v2/partials/sightings"
          hx-trigger="keyup changed delay:300ms"
          hx-target="#sightings-table"
-         :hx-vals="JSON.stringify({status: sStatus, group_by: sGroupBy})"
+         :hx-vals="JSON.stringify({status: sStatus, group_by: sGroupBy, manufacturer: sManufacturer})"
          class="flex-1 min-w-[150px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+  <input aria-label="Filter by manufacturer" type="text" name="manufacturer" value="{{ manufacturer|default('') }}"
+         placeholder="Manufacturer..."
+         x-model="sManufacturer"
+         hx-get="/v2/partials/sightings"
+         hx-trigger="keyup changed delay:300ms"
+         hx-target="#sightings-table"
+         :hx-vals="JSON.stringify({status: sStatus, group_by: sGroupBy, q: sQ})"
+         class="w-[140px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-2 focus:ring-brand-200 outline-none">
   <select name="group_by" x-model="sGroupBy"
           hx-get="/v2/partials/sightings"
           hx-trigger="change"
           hx-target="#sightings-table"
-          :hx-vals="JSON.stringify({status: sStatus, q: sQ})"
+          :hx-vals="JSON.stringify({status: sStatus, q: sQ, manufacturer: sManufacturer})"
           class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
     <option value="" {{ 'selected' if not group_by }}>Flat</option>
     <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>
     <option value="manufacturer" {{ 'selected' if group_by == 'manufacturer' }}>By Manufacturer</option>
   </select>
 </div>
+{# Caption when grouped by manufacturer to guide buyer toward cross-req basket assembly #}
+{% if group_by == 'manufacturer' %}
+<div class="px-3 py-1 text-[11px] text-gray-400 bg-gray-50 border-b border-gray-100">
+  Tick a manufacturer to build one cross-requisition RFQ across all matching parts.
+</div>
+{% endif %}
 
 {# ── Table ───────────────────────────────────────────────────── #}
 <div class="flex-1 overflow-y-auto overflow-x-auto sightings-table-wrapper"
@@ -201,8 +215,19 @@
         {% for group_name, group_reqs in groups.items() %}
         <tr class="bg-gray-50 border-b border-gray-200">
           <td colspan="9" class="px-3 py-2">
-            <span class="font-medium text-gray-700 text-sm">{{ group_name }}</span>
-            <span class="ml-2 text-xs text-gray-400">{{ group_reqs|length }} part{{ 's' if group_reqs|length != 1 else '' }}</span>
+            <div class="flex items-center gap-3">
+              {# "Select all N" checkbox for this group — adds/removes all group ids in the basket #}
+              <label class="flex items-center gap-1.5 cursor-pointer text-xs text-gray-600 font-medium select-none">
+                <input type="checkbox" class="rounded border-gray-300"
+                       @change="
+                         var ids = [{% for r in group_reqs %}{{ r.id }}{% if not loop.last %},{% endif %}{% endfor %}];
+                         ids.forEach(function(id){ var has = $store.sightingSelection.has(id); if ($event.target.checked && !has) $store.sightingSelection.toggle(id); else if (!$event.target.checked && has) $store.sightingSelection.toggle(id); });
+                       ">
+                Select all {{ group_reqs|length }}
+              </label>
+              <span class="font-medium text-gray-700 text-sm">{{ group_name }}</span>
+              <span class="text-xs text-gray-400">{{ group_reqs|length }} part{{ 's' if group_reqs|length != 1 else '' }}</span>
+            </div>
           </td>
         </tr>
         {% for r in group_reqs %}
@@ -291,7 +316,7 @@
     </span>
     <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids=' + $store.sightingSelection.array.join(',')})"
             class="btn-primary btn-sm">
-      Send to Vendors
+      Build RFQ (<span x-text="$store.sightingSelection.count"></span> parts)
     </button>
     <button class="btn-secondary btn-sm"
             hx-post="/v2/partials/sightings/batch-refresh"

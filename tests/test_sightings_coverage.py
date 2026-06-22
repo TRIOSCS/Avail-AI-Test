@@ -697,3 +697,140 @@ class TestVendorRowRFQButton:
         assert resp.status_code == 200
         assert "vendor-modal" in resp.text
         assert "preselect" in resp.text
+
+
+class TestManufacturerBasket:
+    """(S2) Cross-requisition manufacturer-basket assembly."""
+
+    def _seed_multi_req_ibm(self, db_session):
+        """Two requisitions each with one IBM part and one non-IBM part."""
+        req1 = Requisition(name="Req1", status="active", customer_name="Cust A")
+        req2 = Requisition(name="Req2", status="active", customer_name="Cust B")
+        db_session.add_all([req1, req2])
+        db_session.flush()
+
+        r1_ibm = Requirement(
+            requisition_id=req1.id,
+            primary_mpn="IBM-001",
+            manufacturer="IBM",
+            target_qty=10,
+            sourcing_status="open",
+        )
+        r1_other = Requirement(
+            requisition_id=req1.id,
+            primary_mpn="OTHER-001",
+            manufacturer="Other Corp",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        r2_ibm = Requirement(
+            requisition_id=req2.id,
+            primary_mpn="IBM-002",
+            manufacturer="IBM",
+            target_qty=20,
+            sourcing_status="open",
+        )
+        db_session.add_all([r1_ibm, r1_other, r2_ibm])
+        db_session.commit()
+        return req1, req2, r1_ibm, r1_other, r2_ibm
+
+    def test_manufacturer_filter_returns_only_ibm_parts(self, client, db_session):
+        """sightings_list?manufacturer=IBM returns only IBM-manufacturer rows."""
+        _, _, r1_ibm, r1_other, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM")
+        assert resp.status_code == 200
+        html = resp.text
+        # IBM parts are present
+        assert "IBM-001" in html
+        assert "IBM-002" in html
+        # Non-IBM part is absent
+        assert "OTHER-001" not in html
+
+    def test_manufacturer_filter_spans_multiple_requisitions(self, client, db_session):
+        """IBM parts from different requisitions all appear under the filter."""
+        req1, req2, r1_ibm, _, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&group_by=manufacturer")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "IBM-001" in html
+        assert "IBM-002" in html
+
+    def test_manufacturer_survives_status_change(self, client, db_session):
+        """Manufacturer param is preserved when status changes (carried in hx-vals)."""
+        _, _, r1_ibm, _, _ = self._seed_multi_req_ibm(db_session)
+        # When manufacturer filter is active, status pills should carry it
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&status=open")
+        assert resp.status_code == 200
+        # manufacturer is echoed in the filter bar input value
+        assert "IBM" in resp.text
+
+    def test_manufacturer_survives_group_by_change(self, client, db_session):
+        """Manufacturer param is preserved when group_by changes (carried in hx-
+        vals)."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM&group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "IBM" in resp.text
+
+    def test_manufacturer_filter_bar_input_present(self, client, db_session):
+        """The filter bar contains a manufacturer text input."""
+        _, _, r1_ibm, _, _ = self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        # The filter bar input must be present with name="manufacturer"
+        assert 'name="manufacturer"' in resp.text
+
+    def test_manufacturer_filter_bar_prepopulated(self, client, db_session):
+        """Filter bar manufacturer input shows current filter value on re-render."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?manufacturer=IBM")
+        assert resp.status_code == 200
+        # Input must be pre-populated
+        assert 'value="IBM"' in resp.text
+
+    def test_group_header_select_all_checkbox_present(self, client, db_session):
+        """Group header has a 'Select all N' labeled checkbox when grouped."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "Select all" in resp.text
+
+    def test_manufacturer_group_caption_shown(self, client, db_session):
+        """A helper caption appears under the filter bar when group_by==manufacturer."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert "cross-requisition RFQ" in resp.text
+
+    def test_batch_bar_button_relabeled(self, client, db_session):
+        """Action bar button label is 'Build RFQ' not 'Send to Vendors'."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "Build RFQ" in resp.text
+        assert "Send to Vendors" not in resp.text
+
+    def test_vendor_modal_shows_spanning_requisitions(self, client, db_session):
+        """When >1 requisition is in basket, modal Parts panel says 'Spanning N
+        requisitions'."""
+        req1, req2, r1_ibm, _, r2_ibm = self._seed_multi_req_ibm(db_session)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r1_ibm.id},{r2_ibm.id}")
+        assert resp.status_code == 200
+        assert "Spanning" in resp.text
+        assert "2 requisitions" in resp.text
+
+    def test_vendor_modal_no_spanning_for_single_req(self, client, db_session):
+        """When all parts in one requisition, spanning note is absent."""
+        req1, _, r1_ibm, r1_other, _ = self._seed_multi_req_ibm(db_session)
+        # Both parts from req1 only
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r1_ibm.id},{r1_other.id}")
+        assert resp.status_code == 200
+        assert "Spanning" not in resp.text
+
+    def test_existing_q_filter_unchanged(self, client, db_session):
+        """Existing q filter still works alongside manufacturer filter."""
+        self._seed_multi_req_ibm(db_session)
+        resp = client.get("/v2/partials/sightings?q=IBM-001&manufacturer=IBM")
+        assert resp.status_code == 200
+        assert "IBM-001" in resp.text
+        assert "IBM-002" not in resp.text
