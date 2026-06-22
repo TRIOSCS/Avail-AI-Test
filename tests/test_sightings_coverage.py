@@ -630,8 +630,9 @@ class TestVendorModalPreselect:
 
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Cover+Vendor")
         assert resp.status_code == 200
-        # Response must be OK and contain the vendor
-        assert "Cover Vendor" in resp.text or "cover vendor" in resp.text
+        # The vendor's display_name must appear exactly once — a double-append would
+        # render it twice in the for-loop and this count assertion would catch it.
+        assert resp.text.count("Cover Vendor") == 1
 
     def test_preselect_vendor_no_contact_is_rendered_not_checked(self, client, db_session):
         """Preselected vendor with no VendorContact rows has has_contact=False and is
@@ -645,8 +646,13 @@ class TestVendorModalPreselect:
 
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Nocardco")
         assert resp.status_code == 200
-        # The vendor must be rendered
-        assert "Nocardco" in resp.text or "nocardco" in resp.text
+        # The vendor's display_name must appear in the HTML (rendered as a disabled row).
+        assert "Nocardco" in resp.text
+        # The normalized name must NOT appear in the rfqVendorModal tojson seed — the
+        # template filters to only has_contact=True vendors before encoding selectedVendors,
+        # so "nocardco" must be absent from the response entirely (the disabled row only
+        # renders display_name, never normalized_name).
+        assert '"nocardco"' not in resp.text
 
 
 class TestDetailHeaderBuildRFQButton:
