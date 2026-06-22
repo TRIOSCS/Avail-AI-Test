@@ -116,12 +116,46 @@ async def test_refresh_failure_marks_needs_reconnect(monkeypatch):
     monkeypatch.setattr(co.http, "post", fake_post, raising=False)
     assert await co.refresh() is None
     assert store.get("CLAY_OAUTH_NEEDS_RECONNECT") == "1" and co.needs_reconnect()
+    assert store.get("CLAY_OAUTH_ACCESS_TOKEN") is None
 
 
 @pytest.mark.asyncio
 async def test_get_access_token_none_when_absent(monkeypatch):
     _seed_store(monkeypatch)
     assert await co.get_access_token() is None and not co.is_connected()
+
+
+@pytest.mark.asyncio
+async def test_get_access_token_refreshes_when_expiry_absent(monkeypatch):
+    store = _seed_store(monkeypatch)
+    store["CLAY_OAUTH_ACCESS_TOKEN"] = "OLD"
+    store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
+    store["CLAY_OAUTH_CLIENT_ID"] = "cid"
+    # No CLAY_OAUTH_EXPIRES_AT in store — must trigger refresh
+
+    async def fake_post(url, **k):
+        return Resp(200, {"access_token": "REFRESHED", "refresh_token": "RT2", "expires_in": 3600})
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    result = await co.get_access_token()
+    assert result == "REFRESHED", f"Expected refreshed token, got {result!r} (should not return stale 'OLD')"
+    assert store["CLAY_OAUTH_ACCESS_TOKEN"] == "REFRESHED"
+
+
+@pytest.mark.asyncio
+async def test_refresh_failure_clears_access_token(monkeypatch):
+    store = _seed_store(monkeypatch)
+    store["CLAY_OAUTH_REFRESH_TOKEN"] = "RT"
+    store["CLAY_OAUTH_CLIENT_ID"] = "cid"
+    store["CLAY_OAUTH_ACCESS_TOKEN"] = "STALE"
+
+    async def fake_post(url, **k):
+        return Resp(400, {"error": "invalid_grant"})
+
+    monkeypatch.setattr(co.http, "post", fake_post, raising=False)
+    assert await co.refresh() is None
+    assert store.get("CLAY_OAUTH_NEEDS_RECONNECT") == "1" and co.needs_reconnect()
+    assert store.get("CLAY_OAUTH_ACCESS_TOKEN") is None
 
 
 def test_disconnect_clears(monkeypatch):

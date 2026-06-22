@@ -108,6 +108,8 @@ async def register_client() -> str:
 
 
 def _persist_tokens(tok: dict) -> None:
+    if not tok.get("access_token"):
+        return
     expires_at = datetime.now(timezone.utc) + timedelta(seconds=int(tok.get("expires_in", 3600)))
     updates: dict[str, str | None] = {
         "CLAY_OAUTH_ACCESS_TOKEN": tok.get("access_token"),
@@ -165,8 +167,10 @@ async def get_access_token() -> str | None:
     exp = _load("CLAY_OAUTH_EXPIRES_AT")
     if not at:
         return await refresh() if _load("CLAY_OAUTH_REFRESH_TOKEN") else None
+    if not exp:
+        return await refresh()
     try:
-        if exp and datetime.fromisoformat(exp) - _REFRESH_BUFFER <= datetime.now(timezone.utc):
+        if datetime.fromisoformat(exp) - _REFRESH_BUFFER <= datetime.now(timezone.utc):
             return await refresh()
     except ValueError:
         return await refresh()
