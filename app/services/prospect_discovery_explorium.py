@@ -12,9 +12,7 @@ import asyncio
 
 from loguru import logger
 
-from app import connectors  # noqa: F401 — explicit connector import per Task 9
 from app.config import settings
-from app.connectors import explorium  # noqa: F401
 from app.http_client import http
 from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.prospect_scoring import (
@@ -115,6 +113,9 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
 
     try:
         # Use same header format as app.connectors.explorium (api_key: not Authorization: Bearer)
+        # NOTE: This /v1/businesses/search bulk-discovery endpoint is unverified against the
+        # current Explorium API and should be rewired to the documented /v1/businesses fetch
+        # in a follow-up (out of scope for the current prospecting feature).
         resp = await http.post(
             f"{EXPLORIUM_BASE}/v1/businesses/search",
             json=payload,

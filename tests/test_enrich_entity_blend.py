@@ -29,8 +29,6 @@ async def test_enrich_entity_blends_by_authority(monkeypatch):
         ]
 
     monkeypatch.setattr(enrichment_router, "gather_company", fake_gather)
-    monkeypatch.setattr(es, "get_cached", lambda k: None, raising=False)
-    monkeypatch.setattr(es, "set_cached", lambda *a, **k: None, raising=False)
     monkeypatch.setattr("app.cache.intel_cache.get_cached", lambda k: None)
     monkeypatch.setattr("app.cache.intel_cache.set_cached", lambda *a, **k: None)
 

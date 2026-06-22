@@ -1,8 +1,9 @@
 """Unified Enrichment Service.
 
-Shared enrichment workflow for both vendor cards and customer companies. Supports
-Explorium (Vibe Prospecting), Apollo.io (company + contact enrichment), and AI (Claude +
-web search) as enrichment providers. AI runs last to fill remaining gaps.
+Shared enrichment workflow for both vendor cards and customer companies. enrich_entity
+and find_suggested_contacts delegate provider orchestration to
+app.services.enrichment_router and per-field arbitration (by tier) to
+app.services.firmo_tiers. apply_enrichment_to_* functions are provenance-aware.
 """
 
 import re
