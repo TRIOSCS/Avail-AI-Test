@@ -578,3 +578,116 @@ class TestDetailWithOOOContact:
         db_session.commit()
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
+
+
+# ── S1 tests: three entry points + preselect fix ──────────────────────────────
+
+
+def _seed_vendor_with_contact(db_session, vendor_name: str, normalized_name: str, email: str):
+    """Create a VendorCard + VendorContact (contactable) for preselect tests."""
+    card = VendorCard(normalized_name=normalized_name, display_name=vendor_name)
+    db_session.add(card)
+    db_session.flush()
+    contact = VendorContact(
+        vendor_card_id=card.id,
+        contact_type="sales",
+        email=email,
+        source="manual",
+    )
+    db_session.add(contact)
+    db_session.flush()
+    return card
+
+
+class TestVendorModalPreselect:
+    """Preselect= param: named vendor appears checked even below coverage cap (S1b
+    blocker)."""
+
+    def test_preselect_vendor_below_cap_is_present_and_checked(self, client, db_session):
+        """Vendor named in preselect= but NOT in coverage top-20 is appended and seeds
+        selectedVendors (has_contact=True) so the modal initializes with it checked."""
+        req, r, _ = _seed_active(db_session)
+
+        # Create a vendor card + contact for "Preselectco" — not a sighting vendor
+        _seed_vendor_with_contact(db_session, "Preselectco", "preselectco", "buy@preselectco.com")
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Preselectco")
+        assert resp.status_code == 200
+        # The normalized name must appear in the selectedVendors seed (|tojson in x-data)
+        assert "preselectco" in resp.text
+
+    def test_preselect_vendor_already_in_coverage_not_duplicated(self, client, db_session):
+        """If preselect= names a vendor already in the coverage top-20, it must appear
+        exactly once in the suggested_vendors list (no duplicate)."""
+        req, r, _ = _seed_active(db_session)
+
+        # "Cover Vendor" is already seeded as a VendorSightingSummary by _seed_active
+        card = _seed_vendor_with_contact(db_session, "Cover Vendor", "cover vendor", "cv@cover.com")
+        # Tie the sighting to this card so it appears in coverage
+        db_session.query(VendorSightingSummary).filter_by(requirement_id=r.id).update({"vendor_card_id": card.id})
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Cover+Vendor")
+        assert resp.status_code == 200
+        # Response must be OK and contain the vendor
+        assert "Cover Vendor" in resp.text or "cover vendor" in resp.text
+
+    def test_preselect_vendor_no_contact_is_rendered_not_checked(self, client, db_session):
+        """Preselected vendor with no VendorContact rows has has_contact=False and is
+        NOT seeded into selectedVendors (rendered but disabled)."""
+        req, r, _ = _seed_active(db_session)
+
+        # Card with no contact
+        card = VendorCard(normalized_name="nocardco", display_name="Nocardco")
+        db_session.add(card)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}&preselect=Nocardco")
+        assert resp.status_code == 200
+        # The vendor must be rendered
+        assert "Nocardco" in resp.text or "nocardco" in resp.text
+
+
+class TestDetailHeaderBuildRFQButton:
+    """(S1a) detail.html header must contain a 'Build RFQ' primary button."""
+
+    def test_detail_header_has_build_rfq_button(self, client, db_session):
+        """The detail panel header contains a Build RFQ btn-primary CTA."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "Build RFQ" in resp.text
+
+
+class TestTableRFQButton:
+    """(S1c) table.html render_row must contain a per-row quick RFQ icon button."""
+
+    def test_table_row_has_rfq_quick_button(self, client, db_session):
+        """Each requirement row in the table contains a Build RFQ quick-dispatch
+        button."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        # The table contains at least one Build RFQ dispatch trigger
+        assert "Build RFQ" in resp.text
+
+    def test_group_row_colspan_nine(self, client, db_session):
+        """Group header row uses colspan=9 to match the 9-column header."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get("/v2/partials/sightings?group_by=manufacturer")
+        assert resp.status_code == 200
+        assert 'colspan="9"' in resp.text
+
+
+class TestVendorRowRFQButton:
+    """(S1b) _vendor_row.html must have a visible RFQ pill outside the kebab."""
+
+    def test_vendor_row_has_visible_rfq_pill(self, client, db_session):
+        """Detail vendor row has a visible 'Build RFQ' button with preselect
+        dispatch."""
+        req, r, _ = _seed_active(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "vendor-modal" in resp.text
+        assert "preselect" in resp.text

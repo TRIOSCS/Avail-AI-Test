@@ -1546,6 +1546,7 @@ def _find_affinity_in_thread(mpn: str) -> list[dict]:
 async def sightings_vendor_modal(
     request: Request,
     requirement_ids: str = "",
+    preselect: str = "",
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -1625,6 +1626,48 @@ async def sightings_vendor_modal(
                     mpns_by_key.setdefault(row_key, set()).add(mpn)
             for cov_key, mpns in mpns_by_key.items():
                 coverage[cov_key]["mpns"] = ", ".join(sorted(mpns))
+
+    # ── Preselect union: append any named vendor not already in coverage ────────
+    # Split on comma, normalize each name, skip blanks, dedup against the
+    # already-suggested set (keyed by normalized_name to match the Alpine selection
+    # key). `has_contact` is resolved via the same _cards_with_resolvable_email
+    # helper used for coverage rows — so the Alpine seed stays consistent.
+    if preselect.strip():
+        existing_norms = {sv.normalized_name for sv in suggested_vendors}
+        preselect_names = [n.strip() for n in preselect.split(",") if n.strip()]
+        for raw_name in preselect_names:
+            norm = normalize_vendor_name(raw_name)
+            if not norm or norm in existing_norms:
+                continue
+            # Resolve against VendorCard by normalized_name
+            card = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+            if card is not None:
+                contactable = _cards_with_resolvable_email(db, [card.id])
+                has_contact = card.id in contactable
+                sv = SuggestedVendor(
+                    id=card.id,
+                    card=card,
+                    normalized_name=card.normalized_name,
+                    display_name=card.display_name or raw_name,
+                    vendor_name=card.display_name or raw_name,
+                    has_contact=has_contact,
+                    response_rate=card.response_rate,
+                    engagement_score=card.engagement_score,
+                )
+            else:
+                # No matching card — cardless synthetic row, no contact resolvable
+                sv = SuggestedVendor(
+                    id=norm,
+                    card=None,
+                    normalized_name=norm,
+                    display_name=raw_name,
+                    vendor_name=raw_name,
+                    has_contact=False,
+                    response_rate=None,
+                    engagement_score=None,
+                )
+            suggested_vendors.append(sv)
+            existing_norms.add(norm)
 
     ctx = {
         "request": request,

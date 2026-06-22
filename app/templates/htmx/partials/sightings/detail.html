@@ -18,7 +18,11 @@
       <p class="text-xs text-gray-600 mt-1">{{ requirement.manufacturer }}</p>
       {% endif %}
     </div>
-    {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
+    <div class="flex items-center gap-2 flex-shrink-0">
+      <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}'})"
+              class="btn-primary btn-sm">Build RFQ</button>
+      {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
+    </div>
   </div>
 
   <div class="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
