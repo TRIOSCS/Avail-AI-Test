@@ -176,4 +176,15 @@ def test_clay_card_shows_connected(admin_client, monkeypatch):
     monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: True)
     monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: False)
     html = admin_client.get("/v2/partials/settings/api-keys").text
-    assert "Connected" in html and "/auth/clay/disconnect" in html
+    assert "Connected" in html
+    assert 'hx-post="/auth/clay/disconnect"' in html
+
+
+def test_clay_card_shows_needs_reconnect(admin_client, monkeypatch):
+    import app.routers.htmx_views as v
+
+    monkeypatch.setattr(v.clay_oauth, "is_connected", lambda: False)
+    monkeypatch.setattr(v.clay_oauth, "needs_reconnect", lambda: True)
+    html = admin_client.get("/v2/partials/settings/api-keys").text
+    assert "Needs reconnect" in html
+    assert "/auth/clay/connect" in html

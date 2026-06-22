@@ -163,19 +163,6 @@ async def test_enrich_company_none_when_not_connected(monkeypatch):
     assert await clay_mcp.enrich_company("arrow.com") is None
 
 
-@pytest.mark.asyncio
-async def test_disabled_without_key_enrich_company(monkeypatch):
-    from app.connectors import clay_mcp
-
-    async def no_token():
-        return None
-
-    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", no_token)
-
-    out = await clay_mcp.enrich_company("x.com")
-    assert out is None
-
-
 # ── find_contacts ────────────────────────────────────────────────────────────
 
 
@@ -350,3 +337,39 @@ async def test_mcp_call_refreshes_on_401(monkeypatch):
     monkeypatch.setattr(clay_mcp.http, "post", fake_post, raising=False)
     out = await clay_mcp._mcp_call("find-and-enrich-company", {"companyIdentifier": "arrow.com"})
     assert calls["refreshed"] == 1 and calls["n"] == 2 and out == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_mcp_call_quota_after_refresh_propagates(monkeypatch):
+    """After a 401→refresh, a 429 on the retry must raise ProviderQuotaError."""
+    from app.connectors import clay_mcp
+
+    calls = {"n": 0, "refreshed": 0}
+
+    async def tok():
+        return "AT"
+
+    async def refresh():
+        calls["refreshed"] += 1
+        return "AT2"
+
+    monkeypatch.setattr(clay_mcp.clay_oauth, "get_access_token", tok)
+    monkeypatch.setattr(clay_mcp.clay_oauth, "refresh", refresh)
+
+    class R:
+        def __init__(s, code):
+            s.status_code = code
+
+        def json(s):
+            return {}
+
+    async def fake_post(url, **k):
+        calls["n"] += 1
+        return R(401) if calls["n"] == 1 else R(429)
+
+    monkeypatch.setattr(clay_mcp.http, "post", fake_post, raising=False)
+
+    with pytest.raises(ProviderQuotaError):
+        await clay_mcp._mcp_call("find-and-enrich-company", {"companyIdentifier": "arrow.com"})
+
+    assert calls["refreshed"] == 1 and calls["n"] == 2

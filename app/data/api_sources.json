@@ -164,10 +164,10 @@
         "display_name": "Clay",
         "category": "enrichment",
         "source_type": "enrichment",
-        "description": "Enrichment platform accessed via the Clay MCP connector. Replaces the legacy webhook round-trip.",
+        "description": "Enrichment platform accessed via the Clay MCP connector (OAuth Connect). No API key required — authenticate via Settings → API Keys → Connect Clay.",
         "signup_url": "https://www.clay.com",
-        "env_vars": ["CLAY_API_KEY"],
-        "setup_notes": "Provide CLAY_API_KEY and set CLAY_ENRICHMENT_ENABLED=true. Clay is now called via the MCP connector — no inbound webhook required."
+        "env_vars": [],
+        "setup_notes": "Connect via Settings → API Keys → 'Connect Clay' OAuth button. No API key or environment variable is needed; auth is handled via OAuth Connect."
     },
     {
         "name": "netcomponents",
