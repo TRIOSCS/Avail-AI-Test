@@ -371,6 +371,15 @@ class SpecCodeSource(StrEnum):
     CSV_IMPORT = "csv_import"
 
 
+class RfqAttachmentStatus(StrEnum):
+    """Per-datasheet status in the RFQ attachment pipeline."""
+
+    ATTACHED = "attached"
+    MISSING = "missing"
+    OVERSIZED = "oversized"
+    FETCH_ERROR = "fetch_error"
+
+
 BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
 """api_sources rows backed by queue-driven browser workers, not request/response
 connectors.
@@ -655,3 +664,25 @@ class AlertKind(StrEnum):
     INBOUND_CUSTOMER = "inbound_customer"
     INBOUND_VENDOR = "inbound_vendor"
     BUYPLAN_ACTION = "buyplan_action"
+
+
+class SightingsSkipReason(StrEnum):
+    """Advisory skip-reason for a vendor in the sightings RFQ modal / preview.
+
+    Computed up-front so the compose and preview steps can show WHY a vendor will be
+    skipped. The authoritative skip stays in send_batch_rfq (TOCTOU guard) — this enum
+    is advisory only and never gates the actual send.
+
+    Unavailable vendors are partitioned out *before* the per-entry skip_reason loop
+    and placed in a separate ``unavailable_vendors`` list, so they never reach the
+    previews list and this enum never carries an UNAVAILABLE value.
+
+    READY          — vendor has a resolvable email and is not DNC (green / no badge).
+    NO_EMAIL       — no resolvable VendorContact email (amber badge).
+    DO_NOT_CONTACT — vendor contact email matches a do_not_contact SiteContact
+                     (rose badge).
+    """
+
+    READY = "ready"
+    NO_EMAIL = "no_email"
+    DO_NOT_CONTACT = "do_not_contact"

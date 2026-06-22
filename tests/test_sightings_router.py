@@ -609,8 +609,9 @@ class TestVendorRowThreeStates:
         # Expanded detail carries the What we learned entry
         assert "What we learned:" in body
         assert 'class="text-rose-600 font-medium"' in body
-        # Action trio hidden
-        assert "Build RFQ" not in body
+        # Vendor-row action trio hidden (the header always has "Build RFQ"; check
+        # the vendor-specific preselect dispatch is absent from the vendor-row pill)
+        assert "preselect=Good+Vendor" not in body
         assert "Mark Unavail" not in body
         assert "Convert to offer" not in body
 
@@ -652,7 +653,7 @@ class TestVendorRowThreeStates:
         assert "bg-rose-100 text-rose-700" in body  # Unavailable pill, not Contacted
         assert "We bought them" in body  # reason label renders
         assert "Mark available" in body  # state-1 action present
-        assert "Build RFQ" not in body  # action trio hidden
+        assert "preselect=Good+Vendor" not in body  # vendor-row RFQ pill hidden
         assert "Mark Unavail" not in body
 
     def test_state2_expired_record_renders_advisory_hint_and_verify(self, client, db_session):
@@ -3446,7 +3447,8 @@ class TestPreviewInquiry:
         assert "Please quote" in resp.text
 
     def test_preview_vendor_no_email_shows_warning(self, client, db_session):
-        """Vendor with no email shows amber warning in preview."""
+        """Vendor with no email shows amber no-email badge in preview
+        (skip_reason=no_email)."""
         _, r, _ = _seed_data(db_session)
         resp = client.post(
             "/v2/partials/sightings/preview-inquiry",
@@ -3457,7 +3459,8 @@ class TestPreviewInquiry:
             },
         )
         assert resp.status_code == 200
-        assert "No email found" in resp.text
+        # The amber badge now says "no email — will be skipped" (S3 skip-reason badges)
+        assert "no email" in resp.text.lower()
 
     def test_preview_400_empty_requirement_ids(self, client, db_session):
         """Empty requirement_ids returns 400."""

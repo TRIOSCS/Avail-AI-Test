@@ -49,6 +49,12 @@ class VendorCard(Base):
     last_enriched_at = Column(UTCDateTime)
     enrichment_source = Column(String(50))
 
+    # Firmographic / provenance enrichment (Explorium+Clay blending)
+    ticker = Column(String(20))
+    naics = Column(String(20))
+    revenue_range = Column(String(50))
+    enrichment_provenance = Column(JSONB, default=dict, server_default="{}")
+
     cancellation_rate = Column(Float)
 
     # Engagement scoring (Email Mining v2 Upgrade 4)

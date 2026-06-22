@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -43,6 +44,12 @@ class Company(Base):
     hq_country = Column(String(100))
     last_enriched_at = Column(UTCDateTime)
     enrichment_source = Column(String(50))  # "explorium", "apollo", "manual"
+
+    # Firmographic / provenance enrichment (Explorium+Clay blending)
+    ticker = Column(String(20))
+    naics = Column(String(20))
+    revenue_range = Column(String(50))
+    enrichment_provenance = Column(JSONB, default=dict, server_default="{}")
 
     # v1.3.0: Customer ownership fields
     is_strategic = Column(Boolean, default=False, index=True)

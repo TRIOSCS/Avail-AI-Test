@@ -4,8 +4,13 @@ import asyncio
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .services.rfq_attachments import RfqAttachment
 
 from loguru import logger
+from sqlalchemy import func as sqla_func
 from sqlalchemy.orm import Session
 
 from .constants import ActivityType, PendingBatchStatus, VendorResponseStatus
@@ -17,6 +22,7 @@ from .models import (
     ProcessedMessage,
     Requirement,
     Requisition,
+    SiteContact,
     VendorCard,
     VendorResponse,
 )
@@ -87,6 +93,7 @@ async def send_batch_rfq(
     requisition_id: int | None = None,
     vendor_groups: list[dict] | None = None,
     requisition_parts_map: dict[int, list] | None = None,
+    attachments: "list[RfqAttachment] | None" = None,
 ) -> list[dict]:
     """Send one RFQ email per vendor group.
 
@@ -109,6 +116,13 @@ async def send_batch_rfq(
     ``requisition_id`` and ``requisition_parts_map`` are MUTUALLY EXCLUSIVE modes
     (single- vs cross-requisition). Passing both raises ``ValueError`` — the scalar
     would otherwise be silently ignored.
+
+    ``attachments`` is an optional list of :class:`app.services.rfq_attachments.RfqAttachment`
+    (or any object with ``name``, ``content_type``, ``content_bytes_b64`` attributes).
+    When provided and non-empty, the SAME list is attached to EVERY vendor's email
+    (datasheets are part-scoped, not vendor-scoped). Omitting it or passing None/[]
+    keeps the payload byte-identical to the pre-attachment behaviour (no
+    ``message.attachments`` key injected).
     """
     from app.utils.graph_client import GraphClient
 
@@ -173,15 +187,13 @@ async def send_batch_rfq(
             continue
 
         # DNC check — skip any email address that belongs to a do-not-contact
-        # SiteContact. Reported as "skipped" (same mechanism as no-email), with
-        # an explicit "do-not-contact" reason so the caller can surface it
-        # distinctly (compliance: the address must never appear in sendMail).
-        from .models.crm import SiteContact
-
+        # SiteContact. Case-insensitive comparison (func.lower on both sides)
+        # matches the advisory check in _dnc_emails_for_cards so advisory ⊆
+        # send-time. Compliance: the address must never appear in sendMail.
         dnc_match = (
             db.query(SiteContact)
             .filter(
-                SiteContact.email == email,
+                sqla_func.lower(SiteContact.email) == email.lower(),
                 SiteContact.do_not_contact.is_(True),
             )
             .first()
@@ -207,16 +219,27 @@ async def send_batch_rfq(
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject
         group["_tagged_subject"] = tagged_subject
 
-        payload = {
-            "message": {
-                "subject": tagged_subject,
-                "body": {"contentType": "HTML", "content": html_body},
-                "toRecipients": [{"emailAddress": {"address": email}}],
-                "isReadReceiptRequested": False,
-                "isDeliveryReceiptRequested": False,
-            },
-            "saveToSentItems": "true",
+        message: dict = {
+            "subject": tagged_subject,
+            "body": {"contentType": "HTML", "content": html_body},
+            "toRecipients": [{"emailAddress": {"address": email}}],
+            "isReadReceiptRequested": False,
+            "isDeliveryReceiptRequested": False,
         }
+        # Attach datasheets when provided — same list for every vendor (part-scoped, not
+        # vendor-scoped). Only inject the key when there are actual attachments; omitting it
+        # keeps the payload byte-identical to pre-attachment behaviour (regression-safe).
+        if attachments:
+            message["attachments"] = [
+                {
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    "name": att.name,
+                    "contentType": att.content_type,
+                    "contentBytes": att.content_bytes_b64,
+                }
+                for att in attachments
+            ]
+        payload = {"message": message, "saveToSentItems": "true"}
         send_tasks.append(gc.post_json("/me/sendMail", payload))
         send_groups.append(group)
 

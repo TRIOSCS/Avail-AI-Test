@@ -2,6 +2,10 @@
 
 Finds companies matching ICP segments with firmographics + intent/hiring/event signals
 in a single API call. Normalizes results into ProspectAccountCreate schemas.
+
+For point-enrichment of a known domain (not discovery), use app.connectors.explorium
+directly: explorium.enrich_company(domain, name, api_key) /
+explorium.search_contacts(domain, name, api_key, title_filter, limit).
 """
 
 import asyncio
@@ -108,12 +112,16 @@ async def discover_companies_with_signals(segment_key: str, region_key: str) -> 
     }
 
     try:
+        # Use same header format as app.connectors.explorium (api_key: not Authorization: Bearer)
+        # NOTE: This /v1/businesses/search bulk-discovery endpoint is unverified against the
+        # current Explorium API and should be rewired to the documented /v1/businesses fetch
+        # in a follow-up (out of scope for the current prospecting feature).
         resp = await http.post(
             f"{EXPLORIUM_BASE}/v1/businesses/search",
             json=payload,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                "api_key": api_key,
             },
             timeout=60,
         )

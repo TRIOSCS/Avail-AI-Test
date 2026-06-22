@@ -1780,6 +1780,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // object key add/delete reliably, Set mutations less so.
   selectedVendors: Object.fromEntries((suggestedNames || []).map((n) => [n, true])),
   requirementIds: requirementIds || [],
+  // Opt-in datasheet attachment ids (array of integers). Included in _form() so the
+  // send-inquiry route can resolve + fetch + encode them. Same list sent to EVERY vendor.
+  selectedDatasheetIds: [],
   emailBody: '',
   previewing: false,
   sending: false,
@@ -1808,6 +1811,13 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // they arrive CHECKED — runtime-added keys flow into vendor_names via _form().
   selectVendor(name) {
     this.selectedVendors[name] = true;
+  },
+
+  // Toggle a datasheet id in/out of selectedDatasheetIds (opt-in attachment list).
+  toggleDatasheet(id) {
+    const idx = this.selectedDatasheetIds.indexOf(id);
+    if (idx >= 0) this.selectedDatasheetIds.splice(idx, 1);
+    else this.selectedDatasheetIds.push(id);
   },
 
   // Debounced (template-side @input.debounce.300ms) lookup against the existing
@@ -2014,6 +2024,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     this.requirementIds.forEach((id) => form.append('requirement_ids', id));
     Object.keys(this.selectedVendors).forEach((v) => form.append('vendor_names', v));
     form.append('email_body', this.emailBody);
+    // Opt-in datasheet attachment ids (integers). Empty selection → no fields posted
+    // → server treats as no attachments (regression-safe).
+    this.selectedDatasheetIds.forEach((id) => form.append('datasheet_ids', id));
     return form;
   },
 
@@ -2034,12 +2047,59 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         indicator: this.$refs.previewContent,
         values: this._form(),
       });
+      // preview_inquiry.html contains Alpine x-data / x-model / @rfq-email-fixed.window
+      // directives for the inline fix-email mini-form. htmx.ajax swaps innerHTML but does
+      // not run Alpine on new nodes — the afterSwap handler only covers its hardcoded id
+      // allowlist (lead-drawer-content, rq2-table, rfq-affinity-section). previewContent
+      // has no id, so we must explicitly initTree here to bind the fix-email component.
+      if (this.$refs.previewContent && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(this.$refs.previewContent);
+      }
       this.step = 'preview';
     } catch (err) {
       console.error('[rfqVendorModal] preview failed', err);
       this._toast('Preview failed — please try again', 'error');
     } finally {
       this.previewing = false;
+    }
+  },
+
+  // One-click skip remediation from the preview step: attach a contact email to a
+  // previously-skipped (no-email) vendor then re-run preview so the vendor resolves.
+  // POSTs to the existing composer-vendor endpoint (which creates/updates the
+  // VendorContact). On non-ok response, shows a toast and keeps the inline form open
+  // by NOT calling loadPreview(). On success, selectVendor() ensures the vendor is
+  // in selectedVendors, then loadPreview() refreshes the preview panel in-place
+  // (no modal close or wrapper re-init — the preview container is a stable-id swap).
+  async fixVendorEmail(vendorName, email) {
+    if (!email || !vendorName) return;
+    const form = new FormData();
+    form.append('vendor_name', vendorName);
+    form.append('email', email);
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    try {
+      const resp = await fetch('/v2/partials/sightings/composer-vendor', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrfToken() },
+        body: form,
+      });
+      if (!resp.ok) {
+        let reason = '';
+        try { reason = (await resp.json()).error || ''; } catch { /* non-JSON body */ }
+        const msg = resp.status < 500 && reason
+          ? 'Could not add email: ' + reason
+          : 'Could not add email — please try again';
+        this._toast(msg, 'error');
+        return; // keep the form open with the typed value
+      }
+      // Ensure the vendor is in selectedVendors so it is included in the re-preview POST.
+      this.selectVendor(vendorName);
+      // Signal the nested x-data scope to clear its fixEmail input (success path only).
+      window.dispatchEvent(new CustomEvent('rfq-email-fixed'));
+      await this.loadPreview();
+    } catch (err) {
+      console.error('[rfqVendorModal] fixVendorEmail failed', err);
+      this._toast('Could not add email — please try again', 'error');
     }
   },
 
@@ -2065,7 +2125,9 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // They are NOT delivery failures — without subtracting them they'd be
       // misattributed to the 'failed' bucket (total - sent - skipped).
       const unavailable = parseInt(resp.headers.get('X-RFQ-Unavailable') || '0', 10);
-      const outcome = this._sendOutcome(sent, total, skipped, unavailable);
+      // X-RFQ-Datasheets-Dropped = oversized datasheets silently dropped before send.
+      const datasheetsDropped = parseInt(resp.headers.get('X-RFQ-Datasheets-Dropped') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped, unavailable, datasheetsDropped);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -2078,31 +2140,33 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total/skipped/unavailable counts to a toast. `delivered` is
-  // false only when nothing went out, so the caller can keep the modal open for a retry.
-  // `skipped` = vendors with no contact email; `unavailable` = vendors dropped by the
-  // send-time unavailability re-check — both reported distinctly from send failures so a
-  // correctly-blocked vendor is never miscounted as 'failed'.
-  _sendOutcome(sent, total, skipped = 0, unavailable = 0) {
+  // Map the server's sent/total/skipped/unavailable/datasheetsDropped counts to a toast.
+  // `delivered` is false only when nothing went out, so the caller can keep the modal open
+  // for a retry. `skipped` = vendors with no contact email; `unavailable` = vendors dropped
+  // by the send-time unavailability re-check; `datasheetsDropped` = attachments silently
+  // dropped for exceeding the ~3 MB Graph simple-send cap (largest-first).
+  _sendOutcome(sent, total, skipped = 0, unavailable = 0, datasheetsDropped = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
+    let baseMsg;
     if (sent < total) {
       const failed = total - sent - skipped - unavailable;
       const reasons = [];
       if (failed > 0) reasons.push(failed + ' failed');
       if (skipped > 0) reasons.push(skipped + ' had no email');
       if (unavailable > 0) reasons.push(unavailable + ' marked unavailable');
-      return {
-        type: 'warning',
-        delivered: true,
-        message: 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : ''),
-      };
+      baseMsg = 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : '');
+    } else {
+      baseMsg = 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's');
+    }
+    if (datasheetsDropped > 0) {
+      baseMsg += ' (' + datasheetsDropped + ' attachment' + (datasheetsDropped === 1 ? '' : 's') + ' dropped — too large)';
     }
     return {
-      type: 'success',
+      type: sent < total ? 'warning' : 'success',
       delivered: true,
-      message: 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's'),
+      message: baseMsg,
     };
   },
 

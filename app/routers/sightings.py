@@ -35,13 +35,15 @@ from ..constants import (
     OfferStatus,
     ReleaseTrigger,
     RequisitionStatus,
+    RfqAttachmentStatus,
+    SightingsSkipReason,
     SourcingStatus,
     UnavailabilityReason,
 )
 from ..database import get_db
 from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
-from ..models.intelligence import ActivityLog, MaterialCard
+from ..models.intelligence import ActivityLog, MaterialCard, MaterialCardDatasheet
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
@@ -50,6 +52,7 @@ from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
 from ..services.offer_qualification import prefill_from_vendor
 from ..services.part_offers import part_offers_for
+from ..services.rfq_attachments import trim_datasheet_names_to_cap
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
@@ -136,6 +139,7 @@ RFQ_SENT_HEADER = "X-RFQ-Sent"
 RFQ_TOTAL_HEADER = "X-RFQ-Total"
 RFQ_SKIPPED_HEADER = "X-RFQ-Skipped"  # vendors with no contact email (not a delivery failure)
 RFQ_UNAVAILABLE_HEADER = "X-RFQ-Unavailable"  # vendors dropped by the active-only unavailability re-check
+RFQ_DATASHEETS_DROPPED_HEADER = "X-RFQ-Datasheets-Dropped"  # oversized datasheets dropped before send
 
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
@@ -312,6 +316,9 @@ async def sightings_list(
             | Requisition.customer_name.ilike(f"%{safe_q}%")
             | Requirement.substitutes_text.ilike(f"%{safe_q}%")
         )
+    if filters.manufacturer:
+        safe_mfr = escape_like(filters.manufacturer)
+        query = query.filter(Requirement.manufacturer.ilike(f"%{safe_mfr}%"))
 
     total = query.count()
 
@@ -500,6 +507,7 @@ async def sightings_list(
         "groups": groups,
         "link_map": link_map,
         "user": user,
+        "manufacturer": filters.manufacturer,
     }
     return template_response("htmx/partials/sightings/table.html", ctx)
 
@@ -1332,6 +1340,8 @@ class RankedVendor(NamedTuple):
     covered_count: int
     avg_score: float | None
     has_contact: bool
+    lead_time_days: int | None = None
+    vendor_score: float | None = None
 
 
 class CoverageEntry(TypedDict):
@@ -1371,6 +1381,8 @@ class SuggestedVendor(NamedTuple):
     has_contact: bool
     response_rate: float | None
     engagement_score: float | None
+    vendor_score: float | None = None
+    lead_time_days: int | None = None
 
 
 def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
@@ -1395,6 +1407,44 @@ def _cards_with_resolvable_email(db: Session, card_ids: list[int]) -> set[int]:
         .all()
     )
     return {cid for (cid,) in rows}
+
+
+def _dnc_emails_for_cards(db: Session, card_ids: list[int]) -> set[str]:
+    """Return the lowercased email addresses (from VendorContact) that will be DNC-
+    skipped by send_batch_rfq for the given vendor card ids.
+
+    Mirrors the send-time DNC check in email_service.send_batch_rfq (line ~181):
+    join VendorContact → SiteContact by func.lower(email), filtered on
+    SiteContact.do_not_contact.is_(True). Uses func.lower on BOTH sides so the
+    advisory set is consistent with the case-insensitive send-time check.
+
+    Returns a set of lowercased emails — the caller compares contact.email.lower()
+    against this set. Advisory only; the authoritative skip stays in send_batch_rfq
+    (TOCTOU guard — a SiteContact can be flagged after the modal opens).
+
+    Called by: sightings_vendor_modal, sightings_preview_inquiry.
+    """
+    if not card_ids:
+        return set()
+
+    from ..models.crm import SiteContact
+
+    rows = (
+        db.query(VendorContact.email)
+        .join(
+            SiteContact,
+            sqlfunc.lower(VendorContact.email) == sqlfunc.lower(SiteContact.email),
+        )
+        .filter(
+            VendorContact.vendor_card_id.in_(card_ids),
+            VendorContact.email.isnot(None),
+            VendorContact.email != "",
+            SiteContact.do_not_contact.is_(True),
+        )
+        .distinct()
+        .all()
+    )
+    return {email.lower() for (email,) in rows}
 
 
 def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: set[str]) -> list[RankedVendor]:
@@ -1444,13 +1494,15 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
                 continue  # un-normalizable cardless name — nothing to suggest
         g = groups.get(key)
         if g is None:
-            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": []}
+            g = {"card": None, "req_ids": set(), "scores": [], "raw_names": [], "lead_times": []}
             groups[key] = g
         g["req_ids"].add(vss.requirement_id)
         if vss.score is not None:
             g["scores"].append(vss.score)
         if vss.vendor_name:
             g["raw_names"].append(vss.vendor_name)
+        if vss.best_lead_time_days is not None:
+            g["lead_times"].append(vss.best_lead_time_days)
         if g["card"] is None and card is not None:
             g["card"] = card
 
@@ -1474,6 +1526,7 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         dst["req_ids"].update(src["req_ids"])
         dst["scores"].extend(src["scores"])
         dst["raw_names"].extend(src["raw_names"])
+        dst["lead_times"].extend(src["lead_times"])
 
     # has_contact: one batched VendorContact lookup over all representative card ids.
     contactable_card_ids = _cards_with_resolvable_email(db, [g["card"].id for g in groups.values() if g["card"]])
@@ -1495,12 +1548,16 @@ def _coverage_ranked_vendor_rows(db: Session, req_id_list: list[int], excluded: 
         scores = g["scores"]
         avg_score = (sum(scores) / len(scores)) if scores else None
         has_contact = card is not None and card.id in contactable_card_ids
+        lead_times = g["lead_times"]
+        lead_time_days = min(lead_times) if lead_times else None
         rv = RankedVendor(
             card=card,
             vendor_name=display,
             covered_count=covered,
             avg_score=avg_score,
             has_contact=has_contact,
+            lead_time_days=lead_time_days,
+            vendor_score=(card.vendor_score if card is not None else None),
         )
         engagement = card.engagement_score if (card is not None and card.engagement_score is not None) else None
         # Stable, deterministic tiebreak (F-L1): carded ties keep NUMERIC card.id order
@@ -1546,6 +1603,7 @@ def _find_affinity_in_thread(mpn: str) -> list[dict]:
 async def sightings_vendor_modal(
     request: Request,
     requirement_ids: str = "",
+    preselect: str = "",
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -1591,6 +1649,8 @@ async def sightings_vendor_modal(
                     has_contact=r.has_contact,
                     response_rate=(r.card.response_rate if r.card is not None else None),
                     engagement_score=(r.card.engagement_score if r.card is not None else None),
+                    vendor_score=r.vendor_score,
+                    lead_time_days=r.lead_time_days,
                 )
             )
             coverage[key] = CoverageEntry(
@@ -1626,12 +1686,116 @@ async def sightings_vendor_modal(
             for cov_key, mpns in mpns_by_key.items():
                 coverage[cov_key]["mpns"] = ", ".join(sorted(mpns))
 
+    # ── Preselect union: append any named vendor not already in coverage ────────
+    # Split on comma, normalize each name, skip blanks, dedup against the
+    # already-suggested set (keyed by normalized_name to match the Alpine selection
+    # key). `has_contact` is resolved via the same _cards_with_resolvable_email
+    # helper used for coverage rows — so the Alpine seed stays consistent.
+    if preselect.strip():
+        existing_norms = {sv.normalized_name for sv in suggested_vendors}
+        preselect_names = [n.strip() for n in preselect.split(",") if n.strip()]
+        for raw_name in preselect_names:
+            norm = normalize_vendor_name(raw_name)
+            if not norm or norm in existing_norms:
+                continue
+            # Resolve against VendorCard by normalized_name
+            card = db.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
+            if card is not None:
+                contactable = _cards_with_resolvable_email(db, [card.id])
+                has_contact = card.id in contactable
+                sv = SuggestedVendor(
+                    id=card.id,
+                    card=card,
+                    normalized_name=card.normalized_name,
+                    display_name=card.display_name or raw_name,
+                    vendor_name=card.display_name or raw_name,
+                    has_contact=has_contact,
+                    response_rate=card.response_rate,
+                    engagement_score=card.engagement_score,
+                    vendor_score=card.vendor_score,
+                    lead_time_days=None,  # preselect-only: no VSS context to compute min
+                )
+            else:
+                # No matching card — cardless synthetic row, no contact resolvable
+                sv = SuggestedVendor(
+                    id=norm,
+                    card=None,
+                    normalized_name=norm,
+                    display_name=raw_name,
+                    vendor_name=raw_name,
+                    has_contact=False,
+                    response_rate=None,
+                    engagement_score=None,
+                    vendor_score=None,
+                    lead_time_days=None,
+                )
+            suggested_vendors.append(sv)
+            existing_norms.add(norm)
+
+    # Compute how many distinct requisitions the basket spans (for the "Spanning N
+    # requisitions" note in the Parts panel). Only shown when >1 to keep the modal quiet
+    # for the single-requirement case.
+    requisition_count = len({r.requisition_id for r in requirements})
+
+    # Advisory DNC computation — determine which suggested vendors have a DNC-flagged
+    # contact email. Two steps:
+    # 1. Collect the card ids of all carded suggested vendors.
+    # 2. _dnc_emails_for_cards returns the lowercased DNC emails for those cards.
+    # 3. Fetch each carded vendor's best contact (same ordering as the send path), then
+    #    cross-reference: if the resolved email is in dnc_emails → vendor is advisory DNC.
+    # Result is `dnc_norms`: set of normalized_names passed to the template so it can
+    # disable the checkbox and render the rose chip WITHOUT lazy-loading relationships.
+    carded_ids = [sv.card.id for sv in suggested_vendors if sv.card is not None]
+    dnc_emails: set[str] = _dnc_emails_for_cards(db, carded_ids) if carded_ids else set()
+
+    dnc_norms: set[str] = set()
+    if dnc_emails and carded_ids:
+        # Best-contact-per-card (same ordering as send path) to determine which vendor's
+        # resolved email is in dnc_emails.
+        best_contacts = _best_contacts_by_card(db, carded_ids)
+        card_best_contact: dict[int, VendorContact] = {c.vendor_card_id: c for c in best_contacts}
+        for sv in suggested_vendors:
+            if sv.card is not None:
+                contact = card_best_contact.get(sv.card.id)
+                if contact and contact.email and contact.email.lower() in dnc_emails:
+                    dnc_norms.add(sv.normalized_name)
+
+    # Contactable, non-DNC normalized names for the Alpine selectedVendors seed.
+    # Passed explicitly so the template doesn't need Jinja2 set-member filtering.
+    contactable_non_dnc = [
+        sv.normalized_name for sv in suggested_vendors if sv.has_contact and sv.normalized_name not in dnc_norms
+    ]
+
+    # Resolve available datasheets for the basket's material cards — passed to the
+    # compose step as an opt-in checkbox list ("Attachments (N available)").
+    # Collapsed in the template when >3. No bytes fetched here; send-time only.
+    available_datasheets: list[dict] = []
+    if requirements:
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(MaterialCardDatasheet)
+                .filter(
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
+                    MaterialCardDatasheet.library_item_id.isnot(None),
+                    MaterialCardDatasheet.library_drive_id.isnot(None),
+                )
+                .all()
+            )
+            available_datasheets = [
+                {"id": ds.id, "file_name": ds.file_name, "size_bytes": ds.size_bytes} for ds in ds_rows
+            ]
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
         "coverage": coverage,
         "requirement_ids": req_id_list,
         "parts": parts,
+        "requisition_count": requisition_count,
+        "dnc_norms": dnc_norms,
+        "contactable_non_dnc": contactable_non_dnc,
+        "available_datasheets": available_datasheets,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
@@ -1977,6 +2141,10 @@ async def sightings_preview_inquiry(
     avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
+    # Advisory DNC set — look up which resolved emails are flagged do_not_contact.
+    # This mirrors the send-time check in email_service.py so preview ≈ what sends.
+    preview_dnc_emails: set[str] = _dnc_emails_for_cards(db, card_ids) if card_ids else set()
+
     previews = []
     for vn in vendor_names:
         card = card_map.get(normalize_vendor_name(vn))
@@ -1985,6 +2153,14 @@ async def sightings_preview_inquiry(
             contact = contact_map.get(card.id)
             if contact and contact.email:
                 vendor_email = contact.email
+
+        # Compute advisory skip reason for the badge in the preview template.
+        if not vendor_email:
+            skip_reason = SightingsSkipReason.NO_EMAIL
+        elif vendor_email.lower() in preview_dnc_emails:
+            skip_reason = SightingsSkipReason.DO_NOT_CONTACT
+        else:
+            skip_reason = SightingsSkipReason.READY
 
         raw_subject = f"RFQ — {len(requirements)} part{'s' if len(requirements) != 1 else ''}"
         tagged_subject = f"{raw_subject} {avail_token}" if avail_token else raw_subject
@@ -1997,8 +2173,32 @@ async def sightings_preview_inquiry(
                 "subject": tagged_subject,
                 "html_body": html_body,
                 "parts": parts_list,
+                "skip_reason": skip_reason,
+                "normalized_name": normalize_vendor_name(vn),
             }
         )
+
+    # Resolve selected datasheet names for the preview attachment list — apply the same
+    # ~3 MB combined cap + largest-first drop used at send time so preview == what sends.
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    preview_attachments: list[dict] = []
+    if selected_ds_ids:
+        mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        if mc_ids:
+            ds_rows = (
+                db.query(MaterialCardDatasheet)
+                .filter(
+                    MaterialCardDatasheet.id.in_(selected_ds_ids),
+                    MaterialCardDatasheet.material_card_id.in_(mc_ids),
+                )
+                .all()
+            )
+            # Build (id, file_name, size_bytes) tuples — use size_bytes when available,
+            # fall back to 0 so un-sized datasheets are always kept (conservative).
+            names_with_sizes = [(ds.id, ds.file_name, ds.size_bytes or 0) for ds in ds_rows]
+            kept, _dropped = trim_datasheet_names_to_cap(names_with_sizes)
+            preview_attachments = [{"id": ds_id, "file_name": fname} for ds_id, fname in kept]
 
     ctx = {
         "request": request,
@@ -2007,6 +2207,7 @@ async def sightings_preview_inquiry(
         "vendor_names": vendor_names,
         "email_body": email_body,
         "unavailable_vendors": unavailable_vendors,
+        "preview_attachments": preview_attachments,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
@@ -2084,6 +2285,34 @@ async def sightings_send_inquiry(
             }
         )
 
+    # Collect datasheet attachments in their own guard: a fetch error DEGRADES to
+    # send-without-attachments (never a 500). The buyer opts in per send via
+    # datasheet_ids posted from the compose form.
+    attachments = None
+    dropped_datasheet_count = 0
+    datasheet_ids_raw = form.getlist("datasheet_ids")
+    selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
+    if selected_ds_ids:
+        material_card_ids = [r.material_card_id for r in requirements if r.material_card_id]
+        try:
+            from ..services.rfq_attachments import collect_rfq_attachments
+
+            attachments, ds_statuses = await collect_rfq_attachments(
+                db=db,
+                material_card_ids=material_card_ids,
+                selected_ids=selected_ds_ids,
+            )
+            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] != RfqAttachmentStatus.ATTACHED)
+            if dropped_datasheet_count:
+                logger.warning(
+                    "RFQ datasheet attachment: {} datasheet(s) dropped (oversized)",
+                    dropped_datasheet_count,
+                )
+        except Exception:
+            logger.warning("RFQ datasheet attachment collection failed — sending without attachments", exc_info=True)
+            attachments = None
+            dropped_datasheet_count = len(selected_ds_ids)
+
     sent_count = 0
     progressed_count = 0
     failed_vendors: list[str] = []
@@ -2098,6 +2327,7 @@ async def sightings_send_inquiry(
                 user_id=user.id,
                 vendor_groups=vendor_groups,
                 requisition_parts_map=requisition_parts_map,
+                attachments=attachments,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check
@@ -2172,6 +2402,7 @@ async def sightings_send_inquiry(
     resp.headers[RFQ_TOTAL_HEADER] = str(total)
     resp.headers[RFQ_SKIPPED_HEADER] = str(len(no_email_vendors))
     resp.headers[RFQ_UNAVAILABLE_HEADER] = str(len(unavailable_vendors))
+    resp.headers[RFQ_DATASHEETS_DROPPED_HEADER] = str(dropped_datasheet_count)
     return resp
 
 
