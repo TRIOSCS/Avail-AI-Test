@@ -1641,11 +1641,40 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
   `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
-  `https://api.clay.com/v3/mcp`, `Authorization: Bearer CLAY_API_KEY`). Company:
-  `find-and-enrich-company` (sync). Contacts: `find-and-enrich-contacts-at-company`;
-  emails polled via `get-task-context` (bounded: 5 polls × 3 s). 402/429 →
-  `ProviderQuotaError`. **The old Clay WEBHOOK path (`clay_service.py` +
-  `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
+  `https://api.clay.com/v3/mcp`). Authenticates with an OAuth access token
+  (`Authorization: Bearer <token>`); on 401 it attempts one token refresh then
+  retries. Not connected → returns `None`/`[]` (fail-soft; blend continues without
+  Clay). Company: `find-and-enrich-company` (sync). Contacts:
+  `find-and-enrich-contacts-at-company`; emails polled via `get-task-context`
+  (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. **The old Clay WEBHOOK
+  path (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is
+  now MCP-only.**
+
+  **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
+  (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).
+
+  - `app/services/clay_oauth.py` — token lifecycle: dynamic client registration
+    (DCR, reuses an existing `CLIENT_ID` when already registered), PKCE S256 code
+    challenge, code exchange, `get_access_token()` (auto-refresh with 5-min buffer,
+    rotation-aware), `refresh()` (sets `NEEDS_RECONNECT` marker on failure),
+    `is_connected()`, `disconnect()`. Tokens stored **encrypted** in
+    `ApiSource('clay_enrichment').credentials` JSONB:
+    `CLAY_OAUTH_ACCESS_TOKEN` / `REFRESH_TOKEN` / `EXPIRES_AT` / `CLIENT_ID` /
+    `NEEDS_RECONNECT`. No DB migration — reuses the existing `ApiSource.credentials`
+    column.
+
+  - `app/routers/clay_oauth.py` — admin-only routes, mounted in `app/main.py`:
+    - `GET /auth/clay/connect` — DCR-or-reuse → generate PKCE verifier + `state`
+      (stored in `intel_cache`) → redirect to `app.clay.com/oauth/authorize`.
+    - `GET /auth/clay/callback` — validate single-use `state` → exchange code →
+      store encrypted tokens → redirect to Settings.
+    - `POST /auth/clay/disconnect` — clears stored credentials.
+
+  - **Settings → API Keys** — the Clay card is a **Connect / Reconnect / Disconnect**
+    card (no API-key input field). The `NEEDS_RECONNECT` marker surfaces a
+    "Reconnect" prompt when the refresh token has expired.
+
+  Mirrors the Azure AD OAuth pattern in `app/routers/auth.py`.
 - `app/connectors/sam_gov_company.py` — name→firmographics adapter wrapping the public
   SAM.gov entity-information API (`api.sam.gov/entity-information/v3/entities`).
 
