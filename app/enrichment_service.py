@@ -684,59 +684,80 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
     return filtered if filtered else unique
 
 
+_ENRICH_FIELDS = (
+    "domain",
+    "linkedin_url",
+    "legal_name",
+    "industry",
+    "employee_size",
+    "hq_city",
+    "hq_state",
+    "hq_country",
+    "website",
+    "ticker",
+    "naics",
+    "revenue_range",
+)
+
+
+def _apply_enrichment(obj, data: dict) -> list[str]:
+    """Shared provenance-aware enrichment writer.
+
+    Rules:
+      1. Empty field → always write (whether or not provenance is present).
+      2. Field has existing value but no stored provenance → manual/legacy; protect it.
+      3. Field has existing value with stored provenance → overwrite only when incoming
+         tier (then confidence) strictly beats the stored tier (then confidence).
+    """
+    updated: list[str] = []
+    prov_in = data.get("_provenance") or {}
+    store = dict(getattr(obj, "enrichment_provenance", None) or {})
+    for field in _ENRICH_FIELDS:
+        val = data.get(field)
+        if not val:
+            continue
+        incoming = prov_in.get(field)
+        current = getattr(obj, field, None)
+        if current:
+            # Existing value: check whether we may overwrite.
+            if incoming is None:
+                # No provenance for the incoming value → never clobber.
+                continue
+            existing = store.get(field)
+            if existing is None:
+                # Stored value lacks provenance (manual/legacy) → protect it.
+                continue
+            inc_key = (incoming.get("tier", 0), incoming.get("confidence", 0.0))
+            cur_key = (existing.get("tier", 0), existing.get("confidence", 0.0))
+            if inc_key <= cur_key:
+                continue
+        setattr(obj, field, val)
+        if incoming:
+            store[field] = {
+                "source": incoming.get("source"),
+                "tier": incoming.get("tier", 0),
+                "confidence": incoming.get("confidence", 1.0),
+            }
+        updated.append(field)
+    if updated:
+        obj.enrichment_provenance = store
+        obj.last_enriched_at = datetime.now(timezone.utc)
+        obj.enrichment_source = data.get("source", "unknown")
+    return updated
+
+
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
-    """Apply enrichment data dict to a Company model.
+    """Apply blended enrichment to a Company (provenance-aware; protects manual values).
 
     Returns list of fields updated.
     """
-    updated = []
-    # Each field is set only when present in `data` and currently empty on the model.
-    fields = (
-        "domain",
-        "linkedin_url",
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "website",
-    )
-    for field in fields:
-        val = data.get(field)
-        if val and not getattr(company, field, None):
-            setattr(company, field, val)
-            updated.append(field)
-    if updated:
-        company.last_enriched_at = datetime.now(timezone.utc)
-        company.enrichment_source = data.get("source", "unknown")
-    return updated
+    return _apply_enrichment(company, data)
 
 
 def apply_enrichment_to_vendor(card, data: dict) -> list[str]:
-    """Apply enrichment data dict to a VendorCard model.
+    """Apply blended enrichment to a VendorCard (provenance-aware; protects manual
+    values).
 
     Returns list of fields updated.
     """
-    updated = []
-    # Each field is set only when present in `data` and currently empty on the model.
-    fields = (
-        "linkedin_url",
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "domain",
-        "website",
-    )
-    for field in fields:
-        val = data.get(field)
-        if val and not getattr(card, field, None):
-            setattr(card, field, val)
-            updated.append(field)
-    if updated:
-        card.last_enriched_at = datetime.now(timezone.utc)
-        card.enrichment_source = data.get("source", "unknown")
-    return updated
+    return _apply_enrichment(card, data)
