@@ -21,8 +21,8 @@
   </div>
 
   {# Attachment names — shown in preview so the buyer confirms what will attach.
-     These are the SELECTED datasheets (pre-trim); actual byte fetch + cap enforcement
-     happens at send time. If any are dropped for size the post-send toast reports it. #}
+     These are post-trim: the server already applied the same ~3 MB combined cap +
+     largest-first drop as send time, so the list here exactly matches what will send. #}
   {% if preview_attachments %}
   <div class="flex items-center gap-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded px-3 py-1.5">
     <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">

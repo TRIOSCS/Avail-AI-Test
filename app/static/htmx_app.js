@@ -2035,6 +2035,14 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         indicator: this.$refs.previewContent,
         values: this._form(),
       });
+      // preview_inquiry.html contains Alpine x-data / x-model / @rfq-email-fixed.window
+      // directives for the inline fix-email mini-form. htmx.ajax swaps innerHTML but does
+      // not run Alpine on new nodes — the afterSwap handler only covers its hardcoded id
+      // allowlist (lead-drawer-content, rq2-table, rfq-affinity-section). previewContent
+      // has no id, so we must explicitly initTree here to bind the fix-email component.
+      if (this.$refs.previewContent && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(this.$refs.previewContent);
+      }
       this.step = 'preview';
     } catch (err) {
       console.error('[rfqVendorModal] preview failed', err);

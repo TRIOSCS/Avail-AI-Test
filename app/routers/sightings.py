@@ -2179,13 +2179,14 @@ async def sightings_preview_inquiry(
             }
         )
 
-    # Resolve selected datasheet names for the preview attachment list (display only —
-    # no bytes fetched at preview time; the names confirm what will attach at send time).
+    # Resolve selected datasheet names for the preview attachment list — apply the same
+    # ~3 MB combined cap + largest-first drop used at send time so preview == what sends.
     datasheet_ids_raw = form.getlist("datasheet_ids")
     selected_ds_ids = [int(x) for x in datasheet_ids_raw if x.isdigit()]
     preview_attachments: list[dict] = []
     if selected_ds_ids:
         from ..models.intelligence import MaterialCardDatasheet as _PMCD
+        from ..services.rfq_attachments import trim_datasheet_names_to_cap
 
         mc_ids = [r.material_card_id for r in requirements if r.material_card_id]
         if mc_ids:
@@ -2197,7 +2198,11 @@ async def sightings_preview_inquiry(
                 )
                 .all()
             )
-            preview_attachments = [{"id": ds.id, "file_name": ds.file_name} for ds in ds_rows]
+            # Build (id, file_name, size_bytes) tuples — use size_bytes when available,
+            # fall back to 0 so un-sized datasheets are always kept (conservative).
+            names_with_sizes = [(ds.id, ds.file_name, ds.size_bytes or 0) for ds in ds_rows]
+            kept, _dropped = trim_datasheet_names_to_cap(names_with_sizes)
+            preview_attachments = [{"id": ds_id, "file_name": fname} for ds_id, fname in kept]
 
     ctx = {
         "request": request,
@@ -2301,7 +2306,7 @@ async def sightings_send_inquiry(
                 material_card_ids=material_card_ids,
                 selected_ids=selected_ds_ids,
             )
-            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] == RfqAttachmentStatus.OVERSIZED)
+            dropped_datasheet_count = sum(1 for s in ds_statuses if s["status"] != RfqAttachmentStatus.ATTACHED)
             if dropped_datasheet_count:
                 logger.warning(
                     "RFQ datasheet attachment: {} datasheet(s) dropped (oversized)",
@@ -2310,6 +2315,7 @@ async def sightings_send_inquiry(
         except Exception:
             logger.warning("RFQ datasheet attachment collection failed — sending without attachments", exc_info=True)
             attachments = None
+            dropped_datasheet_count = len(selected_ds_ids)
 
     sent_count = 0
     progressed_count = 0
@@ -2325,7 +2331,7 @@ async def sightings_send_inquiry(
                 user_id=user.id,
                 vendor_groups=vendor_groups,
                 requisition_parts_map=requisition_parts_map,
-                attachments=attachments or None,
+                attachments=attachments,
             )
         else:
             results = []  # every requested vendor was dropped by the unavailability re-check

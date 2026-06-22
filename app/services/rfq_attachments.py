@@ -43,6 +43,33 @@ class RfqAttachment:
     content_bytes_b64: str  # base64-encoded file bytes
 
 
+def trim_datasheet_names_to_cap(
+    names_with_sizes: list[tuple[int, str, int]],
+) -> tuple[list[tuple[int, str]], list[int]]:
+    """Apply the same ~3 MB combined cap to a list of (ds_id, file_name, size_bytes).
+
+    Returns ``(kept, dropped_ids)`` where *kept* is the ``(ds_id, file_name)`` list
+    that would survive the cap, and *dropped_ids* are the ids that would be dropped.
+    Mirrors collect_rfq_attachments' largest-first trimming so preview == send.
+
+    Args:
+        names_with_sizes: Sequence of ``(datasheet_id, file_name, size_bytes)`` for
+            all candidate datasheets, in ANY order — the function sorts internally.
+    """
+    # Sort largest-first to drop the same order as the real send path.
+    candidates = sorted(names_with_sizes, key=lambda x: x[2], reverse=True)
+    total = sum(sz for _, _, sz in candidates)
+    dropped_ids: list[int] = []
+
+    while total > _COMBINED_CAP_BYTES and candidates:
+        ds_id, _, sz = candidates.pop(0)
+        total -= sz
+        dropped_ids.append(ds_id)
+
+    kept = [(ds_id, fname) for ds_id, fname, _ in candidates]
+    return kept, dropped_ids
+
+
 async def collect_rfq_attachments(
     db: Session,
     material_card_ids: list[int],
@@ -88,6 +115,11 @@ async def collect_rfq_attachments(
     async def _fetch_one(ds: MaterialCardDatasheet) -> tuple[int, bytes | None, str]:
         """Return (datasheet_id, bytes_or_none, status_hint)."""
         if not (ds.library_drive_id and ds.library_item_id):
+            logger.warning(
+                "datasheet attachment skipped (no library ids) id={} name={}",
+                ds.id,
+                ds.file_name,
+            )
             return ds.id, None, RfqAttachmentStatus.MISSING
         async with sem:
             try:
@@ -101,6 +133,11 @@ async def collect_rfq_attachments(
                 )
                 return ds.id, None, RfqAttachmentStatus.FETCH_ERROR
         if data is None:
+            logger.warning(
+                "datasheet attachment skipped (fetch returned None) id={} item={}",
+                ds.id,
+                ds.library_item_id,
+            )
             return ds.id, None, RfqAttachmentStatus.MISSING
         return ds.id, data, RfqAttachmentStatus.ATTACHED
 

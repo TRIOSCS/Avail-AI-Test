@@ -530,3 +530,138 @@ class TestSendInquiryDatasheetDroppedHeader:
 
         assert resp.status_code == 200
         assert resp.headers["X-RFQ-Datasheets-Dropped"] == "1"
+
+    def test_datasheets_dropped_header_set_on_fetch_error(self, client, db_session: Session, test_user: User):
+        """Endpoint sets X-RFQ-Datasheets-Dropped == '1' when collect returns one
+        fetch_error status entry (not just oversized)."""
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="DS FE Req", status="active", customer_name="DS Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DS-FE-001",
+            manufacturer="TestMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        # collect returns no attachments + one fetch_error status
+        ds_statuses = [
+            {"datasheet_id": 101, "file_name": "err.pdf", "status": RfqAttachmentStatus.FETCH_ERROR},
+        ]
+
+        async def _fake_collect(**_kwargs):
+            return [], ds_statuses
+
+        async def _fake_send(**_kwargs):
+            return [{"vendor_name": "Acme", "status": "sent"}]
+
+        with (
+            patch("app.services.rfq_attachments.collect_rfq_attachments", side_effect=_fake_collect),
+            patch("app.email_service.send_batch_rfq", side_effect=_fake_send),
+        ):
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": str(r.id),
+                    "vendor_names": ["Acme"],
+                    "email_body": "Please quote.",
+                    "datasheet_ids": "101",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Datasheets-Dropped"] == "1"
+
+    def test_datasheets_dropped_header_set_on_missing(self, client, db_session: Session, test_user: User):
+        """Endpoint sets X-RFQ-Datasheets-Dropped == '1' when collect returns one
+        missing status entry."""
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="DS Miss Req", status="active", customer_name="DS Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DS-MISS-001",
+            manufacturer="TestMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        ds_statuses = [
+            {"datasheet_id": 102, "file_name": "missing.pdf", "status": RfqAttachmentStatus.MISSING},
+        ]
+
+        async def _fake_collect(**_kwargs):
+            return [], ds_statuses
+
+        async def _fake_send(**_kwargs):
+            return [{"vendor_name": "Acme", "status": "sent"}]
+
+        with (
+            patch("app.services.rfq_attachments.collect_rfq_attachments", side_effect=_fake_collect),
+            patch("app.email_service.send_batch_rfq", side_effect=_fake_send),
+        ):
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": str(r.id),
+                    "vendor_names": ["Acme"],
+                    "email_body": "Please quote.",
+                    "datasheet_ids": "102",
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Datasheets-Dropped"] == "1"
+
+    def test_datasheets_dropped_header_full_count_on_collect_exception(
+        self, client, db_session: Session, test_user: User
+    ):
+        """When collect_rfq_attachments raises, X-RFQ-Datasheets-Dropped == total
+        selected count (degrade-to-send-without + honest reporting)."""
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="DS Exc Req", status="active", customer_name="DS Corp")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DS-EXC-001",
+            manufacturer="TestMfr",
+            target_qty=5,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.commit()
+
+        async def _fake_collect(**_kwargs):
+            raise RuntimeError("graph unavailable")
+
+        async def _fake_send(**_kwargs):
+            return [{"vendor_name": "Acme", "status": "sent"}]
+
+        # 2 datasheet ids selected — both should be reported as dropped
+        with (
+            patch("app.services.rfq_attachments.collect_rfq_attachments", side_effect=_fake_collect),
+            patch("app.email_service.send_batch_rfq", side_effect=_fake_send),
+        ):
+            resp = client.post(
+                "/v2/partials/sightings/send-inquiry",
+                data={
+                    "requirement_ids": str(r.id),
+                    "vendor_names": ["Acme"],
+                    "email_body": "Please quote.",
+                    "datasheet_ids": ["103", "104"],
+                },
+            )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Datasheets-Dropped"] == "2"
