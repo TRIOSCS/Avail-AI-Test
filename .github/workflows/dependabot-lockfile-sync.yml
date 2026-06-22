@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the PR head branch
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # head is guaranteed in-repo by the `if:` gate, so this is never a fork ref.
           ref: ${{ github.event.pull_request.head.ref }}
