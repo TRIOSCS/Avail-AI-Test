@@ -1402,40 +1402,57 @@ class TestComposeTimeVendorIntel:
 
         resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
         assert resp.status_code == 200
-        # Should render em-dash "—" for the lead time
-        assert "—" in resp.text or "&mdash;" in resp.text
+        # Should render em-dash "—" in the specific lead-time span, not just anywhere
+        assert '<span class="ml-2 text-xs text-gray-400">—</span>' in resp.text
+        # Confirm the numeric lead-time span is NOT present (no "Nd lead" text)
+        assert "d lead" not in resp.text
 
     def test_coverage_rows_none_when_no_vss_lead_time(self, client, db_session):
-        """When VSS.best_lead_time_days is None, RankedVendor.lead_time_days is None
-        (not zero)."""
+        """When VSS.best_lead_time_days is None for all rows,
+        RankedVendor.lead_time_days is None (not zero).
+
+        Two VSS rows across two requirements exercise the min()-over-all-None grouping
+        path.
+        """
         from app.routers.sightings import _coverage_ranked_vendor_rows
 
         req = Requisition(name="NullLead RFQ", status="active", customer_name="NL Corp")
         db_session.add(req)
         db_session.flush()
-        r = Requirement(
+        # Two requirements so we can create two VSS rows for the same vendor
+        # (unique constraint is on (requirement_id, vendor_name))
+        r1 = Requirement(
             requisition_id=req.id,
             primary_mpn="NULLLEAD-001",
             target_qty=5,
             sourcing_status="open",
         )
-        db_session.add(r)
+        r2 = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NULLLEAD-002",
+            target_qty=3,
+            sourcing_status="open",
+        )
+        db_session.add(r1)
+        db_session.add(r2)
         db_session.flush()
         card = VendorCard(normalized_name="nullleadvendor", display_name="NullLeadVendor")
         db_session.add(card)
         db_session.flush()
-        VendorSightingSummary(
-            requirement_id=r.id,
-            vendor_name="NullLeadVendor",
-            estimated_qty=10,
-            listing_count=1,
-            score=50.0,
-            best_lead_time_days=None,
-            vendor_card_id=card.id,
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r1.id,
+                vendor_name="NullLeadVendor",
+                estimated_qty=10,
+                listing_count=1,
+                score=50.0,
+                best_lead_time_days=None,
+                vendor_card_id=card.id,
+            )
         )
         db_session.add(
             VendorSightingSummary(
-                requirement_id=r.id,
+                requirement_id=r2.id,
                 vendor_name="NullLeadVendor",
                 estimated_qty=10,
                 listing_count=1,
@@ -1446,7 +1463,7 @@ class TestComposeTimeVendorIntel:
         )
         db_session.commit()
 
-        rows = _coverage_ranked_vendor_rows(db_session, [r.id], excluded=set())
+        rows = _coverage_ranked_vendor_rows(db_session, [r1.id, r2.id], excluded=set())
         carded = next((rv for rv in rows if rv.card is not None and rv.card.id == card.id), None)
         assert carded is not None
         assert carded.lead_time_days is None  # must be None, not 0
