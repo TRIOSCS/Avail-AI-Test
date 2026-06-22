@@ -5,6 +5,7 @@ Depends on: app.routers.crm.views
 """
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -3676,3 +3677,222 @@ class TestC3KebabActionsAndCadence:
         real_rows = [r for r in rows if not r["legacy"]]
         assert len(real_rows) == 1
         assert real_rows[0]["cadence"] == "new"
+
+
+class TestC4SuggestedContactsUI:
+    """C4 TDD: Suggested-contacts UI loop.
+
+    Written FIRST (failing) per TDD — implement endpoints + templates to pass.
+
+    Routes tested:
+      GET  /v2/partials/customers/{company_id}/suggested-contacts
+      POST /v2/partials/customers/{company_id}/suggested-contacts/add
+    """
+
+    def _make_company_with_hq(self, db_session: Session, *, domain: str = "acme.com"):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="Suggested Co", is_active=True, domain=domain)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", site_type="hq", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Existing Alice",
+            email="alice@acme.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    # ── "Find contacts" button on the Contacts tab ────────────────────────
+
+    def test_contacts_tab_shows_find_contacts_when_domain_set(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Contacts tab shows 'Find contacts' button when company.domain is set."""
+        company, site, contact = self._make_company_with_hq(db_session, domain="acme.com")
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Find contacts" in resp.text
+
+    def test_contacts_tab_no_find_contacts_when_no_domain(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Contacts tab hides 'Find contacts' button when no domain/website is set."""
+        company, site, contact = self._make_company_with_hq(db_session, domain="")
+        # Remove domain/website
+        company.domain = None
+        company.website = None
+        db_session.commit()
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        assert "Find contacts" not in resp.text
+
+    # ── GET /suggested-contacts renders _suggested_contacts.html ─────────
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_renders_html(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """GET suggested contacts for a company renders an HTML partial (not JSON)."""
+        mock_contacts.return_value = (
+            [{"full_name": "Bob Buyer", "email": "bob@acme.com", "title": "VP Procurement"}],
+            [],  # no errored providers
+        )
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        assert "Bob Buyer" in resp.text
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_zero_results_neutral_state(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Zero results + no provider error → neutral 'No contacts found' state."""
+        mock_contacts.return_value = ([], [])
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Neutral empty state — no provider error badge
+        assert "No contacts found" in resp.text
+        # Should NOT show an error/warning banner
+        assert "Couldn" not in resp.text
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_provider_error_amber_state(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Zero results + provider errored → amber 'Couldn't reach <provider>' state."""
+        mock_contacts.return_value = ([], ["hunter"])
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Amber error banner mentioning the provider
+        assert "hunter" in resp.text.lower()
+        # Should indicate something went wrong (Couldn't reach or try again)
+        assert "try again" in resp.text.lower() or "couldn" in resp.text.lower()
+
+    @patch("app.enrichment_service.find_suggested_contacts_with_errors", new_callable=AsyncMock)
+    def test_get_suggested_contacts_add_button_per_row(
+        self, mock_contacts, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Suggested contacts list has an Add button per row."""
+        mock_contacts.return_value = (
+            [{"full_name": "Bob Buyer", "email": "bob@acme.com", "title": "VP Procurement"}],
+            [],
+        )
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.get(
+            f"/v2/partials/customers/{company.id}/suggested-contacts",
+            params={"domain": "acme.com"},
+        )
+        assert resp.status_code == 200
+        # Each row should have an Add action targeting the add endpoint
+        assert "suggested-contacts/add" in resp.text
+
+    # ── POST /suggested-contacts/add creates SiteContact + returns grouped list ──
+
+    def test_post_add_suggested_creates_site_contact(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add creates a real SiteContact and returns grouped list HTML."""
+        from app.models.crm import SiteContact
+
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "New Suggested",
+                "email": "new@acme.com",
+                "title": "Director",
+                "source": "hunter",
+                "email_verified": "1",
+            },
+        )
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+        db_session.expire_all()
+        sc = db_session.query(SiteContact).filter_by(email="new@acme.com").first()
+        assert sc is not None
+        assert sc.full_name == "New Suggested"
+        assert sc.enrichment_source == "hunter"
+        assert sc.email_verified is True
+
+    def test_post_add_suggested_returns_grouped_list(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add returns the re-rendered grouped list (not JSON)."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "List Check",
+                "email": "listcheck@acme.com",
+            },
+        )
+        assert resp.status_code == 200
+        # Grouped list has accordion site headers
+        assert "HQ" in resp.text
+        # New contact appears in list
+        assert "List Check" in resp.text
+
+    def test_post_add_suggested_emits_toast_on_success(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add emits an HX-Trigger toast header on success."""
+        company, site, _ = self._make_company_with_hq(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Toast User",
+                "email": "toast@acme.com",
+            },
+        )
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "showToast" in trigger
+
+    def test_post_add_suggested_dedup_reports_already_on_file(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """POST add for an existing contact reports 'already on file' via toast, not
+        silent no-op or 409."""
+        company, site, existing = self._make_company_with_hq(db_session)
+        # alice@acme.com already exists
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/suggested-contacts/add",
+            data={
+                "site_id": str(site.id),
+                "full_name": "Alice Dupe",
+                "email": "alice@acme.com",  # same as existing contact
+            },
+        )
+        assert resp.status_code == 200
+        # Returns grouped list (still valid HTML response)
+        assert "text/html" in resp.headers.get("content-type", "")
+        # Toast header present, mentioning "already" or "on file"
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "showToast" in trigger
+        import json
+
+        trigger_data = json.loads(trigger)
+        toast_msg = (trigger_data.get("showToast") or {}).get("message", "")
+        assert "already" in toast_msg.lower() or "file" in toast_msg.lower()
+
+    def test_post_add_suggested_404_on_bad_company(self, client: TestClient, db_session: Session, test_user: User):
+        """POST add for unknown company returns 404."""
+        resp = client.post(
+            "/v2/partials/customers/99999/suggested-contacts/add",
+            data={"site_id": "1", "full_name": "Ghost"},
+        )
+        assert resp.status_code == 404

@@ -25,12 +25,28 @@
 <div class="bg-white rounded-lg border border-gray-200 p-4">
   <div class="flex items-center justify-between">
     <h3 class="text-sm font-semibold text-gray-900">Contacts ({{ contact_rows|length }})</h3>
-    <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-            class="px-3 py-1 text-xs font-medium text-brand-500 border border-brand-300 rounded hover:bg-brand-50">
-      + Add Contact
-    </button>
+    <div class="flex items-center gap-2">
+      {# "Find contacts" — only shown when a domain/website is available #}
+      {% set company_domain = company.domain or company.website %}
+      {% if company_domain %}
+      <button hx-get='/v2/partials/customers/{{ company.id }}/suggested-contacts?domain={{ company_domain | urlencode }}'
+              hx-target='#suggested-contacts-panel'
+              hx-swap='innerHTML'
+              hx-indicator='#suggested-contacts-panel'
+              class='px-3 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50'>
+        Find contacts
+      </button>
+      {% endif %}
+      <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
+              class="px-3 py-1 text-xs font-medium text-brand-500 border border-brand-300 rounded hover:bg-brand-50">
+        + Add Contact
+      </button>
+    </div>
   </div>
 </div>
+
+{# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
+<div id="suggested-contacts-panel" class="mt-2"></div>
 
 {# ── Grouped list wrapped in stable swap target ────────────────────────────── #}
 <div id="contacts-tab-list">

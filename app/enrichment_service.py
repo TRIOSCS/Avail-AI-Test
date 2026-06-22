@@ -684,6 +684,109 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
     return filtered if filtered else unique
 
 
+async def find_suggested_contacts_with_errors(
+    domain: str, name: str = "", title_filter: str = "", limit: int = 10
+) -> tuple[list[dict], list[str]]:
+    """Like find_suggested_contacts but also returns which providers errored.
+
+    Returns (contacts, errored_provider_names) so the UI can distinguish:
+      - zero results + empty errors  → neutral "No contacts found"
+      - zero results + errors        → amber "Couldn't reach <provider>"
+      - contacts present             → render the list with Add buttons
+
+    Calls the same provider waterfall as find_suggested_contacts.
+    """
+    all_contacts: list[dict] = []
+    errored: list[str] = []
+
+    # ── Lusha first (verified source) — circuit-guarded ──
+    if _lusha_enabled() and not circuit_open("lusha"):
+        try:
+            all_contacts = await lusha.search_contacts(
+                domain, get_credential_cached("lusha_enrichment", "LUSHA_API_KEY") or "", limit
+            )
+        except ProviderQuotaError:
+            logger.warning("Lusha quota/rate-limit on contacts {} — tripping circuit", domain)
+            trip_circuit("lusha", settings.lusha_cooldown_minutes)
+            errored.append("lusha")
+        except Exception as exc:
+            logger.warning("Lusha contact provider failed: {}", exc)
+            errored.append("lusha")
+
+    if not (len(all_contacts) >= limit and any(c.get("verified") for c in all_contacts)):
+        providers: list = []
+        provider_names: list[str] = []
+        explorium_on = _explorium_enabled() and not circuit_open("explorium")
+        if explorium_on:
+            providers.append(_explorium_find_contacts(domain, title_filter))
+            provider_names.append("explorium")
+        providers.append(_hunter_find_contacts(domain))
+        provider_names.append("hunter")
+        providers.append(_ai_find_contacts(domain, name, title_filter))
+        provider_names.append("ai")
+
+        results = await asyncio.gather(*providers, return_exceptions=True)
+        for pname, r in zip(provider_names, results):
+            if isinstance(r, ProviderQuotaError):
+                logger.warning("{} quota/rate-limit on contacts {} — tripping circuit", pname, domain)
+                if pname == "explorium":
+                    trip_circuit("explorium", settings.explorium_cooldown_minutes)
+                errored.append(pname)
+                continue
+            if isinstance(r, Exception):
+                logger.warning("Contact provider {} failed: {}", pname, r)
+                errored.append(pname)
+                continue
+            all_contacts.extend(r)
+
+    # Deduplicate by email or linkedin_url or full_name
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for c in all_contacts:
+        key = (c.get("email") or "").lower() or c.get("linkedin_url") or (c.get("full_name") or "").lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(c)
+
+    # Filter to relevant B2B titles
+    _RELEVANT_KEYWORDS = {
+        "procurement",
+        "purchasing",
+        "buyer",
+        "sourcing",
+        "supply chain",
+        "component",
+        "commodity",
+        "materials",
+        "vendor",
+        "supplier",
+        "sales",
+        "account",
+        "business development",
+        "director",
+        "president",
+        "vp",
+        "manager",
+        "engineer",
+        "operations",
+        "logistics",
+        "inventory",
+        "planning",
+        "quality",
+    }
+
+    def _is_relevant(contact: dict) -> bool:
+        title = (contact.get("title") or "").lower()
+        if not title:
+            return bool(contact.get("email"))
+        return any(kw in title for kw in _RELEVANT_KEYWORDS)
+
+    filtered = [c for c in unique if _is_relevant(c)]
+    contacts = filtered if filtered else unique
+    return contacts, errored
+
+
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
     """Apply enrichment data dict to a Company model.
 

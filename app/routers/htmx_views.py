@@ -6055,6 +6055,190 @@ async def contacts_tab_create(
     return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
 
 
+# ── Suggested-contacts UI (account-building loop) ──────────────────────
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/suggested-contacts",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_suggested(
+    request: Request,
+    company_id: int,
+    domain: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return suggested-contacts partial for the Contacts tab.
+
+    Calls the enrichment waterfall and renders _suggested_contacts.html with:
+    - per-row Add buttons (hx-post to /suggested-contacts/add)
+    - zero results + no errors → neutral "No contacts found"
+    - zero results + provider errors → amber "Couldn't reach <provider>" state
+    """
+    from app.enrichment_service import find_suggested_contacts_with_errors
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    if not domain:
+        domain = company.domain or company.website or ""
+    if not domain:
+        raise HTTPException(400, "No domain available for this company")
+
+    # Normalize (strip scheme/www/path)
+    domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0]
+
+    active_sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+
+    try:
+        contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
+    except Exception as exc:
+        logger.warning("find_suggested_contacts_with_errors failed for company {}: {}", company_id, exc)
+        contacts = []
+        errored = ["all"]
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "suggested": contacts,
+            "errored_providers": errored,
+            "active_sites": active_sites,
+        }
+    )
+    return template_response("htmx/partials/customers/tabs/_suggested_contacts.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/suggested-contacts/add",
+    response_class=HTMLResponse,
+)
+async def contacts_tab_add_suggested(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a single suggested contact to a site and return the grouped list with toast.
+
+    Form fields: site_id (int), full_name, email, title, phone, linkedin_url,
+    source (default "enrichment"), email_verified ("1" / "true" = True).
+
+    Dedup: if the email already exists on the site, returns a "already on file"
+    toast — never a silent no-op or 409 error.
+    Always returns _contacts_grouped_list.html + HX-Trigger toast.
+    """
+    from datetime import timezone as _tz
+
+    from sqlalchemy import func as sqlfunc2
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    form = await request.form()
+    full_name = (form.get("full_name") or "").strip()
+    if not full_name:
+        raise HTTPException(400, "full_name is required")
+
+    site_id_raw = (form.get("site_id") or "").strip()
+    email_val = (form.get("email") or "").strip().lower() or None
+    title_val = (form.get("title") or "").strip() or None
+    phone_val = (form.get("phone") or "").strip() or None
+    linkedin_val = (form.get("linkedin_url") or "").strip() or None
+    source_val = (form.get("source") or "").strip() or "enrichment"
+    email_verified = (form.get("email_verified") or "").strip().lower() in ("1", "true", "yes")
+
+    # Resolve site
+    if site_id_raw:
+        try:
+            sid = int(site_id_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid site_id")
+        site = db.query(CustomerSite).filter(CustomerSite.id == sid, CustomerSite.company_id == company_id).first()
+        if not site:
+            raise HTTPException(404, "Site not found")
+    else:
+        # Default to HQ site
+        sites = (
+            db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
+        )
+        hq = next((s for s in sites if (s.site_type or "") == "hq"), None)
+        site = hq or (sites[0] if sites else None)
+        if not site:
+            raise HTTPException(400, "No site available — create a site first")
+
+    # Per-site email dedup
+    deduped = False
+    if email_val:
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site.id,
+                sqlfunc2.lower(SiteContact.email) == email_val,
+            )
+            .first()
+        )
+        if existing:
+            deduped = True
+    elif full_name:
+        existing_name = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site.id,
+                SiteContact.email.is_(None),
+                sqlfunc2.lower(SiteContact.full_name) == full_name.lower(),
+            )
+            .first()
+        )
+        if existing_name:
+            deduped = True
+
+    if not deduped:
+        sc = SiteContact(
+            customer_site_id=site.id,
+            full_name=full_name,
+            email=email_val,
+            title=title_val,
+            phone=phone_val,
+            linkedin_url=linkedin_val,
+            enrichment_source=source_val,
+            email_verified=email_verified,
+        )
+        db.add(sc)
+        db.commit()
+        logger.info(
+            "add_suggested: created SiteContact for company {} site {} by {}",
+            company_id,
+            site.id,
+            user.email,
+        )
+        toast_msg = f"Added {full_name}"
+        toast_kind = "success"
+    else:
+        toast_msg = f"{full_name} is already on file"
+        toast_kind = "info"
+
+    ctx = _base_ctx(request, user, "customers")
+    ctx.update(
+        {
+            "company": company,
+            "contact_rows": _company_contact_rows(db, company_id),
+            "now_utc": datetime.now(_tz.utc),
+        }
+    )
+    response = template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_kind}})
+    return response
+
+
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
 
 
