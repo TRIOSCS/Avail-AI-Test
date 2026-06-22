@@ -6267,6 +6267,15 @@ async def delete_site_contact(
       - 'contacts-tab-list' → re-renders _contacts_grouped_list.html (Contacts tab)
       - anything else       → returns empty string (site_card outerHTML-remove path)
     """
+    # Validate site belongs to company BEFORE mutating — closes IDOR gap and
+    # guarantees company is available for the contacts-tab-list render path.
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
     )
@@ -6280,7 +6289,6 @@ async def delete_site_contact(
     if hx_target == "contacts-tab-list":
         from datetime import timezone as _tz
 
-        company = db.query(Company).filter(Company.id == company_id).first()
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {

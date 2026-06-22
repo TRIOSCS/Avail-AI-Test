@@ -32,13 +32,13 @@
 
 {# ── Render ────────────────────────────────────────────────────────────────── #}
 {% if not contact_rows %}
-<div class='p-8 text-center'>
-  <p class='text-sm text-gray-600 mb-3'>No contacts yet. Add your first contact to get started.</p>
-  <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-          class='px-4 py-2 text-sm font-medium text-brand-600 border border-brand-300 rounded hover:bg-brand-50'>
-    + Add Contact
-  </button>
-</div>
+{% with
+   message='No contacts yet. Add your first contact to get started.',
+   action_alpine_click='$dispatch(\'open-modal\', {url: \'/v2/partials/customers/' ~ company.id ~ '/contacts/add-form\'})',
+   action_label='+ Add Contact'
+%}
+{% include 'htmx/partials/shared/empty_state.html' %}
+{% endwith %}
 {% else %}
 <div class="space-y-3">
   {% for sk in site_groups.order %}

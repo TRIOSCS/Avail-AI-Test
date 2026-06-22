@@ -571,6 +571,27 @@ class TestSiteContactCRUD:
         resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999")
         assert resp.status_code == 404
 
+    def test_delete_site_contact_site_from_other_company_404_no_mutation(
+        self,
+        client: TestClient,
+        db_session: Session,
+        test_company: Company,
+        test_customer_site: CustomerSite,
+    ):
+        """A mismatched URL (site belonging to a different company) must 404 BEFORE
+        deleting — the contact must not be removed."""
+        contact = _site_contact(db_session, test_customer_site)
+        other_company = Company(name="Other Delete Co", is_active=True)
+        db_session.add(other_company)
+        db_session.commit()
+
+        resp = client.delete(
+            f"/v2/partials/customers/{other_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}"
+        )
+        assert resp.status_code == 404
+        # Contact must still exist — no mutation before auth check
+        assert db_session.get(SiteContact, contact.id) is not None
+
     def test_set_primary_contact_success(
         self,
         client: TestClient,
