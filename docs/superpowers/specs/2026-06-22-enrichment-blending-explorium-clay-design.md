@@ -144,8 +144,7 @@ Replaces the broken logic in `enrichment_service.py:_explorium_find_*` and `app/
 - **Delete the dead webhook path:** remove `clay_service.request_enrichment`, the `POST /api/webhooks/clay`
   endpoint + secret/signature verification (`app/routers/v13_features/activity.py:116-159`), the
   `CLAY_WEBHOOK_URL`/`CLAY_CALLBACK_SECRET` config + `api_sources.json` env vars, and the webhook trigger calls in
-  `app/routers/crm/enrichment.py`. **Keep** `_add_vendor_contacts` / `_add_site_contacts` / `_confidence_from_marker`
-  (reused by the router). The Settings `CLAY_API_KEY` card becomes correct.
+  `app/routers/crm/enrichment.py`. **`clay_service.py` is deleted entirely** — contact auto-persist is gone; contacts flow via `find_suggested_contacts()` calling `clay_mcp.find_contacts()`. The Settings `CLAY_API_KEY` card becomes correct.
 - **Errors:** MCP error / quota → `ProviderQuotaError` → `trip_circuit("clay", clay_cooldown_minutes)`.
 
 ## 6. Component C — Unified blending layer

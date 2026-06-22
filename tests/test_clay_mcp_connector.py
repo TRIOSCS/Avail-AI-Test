@@ -247,6 +247,22 @@ async def test_find_contacts_respects_limit(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_find_contacts_propagates_quota_error(monkeypatch):
+    """ProviderQuotaError must NOT be swallowed — it propagates to the caller."""
+    from app.connectors import clay_mcp
+
+    monkeypatch.setattr(clay_mcp, "_resolve_key", lambda: "TESTKEY")
+
+    async def fake_call(tool, args):
+        raise ProviderQuotaError("Clay MCP quota/rate-limit: 429")
+
+    monkeypatch.setattr(clay_mcp, "_mcp_call", fake_call)
+
+    with pytest.raises(ProviderQuotaError):
+        await clay_mcp.find_contacts("arrow.com", "", 10, want_email=False)
+
+
+@pytest.mark.asyncio
 async def test_disabled_without_key_find_contacts(monkeypatch):
     from app.connectors import clay_mcp
 
