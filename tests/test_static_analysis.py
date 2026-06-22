@@ -564,3 +564,64 @@ def test_modal_uses_canonical_close_class():
     html = Path("app/templates/htmx/base.html").read_text()
     assert 'class="modal-close"' in html, "global modal close button must use .modal-close"
     assert "top-2.5 right-2.5" not in html, "modal close button still uses magic-number positioning — use .modal-close"
+
+
+# Page-shell width policy (see docs/superpowers/specs/2026-06-22-horizontal-space-optimization-design.md):
+# dense data pages fill the viewport via .page-fluid; reading/form pages keep a comfortable
+# ~1152px measure via .page-readable. The shell wrapper must carry the semantic class rather
+# than an ad-hoc `max-w-*xl mx-auto` cap (which leaves empty gutters on wide monitors).
+_PAGE_FLUID_SHELLS = (
+    "app/templates/htmx/partials/admin/spec_codes_pending.html",
+    "app/templates/htmx/partials/buy_plans/detail.html",
+    "app/templates/htmx/partials/buy_plans/hub.html",
+    "app/templates/htmx/partials/dashboard.html",
+    "app/templates/htmx/partials/emails/intelligence_dashboard.html",
+    "app/templates/htmx/partials/excess/detail.html",
+    "app/templates/htmx/partials/excess/list.html",
+    "app/templates/htmx/partials/follow_ups/list.html",
+    "app/templates/htmx/partials/materials/detail.html",
+    "app/templates/htmx/partials/proactive/list.html",
+    "app/templates/htmx/partials/prospecting/list.html",
+    "app/templates/htmx/partials/quotes/detail.html",
+    "app/templates/htmx/partials/requisitions/detail.html",
+    "app/templates/htmx/partials/requisitions/list.html",
+    "app/templates/htmx/partials/search/full_results.html",
+    "app/templates/htmx/partials/settings/index.html",
+    "app/templates/htmx/partials/sourcing/lead_detail.html",
+    "app/templates/htmx/partials/tickets/workspace.html",
+    "app/templates/htmx/partials/vendors/detail.html",
+    "app/templates/htmx/partials/vendors/list.html",
+    "app/templates/htmx/partials/offers/review_queue.html",
+)
+_PAGE_READABLE_SHELLS = (
+    "app/templates/htmx/partials/admin/data_ops.html",
+    "app/templates/htmx/partials/knowledge/list.html",
+    "app/templates/htmx/partials/proactive/prepare.html",
+    "app/templates/htmx/partials/prospecting/detail.html",
+    "app/templates/htmx/partials/search/dossier_shell.html",
+    "app/templates/htmx/partials/tickets/detail.html",
+)
+
+
+def test_width_classes_defined_in_styles():
+    """The semantic page-width classes are the single source of truth for horizontal
+    space usage — they must exist in the Tailwind component layer."""
+    css = Path("app/static/styles.css").read_text()
+    assert ".page-fluid" in css, ".page-fluid must be defined in styles.css"
+    assert ".page-readable" in css, ".page-readable must be defined in styles.css"
+
+
+def test_page_shells_use_width_classes():
+    """Every classified page-shell carries its semantic width class.
+
+    Reverting a shell to an ad-hoc `max-w-*xl mx-auto` cap (re-introducing wide-monitor
+    gutters) removes the class and trips this guard.
+    """
+    offenders = []
+    for rel in _PAGE_FLUID_SHELLS:
+        if "page-fluid" not in Path(rel).read_text():
+            offenders.append(f"{rel}: missing .page-fluid on shell wrapper")
+    for rel in _PAGE_READABLE_SHELLS:
+        if "page-readable" not in Path(rel).read_text():
+            offenders.append(f"{rel}: missing .page-readable on shell wrapper")
+    assert not offenders, "page-shells lost their width class:\n" + "\n".join(offenders)
