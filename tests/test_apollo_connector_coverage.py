@@ -244,7 +244,7 @@ async def test_search_contacts_success():
 @pytest.mark.parametrize(
     "post_kwargs",
     [
-        pytest.param({"return_value": make_response(429, {})}, id="non_200"),
+        pytest.param({"return_value": make_response(403, {})}, id="non_200"),
         pytest.param({"side_effect": httpx.HTTPError("timeout")}, id="http_error"),
         pytest.param({"side_effect": KeyError("missing")}, id="key_error"),
     ],
@@ -259,6 +259,18 @@ async def test_search_contacts_returns_empty(post_kwargs):
         result = await search_contacts("co.com", "fake-key")
 
     assert result == []
+
+
+async def test_search_contacts_raises_quota_on_429():
+    from app.connectors.apollo import search_contacts
+    from app.services.enrichment_credit_guard import ProviderQuotaError
+
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=make_response(429, {}))
+
+    with patched_async_client(mock_client):
+        with pytest.raises(ProviderQuotaError):
+            await search_contacts("co.com", "fake-key")
 
 
 async def test_search_contacts_default_limit():

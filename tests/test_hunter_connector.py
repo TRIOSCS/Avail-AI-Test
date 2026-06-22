@@ -83,14 +83,14 @@ class TestHunterDomainSearch:
                 await HunterConnector("bad-key").domain_search("example.com")
 
     @pytest.mark.asyncio
-    async def test_429_raises_rate_limit(self):
-        from app.connectors.errors import ConnectorRateLimitError
+    async def test_429_raises_quota_error(self):
         from app.connectors.hunter import HunterConnector
+        from app.services.enrichment_credit_guard import ProviderQuotaError
 
         mock_resp = _mock_response(429, {})
         with patch("app.connectors.hunter.http") as mock_http:
             mock_http.get = AsyncMock(return_value=mock_resp)
-            with pytest.raises(ConnectorRateLimitError):
+            with pytest.raises(ProviderQuotaError):
                 await HunterConnector("key").domain_search("example.com")
 
     @pytest.mark.asyncio

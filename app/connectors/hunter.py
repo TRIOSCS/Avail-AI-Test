@@ -10,9 +10,11 @@ Depends on: app/http_client.py, HUNTER_API_KEY credential
 from loguru import logger
 
 from ..http_client import http
-from .errors import ConnectorAuthError, ConnectorRateLimitError
+from ..services.enrichment_credit_guard import ProviderQuotaError
+from .errors import ConnectorAuthError
 
 _BASE = "https://api.hunter.io/v2"
+_QUOTA_STATUSES = (402, 429)
 
 
 class HunterConnector:
@@ -46,8 +48,8 @@ class HunterConnector:
 
         if r.status_code == 401:
             raise ConnectorAuthError("Hunter.io auth error: HTTP 401 — check HUNTER_API_KEY")
-        if r.status_code == 429:
-            raise ConnectorRateLimitError("Hunter.io rate limit exceeded")
+        if r.status_code in _QUOTA_STATUSES:
+            raise ProviderQuotaError(f"Hunter.io domain-search quota/rate-limit: {r.status_code}")
         if r.status_code != 200:
             logger.warning("Hunter domain-search HTTP {} for {}", r.status_code, domain)
             return []
@@ -100,8 +102,8 @@ class HunterConnector:
 
         if r.status_code == 401:
             raise ConnectorAuthError("Hunter.io auth error: HTTP 401")
-        if r.status_code == 429:
-            raise ConnectorRateLimitError("Hunter.io rate limit exceeded")
+        if r.status_code in _QUOTA_STATUSES:
+            raise ProviderQuotaError(f"Hunter.io email-finder quota/rate-limit: {r.status_code}")
         if r.status_code != 200:
             return None
 
