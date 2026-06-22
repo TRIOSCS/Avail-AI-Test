@@ -1,15 +1,16 @@
 """Clay enrichment via the backend MCP client (no webhook).
 
-Calls the hosted Clay MCP (https://api.clay.com/v3/mcp) with CLAY_API_KEY:
+Calls the hosted Clay MCP (https://api.clay.com/v3/mcp) with an OAuth access token:
 - enrich_company: find-and-enrich-company returns base firmographics synchronously.
 - find_contacts: find-and-enrich-contacts-at-company returns a base contact list inline;
   emails (Email data point) are polled via get-task-context (bounded, _POLL_TRIES).
 
 Called by: app/services/enrichment_router.py (Task 6). Depends on: app/http_client.py,
-app/services/credential_service (key), app/services/enrichment_credit_guard (circuit).
+app/services/clay_oauth (OAuth token), app/services/enrichment_credit_guard (circuit).
 
 Transport confirmed by Task 0 spike: JSON-RPC 2.0 over HTTPS, tools/call method,
 Authorization: Bearer, response unwrapped from result.structuredContent.
+Authentication: OAuth authorization_code + PKCE (Clay MCP is OAuth-gated, not key-based).
 """
 
 import asyncio
@@ -19,7 +20,7 @@ import httpx
 from loguru import logger
 
 from app.http_client import http
-from app.services.credential_service import get_credential_cached
+from app.services import clay_oauth
 from app.services.enrichment_credit_guard import ProviderQuotaError
 
 MCP_URL = "https://api.clay.com/v3/mcp"
@@ -35,9 +36,9 @@ _TICKER_RE = re.compile(r"\((?:NYSE|NASDAQ):\s*([A-Z]{1,6})\)")
 # ── credential ────────────────────────────────────────────────────────────────
 
 
-def _resolve_key() -> str:
-    """Return the Clay API key from credentials, or '' if absent."""
-    return get_credential_cached("clay_enrichment", "CLAY_API_KEY") or ""
+async def _access_token() -> str | None:
+    """Valid Clay OAuth access token (auto-refreshed), or None if not connected."""
+    return await clay_oauth.get_access_token()
 
 
 # ── transport ─────────────────────────────────────────────────────────────────
@@ -46,22 +47,37 @@ def _resolve_key() -> str:
 async def _mcp_call(tool: str, args: dict) -> dict:
     """POST a JSON-RPC tools/call to the Clay MCP and return the structured result.
 
-    402/429 → raises ProviderQuotaError (not swallowed). Other non-200 → logs warning
-    and returns {}.
+    On HTTP 401 the token is refreshed once and the request is retried. 402/429 → raises
+    ProviderQuotaError (not swallowed). Other non-200 → logs warning and returns {}.
     """
-    key = _resolve_key()
-    headers = {
-        "Authorization": f"Bearer {key}",
-        "Content-Type": "application/json",
-        "Accept": "application/json, text/event-stream",
-    }
-    body = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": tool, "arguments": args},
-    }
-    resp = await http.post(MCP_URL, headers=headers, json=body, timeout=40)
+    token = await _access_token()
+    if not token:
+        return {}
+
+    async def _post(tok: str):
+        return await http.post(
+            MCP_URL,
+            headers={
+                "Authorization": f"Bearer {tok}",
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            json={
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": tool, "arguments": args},
+            },
+            timeout=40,
+        )
+
+    resp = await _post(token)
+    if resp.status_code == 401:  # token rejected → one refresh + retry
+        new = await clay_oauth.refresh()
+        if not new:
+            logger.warning("Clay MCP 401 and refresh failed — not connected")
+            return {}
+        resp = await _post(new)
     if resp.status_code in _QUOTA_STATUSES:
         raise ProviderQuotaError(f"Clay MCP quota/rate-limit: {resp.status_code}")
     if resp.status_code != 200:
@@ -128,10 +144,10 @@ def _map_company(domain: str, payload: dict) -> dict | None:
 async def enrich_company(domain: str) -> dict | None:
     """Return firmographics for *domain* from Clay, or None if unavailable/error.
 
-    402/429 → ProviderQuotaError (propagates; caller trips the circuit breaker). Key
-    absent → returns None immediately (no network call).
+    402/429 → ProviderQuotaError (propagates; caller trips the circuit breaker). Token
+    absent (not connected) → returns None immediately (no network call).
     """
-    if not _resolve_key():
+    if not await _access_token():
         return None
     try:
         payload = await _mcp_call("find-and-enrich-company", {"companyIdentifier": domain})
@@ -179,10 +195,10 @@ async def find_contacts(
     at other companies). If *want_email* is True the Email data point is requested and
     polled asynchronously (bounded poll).
 
-    Key absent → returns [] immediately.
+    Not connected → returns [] immediately.
     402/429 → ProviderQuotaError propagates.
     """
-    if not _resolve_key():
+    if not await _access_token():
         return []
     try:
         args: dict = {"companyIdentifier": domain}
