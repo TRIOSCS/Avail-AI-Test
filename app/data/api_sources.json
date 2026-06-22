@@ -164,10 +164,10 @@
         "display_name": "Clay",
         "category": "enrichment",
         "source_type": "enrichment",
-        "description": "Async enrichment platform (no real-time API). We POST a domain to a Clay table's inbound webhook; Clay enriches and POSTs the row back to our callback.",
+        "description": "Enrichment platform accessed via the Clay MCP connector. Replaces the legacy webhook round-trip.",
         "signup_url": "https://www.clay.com",
-        "env_vars": ["CLAY_WEBHOOK_URL", "CLAY_CALLBACK_SECRET"],
-        "setup_notes": "In Clay: create a table with an inbound webhook → put its URL in CLAY_WEBHOOK_URL. Add an HTTP-API action that POSTs the enriched row to {APP_URL}/api/webhooks/clay with header x-clay-secret = CLAY_CALLBACK_SECRET, echoing the correlation_token. Set CLAY_ENRICHMENT_ENABLED=true to activate."
+        "env_vars": ["CLAY_API_KEY"],
+        "setup_notes": "Provide CLAY_API_KEY and set CLAY_ENRICHMENT_ENABLED=true. Clay is now called via the MCP connector — no inbound webhook required."
     },
     {
         "name": "netcomponents",

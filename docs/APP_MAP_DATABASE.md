@@ -270,6 +270,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | disposition_set_at | UTCDateTime, nullable | When the disposition was last set. |
 | normalized_name | String 255, indexed (btree + Postgres GIN pg_trgm), **nullable, NOT unique** | Migration 120 (Increment 3, AI-org). Suffix-stripped/lowercased dedup match key, kept in lockstep with `name` by `Company._sync_normalized_name` (`@validates("name")`) using `vendor_utils.normalize_vendor_name` — the SAME normalizer the dedup scanner scores with. Mirrors VendorCard but is **nullable + non-unique** on purpose (companies legitimately share a normalized form across the dedup window; the policy keeps different-owner accounts separate). The `ix_companies_normalized_name_trgm` GIN index is Postgres-guarded (`dialect.name == 'postgresql'`); SQLite gets only the btree and the scanner falls back to rapidfuzz. |
 | alternate_names | JSON (default []) | Migration 120. Names this company has been known by. `merge_companies` appends the loser's `name` (+ its own `alternate_names`, deduped, never keep's display name) so a re-import of the old name fuzzy-matches the survivor instead of recreating the duplicate (mirrors `VendorCard._record_alternate_name`). |
+| ticker | String 20, nullable | Migration 125. Stock ticker symbol (e.g. `INTC`). Written by `apply_enrichment_to_company` via the `firmo_tiers` blending ladder; Explorium is the highest-authority source (tier 90). |
+| naics | String 20, nullable | Migration 125. NAICS industry code. SAM.gov is authoritative (tier 95); Explorium second (tier 85). |
+| revenue_range | String 50, nullable | Migration 125. Annual revenue band (e.g. `1000000-5000000`), formatted from a `{min, max}` range by the Explorium connector. Explorium is the highest-authority source (tier 90). |
+| enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store written by `_apply_enrichment` (enrichment_service.py). Shape: `{field: {source, tier, confidence}}`. Guards the provenance-aware overwrite rule: a field with no stored provenance is treated as manual/legacy and is never clobbered by an automated source; a field with provenance is overwritten only when the incoming (tier, confidence) pair strictly beats the stored one. |
 
 **`customer_sites`** — Delivery/contact locations for a company
 | Column | Type | Notes |
@@ -319,6 +323,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | brand_tags / commodity_tags | JSONB | |
 | search_vector | TSVECTOR | Full-text search |
 | is_blacklisted | Boolean | |
+| ticker | String 20, nullable | Migration 125. Stock ticker symbol. Written by `apply_enrichment_to_vendor` via the `firmo_tiers` blending ladder; mirrors the `companies` column. |
+| naics | String 20, nullable | Migration 125. NAICS industry code; mirrors `companies.naics`. |
+| revenue_range | String 50, nullable | Migration 125. Annual revenue band; mirrors `companies.revenue_range`. |
+| enrichment_provenance | JSONB, nullable, server_default `{}` | Migration 125. Per-field provenance store; same shape and semantics as `companies.enrichment_provenance` — written by `apply_enrichment_to_vendor` via `_apply_enrichment`. |
 
 **`vendor_contacts`** — People at vendor companies
 | Column | Type | Notes |

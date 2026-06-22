@@ -300,6 +300,17 @@ class Settings(BaseSettings):
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
 
+    # --- Apollo Enrichment (gate + cooldown) ---
+    apollo_enrichment_enabled: bool = False  # feature gate; off → Apollo not triggered
+    apollo_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
+
+    # --- Hunter.io Enrichment ---
+    hunter_enrichment_enabled: bool = False  # feature gate; off → Hunter not triggered
+    hunter_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
+
+    # --- SAM.gov Enrichment ---
+    sam_gov_enrichment_enabled: bool = False  # feature gate; off → SAM.gov not triggered
+
     # --- Worker liveness watchdog (scheduler job in the supervised app) ---
     # Workers heartbeat every loop tick; this job alerts when one that should be
     # running goes silent (hung/crashed) or trips its circuit breaker.
@@ -307,11 +318,8 @@ class Settings(BaseSettings):
     worker_heartbeat_stale_minutes: int = 15
     worker_alert_debounce_minutes: int = 60
 
-    # --- Clay Enrichment (async webhook → callback; URL/secret via get_credential_cached) ---
-    # Clay has no real-time API: we POST a domain to the table's inbound webhook
-    # (CLAY_WEBHOOK_URL) and Clay POSTs the enriched row back to /api/webhooks/clay,
-    # echoing CLAY_CALLBACK_SECRET in the x-clay-secret header.
-    clay_enrichment_enabled: bool = False  # feature gate; off → Clay not triggered
+    # --- Clay Enrichment (MCP connector; CLAY_API_KEY via credential store) ---
+    clay_enrichment_enabled: bool = False  # feature gate; off → Clay MCP not triggered
     clay_cooldown_minutes: int = 15  # quota/rate-limit circuit cooldown
 
     # --- Azure Communication Services ---

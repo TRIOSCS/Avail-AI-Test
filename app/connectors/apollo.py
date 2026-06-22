@@ -7,6 +7,10 @@ Depends on: app/config.py (apollo_api_key)
 import httpx
 from loguru import logger
 
+from app.services.enrichment_credit_guard import ProviderQuotaError
+
+_QUOTA_STATUSES = (402, 429)
+
 APOLLO_BASE = "https://api.apollo.io/v1"
 _HEADERS_TEMPLATE = {"Content-Type": "application/json"}
 
@@ -58,6 +62,8 @@ async def search_company(domain: str, api_key: str) -> dict | None:
                 headers=_headers(api_key),
                 params={"domain": domain},
             )
+            if resp.status_code in _QUOTA_STATUSES:
+                raise ProviderQuotaError(f"Apollo company quota/rate-limit: {resp.status_code}")
             if resp.status_code != 200:
                 logger.warning("Apollo company lookup failed: {}", resp.status_code)
                 return None
@@ -80,6 +86,8 @@ async def search_contacts(domain: str, api_key: str, limit: int = 10) -> list[di
                     "per_page": limit,
                 },
             )
+            if resp.status_code in _QUOTA_STATUSES:
+                raise ProviderQuotaError(f"Apollo contacts quota/rate-limit: {resp.status_code}")
             if resp.status_code != 200:
                 logger.warning("Apollo contacts search failed: {}", resp.status_code)
                 return []
