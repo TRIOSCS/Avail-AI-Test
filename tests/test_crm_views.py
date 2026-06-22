@@ -2261,6 +2261,25 @@ class TestBuyingRoleSetter:
         db_session.refresh(contact)
         assert contact.contact_role is None
 
+    def test_chip_editor_select_contains_canonical_roles(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Chip editor re-render contains all CANONICAL_ROLES as <option> values (driven
+        by ctx 'roles', not hardcoded HTML), so adding a role to CANONICAL_ROLES
+        automatically propagates to the select."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.post(
+            f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
+            data={"contact_role": "specifier"},
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        # All canonical values must appear as option values
+        for role in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
+            assert f"value='{role}'" in html or f'value="{role}"' in html, (
+                f"Expected role '{role}' as an <option> value in chip editor HTML"
+            )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # TestRoleChipLegacy — role_chip macro handles legacy + new canonical values
@@ -3162,7 +3181,8 @@ class TestContactsTabHome:
         assert "New Bob" in resp.text
 
     def test_post_create_per_site_email_dedup(self, client: TestClient, db_session: Session, test_user: User):
-        """POST create with duplicate email on same site returns list without 500."""
+        """POST create with duplicate email on same site returns 409 (visible error) and
+        does not create a new contact row."""
         from app.models.crm import SiteContact
 
         company, site, _ = self._make_company_with_hq(db_session)
@@ -3176,7 +3196,7 @@ class TestContactsTabHome:
                 "email": "alice@tabco.com",  # same email as existing contact
             },
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 409
         db_session.expire_all()
         count_after = db_session.query(SiteContact).filter_by(customer_site_id=site.id).count()
         assert count_after == count_before  # no new row

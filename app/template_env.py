@@ -275,3 +275,10 @@ templates.env.globals["now"] = _now
 from .services.crm_service import cadence_state  # noqa: E402
 
 templates.env.globals["cadence_state"] = cadence_state
+# Canonical buying-role taxonomy exposed as a Jinja2 global so _role_chip_editor.html
+# can iterate roles inside macros (which don't inherit template context).
+# Context-level "roles" passed by set_contact_role / contacts_tab endpoints takes
+# precedence; this global is the fallback for the macro-include path.
+# Must stay in sync with CANONICAL_ROLES in app/routers/htmx_views.py.
+_CANONICAL_ROLES = ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other")
+templates.env.globals["roles"] = _CANONICAL_ROLES

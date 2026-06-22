@@ -5091,6 +5091,7 @@ async def set_contact_role(
             "request": request,
             "company": company,
             "contact": contact,
+            "roles": CANONICAL_ROLES,
         },
     )
 
@@ -5925,13 +5926,16 @@ async def contacts_tab_create(
     """Create a contact from the Contacts tab modal and return the grouped list.
 
     Site resolution order:
-      1. site_id == '__new__' + new_site_name → create site first (savepoint so a
-         contact failure rolls it back)
+      1. site_id == '__new__' + new_site_name → create site first using a single
+         SQLAlchemy transaction — db.flush() sends the site INSERT to PG but does
+         not commit; if db.commit() fails the entire transaction (site + contact)
+         rolls back atomically.
       2. site_id valid int → use that site
       3. site_id blank/missing → auto-create an 'HQ' site for zero-site companies;
          for companies with sites default to the first active HQ-typed site.
 
     After resolving the site, creates SiteContact with email dedup per-site.
+    Duplicate email on the same site returns HTTP 409 with a user-visible error.
     Returns the grouped list HTML for swap into #contacts-tab-list.
     """
     from datetime import timezone as _tz
@@ -5998,16 +6002,8 @@ async def contacts_tab_create(
             .first()
         )
         if dup:
-            # Dedup: return current list without creating anything (no commit/rollback needed)
-            ctx = _base_ctx(request, user, "customers")
-            ctx.update(
-                {
-                    "company": company,
-                    "contact_rows": _company_contact_rows(db, company_id),
-                    "now_utc": datetime.now(_tz.utc),
-                }
-            )
-            return template_response("htmx/partials/customers/tabs/_contacts_grouped_list.html", ctx)
+            # Dedup: 409 so the user knows the contact was not created
+            raise HTTPException(409, f"A contact with email {email_val} already exists at this site")
 
     # ── Create site if needed (inside one transaction with the contact) ──
     if existing_site:
