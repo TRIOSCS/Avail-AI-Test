@@ -4041,3 +4041,103 @@ class TestC4SuggestedContactsUI:
             data={"site_id": "1", "full_name": "Ghost"},
         )
         assert resp.status_code == 404
+
+
+class TestFullWidthContactsForwardLayout:
+    """Pin the full-width, contacts-forward customer + vendor detail reshape.
+
+    The detail panel was capped at max-w-3xl and centered; contacts sat below 3 stacked
+    meta cards. The reshape goes full width, slims the account header to one line (+ a
+    collapsible Account settings block), and renders contacts as the primary multi-
+    column grid. These tests lock that intent so a revert fails CI.
+    """
+
+    def _make_company_with_contact(self, db_session: Session):
+        from app.models.crm import CustomerSite, SiteContact
+
+        company = Company(name="FullWidth Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Gridcell Greta",
+            email="greta@fullwidth.com",
+            phone="+14155551234",
+            is_primary=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+        return company, site, contact
+
+    def test_customer_detail_drops_max_width_cap(self, client: TestClient, db_session: Session, test_user: User):
+        """Customer detail no longer caps content at max-w-3xl (full panel width)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        assert "max-w-3xl" not in resp.text
+
+    def test_customer_detail_has_slim_header_actions(self, client: TestClient, db_session: Session, test_user: User):
+        """The slim header carries the primary Add Contact + the Account settings
+        collapsible trigger, and the coverage chip (N contacts · N sites)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "+ Add Contact" in html
+        assert "Account settings" in html
+        assert "showAcctSettings" in html
+        # Coverage chip and commercial strip survive the collapse into one line.
+        assert "1 contact" in html
+        assert "1 site" in html
+
+    def test_customer_detail_preserves_cadence_controls(self, client: TestClient, db_session: Session, test_user: User):
+        """Cadence tier setter + disposition control + clocks remain (in the
+        collapsible)."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}")
+        html = resp.text
+        # Tier setter form, disposition control, dual clocks all still rendered.
+        assert f"/v2/partials/customers/{company.id}/tier" in html
+        assert "disposition-control" in html
+        assert "Last Out" in html
+
+    def test_contacts_grid_container_class_present(self, client: TestClient, db_session: Session, test_user: User):
+        """Open site-group contact cards render in a responsive grid, not single-
+        column."""
+        company, _, _ = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "grid gap-2 sm:grid-cols-2 2xl:grid-cols-3" in html
+        # Cards + their actions survive the grid switch.
+        assert "Gridcell Greta" in html
+        assert "data-outreach-log" in html
+
+    def test_workspace_auto_select_marker_present(self, client: TestClient, db_session: Session, test_user: User):
+        """The workspace auto-selects the first account over the untouched empty state
+        only — gated on the [data-cdm-empty] marker and a null selectedId."""
+        c = Company(name="AutoSelect Co", is_active=True)
+        db_session.add(c)
+        db_session.commit()
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "autoSelectFirst" in html
+        assert "data-cdm-empty" in html
+
+    def test_vendor_detail_drops_max_width_cap(self, client: TestClient, db_session: Session, test_user: User):
+        """Vendor detail no longer caps content at max-w-5xl (full panel width)."""
+        from app.models.vendors import VendorCard
+
+        vendor = VendorCard(display_name="FullWidth Vendor", normalized_name="fullwidth vendor")
+        db_session.add(vendor)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/vendors/{vendor.id}")
+        assert resp.status_code == 200
+        assert "max-w-5xl" not in resp.text
+        # The 4 stats survive the compression into a slim strip.
+        assert "Sightings" in resp.text
+        assert "Win Rate" in resp.text
