@@ -162,6 +162,52 @@ class TestHunterEmailFinder:
         assert await HunterConnector("key").email_finder("", "Alice", "Smith") is None
         assert await HunterConnector("key").email_finder("example.com", "", "Smith") is None
 
+    @pytest.mark.asyncio
+    async def test_402_raises_quota_error(self):
+        from app.connectors.hunter import HunterConnector
+        from app.services.enrichment_credit_guard import ProviderQuotaError
+
+        mock_resp = _mock_response(402, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ProviderQuotaError):
+                await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+    @pytest.mark.asyncio
+    async def test_429_raises_quota_error(self):
+        from app.connectors.hunter import HunterConnector
+        from app.services.enrichment_credit_guard import ProviderQuotaError
+
+        mock_resp = _mock_response(429, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ProviderQuotaError):
+                await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+
+class TestHunterVerify:
+    @pytest.mark.asyncio
+    async def test_429_raises_quota_error(self):
+        from app.connectors.hunter import HunterConnector
+        from app.services.enrichment_credit_guard import ProviderQuotaError
+
+        mock_resp = _mock_response(429, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ProviderQuotaError):
+                await HunterConnector("key").verify("alice@example.com")
+
+    @pytest.mark.asyncio
+    async def test_402_raises_quota_error(self):
+        from app.connectors.hunter import HunterConnector
+        from app.services.enrichment_credit_guard import ProviderQuotaError
+
+        mock_resp = _mock_response(402, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ProviderQuotaError):
+                await HunterConnector("key").verify("alice@example.com")
+
 
 class TestHunterWaterfallIntegration:
     @pytest.mark.asyncio

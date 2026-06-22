@@ -99,3 +99,18 @@ async def test_hunter_raises_quota_on_402():
         mock_http.get = AsyncMock(return_value=mock_resp)
         with pytest.raises(ProviderQuotaError):
             await HunterConnector("key").domain_search("example.com")
+
+
+@pytest.mark.asyncio
+async def test_apollo_search_contacts_raises_quota_on_402():
+    from app.connectors import apollo
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 402
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    with patch("app.connectors.apollo.httpx.AsyncClient") as mock_cls:
+        mock_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+        with pytest.raises(ProviderQuotaError):
+            await apollo.search_contacts("x.com", "key")

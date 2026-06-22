@@ -131,6 +131,10 @@ class HunterConnector:
             logger.warning("Hunter verify error: {}", exc)
             return {"result": "unknown", "score": 0}
 
+        if r.status_code == 401:
+            raise ConnectorAuthError("Hunter.io auth error: HTTP 401")
+        if r.status_code in _QUOTA_STATUSES:
+            raise ProviderQuotaError(f"Hunter verify quota/rate-limit: {r.status_code}")
         if r.status_code != 200:
             return {"result": "unknown", "score": 0}
 

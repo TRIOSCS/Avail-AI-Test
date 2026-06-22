@@ -300,7 +300,7 @@ class Settings(BaseSettings):
     lusha_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
     prospect_enrich_contacts_per_account: int = 5  # cap for paid contact pulls
 
-    # --- Apollo Enrichment ---
+    # --- Apollo Enrichment (gate + cooldown) ---
     apollo_enrichment_enabled: bool = False  # feature gate; off → Apollo not triggered
     apollo_cooldown_minutes: int = 15  # quota/rate-limit (402/429) circuit cooldown
 
