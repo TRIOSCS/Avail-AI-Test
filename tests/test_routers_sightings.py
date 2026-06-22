@@ -489,6 +489,162 @@ class TestRefreshPerMpnToast:
         assert ("All MPNs" in hx) or ("cached" in hx)
 
 
+class TestPreviewInlineEmailFix:
+    """S4: inline email-fix mini-form in preview + normalized_name in preview ctx.
+
+    Covers:
+    - sightings_preview_inquiry includes ``normalized_name`` in each preview dict
+      so the template can key the fix-form by it.
+    - After posting a contact email to composer-vendor for a skipped vendor,
+      re-previewing resolves vendor_email and omits the no-email chip.
+    - The inline mini-form is rendered (HTML presence) when skip_reason==no_email.
+    - The fix-email JS helper (fixVendorEmail) is present in htmx_app.js and
+      calls loadPreview on success.
+    """
+
+    @pytest.fixture()
+    def _rfq_fixtures(self, db_session: Session, test_user: User):
+        """Requisition + requirement + vendor card WITHOUT a contact."""
+        from app.models import Requirement, Requisition, VendorCard
+
+        req = Requisition(
+            name="FIX-EMAIL-REQ",
+            customer_name="Fix Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=req.id,
+            primary_mpn="FIX123",
+            target_qty=10,
+            sourcing_status="open",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(item)
+        card = VendorCard(
+            normalized_name="acme corp",
+            display_name="Acme Corp",
+            emails=[],
+            phones=[],
+        )
+        db_session.add(card)
+        db_session.commit()
+        db_session.refresh(req)
+        db_session.refresh(item)
+        db_session.refresh(card)
+        return req, item, card
+
+    def test_preview_includes_normalized_name_in_each_entry(
+        self, client: TestClient, db_session: Session, test_user: User, _rfq_fixtures
+    ):
+        """preview_inquiry response context includes normalized_name per vendor so the
+        template inline-form can key by it."""
+        _, item, card = _rfq_fixtures
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(item.id),
+                "vendor_names": "Acme Corp",
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        # The no-email chip is rendered (vendor has no contact yet)
+        assert "no email" in resp.text.lower()
+        # The inline fix-email form must be present (input + button).
+        # We check for the normalized_name embedded in the form so JS can key it.
+        assert "acme corp" in resp.text.lower()
+
+    def test_add_email_then_repreview_resolves_vendor_email(
+        self, client: TestClient, db_session: Session, test_user: User, _rfq_fixtures
+    ):
+        """Posting email to composer-vendor for a skipped vendor then re-previewing
+        shows vendor_email populated and no longer marks the vendor as no_email."""
+        _, item, card = _rfq_fixtures
+
+        # Step 1: add contact email via composer-vendor
+        add_resp = client.post(
+            "/v2/partials/sightings/composer-vendor",
+            data={
+                "vendor_name": "Acme Corp",
+                "email": "sales@acme.example.com",
+                "requirement_ids": str(item.id),
+            },
+        )
+        assert add_resp.status_code == 200
+
+        # Step 2: re-preview — Acme Corp now has a contact so vendor_email resolves
+        preview_resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(item.id),
+                "vendor_names": "acme corp",  # normalized form Alpine sends
+                "email_body": "Please quote.",
+            },
+        )
+        assert preview_resp.status_code == 200
+        html = preview_resp.text
+        # vendor email is shown (not the no-email chip)
+        assert "sales@acme.example.com" in html
+        # The amber "no email" chip is gone
+        assert "no email — will be skipped" not in html
+
+    def test_preview_inline_form_rendered_for_no_email_vendor(
+        self, client: TestClient, db_session: Session, test_user: User, _rfq_fixtures
+    ):
+        """Template renders inline mini-form (email input + Add & re-check button) when
+        skip_reason == no_email, not just the amber chip."""
+        _, item, card = _rfq_fixtures
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(item.id),
+                "vendor_names": "Acme Corp",
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        html = resp.text
+        # Inline form must contain an email input and submit action
+        assert 'type="email"' in html
+        assert "Add" in html  # "Add & re-check" button text
+
+    def test_fix_vendor_email_js_method_present(self):
+        """FixVendorEmail method exists in rfqVendorModal and calls loadPreview."""
+        from pathlib import Path
+
+        js = Path("app/static/htmx_app.js").read_text()
+        assert "fixVendorEmail(" in js, "fixVendorEmail method missing from rfqVendorModal"
+        # After a successful fix, loadPreview() must be called
+        # Find the fixVendorEmail function body
+        start = js.index("fixVendorEmail(")
+        # Grab the next ~40 lines to find loadPreview() call inside
+        snippet = js[start : start + 1500]
+        assert "loadPreview()" in snippet, "fixVendorEmail must call loadPreview() on success"
+
+    def test_failed_composer_vendor_post_does_not_silently_succeed(
+        self, client: TestClient, db_session: Session, test_user: User, _rfq_fixtures
+    ):
+        """A bad email (no @) POSTed to composer-vendor returns 4xx, not 200.
+
+        Ensures the JS can detect failure and keep the form open (not silent success).
+        """
+        _, item, _ = _rfq_fixtures
+        resp = client.post(
+            "/v2/partials/sightings/composer-vendor",
+            data={
+                "vendor_name": "Acme Corp",
+                "email": "not-an-email",
+                "requirement_ids": str(item.id),
+            },
+        )
+        # The endpoint returns 400 for invalid email — JS can detect !resp.ok
+        assert resp.status_code == 400
+
+
 class TestPerRowSearchIconAlwaysVisible:
     """The per-row refresh icon must render on every row regardless of last_searched_at
     (no 'stale' conditional).

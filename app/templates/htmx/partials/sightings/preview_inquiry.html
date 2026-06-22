@@ -1,10 +1,13 @@
 {# Email preview partial — shows rendered emails per vendor before sending.
    Called by: preview-inquiry endpoint via HTMX POST from vendor_modal.html
    Depends on: previews context (vendor_name, vendor_email, subject, html_body, parts,
-               skip_reason), unavailable_vendors list.
+               skip_reason, normalized_name), unavailable_vendors list.
    skip_reason values: "ready" | "no_email" | "do_not_contact"
    Badge color: amber = no_email; rose = do_not_contact.
    Unavailable vendors are reported separately in the unavailable_vendors block above.
+   Inline fix-email form: rendered below the subject row when skip_reason == no_email.
+     Calls rfqVendorModal.fixVendorEmail(normalizedName, email) which posts to
+     composer-vendor then calls loadPreview() to refresh this panel.
 #}
 
 <div class="space-y-4">
@@ -54,6 +57,24 @@
         <div class="text-xs text-gray-600 mt-1">
           <span class="font-medium text-gray-600">Subject:</span> {{ p.subject }}
         </div>
+        {# Inline email-fix form — rendered on its own line below the subject when the
+           vendor has no email on file. Posts to composer-vendor via fixVendorEmail()
+           which then calls loadPreview() to refresh this panel without closing the modal. #}
+        {% if p.skip_reason == "no_email" %}
+        <div class='mt-2 flex items-center gap-2' x-data='{"fixEmail": ""}'>
+          <input
+            type="email"
+            x-model='fixEmail'
+            placeholder='Add contact email…'
+            class='flex-1 text-xs border border-amber-300 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-amber-400'
+          />
+          <button
+            type='button'
+            @click='if (fixEmail) { fixVendorEmail({{ p.normalized_name|tojson }}, fixEmail); fixEmail = ""; }'
+            class='text-xs px-2 py-1 rounded bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 whitespace-nowrap'
+          >Add &amp; re-check</button>
+        </div>
+        {% endif %}
       </div>
       {# Body #}
       <div class="px-3 py-2 text-sm text-gray-700 bg-white">

@@ -2133,6 +2133,7 @@ async def sightings_preview_inquiry(
                 "html_body": html_body,
                 "parts": parts_list,
                 "skip_reason": skip_reason,
+                "normalized_name": normalize_vendor_name(vn),
             }
         )
 

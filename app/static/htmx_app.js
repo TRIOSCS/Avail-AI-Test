@@ -2031,6 +2031,43 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
+  // One-click skip remediation from the preview step: attach a contact email to a
+  // previously-skipped (no-email) vendor then re-run preview so the vendor resolves.
+  // POSTs to the existing composer-vendor endpoint (which creates/updates the
+  // VendorContact). On non-ok response, shows a toast and keeps the inline form open
+  // by NOT calling loadPreview(). On success, selectVendor() ensures the vendor is
+  // in selectedVendors, then loadPreview() refreshes the preview panel in-place
+  // (no modal close or wrapper re-init — the preview container is a stable-id swap).
+  async fixVendorEmail(vendorName, email) {
+    if (!email || !vendorName) return;
+    const form = new FormData();
+    form.append('vendor_name', vendorName);
+    form.append('email', email);
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    try {
+      const resp = await fetch('/v2/partials/sightings/composer-vendor', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrfToken() },
+        body: form,
+      });
+      if (!resp.ok) {
+        let reason = '';
+        try { reason = (await resp.json()).error || ''; } catch { /* non-JSON body */ }
+        const msg = resp.status < 500 && reason
+          ? 'Could not add email: ' + reason
+          : 'Could not add email — please try again';
+        this._toast(msg, 'error');
+        return; // keep the form open with the typed value
+      }
+      // Ensure the vendor is in selectedVendors so it is included in the re-preview POST.
+      this.selectVendor(vendorName);
+      await this.loadPreview();
+    } catch (err) {
+      console.error('[rfqVendorModal] fixVendorEmail failed', err);
+      this._toast('Could not add email — please try again', 'error');
+    }
+  },
+
   async confirmSend() {
     if (this.selectedCount === 0 || !this.emailBody || this.sending) return;
     this.sending = true;
