@@ -1,10 +1,20 @@
 """Tests for app/company_utils.py — normalization and dedup detection."""
 
+import os
+
+os.environ["TESTING"] = "1"
+
 from datetime import datetime, timezone
 
 import pytest
 
-from app.company_utils import find_company_dedup_candidates, normalize_company_name
+from app.company_utils import (
+    _auto_keep_rank,
+    _pair_dict,
+    find_company_dedup_candidates,
+    normalize_company_name,
+    suggest_clean_company_name,
+)
 from app.models import Company, CustomerSite
 
 
@@ -124,3 +134,163 @@ class TestFindCompanyDedupCandidates:
         candidates = find_company_dedup_candidates(db_session, threshold=80)
         # Should not match inactive company
         assert len(candidates) == 0
+
+
+class TestSuggestCleanCompanyName:
+    @pytest.mark.parametrize(
+        "raw,expected_contains,expected_not_contains",
+        [
+            ("ACME CORP", "ACME", ["Corp", "corp"]),
+            ("Mouser Electronics, Inc.", "Electronics", ["Inc", "inc"]),
+            ("The Phoenix Company", "Phoenix", ["The ", "Company"]),
+            ("DigiKey Corp.", "DigiKey", ["Corp"]),
+            ("  Foo   Bar  ", "Foo Bar", []),
+            ("Arrow Electronics, LLC", "Arrow Electronics", ["LLC"]),
+        ],
+    )
+    def test_suggest_clean(self, raw, expected_contains, expected_not_contains):
+        result = suggest_clean_company_name(raw)
+        assert expected_contains in result
+        for not_expected in expected_not_contains:
+            assert not_expected not in result
+
+    def test_empty_returns_empty(self):
+        assert suggest_clean_company_name("") == ""
+
+    def test_none_returns_empty(self):
+        assert suggest_clean_company_name(None) == ""
+
+    def test_preserves_case(self):
+        result = suggest_clean_company_name("Arrow Electronics Inc")
+        assert result[0].isupper()
+
+    def test_strips_trailing_comma(self):
+        result = suggest_clean_company_name("Acme Corp,")
+        assert "," not in result
+
+    def test_strips_leading_the(self):
+        result = suggest_clean_company_name("The Phoenix Company")
+        assert not result.startswith("The ")
+
+
+class TestPairDictHelpers:
+    def _company_dict(self, id: int, name: str, sites: int = 0, owner: bool = False, strategic: bool = False):
+        return {
+            "id": id,
+            "name": name,
+            "site_count": sites,
+            "has_owner": owner,
+            "is_strategic": strategic,
+        }
+
+    def test_pair_dict_shape(self):
+        a = self._company_dict(1, "Alpha Corp", sites=3, owner=True)
+        b = self._company_dict(2, "Alpha Corporation", sites=1)
+        result = _pair_dict(a, b, 92)
+        assert result["score"] == 92
+        assert "company_a" in result
+        assert "company_b" in result
+        assert "auto_keep_id" in result
+
+    def test_pair_dict_auto_keep_prefers_more_sites(self):
+        a = self._company_dict(1, "A Corp", sites=5)
+        b = self._company_dict(2, "A Corporation", sites=1)
+        result = _pair_dict(a, b, 90)
+        assert result["auto_keep_id"] == 1
+
+    def test_pair_dict_auto_keep_prefers_owner(self):
+        a = self._company_dict(1, "B Corp", sites=1, owner=True)
+        b = self._company_dict(2, "B Corporation", sites=1, owner=False)
+        result = _pair_dict(a, b, 90)
+        assert result["auto_keep_id"] == 1
+
+    def test_pair_dict_auto_keep_prefers_strategic(self):
+        a = self._company_dict(1, "C Corp", sites=1, owner=False, strategic=True)
+        b = self._company_dict(2, "C Corporation", sites=1, owner=False, strategic=False)
+        result = _pair_dict(a, b, 85)
+        assert result["auto_keep_id"] == 1
+
+    def test_auto_keep_rank_lower_id_tiebreak(self):
+        a = self._company_dict(1, "D Corp", sites=0)
+        b = self._company_dict(2, "D Corporation", sites=0)
+        # Equal sites/owner/strategic → lower id wins
+        rank_a = _auto_keep_rank(a)
+        rank_b = _auto_keep_rank(b)
+        assert rank_a > rank_b
+
+
+class TestFindCompanyDedupCandidatesPGPath:
+    """Test the PostgreSQL code path by mocking the dialect."""
+
+    def _pg_db(self, pair_rows=None):
+        from unittest.mock import MagicMock
+
+        mock_db = MagicMock()
+        mock_db.bind = MagicMock()
+        mock_db.bind.dialect.name = "postgresql"
+        query = mock_db.query.return_value
+        query.filter.return_value = query
+        query.order_by.return_value = query
+        query.limit.return_value = query
+        query.all.return_value = pair_rows if pair_rows is not None else []
+        query.outerjoin.return_value = query
+        query.group_by.return_value = query
+        return mock_db
+
+    def test_pg_path_returns_empty_when_no_pairs(self):
+        from app.company_utils import _find_company_dedup_candidates_pg
+
+        db = self._pg_db(pair_rows=[])
+        result = _find_company_dedup_candidates_pg(db, threshold=85, limit=50)
+        assert result == []
+
+    def test_pg_path_with_pairs_builds_candidates(self):
+        from unittest.mock import MagicMock
+
+        from app.company_utils import _find_company_dedup_candidates_pg
+
+        row = MagicMock()
+        row.a_id = 1
+        row.a_name = "Alpha Corp"
+        row.b_id = 2
+        row.b_name = "Alpha Corporation"
+        row.sim = 0.92
+
+        attr_row_a = MagicMock()
+        attr_row_a.id = 1
+        attr_row_a.account_owner_id = None
+        attr_row_a.is_strategic = False
+        attr_row_a.site_count = 2
+
+        attr_row_b = MagicMock()
+        attr_row_b.id = 2
+        attr_row_b.account_owner_id = 5
+        attr_row_b.is_strategic = False
+        attr_row_b.site_count = 1
+
+        db = MagicMock()
+        db.bind = MagicMock()
+        db.bind.dialect.name = "postgresql"
+
+        call_count = [0]
+
+        def query_side_effect(*args):
+            call_count[0] += 1
+            q = MagicMock()
+            q.filter.return_value = q
+            q.order_by.return_value = q
+            q.limit.return_value = q
+            q.outerjoin.return_value = q
+            q.group_by.return_value = q
+            if call_count[0] == 1:
+                q.all.return_value = [row]
+            else:
+                q.all.return_value = [attr_row_a, attr_row_b]
+            return q
+
+        db.query.side_effect = query_side_effect
+
+        result = _find_company_dedup_candidates_pg(db, threshold=85, limit=50)
+        assert len(result) == 1
+        assert result[0]["score"] == 92
+        assert result[0]["company_a"]["name"] == "Alpha Corp"

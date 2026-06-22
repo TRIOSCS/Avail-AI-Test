@@ -33,7 +33,7 @@ def backfill(db: Session) -> int:
     return len(updated)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     db = SessionLocal()
     try:
         backfill(db)

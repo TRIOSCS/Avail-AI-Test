@@ -67,6 +67,51 @@ async def test_fetch_bytes_ok():
         assert await dl.fetch_datasheet_bytes("DRV", "ITM") == b"%PDF-bytes"
 
 
+async def test_upload_returns_none_when_no_token():
+    resp = MagicMock(status_code=200)
+    resp.json.return_value = {"id": "X", "webUrl": "https://sp/x"}
+    with (
+        patch.object(dl.settings, "datasheet_library_drive_id", "DRV"),
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value=None)),
+    ):
+        out = await dl.upload_datasheet_to_library("x.pdf", b"x", "application/pdf")
+    assert out is None
+
+
+async def test_fetch_bytes_returns_none_when_no_token():
+    with patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value=None)):
+        result = await dl.fetch_datasheet_bytes("DRV", "ITM")
+    assert result is None
+
+
+async def test_fetch_bytes_returns_none_on_exception():
+    with (
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value="T")),
+        patch("app.services.datasheet_library.http_redirect") as httpr,
+    ):
+        httpr.get = AsyncMock(side_effect=RuntimeError("network error"))
+        result = await dl.fetch_datasheet_bytes("DRV", "ITM")
+    assert result is None
+
+
+async def test_fetch_bytes_returns_none_on_non_200():
+    resp = MagicMock(status_code=404, content=b"")
+    with (
+        patch("app.services.datasheet_library.get_app_graph_token", AsyncMock(return_value="T")),
+        patch("app.services.datasheet_library.http_redirect") as httpr,
+    ):
+        httpr.get = AsyncMock(return_value=resp)
+        result = await dl.fetch_datasheet_bytes("DRV", "ITM")
+    assert result is None
+
+
+async def test_fetch_bytes_returns_none_for_empty_ids():
+    result = await dl.fetch_datasheet_bytes("", "ITM")
+    assert result is None
+    result = await dl.fetch_datasheet_bytes("DRV", "")
+    assert result is None
+
+
 def test_sanitize_blocks_traversal_and_specials():
     from app.services.datasheet_library import _sanitize
 

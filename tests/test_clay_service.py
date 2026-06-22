@@ -198,3 +198,147 @@ def test_endpoint_accepts_valid(client):
         )
     assert r.status_code == 200
     assert r.json()["status"] == "applied"
+
+
+# ── Additional branch coverage ────────────────────────────────────────────────
+
+
+class TestRequestEnrichmentEdgeCases:
+    def test_unsupported_entity_type_returns_error(self):
+        with patch.object(clay_service, "enabled_and_configured", return_value=True):
+            with patch.object(clay_service, "circuit_open", return_value=False):
+                out = asyncio.run(clay_service.request_enrichment("x.com", "contact", 1))
+        assert out["status"] == "error"
+        assert "unsupported" in out["reason"]
+
+    def test_network_error_returns_error(self):
+        with (
+            patch.object(clay_service, "enabled_and_configured", return_value=True),
+            patch.object(clay_service, "circuit_open", return_value=False),
+            patch.object(clay_service, "_webhook_url", return_value="https://clay/hook"),
+            patch.object(clay_service, "_secret", return_value=""),
+            patch.object(clay_service, "set_cached"),
+            patch.object(clay_service, "http") as mock_http,
+        ):
+            mock_http.post = AsyncMock(side_effect=Exception("connection refused"))
+            out = asyncio.run(clay_service.request_enrichment("x.com", "company", 1))
+        assert out["status"] == "error"
+        assert "connection refused" in out["reason"]
+
+    def test_non_2xx_response_returns_error(self):
+        with (
+            patch.object(clay_service, "enabled_and_configured", return_value=True),
+            patch.object(clay_service, "circuit_open", return_value=False),
+            patch.object(clay_service, "_webhook_url", return_value="https://clay/hook"),
+            patch.object(clay_service, "_secret", return_value=""),
+            patch.object(clay_service, "set_cached"),
+            patch.object(clay_service, "http") as mock_http,
+        ):
+            mock_http.post = AsyncMock(return_value=_resp(400))
+            out = asyncio.run(clay_service.request_enrichment("x.com", "company", 1))
+        assert out["status"] == "error"
+        assert "400" in out["reason"]
+
+
+class TestVerifySignatureEdgeCases:
+    def test_signature_without_prefix(self):
+        import hashlib
+        import hmac
+
+        body = b'{"x":1}'
+        raw_sig = hmac.new(b"secret", body, hashlib.sha256).hexdigest()
+        with patch.object(clay_service, "_secret", return_value="secret"):
+            assert clay_service.verify_signature(body, raw_sig) is True
+
+    def test_empty_provided_returns_false(self):
+        with patch.object(clay_service, "_secret", return_value="secret"):
+            assert clay_service.verify_signature(b"body", None) is False
+
+
+class TestConfidenceFromMarker:
+    def test_none_returns_70(self):
+        assert clay_service._confidence_from_marker(None) == 70
+
+    def test_int_above_1(self):
+        assert clay_service._confidence_from_marker(90) == 90
+
+    def test_float_below_1(self):
+        assert clay_service._confidence_from_marker(0.8) == 80
+
+    def test_string_high(self):
+        assert clay_service._confidence_from_marker("high") == 90
+
+    def test_string_medium(self):
+        assert clay_service._confidence_from_marker("b") == 70
+
+    def test_string_low(self):
+        assert clay_service._confidence_from_marker("c") == 40
+
+    def test_string_unknown_returns_default(self):
+        assert clay_service._confidence_from_marker("unknown_val") == 70
+
+
+class TestHandleCallbackEdgeCases:
+    def test_company_not_found(self):
+        corr = {"entity_type": "company", "entity_id": 99999, "domain": "missing.com"}
+        db = MagicMock()
+        db.get.return_value = None
+        with (
+            patch.object(clay_service, "get_cached", return_value=corr),
+            patch.object(clay_service, "set_cached"),
+        ):
+            out = clay_service.handle_callback({"correlation_token": "tok"}, db)
+        assert out["status"] == "rejected"
+        assert out["reason"] == "company_not_found"
+
+    def test_commit_failure_returns_error(self, db_session, test_vendor_card):
+        corr = {"entity_type": "vendor_card", "entity_id": test_vendor_card.id, "domain": "co.com"}
+        payload = {"correlation_token": "tok"}
+        with (
+            patch.object(clay_service, "get_cached", return_value=corr),
+            patch.object(clay_service, "set_cached"),
+            patch("app.enrichment_service.apply_enrichment_to_vendor", return_value=[]),
+            patch.object(db_session, "commit", side_effect=Exception("db error")),
+        ):
+            out = clay_service.handle_callback(payload, db_session)
+        assert out["status"] == "error"
+        assert out["reason"] == "commit_failed"
+
+
+class TestAddVendorContactsEdgeCases:
+    def test_skip_non_dict_contacts(self, db_session, test_vendor_card):
+        from app.models import VendorContact
+
+        contacts = ["not-a-dict", 42]
+        count = clay_service._add_vendor_contacts(db_session, VendorContact, test_vendor_card.id, contacts)
+        assert count == 0
+
+    def test_skip_contact_with_no_email_and_no_name(self, db_session, test_vendor_card):
+        from app.models import VendorContact
+
+        contacts = [{"email": "", "full_name": None}]
+        count = clay_service._add_vendor_contacts(db_session, VendorContact, test_vendor_card.id, contacts)
+        assert count == 0
+
+    def test_skip_duplicate_email(self, db_session, test_vendor_card, test_vendor_contact):
+        from app.models import VendorContact
+
+        existing_email = test_vendor_contact.email
+        contacts = [{"email": existing_email, "full_name": "Jane"}]
+        count = clay_service._add_vendor_contacts(db_session, VendorContact, test_vendor_card.id, contacts)
+        assert count == 0
+
+
+class TestAddSiteContactsEdgeCases:
+    def test_skip_contact_with_no_name(self, db_session, test_customer_site):
+        from app.models import SiteContact
+
+        contacts = [{"full_name": None, "name": None, "email": "x@y.com"}]
+        count = clay_service._add_site_contacts(db_session, SiteContact, test_customer_site.id, contacts)
+        assert count == 0
+
+    def test_skip_non_dict(self, db_session, test_customer_site):
+        from app.models import SiteContact
+
+        count = clay_service._add_site_contacts(db_session, SiteContact, test_customer_site.id, ["bad"])
+        assert count == 0

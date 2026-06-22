@@ -163,6 +163,125 @@ class TestHunterEmailFinder:
         assert await HunterConnector("key").email_finder("example.com", "", "Smith") is None
 
 
+class TestHunterVerify:
+    @pytest.mark.asyncio
+    async def test_verify_returns_deliverable(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {"data": {"result": "deliverable", "score": 95}})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("alice@example.com")
+
+        assert result["result"] == "deliverable"
+        assert result["score"] == 95
+
+    @pytest.mark.asyncio
+    async def test_verify_no_key_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        result = await HunterConnector("").verify("alice@example.com")
+        assert result["result"] == "unknown"
+        assert result["score"] == 0
+
+    @pytest.mark.asyncio
+    async def test_verify_no_email_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        result = await HunterConnector("key").verify("")
+        assert result["result"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_verify_network_error_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(side_effect=Exception("network failure"))
+            result = await HunterConnector("key").verify("bob@example.com")
+
+        assert result["result"] == "unknown"
+        assert result["score"] == 0
+
+    @pytest.mark.asyncio
+    async def test_verify_non_200_returns_unknown(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(503, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("bob@example.com")
+
+        assert result["result"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_verify_missing_data_key_returns_defaults(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").verify("bob@example.com")
+
+        assert result["result"] == "unknown"
+        assert result["score"] == 0
+
+
+class TestHunterEmailFinderEdgeCases:
+    @pytest.mark.asyncio
+    async def test_401_raises_auth_error(self):
+        from app.connectors.errors import ConnectorAuthError
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(401, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ConnectorAuthError):
+                await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+    @pytest.mark.asyncio
+    async def test_429_raises_rate_limit(self):
+        from app.connectors.errors import ConnectorRateLimitError
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(429, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            with pytest.raises(ConnectorRateLimitError):
+                await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+    @pytest.mark.asyncio
+    async def test_non_200_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(500, {})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_network_error_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(side_effect=Exception("timeout"))
+            result = await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_empty_email_in_response_returns_none(self):
+        from app.connectors.hunter import HunterConnector
+
+        mock_resp = _mock_response(200, {"data": {"email": "", "score": 0}})
+        with patch("app.connectors.hunter.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=mock_resp)
+            result = await HunterConnector("key").email_finder("example.com", "Alice", "Smith")
+
+        assert result is None
+
+
 class TestHunterWaterfallIntegration:
     @pytest.mark.asyncio
     async def test_hunter_contacts_included_in_waterfall(self):
