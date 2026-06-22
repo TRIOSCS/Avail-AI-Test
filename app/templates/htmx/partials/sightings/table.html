@@ -13,7 +13,7 @@
 {% set dc = dashboard_counters|default({}) %}
 <div class="px-3 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
   {# Urgent counter #}
-  <button hx-get="/v2/partials/sightings?priority_min=70&q={{ q }}"
+  <button hx-get="/v2/partials/sightings?priority_min=70&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
                  {{ 'bg-rose-100 text-rose-700' if dc.get('urgent', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
@@ -22,7 +22,7 @@
   </button>
 
   {# Stale counter #}
-  <button hx-get="/v2/partials/sightings?stale=1&q={{ q }}"
+  <button hx-get="/v2/partials/sightings?stale=1&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
                  {{ 'bg-amber-100 text-amber-700' if dc.get('stale', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
@@ -31,7 +31,7 @@
   </button>
 
   {# Pending counter #}
-  <button hx-get="/v2/partials/sightings?status=offered&q={{ q }}"
+  <button hx-get="/v2/partials/sightings?status=offered&q={{ q }}&manufacturer={{ manufacturer|default('') }}"
           hx-target="#sightings-table" hx-swap="innerHTML"
           class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
                  {{ 'bg-blue-100 text-blue-700' if dc.get('pending', 0) > 0 else 'bg-gray-100 text-gray-500' }}">
@@ -49,7 +49,7 @@
       ('quoted', 'Quoted', stat_counts.get('quoted', 0) + stat_counts.get('won', 0)),
     ] %}
     {% for val, label, count in pills %}
-    <button hx-get="/v2/partials/sightings?status={{ val }}&q={{ q }}&group_by={{ group_by }}"
+    <button hx-get="/v2/partials/sightings?status={{ val }}&q={{ q }}&group_by={{ group_by }}&manufacturer={{ manufacturer|default('') }}"
             hx-target="#sightings-table" hx-swap="innerHTML"
             class="px-2 py-0.5 rounded text-[10px] font-medium transition-colors
                    {{ 'bg-brand-100 text-brand-700' if status == val else 'text-gray-400 hover:text-gray-600' }}">

@@ -756,21 +756,38 @@ class TestManufacturerBasket:
         assert "IBM-002" in html
 
     def test_manufacturer_survives_status_change(self, client, db_session):
-        """Manufacturer param is preserved when status changes (carried in hx-vals)."""
+        """Manufacturer param is carried in pill hx-get URLs, not just the filter
+        input."""
         _, _, r1_ibm, _, _ = self._seed_multi_req_ibm(db_session)
         # When manufacturer filter is active, status pills should carry it
         resp = client.get("/v2/partials/sightings?manufacturer=IBM&status=open")
         assert resp.status_code == 200
-        # manufacturer is echoed in the filter bar input value
-        assert "IBM" in resp.text
+        html = resp.text
+        # The filter bar input carries value="IBM" — that's necessary but NOT sufficient.
+        # We must verify the pill hx-get URLs also encode manufacturer=IBM so that
+        # clicking a pill does not silently drop the filter.
+        import re
+
+        pill_urls = re.findall(r'hx-get="(/v2/partials/sightings\?[^"]+)"', html)
+        # At least some pill buttons must exist
+        assert pill_urls, "No hx-get pill buttons found in response"
+        # Every status/dashboard pill URL must carry manufacturer=IBM
+        for url in pill_urls:
+            assert "manufacturer=IBM" in url, f"manufacturer=IBM missing from pill hx-get URL: {url}"
 
     def test_manufacturer_survives_group_by_change(self, client, db_session):
-        """Manufacturer param is preserved when group_by changes (carried in hx-
-        vals)."""
+        """Manufacturer param is carried in group_by select hx-vals and filter bar."""
         self._seed_multi_req_ibm(db_session)
         resp = client.get("/v2/partials/sightings?manufacturer=IBM&group_by=manufacturer")
         assert resp.status_code == 200
-        assert "IBM" in resp.text
+        html = resp.text
+        # manufacturer=IBM must appear in the pill hx-get URLs on this render too
+        import re
+
+        pill_urls = re.findall(r'hx-get="(/v2/partials/sightings\?[^"]+)"', html)
+        assert pill_urls, "No hx-get pill buttons found in response"
+        for url in pill_urls:
+            assert "manufacturer=IBM" in url, f"manufacturer=IBM missing from pill hx-get URL: {url}"
 
     def test_manufacturer_filter_bar_input_present(self, client, db_session):
         """The filter bar contains a manufacturer text input."""
