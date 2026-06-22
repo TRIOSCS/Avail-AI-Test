@@ -35,7 +35,7 @@
 {# ── Neutral empty state (no errors, zero results) ─────────────────────── #}
 {% elif not suggested %}
 <div class='rounded-md bg-gray-50 border border-gray-200 px-4 py-3 text-center'>
-  <p class='text-sm text-gray-500'>No contacts found for this domain.</p>
+  <p class='text-sm text-gray-600'>No contacts found for this domain.</p>
 </div>
 
 {# ── Contact list with per-row Add forms ────────────────────────────────── #}
@@ -48,13 +48,13 @@
       <div class='min-w-0'>
         <p class='text-sm font-medium text-gray-900 truncate'>{{ c.full_name | e }}</p>
         {% if c.title %}
-        <p class='text-xs text-gray-500 truncate'>{{ c.title | e }}</p>
+        <p class='text-xs text-gray-600 truncate'>{{ c.title | e }}</p>
         {% endif %}
         {% if c.email %}
         <p class='text-xs text-brand-600 truncate'>{{ c.email | e }}</p>
         {% endif %}
         {% if c.source %}
-        <span class='inline-block mt-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-400'>
+        <span class='inline-block mt-0.5 text-[11px] font-medium uppercase tracking-wide text-gray-400'>
           via {{ c.source | e }}{% if c.verified %} ✓{% endif %}
         </span>
         {% endif %}

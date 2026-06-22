@@ -679,13 +679,13 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
         unique.append(c)
 
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
-    filtered = [
-        c
-        for c in unique
-        if not (t := (c.get("title") or "").lower())
-        or any(kw in t for kw in _RELEVANT_CONTACT_KEYWORDS)
-        or bool(c.get("email"))
-    ]
+    def _is_relevant(contact: dict) -> bool:
+        title = (contact.get("title") or "").lower()
+        if not title:
+            return bool(contact.get("email"))  # no title → keep only if has email
+        return any(kw in title for kw in _RELEVANT_CONTACT_KEYWORDS)
+
+    filtered = [c for c in unique if _is_relevant(c)]
     # If filter removed everything, return unfiltered (don't lose all results)
     return filtered if filtered else unique
 
@@ -756,13 +756,13 @@ async def find_suggested_contacts_with_errors(
         unique.append(c)
 
     # Filter to relevant B2B titles
-    filtered = [
-        c
-        for c in unique
-        if not (t := (c.get("title") or "").lower())
-        or any(kw in t for kw in _RELEVANT_CONTACT_KEYWORDS)
-        or bool(c.get("email"))
-    ]
+    def _is_relevant(contact: dict) -> bool:
+        title = (contact.get("title") or "").lower()
+        if not title:
+            return bool(contact.get("email"))  # no title → keep only if has email
+        return any(kw in title for kw in _RELEVANT_CONTACT_KEYWORDS)
+
+    filtered = [c for c in unique if _is_relevant(c)]
     contacts = filtered if filtered else unique
     return contacts, errored
 
