@@ -309,6 +309,7 @@ async def quotes_list_redirect():
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
+@router.get("/v2/my-day", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -330,6 +331,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "materials",
         "follow-ups",
         "trouble-tickets",
+        "my-day",
         "crm",
         "vendors",
         "customers",
@@ -351,6 +353,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/sightings/workspace"
     elif current_view == "resell":
         partial_url = "/v2/partials/resell/workspace"
+    elif current_view == "my-day":
+        partial_url = "/v2/partials/my-day"
     elif current_view == "search":
         # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
@@ -14269,12 +14273,15 @@ async def create_contact_task_endpoint(
 async def complete_task_endpoint(
     request: Request,
     task_id: int,
+    from_my_day: bool = False,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Mark a CRM task done. No activity log is created.
 
-    Returns the refreshed parent task list (account or contact).
+    Returns the refreshed parent task list (account or contact). When from_my_day=true,
+    returns an empty fragment so the row removes itself via outerHTML swap on the My Day
+    worklist.
     """
     from app.services.task_service import (
         complete_crm_task,
@@ -14286,6 +14293,9 @@ async def complete_task_endpoint(
     if not task:
         raise HTTPException(404, "Task not found")
     complete_crm_task(db, task_id, user.id)
+    # My Day context: caller handles its own row removal via outerHTML swap.
+    if from_my_day:
+        return HTMLResponse("")
     # Re-render the appropriate parent container
     if task.company_id:
         tasks = get_open_tasks_for_company(db, task.company_id)
@@ -14304,3 +14314,67 @@ async def complete_task_endpoint(
         return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
     # Fallback: requisition task — just return empty fragment
     return HTMLResponse("")
+
+
+# ── My Day ──────────────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/my-day", response_class=HTMLResponse)
+async def my_day_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """My Day worklist — overdue/due accounts I own + my open tasks.
+
+    Overdue/due accounts: reuses cdm_company_query with staleness="needs_call"
+    and my_only=True, ordered stalest-first via the outbound clock.
+    Tasks: task_service.get_my_tasks filtered to open, due/overdue first.
+
+    Called by: /v2/my-day full-page shell and nav hx-get.
+    Depends on: crm_service.cdm_company_query, crm_service.cadence_state,
+                task_service.get_my_tasks.
+    """
+    from ..services.crm_service import (
+        cadence_state as _cadence_state,
+    )
+    from ..services.crm_service import (
+        cdm_company_query as _cdm_company_query,
+    )
+    from ..services.task_service import get_my_tasks as _get_my_tasks
+
+    now = datetime.now(timezone.utc)
+
+    # 1. Overdue / due follow-up accounts I own — reuse the shared _needs_call_filter
+    #    (staleness="needs_call") so the count and this list always agree with the CRM chip.
+    _accounts_q = _cdm_company_query(
+        db,
+        user,
+        search="",
+        staleness="needs_call",
+        account_type="",
+        my_only=True,
+        sort="outbound_asc",
+        now=now,
+    )
+    accounts = _accounts_q.limit(50).all()
+
+    # Annotate each account with its cadence_state (reused — not recomputed inline).
+    account_rows = []
+    for co in accounts:
+        state = _cadence_state(co.tier, co.last_outbound_at, now)
+        out_days = (now - co.last_outbound_at).days if co.last_outbound_at else None
+        account_rows.append({"company": co, "cadence_state": state, "out_days": out_days})
+
+    # 2. My open tasks — due/overdue first (get_my_tasks already excludes done).
+    all_tasks = _get_my_tasks(db, user.id)
+    # Surface due/overdue first (past due_at), then tasks with no due_at last.
+    due_tasks = [t for t in all_tasks if t.due_at is not None and t.due_at <= now]
+    no_due_tasks = [t for t in all_tasks if t.due_at is None or t.due_at > now]
+    tasks = due_tasks + no_due_tasks
+
+    ctx = _base_ctx(request, user, "my-day")
+    ctx["account_rows"] = account_rows
+    ctx["tasks"] = tasks
+    ctx["now_utc"] = now
+    return template_response("htmx/partials/my_day.html", ctx)
