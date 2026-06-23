@@ -43,12 +43,14 @@ from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 
 # Excess Inventory / Resell (resell-brokerage) offers
 from .excess import (  # noqa: F401
+    BuyerScore,
     CustomerBid,
     CustomerBidLine,
     ExcessLineItem,
     ExcessList,
     ExcessOffer,
     ExcessOfferLine,
+    ExcessOutreach,
 )
 
 # Faceted Search

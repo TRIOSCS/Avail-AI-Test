@@ -217,6 +217,39 @@ class CustomerBidStatus(StrEnum):
     REJECTED = "rejected"
 
 
+class ExcessOutreachChannel(StrEnum):
+    """Channel a resell outreach went out on (ExcessOutreach.channel).
+
+    The trader→buyer half of Resell: the medium used to offer excess to a buyer.
+    Distinct from the CDM click-to-contact ``OutreachChannel`` (which carries WECHAT
+    and drives the activity-panel buttons) — this set adds MARKETPLACE/OTHER for the
+    broker-marketplace and manual-log paths and is what ``ExcessOutreach.channel``
+    validates against.
+    """
+
+    EMAIL = "email"
+    PHONE = "phone"
+    TEAMS = "teams"
+    MARKETPLACE = "marketplace"
+    OTHER = "other"
+
+
+class ExcessOutreachStatus(StrEnum):
+    """Response lifecycle for a resell outreach (ExcessOutreach.status).
+
+    sent -> opened -> responded -> bid (the buyer submitted an ExcessOffer) or
+    declined; ``no_response`` is the terminal silence state used by the don't-forget
+    nudge. Advanced by the reply adapter (see resell_outreach_service in Chunk B).
+    """
+
+    SENT = "sent"
+    OPENED = "opened"
+    RESPONDED = "responded"
+    BID = "bid"
+    DECLINED = "declined"
+    NO_RESPONSE = "no_response"
+
+
 class QuoteStatus(StrEnum):
     """Status lifecycle for Quote records."""
 

@@ -68,6 +68,17 @@
           Post
         </button>
         {% endif %}
+        {# Offer to buyers — the trader→buyer action (owner-only, posted lists). Opens
+           the buyer panel; submitting refreshes the Outreach tracker. #}
+        {% if can_see_customer and is_posted %}
+        <button @click="$dispatch('open-modal')"
+                hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
+                hx-target="#modal-content"
+                class="btn-secondary btn-sm">
+          <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Offer to buyers
+        </button>
+        {% endif %}
         {% if can_see_customer and el.status in ['open', 'collecting'] %}
         <button hx-post="/api/resell/{{ el.id }}/close"
                 hx-target="#split-right-resell"
@@ -92,8 +103,12 @@
   </div>
 
   {# ── Tab bar ──────────────────────────────────────────────────── #}
+  {# Outreach (the trader→buyer board) is OWNER-only — non-owners never see who the
+     list has been offered to. #}
   <div class="px-5 border-b border-brand-200 bg-white flex-shrink-0 flex gap-4">
-    {% set tabs = [('lines', 'Lines'), ('offers', 'Offers'), ('build', 'Build Bid'), ('activity', 'Activity')] %}
+    {% set tabs = [('lines', 'Lines'), ('offers', 'Offers'), ('build', 'Build Bid')] %}
+    {% if can_see_customer %}{% set tabs = tabs + [('outreach', 'Outreach')] %}{% endif %}
+    {% set tabs = tabs + [('activity', 'Activity')] %}
     {% for key, label in tabs %}
     <button @click="tab = '{{ key }}'"
             :class="tab === '{{ key }}' ? 'border-brand-500 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'"
@@ -143,6 +158,27 @@
       </div>
       {% endif %}
     </div>
+
+    {# Outreach — owner-only trader→buyer board, lazy-loaded. The "usually offered, not
+       yet" nudge strip sits ABOVE the tracker (the existing nudge surface — NOT a new
+       My-Day) and lazy-loads on its own so an empty strip costs nothing.
+       LANDMINE: every lazy loader carries an explicit hx-target. #}
+    {% if can_see_customer %}
+    <div x-show="tab === 'outreach'" x-cloak class="space-y-4">
+      <div id="tab-not-yet-{{ el.id }}"
+           hx-get="/v2/partials/resell/{{ el.id }}/not-yet-strip"
+           hx-trigger="intersect once"
+           hx-target="#tab-not-yet-{{ el.id }}"
+           hx-swap="innerHTML"></div>
+      <div id="tab-outreach-{{ el.id }}"
+           hx-get="/v2/partials/resell/{{ el.id }}/outreach"
+           hx-trigger="intersect once"
+           hx-target="#tab-outreach-{{ el.id }}"
+           hx-swap="innerHTML">
+        <div class="p-6 text-center text-gray-400 text-sm">Loading outreach…</div>
+      </div>
+    </div>
+    {% endif %}
 
     {# Activity — lightweight placeholder this slice. #}
     <div x-show="tab === 'activity'" x-cloak>

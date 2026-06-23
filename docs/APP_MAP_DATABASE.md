@@ -633,6 +633,20 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 - selected_offer_id -> excess_offers / selected_offer_line_id -> excess_offer_lines (SET NULL)
   — INTERNAL provenance only; NEVER exported to the customer doc
 
+**`excess_outreach`** — Outbound record: who the trader OFFERED a list to + the response (Resell Outreach; migration 133)
+- excess_list_id -> excess_lists (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL — per buyer×line)
+- target_vendor_card_id -> vendor_cards (SET NULL, the canonical buyer), submitted_by -> users
+- channel: email | phone | teams | marketplace | other (ExcessOutreachChannel)
+- status: sent -> opened -> responded -> bid | declined | no_response (ExcessOutreachStatus)
+- graph_message_id / graph_conversation_id (email only), parts_included (JSON), sent_at
+- No DB (buyer×line) uniqueness — re-offers are legitimate; overlap is advisory (buyer_affinity_service.overlap_warning)
+
+**`buyer_scores`** — Per-buyer "good bidder" rollup (migration 133; inverts the vendor scorecard)
+- vendor_card_id -> vendor_cards (UNIQUE index)
+- offers_received, wins, avg_bid_pct_of_ask, response_rate, median_response_hours, last_offered_at
+- commodity_affinity (JSON, per-commodity counts) — fed from excess_offers + excess_outreach; recompute on offer-win + nightly
+- `activity_log` gains a nullable `excess_list_id` scope (migration 133) so outreach events join the unified timeline + cadence clocks
+
 > **Dropped in migration 128 (cutover):** `bids` (vendor bids on excess items) and
 > `bid_solicitations` (outbound bid-request emails). The Resell module's
 > `excess_offers`/`excess_offer_lines` + `customer_bids`/`customer_bid_lines` replace them;
