@@ -70,7 +70,7 @@
     <div class="mt-2">
       <span class="text-xs text-gray-400">Attachments:</span>
       {% for att in offer.attachments %}
-      <a href="{{ att.onedrive_url or '#' }}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand-500 hover:text-brand-400 ml-1">{{ att.file_name }}</a>
+      <a href="{{ att.library_web_url or '#' }}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand-500 hover:text-brand-400 ml-1">{{ att.file_name }}</a>
       {% endfor %}
     </div>
     {% endif %}

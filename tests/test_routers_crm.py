@@ -1965,7 +1965,7 @@ class TestOneDrive:
         assert resp.status_code == 200
         data = resp.json()
         assert data["file_name"] == "test.pdf"
-        assert data["onedrive_url"] == "https://onedrive.com/file"
+        assert data["web_url"] == "https://onedrive.com/file"
 
     @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
     @patch("app.http_client.http.put", new_callable=AsyncMock)
@@ -2044,8 +2044,8 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="old.pdf",
-            onedrive_item_id="drive-item-999",
-            onedrive_url="https://onedrive.com/old",
+            library_item_id="drive-item-999",
+            library_web_url="https://onedrive.com/old",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2062,7 +2062,7 @@ class TestOneDrive:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="local.pdf",
-            onedrive_item_id=None,
+            library_item_id=None,
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)
@@ -2280,7 +2280,7 @@ class TestOneDriveDeleteError:
         att = OfferAttachment(
             offer_id=test_offer.id,
             file_name="fail-delete.pdf",
-            onedrive_item_id="drive-item-fail",
+            library_item_id="drive-item-fail",
             uploaded_by_id=test_user.id,
         )
         db_session.add(att)

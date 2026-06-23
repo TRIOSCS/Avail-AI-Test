@@ -1,4 +1,3 @@
-import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -6,7 +5,12 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import ActivityType, OfferStatus, RequisitionStatus, UserRole
+from ...constants import (
+    ActivityType,
+    OfferStatus,
+    RequisitionStatus,
+    UserRole,
+)
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -24,6 +28,7 @@ from ...models import (
 )
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
+from ...services import attachment_service
 from ...services.activity_service import log_activity
 from ...services.credential_service import get_credential_cached
 from ...services.status_machine import require_valid_transition
@@ -34,20 +39,6 @@ from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
 router = APIRouter()
-
-ALLOWED_OFFER_EXTENSIONS = {
-    ".pdf",
-    ".xlsx",
-    ".xls",
-    ".csv",
-    ".doc",
-    ".docx",
-    ".png",
-    ".jpg",
-    ".jpeg",
-    ".txt",
-    ".zip",
-}
 
 
 def _upsert_inapp_notice(
@@ -191,7 +182,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             {
                 "id": a.id,
                 "file_name": a.file_name,
-                "onedrive_url": a.onedrive_url,
+                "library_web_url": a.library_web_url,
                 "thumbnail_url": a.thumbnail_url,
                 "content_type": a.content_type,
             }
@@ -780,59 +771,20 @@ async def upload_offer_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Upload a file to OneDrive and attach it to an offer."""
+    """Upload a file to OneDrive/SharePoint and attach it to an offer."""
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
-    content = await file.read()
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(400, "File too large (max 10 MB)")
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_OFFER_EXTENSIONS:
-        raise HTTPException(
-            400,
-            f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_OFFER_EXTENSIONS))}",
-        )
-    # Upload to OneDrive: AvailAI/Offers/{req_id}/{filename}
-    from ...scheduler import get_valid_token
-
-    token = await get_valid_token(user, db)
-    if not token:
-        raise HTTPException(401, "Microsoft account not connected — please re-login")
-    safe_name = (file.filename or "unnamed_file").replace("/", "_").replace("\\", "_")
-    drive_path = f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
-    from ...http_client import http
-
-    resp = await http.put(
-        f"https://graph.microsoft.com/v1.0{drive_path}",
-        content=content,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": file.content_type or "application/octet-stream",
-        },
-        timeout=30,
+    att = await attachment_service.store_and_attach(
+        db,
+        model=OfferAttachment,
+        fk_field="offer_id",
+        entity_label="Offers",
+        entity_id=offer_id,
+        file=file,
+        user=user,
     )
-    if resp.status_code not in (200, 201):
-        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
-        raise HTTPException(502, "Failed to upload to OneDrive")
-    result = resp.json()
-    att = OfferAttachment(
-        offer_id=offer_id,
-        file_name=safe_name,
-        onedrive_item_id=result.get("id"),
-        onedrive_url=result.get("webUrl"),
-        content_type=file.content_type,
-        size_bytes=len(content),
-        uploaded_by_id=user.id,
-    )
-    db.add(att)
-    db.commit()
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
+    return attachment_service.serialize(att)
 
 
 @router.post("/api/offers/{offer_id}/attachments/onedrive")
@@ -859,20 +811,16 @@ async def attach_from_onedrive(
     att = OfferAttachment(
         offer_id=offer_id,
         file_name=item.get("name", "file"),
-        onedrive_item_id=item_id,
-        onedrive_url=item.get("webUrl"),
+        library_item_id=item_id,
+        library_web_url=item.get("webUrl"),
         content_type=item.get("file", {}).get("mimeType"),
         size_bytes=item.get("size"),
         uploaded_by_id=user.id,
     )
     db.add(att)
     db.commit()
-    return {
-        "id": att.id,
-        "file_name": att.file_name,
-        "onedrive_url": att.onedrive_url,
-        "content_type": att.content_type,
-    }
+    db.refresh(att)
+    return attachment_service.serialize(att)
 
 
 @router.delete("/api/offer-attachments/{att_id}")
@@ -881,24 +829,11 @@ async def delete_offer_attachment(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """Delete an offer attachment (and remove from cloud storage)."""
     att = db.get(OfferAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
-    # Delete from OneDrive if we have the item ID
-    if att.onedrive_item_id and user.access_token:
-        try:
-            from ...http_client import http
-
-            await http.delete(
-                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                headers={"Authorization": f"Bearer {user.access_token}"},
-                timeout=15,
-            )
-        except (ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
-    db.delete(att)
-    db.commit()
-    return {"ok": True}
+    return await attachment_service.remove_attachment(db, att, user)
 
 
 @router.get("/api/onedrive/browse")

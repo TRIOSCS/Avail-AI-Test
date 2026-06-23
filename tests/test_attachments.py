@@ -78,7 +78,7 @@ def test_list_requisition_attachments_with_data(att_client, db_session, test_req
     att = RequisitionAttachment(
         requisition_id=test_requisition.id,
         file_name="datasheet.pdf",
-        onedrive_url="https://onedrive.example.com/file",
+        library_web_url="https://onedrive.example.com/file",
         content_type="application/pdf",
         size_bytes=1024,
         uploaded_by_id=test_user.id,
@@ -116,7 +116,7 @@ def test_upload_requisition_attachment(mock_http, _mock_token, att_client, test_
     assert resp.status_code == 200
     data = resp.json()
     assert data["file_name"] == "test.pdf"
-    assert data["onedrive_url"] == "https://onedrive.example.com/file"
+    assert data["web_url"] == "https://onedrive.example.com/file"
 
 
 def test_upload_requisition_attachment_not_found(att_client):
@@ -199,7 +199,7 @@ def test_list_requirement_attachments_with_data(att_client, db_session, test_req
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="spec.pdf",
-        onedrive_url="https://onedrive.example.com/spec",
+        library_web_url="https://onedrive.example.com/spec",
         content_type="application/pdf",
         size_bytes=2048,
         uploaded_by_id=test_user.id,
@@ -319,7 +319,7 @@ def test_attach_from_onedrive_success(mock_gc_cls, mock_token, att_client, test_
     assert resp.status_code == 200
     data = resp.json()
     assert data["file_name"] == "spec.pdf"
-    assert data["onedrive_url"] == "https://onedrive.example.com/spec"
+    assert data["web_url"] == "https://onedrive.example.com/spec"
 
 
 @patch("app.utils.graph_client.GraphClient")
@@ -378,7 +378,7 @@ def test_delete_requisition_with_onedrive(mock_http, mock_token, att_client, db_
     att = RequisitionAttachment(
         requisition_id=test_requisition.id,
         file_name="onedrive-file.pdf",
-        onedrive_item_id="od-item-to-delete",
+        library_item_id="od-item-to-delete",
         uploaded_by_id=test_user.id,
     )
     db_session.add(att)
@@ -402,7 +402,7 @@ def test_delete_requisition_onedrive_failure(
     att = RequisitionAttachment(
         requisition_id=test_requisition.id,
         file_name="fail-delete.pdf",
-        onedrive_item_id="od-fail-item",
+        library_item_id="od-fail-item",
         uploaded_by_id=test_user.id,
     )
     db_session.add(att)
@@ -472,7 +472,7 @@ def test_delete_requirement_with_onedrive(mock_http, mock_token, att_client, db_
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="onedrive-req-file.pdf",
-        onedrive_item_id="od-req-item-to-delete",
+        library_item_id="od-req-item-to-delete",
         uploaded_by_id=test_user.id,
     )
     db_session.add(att)
@@ -497,7 +497,7 @@ def test_delete_requirement_onedrive_failure(
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="fail-req-delete.pdf",
-        onedrive_item_id="od-req-fail-item",
+        library_item_id="od-req-fail-item",
         uploaded_by_id=test_user.id,
     )
     db_session.add(att)
