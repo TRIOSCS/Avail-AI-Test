@@ -1,0 +1,550 @@
+"""buyer_affinity_service.py — who-to-offer ranking, the buyer scorecard, team overlap,
+and the don't-forget nudge.
+
+The intelligence layer of Resell Outreach: the inverse of sourcing's vendor coverage
+ranking. Where sourcing asks "which VENDORS stock the parts I need to buy?", resell
+asks "which BUYERS should I offer this excess TO?". Everything here is BUYER-side and
+keyed on the canonical buyer ``vendor_card_id`` (the same "who" Chunk B's
+``counterparty_card`` resolves to). It never touches the ``customer_excess`` supply
+Sighting mirror — that mirror is the SELL-side surface; this is the OFFER-OUT side.
+
+Four entry points:
+  - ``rank_buyers_for``        — tiered who-to-offer suggestions: buyers who bought
+    THIS exact material_card (won ExcessOffer history) → buyers active in the
+    list's commodity (VendorCard.commodity_tags + their bought-commodity affinity) →
+    an engagement tiebreak. Mirrors the SHAPE of sightings'
+    ``_coverage_ranked_vendor_rows`` rank tuple, inverted to buyers. Unreachable /
+    DNC / blacklisted buyers are filtered the SAME way the RFQ suggestion does
+    (reusing the sightings reachability + DNC gates), so a suggested buyer is always
+    actually offerable.
+  - ``recompute_buyer_score``  — the per-buyer BuyerScore rollup (offers_received,
+    wins, avg_bid_pct_of_ask, response_rate, median_response_hours, last_offered_at,
+    commodity_affinity), upserted 1:1 on vendor_card_id. Fed from ExcessOffer +
+    ExcessOutreach. Recomputed via ``recompute_buyer_score_on_win`` (the offer-win
+    hook) and nightly-batch friendly (``recompute_all_buyer_scores``).
+  - ``overlap_warning``        — ADVISORY only (never blocks): has a TEAMMATE
+    (``submitted_by != owner``) already offered this buyer overlapping lines on this
+    list recently? Returns who / when / which lines, or None.
+  - ``not_yet_offered_strip``  — the don't-forget nudge: buyers historically active in
+    this list's commodities but with NO ExcessOutreach row on THIS list yet.
+
+ADDITIVE: reuses the sightings reachability + DNC gates and the BuyerScore rollup; it
+adds no schema and changes no existing signatures.
+
+Called by: routers/resell.py (Chunk D wiring), the nightly scorecard batch
+Depends on: models (ExcessOffer/Line, ExcessOutreach, ExcessList/LineItem, BuyerScore,
+            VendorCard, MaterialCard, User), routers.sightings reachability/DNC gates
+"""
+
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from typing import NamedTuple
+
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from ..constants import ExcessOfferStatus, ExcessOutreachStatus
+from ..models import User, VendorCard
+from ..models.excess import (
+    BuyerScore,
+    ExcessLineItem,
+    ExcessOffer,
+    ExcessOfferLine,
+    ExcessOutreach,
+)
+from ..models.intelligence import MaterialCard
+
+# Tier ranks (lower = stronger signal), mirroring the coverage-then-engagement bucket
+# ordering in _coverage_ranked_vendor_rows but keyed on the BUYER's affinity signal.
+_TIER_BOUGHT_PART = 0
+_TIER_COMMODITY = 1
+_TIER_ENGAGEMENT = 2
+_TIER_REASON = {
+    _TIER_BOUGHT_PART: "bought_this_part",
+    _TIER_COMMODITY: "buys_this_commodity",
+    _TIER_ENGAGEMENT: "engagement",
+}
+
+_DEFAULT_LIMIT = 20
+_DEFAULT_OVERLAP_DAYS = 14
+# Outreach statuses that count as "responded" (the buyer engaged at all) for the
+# scorecard response_rate — every terminal-or-engaged state past a bare send.
+_RESPONDED_STATUSES = {
+    ExcessOutreachStatus.RESPONDED,
+    ExcessOutreachStatus.BID,
+    ExcessOutreachStatus.DECLINED,
+    ExcessOutreachStatus.OPENED,
+}
+
+
+class RankedBuyer(NamedTuple):
+    """One who-to-offer-ranked buyer row — the buyer-side analogue of ``RankedVendor``.
+
+    Fields:
+    - ``vendor_card_id`` / ``display_name``: the canonical buyer "who".
+    - ``last_bid``: the buyer's most recent ExcessOfferLine unit_price (Decimal | None).
+    - ``win_rate``: wins ÷ offers_received from the buyer's BuyerScore (0-1 | None when
+      no score row / no offers yet).
+    - ``last_offered_at``: when we last offered this buyer anything (from BuyerScore).
+    - ``rank_reason``: which tier placed the buyer — "bought_this_part" |
+      "buys_this_commodity" | "engagement".
+    - ``has_contact``: True iff the RFQ send path would resolve a non-DNC email for the
+      buyer (mirrors the sightings reachability gate). Unreachable buyers are dropped
+      before ranking, so this is always True on a returned row — kept for parity with
+      RankedVendor and for the template badge.
+    - ``engagement_score``: the buyer card's engagement score (the tiebreak), or None.
+    """
+
+    vendor_card_id: int
+    display_name: str
+    last_bid: Decimal | None
+    win_rate: float | None
+    last_offered_at: datetime | None
+    rank_reason: str
+    has_contact: bool = True
+    engagement_score: float | None = None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TARGET / GATE HELPERS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _target_lines(
+    db: Session,
+    *,
+    excess_list_id: int | None,
+    line_item_ids: list[int] | None,
+) -> list[ExcessLineItem]:
+    """The ExcessLineItems the ranking is scoped to.
+
+    ``line_item_ids`` (explicit lines) wins; else every line on ``excess_list_id``.
+    Raises ValueError when neither is supplied — callers must name a target (mirrors
+    Chunk B's "callers must name a buyer" discipline).
+    """
+    if line_item_ids:
+        return db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(line_item_ids)).all()
+    if excess_list_id is not None:
+        return db.query(ExcessLineItem).filter_by(excess_list_id=excess_list_id).all()
+    raise ValueError("rank_buyers_for requires excess_list_id or line_item_ids")
+
+
+def _target_commodities(db: Session, lines: list[ExcessLineItem]) -> set[str]:
+    """The canonical commodity keys (MaterialCard.category) of the target lines."""
+    card_ids = {li.material_card_id for li in lines if li.material_card_id is not None}
+    if not card_ids:
+        return set()
+    rows = db.query(MaterialCard.category).filter(MaterialCard.id.in_(card_ids)).all()
+    return {c for (c,) in rows if c}
+
+
+def _reachable_card_ids(db: Session, card_ids: list[int]) -> set[int]:
+    """Buyer card ids the RFQ send path could actually reach — reachable AND not DNC.
+
+    Reuses the sightings gates verbatim (the SAME "can we reach this card" logic the RFQ
+    suggestion applies) so a suggested buyer is always offerable: a card is kept iff it
+    has a resolvable VendorContact email AND none of its emails is flagged
+    do_not_contact. Imported lazily from the router (the established service→router
+    reuse pattern, e.g. activity_service / rfq_attachments) to avoid reinventing it.
+    """
+    if not card_ids:
+        return set()
+    from ..routers.sightings import _cards_with_resolvable_email, _dnc_emails_for_cards
+
+    reachable = _cards_with_resolvable_email(db, card_ids)
+    if not reachable:
+        return set()
+    dnc_emails = _dnc_emails_for_cards(db, list(reachable))
+    if not dnc_emails:
+        return reachable
+    # Drop a card all of whose resolvable emails are DNC-flagged.
+    from ..models.vendors import VendorContact
+
+    rows = (
+        db.query(VendorContact.vendor_card_id, VendorContact.email)
+        .filter(
+            VendorContact.vendor_card_id.in_(list(reachable)),
+            VendorContact.email.isnot(None),
+            VendorContact.email != "",
+        )
+        .all()
+    )
+    non_dnc: set[int] = set()
+    for cid, email in rows:
+        if email and email.lower() not in dnc_emails:
+            non_dnc.add(cid)
+    return non_dnc
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  RANK BUYERS
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def rank_buyers_for(
+    db: Session,
+    *,
+    excess_list_id: int | None = None,
+    line_item_ids: list[int] | None = None,
+    limit: int = _DEFAULT_LIMIT,
+) -> list[RankedBuyer]:
+    """Tiered who-to-offer ranking for an excess list (or a line subset).
+
+    Tiers (strongest first), the buyer-side inversion of vendor coverage ranking:
+      1. ``bought_this_part`` — the buyer has a WON ExcessOffer whose matched lines
+         carry one of the target ``material_card_id``s (the exact-MPN signal).
+      2. ``buys_this_commodity`` — the buyer's ``commodity_tags`` overlap the target
+         lines' commodities (MaterialCard.category), OR the buyer has a WON offer in
+         one of those commodities historically.
+      3. ``engagement`` — any other reachable buyer with an engagement score, ranked
+         by it (the cold tiebreak so the panel is never empty).
+
+    Rank tuple MIRRORS ``_coverage_ranked_vendor_rows``: ``(tier, not has_contact,
+    -engagement, (0, card_id))`` — strongest tier first, contactable first, higher
+    engagement first nullslast, then a stable numeric-id tiebreak. Unreachable / DNC /
+    blacklisted buyers are filtered BEFORE ranking (reusing the sightings gates), so
+    every returned buyer is actually offerable. Capped at ``limit``.
+
+    Each RankedBuyer carries the scorecard facts the suggestion chip renders
+    (last_bid, win_rate, last_offered_at) sourced from the buyer's BuyerScore +
+    most-recent offer line. Raises ValueError if neither target is supplied.
+    """
+    lines = _target_lines(db, excess_list_id=excess_list_id, line_item_ids=line_item_ids)
+    target_card_ids = {li.material_card_id for li in lines if li.material_card_id is not None}
+    target_commodities = _target_commodities(db, lines)
+
+    # ── Tier-1 set: buyers who WON an offer on one of the target material_cards. ──
+    bought_part_buyers: set[int] = set()
+    if target_card_ids:
+        rows = (
+            db.query(ExcessOffer.offerer_vendor_card_id)
+            .join(ExcessOfferLine, ExcessOfferLine.offer_id == ExcessOffer.id)
+            .join(ExcessLineItem, ExcessLineItem.id == ExcessOfferLine.excess_line_item_id)
+            .filter(
+                ExcessOffer.status == ExcessOfferStatus.WON,
+                ExcessOffer.offerer_vendor_card_id.isnot(None),
+                ExcessLineItem.material_card_id.in_(target_card_ids),
+            )
+            .distinct()
+            .all()
+        )
+        bought_part_buyers = {cid for (cid,) in rows}
+
+    # ── Tier-2 set: buyers active in the target commodities (won a commodity offer). ──
+    commodity_offer_buyers: set[int] = set()
+    if target_commodities:
+        rows = (
+            db.query(ExcessOffer.offerer_vendor_card_id)
+            .join(ExcessOfferLine, ExcessOfferLine.offer_id == ExcessOffer.id)
+            .join(ExcessLineItem, ExcessLineItem.id == ExcessOfferLine.excess_line_item_id)
+            .join(MaterialCard, MaterialCard.id == ExcessLineItem.material_card_id)
+            .filter(
+                ExcessOffer.status == ExcessOfferStatus.WON,
+                ExcessOffer.offerer_vendor_card_id.isnot(None),
+                MaterialCard.category.in_(target_commodities),
+            )
+            .distinct()
+            .all()
+        )
+        commodity_offer_buyers = {cid for (cid,) in rows}
+
+    # ── Candidate universe: every non-blacklisted buyer card that could be ranked. ──
+    # Tier-1/2 buyers (by offer history) + buyers tagged for the target commodities +
+    # (cold tier) any card with an engagement score. We resolve to reachable cards next.
+    candidates = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False)).all()
+
+    reachable = _reachable_card_ids(db, [c.id for c in candidates])
+    if not reachable:
+        return []
+
+    # Scorecard facts (last_offered_at, win_rate) in one batched lookup.
+    score_by_card = {
+        s.vendor_card_id: s for s in db.query(BuyerScore).filter(BuyerScore.vendor_card_id.in_(list(reachable))).all()
+    }
+
+    ranked: list[tuple[int, bool, float, tuple[int, int], RankedBuyer]] = []
+    for card in candidates:
+        if card.id not in reachable:
+            continue
+
+        tags = {str(t).lower() for t in (card.commodity_tags or [])}
+        commodity_tagged = bool(tags & {c.lower() for c in target_commodities}) if target_commodities else False
+
+        if card.id in bought_part_buyers:
+            tier = _TIER_BOUGHT_PART
+        elif card.id in commodity_offer_buyers or commodity_tagged:
+            tier = _TIER_COMMODITY
+        elif card.engagement_score is not None:
+            tier = _TIER_ENGAGEMENT
+        else:
+            continue  # no part, no commodity, no engagement → nothing to suggest
+
+        score = score_by_card.get(card.id)
+        win_rate = None
+        last_offered_at = None
+        if score is not None:
+            if score.offers_received:
+                win_rate = round((score.wins or 0) / score.offers_received, 3)
+            last_offered_at = score.last_offered_at
+
+        rb = RankedBuyer(
+            vendor_card_id=card.id,
+            display_name=card.display_name,
+            last_bid=_last_bid_for(db, card.id),
+            win_rate=win_rate,
+            last_offered_at=last_offered_at,
+            rank_reason=_TIER_REASON[tier],
+            has_contact=True,
+            engagement_score=card.engagement_score,
+        )
+        engagement = card.engagement_score if card.engagement_score is not None else float("-inf")
+        ranked.append((tier, not rb.has_contact, -engagement, (0, card.id), rb))
+
+    ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
+    return [t[4] for t in ranked[: max(0, limit)]]
+
+
+def _last_bid_for(db: Session, vendor_card_id: int) -> Decimal | None:
+    """The buyer's most recent priced ExcessOfferLine unit_price (None if none)."""
+    row = (
+        db.query(ExcessOfferLine.unit_price)
+        .join(ExcessOffer, ExcessOffer.id == ExcessOfferLine.offer_id)
+        .filter(
+            ExcessOffer.offerer_vendor_card_id == vendor_card_id,
+            ExcessOfferLine.unit_price.isnot(None),
+        )
+        .order_by(ExcessOffer.created_at.desc(), ExcessOfferLine.id.desc())
+        .first()
+    )
+    return row[0] if row else None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  BUYER SCORECARD ROLLUP
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def recompute_buyer_score(db: Session, vendor_card_id: int) -> BuyerScore:
+    """Recompute (and upsert) the per-buyer BuyerScore rollup — the inverse of the
+    vendor scorecard.
+
+    Rolls up the buyer's full ExcessOffer + ExcessOutreach history keyed on the
+    canonical ``vendor_card_id``:
+      - ``offers_received``  — distinct ExcessOffers from this buyer.
+      - ``wins``             — those in status ``won``.
+      - ``avg_bid_pct_of_ask`` — mean of (line.unit_price ÷ line item asking_price ×
+        100) over priced, matched offer lines whose target line carries an asking
+        price (None when no comparable pair exists).
+      - ``response_rate``    — responded outreach ÷ sent outreach (None when no sends).
+      - ``median_response_hours`` — median (responded sent_at → updated_at) gap, when
+        derivable (None otherwise).
+      - ``last_offered_at``  — max outreach sent_at / created_at.
+      - ``commodity_affinity`` — JSON {commodity: count} of the buyer's bought-before
+        lines (the signal that seeds the MPN→commodity→engagement ranking tier-2).
+
+    Upserts the single BuyerScore row for the card (1:1 on vendor_card_id), never
+    duplicating. Flushes; the caller commits (so the win hook and the nightly batch
+    can both batch their commits). Returns the row.
+    """
+    offers = db.query(ExcessOffer).filter(ExcessOffer.offerer_vendor_card_id == vendor_card_id).all()
+    offers_received = len(offers)
+    wins = sum(1 for o in offers if o.status == ExcessOfferStatus.WON)
+
+    # ── avg_bid_pct_of_ask + commodity_affinity over the buyer's offer lines. ──
+    pcts: list[Decimal] = []
+    commodity_affinity: dict[str, int] = {}
+    if offers:
+        offer_ids = [o.id for o in offers]
+        line_rows = (
+            db.query(ExcessOfferLine.unit_price, ExcessLineItem.asking_price, MaterialCard.category)
+            .join(ExcessLineItem, ExcessLineItem.id == ExcessOfferLine.excess_line_item_id)
+            .outerjoin(MaterialCard, MaterialCard.id == ExcessLineItem.material_card_id)
+            .filter(ExcessOfferLine.offer_id.in_(offer_ids))
+            .all()
+        )
+        for unit_price, asking_price, category in line_rows:
+            if unit_price is not None and asking_price:
+                pcts.append((Decimal(unit_price) / Decimal(asking_price)) * Decimal(100))
+            if category:
+                commodity_affinity[category] = commodity_affinity.get(category, 0) + 1
+    avg_bid_pct = (sum(pcts) / len(pcts)).quantize(Decimal("0.01")) if pcts else None
+
+    # ── response_rate + median_response_hours + last_offered_at over outreach. ──
+    outreach = db.query(ExcessOutreach).filter(ExcessOutreach.target_vendor_card_id == vendor_card_id).all()
+    sent = len(outreach)
+    responded = sum(1 for o in outreach if o.status in _RESPONDED_STATUSES)
+    response_rate = (Decimal(responded) / Decimal(sent)).quantize(Decimal("0.01")) if sent else None
+
+    response_gaps: list[float] = []
+    last_offered_at: datetime | None = None
+    for o in outreach:
+        stamp = o.sent_at or o.created_at
+        if stamp is not None:
+            stamp = _aware(stamp)
+            if last_offered_at is None or stamp > last_offered_at:
+                last_offered_at = stamp
+        if o.status in _RESPONDED_STATUSES and o.sent_at and o.updated_at:
+            gap = (_aware(o.updated_at) - _aware(o.sent_at)).total_seconds() / 3600
+            if gap >= 0:
+                response_gaps.append(gap)
+    median_response_hours = Decimal(str(round(_median(response_gaps), 2))) if response_gaps else None
+
+    # ── Upsert the single BuyerScore row (1:1 on vendor_card_id). ──
+    score = db.query(BuyerScore).filter_by(vendor_card_id=vendor_card_id).first()
+    if score is None:
+        score = BuyerScore(vendor_card_id=vendor_card_id)
+        db.add(score)
+    score.offers_received = offers_received
+    score.wins = wins
+    score.avg_bid_pct_of_ask = avg_bid_pct
+    score.response_rate = response_rate
+    score.median_response_hours = median_response_hours
+    score.last_offered_at = last_offered_at
+    score.commodity_affinity = commodity_affinity or None
+    db.flush()
+    logger.info(
+        "Recomputed BuyerScore for card={} (offers={} wins={} resp_rate={})",
+        vendor_card_id,
+        offers_received,
+        wins,
+        response_rate,
+    )
+    return score
+
+
+def recompute_buyer_score_on_win(db: Session, offer: ExcessOffer) -> BuyerScore | None:
+    """Offer-win hook — recompute the buyer's scorecard when an ExcessOffer is won.
+
+    Call this from WHEREVER an ExcessOffer's status flips to ``won`` (the bid-back /
+    award path, Chunk E+). No-ops (returns None) for an offer with no canonical buyer
+    card. Idempotent (the rollup reads full history), so a double-fire is harmless.
+    Does NOT commit — the award path that flips the status owns the transaction.
+    """
+    if offer.offerer_vendor_card_id is None:
+        return None
+    return recompute_buyer_score(db, offer.offerer_vendor_card_id)
+
+
+def recompute_all_buyer_scores(db: Session) -> int:
+    """Nightly-batch backstop — recompute every buyer's scorecard.
+
+    Walks every VendorCard that has either an ExcessOffer or an ExcessOutreach against
+    it and recomputes its BuyerScore. Commits once. Returns the count recomputed.
+    """
+    offer_cards = (
+        db.query(ExcessOffer.offerer_vendor_card_id).filter(ExcessOffer.offerer_vendor_card_id.isnot(None)).distinct()
+    )
+    outreach_cards = (
+        db.query(ExcessOutreach.target_vendor_card_id)
+        .filter(ExcessOutreach.target_vendor_card_id.isnot(None))
+        .distinct()
+    )
+    card_ids = {cid for (cid,) in offer_cards.all()} | {cid for (cid,) in outreach_cards.all()}
+    for cid in card_ids:
+        recompute_buyer_score(db, cid)
+    db.commit()
+    logger.info("Nightly buyer-score backstop recomputed {} buyer(s)", len(card_ids))
+    return len(card_ids)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TEAM-OVERLAP (ADVISORY)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def overlap_warning(
+    db: Session,
+    *,
+    excess_list_id: int,
+    target_vendor_card_id: int,
+    owner_id: int,
+    within_days: int = _DEFAULT_OVERLAP_DAYS,
+) -> dict | None:
+    """Advisory: has a TEAMMATE already offered this buyer this list recently?
+
+    NEVER blocks and never raises on a missing row — purely informational (the user is
+    HYBRID-assertive: warn, log the override, proceed). Looks for an ExcessOutreach on
+    ``excess_list_id`` to ``target_vendor_card_id`` whose ``submitted_by`` is NOT
+    ``owner_id`` and whose ``sent_at`` (falling back to ``created_at``) is within
+    ``within_days``. Returns the MOST RECENT such touch as
+    ``{by_user_id, by_user_name, when, line_item_ids}`` (line_item_ids unions the
+    overlapping teammate touches), or None when there is no recent teammate overlap.
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+    touches = (
+        db.query(ExcessOutreach)
+        .filter(
+            ExcessOutreach.excess_list_id == excess_list_id,
+            ExcessOutreach.target_vendor_card_id == target_vendor_card_id,
+            ExcessOutreach.submitted_by != owner_id,
+        )
+        .all()
+    )
+    recent = [t for t in touches if _aware(t.sent_at or t.created_at) >= cutoff]
+    if not recent:
+        return None
+
+    recent.sort(key=lambda t: _aware(t.sent_at or t.created_at), reverse=True)
+    latest = recent[0]
+    teammate = db.get(User, latest.submitted_by)
+    line_item_ids = sorted({t.excess_line_item_id for t in recent if t.excess_line_item_id is not None})
+    return {
+        "by_user_id": latest.submitted_by,
+        "by_user_name": teammate.name if teammate else None,
+        "when": _aware(latest.sent_at or latest.created_at),
+        "line_item_ids": line_item_ids,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  DON'T-FORGET NUDGE STRIP
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def not_yet_offered_strip(
+    db: Session,
+    *,
+    excess_list_id: int,
+    limit: int = _DEFAULT_LIMIT,
+) -> list[RankedBuyer]:
+    """The don't-forget nudge ("you usually offer this to X/Y") — buyers active in this
+    list's commodities who have NO ExcessOutreach row on THIS list yet.
+
+    Ranks the same way ``rank_buyers_for`` does (so the strip and the suggestion panel
+    agree on ordering), then SUBTRACTS the buyers already touched on this list — the
+    don't-forget nudge surfaces exactly the historical commodity buyers you have not
+    yet offered THIS round. Reachable / non-DNC only (reuses the same gate). Returns
+    [] when every historical buyer has already been offered.
+    """
+    ranked = rank_buyers_for(db, excess_list_id=excess_list_id, limit=limit)
+    already = {
+        cid
+        for (cid,) in db.query(ExcessOutreach.target_vendor_card_id)
+        .filter(
+            ExcessOutreach.excess_list_id == excess_list_id,
+            ExcessOutreach.target_vendor_card_id.isnot(None),
+        )
+        .distinct()
+        .all()
+    }
+    # The nudge is about buyers with a real history (part/commodity), not the cold
+    # engagement tier — those are covered by the live suggestion panel, not "usually".
+    return [r for r in ranked if r.vendor_card_id not in already and r.rank_reason != "engagement"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SMALL UTILITIES
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _aware(dt: datetime) -> datetime:
+    """Coerce a naive timestamp (SQLite returns naive) to UTC-aware for comparison."""
+    return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
+
+
+def _median(values: list[float]) -> float:
+    """Median of a non-empty list (caller guarantees non-empty)."""
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    return s[mid] if n % 2 else (s[mid - 1] + s[mid]) / 2
