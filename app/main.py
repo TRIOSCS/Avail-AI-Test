@@ -419,6 +419,7 @@ async def request_id_middleware(request: Request, call_next):
         elif (
             request.headers.get("HX-Request") is None
             and not path.startswith("/api")
+            and "/partials/" not in path
             and "text/html" in (response.headers.get("content-type") or "")
         ):
             response.headers["Cache-Control"] = "no-cache, must-revalidate"
