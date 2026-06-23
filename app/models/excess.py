@@ -1,16 +1,18 @@
-"""Excess Inventory & Bid Collection models.
+"""Excess Inventory & Trading (resell-brokerage) models.
 
-Data models for managing customer excess/surplus inventory and collecting
-bids from potential buyers. This is the reverse of sourcing: customer has
-parts to sell, Trio finds buyers.
+Data models for the Trading workspace: customers post excess/surplus inventory
+(ExcessList / ExcessLineItem), brokers submit offers to buy (ExcessOffer /
+ExcessOfferLine), and the trader assembles a clean bid back to the seller
+(CustomerBid / CustomerBidLine). This is the reverse of sourcing: the customer
+has parts to sell, Trio finds buyers.
 
 Business Rules:
 - ExcessList belongs to a Company (the seller) and is owned by a User (salesperson/trader)
 - ExcessLineItems cascade-delete with their parent ExcessList
-- Bids can come from Companies (customers) or VendorCards (vendors)
-- BidSolicitations track outbound bid request emails
+- ExcessOffers are inbound broker offers to buy (per_line or take_all)
+- CustomerBids are the outbound clean bid back to the seller
 
-Called by: routers/excess.py, services/excess.py (Phase 2+)
+Called by: routers/trading.py, services/excess_service.py
 Depends on: models/base, models with Company, User, VendorCard, CustomerSite
 """
 
@@ -107,8 +109,6 @@ class ExcessLineItem(Base):
     updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="line_items")
-    bids = relationship("Bid", back_populates="excess_line_item", cascade="all, delete-orphan")
-    solicitations = relationship("BidSolicitation", back_populates="excess_line_item", cascade="all, delete-orphan")
 
     # --- Validators ---
     @validates("quantity")
@@ -122,83 +122,6 @@ class ExcessLineItem(Base):
         Index("ix_excess_line_items_status", "status"),
         Index("ix_excess_line_items_pn_status", "part_number", "status"),
         Index("ix_excess_line_items_demand", "demand_match_count", "status"),
-    )
-
-
-class BidSolicitation(Base):
-    """Outbound bid request sent to a potential buyer — analogous to RFQ tracking."""
-
-    __tablename__ = "bid_solicitations"
-    id = Column(Integer, primary_key=True)
-    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="CASCADE"), nullable=False)
-    contact_id = Column(Integer, nullable=False)  # generic FK — no EmailTrack model exists
-    sent_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    recipient_email = Column(String(255), nullable=True)
-    recipient_name = Column(String(255), nullable=True)
-    graph_message_id = Column(String(500), nullable=True)  # Graph API message ID for tracking
-    subject = Column(String(500), nullable=True)
-    body_preview = Column(String(500), nullable=True)  # First 500 chars of email body
-    response_received_at = Column(UTCDateTime, nullable=True)
-    parsed_bid_id = Column(
-        Integer, ForeignKey("bids.id", ondelete="SET NULL", use_alter=True), nullable=True
-    )  # auto-created bid
-    status = Column(String(20), default="pending")  # pending, sent, responded, expired, failed
-    sent_at = Column(UTCDateTime, nullable=True)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-
-    excess_line_item = relationship("ExcessLineItem", back_populates="solicitations")
-    sent_by_user = relationship("User", foreign_keys=[sent_by])
-    parsed_bid = relationship("Bid", foreign_keys=[parsed_bid_id])
-
-    __table_args__ = (
-        Index("ix_bid_solicitations_line_item", "excess_line_item_id"),
-        Index("ix_bid_solicitations_contact", "contact_id"),
-        Index("ix_bid_solicitations_graph_msg", "graph_message_id"),
-        Index("ix_bidsol_status", "status"),
-    )
-
-
-class Bid(Base):
-    """Incoming bid from a potential buyer — analogous to Offer."""
-
-    __tablename__ = "bids"
-    id = Column(Integer, primary_key=True)
-    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="CASCADE"), nullable=False)
-    bidder_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
-    bidder_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
-    unit_price = Column(Numeric(12, 4), nullable=False)
-    quantity_wanted = Column(Integer, nullable=False)
-    lead_time_days = Column(Integer, nullable=True)
-    status = Column(String(20), default="pending")  # pending, accepted, rejected, expired, withdrawn
-    source = Column(String(20), default="manual")  # manual, email_parsed, phone
-    notes = Column(Text, nullable=True)
-    created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
-
-    excess_line_item = relationship("ExcessLineItem", back_populates="bids")
-    bidder_company = relationship("Company", foreign_keys=[bidder_company_id])
-    bidder_vendor_card = relationship("VendorCard", foreign_keys=[bidder_vendor_card_id])
-    created_by_user = relationship("User", foreign_keys=[created_by])
-
-    # --- Validators ---
-    @validates("unit_price")
-    def _validate_unit_price(self, _key, value):
-        if value is not None and value < 0:
-            raise ValueError(f"unit_price must be >= 0, got {value}")
-        return value
-
-    @validates("quantity_wanted")
-    def _validate_quantity_wanted(self, _key, value):
-        if value is not None and value <= 0:
-            raise ValueError("quantity_wanted must be positive")
-        return value
-
-    __table_args__ = (
-        Index("ix_bids_line_item", "excess_line_item_id"),
-        Index("ix_bids_company", "bidder_company_id"),
-        Index("ix_bids_vendor_card", "bidder_vendor_card_id"),
-        Index("ix_bids_status", "status"),
     )
 
 

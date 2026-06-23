@@ -195,26 +195,6 @@ class CustomerBidStatus(StrEnum):
     REJECTED = "rejected"
 
 
-class BidStatus(StrEnum):
-    """Status lifecycle for Bid records."""
-
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    REJECTED = "rejected"
-    EXPIRED = "expired"
-    WITHDRAWN = "withdrawn"
-
-
-class BidSolicitationStatus(StrEnum):
-    """Status lifecycle for BidSolicitation records."""
-
-    PENDING = "pending"
-    SENT = "sent"
-    RESPONDED = "responded"
-    EXPIRED = "expired"
-    FAILED = "failed"
-
-
 class QuoteStatus(StrEnum):
     """Status lifecycle for Quote records."""
 

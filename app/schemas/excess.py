@@ -1,8 +1,9 @@
-"""Pydantic schemas for Excess Inventory & Bid Collection.
+"""Pydantic schemas for Excess Inventory & Trading offers.
 
-Request/response models for the excess inventory and bid collection API.
+Request/response models for the Trading workspace: excess lists, line items,
+bulk import, and inbound broker offers (ExcessOffer / ExcessOfferLine).
 
-Called by: routers/excess.py (Phase 2+)
+Called by: routers/trading.py
 Depends on: pydantic
 """
 
@@ -100,81 +101,6 @@ class ExcessLineItemResponse(BaseModel):
     updated_at: datetime | None = None
 
 
-# ── Bid ──────────────────────────────────────────────────────────────
-
-
-class BidCreateRequest(BaseModel):
-    """Request body for creating a bid — excess_line_item_id comes from URL path."""
-
-    unit_price: float = Field(ge=0)
-    quantity_wanted: int = Field(ge=1)
-    lead_time_days: int | None = Field(default=None, ge=0)
-    bidder_company_id: int | None = None
-    bidder_vendor_card_id: int | None = None
-    source: Literal["manual", "phone"] | None = "manual"
-    notes: str | None = None
-
-
-class BidUpdate(BaseModel):
-    unit_price: float | None = Field(default=None, ge=0)
-    quantity_wanted: int | None = Field(default=None, ge=1)
-    status: Literal["pending", "accepted", "rejected", "expired", "withdrawn"] | None = None
-    notes: str | None = None
-
-
-class BidResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    excess_line_item_id: int
-    bidder_company_id: int | None = None
-    bidder_vendor_card_id: int | None = None
-    bidder_contact_id: int | None = None
-    unit_price: float
-    quantity_wanted: int
-    lead_time_days: int | None = None
-    status: str
-    source: str
-    notes: str | None = None
-    created_by: int
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-# ── BidSolicitation ──────────────────────────────────────────────────
-
-
-class BidSolicitationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    excess_line_item_id: int
-    contact_id: int
-    sent_by: int
-    email_track_id: int | None = None
-    recipient_email: str | None = None
-    recipient_name: str | None = None
-    graph_message_id: str | None = None
-    subject: str | None = None
-    status: str
-    sent_at: datetime | None = None
-    response_received_at: datetime | None = None
-    body_preview: str | None = None
-    created_at: datetime | None = None
-
-
-# ── Parse Bid Response ──────────────────────────────────────────────
-
-
-class ParseBidResponseRequest(BaseModel):
-    """Request body for parsing a bid response from an email solicitation."""
-
-    unit_price: float = Field(ge=0)
-    quantity_wanted: int = Field(ge=1)
-    lead_time_days: int | None = Field(default=None, ge=0)
-    notes: str | None = None
-
-
 # ── Confirm Import ──────────────────────────────────────────────────
 
 
@@ -199,13 +125,13 @@ class ConfirmImportRequest(BaseModel):
 
 
 class ExcessStatsResponse(BaseModel):
-    """Aggregate stats for the excess list view."""
+    """Aggregate stats for the Trading workspace (offer counts, not bid counts)."""
 
     total_lists: int = 0
     total_line_items: int = 0
-    pending_bids: int = 0
+    open_offers: int = 0
     matched_items: int = 0
-    total_bids: int = 0
+    total_offers: int = 0
     awarded_items: int = 0
 
 
@@ -277,30 +203,3 @@ class ExcessOfferResponse(BaseModel):
     lines: list[ExcessOfferLineResponse] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-# ── Email Solicitation Request ──────────────────────────────────────
-
-
-class SendBidSolicitationRequest(BaseModel):
-    """Request body for sending a bid solicitation email."""
-
-    line_item_ids: list[int] = Field(min_length=1)
-    recipient_email: str
-    recipient_name: str | None = None
-    contact_id: int
-    subject: str | None = None
-    message: str | None = None
-    bundled: bool = True
-
-
-class PolishEmailRequest(BaseModel):
-    """Request body for AI email polish."""
-
-    text: str = Field(min_length=1, max_length=5000)
-
-
-class PolishEmailResponse(BaseModel):
-    """Response from AI email polish."""
-
-    text: str
