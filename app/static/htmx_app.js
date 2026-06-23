@@ -287,8 +287,9 @@ htmx.on('htmx:responseError', (evt) => {
         let msg = 'Request failed. Please try again.';
         try {
             const body = JSON.parse(evt.detail.xhr.responseText);
-            if (body && typeof body.detail === 'string' && body.detail) {
-                msg = body.detail;
+            const msg_text = body.error || body.detail;
+            if (msg_text && typeof msg_text === 'string') {
+                msg = msg_text;
             }
         } catch (_) { /* not JSON — use fallback */ }
         showToast(msg, 'error');

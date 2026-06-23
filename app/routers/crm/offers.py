@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ...constants import ActivityType, OfferStatus, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
-from ...dependencies import require_buyer, require_user
+from ...dependencies import require_buyer, require_requisition_access, require_user
 from ...models import (
     ActivityLog,
     ChangeLog,
@@ -590,6 +590,7 @@ async def update_offer(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     changes = payload.model_dump(exclude_unset=True)
     # Snapshot old values for changelog
     trackable = [
@@ -633,6 +634,7 @@ async def delete_offer(offer_id: int, user: User = Depends(require_buyer), db: S
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     db.delete(offer)
     db.commit()
     return {"ok": True}
@@ -648,6 +650,7 @@ async def reconfirm_offer(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     offer.reconfirmed_at = datetime.now(timezone.utc)
     offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
     db.commit()
@@ -668,6 +671,7 @@ async def approve_offer(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be approved")
     old_status = offer.status
@@ -697,6 +701,7 @@ async def reject_offer(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
     old_status = offer.status
@@ -784,6 +789,7 @@ async def upload_offer_attachment(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
@@ -847,6 +853,7 @@ async def attach_from_onedrive(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     item_id = body.item_id
     from ...utils.graph_client import GraphClient
 
@@ -884,6 +891,14 @@ async def delete_offer_attachment(
     att = db.get(OfferAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
+    parent_offer = db.get(Offer, att.offer_id)
+    require_requisition_access(
+        db,
+        parent_offer.requisition_id if parent_offer else None,
+        user,
+        owner_id=parent_offer.entered_by_id if parent_offer else None,
+        label="Attachment",
+    )
     # Delete from OneDrive if we have the item ID
     if att.onedrive_item_id and user.access_token:
         try:
@@ -991,6 +1006,7 @@ async def promote_offer(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.evidence_tier != "T4":
         raise HTTPException(400, "Only T4 offers can be promoted")
 
@@ -1024,6 +1040,7 @@ async def reject_offer_t4_review(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 

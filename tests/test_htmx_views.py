@@ -1339,8 +1339,10 @@ class TestSettings:
         assert resp.status_code == 200
 
     def test_settings_sources(self, client: TestClient):
-        resp = client.get("/v2/partials/settings/sources")
-        assert resp.status_code == 200
+        # Sources tab retired → unified Connectors tab; old URL 302-redirects.
+        resp = client.get("/v2/partials/settings/sources", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+        assert "/connectors" in resp.headers["location"]
 
     def test_settings_system_admin(self, client: TestClient, test_user: User, db_session: Session):
         test_user.role = "admin"

@@ -32,7 +32,7 @@
   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
     <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
   </svg>
-  {{ label }}
+  <span class="sr-only">{{ label }}</span>
 </a>
 {% endmacro %}
 
@@ -63,22 +63,22 @@
     {% set clock_cls = 'text-emerald-600' %}
   {% endif %}
 <div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
+  <span class="text-gray-600">Out:</span>
   <span class="{{ clock_cls }} font-medium">{{ out_days }}d ago</span>
-  <span class="text-gray-400">Reply:</span>
+  <span class="text-gray-600">Reply:</span>
   {% if rep_ts %}
     {% set rep_days = (now_utc - rep_ts).days %}
     <span class="text-gray-600">{{ rep_days }}d ago</span>
   {% else %}
-    <span class="text-gray-300">—</span>
+    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
   {% endif %}
 </div>
 {% else %}
 <div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
-  <span class="text-gray-300" title="no logged touch">—</span>
-  <span class="text-gray-400">Reply:</span>
-  <span class="text-gray-300">—</span>
+  <span class="text-gray-600">Out:</span>
+  <span class="text-gray-400" title="no logged touch">—<span class="sr-only"> no data</span></span>
+  <span class="text-gray-600">Reply:</span>
+  <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
 </div>
 {% endif %}
 {% endmacro %}
@@ -97,7 +97,7 @@
     {% set out_days = (now_utc - out_ts).days %}
     <span class="{% if cadence == 'overdue' %}text-rose-600{% elif cadence == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">{{ out_days }}d</span>
   {% else %}
-    <span class="text-gray-300">—</span>
+    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
   {% endif %}
 </span>
 {% endmacro %}
@@ -179,7 +179,7 @@
           <span class="text-sm font-medium text-gray-900">{{ contact.full_name or "—" }}</span>
           {# Primary star — always visible when set #}
           {% if contact.is_primary %}
-          <span class="text-amber-400" title="Primary contact">★</span>
+          <span class="text-amber-400" title="Primary contact for {{ site.site_name if site else 'this site' }}">★</span>
           {% endif %}
           {# Role label — always visible (read-only chip), editor in hover zone below #}
           {% if contact.contact_role %}
@@ -244,15 +244,19 @@
         <div class="relative inline-block" x-data='{"open": false}' @click.outside='open = false'>
           <button @click.stop='open = !open' type='button'
                   class='p-1 text-gray-300 hover:text-gray-600 rounded transition-colors'
-                  aria-label='Contact actions'>
+                  aria-label='Contact actions'
+                  :aria-expanded="open ? 'true' : 'false'"
+                  aria-haspopup="menu">
             <svg class='h-4 w-4' fill='currentColor' viewBox='0 0 20 20'>
               <path d='M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z'/>
             </svg>
           </button>
           <div x-show='open' x-cloak
+               role="menu"
                class='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left'>
             {# Edit #}
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/edit-form'}); open = false"
+                    role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Edit</button>
             {# Set Primary — only when not already primary #}
             {% if not contact.is_primary %}
@@ -261,6 +265,7 @@
                     hx-swap='innerHTML'
                     @click.stop='open = false'
                     data-loading-disable
+                    role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50'>Set Primary</button>
             {% endif %}
             <div class='border-t border-gray-100 my-1'></div>
@@ -277,14 +282,14 @@
               </button>
               <form x-show='editing' x-cloak
                     hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/role'
-                    hx-target='#role-chip-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     @htmx:after-request='editing = false'>
                 <select name='contact_role'
                         onchange='this.form.requestSubmit()'
                         @blur='editing = false'
                         x-init='$nextTick(() => { if (editing) $el.focus() })'
-                        class='text-xs border border-brand-300 rounded px-1 py-0.5 focus:outline-none w-full'>
+                        class='text-xs border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 w-full'>
                   <option value=''>— clear —</option>
                   {% for r in roles %}<option value='{{ r }}' {% if contact.contact_role == r %}selected{% endif %}>{{ role_labels.get(r, r|replace('_', ' ')|title) }}</option>{% endfor %}
                 </select>
@@ -295,8 +300,8 @@
             <div id='priority-toggle-{{ contact.id }}' class='px-3 py-1'>
               {% if contact.is_priority %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/priority'
-                    hx-target='#priority-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='is_priority' value=''>
                 <button type='submit' @click.stop=''
@@ -304,8 +309,8 @@
               </form>
               {% else %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/priority'
-                    hx-target='#priority-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='is_priority' value='1'>
                 <button type='submit' @click.stop=''
@@ -317,8 +322,8 @@
             <div id='archive-toggle-{{ contact.id }}' class='px-3 py-1'>
               {% if contact.is_archived %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
-                    hx-target='#archive-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='is_archived' value=''>
                 <button type='submit' @click.stop=''
@@ -326,8 +331,8 @@
               </form>
               {% else %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
-                    hx-target='#archive-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='is_archived' value='1'>
                 <button type='submit' @click.stop=''
@@ -339,8 +344,8 @@
             <div id='dnc-toggle-{{ contact.id }}' class='px-3 py-1'>
               {% if contact.do_not_contact %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
-                    hx-target='#dnc-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='do_not_contact' value=''>
                 <button type='submit' @click.stop=''
@@ -348,8 +353,8 @@
               </form>
               {% else %}
               <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
-                    hx-target='#dnc-toggle-{{ contact.id }}'
-                    hx-swap='outerHTML'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
                     class='inline'>
                 <input type='hidden' name='do_not_contact' value='1'>
                 <button type='submit' @click.stop=''
@@ -365,6 +370,7 @@
                     hx-confirm='Delete {{ contact.full_name or "this contact" }}?'
                     @click.stop='open = false'
                     data-loading-disable
+                    role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50'>Delete</button>
           </div>
         </div>
@@ -372,7 +378,7 @@
     </div>
 
     {# ── Hover-reveal detail zone: contact info + cadence clocks ───────────────── #}
-    <div class="mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div class="mt-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
       <div class="flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
         {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
         {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}

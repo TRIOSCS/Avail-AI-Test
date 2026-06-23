@@ -31,6 +31,7 @@
       <input aria-label="Site Name" type="text" name="site_name" required placeholder="Site Name"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="site_type"
+              aria-label="Site type"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
         <option value="">Type</option>
         <option value="hq">HQ</option>
@@ -44,6 +45,7 @@
       <input aria-label="Country" type="text" name="country" placeholder="Country"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="owner_id"
+              aria-label="Account owner"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 col-span-2">
         <option value="">Owner (optional)</option>
         {% for u in users %}

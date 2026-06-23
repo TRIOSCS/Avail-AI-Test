@@ -44,10 +44,12 @@ from ..constants import (
 from ..database import get_db
 from ..dependencies import (
     get_quote_for_user,
+    get_req_for_user,
     get_user,
     has_buyer_role,
     require_admin,
     require_buyer,
+    require_requisition_access,
     require_user,
 )
 from ..models import (
@@ -1182,6 +1184,7 @@ async def add_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form_data = await request.form()
     sub_mpns = form_data.getlist("sub_mpn")
@@ -1238,6 +1241,7 @@ async def requisition_search_all(
     """Trigger search for all requirements in a requisition, then refresh parts
     table."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     if not requirements:
         return HTMLResponse(
@@ -1481,6 +1485,7 @@ async def parse_email_action(
 ):
     """Parse vendor email and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not email_body.strip():
         return HTMLResponse(
@@ -1530,6 +1535,7 @@ async def parse_offer_action(
 ):
     """Parse freeform vendor text and return editable offer cards."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     if not raw_text.strip():
         return HTMLResponse(
@@ -1571,6 +1577,7 @@ async def save_parsed_offers(
 ):
     """Save user-edited parsed offers to the requisition."""
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "")
@@ -1726,6 +1733,8 @@ async def requisitions_bulk_action(
         raise HTTPException(400, f"Invalid action: {action}")
 
     reqs = db.query(Requisition).filter(Requisition.id.in_(ids)).all()
+    for r in reqs:
+        require_requisition_access(db, r.id, user)
 
     if action == "archive":
         for r in reqs:
@@ -1777,7 +1786,6 @@ async def requisition_inline_edit_cell(
         field: One of name, status, urgency, deadline, owner.
         context: 'row' for list view, 'header' for detail header.
     """
-    from ..dependencies import get_req_for_user
 
     valid_fields = {"name", "status", "urgency", "deadline", "owner"}
     if field not in valid_fields:
@@ -1807,7 +1815,6 @@ async def requisition_inline_save(
     For context='row', returns the full table row. For context='header', returns the
     updated header card.
     """
-    from ..dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id, options=[])
     if not req:
@@ -1906,7 +1913,6 @@ async def requisition_row_action(
 ):
     """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
     clone)."""
-    from ..dependencies import get_req_for_user
 
     valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
     if action_name not in valid_actions:
@@ -1997,6 +2003,7 @@ async def create_quote_from_offers(
         raise HTTPException(400, "No offers selected")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
     if not offers:
@@ -2072,6 +2079,7 @@ async def review_offer(
     if action not in ("approve", "reject"):
         raise HTTPException(400, "Invalid action")
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2137,6 +2145,7 @@ async def add_offer(
 ):
     """Create a manual offer and return refreshed offers tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = (form.get("vendor_name") or "").strip()
@@ -2231,6 +2240,7 @@ async def reconfirm_offer(
     db: Session = Depends(get_db),
 ):
     """Reconfirm an offer — resets TTL and increments reconfirm count."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2282,6 +2292,7 @@ async def edit_offer(
     """Save edits to an offer and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2389,6 +2400,7 @@ async def delete_offer_htmx(
     db: Session = Depends(get_db),
 ):
     """Delete an offer and return refreshed offers tab."""
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2410,6 +2422,7 @@ async def mark_offer_sold_htmx(
     """Mark an offer as sold and return refreshed offers tab."""
     from ..models.intelligence import ChangeLog
 
+    require_requisition_access(db, req_id, user)
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -2483,6 +2496,7 @@ async def promote_offer_htmx(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
@@ -2529,6 +2543,7 @@ async def reject_offer_htmx(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
+    require_requisition_access(db, offer.requisition_id, user, owner_id=offer.entered_by_id, label="Offer")
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
@@ -2596,6 +2611,7 @@ async def log_activity(
     from ..models.intelligence import ActivityLog
 
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     activity_type = form.get("activity_type", "note")
@@ -2696,6 +2712,7 @@ async def ai_cleanup_email(
 ):
     """Clean up user-written email — fix grammar, tone, and formatting."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     user_text = body.strip()
     if not user_text:
@@ -2728,19 +2745,6 @@ async def ai_cleanup_email(
         f'<script>document.getElementById("rfq-body-textarea").value = `{escaped}`;</script>'
         '<p class="text-xs text-green-600 mt-1">Email cleaned up. Review and edit as needed.</p>'
     )
-
-
-def _require_requisition_access(db: Session, req_id: int, user: User):
-    """Fetch a requisition, enforcing the role-based ownership model.
-
-    SALES/TRADER users may only act on requisitions they created; buyers, managers, and
-    admins are unrestricted. Mirrors the scoping applied in the requisition list and
-    follow-ups list. Raises 404 (not 403) so existence isn't leaked.
-    """
-    req = get_requisition_or_404(db, req_id)
-    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER) and req.created_by != user.id:
-        raise HTTPException(404, "Requisition not found")
-    return req
 
 
 @router.post("/v2/partials/requisitions/{req_id}/ai-rephrase-email", response_class=HTMLResponse)
@@ -2786,6 +2790,7 @@ async def rfq_send(
     from ..models.offers import Contact as RfqContact
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_names = form.getlist("vendor_names")
@@ -2975,15 +2980,7 @@ async def send_follow_up_htmx(
     contact = db.get(RfqContact, contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
-
-    # SALES/TRADER may only send for contacts they own or whose requisition they own.
-    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
-        owns = contact.user_id == user.id
-        if not owns and contact.requisition_id:
-            req = db.get(Requisition, contact.requisition_id)
-            owns = bool(req and req.created_by == user.id)
-        if not owns:
-            raise HTTPException(404, "Contact not found")
+    require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
 
     form = await request.form()
     body = (form.get("body") or "").strip()
@@ -3057,15 +3054,7 @@ async def ai_draft_follow_up(
     contact = db.get(RfqContact, contact_id)
     if not contact:
         raise HTTPException(404, "Contact not found")
-
-    # SALES/TRADER may only draft for contacts they own or whose requisition they own.
-    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
-        owns = contact.user_id == user.id
-        if not owns and contact.requisition_id:
-            req = db.get(Requisition, contact.requisition_id)
-            owns = bool(req and req.created_by == user.id)
-        if not owns:
-            raise HTTPException(404, "Contact not found")
+    require_requisition_access(db, contact.requisition_id, user, owner_id=contact.user_id, label="Contact")
 
     days_waiting = (datetime.now(tz.utc) - contact.created_at).days if contact.created_at else None
 
@@ -3103,8 +3092,7 @@ async def review_response_htmx(
     """
     from ..models.offers import VendorResponse
 
-    _require_requisition_access(db, req_id, user)
-
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -3146,7 +3134,7 @@ async def ai_draft_reply(
     """Draft an AI reply to a vendor response and render an editable compose block."""
     from ..models.offers import VendorResponse
 
-    _require_requisition_access(db, req_id, user)
+    require_requisition_access(db, req_id, user)
 
     vr = (
         db.query(VendorResponse)
@@ -3206,7 +3194,7 @@ async def send_reply_htmx(
 
     from ..models.offers import VendorResponse
 
-    _require_requisition_access(db, req_id, user)
+    require_requisition_access(db, req_id, user)
 
     vr = (
         db.query(VendorResponse)
@@ -3279,6 +3267,7 @@ async def poll_inbox_htmx(
     """Trigger a FULL inbox scan for the current user (not requisition-scoped), then
     return the refreshed responses tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
     await _run_inbox_scan_now(user, db)
     return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
@@ -3297,6 +3286,7 @@ async def delete_requirement(
     Returns empty response for hx-swap='delete'.
     """
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3339,6 +3329,7 @@ async def update_requirement(
         raise HTTPException(422, "Manufacturer is required")
 
     req = get_requisition_or_404(db, req_id)
+    require_requisition_access(db, req_id, user)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -3828,6 +3819,7 @@ async def add_to_requisition(
             '<div class="text-red-600 text-sm p-2">Requisition not found.</div>',
             status_code=404,
         )
+    require_requisition_access(db, int(requisition_id), user)
 
     # Find or create Requirement for this MPN
     requirement = (
@@ -5341,15 +5333,7 @@ async def set_contact_role(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_role_chip_editor.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-            "roles": CANONICAL_ROLES,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5395,14 +5379,7 @@ async def set_contact_dnc(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_dnc_toggle.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 _VALID_DISPOSITIONS = frozenset({"active", "bucket"})
@@ -5531,10 +5508,7 @@ async def set_contact_priority(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_priority_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5579,10 +5553,7 @@ async def set_contact_archive(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_archive_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
@@ -6212,7 +6183,17 @@ async def contacts_tab_suggested(
     try:
         contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
     except Exception as exc:
-        logger.warning("find_suggested_contacts_with_errors failed for company {}: {}", company_id, exc)
+        import httpx
+
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+            logger.warning("find_suggested_contacts_with_errors connectivity error for company {}: {}", company_id, exc)
+        else:
+            logger.error(
+                "find_suggested_contacts_with_errors unexpected error for company {}: {}",
+                company_id,
+                exc,
+                exc_info=True,
+            )
         contacts = []
         errored = ["all"]
 
@@ -6399,6 +6380,9 @@ async def create_site(
     if site.owner_id:
         _ = site.owner
 
+    # Avoid lazy-load during render: new site has zero contacts by definition.
+    site.site_contacts = []
+
     ctx = _base_ctx(request, user, "customers")
     ctx["company"] = company
     ctx["s"] = site
@@ -6490,8 +6474,14 @@ async def create_site_contact(
             .first()
         )
         if existing:
-            # Already exists — just return the list
-            pass
+            # Deprecated route: dedup silently returns the list; legacy path kept for
+            # backwards-compat only (contacts_tab_create is the canonical add endpoint).
+            logger.info(
+                "Dedup [legacy create_site_contact]: email {} already exists at site {} (company {})",
+                email,
+                site_id,
+                company_id,
+            )
         else:
             contact = SiteContact(
                 customer_site_id=site_id,
@@ -6823,18 +6813,16 @@ async def edit_site(
     if not site_name:
         raise HTTPException(400, "site_name is required")
     site.site_name = site_name
-    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
-    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
-    site.city = form.get("city", "").strip() or site.city
-    site.state = form.get("state", "").strip() or site.state
-    site.zip = form.get("zip", "").strip() or site.zip
-    site.country = form.get("country", "").strip() or site.country
-    site.site_type = form.get("site_type", "").strip() or site.site_type
-    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
-    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        site.notes = notes_val
+    site.address_line1 = form.get("address_line1", "").strip() or None
+    site.address_line2 = form.get("address_line2", "").strip() or None
+    site.city = form.get("city", "").strip() or None
+    site.state = form.get("state", "").strip() or None
+    site.zip = form.get("zip", "").strip() or None
+    site.country = form.get("country", "").strip() or None
+    site.site_type = form.get("site_type", "").strip() or None
+    site.payment_terms = form.get("payment_terms", "").strip() or None
+    site.shipping_terms = form.get("shipping_terms", "").strip() or None
+    site.notes = form.get("notes", "").strip() or None
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
@@ -6926,6 +6914,20 @@ async def edit_site_contact(
     email_val = form.get("email", "").strip()
     if email_val and "@" not in email_val:
         raise HTTPException(400, "Invalid email address")
+
+    # Per-site email uniqueness on edit
+    if email_val:
+        email_dup = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                sqlfunc.lower(SiteContact.email) == email_val.strip().lower(),
+                SiteContact.id != contact_id,
+            )
+            .first()
+        )
+        if email_dup:
+            raise HTTPException(409, f"Another contact at this site already uses {email_val}")
 
     # Write all editable fields with explicit clear semantics (no OR-fallback)
     contact.full_name = full_name
@@ -7035,7 +7037,14 @@ async def get_site_contact_notes(
 
     return template_response(
         "htmx/partials/customers/contact_notes.html",
-        {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
+        {
+            "request": request,
+            "contact": contact,
+            "notes": notes,
+            "company_id": company_id,
+            "site_id": site_id,
+            "no_email_contact": not contact.email,
+        },
     )
 
 
@@ -7262,6 +7271,7 @@ async def log_phone_call(
 ):
     """Log a phone call to a vendor and return updated activity tab."""
     get_requisition_or_404(db, req_id)  # validates existence
+    require_requisition_access(db, req_id, user)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "").strip()
@@ -7388,6 +7398,7 @@ async def update_response_status(
     """Update vendor response status (reviewed/rejected/flagged)."""
     from ..models.offers import VendorResponse
 
+    require_requisition_access(db, req_id, user)
     vr = (
         db.query(VendorResponse)
         .filter(
@@ -8512,7 +8523,13 @@ async def lead_status_update(
     Returns updated lead card when called from results view (for OOB swap), or updated
     lead detail when called from lead detail page.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import update_lead_status
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     status_val = form.get("status", "").strip()
@@ -8597,7 +8614,13 @@ async def lead_feedback(
 
     Returns updated lead detail.
     """
+    from ..models.sourcing_lead import SourcingLead
     from ..services.sourcing_leads import append_lead_feedback
+
+    _lead = db.get(SourcingLead, lead_id)
+    if not _lead:
+        raise HTTPException(404, "Lead not found")
+    require_requisition_access(db, _lead.requisition_id, user, label="Lead")
 
     form = await request.form()
     note = form.get("note", "").strip() or None
@@ -10746,7 +10769,7 @@ async def reclaim_prospect_htmx(
 @router.get("/v2/partials/settings", response_class=HTMLResponse)
 async def settings_partial(
     request: Request,
-    tab: str = "sources",
+    tab: str = "connectors",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -10763,11 +10786,10 @@ async def settings_sources_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Sources tab content."""
-    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
-    ctx = _base_ctx(request, user, "settings")
-    ctx["sources"] = sources
-    return template_response("htmx/partials/settings/sources.html", ctx)
+    """Sources tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
 
 
 @router.get("/v2/partials/settings/system", response_class=HTMLResponse)
@@ -10886,44 +10908,200 @@ async def settings_api_keys_tab(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """API credentials management tab — admin only."""
+    """API keys tab — redirects to unified Connectors tab."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/v2/partials/settings/connectors", status_code=302)
+
+
+def _build_connector_field(db, source_name: str, env_var: str) -> dict:
+    """Return {is_set, masked} for one env-var credential field."""
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
+
+    is_set = credential_is_set(db, source_name, env_var)
+    masked = ""
+    if is_set:
+        plain = get_credential(db, source_name, env_var)
+        masked = mask_value(plain) if plain else "••••••••"
+    return {"is_set": is_set, "masked": masked}
+
+
+def _enrich_source(source, db) -> dict:
+    """Build the per-source context dict for the connectors tab."""
+    from ..services import connector_service
+
+    name = source.name
+    ct = connector_service.control_type(source)
+    keyless = connector_service.is_keyless(source)
+
+    # Credential fields
+    env_vars = source.env_vars or []
+    creds = {ev: _build_connector_field(db, name, ev) for ev in env_vars}
+    credential_set = any(c["is_set"] for c in creds.values())
+
+    # Clay OAuth state
+    if name == "clay_enrichment":
+        oauth_connected = clay_oauth.is_connected()
+        needs_reconnect = clay_oauth.needs_reconnect()
+    else:
+        oauth_connected = False
+        needs_reconnect = False
+
+    state = connector_service.connector_state(
+        source,
+        credential_set=credential_set,
+        oauth_connected=oauth_connected,
+        needs_reconnect=needs_reconnect,
+        keyless=keyless,
+    )
+
+    # Keyless note
+    if ct == "keyless":
+        if name == "ai_live_web":
+            keyless_note = "No key required — uses your Anthropic key."
+        else:
+            keyless_note = "No key required — switch it on to use it."
+    else:
+        keyless_note = ""
+
+    # Planned connectors are never testable — they have no implementation yet.
+    if ct == "planned":
+        testable = False
+    else:
+        # Testable = has some form of access
+        testable = bool(credential_set or oauth_connected or keyless)
+
+    return {
+        "id": source.id,
+        "name": name,
+        "display_name": source.display_name or name,
+        "description": source.description or "",
+        "is_active": source.is_active,
+        "state": state,
+        "control_type": ct,
+        "env_vars": env_vars,
+        "creds": creds,
+        "oauth_connected": oauth_connected,
+        "needs_reconnect": needs_reconnect,
+        "status": source.status or "pending",
+        "last_error": source.last_error or "",
+        "last_success": source.last_success,
+        "error_count_24h": getattr(source, "error_count_24h", 0) or 0,
+        "keyless_note": keyless_note,
+        "testable": testable,
+    }
+
+
+def _build_connector_groups(db, request) -> list[dict]:
+    """Return connector_groups list-of-group-dicts for the connectors tab context.
+
+    Each group: {key, label, sources: [enriched source dict]}.
+    Sources are bucketed by connector_service.connector_group, emitted in GROUP_ORDER,
+    empty groups are dropped. Dead providers (rocketreach, clearbit) are excluded.
+    """
+    from ..services import connector_service
+
+    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
+
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    buckets: dict[str, list[dict]] = {key: [] for key, _ in connector_service.GROUP_ORDER}
+
+    for src in sources:
+        if src.name in _DEAD:
+            continue
+        group_key = connector_service.connector_group(src)
+        if group_key not in buckets:
+            group_key = "part_sourcing"
+        buckets[group_key].append(_enrich_source(src, db))
+
+    groups = []
+    for key, label in connector_service.GROUP_ORDER:
+        members = buckets.get(key, [])
+        if members:
+            groups.append({"key": key, "label": label, "sources": members})
+
+    return groups
+
+
+@router.get("/v2/partials/settings/connectors", response_class=HTMLResponse)
+async def settings_connectors_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unified Connectors tab — admin only.
+
+    Replaces sources + api-keys tabs.
+    """
     if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
 
-    from ..config import GRAPH_SCOPES
-    from ..services.credential_service import credential_is_set, get_credential, mask_value
+    ctx = _base_ctx(request, user, "settings")
+    ctx["connector_groups"] = _build_connector_groups(db, request)
+    return template_response("htmx/partials/settings/connectors.html", ctx)
 
-    def _field(source: str, env_var: str) -> dict:
-        is_set = credential_is_set(db, source, env_var)
-        masked = ""
-        if is_set:
-            plain = get_credential(db, source, env_var)
-            masked = mask_value(plain) if plain else "••••••••"
-        return {"is_set": is_set, "masked": masked}
 
-    current_scopes = set(GRAPH_SCOPES.split())
-    needed_scopes = {"Calls.Read", "Calls.Initiate", "CallRecords.Read.All"}
+@router.get("/v2/partials/settings/connector-card/{source_id}", response_class=HTMLResponse)
+async def connector_card_partial(
+    source_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Single connector card partial — used as the swap unit for toggle/test/save.
+
+    Returns the rendered card macro for one source, or 404 if not found.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    source = db.query(ApiSource).filter(ApiSource.id == source_id).first()
+    if not source:
+        raise HTTPException(404, f"Connector {source_id!r} not found")
+
+    enriched = _enrich_source(source, db)
+    ctx = _base_ctx(request, user, "settings")
+    ctx["s"] = enriched
+    return template_response("htmx/partials/settings/_connector_card_partial.html", ctx)
+
+
+@router.post("/v2/partials/settings/connectors/test-all", response_class=HTMLResponse)
+async def connectors_test_all(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Run Test for every credentialed + active source, sequentially (don't hammer
+    provider APIs), and return an OOB bundle of refreshed cards.
+
+    Sources without credentials / inactive are skipped. Per-source failures are
+    tolerated (recorded as Error) and never abort the sweep.
+    """
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(403, "Admin only")
+
+    from ..routers.sources import run_source_test
+
+    _DEAD = {"rocketreach_enrichment", "clearbit_enrichment"}
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+
+    tested: list[dict] = []
+    for src in sources:
+        if src.name in _DEAD or not src.is_active:
+            continue
+        enriched = _enrich_source(src, db)
+        if not enriched["testable"]:
+            continue
+        try:
+            await run_source_test(src, db)
+        except Exception as e:  # defensive — run_source_test already swallows
+            logger.warning("Test-all probe failed for {}: {}", src.name, e)
+        tested.append(_enrich_source(src, db))
 
     ctx = _base_ctx(request, user, "settings")
-    ctx.update(
-        {
-            "lusha_api_key": _field("lusha_enrichment", "LUSHA_API_KEY"),
-            "explorium_api_key": _field("explorium_enrichment", "EXPLORIUM_API_KEY"),
-            "apollo_api_key": _field("apollo_enrichment", "APOLLO_API_KEY"),
-            "hunter_api_key": _field("hunter_enrichment", "HUNTER_API_KEY"),
-            "clay_connected": clay_oauth.is_connected(),
-            "clay_needs_reconnect": clay_oauth.needs_reconnect(),
-            "eight_by_eight_api_key": _field("eight_by_eight", "EIGHT_BY_EIGHT_API_KEY"),
-            "eight_by_eight_pbx_id": _field("eight_by_eight", "EIGHT_BY_EIGHT_PBX_ID"),
-            "eight_by_eight_username": _field("eight_by_eight", "EIGHT_BY_EIGHT_USERNAME"),
-            "eight_by_eight_password": _field("eight_by_eight", "EIGHT_BY_EIGHT_PASSWORD"),
-            "eight_by_eight_timezone": _field("eight_by_eight", "EIGHT_BY_EIGHT_TIMEZONE"),
-            "current_scopes": sorted(current_scopes),
-            "missing_scopes": sorted(needed_scopes - current_scopes),
-            "teams_ready": not (needed_scopes - current_scopes),
-        }
-    )
-    return template_response("htmx/partials/settings/api_keys.html", ctx)
+    ctx["tested_sources"] = tested
+    return template_response("htmx/partials/settings/_connectors_testall.html", ctx)
 
 
 @router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
@@ -12344,6 +12522,7 @@ async def part_header_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -12469,6 +12648,7 @@ async def part_cell_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
@@ -12551,6 +12731,7 @@ async def part_spec_save(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     if req.sourcing_status == SourcingStatus.ARCHIVED:
         return HTMLResponse("Cannot edit archived part", status_code=403)
@@ -12662,6 +12843,7 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
     old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
     if (req.sale_notes or "") != (old_sale_notes or ""):
@@ -12691,6 +12873,7 @@ async def create_part_task(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, req.requisition_id, user, label="Part")
 
     form = await request.form()
     title = (form.get("title") or "").strip()
@@ -12787,6 +12970,7 @@ async def archive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.ARCHIVED
     db.commit()
@@ -12808,6 +12992,7 @@ async def unarchive_single_part(
     part = db.get(Requirement, requirement_id)
     if not part:
         raise HTTPException(404, "Part not found")
+    require_requisition_access(db, part.requisition_id, user, label="Part")
 
     part.sourcing_status = SourcingStatus.OPEN
     db.commit()
@@ -12827,6 +13012,7 @@ async def archive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
@@ -12857,6 +13043,7 @@ async def unarchive_requisition(
     requisition = db.get(Requisition, req_id)
     if not requisition:
         raise HTTPException(404, "Requisition not found")
+    require_requisition_access(db, req_id, user)
 
     prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
@@ -12890,6 +13077,13 @@ async def bulk_archive(
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
 
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:
@@ -12933,6 +13127,13 @@ async def bulk_unarchive(
     body = await request.json()
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
+
+    # Ownership guard (no-op for buyer/manager/admin; 404 for a restricted non-owner)
+    for _rid in requisition_ids:
+        require_requisition_access(db, _rid, user)
+    if requirement_ids:
+        for _r in db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all():
+            require_requisition_access(db, _r.requisition_id, user, label="Requirement")
 
     # Bulk-update parts in a single query instead of N+1
     if requirement_ids:

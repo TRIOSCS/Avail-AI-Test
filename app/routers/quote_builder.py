@@ -181,8 +181,12 @@ async def quote_builder_save(
     db: Session = Depends(get_db),
 ):
     """Save the quote from the builder modal."""
-    from ..dependencies import get_req_for_user
+    from ..dependencies import get_req_for_user, require_requisition_access
     from ..services.quote_builder_service import save_quote_from_builder
+
+    # Ownership guard: SALES/TRADER may only save quotes for requisitions they own
+    # (no-op for buyer/manager/admin). 404 to avoid leaking existence.
+    require_requisition_access(db, req_id, user)
 
     req = get_req_for_user(db, user, req_id)
     if not req:

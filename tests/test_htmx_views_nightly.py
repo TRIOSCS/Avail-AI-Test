@@ -908,15 +908,28 @@ class TestSettingsPartials:
         [
             ("/v2/partials/settings", 200),
             ("/v2/partials/settings?tab=profile", 200),
-            ("/v2/partials/settings/sources", 200),
             ("/v2/partials/settings/profile", 200),
             ("/v2/partials/settings/system", 403),  # non-admin
+            ("/v2/partials/settings/connectors", 403),  # admin-only, buyer role → 403
         ],
-        ids=["index", "index_tab_param", "sources", "profile", "system_non_admin"],
+        ids=["index", "index_tab_param", "profile", "system_non_admin", "connectors_non_admin"],
     )
     def test_settings(self, client, db_session: Session, path: str, expected_status: int):
         resp = client.get(path)
         assert resp.status_code == expected_status
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/v2/partials/settings/sources",
+            "/v2/partials/settings/api-keys",
+        ],
+        ids=["sources_redirect", "api_keys_redirect"],
+    )
+    def test_settings_old_tabs_redirect_to_connectors(self, client, path: str):
+        resp = client.get(path, follow_redirects=False)
+        assert resp.status_code == 302
+        assert "/connectors" in resp.headers["location"]
 
 
 # ── Inline Edit / Action ──────────────────────────────────────────────
