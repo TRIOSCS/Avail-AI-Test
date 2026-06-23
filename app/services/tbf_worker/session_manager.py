@@ -9,11 +9,18 @@ TBF is a Vue SPA:
   fixed settle, never networkidle.
 - The ``--window-size`` launch arg is MANDATORY: without it the no-WM Xvfb
   window is 0x0 and nothing lays out / is clickable.
-- The logged-in marker is the "TBS Member" badge text, which only renders when
-  authenticated.
+- The logged-in marker is the PRESENCE of the "Sign out" control (rendered into
+  the member nav on every authenticated page). Keying on a positive marker fails
+  SAFE: an unrecognized page reads as logged-out and re-authenticates instead of
+  silently writing anonymized rows. Do NOT key on "TBS Member" text — that is the
+  *anonymized company label TBF shows to logged-OUT visitors* on listings.
 - The login form is ``form:has(input[name='password'])`` — there is also a
   password-RESET form (email only) and a ``fakeEmail`` honeypot; we never touch
-  those.
+  those. The submit control is the form's ``button[type=submit]``.
+- 2FA is currently NOT enforced on the account (TBF offers an optional "Setup
+  2FA Now"); email+password logs straight in. If 2FA is later enabled an
+  emailed-code step appears that an unattended worker cannot complete — login()
+  detects and logs that case clearly.
 
 Called by: worker loop
 Depends on: patchright, config
@@ -34,8 +41,14 @@ from .config import TbfConfig
 
 HOME_URL = "https://www.thebrokersite.com/"
 
-# Logged-in marker: a member badge that only renders when authenticated.
-MEMBER_MARKER = "text=TBS Member"
+# Logged-IN marker (POSITIVE, fail-safe): the "Sign out" control, rendered into
+# the member nav (desktop dropdown + mobile menu) on every authenticated page and
+# absent when logged out. We key on its PRESENCE rather than the ABSENCE of a
+# "Sign In" button so that any selector/label drift fails SAFE — an unrecognized
+# page reads as logged-out and triggers a re-login, instead of silently writing
+# anonymized "TBS Member" rows. (Never key on "TBS Member" text — that is the
+# anonymized company label TBF shows to logged-OUT visitors.)
+LOGGED_IN_MARKER = "a:has-text('Sign out'), button:has-text('Sign out')"
 
 # Cookie/consent banner buttons to try-dismiss (best effort, never fatal).
 _CONSENT_BUTTON_NAMES = ("^Accept$", "^Dismiss$", "^Close$", "^I agree$")
@@ -103,11 +116,14 @@ class TbfSessionManager:
     async def check_session_health(self) -> bool:
         """Check if the TBF session is still valid.
 
-        Logged-in marker = the "TBS Member" member badge text appears on the page.
-        Logged-out = that marker is absent.
+        Logged in == the "Sign out" control (LOGGED_IN_MARKER) is PRESENT. This is a
+        positive, fail-safe check: an unrecognized page (selector drift, a failed load)
+        reads as logged-out and forces a re-login rather than letting the worker write
+        anonymized "TBS Member" rows. (The original bug keyed on "TBS Member" text — the
+        logged-OUT company label — and was a false positive.)
         """
         try:
-            return await self._page.locator(MEMBER_MARKER).count() > 0
+            return await self._page.locator(LOGGED_IN_MARKER).count() > 0
         except Exception as e:
             logger.warning("TBF session health check failed: {}", e)
             return False
@@ -146,14 +162,27 @@ class TbfSessionManager:
             await asyncio.sleep(0.5)
             await form.locator("input[name='password']").fill(self.config.TBF_PASSWORD)
             await asyncio.sleep(0.5)
-            await form.locator("button:has-text('Sign')").click()
+            # The form's submit control (NOT the nav "Sign In" toggle that opened
+            # the modal — that one is a `type=button`).
+            await form.locator("button[type=submit]").first.click()
             await asyncio.sleep(7)
 
             self.is_logged_in = await self.check_session_health()
             if self.is_logged_in:
                 logger.info("TBF login: success")
             else:
-                logger.error("TBF login: failed — 'TBS Member' marker absent after submit")
+                # If 2FA was enabled on the account, an emailed-code step blocks
+                # an unattended login — surface that distinctly from bad creds.
+                try:
+                    if await self._page.locator("input[name='code']:visible").count() > 0:
+                        logger.error(
+                            "TBF login: blocked on a 2FA code step — manual re-auth required "
+                            "(account now enforces email 2FA)"
+                        )
+                    else:
+                        logger.error("TBF login: failed — still logged out after submit (check credentials)")
+                except Exception:
+                    logger.error("TBF login: failed — still logged out after submit")
             return self.is_logged_in
 
         except Exception as e:
