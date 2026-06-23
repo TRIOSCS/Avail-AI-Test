@@ -2069,26 +2069,6 @@ class TestOfferHookExcludedPaths:
         assert offer.requirement_id == test_requisition.requirements[0].id
         _assert_not_released(db_session, rec)
 
-    def test_excess_match_does_not_release(self, db_session: Session, test_user: User, test_requisition):
-        from app.models import Company, Offer
-        from app.services.excess_service import confirm_import, create_excess_list, match_excess_demand
-
-        requirement = test_requisition.requirements[0]
-        requirement.normalized_mpn = normalize_mpn_key("LM317T")
-        company = Company(name="Arrow Electronics")
-        db_session.add(company)
-        db_session.commit()
-
-        rec = _hook_record(db_session, "Arrow Electronics")
-        el = create_excess_list(db_session, title="Excess", company_id=company.id, owner_id=test_user.id)
-        confirm_import(db_session, el.id, [{"part_number": "LM317T", "quantity": 500, "asking_price": 0.45}])
-        result = match_excess_demand(db_session, el.id, user_id=test_user.id)
-
-        assert result["matches_created"] >= 1
-        offer = db_session.query(Offer).filter_by(source="excess", requisition_id=test_requisition.id).one()
-        assert offer.requirement_id == requirement.id
-        _assert_not_released(db_session, rec)
-
     def test_clone_does_not_release(self, client, db_session: Session, test_requisition, test_offer):
         from app.models import Offer
 

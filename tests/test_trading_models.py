@@ -1,11 +1,9 @@
 """Tests for the additive Trading (resell-brokerage) schema foundation.
 
-Covers the new inbound-offer models (ExcessOffer / ExcessOfferLine), the
+Covers the inbound-offer models (ExcessOffer / ExcessOfferLine), the
 additive columns on the kept models (ExcessLineItem rollup + material_card_id,
-ExcessList.version), the new StrEnum constants, and the new Pydantic schemas.
-
-This is ADDITIVE-only: it does NOT touch Bid / BidSolicitation (still present
-this chunk) — those stay covered by tests/test_models_excess.py.
+ExcessList.version), the StrEnum constants, and the Pydantic schemas. The kept
+ExcessList / ExcessLineItem models stay covered by tests/test_models_excess.py.
 
 Called by: pytest
 Depends on: app.constants, app.models.excess, app.schemas.excess, tests.conftest

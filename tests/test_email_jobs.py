@@ -519,7 +519,6 @@ class TestScanUserInbox:
             patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
         ):
             await _scan_user_inbox(user, mock_db)
             mock_db.commit.assert_called()
@@ -553,7 +552,6 @@ class TestScanUserInbox:
             patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
         ):
             await _scan_user_inbox(user, mock_db)
             # poll failed, so last_inbox_scan should NOT update
@@ -578,7 +576,6 @@ class TestScanUserInbox:
             ),
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
         ):
             # Should not raise even when sub-ops fail
             await _scan_user_inbox(user, mock_db)
@@ -598,81 +595,12 @@ class TestScanUserInbox:
             patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock) as mock_rfq,
-            patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
         ):
             await _scan_user_inbox(user, mock_db)
             # Verify is_backfill=True passed to sub-ops
             mock_stock.assert_called_once()
             args = mock_stock.call_args
             assert args[0][2] is True  # is_backfill
-
-
-# ── _scan_excess_bid_responses ───────────────────────────────────────
-
-
-class TestScanExcessBidResponses:
-    @pytest.mark.asyncio
-    async def test_scan_disabled(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        user = MagicMock()
-        mock_db = MagicMock()
-
-        with patch("app.config.settings") as mock_settings:
-            mock_settings.excess_bid_scan_enabled = False
-            await _scan_excess_bid_responses(user, mock_db)
-
-    @pytest.mark.asyncio
-    async def test_scan_no_pending(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        user = MagicMock()
-        user.id = 1
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.count.return_value = 0
-
-        with patch("app.config.settings") as mock_settings:
-            mock_settings.excess_bid_scan_enabled = True
-            mock_settings.excess_bid_parse_lookback_days = 30
-            await _scan_excess_bid_responses(user, mock_db)
-
-    @pytest.mark.asyncio
-    async def test_scan_with_bids(self):
-        from app.jobs.email_jobs import _scan_excess_bid_responses
-
-        user = MagicMock()
-        user.id = 1
-        user.email = "buyer@trioscs.com"
-        user.access_token = "tok"
-        mock_db = MagicMock()
-        mock_db.query.return_value.filter.return_value.count.return_value = 1
-
-        solicitation = MagicMock()
-        solicitation.status = "sent"
-        mock_db.get.return_value = solicitation
-
-        gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(
-            return_value={
-                "value": [
-                    {
-                        "subject": "Re: [EXCESS-BID-42] Stock Offer",
-                        "body": {"content": "We bid $1.50 for 500 pcs"},
-                        "receivedDateTime": "2026-03-01T10:00:00Z",
-                    }
-                ]
-            }
-        )
-
-        with (
-            patch("app.config.settings") as mock_settings,
-            patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
-            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
-            patch("app.services.excess_service.parse_bid_from_email", new_callable=AsyncMock, return_value=MagicMock()),
-        ):
-            mock_settings.excess_bid_scan_enabled = True
-            mock_settings.excess_bid_parse_lookback_days = 30
-            await _scan_excess_bid_responses(user, mock_db)
 
 
 # ── _mine_vendor_contacts ────────────────────────────────────────────
@@ -1260,12 +1188,3 @@ class TestRegexPatterns:
         assert m.group(1) == "42"
 
         assert RFQ_SUBJECT_TAG_RE.search("No tag here") is None
-
-    def test_excess_bid_re(self):
-        from app.jobs.email_jobs import _EXCESS_BID_RE
-
-        m = _EXCESS_BID_RE.search("Re: [EXCESS-BID-123] Your bid request")
-        assert m is not None
-        assert m.group(1) == "123"
-
-        assert _EXCESS_BID_RE.search("No bid tag") is None
