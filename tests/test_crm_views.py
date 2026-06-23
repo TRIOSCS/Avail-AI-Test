@@ -574,7 +574,7 @@ class TestContactPanel:
         assert resp.status_code == 200
         assert "data-outreach-log" in resp.text
         assert 'href="tel:+14155550000"' in resp.text
-        assert 'href="mailto:jane@contactpanel.com"' in resp.text
+        assert "outlook.office.com/mail/deeplink/compose?to=" in resp.text
         assert "https://teams.microsoft.com/l/chat/0/0?users=jane%40contactpanel.com" in resp.text
         assert f'data-company-id="{company.id}"' in resp.text
         assert f'data-contact-id="{contact.id}"' in resp.text
@@ -586,8 +586,9 @@ class TestContactPanel:
         company, _, _ = self._make_company_with_contact(db_session, wechat_id="jane_wc")
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert "weixin://dl/chat?jane_wc" in resp.text
         assert 'data-channel="wechat"' in resp.text
+        assert 'data-value="jane_wc"' in resp.text
+        assert "navigator.clipboard" in resp.text
 
     def test_no_wechat_action_without_handle(self, client: TestClient, db_session: Session, test_user: User):
         """No WeChat button when the contact has no wechat_id."""
@@ -1014,7 +1015,7 @@ class TestContactsTabP33:
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         html = resp.text
         assert "data-outreach-log" in html
-        assert 'href="mailto:alice@p33.com"' in html
+        assert "outlook.office.com/mail/deeplink/compose?to=" in html
 
     # ── empty state ─────────────────────────────────────────────────────
 
