@@ -3386,18 +3386,21 @@ class TestContactsTabHome:
         # should NOT be the site_contacts inline form (no showAdd Alpine state)
         assert "showAdd" not in resp.text
 
-    def test_edit_hx_target_default_renders_site_contacts(
+    def test_edit_hx_target_default_renders_grouped_list(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit without HX-Target returns site_contacts.html (Sites-tab path)."""
+        """POST edit without HX-Target now always returns grouped list
+        (site_contacts.html path retired — the Sites tab no longer carries a contact
+        editor)."""
         company, site, contact = self._make_company_with_hq(db_session)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
         )
         assert resp.status_code == 200
-        # site_contacts.html has showAdd Alpine state
-        assert "showAdd" in resp.text
+        # grouped list renders site section header — not the old showAdd site_contacts form
+        assert "HQ" in resp.text
+        assert "showAdd" not in resp.text
 
     def test_edit_writes_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with linkedin_url persists it to the DB."""
@@ -3731,11 +3734,11 @@ class TestC3KebabActionsAndCadence:
         # contact gone
         assert "Only One" not in resp.text
 
-    def test_delete_via_tab_without_hx_target_returns_empty_string(
+    def test_delete_without_hx_target_renders_grouped_list(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """DELETE without HX-Target header still deletes and returns empty string
-        (site_card path unchanged)."""
+        """DELETE without HX-Target now always returns grouped list (site_contacts.html
+        path retired — the Sites tab no longer carries a contact editor)."""
         from app.models.crm import SiteContact
 
         company, site, ca, cb = self._make_two_contacts(db_session)
@@ -3745,6 +3748,9 @@ class TestC3KebabActionsAndCadence:
         assert resp.status_code == 200
         db_session.expire_all()
         assert db_session.get(SiteContact, ca.id) is None
+        # Returns the grouped list (remaining contact visible, old inline form gone)
+        assert "Beta Contact" in resp.text
+        assert "showAdd" not in resp.text
 
     # ── Cadence badge and sort ──────────────────────────────────────────
 

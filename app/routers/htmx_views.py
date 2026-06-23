@@ -5577,7 +5577,7 @@ async def company_tab(
 
         sites = (
             db.query(CustomerSite)
-            .options(joinedload(CustomerSite.owner))
+            .options(joinedload(CustomerSite.owner), joinedload(CustomerSite.site_contacts))
             .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
             .all()
         )
@@ -6303,11 +6303,10 @@ async def delete_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a site contact.
+    """Delete a site contact and re-render the Contacts tab grouped list.
 
-    Branches on HX-Target header:
-      - 'contacts-tab-list' → re-renders _contacts_grouped_list.html (Contacts tab)
-      - anything else       → returns empty string (site_card outerHTML-remove path)
+    The Sites tab no longer carries a contact editor — the only render target is
+    #contacts-tab-list (the canonical Contacts tab surface).
     """
     # Validate site belongs to company BEFORE mutating — closes IDOR gap and
     # guarantees company is available for the contacts-tab-list render path.
@@ -6327,11 +6326,7 @@ async def delete_site_contact(
     db.commit()
     logger.info("Contact {} deleted by {}", contact_id, user.email)
 
-    hx_target = request.headers.get("HX-Target", "")
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    return HTMLResponse("")
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -6371,22 +6366,9 @@ async def set_primary_contact(
     contact.is_primary = True
     db.commit()
 
-    hx_target = request.headers.get("HX-Target", "")
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    # Sites-tab path (default): re-render the per-site contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    # The Sites tab no longer carries a contact editor — always render the
+    # canonical Contacts tab surface (#contacts-tab-list).
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
@@ -6725,12 +6707,11 @@ async def edit_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update editable contact fields and return refreshed contacts panel.
+    """Update editable contact fields and return refreshed Contacts tab grouped list.
 
     Writes contact_role (validated via _validate_role; blank→NULL, unknown→400),
-    is_priority, and linkedin_url.  Branches render target on HX-Target header:
-      - 'contacts-tab-list' → _contacts_grouped_list.html (Contacts tab)
-      - anything else → site_contacts.html (Sites tab path unchanged)
+    is_priority, and linkedin_url. Always renders #contacts-tab-list — the Sites tab no
+    longer carries a contact editor.
     """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -6768,23 +6749,7 @@ async def edit_site_contact(
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
     company = db.query(Company).filter(Company.id == company_id).first()
-    hx_target = request.headers.get("HX-Target", "")
-
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    # Sites-tab path (default): re-render the per-site contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
