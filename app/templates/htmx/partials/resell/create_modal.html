@@ -1,14 +1,14 @@
 {#
-  trading/create_modal.html — New-list modal (reuses the excess create-modal shape).
-  Posts to /api/trading/lists which re-renders the My-Lists list partial.
+  resell/create_modal.html — New-list modal (reuses the excess create-modal shape).
+  Posts to /api/resell/lists which re-renders the My-Lists list partial.
   Receives: companies.
-  Called by: trading.trading_create_form.
+  Called by: resell.resell_create_form.
 #}
 <div class="p-5">
   <h2 class="text-lg font-semibold text-gray-900 mb-5">New excess list</h2>
 
-  <form hx-post="/api/trading/lists"
-        hx-target="#trading-list-body"
+  <form hx-post="/api/resell/lists"
+        hx-target="#resell-list-body"
         hx-swap="innerHTML"
         data-loading-disable
         @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message='List created'; $store.toast.type='success'; $store.toast.show=true; }"

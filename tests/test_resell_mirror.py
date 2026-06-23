@@ -1,4 +1,4 @@
-"""test_trading_mirror.py — Sighting live-mirror + virtual requirement (Chunk C).
+"""test_resell_mirror.py — Sighting live-mirror + virtual requirement (Chunk C).
 
 Covers the additive Sighting live-mirror (spec §"Sighting live-mirror"): each posted
 ``ExcessLineItem`` mirrors into a ``Sighting`` so the existing matcher sees it for free,

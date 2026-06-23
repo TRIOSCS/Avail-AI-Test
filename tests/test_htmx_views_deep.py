@@ -138,7 +138,7 @@ class TestV2PagePathVariants:
         "path",
         [
             "/v2/buy-plans",
-            "/v2/trading",
+            "/v2/resell",
             "/v2/quotes",
             "/v2/prospecting",
             "/v2/proactive",
@@ -152,7 +152,7 @@ class TestV2PagePathVariants:
             "/v2/materials/1",
             "/v2/prospecting/1",
             "/v2/trouble-tickets/1",
-            "/v2/trading/1",
+            "/v2/resell/1",
             "/v2/prospecting/5",
             "/v2/sourcing/leads/1",
         ],

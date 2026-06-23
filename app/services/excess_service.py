@@ -1,11 +1,11 @@
-"""excess_service.py — Business logic for the Trading workspace.
+"""excess_service.py — Business logic for the Resell workspace.
 
 Handles CRUD operations for ExcessList, bulk import of ExcessLineItems with
 flexible header detection (part_number/mpn, quantity/qty, etc.), MaterialCard
 resolution, role-derived capabilities, inbound broker offers (ExcessOffer /
 ExcessOfferLine), the best-price rollup, list close, and aggregate stats.
 
-Called by: routers/trading.py
+Called by: routers/resell.py
 Depends on: models (ExcessList, ExcessLineItem, ExcessOffer, Company), database
 """
 
@@ -31,7 +31,7 @@ from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer, ExcessOffer
 from ..utils.normalization import normalize_mpn_key
 
 # ---------------------------------------------------------------------------
-# Trading capabilities — role-derived powers (spec §"Roles & capabilities")
+# Resell capabilities — role-derived powers (spec §"Roles & capabilities")
 # ---------------------------------------------------------------------------
 #
 # Two powers modelled as capabilities (NOT scattered ``role == 'trader'`` checks),
@@ -402,7 +402,7 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
 
 
 # ---------------------------------------------------------------------------
-# Trading: inbound offers (ExcessOffer / ExcessOfferLine) + best-price rollup
+# Resell: inbound offers (ExcessOffer / ExcessOfferLine) + best-price rollup
 # ---------------------------------------------------------------------------
 #
 # An inbound offer is a broker's offer to BUY a posted excess list. It is either
@@ -621,7 +621,7 @@ def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
 
 
 def get_excess_stats(db: Session) -> dict:
-    """Compute aggregate stats for the Trading workspace (offer counts, not bid counts).
+    """Compute aggregate stats for the Resell workspace (offer counts, not bid counts).
 
     Returns {total_lists, total_line_items, open_offers, matched_items, total_offers,
     awarded_items}.

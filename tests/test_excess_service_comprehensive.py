@@ -227,7 +227,7 @@ class TestGetExcessStats:
         item = _make_line_item(db_session, el)
 
         # An inbound broker offer (an OPEN ExcessOffer with a matched line) — the
-        # Trading replacement for the old per-line bid.
+        # Resell replacement for the old per-line bid.
         submit_offer(
             db_session,
             list_id=el.id,

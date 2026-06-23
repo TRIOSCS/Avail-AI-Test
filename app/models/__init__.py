@@ -41,7 +41,7 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 # Enrichment Worker Status
 from .enrichment_worker_status import EnrichmentWorkerStatus  # noqa: F401
 
-# Excess Inventory / Trading (resell-brokerage) offers
+# Excess Inventory / Resell (resell-brokerage) offers
 from .excess import (  # noqa: F401
     CustomerBid,
     CustomerBidLine,
