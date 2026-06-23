@@ -1772,14 +1772,21 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
   `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
-  `https://api.clay.com/v3/mcp`). Authenticates with an OAuth access token
-  (`Authorization: Bearer <token>`); on 401 it attempts one token refresh then
-  retries. Not connected → returns `None`/`[]` (fail-soft; blend continues without
-  Clay). Company: `find-and-enrich-company` (sync). Contacts:
-  `find-and-enrich-contacts-at-company`; emails polled via `get-task-context`
-  (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. **The old Clay WEBHOOK
-  path (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is
-  now MCP-only.**
+  `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
+  `tools/call` requires a session, so the connector first runs the handshake
+  (`initialize` → read the `Mcp-Session-Id` response header → `notifications/initialized`)
+  and **caches that session per access token** (reused across calls; a bare sessionless
+  call returns `400 "Missing Mcp-Session-Id header"`). `tools/call` responses are
+  **server-sent events** (`content-type: text/event-stream`), parsed from the `data:`
+  line — not plain JSON. Authenticates with an OAuth access token
+  (`Authorization: Bearer <token>`); on 401 it refreshes the token + re-initializes the
+  session then retries once; on 400/404 (expired session) it re-initializes + retries
+  once. Not connected → returns `None`/`[]` (fail-soft; blend continues without Clay).
+  Company: `find-and-enrich-company` (sync; `result.structuredContent.companies[domain]`).
+  Contacts: `find-and-enrich-contacts-at-company` (`.contacts[]`); emails polled via
+  `get-task-context` (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. Protocol
+  verified live 2026-06-23. **The old Clay WEBHOOK path (`clay_service.py` +
+  `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
 
   **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
   (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).
