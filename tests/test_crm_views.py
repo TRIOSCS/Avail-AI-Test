@@ -2142,10 +2142,10 @@ class TestBuyingRoleSetter:
       POST /v2/partials/customers/{company_id}/contacts/{contact_id}/role
     """
 
-    def _make_company_with_contact(self, db_session: Session, **contact_kwargs):
+    def _make_company_with_contact(self, db_session: Session, owner_id=None, **contact_kwargs):
         from app.models.crm import CustomerSite, SiteContact
 
-        company = Company(name="RoleSet Co", is_active=True)
+        company = Company(name="RoleSet Co", is_active=True, account_owner_id=owner_id)
         db_session.add(company)
         db_session.flush()
         site = CustomerSite(company_id=company.id, site_name="HQ", is_active=True)
@@ -2166,7 +2166,7 @@ class TestBuyingRoleSetter:
     def test_set_role_updates_db(self, client: TestClient, db_session: Session, test_user: User):
         """POST contact_role=buyer_po persists to SiteContact.contact_role."""
 
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "buyer_po"},
@@ -2177,7 +2177,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_rerenders_chip(self, client: TestClient, db_session: Session, test_user: User):
         """POST role returns HTML containing the chip for the new role."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "specifier"},
@@ -2187,7 +2187,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_invalid_value_returns_400(self, client: TestClient, db_session: Session, test_user: User):
         """POST with unknown role value returns 400."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "wizard"},
@@ -2197,7 +2197,7 @@ class TestBuyingRoleSetter:
     def test_set_role_all_canonical_values_accepted(self, client: TestClient, db_session: Session, test_user: User):
         """All canonical buying-role values are accepted."""
         for role_val in ("specifier", "buyer_po", "ap_payer", "logistics", "exec", "other"):
-            company, site, contact = self._make_company_with_contact(db_session)
+            company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
             resp = client.post(
                 f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
                 data={"contact_role": role_val},
@@ -2206,7 +2206,7 @@ class TestBuyingRoleSetter:
 
     def test_set_role_nonexistent_contact_returns_404(self, client: TestClient, db_session: Session, test_user: User):
         """POST to unknown contact_id returns 404."""
-        company, _, _ = self._make_company_with_contact(db_session)
+        company, _, _ = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/99999/role",
             data={"contact_role": "buyer_po"},
@@ -2216,7 +2216,9 @@ class TestBuyingRoleSetter:
     def test_set_role_blank_clears_role(self, client: TestClient, db_session: Session, test_user: User):
         """POST with contact_role='' clears the role to None."""
 
-        company, site, contact = self._make_company_with_contact(db_session, contact_role="buyer")
+        company, site, contact = self._make_company_with_contact(
+            db_session, owner_id=test_user.id, contact_role="buyer"
+        )
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": ""},
@@ -2231,7 +2233,7 @@ class TestBuyingRoleSetter:
         """Chip editor re-render contains all CANONICAL_ROLES as <option> values (driven
         by ctx 'roles', not hardcoded HTML), so adding a role to CANONICAL_ROLES
         automatically propagates to the select."""
-        company, site, contact = self._make_company_with_contact(db_session)
+        company, site, contact = self._make_company_with_contact(db_session, owner_id=test_user.id)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/contacts/{contact.id}/role",
             data={"contact_role": "specifier"},

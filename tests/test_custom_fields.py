@@ -318,6 +318,21 @@ class TestCompanyCustomFieldsEndpoints:
         )
         assert resp.status_code == 403
 
+    def test_post_exceeding_cap_returns_400_not_500(
+        self,
+        client: TestClient,
+        db_session: Session,
+        owned_company: Company,
+    ):
+        """FIX C: the @validates 30-key cap surfaces as 400, not an uncaught 500."""
+        owned_company.custom_fields = {str(i): "v" for i in range(30)}
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{owned_company.id}/custom-fields",
+            data={"label": "one-too-many", "value": "x"},
+        )
+        assert resp.status_code == 400
+
 
 # ── Contact custom-fields endpoint tests ─────────────────────────────────────
 
@@ -442,6 +457,53 @@ class TestContactCustomFieldsEndpoints:
             data={"label": "x", "value": "y"},
         )
         assert resp.status_code == 404
+
+    def test_contact_post_non_owner_returns_403(
+        self,
+        db_session: Session,
+        owned_company: Company,
+        company_contact: SiteContact,
+    ):
+        """FIX A: a non-owner, non-admin user cannot add a contact custom field."""
+        from fastapi.testclient import TestClient as _TC
+
+        from app.database import get_db
+        from app.dependencies import require_user
+        from app.main import app
+
+        other = User(email="intruder@trioscs.com", name="Intruder", role="buyer", azure_id="intruder-az")
+        db_session.add(other)
+        db_session.commit()
+        db_session.refresh(other)
+
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[require_user] = lambda: other
+        try:
+            with _TC(app, raise_server_exceptions=False) as c:
+                resp = c.post(
+                    f"/v2/partials/customers/{owned_company.id}/contacts/{company_contact.id}/custom-fields",
+                    data={"label": "x", "value": "y"},
+                )
+            assert resp.status_code == 403
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
+
+    def test_contact_post_exceeding_cap_returns_400_not_500(
+        self,
+        client: TestClient,
+        db_session: Session,
+        owned_company: Company,
+        company_contact: SiteContact,
+    ):
+        """FIX C: the contact @validates cap surfaces as 400, not an uncaught 500."""
+        company_contact.custom_fields = {str(i): "v" for i in range(30)}
+        db_session.commit()
+        resp = client.post(
+            f"/v2/partials/customers/{owned_company.id}/contacts/{company_contact.id}/custom-fields",
+            data={"label": "over", "value": "x"},
+        )
+        assert resp.status_code == 400
 
 
 # ── Template rendering tests ──────────────────────────────────────────────────

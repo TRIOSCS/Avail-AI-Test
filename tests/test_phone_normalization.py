@@ -295,7 +295,11 @@ class TestVendorCardNormalizedPhones:
 
 class TestMigrationChain:
     def test_single_head(self):
-        """Alembic must have exactly one head after adding migration 130."""
+        """Alembic must have exactly one head (the real chain invariant).
+
+        The specific head id is not asserted — later migrations legitimately chain on
+        top of 130, so hardcoding a head id is brittle.
+        """
         import pathlib
 
         from alembic.script import ScriptDirectory
@@ -303,7 +307,6 @@ class TestMigrationChain:
         alembic_dir = pathlib.Path(__file__).resolve().parent.parent / "alembic"
         heads = ScriptDirectory(str(alembic_dir)).get_heads()
         assert len(heads) == 1, f"Expected 1 head, got {len(heads)}: {heads}"
-        assert "130_phone_normalization" in heads[0]
 
     def test_migration_130_down_revision(self):
         """Migration 130 chains onto 129_drop_bid_tables."""

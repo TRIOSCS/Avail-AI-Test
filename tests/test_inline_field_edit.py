@@ -270,6 +270,68 @@ class TestContactFieldEdit:
         assert contact.linkedin_url == "https://linkedin.com/in/janedoe"
 
 
+class TestContactFieldEditAuthz:
+    """FIX A: contact inline-edit POST is IDOR-safe and owner-or-admin gated."""
+
+    def test_non_owner_post_returns_403(self, non_owner_client, test_company, site_and_contact):
+        """A logged-in user who neither owns the company nor is admin gets 403."""
+        _, contact = site_and_contact
+        resp = non_owner_client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
+            data={"field": "title", "value": "Hacker"},
+        )
+        assert resp.status_code == 403
+
+    def test_admin_post_succeeds(self, db_session, test_company, site_and_contact, admin_user):
+        """An admin (not the owner) can still edit the contact."""
+        from fastapi.testclient import TestClient
+
+        from app.main import app
+
+        _, contact = site_and_contact
+        test_company.account_owner_id = None
+        db_session.commit()
+        _make_client(app, db_session, admin_user)
+        try:
+            with TestClient(app, raise_server_exceptions=True) as c:
+                resp = c.post(
+                    f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
+                    data={"field": "title", "value": "Director"},
+                )
+            assert resp.status_code == 200
+            db_session.refresh(contact)
+            assert contact.title == "Director"
+        finally:
+            _clear_overrides(app)
+
+    def test_post_mismatched_company_returns_404(self, owner_client, db_session, test_company, site_and_contact):
+        """A contact_id that does not belong to {company_id} → 404 (IDOR guard)."""
+        _, contact = site_and_contact
+        other = Company(name="Other Co", is_active=True)
+        db_session.add(other)
+        db_session.commit()
+        db_session.refresh(other)
+        other.account_owner_id = test_company.account_owner_id
+        db_session.commit()
+        resp = owner_client.post(
+            f"/v2/partials/customers/{other.id}/contacts/{contact.id}/field",
+            data={"field": "title", "value": "Nope"},
+        )
+        assert resp.status_code == 404
+
+    def test_get_edit_mismatched_company_returns_404(self, owner_client, db_session, test_company, site_and_contact):
+        """The GET edit widget is also IDOR-scoped."""
+        _, contact = site_and_contact
+        other = Company(name="Other Co 2", is_active=True)
+        db_session.add(other)
+        db_session.commit()
+        db_session.refresh(other)
+        other.account_owner_id = test_company.account_owner_id
+        db_session.commit()
+        resp = owner_client.get(f"/v2/partials/customers/{other.id}/contacts/{contact.id}/field/edit/title")
+        assert resp.status_code == 404
+
+
 class TestCompanyKnownFields:
     """WS2: new fields added to EDITABLE_ACCOUNT_FIELDS (domain, tax_id, source, notes)."""
 

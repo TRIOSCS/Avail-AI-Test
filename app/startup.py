@@ -43,6 +43,8 @@ def run_startup_migrations() -> None:
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
         _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
+        # Normalize legacy site_type 'headquarters' → 'hq' (idempotent)
+        _exec(conn, "UPDATE customer_sites SET site_type='hq' WHERE site_type='headquarters'")
         _exec(
             conn,
             "UPDATE trouble_tickets SET resolved_at = COALESCE(diagnosed_at, created_at) + INTERVAL '1 hour' "

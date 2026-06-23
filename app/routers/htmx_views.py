@@ -5312,7 +5312,6 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
 # so the "Add <field>" affordance has a working edit endpoint behind it.
 KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
     ("legal_name", "Legal Name", "text", None),
-    ("industry", "Industry", "text", None),
     ("website", "Website", "text", None),
     ("domain", "Domain", "text", None),
     ("phone", "Phone", "text", None),
@@ -5321,20 +5320,10 @@ KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
     ("hq_city", "HQ City", "text", None),
     ("hq_state", "HQ State", "text", None),
     ("hq_country", "HQ Country", "text", None),
-    ("credit_terms", "Credit Terms", "text", None),
     ("tax_id", "Tax ID", "text", None),
     ("account_type", "Account Type", "select", ["Customer", "Prospect", "Partner", "Competitor"]),
     ("source", "Source", "text", None),
     ("notes", "Notes", "text", None),
-]
-
-KNOWN_CONTACT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
-    ("title", "Title", "text", None),
-    ("email", "Email", "text", None),
-    ("phone", "Phone", "text", None),
-    ("wechat_id", "WeChat ID", "text", None),
-    ("linkedin_url", "LinkedIn", "text", None),
-    ("contact_role", "Role", "select", list(CANONICAL_ROLES)),
 ]
 
 
@@ -5360,9 +5349,9 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
             raise HTTPException(400, f"Invalid account_type '{v}'. Valid: {choices}")
         company.account_type = v or None
     elif field == "industry":
-        company.industry = v or company.industry
+        company.industry = v or None
     elif field == "website":
-        company.website = v or company.website
+        company.website = v or None
     else:
         setattr(company, field, v or None)
     company.updated_at = datetime.now(timezone.utc)
@@ -5514,6 +5503,10 @@ async def set_contact_role(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
     contact.contact_role = _validate_role(form.get("contact_role") or "")
     db.commit()
@@ -5557,6 +5550,10 @@ async def set_contact_dnc(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
     dnc_raw = (form.get("do_not_contact") or "").strip()
@@ -5689,6 +5686,10 @@ async def set_contact_priority(
     if not company:
         raise HTTPException(404, "Company not found")
 
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
+
     form = await request.form()
     contact.is_priority = bool((form.get("is_priority") or "").strip())
     db.commit()
@@ -5733,6 +5734,10 @@ async def set_contact_archive(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
 
     form = await request.form()
     contact.is_archived = bool((form.get("is_archived") or "").strip())
@@ -5963,9 +5968,8 @@ async def company_detail_partial(
             "all_segment_tags": all_segment_tags,
             # Deep-link: which tab to activate on first render (validated above).
             "active_tab": active_tab,
-            # WS2: known-field grids for account + contact cards.
+            # WS2: known-field grid for the account card.
             "known_account_fields": KNOWN_ACCOUNT_FIELDS,
-            "known_contact_fields": KNOWN_CONTACT_FIELDS,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -7016,7 +7020,12 @@ async def contact_field_edit_form(
     """Return the inline edit widget for a single contact field."""
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
-    contact = db.get(SiteContact, contact_id)
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not contact:
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
@@ -7049,7 +7058,12 @@ async def contact_field_display(
     """Return the display span for a single contact field (cancel path)."""
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
-    contact = db.get(SiteContact, contact_id)
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not contact:
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
@@ -7077,10 +7091,22 @@ async def contact_field_post(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Save a single inline-edited contact field; return the display span."""
-    contact = db.get(SiteContact, contact_id)
+    """Save a single inline-edited contact field; return the display span.
+
+    IDOR-safe: the contact must belong to a site under {company_id}. Owner-or-admin only.
+    """
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
     if not contact:
         raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and (company is None or company.account_owner_id != user.id):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
     form = await request.form()
     field = (form.get("field") or "").strip()
     if field not in EDITABLE_CONTACT_FIELDS:
@@ -7135,7 +7161,10 @@ async def company_add_custom_field(
         raise HTTPException(400, "label is required")
     existing = company.custom_fields or {}
     updated = {**existing, label: value}
-    company.custom_fields = updated
+    try:
+        company.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(company, "custom_fields")
@@ -7198,6 +7227,10 @@ async def contact_add_custom_field(
     )
     if not contact:
         raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and (company is None or company.account_owner_id != user.id):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
     form = await request.form()
     label = (form.get("label") or "").strip()
     value = (form.get("value") or "").strip()
@@ -7205,7 +7238,10 @@ async def contact_add_custom_field(
         raise HTTPException(400, "label is required")
     existing = contact.custom_fields or {}
     updated = {**existing, label: value}
-    contact.custom_fields = updated
+    try:
+        contact.custom_fields = updated
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     from sqlalchemy.orm.attributes import flag_modified
 
     flag_modified(contact, "custom_fields")
@@ -7239,6 +7275,10 @@ async def contact_delete_custom_field(
     )
     if not contact:
         raise HTTPException(404, "Contact not found")
+    company = db.get(Company, company_id)
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and (company is None or company.account_owner_id != user.id):
+        raise HTTPException(403, "Only the owner or an admin can edit this contact")
     existing = dict(contact.custom_fields or {})
     existing.pop(label, None)
     contact.custom_fields = existing
@@ -7542,11 +7582,9 @@ async def edit_site_contact(
         if raw is not None:  # field was submitted
             apply_contact_field(contact, f, raw, site_id, db)
 
-    # Non-registry fields
-    contact.wechat_id = (form.get("wechat_id", "") or "").strip() or None
+    # Non-registry fields (wechat_id + linkedin_url are written by the loop above)
     contact.notes = (form.get("notes", "") or "").strip() or None
     contact.is_priority = bool((form.get("is_priority", "") or "").strip())
-    contact.linkedin_url = (form.get("linkedin_url", "") or "").strip() or None
     contact.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Contact {} edited by {}", contact_id, user.email)
