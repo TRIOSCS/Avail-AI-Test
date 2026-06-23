@@ -1075,6 +1075,10 @@ async def resell_submit_outreach(
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
+    if el.status == ExcessListStatus.DRAFT:
+        raise HTTPException(409, "List is not posted")
+    if channel not in {c.value for c in ExcessOutreachChannel}:
+        raise HTTPException(422, "Unknown channel")
 
     buyers: list[dict] = [{"vendor_card_id": cid} for cid in (_to_int(x) for x in vendor_card_ids.split(",")) if cid]
     buyers += [{"company_id": cid} for cid in (_to_int(x) for x in company_ids.split(",")) if cid]

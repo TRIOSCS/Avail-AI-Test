@@ -70,6 +70,23 @@ def teammate_user(db_session: Session) -> User:
 
 
 @pytest.fixture()
+def draft_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
+    """A DRAFT list owned by the trader (not yet posted)."""
+    el = ExcessList(
+        title="D draft caps",
+        company_id=test_company.id,
+        owner_id=trader_user.id,
+        status=ExcessListStatus.DRAFT,
+        total_line_items=0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(el)
+    db_session.commit()
+    db_session.refresh(el)
+    return el
+
+
+@pytest.fixture()
 def posted_list(db_session: Session, trader_user: User, test_company: Company) -> ExcessList:
     """A posted (collecting) list owned by the trader, with one capacitor line."""
     el = ExcessList(
@@ -432,5 +449,69 @@ def test_detail_has_outreach_tab(client, db_session, trader_user, posted_list):
         body = resp.text
         assert "Outreach" in body
         assert "offer-buyers-form" in body  # the action is wired
+    finally:
+        restore()
+
+
+# ── Fix 1 — 422 on invalid channel ──────────────────────────────────
+
+
+def test_submit_outreach_invalid_channel_422(client, db_session, trader_user, posted_list):
+    """A bogus channel value is rejected with 422 (not an unhandled 500)."""
+    buyer = _reachable_buyer(db_session, "Any Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach",
+            data={
+                "vendor_card_ids": str(buyer.id),
+                "scope": "whole_list",
+                "channel": "bogus_channel",
+            },
+        )
+        assert resp.status_code == 422
+    finally:
+        restore()
+
+
+# ── Fix 2 — 409 on draft list ────────────────────────────────────────
+
+
+def test_submit_outreach_draft_list_409(client, db_session, trader_user, draft_list):
+    """Submitting outreach on a DRAFT list is rejected with 409."""
+    buyer = _reachable_buyer(db_session, "Draft Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{draft_list.id}/outreach",
+            data={
+                "vendor_card_ids": str(buyer.id),
+                "scope": "whole_list",
+                "channel": "phone",
+            },
+        )
+        assert resp.status_code == 409
+    finally:
+        restore()
+
+
+def test_submit_outreach_posted_list_200(client, db_session, trader_user, posted_list):
+    """Submitting outreach on a POSTED (collecting) list still succeeds — no
+    regression."""
+    buyer = _reachable_buyer(db_session, "Posted Buyer", engagement=10.0, commodity=_CAP)
+    db_session.commit()
+    restore = _own(db_session, None, trader_user)
+    try:
+        resp = client.post(
+            f"/api/resell/{posted_list.id}/outreach",
+            data={
+                "vendor_card_ids": str(buyer.id),
+                "scope": "whole_list",
+                "channel": "phone",
+            },
+        )
+        assert resp.status_code == 200
     finally:
         restore()
