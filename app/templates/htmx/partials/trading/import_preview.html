@@ -1,0 +1,67 @@
+{#
+  trading/import_preview.html — Preview of a parsed import (reuses the excess grid).
+  Confirm → /api/trading/{id}/import-confirm (re-renders the Lines tab).
+  Receives: list_id, filename, valid_count, error_count, errors, preview_rows,
+            all_valid_rows_json.
+  Called by: trading.trading_import_preview.
+#}
+<div class="space-y-3" id="import-area">
+  <div class="flex items-center gap-3 text-sm">
+    <span class="font-medium text-emerald-600">{{ valid_count }} valid rows</span>
+    {% if error_count %}<span class="font-medium text-rose-500">{{ error_count }} errors</span>{% endif %}
+    <span class="text-gray-500">from {{ filename }}</span>
+  </div>
+
+  {% if errors %}
+  <div class="rounded-lg border border-rose-200 bg-rose-50 p-3">
+    <ul class="list-disc pl-4 text-sm text-rose-700">
+      {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if preview_rows %}
+  <div class="overflow-x-auto rounded-lg border border-brand-200">
+    <table class="compact-table min-w-full">
+      <thead>
+        <tr>
+          <th class="text-left">Part number</th>
+          <th class="text-left">Manufacturer</th>
+          <th class="text-right">Qty</th>
+          <th class="text-left">Date code</th>
+          <th class="text-left">Condition</th>
+          <th class="text-right">Asking price</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in preview_rows %}
+        <tr>
+          <td class="font-mono">{{ row.part_number or '—' }}</td>
+          <td>{{ row.manufacturer or '—' }}</td>
+          <td class="text-right tabular-nums">{{ row.quantity or '—' }}</td>
+          <td>{{ row.date_code or '—' }}</td>
+          <td>{{ row.condition or '—' }}</td>
+          <td class="text-right tabular-nums">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '—' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if valid_count > preview_rows|length %}
+  <p class="text-xs text-gray-400">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
+  {% endif %}
+  {% endif %}
+
+  {% if valid_count %}
+  <form hx-post="/api/trading/{{ list_id }}/import-confirm"
+        hx-target="#tab-lines-{{ list_id }}"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="$store.toast.message='Imported {{ valid_count }} lines'; $store.toast.type='success'; $store.toast.show=true;">
+    <input type="hidden" name="rows_json" value="{{ all_valid_rows_json }}">
+    <div class="flex gap-2">
+      <button type="submit" class="btn btn-primary btn-sm">Confirm import ({{ valid_count }})</button>
+    </div>
+  </form>
+  {% endif %}
+</div>

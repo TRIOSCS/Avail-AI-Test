@@ -427,6 +427,9 @@ def list_requisitions(
         selectinload(Requisition.requirements),
     )
 
+    # ── Exclude virtual/scratch requisitions (system-owned, e.g. excess mirrors) ──
+    query = query.filter(Requisition.is_scratch.is_(False))
+
     # ── Role-based filtering ─────────────────────────────────────────
     if user_role == UserRole.SALES:
         query = query.filter(Requisition.created_by == user_id)

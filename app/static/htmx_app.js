@@ -2252,38 +2252,6 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   },
 }));
 
-// ── solicitModal: excess bid-solicitation email composer ──
-// Rendered by app/templates/htmx/partials/excess/solicit_modal.html. Only the subject is
-// dynamic (the list title); it's passed via a SINGLE-quoted x-data attribute through
-// |tojson, so a list title containing a quote/apostrophe can't terminate the attribute
-// and break Alpine init (the inline object previously used |e in a double-quoted x-data,
-// which broke on apostrophe titles).
-Alpine.data('solicitModal', (subject) => ({
-  recipientEmail: '',
-  recipientName: '',
-  subject: subject || 'Bid Request',
-  bundled: true,
-  message: 'We have the following parts available and are seeking your best bid. Please reply with unit price, quantity, and lead time.',
-  polishing: false,
-  async polishEmail() {
-    if (!this.message.trim()) return;
-    this.polishing = true;
-    try {
-      const res = await fetch('/api/excess-lists/polish-email', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: this.message }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        this.message = data.text;
-      }
-    } finally {
-      this.polishing = false;
-    }
-  },
-}));
-
 // ── offerQualification: condition-driven offer form (chip panels + note preview + meter) ──
 // Rendered by sightings/offer_form_modal.html and requisitions/add_offer_form.html.
 // x-data attribute on the <form> must be SINGLE-quoted with |tojson so that prefill

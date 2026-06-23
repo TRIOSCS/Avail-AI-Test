@@ -295,8 +295,8 @@ async def quotes_list_redirect():
 @router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/excess", response_class=HTMLResponse)
-@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
+@router.get("/v2/trading", response_class=HTMLResponse)
+@router.get("/v2/trading/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
@@ -322,7 +322,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     # /requisitions). Anything unmatched defaults to the requisitions view.
     _VIEW_SEGMENTS = (
         "buy-plans",
-        "excess",
+        "trading",
         "quotes",
         "prospecting",
         "proactive",
@@ -349,6 +349,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
         partial_url = "/v2/partials/sightings/workspace"
+    elif current_view == "trading":
+        partial_url = "/v2/partials/trading/workspace"
     elif current_view == "search":
         # Deep-link the Part Dossier: ?mpn= rides along to /v2/partials/search so a
         # bookmarked /v2/search?mpn=<PN> paints the dossier on first load.
@@ -363,7 +365,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         "vendors",
         "customers",
         "buy-plans",
-        "excess",
+        "trading",
         "quotes",
         "prospecting",
         "trouble-tickets",

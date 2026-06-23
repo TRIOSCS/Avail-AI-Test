@@ -1,0 +1,131 @@
+{#
+  trading/_offers.html — Offers tab body.
+  Owner view: take-all offers as a PINNED BANNER on top (the take-all is the
+  headline; lines are its contents — spec §"Flexible detail"), then per-line
+  offers stacked under each line, plus an unmatched-queue card for rows that
+  didn't resolve (never dropped — spec §"Offer collection").
+  Non-owner: offers are private to the owner — show only the submit-offer prompt.
+  Receives: list, line_items, by_line {line_id: [{offer, line}]}, unmatched,
+            take_all_offers, is_owner, can_see_customer, shape.
+  Called by: trading.trading_offers (lazy + offer-submit re-render).
+#}
+{% set el = list %}
+
+{% macro _broker_label(offer, is_owner) %}
+  {%- if offer.offerer_company and is_owner -%}{{ offer.offerer_company.name }}
+  {%- elif offer.offerer_vendor_card and is_owner -%}{{ offer.offerer_vendor_card.display_name }}
+  {%- else -%}Broker #{{ offer.id }}{%- endif -%}
+{% endmacro %}
+
+{% if not is_owner %}
+{# Offerer-facing: a non-owner never sees the collected offer stack. #}
+<div class="mx-auto max-w-sm text-center py-10">
+  <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+  </svg>
+  <p class="text-sm font-medium text-gray-600">Offers are private to the list owner</p>
+  <p class="text-xs text-gray-400 mt-1">Use “Submit offer” to send yours — the owner sees it, other brokers do not.</p>
+</div>
+
+{% else %}
+<div class="space-y-5">
+
+  {# ── Pinned take-all banner(s) ──────────────────────────────── #}
+  {% for offer in take_all_offers %}
+  <div class="rounded-lg border-2 border-violet-200 bg-violet-50 p-4">
+    <div class="flex items-start justify-between gap-3">
+      <div>
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-semibold rounded-full bg-violet-100 text-violet-700">
+          <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8"/></svg>
+          Take-all
+        </span>
+        <p class="mt-1.5 text-sm font-semibold text-gray-900">{{ _broker_label(offer, is_owner) }}</p>
+        {% if offer.notes %}<p class="text-xs text-gray-500 mt-0.5">{{ offer.notes }}</p>{% endif %}
+      </div>
+      <div class="text-right">
+        <span class="block text-xs text-gray-400 uppercase tracking-wide">Lump price</span>
+        {% if offer.take_all_total_price is not none %}
+        <span class="text-lg font-bold text-violet-700 tabular-nums">${{ "{:,.2f}".format(offer.take_all_total_price|float) }}</span>
+        {% else %}<span class="text-sm text-gray-400 italic">Price TBD</span>{% endif %}
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# ── Per-line offer stacks ──────────────────────────────────── #}
+  {% set any_per_line = by_line.values()|map('length')|sum > 0 %}
+  {% if any_per_line %}
+  <div class="space-y-3">
+    {% for item in line_items %}
+    {% set entries = by_line.get(item.id, []) %}
+    {% if entries %}
+    <div class="rounded-lg border border-brand-200 overflow-hidden">
+      <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-brand-100">
+        <span class="text-sm font-mono font-medium text-gray-900">{{ item.part_number }}</span>
+        <button hx-get="/v2/partials/trading/{{ el.id }}/lines/{{ item.id }}/offers"
+                hx-target="#modal-content"
+                @click="$dispatch('open-modal', { wide: true })"
+                class="text-xs text-brand-500 hover:text-brand-600 font-medium">Compare ▸</button>
+      </div>
+      <table class="compact-table min-w-full">
+        <thead>
+          <tr>
+            <th class="text-left">Broker</th>
+            <th class="text-right">Unit $</th>
+            <th class="text-right">Qty</th>
+            <th class="text-center">Lead</th>
+            <th class="text-left">Terms</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for e in entries %}
+          {% set best = item.best_offer_id is not none and e.offer.id == item.best_offer_id and e.line.unit_price is not none %}
+          <tr class="{{ 'bg-emerald-50/60' if best }}">
+            <td>{{ _broker_label(e.offer, is_owner) }}{% if best %}<span class="ml-1 text-xs font-semibold text-emerald-600">best</span>{% endif %}</td>
+            <td class="text-right tabular-nums {{ 'font-semibold text-emerald-600' if best }}">
+              {% if e.line.unit_price is not none %}${{ "{:,.4f}".format(e.line.unit_price|float) }}{% else %}<span class="text-gray-400">TBD</span>{% endif %}
+            </td>
+            <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
+            <td class="text-center">{{ (e.line.lead_time_days|string ~ 'd') if e.line.lead_time_days is not none else '—' }}</td>
+            <td class="text-gray-500">{{ e.line.terms_text or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── Unmatched queue — never drop an offer ──────────────────── #}
+  {% if unmatched %}
+  <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+    <p class="text-xs font-semibold text-amber-800 mb-2 flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+      Unmatched queue ({{ unmatched|length }}) — resolve manually
+    </p>
+    <table class="compact-table min-w-full">
+      <thead><tr><th class="text-left">Raw MPN</th><th class="text-right">Unit $</th><th class="text-right">Qty</th><th class="text-left">Broker</th></tr></thead>
+      <tbody>
+        {% for e in unmatched %}
+        <tr>
+          <td class="font-mono">{{ e.line.mpn_raw }}</td>
+          <td class="text-right tabular-nums">{% if e.line.unit_price is not none %}${{ "{:,.4f}".format(e.line.unit_price|float) }}{% else %}—{% endif %}</td>
+          <td class="text-right tabular-nums">{{ "{:,}".format(e.line.quantity) }}</td>
+          <td>{{ _broker_label(e.offer, is_owner) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  {% if not take_all_offers and not any_per_line and not unmatched %}
+  <div class="mx-auto max-w-xs text-center text-sm text-gray-500 py-8">
+    <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+    No offers yet. Brokers' offers stack here as they land.
+  </div>
+  {% endif %}
+</div>
+{% endif %}

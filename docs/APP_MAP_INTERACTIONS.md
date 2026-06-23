@@ -1159,6 +1159,46 @@ GET /v2/partials/buy-plans?lens=          (shell: switcher + lazy #bp-hub-body)
                              so the action re-renders THIS body into #bp-hub-body.
 ```
 
+**Trading workspace — resell/excess split-panel (Chunk F, ADDITIVE).** `/v2/trading` is
+its own primary-nav tab (9th item in `mobile_nav.html`) served by the `v2_page` shell →
+`GET /v2/partials/trading/workspace` (router `app/routers/trading.py`, mounted alongside the
+OLD `excess` router which a later cutover chunk removes). The workspace is a `splitPanel('trading')`
+shell: lens pills (My Lists / Open to Me, buy-plans-hub pattern) + a `stat_card` triage strip
+(Open · Offers to review · Take-all · Bids out · Awarded — each card a one-click stage filter) +
+a lazy left list and a right detail. Logic stays in `excess_service` (offers/import) +
+`excess_mirror` (publish); the router is thin (request → context → partial).
+
+```
+GET /v2/partials/trading/workspace?lens=mine|open   (shell: pills + stats + splitPanel)
+    |
+    +-- GET /v2/partials/trading/lists?lens=&stage=&q=   (left list; rows → detail)
+    |        lens=mine  → lists OWNED by user (seller name VISIBLE)
+    |        lens=open  → posted lists owned by OTHERS, customer-ANONYMIZED (pure whitelist)
+    +-- GET /v2/partials/trading/{id}                    (right detail: breadcrumb + chips +
+    |        lazy tabs Lines · Offers · Build Bid · Activity; customer chip owner-only)
+    |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
+    |        +-- GET .../{id}/offers   (owner-only stack: pinned take-all banner +
+    |        |     per-line offer tables + unmatched queue; non-owner sees nothing)
+    |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
+    |              price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
+    +-- POST /api/trading/lists                          (create → excess_service.create_excess_list)
+    +-- POST /api/trading/{id}/lines                     (add line; resolves MaterialCard)
+    +-- POST /api/trading/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid)
+    +-- POST /api/trading/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
+    +-- POST /api/trading/{id}/offers                    (excess_service.submit_offer; scope
+          per_line|take_all; service enforces can_offer + the self-offer guard)
+```
+
+Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):
+`shape='single'` (1 line → one `.card`, no table chrome) vs `'table'` (≥2 → `compact-table`);
+any take-all offer pins as a violet banner above the lines. Status pills reuse existing
+`status_badge` keys — no new colors (open→sky, collecting→sourcing/amber, bid_out→quoted/violet,
+awarded→won/emerald, draft→muted). Customer hiding is view discipline (single-tenant): the
+offerer-facing list + non-owner detail project ONLY MPN/qty/condition, never the seller company.
+Demo seed: `python -m app.management.seed_trading_demo` (idempotent; `--reset` to clear) creates
+three deal shapes (40-line collecting w/ per-line + unmatched + take-all offers, a single-line
+one-off w/ 2 offers, an awarded list).
+
 **Notification tiers (`buyplan_notifications.py`).** Two tiers gate which channels fire:
 - **Urgent → email + Teams DM + in-app**: SO kickback (`notify_so_rejected`), PO kickback
   (`notify_po_rejected`, fired from the verify-po reject path), new assignment / approval
@@ -3430,8 +3470,10 @@ APScheduler (scheduler.py)
 BROWSER (HTMX + Alpine.js)
 
   0. Bottom navigation (mobile_nav.html):
-     Reqs | Sightings | Materials | Search | ...
+     Reqs | Sightings | Materials | Search | Buy Plans | Trading | CRM | ...
      "Materials" tab links to /v2/materials, loads /v2/partials/materials/workspace
+     "Trading" tab links to /v2/trading, loads /v2/partials/trading/workspace
+     (resell/excess split-panel — see § Trading workspace).
      Quotes has NO top-level nav tab — surfaced via the Reqs and CRM account
      tab strips (see § 5 Quote Building).
 
@@ -3681,7 +3723,7 @@ the current implementation.
 | Buy Plans | 10 | submit/approve, SO+PO verify, confirm-PO, flag-issue, cancel (service + line cascade), reset; ops-group admin tab |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
 | Sightings | 27 | CRUD, RFQ send, batch RFQ, inquiry (cross-requisition composer: vendor-affinity GET + composer-vendor POST), vendor+part unavailability (mark/clear/reason modal) |
-| Excess | 30 | Lists, line items, bids, solicitations, import |
+| Trading | 20 | Resell-brokerage workspace (`routers/trading.py`): lists, line items, import, inbound offers (per_line/take_all + unmatched queue), best-price rollup, build/close bid-back + PDF. Replaced the removed old-excess router (bids/solicitations gone) |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
 | Prospects | 9 | HTMX tab only (JSON `/api/prospects/*` removed, consolidated): list, stats, add-domain, detail, claim, dismiss, release, enrich (background — spawns run_enrichment_job; pulls real contacts + firmographics via Lusha chain: enrich_entity + find_suggested_contacts, fill-only onto prospect columns; recomputes both fit_score and readiness_score; 24h gate prevents repeat paid pulls), enrich-status (poll; HTTP 286 stops) |
@@ -3837,22 +3879,6 @@ activity + auto-advances status only for actually-sent vendors. `confirmSend` re
 headers and toasts via `$store.toast`: full success, partial (warning, distinguishing
 "N failed" from "N had no email"), or total failure (error — modal stays open to retry);
 it never infers success from the HTTP status alone.
-
-### solicitModal  (htmx_app.js, Alpine.data)
-
-Backs `excess/solicit_modal.html` — the "Solicit Bids" email composer opened from an
-excess list. Only the email **subject** (derived from the list title) is dynamic, so the
-factory takes that one argument: `x-data='solicitModal({{ (("Bid Request: " ~ list.title)
-if list else "Bid Request")|tojson }})'`. It lives in JS (not inline) for the same reason
-as `rfqVendorModal`: the title may contain `'`/`"`, and the old inline **double-quoted**
-`x-data` interpolated it with `|e` — which HTML-escapes but emits an invalid JS string
-literal, so an apostrophe/quote title broke `Alpine.init()` and left the whole modal inert
-(spinner/"AI Clean Up" never un-cloaked, submit dead). The **single-quoted** `x-data` +
-`|tojson` is immune. State: `recipientEmail`, `recipientName`, `subject`, `bundled`
-(one bundled email vs one per item), `message`, `polishing`. Method: `polishEmail()` →
-`POST /api/excess-lists/polish-email` ({text} in, {text} out) replaces the body with an
-AI-cleaned version. The form itself posts via HTMX to
-`/v2/partials/excess/{list_id}/solicit` and closes the modal on success.
 
 ### attachmentsPanel  (htmx_app.js, Alpine.data)
 

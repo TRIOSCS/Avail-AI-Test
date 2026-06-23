@@ -1,8 +1,9 @@
-"""Pydantic schemas for Excess Inventory & Bid Collection.
+"""Pydantic schemas for Excess Inventory & Trading offers.
 
-Request/response models for the excess inventory and bid collection API.
+Request/response models for the Trading workspace: excess lists, line items,
+bulk import, and inbound broker offers (ExcessOffer / ExcessOfferLine).
 
-Called by: routers/excess.py (Phase 2+)
+Called by: routers/trading.py
 Depends on: pydantic
 """
 
@@ -39,7 +40,9 @@ class ExcessListCreate(BaseModel):
 
 class ExcessListUpdate(BaseModel):
     title: str | None = None
-    status: Literal["draft", "active", "bidding", "closed", "expired"] | None = None
+    status: (
+        Literal["draft", "active", "bidding", "closed", "expired", "open", "collecting", "bid_out", "awarded"] | None
+    ) = None
     notes: str | None = None
 
 
@@ -89,88 +92,11 @@ class ExcessLineItemResponse(BaseModel):
     date_code: str | None = None
     condition: str | None = None
     asking_price: float | None = None
-    market_price: float | None = None
-    demand_score: int | None = None
     demand_match_count: int = 0
     status: str
     notes: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
-
-
-# ── Bid ──────────────────────────────────────────────────────────────
-
-
-class BidCreateRequest(BaseModel):
-    """Request body for creating a bid — excess_line_item_id comes from URL path."""
-
-    unit_price: float = Field(ge=0)
-    quantity_wanted: int = Field(ge=1)
-    lead_time_days: int | None = Field(default=None, ge=0)
-    bidder_company_id: int | None = None
-    bidder_vendor_card_id: int | None = None
-    source: Literal["manual", "phone"] | None = "manual"
-    notes: str | None = None
-
-
-class BidUpdate(BaseModel):
-    unit_price: float | None = Field(default=None, ge=0)
-    quantity_wanted: int | None = Field(default=None, ge=1)
-    status: Literal["pending", "accepted", "rejected", "expired", "withdrawn"] | None = None
-    notes: str | None = None
-
-
-class BidResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    excess_line_item_id: int
-    bidder_company_id: int | None = None
-    bidder_vendor_card_id: int | None = None
-    bidder_contact_id: int | None = None
-    unit_price: float
-    quantity_wanted: int
-    lead_time_days: int | None = None
-    status: str
-    source: str
-    notes: str | None = None
-    created_by: int
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-
-
-# ── BidSolicitation ──────────────────────────────────────────────────
-
-
-class BidSolicitationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    excess_line_item_id: int
-    contact_id: int
-    sent_by: int
-    email_track_id: int | None = None
-    recipient_email: str | None = None
-    recipient_name: str | None = None
-    graph_message_id: str | None = None
-    subject: str | None = None
-    status: str
-    sent_at: datetime | None = None
-    response_received_at: datetime | None = None
-    body_preview: str | None = None
-    created_at: datetime | None = None
-
-
-# ── Parse Bid Response ──────────────────────────────────────────────
-
-
-class ParseBidResponseRequest(BaseModel):
-    """Request body for parsing a bid response from an email solicitation."""
-
-    unit_price: float = Field(ge=0)
-    quantity_wanted: int = Field(ge=1)
-    lead_time_days: int | None = Field(default=None, ge=0)
-    notes: str | None = None
 
 
 # ── Confirm Import ──────────────────────────────────────────────────
@@ -197,38 +123,81 @@ class ConfirmImportRequest(BaseModel):
 
 
 class ExcessStatsResponse(BaseModel):
-    """Aggregate stats for the excess list view."""
+    """Aggregate stats for the Trading workspace (offer counts, not bid counts)."""
 
     total_lists: int = 0
     total_line_items: int = 0
-    pending_bids: int = 0
+    open_offers: int = 0
     matched_items: int = 0
-    total_bids: int = 0
+    total_offers: int = 0
     awarded_items: int = 0
 
 
-# ── Email Solicitation Request ──────────────────────────────────────
+# ── ExcessOffer (inbound broker offers — Trading module) ─────────────
 
 
-class SendBidSolicitationRequest(BaseModel):
-    """Request body for sending a bid solicitation email."""
+class ExcessOfferLineCreate(BaseModel):
+    """One part line within a per_line offer.
 
-    line_item_ids: list[int] = Field(min_length=1)
-    recipient_email: str
-    recipient_name: str | None = None
-    contact_id: int
-    subject: str | None = None
-    message: str | None = None
-    bundled: bool = True
+    unit_price optional (price-TBD allowed).
+    """
+
+    mpn_raw: str
+    quantity: int = Field(ge=1)
+    unit_price: float | None = Field(default=None, ge=0)
+    lead_time_days: int | None = Field(default=None, ge=0)
+    terms_text: str | None = None
+    excess_line_item_id: int | None = None
+
+    @field_validator("mpn_raw")
+    @classmethod
+    def mpn_not_blank(cls, v: str) -> str:
+        return _strip_not_blank(v, "mpn_raw")
 
 
-class PolishEmailRequest(BaseModel):
-    """Request body for AI email polish."""
+class ExcessOfferLineResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    text: str = Field(min_length=1, max_length=5000)
+    id: int
+    offer_id: int
+    excess_line_item_id: int | None = None
+    mpn_raw: str
+    quantity: int
+    unit_price: float | None = None
+    lead_time_days: int | None = None
+    terms_text: str | None = None
+    match_status: str
 
 
-class PolishEmailResponse(BaseModel):
-    """Response from AI email polish."""
+class ExcessOfferCreate(BaseModel):
+    """Request body for submitting an inbound offer — excess_list_id from URL path.
 
-    text: str
+    scope='per_line' carries `lines`; scope='take_all' carries an optional lump
+    `take_all_total_price` and no lines.
+    """
+
+    scope: Literal["per_line", "take_all"] = "per_line"
+    take_all_total_price: float | None = Field(default=None, ge=0)
+    valid_until: datetime | None = None
+    notes: str | None = None
+    offerer_company_id: int | None = None
+    offerer_vendor_card_id: int | None = None
+    lines: list[ExcessOfferLineCreate] = Field(default_factory=list)
+
+
+class ExcessOfferResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    excess_list_id: int
+    submitted_by: int
+    offerer_company_id: int | None = None
+    offerer_vendor_card_id: int | None = None
+    scope: Literal["per_line", "take_all"]
+    take_all_total_price: float | None = None
+    valid_until: datetime | None = None
+    status: str
+    notes: str | None = None
+    lines: list[ExcessOfferLineResponse] = Field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None

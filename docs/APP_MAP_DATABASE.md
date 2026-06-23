@@ -550,20 +550,93 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 
 ---
 
-### Excess Inventory
+### Excess Inventory / Trading (resell-brokerage)
 
-**`excess_lists`** — Customer surplus inventory batches
+> Migration 126 added the inbound-offer tables + rollup columns; migration 127 added the
+> bid-back tables + posting window; **migration 128 (the CUTOVER) dropped the old
+> `bids`/`bid_solicitations` tables** — the legacy outbound email-RFQ "Bid"/"BidSolicitation"
+> concept is fully replaced by `excess_offers`/`customer_bids` and is GONE (models, constants
+> `Bid*`, schemas, the `app/routers/excess.py` router + `partials/excess/*` templates, the
+> `email_service`/`email_jobs` inbox-RFQ callers, and the `create_bid`/`accept_bid`/
+> `send_bid_solicitation`/`match_excess_demand` service methods). `ExcessListStatus` keeps the
+> Trading lifecycle members (open/collecting/bid_out/awarded); the pre-Trading active/bidding
+> members remain (not in the cutover's removal scope).
+>
+> Service logic lives in `app/services/excess_service.py`:
+> `can_post`/`can_offer` (role-derived capabilities), `submit_offer` (per_line/take_all;
+> part-number-only matching via `normalize_mpn_key`; unmatched/ambiguous rows queued),
+> `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*),
+> `close_list`, `get_excess_stats` (offer counts), list/line CRUD + import, and
+> `material_card_id` resolution on the import path. The thin router is `app/routers/trading.py`
+> (templates under `app/templates/htmx/partials/trading/*`).
+>
+> Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
+> `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
+> `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
+> `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
+> NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
+> (NOT NULL) hangs on a per-list system-owned **virtual requirement** — a single
+> `is_scratch=True` "Customer Excess (list N)" requisition+requirement (found by the
+> deterministic name; hidden from sales views by the existing
+> `Requisition.is_scratch.is_(False)` filter). The mirror upserts by
+> `(source_company_id, material_card_id)` — NOT the connector-aware
+> delete-by-`(requirement_id, source_type)` path — so a re-publish updates the row and
+> never wipes a sibling list's `customer_excess` sightings. `retire_line` deletes the
+> mirror on award / withdraw / qty->0. Lines whose MPN won't resolve to a MaterialCard
+> are skipped (the upsert key needs the card), never raised.
+>
+> Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
+> `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
+> header + `customer_bid_lines`, seeding each `customer_unit_price` from the line's
+> `best_offer_unit_price` rollup (trader override per line); the chosen offer ids are
+> recorded INTERNALLY (`selected_offer_id`/`selected_offer_line_id`) for audit and are
+> NEVER exported. `bid_back_export_context` is a PURE WHITELIST — line dicts carry only
+> part/mfr/qty/condition/unit+extended price and the header carries no seller identity,
+> so customer-doc cleanliness is enforced at ASSEMBLY, not by template omission. The
+> clean PDF (`generate_bid_report_pdf` -> `app/templates/documents/bid_report.html`,
+> cloned from `quote_report.html`, WeasyPrint) renders only that context. Migration 127
+> (ADDITIVE) adds the two `customer_bids*` tables and the `open_at`/`close_at` posting
+> window on `excess_lists`; `excess_mirror.publish_list` now stamps `open_at` and
+> `excess_service.close_list` (owner-only) flips to `bid_out` + stamps `close_at` (which
+> drives the "closes in Xd" header chip).
+
+**`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
-- Status: draft -> active -> bidding -> closed -> expired
+- Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
+- version (int, default 1) — lock-on-post; a revision bumps version
+- open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
 
 **`excess_line_items`** — Individual parts in an excess list
 - part_number, description, manufacturer, quantity, asking_price, demand_match_count
+- material_card_id -> material_cards (SET NULL) — resolved on create for the Sighting mirror
+- best_offer_unit_price, best_offer_id (plain int, not a hard FK), offer_count — best-price rollup
 
-**`bids`** — Vendor bids on excess items
-- bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status
+**`excess_offers`** — Inbound broker offer to BUY a posted list (the Trading offer model; replaced the dropped `bids`)
+- excess_list_id -> excess_lists (CASCADE), submitted_by -> users
+- offerer_company_id -> companies / offerer_vendor_card_id -> vendor_cards (both SET NULL)
+- scope: per_line | take_all; take_all_total_price (lump, take_all only); valid_until
+- status: open -> won -> lost -> expired -> withdrawn (late = post-close, queued)
 
-**`bid_solicitations`** — Outbound emails soliciting bids
-- graph_message_id for email tracking
+**`excess_offer_lines`** — Per-line rows of a per_line offer (incl. the unmatched queue)
+- offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
+- mpn_raw, quantity, unit_price (nullable), lead_time_days, terms_text
+- match_status: matched | unmatched | ambiguous (unmatched/ambiguous = held for manual resolution)
+
+**`customer_bids`** — Outbound bid back to the seller (Trio's offer to BUY their excess; Chunk E)
+- excess_list_id -> excess_lists (CASCADE), owner_id -> users
+- status: draft -> sent -> accepted/rejected; revision (int, default 1); notes
+- One per assembly; the clean PDF + summary render from `bid_back_export_context`
+
+**`customer_bid_lines`** — Per-line priced rows of a customer bid (Chunk E)
+- customer_bid_id -> customer_bids (CASCADE), excess_line_item_id -> excess_line_items (SET NULL)
+- customer_unit_price (seeded from best_offer_unit_price, overridable), quantity
+- selected_offer_id -> excess_offers / selected_offer_line_id -> excess_offer_lines (SET NULL)
+  — INTERNAL provenance only; NEVER exported to the customer doc
+
+> **Dropped in migration 128 (cutover):** `bids` (vendor bids on excess items) and
+> `bid_solicitations` (outbound bid-request emails). The Trading module's
+> `excess_offers`/`excess_offer_lines` + `customer_bids`/`customer_bid_lines` replace them;
+> the migration's downgrade recreates both tables structure-only (schema-reversible).
 
 ---
 
