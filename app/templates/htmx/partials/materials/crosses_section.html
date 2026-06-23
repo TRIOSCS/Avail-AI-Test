@@ -65,7 +65,7 @@
 
     {% elif card.cross_references %}
     {# Loaded state — compact grid of cross-reference chips #}
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-1.5">
       {% for xref in card.cross_references %}
       {% set mpn_val = xref.mpn if xref is mapping else xref %}
       {% set mfg_val = xref.manufacturer if xref is mapping and xref.manufacturer else None %}
