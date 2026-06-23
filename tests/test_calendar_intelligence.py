@@ -502,3 +502,55 @@ class TestScanCalendarEvents:
 
         assert result["events_scanned"] == 0
         assert result["activities_logged"] == 0
+
+
+# ── Tests: calendar scan flag guard (FIX 3a) ─────────────────────────────────
+
+
+class TestCalendarScanFlagGuard:
+    """Verify _job_calendar_scan is only registered when activity_tracking_enabled."""
+
+    def test_calendar_scan_not_registered_when_tracking_disabled(self):
+        """When activity_tracking_enabled=False, no calendar_scan job is added."""
+        from unittest.mock import MagicMock
+
+        from app.jobs.email_jobs import register_email_jobs
+
+        mock_scheduler = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.activity_tracking_enabled = False
+        mock_settings.contacts_sync_enabled = False
+        mock_settings.ownership_sweep_enabled = False
+        mock_settings.contact_scoring_enabled = False
+        mock_settings.customer_enrichment_enabled = False
+
+        register_email_jobs(mock_scheduler, mock_settings)
+
+        added_ids = [
+            call.kwargs.get("id") or call.args[1] if len(call.args) > 1 else None
+            for call in mock_scheduler.add_job.call_args_list
+        ]
+        # Flatten: add_job is called with id= keyword in most registrations
+        all_kwargs_ids = [call.kwargs.get("id") for call in mock_scheduler.add_job.call_args_list]
+        assert "calendar_scan" not in all_kwargs_ids, (
+            "calendar_scan must NOT be registered when activity_tracking_enabled=False"
+        )
+
+    def test_calendar_scan_registered_when_tracking_enabled(self):
+        """When activity_tracking_enabled=True, calendar_scan job IS added."""
+        from unittest.mock import MagicMock
+
+        from app.jobs.email_jobs import register_email_jobs
+
+        mock_scheduler = MagicMock()
+        mock_settings = MagicMock()
+        mock_settings.activity_tracking_enabled = True
+        mock_settings.contacts_sync_enabled = False
+        mock_settings.ownership_sweep_enabled = False
+        mock_settings.contact_scoring_enabled = False
+        mock_settings.customer_enrichment_enabled = False
+
+        register_email_jobs(mock_scheduler, mock_settings)
+
+        all_kwargs_ids = [call.kwargs.get("id") for call in mock_scheduler.add_job.call_args_list]
+        assert "calendar_scan" in all_kwargs_ids, "calendar_scan must be registered when activity_tracking_enabled=True"

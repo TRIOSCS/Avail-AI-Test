@@ -61,10 +61,13 @@
             {% if company.domain %}
               <a href="https://{{ company.domain }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
             {% endif %}
-            {% if company.industry %}
-              {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
-              <span>{{ company.industry }}</span>
-            {% endif %}
+            {# Industry — inline-editable (WS1) #}
+            {% if company.domain %}<span class="text-gray-300">·</span>{% endif %}
+            {% with obj=company, field='industry', entity='company',
+                    meta={'label': 'Industry', 'kind': 'text'},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/industry' %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
             {% if company.hq_city %}
               {% if company.domain or company.industry %}<span class="text-gray-300">·</span>{% endif %}
               <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
@@ -79,7 +82,13 @@
           {% if company.account_owner %}<span class="font-medium text-gray-700">{{ company.account_owner.name }}</span>{% else %}<span class="text-gray-400">Unassigned</span>{% endif %}
         </span>
         <span class="text-gray-300">·</span>
-        <span>Terms: <span class="font-medium text-gray-700">{{ company.credit_terms or "—" }}</span></span>
+        <span>Terms:
+          {% with obj=company, field='credit_terms', entity='company',
+                  meta={'label': 'Credit Terms', 'kind': 'text'},
+                  edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/credit_terms' %}
+            {% include 'htmx/partials/customers/_field_display.html' %}
+          {% endwith %}
+        </span>
         <span class="text-gray-300">·</span>
         <span class="inline-flex items-center gap-1">
           <span class="w-2 h-2 rounded-full {{ cadence_dot.get(cadence_state, 'bg-gray-300') }}"
@@ -160,24 +169,22 @@
       {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}
 
-      {# Phone + Employees #}
-      <div class="grid grid-cols-2 gap-3">
-        <div class="p-3 rounded-lg bg-gray-50">
-          <p class="text-xs font-medium text-gray-600 uppercase tracking-wider">Phone</p>
-          <p class="mt-1 text-sm font-medium">
-            {% if company.phone %}
-              <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
-                 data-outreach-log data-channel="phone" data-value="{{ company.phone }}"
-                 data-company-id="{{ company.id }}" data-contact-name="{{ company.name }}">{{ company.phone }}</a>
-            {% else %}
-              <span class="text-gray-400">—</span>
-            {% endif %}
-          </p>
-        </div>
-        <div class="p-3 rounded-lg bg-gray-50">
-          <p class="text-xs font-medium text-gray-600 uppercase tracking-wider">Employees</p>
-          <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
-        </div>
+      {# ── Known-fields grid — all account fields (filled + empty); empties show "+ Add <label>" #}
+      <div class="grid grid-cols-2 gap-x-4 gap-y-2.5">
+        {% for field_info in known_account_fields %}
+          {% set fname = field_info[0] %}
+          {% set flabel = field_info[1] %}
+          {% set fkind = field_info[2] %}
+          {% set fchoices = field_info[3] %}
+          <div class="min-w-0">
+            <p class="text-xs font-medium text-gray-600 uppercase tracking-wide mb-0.5">{{ flabel }}</p>
+            {% with obj=company, field=fname, entity='company',
+                    meta={'label': flabel, 'kind': fkind, 'choices': fchoices or []},
+                    edit_url='/v2/partials/customers/' ~ company.id ~ '/field/edit/' ~ fname %}
+              {% include 'htmx/partials/customers/_field_display.html' %}
+            {% endwith %}
+          </div>
+        {% endfor %}
       </div>
 
       {# ── Segment Tags — inside account-settings collapsible (less weight on other tabs) #}
@@ -186,13 +193,13 @@
         {% include "htmx/partials/customers/_segment_tags.html" %}
       </div>
 
-      {# ── Notes — inside account-settings collapsible #}
-      {% if company.notes %}
+      {# ── Additional Details — custom key:value fields (WS3) #}
       <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-        <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
-        <p class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{{ company.notes }}</p>
+        <h2 class="text-sm font-semibold text-gray-900 mb-2">Additional details</h2>
+        {% with entity='company', obj=company, company_id=company.id %}
+          {% include "htmx/partials/customers/_custom_fields.html" %}
+        {% endwith %}
       </div>
-      {% endif %}
     </div>
   </div>
 

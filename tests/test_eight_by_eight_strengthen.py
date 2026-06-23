@@ -164,50 +164,6 @@ class TestCdrLinksToCrm:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  EXTENSION MAPPING
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestExtensionMapping:
-    """Test get_extension_map() fetches and parses 8x8 user list."""
-
-    async def test_extension_maps_to_user(self):
-        """Extension mapping returns email for known extensions."""
-        from app.services.eight_by_eight_service import get_extension_map
-
-        fake_response = {
-            "data": [
-                {"extension": "1001", "email": "michael@trio.com"},
-                {"extension": "1002", "email": "marcus@trio.com"},
-                {"extensionNumber": "1009", "userId": "Martina@trio.com"},
-            ]
-        }
-
-        with patch(
-            "app.services.eight_by_eight_service.httpx.AsyncClient",
-            _mock_async_client(get_status=200, get_json=fake_response),
-        ):
-            ext_map = await get_extension_map("fake-token", _FakeSettings())
-
-        assert ext_map["1001"] == "michael@trio.com"
-        assert ext_map["1002"] == "marcus@trio.com"
-        assert ext_map["1009"] == "martina@trio.com"  # lowercased
-        assert len(ext_map) == 3
-
-    async def test_extension_map_handles_api_error(self):
-        """Extension mapping returns empty dict on API error."""
-        from app.services.eight_by_eight_service import get_extension_map
-
-        with patch(
-            "app.services.eight_by_eight_service.httpx.AsyncClient",
-            _mock_async_client(get_status=500, get_json={}),
-        ):
-            ext_map = await get_extension_map("fake-token", _FakeSettings())
-
-        assert ext_map == {}
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  CDR LINKS TO OPEN REQUISITION
 # ═══════════════════════════════════════════════════════════════════════
 

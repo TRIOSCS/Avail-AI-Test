@@ -112,6 +112,16 @@ _delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TAB
 
 
 @pytest.fixture(autouse=True)
+def _clear_8x8_token_cache():
+    """Clear the 8x8 module-level token cache before and after each test."""
+    from app.services.eight_by_eight_service import _token_cache
+
+    _token_cache.clear()
+    yield
+    _token_cache.clear()
+
+
+@pytest.fixture(autouse=True)
 def db_session():
     """Yield a session, then DELETE all rows (fast) instead of drop/create tables."""
     session = TestSessionLocal()

@@ -17,10 +17,13 @@ from ..models.intelligence import ActivityLog
 
 # Activity types eligible for the AI quality pass. Explicit allow-list:
 # only these types are selected by score_unscored_activities().
+# EMAIL_SENT is included so outbound emails get a clean_summary on the timeline
+# (previously only EMAIL_RECEIVED was scored).
 # TEAMS_MESSAGE is included so inbound Teams interactions feed the reply clock
 # via the score_activity → bump_clocks path (same as EMAIL_RECEIVED).
 _AI_SCORED_TYPES = (
     ActivityType.SIGHTING_ADDED,
+    ActivityType.EMAIL_SENT,
     ActivityType.EMAIL_RECEIVED,
     ActivityType.TEAMS_MESSAGE,
     ActivityType.MEETING,

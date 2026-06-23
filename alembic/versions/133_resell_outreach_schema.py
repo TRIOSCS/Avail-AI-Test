@@ -13,8 +13,8 @@ each buyer responded. ADDITIVE only — no drops, no existing-column changes:
 Downgrade reverses each (drop the column + index, drop both tables).
 """
 
-revision = "132_resell_outreach_schema"
-down_revision = "131_tbf_search_tables"
+revision = "133_resell_outreach_schema"
+down_revision = "132_crm_custom_fields"
 
 import sqlalchemy as sa
 

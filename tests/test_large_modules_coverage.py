@@ -68,9 +68,15 @@ class TestRegisterEmailJobs:
         [
             pytest.param(
                 {},
-                ["contact_status_compute", "email_health_update", "calendar_scan", "scan_sent_folders"],
-                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification"],
+                ["contact_status_compute", "email_health_update", "scan_sent_folders"],
+                ["contacts_sync", "ownership_sweep", "contact_scoring", "email_reverification", "calendar_scan"],
                 id="always_on_jobs",
+            ),
+            pytest.param(
+                {"activity_tracking_enabled": True},
+                ["calendar_scan"],
+                [],
+                id="calendar_scan_when_tracking_enabled",
             ),
             pytest.param(
                 {"contacts_sync_enabled": True},

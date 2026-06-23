@@ -50,6 +50,7 @@ class Company(Base):
     naics = Column(String(20))
     revenue_range = Column(String(50))
     enrichment_provenance = Column(JSONB, default=dict, server_default="{}")
+    custom_fields = Column(JSONB, default=dict, server_default="{}")
 
     # v1.3.0: Customer ownership fields
     is_strategic = Column(Boolean, default=False, index=True)
@@ -139,6 +140,21 @@ class Company(Base):
         from ..utils.phone import normalize_e164
 
         self.normalized_phone = normalize_e164(value)
+        return value
+
+    @validates("custom_fields")
+    def _validate_custom_fields(self, _key, value):
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("custom_fields must be a dict")
+        if len(value) > 30:
+            raise ValueError("custom_fields: max 30 keys")
+        for k, v in value.items():
+            if len(str(k)) > 60:
+                raise ValueError(f"custom_fields key too long (max 60 chars): {k!r}")
+            if len(str(v)) > 500:
+                raise ValueError(f"custom_fields value too long (max 500 chars) for key {k!r}")
         return value
 
     __table_args__ = (
@@ -274,6 +290,7 @@ class SiteContact(Base):
     last_enriched_at = Column(UTCDateTime)
     linkedin_url = Column(String(500))
     enrichment_field_sources = Column(JSON)  # Per-field source tracking
+    custom_fields = Column(JSONB, default=dict, server_default="{}")
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -297,6 +314,21 @@ class SiteContact(Base):
         from ..utils.phone import normalize_e164
 
         self.normalized_phone = normalize_e164(value)
+        return value
+
+    @validates("custom_fields")
+    def _validate_custom_fields(self, _key, value):
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            raise ValueError("custom_fields must be a dict")
+        if len(value) > 30:
+            raise ValueError("custom_fields: max 30 keys")
+        for k, v in value.items():
+            if len(str(k)) > 60:
+                raise ValueError(f"custom_fields key too long (max 60 chars): {k!r}")
+            if len(str(v)) > 500:
+                raise ValueError(f"custom_fields value too long (max 500 chars) for key {k!r}")
         return value
 
     __table_args__ = (
