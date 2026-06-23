@@ -131,6 +131,45 @@ htmx.on('htmx:afterRequest', function(evt) {
     });
 });
 
+Alpine.store('callOutcome', {
+    show: false,
+    activityId: null,
+    contactName: '',
+    note: '',
+    chips: [
+        { value: 'connected', label: 'Connected' },
+        { value: 'left_message', label: 'Left message' },
+        { value: 'voicemail', label: 'Voicemail' },
+        { value: 'no_answer', label: 'No answer' },
+    ],
+    dismiss() {
+        this.show = false;
+        this.note = '';
+    },
+    submit(outcome) {
+        const id = this.activityId;
+        const note = this.note.trim() || null;
+        this.dismiss();
+        if (!outcome) return;
+        const headers = { 'Content-Type': 'application/json' };
+        const csrf = csrfToken();
+        if (csrf) headers['x-csrftoken'] = csrf;
+        fetch('/api/activity/' + id + '/call-outcome', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({ outcome: outcome, note: note }),
+        }).then((resp) => {
+            if (resp.ok) {
+                showToast('Call outcome logged', 'success');
+            } else {
+                console.error('[call-outcome] failed', resp.status);
+            }
+        }).catch((err) => {
+            console.error('[call-outcome] network error', err);
+        });
+    },
+});
+
 Alpine.store('shortlist', {
     items: [],
     toggle(item) {
@@ -248,8 +287,10 @@ document.body.addEventListener('click', (evt) => {
         // rep-facing "NOT logged" message) only ever reports genuine fetch
         // rejections; a false "NOT logged" toast invites a duplicate re-click.
         let droppedLinks = [];
+        let body = {};
         try {
-            droppedLinks = (await resp.json()).dropped_links || [];
+            body = await resp.json();
+            droppedLinks = body.dropped_links || [];
         } catch (err) {
             console.error('[outreach-log] could not parse response body', err);
         }
@@ -270,6 +311,13 @@ document.body.addEventListener('click', (evt) => {
                 (labels[d.channel] || 'Outreach') + ' logged' + (d.contactName ? ' — ' + d.contactName : ''),
                 'success'
             );
+            if (payload.channel === 'phone') {
+                const store = Alpine.store('callOutcome');
+                store.activityId = body.id;
+                store.contactName = d.contactName || '';
+                store.note = '';
+                store.show = true;
+            }
             refreshAccountList();
         } catch (err) {
             console.error('[outreach-log] post-success UI update failed', err);

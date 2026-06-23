@@ -466,6 +466,15 @@ class ActivityType(StrEnum):
     VENDOR_AVAILABLE = "vendor_available"
 
 
+class CallOutcome(StrEnum):
+    """Outcome values for a phone call, stamped into ActivityLog.details."""
+
+    CONNECTED = "connected"
+    LEFT_MESSAGE = "left_message"
+    VOICEMAIL = "voicemail"
+    NO_ANSWER = "no_answer"
+
+
 class Channel(StrEnum):
     """Canonical activity_log.channel values (the medium the activity came through)."""
 
