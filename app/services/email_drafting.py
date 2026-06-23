@@ -35,6 +35,13 @@ _VENDOR_REPLY_SYSTEM = (
     "Return JSON with two string fields: 'subject' and 'body'."
 )
 
+_QUAL_REQUEST_SYSTEM = (
+    "You are a concise procurement buyer replying to a vendor to qualify an offer. "
+    "Write a short, professional reply asking ONLY for the specific details listed — "
+    "nothing more. Do not restate what you already know. Return JSON with two string "
+    "fields: 'subject' and 'body'. Body is plain text, 2-5 sentences."
+)
+
 
 async def draft_email(kind: str, context: dict[str, Any]) -> dict | None:
     """Draft an email of ``kind`` from ``context``.
@@ -49,6 +56,8 @@ async def draft_email(kind: str, context: dict[str, Any]) -> dict | None:
         return await _draft_follow_up(context)
     if kind == "vendor_reply":
         return await _draft_vendor_reply(context)
+    if kind == "qual_request":
+        return await _draft_qual_request(context)
     raise ValueError(f"Unknown draft kind: {kind!r}")
 
 
@@ -119,6 +128,34 @@ async def _draft_vendor_reply(context: dict[str, Any]) -> dict | None:
         return None
     reply_subject = str(result.get("subject") or _reply_subject(subject)).strip()
     return {"subject": reply_subject, "body": str(result["body"]).strip()}
+
+
+async def _draft_qual_request(context: dict[str, Any]) -> dict | None:
+    vendor_name = context.get("vendor_name") or "there"
+    mpn = context.get("mpn") or ""
+    subject = _reply_subject(context.get("subject") or "RFQ")
+    items = [str(i).strip() for i in (context.get("items_requested") or []) if str(i).strip()]
+    items_str = "\n".join(f"- {i}" for i in items) if items else "- (no items specified)"
+    prompt = (
+        f"Vendor: {vendor_name}\n"
+        f"Part: {mpn}\n"
+        f"Details we still need to qualify this offer:\n{items_str}\n\n"
+        "Write the reply asking only for these items."
+    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=_QUAL_REQUEST_SYSTEM,
+            model_tier=FAST,
+            max_tokens=400,
+            cost_bucket=_COST_BUCKET,
+        )
+    except ClaudeError as exc:
+        logger.warning("qual_request draft failed: {}", exc)
+        return None
+    if not isinstance(result, dict) or not result.get("body"):
+        return None
+    return {"subject": subject, "body": str(result["body"]).strip()}
 
 
 def _format_parts(parts: Any) -> str:

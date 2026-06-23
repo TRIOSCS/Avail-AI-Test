@@ -24,7 +24,9 @@ FIRMO_FIELD_TIER: dict[str, dict[str, int]] = {
     "legal_name": {"sam_gov": 95, "explorium": 85, "lusha": 75, "clay": 70, "apollo": 65, "ai": 30},
     "naics": {"sam_gov": 95, "explorium": 85, "ai": 30},
     "ticker": {"explorium": 90, "clay": 75, "ai": 30},
-    "revenue_range": {"explorium": 90, "clay": 75, "ai": 30},
+    # Clay omitted: annual_revenue is not a base firmographic and enrich_company does
+    # not request the paid Annual Revenue data point, so Clay never supplies this field.
+    "revenue_range": {"explorium": 90, "ai": 30},
     "employee_size": {"explorium": 85, "apollo": 75, "lusha": 70, "clay": 70, "ai": 30},
     "industry": {"explorium": 85, "apollo": 70, "clay": 70, "lusha": 65, "ai": 30},
     "hq_city": {"explorium": 85, "sam_gov": 80, "apollo": 65, "lusha": 60, "clay": 60, "ai": 30},

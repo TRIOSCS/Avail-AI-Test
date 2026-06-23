@@ -3213,6 +3213,24 @@ async def send_reply_htmx(
     if not body:
         raise HTTPException(400, "Reply body is required")
 
+    # DNC hard-block — never email a do-not-contact vendor (checked in all modes).
+    if vr.vendor_email:
+        from sqlalchemy import func as _sqlfunc
+
+        dnc = (
+            db.query(SiteContact)
+            .filter(
+                _sqlfunc.lower(SiteContact.email) == vr.vendor_email.lower(),
+                SiteContact.do_not_contact.is_(True),
+            )
+            .first()
+        )
+        if dnc:
+            return HTMLResponse(
+                '<div class="rounded bg-rose-50 border border-rose-200 text-rose-700 text-xs px-2 py-1.5">'
+                "This vendor is on the do-not-contact list — reply not sent.</div>"
+            )
+
     is_testing = os.environ.get("TESTING") == "1"
     email_sent = False
 

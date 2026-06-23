@@ -1275,6 +1275,28 @@ Surfaces (all human-edit-before-send; nothing auto-sends):
 Gives `rephrase_rfq` and `VendorResponse.classification` their first live consumers.
 All paths degrade gracefully when Claude is unavailable (cost_bucket="email_drafting").
 
+### Qualify-with-AI (offer pre-fill + ask-the-vendor for what's missing)
+
+```
+Offer row kebab "Qualify with AI" (shown only when offer.vendor_response_id set)
+  GET /v2/partials/sightings/{requirement_id}/offers/{offer_id}/qualify-ai
+    --> parse_vendor_response(linked email) --> extract_draft_offers
+        --> pre-fill the offer form (AI fills EMPTY fields only; saved values win)
+    --> offer_qualification.compute_qual_gaps(prefill, condition)
+        --> condition-aware checklist (genuine gaps pre-checked)
+    --> qual_request_modal.html : pre-filled offer form (same save path as edit) +
+        _qual_checklist.html (gap checkboxes + user-addable custom items via "+ Add item")
+  POST .../offers/{offer_id}/qualify-ai/draft-request
+    checked_items[] (AI gaps kept) + custom_items[] (user's own, not AI-suggested)
+    --> draft_email("qual_request") --> reply_compose.html in #qual-compose-{offer_id}
+  Send → existing send-reply path (Graph as user; TESTING bypass)
+    --> NEW: DNC hard-block in send_reply_htmx (SiteContact.do_not_contact) — never emails DNC vendors
+```
+
+Ownership-guarded via require_requisition_access (offer.requisition_id, owner_id=entered_by_id).
+Read-only pre-fill; never auto-saves or auto-sends. Loop-closes: a vendor's reply becomes a new
+linked VendorResponse, so re-opening Qualify-with-AI fills the remaining fields.
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```
@@ -1750,14 +1772,21 @@ Provenance is persisted in the new `enrichment_provenance` JSONB column on both
   `/prospects/contacts_information/enrich`. Auth: `api_key:` header (NOT
   `Authorization: Bearer`). 402/403/429 → `ProviderQuotaError`.
 - `app/connectors/clay_mcp.py` — backend MCP client (JSON-RPC 2.0 over HTTPS to
-  `https://api.clay.com/v3/mcp`). Authenticates with an OAuth access token
-  (`Authorization: Bearer <token>`); on 401 it attempts one token refresh then
-  retries. Not connected → returns `None`/`[]` (fail-soft; blend continues without
-  Clay). Company: `find-and-enrich-company` (sync). Contacts:
-  `find-and-enrich-contacts-at-company`; emails polled via `get-task-context`
-  (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. **The old Clay WEBHOOK
-  path (`clay_service.py` + `POST /api/webhooks/clay`) has been removed; Clay is
-  now MCP-only.**
+  `https://api.clay.com/v3/mcp`). Clay speaks **MCP Streamable HTTP**: every
+  `tools/call` requires a session, so the connector first runs the handshake
+  (`initialize` → read the `Mcp-Session-Id` response header → `notifications/initialized`)
+  and **caches that session per access token** (reused across calls; a bare sessionless
+  call returns `400 "Missing Mcp-Session-Id header"`). `tools/call` responses are
+  **server-sent events** (`content-type: text/event-stream`), parsed from the `data:`
+  line — not plain JSON. Authenticates with an OAuth access token
+  (`Authorization: Bearer <token>`); on 401 it refreshes the token + re-initializes the
+  session then retries once; on 400/404 (expired session) it re-initializes + retries
+  once. Not connected → returns `None`/`[]` (fail-soft; blend continues without Clay).
+  Company: `find-and-enrich-company` (sync; `result.structuredContent.companies[domain]`).
+  Contacts: `find-and-enrich-contacts-at-company` (`.contacts[]`); emails polled via
+  `get-task-context` (bounded: 5 polls × 3 s). 402/429 → `ProviderQuotaError`. Protocol
+  verified live 2026-06-23. **The old Clay WEBHOOK path (`clay_service.py` +
+  `POST /api/webhooks/clay`) has been removed; Clay is now MCP-only.**
 
   **Clay OAuth Connect flow.** `api.clay.com/v3/mcp` is OAuth-gated
   (authorization_code + PKCE S256, scope=`mcp`; no client_credentials grant).
