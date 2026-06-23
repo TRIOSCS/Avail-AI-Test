@@ -485,11 +485,27 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 > never wipes a sibling list's `customer_excess` sightings. `retire_line` deletes the
 > mirror on award / withdraw / qty->0. Lines whose MPN won't resolve to a MaterialCard
 > are skipped (the upsert key needs the card), never raised.
+>
+> Bid-back assembly lives in `app/services/bid_back_service.py` (Chunk E, additive):
+> `build_bid_back` (owner-only) assembles selected lines into a draft `customer_bids`
+> header + `customer_bid_lines`, seeding each `customer_unit_price` from the line's
+> `best_offer_unit_price` rollup (trader override per line); the chosen offer ids are
+> recorded INTERNALLY (`selected_offer_id`/`selected_offer_line_id`) for audit and are
+> NEVER exported. `bid_back_export_context` is a PURE WHITELIST — line dicts carry only
+> part/mfr/qty/condition/unit+extended price and the header carries no seller identity,
+> so customer-doc cleanliness is enforced at ASSEMBLY, not by template omission. The
+> clean PDF (`generate_bid_report_pdf` -> `app/templates/documents/bid_report.html`,
+> cloned from `quote_report.html`, WeasyPrint) renders only that context. Migration 127
+> (ADDITIVE) adds the two `customer_bids*` tables and the `open_at`/`close_at` posting
+> window on `excess_lists`; `excess_mirror.publish_list` now stamps `open_at` and
+> `excess_service.close_list` (owner-only) flips to `bid_out` + stamps `close_at` (which
+> drives the "closes in Xd" header chip).
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
 - Status: draft -> open -> collecting -> bid_out -> awarded -> closed/expired (legacy: active, bidding)
 - version (int, default 1) — lock-on-post; a revision bumps version
+- open_at (stamped on publish), close_at (stamped on close_list) — posting window (Chunk E)
 
 **`excess_line_items`** — Individual parts in an excess list
 - part_number, description, manufacturer, quantity, asking_price, demand_match_count
@@ -506,6 +522,17 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 - offer_id -> excess_offers (CASCADE), excess_line_item_id -> excess_line_items (nullable, SET NULL)
 - mpn_raw, quantity, unit_price (nullable), lead_time_days, terms_text
 - match_status: matched | unmatched | ambiguous (unmatched/ambiguous = held for manual resolution)
+
+**`customer_bids`** — Outbound bid back to the seller (Trio's offer to BUY their excess; Chunk E)
+- excess_list_id -> excess_lists (CASCADE), owner_id -> users
+- status: draft -> sent -> accepted/rejected; revision (int, default 1); notes
+- One per assembly; the clean PDF + summary render from `bid_back_export_context`
+
+**`customer_bid_lines`** — Per-line priced rows of a customer bid (Chunk E)
+- customer_bid_id -> customer_bids (CASCADE), excess_line_item_id -> excess_line_items (SET NULL)
+- customer_unit_price (seeded from best_offer_unit_price, overridable), quantity
+- selected_offer_id -> excess_offers / selected_offer_line_id -> excess_offer_lines (SET NULL)
+  — INTERNAL provenance only; NEVER exported to the customer doc
 
 **`bids`** — Vendor bids on excess items (legacy; retired in the cutover chunk)
 - bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status
