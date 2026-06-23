@@ -78,25 +78,25 @@ Only genuine card/tile/stat grids — never layout-splits:
 
 ## Treatment table
 
-### → `.page-fluid` (21 dense page-shells)
+### → `.page-fluid` (20 dense page-shells)
 
 `admin/spec_codes_pending`, `buy_plans/detail`*, `buy_plans/hub`*, `dashboard`,
 `emails/intelligence_dashboard`, `excess/detail`, `excess/list`, `follow_ups/list`,
 `materials/detail`*, `proactive/list`, `prospecting/list`, `quotes/detail`,
 `requisitions/detail`, `requisitions/list`*, `search/full_results`, `settings/index`*,
-`sourcing/lead_detail`, `tickets/workspace`, `vendors/detail`, `vendors/list` †,
-`offers/review_queue` †
+`tickets/workspace`, `vendors/detail`, `vendors/list` †, `offers/review_queue` †
 
 - `*` = wrapper is an Alpine `x-data` root — preserve the attribute.
 - `†` = the audit first labeled these as fragments; confirmed full pages via
   `template_response(...)` in `app/routers/htmx_views.py`. `offers/review_queue`'s
   wrapper also carries `id="review-queue-content"` — preserve it.
 
-### → `.page-readable` (6 reading page-shells, normalize to ~1152px)
+### → `.page-readable` (7 reading page-shells, normalize to ~1152px)
 
 `admin/data_ops` (3xl→readable), `knowledge/list` (3xl→readable),
 `proactive/prepare` (4xl→readable), `prospecting/detail` (7xl→readable),
-`search/dossier_shell` (5xl→readable), `tickets/detail` (4xl→readable)
+`search/dossier_shell` (5xl→readable), `sourcing/lead_detail` (4xl→readable;
+single-column card/form detail, twin of prospecting/detail), `tickets/detail` (4xl→readable)
 
 ### → Leave as-is (do NOT touch)
 
