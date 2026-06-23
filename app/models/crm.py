@@ -109,6 +109,7 @@ class Company(Base):
 
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
+    attachments = relationship("CompanyAttachment", back_populates="company", cascade="all, delete-orphan")
 
     @validates("currency")
     def _validate_currency(self, _key, value):
@@ -253,6 +254,7 @@ class SiteContact(Base):
     )
 
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
+    attachments = relationship("SiteContactAttachment", back_populates="site_contact", cascade="all, delete-orphan")
 
     @validates("email")
     def _validate_email(self, _key, value):
@@ -265,3 +267,63 @@ class SiteContact(Base):
         Index("ix_site_contacts_email", "email"),
         UniqueConstraint("customer_site_id", "email", name="uq_site_contacts_site_email"),
     )
+
+
+class CompanyAttachment(Base):
+    """File attachment on a CRM company (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
+    Depends on: Company, User
+    """
+
+    __tablename__ = "company_attachments"
+    id = Column(Integer, primary_key=True)
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    company = relationship("Company", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (Index("ix_company_attachments_company", "company_id"),)
+
+
+class SiteContactAttachment(Base):
+    """File attachment on a CRM site contact (stored in OneDrive or company SharePoint
+    library).
+
+    library_drive_id NULL  → OneDrive fallback row (user token, item in /me/drive)
+    library_drive_id set   → company SharePoint library row (app token)
+
+    Called by: app/routers/attachments_extra.py, app/services/attachment_service.py
+    Depends on: SiteContact, User
+    """
+
+    __tablename__ = "site_contact_attachments"
+    id = Column(Integer, primary_key=True)
+    site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    library_item_id = Column(String(500))
+    library_drive_id = Column(String(200))
+    library_web_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+
+    site_contact = relationship("SiteContact", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (Index("ix_site_contact_attachments_contact", "site_contact_id"),)
