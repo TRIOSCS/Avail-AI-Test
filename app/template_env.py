@@ -48,7 +48,13 @@ def page_response(context: dict[str, Any]) -> Response:
     request = context.get("request")
     if request is None:
         raise ValueError("page_response: 'request' must be present in the context dict")
-    return templates.TemplateResponse(request, "htmx/base_page.html", context, headers=_PAGE_NO_CACHE_HEADERS)
+    # Set Cache-Control EXPLICITLY on the response object — the TemplateResponse(headers=...)
+    # kwarg is silently dropped in production (it survives under TESTING but not the live
+    # ASGI stack), whereas explicit response.headers[...] sets reliably persist (this is how
+    # the security-headers middleware sets X-Frame-Options/CSP/etc.).
+    resp = templates.TemplateResponse(request, "htmx/base_page.html", context)
+    resp.headers["Cache-Control"] = _PAGE_NO_CACHE_HEADERS["Cache-Control"]
+    return resp
 
 
 # ── Shared Helpers ─────────────────────────────────────────────────────
