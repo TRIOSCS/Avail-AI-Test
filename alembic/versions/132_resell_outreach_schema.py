@@ -74,7 +74,6 @@ def upgrade():
             sa.Integer,
             sa.ForeignKey("vendor_cards.id", ondelete="CASCADE"),
             nullable=False,
-            unique=True,
         ),
         sa.Column("offers_received", sa.Integer, nullable=False, server_default="0"),
         sa.Column("wins", sa.Integer, nullable=False, server_default="0"),

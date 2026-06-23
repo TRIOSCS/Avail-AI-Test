@@ -386,7 +386,7 @@ class BuyerScore(Base):
 
     __tablename__ = "buyer_scores"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False, unique=True)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     offers_received = Column(Integer, nullable=False, default=0, server_default="0")
     wins = Column(Integer, nullable=False, default=0, server_default="0")
     avg_bid_pct_of_ask = Column(Numeric(6, 2), nullable=True)
