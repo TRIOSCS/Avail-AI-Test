@@ -54,11 +54,13 @@ def bump_clocks_from_activity(db: Session, activity: ActivityLog) -> None:
 
 
 def _outbound_max(db: Session, col):
-    return db.query(func.max(ActivityLog.created_at)).filter(col, ActivityLog.direction == Direction.OUTBOUND)
+    return db.query(func.max(func.coalesce(ActivityLog.occurred_at, ActivityLog.created_at))).filter(
+        col, ActivityLog.direction == Direction.OUTBOUND
+    )
 
 
 def _reply_max(db: Session, col):
-    return db.query(func.max(ActivityLog.created_at)).filter(
+    return db.query(func.max(func.coalesce(ActivityLog.occurred_at, ActivityLog.created_at))).filter(
         col, ActivityLog.direction == Direction.INBOUND, ActivityLog.is_meaningful.is_(True)
     )
 

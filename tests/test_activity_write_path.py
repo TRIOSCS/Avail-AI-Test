@@ -494,6 +494,29 @@ def test_log_call_activity_details_connected_is_meaningful(db_session, test_user
     assert rec.is_meaningful is True
 
 
+def test_log_call_activity_details_left_message_is_meaningful(db_session, test_user):
+    """details.call_outcome=left_message → is_meaningful True.
+
+    LEFT_MESSAGE is in MEANINGFUL_CALL_OUTCOMES: leaving a voicemail is a meaningful
+    outreach touch. This was previously only meaningful in the call-outcome router;
+    now it is consistent across both write paths.
+    """
+    from app.constants import CallOutcome
+
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15550001007",
+        duration_seconds=0,
+        external_id="outcome-leftmsg-001",
+        contact_name="VM Rep",
+        db=db_session,
+        details={"call_outcome": CallOutcome.LEFT_MESSAGE.value, "source": "manual"},
+    )
+    assert rec is not None
+    assert rec.is_meaningful is True, "LEFT_MESSAGE must be meaningful in log_call_activity"
+
+
 def test_log_call_activity_details_no_answer_not_meaningful_even_long(db_session, test_user):
     """details.call_outcome=no_answer → is_meaningful False even if duration >= 30s."""
     from app.constants import CallOutcome

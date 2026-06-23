@@ -14,7 +14,15 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, CallOutcome, Channel, Direction, EventType, InboxSyncHealth, OutreachChannel
+from app.constants import (
+    MEANINGFUL_CALL_OUTCOMES,
+    ActivityType,
+    Channel,
+    Direction,
+    EventType,
+    InboxSyncHealth,
+    OutreachChannel,
+)
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -353,9 +361,8 @@ def log_meeting_activity(
         local = email.split("@")[0] if "@" in email else email
         if domain in _all_generic:
             return True
-        for prefix in JUNK_EMAIL_PREFIXES:
-            if local.startswith(prefix):
-                return True
+        if local in JUNK_EMAIL_PREFIXES:
+            return True
         return False
 
     organizer_lower = (organizer_email or "").strip().lower()
@@ -483,7 +490,7 @@ def log_call_activity(
     if force_meaningful is not None:
         is_meaningful = force_meaningful
     elif details and details.get("call_outcome"):
-        is_meaningful = details["call_outcome"] == CallOutcome.CONNECTED
+        is_meaningful = details["call_outcome"] in MEANINGFUL_CALL_OUTCOMES
     else:
         is_meaningful = duration_seconds is not None and duration_seconds >= CALL_MEANINGFUL_MIN_SECONDS
 

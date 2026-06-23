@@ -22,7 +22,14 @@ from loguru import logger
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
-from ..constants import ActivityType, CallOutcome, Channel, Direction, EventType, OutreachChannel
+from ..constants import (
+    MEANINGFUL_CALL_OUTCOMES,
+    ActivityType,
+    Channel,
+    Direction,
+    EventType,
+    OutreachChannel,
+)
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ActivityLog, Company, CustomerSite, SiteContact, User, VendorCard
@@ -271,11 +278,12 @@ def record_call_outcome(
     existing ActivityLog.
 
     Called from the post-outreach outcome prompt in the CDM workspace. Returns 404 for
-    any lookup failure to avoid existence leaks. Rate-limited under the same 'outreach'
-    bucket as outreach-initiated.
+    any lookup failure to avoid existence leaks. Rate-limited under its own
+    'call_outcome' bucket (separate from the outreach bucket — recording an outcome must
+    not spend outreach tokens).
     """
     try:
-        if not _check_rate_limit(user.id, bucket="outreach", limit=_OUTREACH_RATE_LIMIT):
+        if not _check_rate_limit(user.id, bucket="call_outcome", limit=_OUTREACH_RATE_LIMIT):
             raise HTTPException(429, "Too many requests — try again in a minute")
 
         record = db.get(ActivityLog, activity_id)
@@ -293,7 +301,7 @@ def record_call_outcome(
             existing = record.notes or ""
             record.notes = (existing + "\n" + note).strip()
 
-        record.is_meaningful = body.outcome in (CallOutcome.CONNECTED, CallOutcome.LEFT_MESSAGE)
+        record.is_meaningful = body.outcome in MEANINGFUL_CALL_OUTCOMES
 
         db.commit()
         return {"ok": True, "outcome": body.outcome.value}

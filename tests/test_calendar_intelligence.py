@@ -320,6 +320,65 @@ class TestLogMeetingActivity:
         assert rows == []
 
 
+# ── Tests: junk-filter exact-match regression ────────────────────────────────
+
+
+class TestJunkFilterExactMatch:
+    """Regression: _is_junk must use exact membership, not startswith().
+
+    support.lee@customer.com should NOT be filtered (local='support.lee' != 'support').
+    marketingdirector@example.com should NOT be filtered (local='marketingdirector' != 'marketing').
+    noreply@customer.com MUST be filtered (local='noreply' IS in JUNK_EMAIL_PREFIXES).
+    """
+
+    def test_support_prefix_real_contact_is_not_filtered(self, db_session):
+        """support.lee@customer.com has local='support.lee' — not in JUNK_EMAIL_PREFIXES
+        — so it must NOT be filtered and must produce a linked ActivityLog row."""
+        co = _make_company(db_session, name="Support Lee Co", domain="customer.com")
+        site = _make_site(db_session, co.id, email="support.lee@customer.com")
+        _make_site_contact(db_session, site.id, email="support.lee@customer.com")
+        db_session.commit()
+
+        rows = log_meeting_activity(
+            user_id=None,
+            graph_event_id="evt-junk-prefix-001",
+            subject="Review call",
+            start_dt=_dt(-2),
+            end_dt=_dt(-1),
+            organizer_email="me@trioscs.com",
+            attendee_emails=["support.lee@customer.com"],
+            location=None,
+            db=db_session,
+        )
+
+        assert len(rows) == 1, (
+            "support.lee@customer.com must not be filtered — 'support.lee' is not in JUNK_EMAIL_PREFIXES"
+        )
+        assert rows[0].company_id == co.id
+
+    def test_noreply_is_always_filtered(self, db_session):
+        """noreply@customer.com has local='noreply' which IS in JUNK_EMAIL_PREFIXES and
+        must produce zero rows regardless of domain."""
+        co = _make_company(db_session, name="Noreply Co", domain="vendor2.com")
+        site = _make_site(db_session, co.id, email="noreply@vendor2.com")
+        _make_site_contact(db_session, site.id, email="noreply@vendor2.com")
+        db_session.commit()
+
+        rows = log_meeting_activity(
+            user_id=None,
+            graph_event_id="evt-junk-prefix-002",
+            subject="Automated alert",
+            start_dt=_dt(-3),
+            end_dt=_dt(-2),
+            organizer_email="me@trioscs.com",
+            attendee_emails=["noreply@vendor2.com"],
+            location=None,
+            db=db_session,
+        )
+
+        assert rows == [], "noreply@ must always be filtered"
+
+
 # ── Tests: AI scoring inclusion ───────────────────────────────────────────────
 
 

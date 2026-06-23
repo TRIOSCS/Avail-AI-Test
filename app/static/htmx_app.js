@@ -163,9 +163,14 @@ Alpine.store('callOutcome', {
                 showToast('Call outcome logged', 'success');
             } else {
                 console.error('[call-outcome] failed', resp.status);
+                const msg = resp.status === 429
+                    ? 'Outcome not saved — rate limit hit, wait a minute'
+                    : 'Outcome not saved (error ' + resp.status + ')';
+                showToast(msg, 'error');
             }
         }).catch((err) => {
             console.error('[call-outcome] network error', err);
+            showToast('Outcome not saved — network error', 'error');
         });
     },
 });

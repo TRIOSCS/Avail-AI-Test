@@ -475,6 +475,14 @@ class CallOutcome(StrEnum):
     NO_ANSWER = "no_answer"
 
 
+# Outcomes that constitute a meaningful outreach touch (cadence clock advances).
+# CONNECTED: live conversation confirmed. LEFT_MESSAGE: human voicemail recorded.
+# VOICEMAIL / NO_ANSWER are not meaningful (no human contact made).
+# NOTE: 8x8 CDR only emits CONNECTED and NO_ANSWER — adding LEFT_MESSAGE here
+# does not change 8x8 behaviour; it makes manually-picked LEFT_MESSAGE consistent.
+MEANINGFUL_CALL_OUTCOMES: frozenset[str] = frozenset({CallOutcome.CONNECTED, CallOutcome.LEFT_MESSAGE})
+
+
 class Channel(StrEnum):
     """Canonical activity_log.channel values (the medium the activity came through)."""
 
