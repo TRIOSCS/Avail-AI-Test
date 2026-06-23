@@ -203,6 +203,10 @@ class Settings(BaseSettings):
     # --- Email Intelligence ---
     email_mining_enabled: bool = False
     email_mining_lookback_days: int = 180
+    # Cap on how many mined domains (top N by inbox volume) get an eager Explorium
+    # match per batch. The long tail is created unenriched and enriched on demand later.
+    # This is the only metered-spend lever for the email-mining path.
+    email_mining_enrich_cap: int = 25
 
     # --- M365 Integration v2 ---
     inbox_scan_interval_min: int = 30

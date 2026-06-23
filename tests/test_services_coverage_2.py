@@ -258,12 +258,14 @@ class TestProspectDiscoveryEmail:
         assert result[0].discovery_source == "email_history"
 
     def test_enrich_email_domains_no_enrichment(self):
-        """No enrichment data available -> empty list."""
+        """No enrich_fn -> domain still captured as a bare prospect (hybrid)."""
         from app.services.prospect_discovery_email import enrich_email_domains
 
         domains = [{"domain": "nope.com", "email_count": 2, "sample_senders": []}]
         result = _run(enrich_email_domains(domains, enrich_fn=None))
-        assert len(result) == 0
+        assert len(result) == 1
+        assert result[0].domain == "nope.com"
+        assert result[0].industry is None
 
     def test_run_email_mining_batch_no_domains(self, db_session: Session):
         """Batch returns empty when no unknown domains found."""

@@ -14,6 +14,7 @@ from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scheduler import (
     DISCOVERY_ROTATION,
+    _persist_discovery_results,
     get_next_discovery_slice,
     job_discover_prospects,
     job_enrich_pool,
@@ -61,6 +62,43 @@ def _make_batch(db: Session, **overrides) -> DiscoveryBatch:
     db.commit()
     db.refresh(b)
     return b
+
+
+class TestPersistScoresAtCreation:
+    """_persist_discovery_results scores rows at persist (not just the monthly
+    refresh)."""
+
+    def test_persisted_prospect_is_scored(self, db_session):
+        from app.schemas.prospect_account import ProspectAccountCreate
+
+        batch = _make_batch(db_session, batch_id="score-at-persist")
+        pc = ProspectAccountCreate(
+            name="Acme Aerospace",
+            domain="acme-aero.com",
+            industry="Aerospace & Defense",
+            naics_code="336412",
+            employee_count_range="201-500",
+            region="US",
+            discovery_source="email_history",
+        )
+        n = _persist_discovery_results(db_session, batch, [pc])
+        db_session.commit()
+        assert n == 1
+        saved = db_session.query(ProspectAccount).filter_by(domain="acme-aero.com").first()
+        # Scored at persist: fit_reasoning is set (NULL by default) and a fit score computed.
+        assert saved.fit_reasoning is not None
+        assert saved.fit_score and saved.fit_score > 0
+
+    def test_bare_prospect_persists_without_crash(self, db_session):
+        from app.schemas.prospect_account import ProspectAccountCreate
+
+        batch = _make_batch(db_session, batch_id="score-bare")
+        pc = ProspectAccountCreate(name="x.com", domain="x.com", discovery_source="email_history")
+        _persist_discovery_results(db_session, batch, [pc])
+        db_session.commit()
+        saved = db_session.query(ProspectAccount).filter_by(domain="x.com").first()
+        # Bare prospect still gets a (low) score, not left at the column default unscored.
+        assert saved.fit_reasoning is not None
 
 
 # ── Rotation Logic ──────────────────────────────────────────────────
