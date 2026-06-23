@@ -25,8 +25,8 @@ def _make_req_attachment(db_session, requisition_id):
     att = RequisitionAttachment(
         requisition_id=requisition_id,
         file_name="spec.pdf",
-        onedrive_item_id=None,  # no OneDrive call; isolates the authz guard
-        onedrive_url="https://example.com/spec.pdf",
+        library_item_id=None,  # no cloud call; isolates the authz guard
+        library_web_url="https://example.com/spec.pdf",
         content_type="application/pdf",
         size_bytes=123,
         created_at=datetime.now(timezone.utc),
@@ -41,8 +41,8 @@ def _make_requirement_attachment(db_session, requirement_id):
     att = RequirementAttachment(
         requirement_id=requirement_id,
         file_name="datasheet.pdf",
-        onedrive_item_id=None,
-        onedrive_url="https://example.com/datasheet.pdf",
+        library_item_id=None,
+        library_web_url="https://example.com/datasheet.pdf",
         content_type="application/pdf",
         size_bytes=456,
         created_at=datetime.now(timezone.utc),
