@@ -24,8 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.models import Offer, Quote, Requirement, Requisition, User
 from app.services.quote_builder_service import (
+    DEFAULT_MARKUP_PCT,
     best_cost_for,
     best_costs_for,
+    build_quote_tab_data,
     margin_guardrail,
     quote_export_context,
 )
@@ -307,6 +309,77 @@ class TestMarginGuardrail:
         # No sell price → nothing to judge (avoid div-by-zero noise).
         assert margin_guardrail(1.00, 0) is None
         assert margin_guardrail(1.00, None) is None
+
+
+# ── build_quote_tab_data ──────────────────────────────────────────────────────
+
+
+class TestBuildQuoteTabData:
+    def test_line_carries_best_cost_and_flags_cheapest_offer(self, db_session: Session, req_with_offers):
+        req, item, offers = req_with_offers
+        lines = build_quote_tab_data(db_session, req.id)
+        assert len(lines) == 1
+        line = lines[0]
+        assert line["requirement_id"] == item.id
+        assert line["mpn"] == "LM317T"
+        assert line["best_cost"] == pytest.approx(0.40)
+        assert line["best_offer_id"] == offers["active_lo"].id
+        # The SOLD 0.10 offer is excluded; only the two ACTIVE offers ride along.
+        assert line["offer_count"] == 2
+        best = next(o for o in line["offers"] if o["is_best"])
+        assert best["id"] == offers["active_lo"].id
+
+    def test_sell_seed_falls_back_to_best_cost_times_markup(self, db_session: Session, req_with_offers):
+        req, _item, _offers = req_with_offers
+        lines = build_quote_tab_data(db_session, req.id, markup_pct=25.0)
+        # No prior quote for LM317T → seed = best_cost (0.40) × 1.25 = 0.50, source markup.
+        assert lines[0]["sell_seed"] == pytest.approx(0.50)
+        assert lines[0]["seed_source"] == "markup"
+
+    def test_sell_seed_prefers_last_quoted_price(self, db_session: Session, req_with_offers, test_user: User):
+        req, _item, _offers = req_with_offers
+        # A prior priced quote for the same MPN — its sell price wins the seed.
+        prior = Quote(
+            requisition_id=req.id,
+            quote_number="Q-PRIOR-0001",
+            status="sent",
+            line_items=[{"mpn": "LM317T", "sell_price": 0.99, "margin_pct": 50.0}],
+            subtotal=99.0,
+            created_by_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(prior)
+        db_session.commit()
+        lines = build_quote_tab_data(db_session, req.id)
+        assert lines[0]["sell_seed"] == pytest.approx(0.99)
+        assert lines[0]["seed_source"] == "last_quoted"
+
+    def test_no_offers_yields_empty_seed(self, db_session: Session, test_user: User):
+        req = Requisition(
+            name="QB-TAB-EMPTY",
+            customer_name="Empty Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        db_session.add(
+            Requirement(
+                requisition_id=req.id,
+                primary_mpn="NOPART",
+                target_qty=5,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.commit()
+        lines = build_quote_tab_data(db_session, req.id)
+        assert lines[0]["best_cost"] is None
+        assert lines[0]["sell_seed"] is None
+        assert lines[0]["offer_count"] == 0
+
+    def test_default_markup_constant(self):
+        assert DEFAULT_MARKUP_PCT == 20.0
 
 
 # ── generate_quote_report_pdf rewiring ────────────────────────────────────────

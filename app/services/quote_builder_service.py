@@ -17,6 +17,10 @@ from sqlalchemy.orm import Session, joinedload
 # established floor used by proactive_min_margin_pct / buyplan_min_margin_pct (10%).
 DEFAULT_MIN_MARGIN_PCT = 10.0
 
+# Default markup applied to the best cost when no last-quoted price exists, used to
+# pre-fill the sell-price field on the Build-Quote tab. Surfaced + editable in the UI.
+DEFAULT_MARKUP_PCT = 20.0
+
 
 def best_cost_for(db: Session, requirement_id: int) -> dict | None:
     """Best (lowest) unit cost across a requirement's ACTIVE offers — compute-on-read.
@@ -234,6 +238,100 @@ def get_builder_data(
         from loguru import logger
 
         logger.warning("Pricing history unavailable for req {}: {} — lines will show no history", req_id, e)
+
+    return lines
+
+
+def build_quote_tab_data(
+    db: Session,
+    req_id: int,
+    *,
+    markup_pct: float = DEFAULT_MARKUP_PCT,
+) -> list[dict]:
+    """Per-line data for the in-workspace Build-Quote tab (single-stage inline
+    assembly).
+
+    Each line carries the best-cost reference (``best_costs_for``), its ACTIVE offers (the
+    cheapest flagged ``is_best``), and a seeded ``sell_price``: the last-quoted price
+    (``_preload_last_quoted_prices``) when known, else best-cost × (1 + markup). The
+    template/Alpine layer reads these straight through — the seed is the only smart default.
+
+    Mirrors the SHAPE of ``resell._build_bid_context`` line items (a best reference + a
+    pre-filled "our price"), but for the buyer-side ``Requirement``/``Offer`` tables.
+    """
+    from app.constants import OfferStatus
+    from app.models import Requirement
+
+    requirements = (
+        db.query(Requirement)
+        .options(joinedload(Requirement.offers))
+        .filter(Requirement.requisition_id == req_id)
+        .order_by(Requirement.id)
+        .all()
+    )
+
+    best_costs = best_costs_for(db, [r.id for r in requirements])
+
+    try:
+        from app.routers.crm._helpers import _preload_last_quoted_prices
+
+        last_quoted = _preload_last_quoted_prices(db)
+    except Exception as e:  # pragma: no cover - history is best-effort
+        from loguru import logger
+
+        logger.warning("Pricing history unavailable for req {}: {} — seeds fall back to markup", req_id, e)
+        last_quoted = {}
+
+    markup_factor = 1 + (markup_pct / 100.0)
+
+    lines: list[dict] = []
+    for r in requirements:
+        best = best_costs.get(r.id)
+        best_cost = best["unit_cost"] if best else None
+        best_offer_id = best["offer_id"] if best else None
+
+        offers = [
+            {
+                "id": o.id,
+                "vendor_name": o.vendor_name,
+                "unit_price": float(o.unit_price) if o.unit_price else 0.0,
+                "qty_available": o.qty_available or 0,
+                "lead_time": o.lead_time,
+                "date_code": o.date_code,
+                "condition": o.condition,
+                "packaging": o.packaging,
+                "moq": o.moq,
+                "material_card_id": o.material_card_id,
+                "is_best": o.id == best_offer_id,
+            }
+            for o in r.offers
+            if o.status == OfferStatus.ACTIVE and o.unit_price is not None
+        ]
+        offers.sort(key=lambda o: o["unit_price"])
+
+        # Seed the sell price: last-quoted wins, else best-cost × markup.
+        lq = last_quoted.get((r.primary_mpn or "").upper().strip())
+        seed = lq.get("sell_price") if lq else None
+        seed_source = "last_quoted" if seed is not None else None
+        if seed is None and best_cost is not None:
+            seed = round(best_cost * markup_factor, 4)
+            seed_source = "markup"
+
+        lines.append(
+            {
+                "requirement_id": r.id,
+                "mpn": r.primary_mpn,
+                "manufacturer": r.manufacturer,
+                "qty": r.target_qty or 0,
+                "condition": r.condition,
+                "best_cost": best_cost,
+                "best_offer_id": best_offer_id,
+                "offers": offers,
+                "offer_count": len(offers),
+                "sell_seed": float(seed) if seed is not None else None,
+                "seed_source": seed_source,
+            }
+        )
 
     return lines
 
