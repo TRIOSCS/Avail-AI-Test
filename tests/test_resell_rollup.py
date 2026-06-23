@@ -1,4 +1,4 @@
-"""test_trading_rollup.py — Best-price rollup across a line's inbound offers.
+"""test_resell_rollup.py — Best-price rollup across a line's inbound offers.
 
 Covers ``recompute_line_rollup`` / ``withdraw_offer`` (spec §"Offer collection",
 "best-price rollup per line"): best_offer_unit_price = min unit_price across the
