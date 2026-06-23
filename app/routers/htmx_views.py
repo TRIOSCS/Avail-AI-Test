@@ -1062,10 +1062,15 @@ async def customer_quick_create(
 async def requisition_detail_partial(
     request: Request,
     req_id: int,
+    tab: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return requisition detail as HTML partial with tabs."""
+    """Return requisition detail as HTML partial with tabs.
+
+    ``tab`` deep-links a starting tab (e.g. ``build_quote`` from the list "Build Quote"
+    launch); it sets the Alpine active tab and auto-loads that tab's lazy body.
+    """
     req = (
         db.query(Requisition)
         .options(
@@ -1088,8 +1093,11 @@ async def requisition_detail_partial(
     # Fetch users for tasks tab assignee dropdown
     users = db.query(User).order_by(User.name).all()
 
+    allowed_initial_tabs = {"parts", "offers", "responses", "quotes", "build_quote", "buy_plans"}
+    initial_tab = tab if tab in allowed_initial_tabs else "parts"
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"req": req, "requirements": requirements, "users": users})
+    ctx.update({"req": req, "requirements": requirements, "users": users, "initial_tab": initial_tab})
     return template_response("htmx/partials/requisitions/detail.html", ctx)
 
 
