@@ -434,6 +434,10 @@ class ActivityLog(Base):
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="SET NULL"), nullable=True)
+    # Resell-outreach scope: outreach/touch events on an excess list write to the same
+    # immutable timeline + cadence clocks (resell-outreach Chunk A; CRM Phase 3 generalizes
+    # the activity layer). Nullable + SET NULL like the other polymorphic-scope FKs.
+    excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="SET NULL"), nullable=True)
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -471,6 +475,7 @@ class ActivityLog(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
+    excess_list = relationship("ExcessList", foreign_keys=[excess_list_id])
 
     __table_args__ = (
         Index(
@@ -531,6 +536,12 @@ class ActivityLog(Base):
             "requirement_id",
             "created_at",
             postgresql_where=Column("requirement_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_excess_list",
+            "excess_list_id",
+            "created_at",
+            postgresql_where=Column("excess_list_id").isnot(None),
         ),
     )
 
