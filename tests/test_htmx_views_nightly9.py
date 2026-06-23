@@ -554,13 +554,17 @@ class TestSiteContactCRUD:
         test_customer_site: CustomerSite,
     ):
         contact = _site_contact(db_session, test_customer_site)
+        contact_id = contact.id
+        contact_email = contact.email
         resp = client.delete(
-            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact.id}"
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{contact_id}"
         )
         assert resp.status_code == 200
-        assert resp.text == ""
-        gone = db_session.get(SiteContact, contact.id)
+        # IA redesign retired the per-site Sites-tab contact list: delete now re-renders
+        # the canonical contacts list, so the contact is gone from both the DB and the list.
+        gone = db_session.get(SiteContact, contact_id)
         assert gone is None
+        assert contact_email not in resp.text
 
     def test_delete_site_contact_not_found(
         self,

@@ -29,6 +29,32 @@ def template_response(name: str, context: dict[str, Any], **kwargs: Any) -> Resp
     return templates.TemplateResponse(request, name, context, **kwargs)
 
 
+# Cache-Control header for full HTML page responses (the base_page shell).
+# Browsers heuristically cache responses with no Cache-Control, so a normal
+# reload can serve a stale shell pointing at old hashed-CSS/JS bundles after
+# a deploy.  "no-cache" means "revalidate before serving from cache" — the
+# browser may still store it but must check with the server first.
+_PAGE_NO_CACHE_HEADERS: dict[str, str] = {"Cache-Control": "no-cache, must-revalidate"}
+
+
+def page_response(context: dict[str, Any]) -> Response:
+    """Render htmx/base_page.html with Cache-Control: no-cache, must-revalidate.
+
+    All /v2/* full-page routes (the base_page shell) use this helper so that a normal
+    browser reload picks up a newly deployed CSS/JS bundle instead of serving the stale
+    shell from heuristic cache.  HTMX partial responses and /static/assets/* (Vite-
+    hashed, immutable) are intentionally unaffected.
+    """
+    request = context.get("request")
+    if request is None:
+        raise ValueError("page_response: 'request' must be present in the context dict")
+    # NOTE: the no-cache Cache-Control for full pages is applied in the security-headers
+    # middleware (app/main.py) — the OUTERMOST middleware. Header sets on THIS TemplateResponse
+    # are dropped by inner response processing before reaching the client (verified live), so
+    # they must be applied at the middleware level. This helper is the single full-page entry.
+    return templates.TemplateResponse(request, "htmx/base_page.html", context)
+
+
 # ── Shared Helpers ─────────────────────────────────────────────────────
 
 

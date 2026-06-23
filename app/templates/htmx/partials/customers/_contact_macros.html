@@ -7,6 +7,12 @@
                htmx_app.js outreach logger, Alpine.js.
    Called by: contacts_tab.html, _contacts_grouped_list.html.
 
+   Progressive disclosure layout (spec §4):
+     Always visible  = name · primary star · role label · site label ·
+                       last-touch dot · outreach buttons (Call/Email/Teams/WeChat)
+     Hover / kebab   = role editor · priority · archive · DNC ·
+                       edit · set-primary · delete
+
    Clock honesty rule: NULL last_outbound_at means "not yet logged". Render "—"
    — NEVER "never replied".
 #}
@@ -26,8 +32,20 @@
   <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
     <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
   </svg>
-  {{ label }}
+  <span class="sr-only">{{ label }}</span>
 </a>
+{% endmacro %}
+
+
+{% macro site_cadence_dot(site, now_utc) %}
+{# Per-site cadence dot for the Contacts section header. A macro (not template body)
+   so cadence_state resolves to the Jinja GLOBAL callable — the detail.html ctx
+   shadows the name with a string in the included template's local scope. #}
+{% set _state = cadence_state(none, site.last_outbound_at, now_utc) if site else 'new' %}
+{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
+<span class="w-2 h-2 rounded-full flex-shrink-0 {{ _dot.get(_state, 'bg-gray-300') }}"
+      role="img" aria-label="{{ _state|replace('_', ' ')|title }} cadence"
+      title="{{ _state|replace('_', ' ')|title }}"></span>
 {% endmacro %}
 
 
@@ -45,24 +63,43 @@
     {% set clock_cls = 'text-emerald-600' %}
   {% endif %}
 <div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
+  <span class="text-gray-600">Out:</span>
   <span class="{{ clock_cls }} font-medium">{{ out_days }}d ago</span>
-  <span class="text-gray-400">Reply:</span>
+  <span class="text-gray-600">Reply:</span>
   {% if rep_ts %}
     {% set rep_days = (now_utc - rep_ts).days %}
     <span class="text-gray-600">{{ rep_days }}d ago</span>
   {% else %}
-    <span class="text-gray-300">—</span>
+    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
   {% endif %}
 </div>
 {% else %}
 <div class="mt-1.5 flex items-center gap-3 text-[11px]">
-  <span class="text-gray-400">Out:</span>
-  <span class="text-gray-300" title="no logged touch">—</span>
-  <span class="text-gray-400">Reply:</span>
-  <span class="text-gray-300">—</span>
+  <span class="text-gray-600">Out:</span>
+  <span class="text-gray-400" title="no logged touch">—<span class="sr-only"> no data</span></span>
+  <span class="text-gray-600">Reply:</span>
+  <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
 </div>
 {% endif %}
+{% endmacro %}
+
+
+{# ── Compact last-touch indicator (always-visible row) ─────────────────────────── #}
+{% macro _last_touch_compact(contact, now_utc, cadence) %}
+{# Shows a cadence dot + compact "Xd" text. NULL → "—". #}
+{% set out_ts = contact.last_outbound_at if contact else none %}
+{% set _dot = {'new': 'bg-gray-300', 'on_target': 'bg-emerald-400', 'due': 'bg-amber-400', 'overdue': 'bg-rose-500'} %}
+{% set _dot_cls = _dot.get(cadence, 'bg-gray-300') %}
+<span class="inline-flex items-center gap-1 text-[11px]"
+      title="{% if out_ts and now_utc %}Last outreach {{ (now_utc - out_ts).days }}d ago{% else %}No logged outreach yet{% endif %}">
+  <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ _dot_cls }}"></span>
+  {% if out_ts and now_utc %}
+    {% set out_days = (now_utc - out_ts).days %}
+    <span class="{% if cadence == 'overdue' %}text-rose-600{% elif cadence == 'due' %}text-amber-600{% else %}text-gray-400{% endif %}">{{ out_days }}d</span>
+  {% else %}
+    <span class="text-gray-400">—<span class="sr-only"> no data</span></span>
+  {% endif %}
+</span>
 {% endmacro %}
 
 
@@ -70,17 +107,20 @@
 {% if legacy %}
   {# Legacy site-level contact (contact is None, fields live on site).
      h-full: equal-height cells when laid out in the responsive contacts grid. #}
-  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors h-full">
+  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors h-full group">
     <div class="flex items-start justify-between gap-3 flex-wrap">
-      <div class="min-w-0">
-        <div class="flex items-center gap-2">
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="text-sm font-medium text-gray-900">{{ site.contact_name or "—" }}</span>
-          <span class="text-[9px] text-gray-400">legacy</span>
+          <span class="text-[11px] text-gray-400">legacy</span>
+          {# Site label — always visible #}
+          {% if site %}
+          <span class="px-1.5 py-0.5 text-[11px] font-medium rounded bg-gray-100 text-gray-600"
+                title="Site">{{ site.site_name }}</span>
+          {% endif %}
         </div>
-        <p class="text-[11px] text-gray-600">
-          {{ site.contact_title or "—" }}
-        </p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
+        <p class="text-[11px] text-gray-600 mt-0.5">{{ site.contact_title or "—" }}</p>
+        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap opacity-0 group-hover:opacity-100 transition-opacity">
           {% if site.contact_email %}<span class="truncate">{{ site.contact_email }}</span>{% endif %}
           {% if site.contact_phone %}<span>{{ site.contact_phone }}</span>{% endif %}
         </div>
@@ -102,40 +142,86 @@
   {# Compute out_days for overdue badge (NULL honesty: only when clock+now_utc set) #}
   {% set out_ts = contact.last_outbound_at %}
   {% set out_days = ((now_utc - out_ts).days) if (out_ts and now_utc) else none %}
+
+  {# Role display label map (read-only chip, not the editor) #}
+  {% set role_labels = {
+    'specifier':      'Specifier',
+    'buyer_po':       'Buyer / PO',
+    'ap_payer':       'AP / Payer',
+    'logistics':      'Logistics',
+    'exec':           'Exec',
+    'other':          'Other',
+    'buyer':          'Buyer',
+    'technical':      'Technical',
+    'decision_maker': 'DM',
+    'operations':     'Ops'
+  } %}
+  {% set role_colors = {
+    'specifier':      'bg-indigo-50 text-indigo-700',
+    'buyer_po':       'bg-blue-50 text-blue-700',
+    'ap_payer':       'bg-teal-50 text-teal-700',
+    'logistics':      'bg-orange-50 text-orange-700',
+    'exec':           'bg-rose-50 text-rose-700',
+    'other':          'bg-gray-100 text-gray-600',
+    'buyer':          'bg-blue-50 text-blue-700',
+    'technical':      'bg-purple-50 text-purple-700',
+    'decision_maker': 'bg-amber-50 text-amber-700',
+    'operations':     'bg-gray-100 text-gray-600'
+  } %}
+
   {# h-full: equal-height cells when laid out in the responsive contacts grid. #}
-  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors h-full">
-    <div class="flex items-start justify-between gap-3 flex-wrap">
+  <div class="bg-white rounded-lg border border-gray-200 p-3 hover:border-brand-200 transition-colors h-full group">
+    {# ── Always-visible row: name · primary star · role · site · last-touch + outreach ── #}
+    <div class="flex items-start justify-between gap-3">
       <div class="min-w-0 flex-1">
-        <div class="flex items-center gap-2 flex-wrap">
+        {# Name line: name, primary star, role chip, site label #}
+        <div class="flex items-center gap-1.5 flex-wrap">
           <span class="text-sm font-medium text-gray-900">{{ contact.full_name or "—" }}</span>
+          {# Primary star — always visible when set #}
           {% if contact.is_primary %}
-          <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
+          <span class="text-amber-400" title="Primary contact for {{ site.site_name if site else 'this site' }}">★</span>
           {% endif %}
-          {# Overdue cadence badge — only when clock is set AND state is overdue #}
+          {# Role label — always visible (read-only chip), editor in hover zone below #}
+          {% if contact.contact_role %}
+          <span class="px-1.5 py-0.5 text-[11px] font-medium rounded {{ role_colors.get(contact.contact_role, 'bg-gray-100 text-gray-600') }}"
+                title="{{ contact.contact_role }}">
+            {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }}
+          </span>
+          {% endif %}
+          {# Site label — always visible (was missing in company-wide view) #}
+          {% if site %}
+          <span class="px-1.5 py-0.5 text-[11px] font-medium rounded bg-gray-100 text-gray-600"
+                title="Site">{{ site.site_name }}</span>
+          {% endif %}
+        </div>
+        {# Subtitle: title + last-touch indicator #}
+        <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+          {% if contact.title %}
+          <span class="text-[11px] text-gray-600">{{ contact.title }}</span>
+          {% endif %}
+          {{ _last_touch_compact(contact, now_utc, cadence) }}
+          {# Active status badges (critical signals — always visible) #}
+          {% if contact.do_not_contact %}
+          <span class="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-red-100 text-red-700 border border-red-200">DNC</span>
+          {% endif %}
+          {% if contact.is_archived %}
+          <span class="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-gray-200 text-gray-600">Archived</span>
+          {% endif %}
+          {% if contact.is_priority %}
+          <span class="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-amber-100 text-amber-700">Priority</span>
+          {% endif %}
+          {# Overdue cadence badge (only when genuinely overdue) #}
           {% if cadence == 'overdue' and out_days is not none %}
-          <span class="px-1.5 py-0.5 text-[9px] font-semibold rounded bg-rose-50 text-rose-600">Overdue {{ out_days }}d</span>
+          <span class="px-1.5 py-0.5 text-[11px] font-semibold rounded bg-rose-50 text-rose-600">{{ out_days }}d overdue</span>
           {% endif %}
-          {% include 'htmx/partials/customers/_role_chip_editor.html' %}
-          {% include 'htmx/partials/customers/_priority_toggle.html' %}
-          {% include 'htmx/partials/customers/_archive_toggle.html' %}
-          {% include 'htmx/partials/customers/_dnc_toggle.html' %}
         </div>
-        <p class="text-[11px] text-gray-600 mt-0.5">{{ contact.title or "—" }}</p>
-        <div class="mt-1 flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
-          {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
-          {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}
-          {% if contact.wechat_id %}<span>WeChat: {{ contact.wechat_id }}</span>{% endif %}
-        </div>
-        {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
-        {{ contact_clocks(contact, now_utc) }}
       </div>
-      {# Right-hand cluster: outreach buttons + kebab (kebab LAST, always visible) #}
+
+      {# Right cluster: outreach buttons + kebab #}
       <div class="flex items-start gap-1.5 flex-shrink-0">
         {# Outreach buttons (suppressed when DNC) #}
-        <div class="flex items-center gap-1.5 flex-wrap">
-          {% if contact.do_not_contact %}
-          {# DNC: outreach buttons suppressed — badge in header communicates block #}
-          {% else %}
+        {% if not contact.do_not_contact %}
+        <div class="flex items-center gap-1">
           {% if contact.phone %}
           {{ outreach_btn("Call", "tel:" ~ contact.phone, "phone", contact.phone, company.id, contact.customer_site_id, contact.id, contact.full_name,
                           "M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z") }}
@@ -150,42 +236,156 @@
           {{ outreach_btn("WeChat", "weixin://dl/chat?" ~ contact.wechat_id|urlencode, "wechat", contact.wechat_id, company.id, contact.customer_site_id, contact.id, contact.full_name,
                           "M17 8h2a2 2 0 012 2v6a2 2 0 01-2 2h-2v4l-4-4H9a1.994 1.994 0 01-1.414-.586m0 0L11 14h4a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2v4l.586-.586z") }}
           {% endif %}
-          {% endif %}
         </div>
-        {# Kebab menu — Edit / Set-Primary / Delete (reuses Alpine @click.outside pattern) #}
+        {% endif %}
+
+        {# Kebab menu — management actions (always accessible via kebab,
+           also revealed on hover via the progressive-disclosure section below) #}
         <div class="relative inline-block" x-data='{"open": false}' @click.outside='open = false'>
           <button @click.stop='open = !open' type='button'
                   class='p-1 text-gray-300 hover:text-gray-600 rounded transition-colors'
-                  aria-label='Contact actions'>
+                  aria-label='Contact actions'
+                  :aria-expanded="open ? 'true' : 'false'"
+                  aria-haspopup="menu">
             <svg class='h-4 w-4' fill='currentColor' viewBox='0 0 20 20'>
               <path d='M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z'/>
             </svg>
           </button>
           <div x-show='open' x-cloak
-               class='absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left'>
-            {# Edit — dispatches open-modal, form targets #contacts-tab-list #}
+               role="menu"
+               class='absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left'>
+            {# Edit #}
             <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/edit-form'}); open = false"
+                    role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50'>Edit</button>
-            {# Set Primary — only shown when not already primary #}
+            {# Set Primary — only when not already primary #}
             {% if not contact.is_primary %}
             <button hx-post='/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}/primary'
                     hx-target='#contacts-tab-list'
                     hx-swap='innerHTML'
                     @click.stop='open = false'
                     data-loading-disable
+                    role="menuitem"
                     class='w-full text-left px-3 py-1.5 text-emerald-700 hover:bg-emerald-50'>Set Primary</button>
             {% endif %}
-            {# Delete — re-renders grouped list when on Contacts tab #}
+            <div class='border-t border-gray-100 my-1'></div>
+            {# Role editor inline in kebab #}
+            <div id='role-chip-{{ contact.id }}' class='px-3 py-1' x-data='{"editing": false}'>
+              <span class='text-gray-400 block mb-1'>Role</span>
+              <button type='button' x-show='!editing' x-cloak @click='editing = true'
+                      class='text-brand-600 hover:underline'>
+                {% if contact.contact_role %}
+                  {{ role_labels.get(contact.contact_role, contact.contact_role|replace('_', ' ')|title) }} ✎
+                {% else %}
+                  + Set role
+                {% endif %}
+              </button>
+              <form x-show='editing' x-cloak
+                    hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/role'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    @htmx:after-request='editing = false'>
+                <select name='contact_role'
+                        onchange='this.form.requestSubmit()'
+                        @blur='editing = false'
+                        x-init='$nextTick(() => { if (editing) $el.focus() })'
+                        class='text-xs border border-brand-300 rounded px-1 py-0.5 focus:outline-none focus:ring-2 focus:ring-brand-500 w-full'>
+                  <option value=''>— clear —</option>
+                  {% for r in roles %}<option value='{{ r }}' {% if contact.contact_role == r %}selected{% endif %}>{{ role_labels.get(r, r|replace('_', ' ')|title) }}</option>{% endfor %}
+                </select>
+              </form>
+            </div>
+            <div class='border-t border-gray-100 my-1'></div>
+            {# Priority toggle #}
+            <div id='priority-toggle-{{ contact.id }}' class='px-3 py-1'>
+              {% if contact.is_priority %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/priority'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='is_priority' value=''>
+                <button type='submit' @click.stop=''
+                        class='text-amber-600 hover:underline text-xs'>★ Clear priority</button>
+              </form>
+              {% else %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/priority'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='is_priority' value='1'>
+                <button type='submit' @click.stop=''
+                        class='text-gray-600 hover:text-amber-600 hover:underline text-xs'>★ Mark priority</button>
+              </form>
+              {% endif %}
+            </div>
+            {# Archive toggle #}
+            <div id='archive-toggle-{{ contact.id }}' class='px-3 py-1'>
+              {% if contact.is_archived %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='is_archived' value=''>
+                <button type='submit' @click.stop=''
+                        class='text-gray-600 hover:underline text-xs'>↺ Restore from archive</button>
+              </form>
+              {% else %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/archive'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='is_archived' value='1'>
+                <button type='submit' @click.stop=''
+                        class='text-gray-600 hover:underline text-xs'>Archive</button>
+              </form>
+              {% endif %}
+            </div>
+            {# DNC toggle #}
+            <div id='dnc-toggle-{{ contact.id }}' class='px-3 py-1'>
+              {% if contact.do_not_contact %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='do_not_contact' value=''>
+                <button type='submit' @click.stop=''
+                        class='text-red-600 hover:underline text-xs'>Clear DNC</button>
+              </form>
+              {% else %}
+              <form hx-post='/v2/partials/customers/{{ company.id }}/contacts/{{ contact.id }}/do-not-contact'
+                    hx-target='#contacts-tab-list'
+                    hx-swap='innerHTML'
+                    class='inline'>
+                <input type='hidden' name='do_not_contact' value='1'>
+                <button type='submit' @click.stop=''
+                        class='text-gray-600 hover:text-red-600 hover:underline text-xs'>Set DNC</button>
+              </form>
+              {% endif %}
+            </div>
+            <div class='border-t border-gray-100 my-1'></div>
+            {# Delete #}
             <button hx-delete='/v2/partials/customers/{{ company.id }}/sites/{{ contact.customer_site_id }}/contacts/{{ contact.id }}'
                     hx-target='#contacts-tab-list'
                     hx-swap='innerHTML'
                     hx-confirm='Delete {{ contact.full_name or "this contact" }}?'
                     @click.stop='open = false'
                     data-loading-disable
-                    class='w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50 border-t border-gray-100'>Delete</button>
+                    role="menuitem"
+                    class='w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50'>Delete</button>
           </div>
         </div>
       </div>
+    </div>
+
+    {# ── Hover-reveal detail zone: contact info + cadence clocks ───────────────── #}
+    <div class="mt-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+      <div class="flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
+        {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
+        {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}
+        {% if contact.wechat_id %}<span>WeChat: {{ contact.wechat_id }}</span>{% endif %}
+      </div>
+      {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
+      {{ contact_clocks(contact, now_utc) }}
     </div>
   </div>
 {% endif %}

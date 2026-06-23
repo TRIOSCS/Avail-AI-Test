@@ -1522,38 +1522,39 @@ Bucket suppression is QUERY-LAYER only (never in `cadence_service.materialize_al
 the NULL-safe exclusion lives in the shared `_needs_call_filter` (count==list invariant)
 + `cdm_company_query`'s base, with `staleness='bucket'` the lone escape hatch.
 
-**Left-panel company→site IA (Increment 2, no migration).** The CDM left list
-(`_account_list.html`) branches on `c.site_count` (trigger-maintained on `Company`):
-- `site_count <= 1` → today's behavior: the row hx-gets `GET .../{company_id}`
-  (full company detail) into `#cdm-detail`, setting `selectedId` (+ clearing
-  `selectedSiteId`).
-- `site_count > 1` → the row becomes an Alpine accordion header
-  (`x-data="{expanded}"`, chevron, no window-level listeners). Clicking the name
-  toggles expand AND hx-gets the **company-header partial** into `#cdm-detail`;
-  the site children lazy-load on first expand (`intersect once`) from the
-  **sites-accordion partial**. Each site child hx-gets the **site-detail** route
-  and sets `selectedId` + `selectedSiteId`.
-
-Three additive routes in `htmx_views.py` (declared ABOVE the
-`GET /v2/partials/customers/{company_id}` catch-all):
-- `GET .../{company_id}/header` (`company_header_partial`) → `customers/header.html`
-  — header card + `_cadence_hero.html` + `_disposition_control.html` + dual clocks
-  + commercial strip, WITHOUT the per-tab strip (the company-level rollup that
-  stays visible while drilling into sites).
-- `GET .../{company_id}/sites-accordion` (`company_sites_accordion_partial`) →
-  `customers/_sites_accordion.html` — a `<ul>` of the company's ACTIVE sites
-  (name + type + city), each linking to the site-detail route.
-- `GET .../{company_id}/sites/{site_id}` (`company_site_detail_partial`) →
-  `customers/site_detail.html` — IDOR-safe (`CustomerSite.id == site_id AND
-  company_id == company_id AND is_active`, else 404; mirrors `site_contacts_list`).
-  Renders site fields + per-site clocks (tier=None standard target) + a mini tab
-  strip: **Contacts** (`company_contact_rows(db, company_id, sites=[this_site])`,
-  reusing the `contacts_tab.html` `contact_card` macro `with context`) and **Open
-  requisitions at this site** (`Requisition.customer_site_id == site_id`, open
-  statuses only). The **Notes tab is deferred** pending the ActivityLog FK scoping
-  fix. The `#cdm-workspace` x-data gains `selectedSiteId` for site-row highlight.
-The legacy in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is
-left intact (harmlessly redundant) — its retirement is a follow-up.
+**Unified account workspace + Contacts canonical surface (IA redesign, no
+migration).** The single-vs-multi-site fork is RETIRED — every account row in the
+CDM left list (`_account_list.html`), regardless of `site_count`, hx-gets the SAME
+`GET .../{company_id}` (`company_detail_partial`) into `#cdm-detail`, setting
+`selectedId`. The left list is now a flat account picker (multi-site rows keep an
+"N sites" hint badge, no accordion). Sites are reached INSIDE that unified detail
+(Sites tab + the Contacts site sections), never via a left-panel drill-down.
+- **Retired** (deleted): `company_header_partial`/`customers/header.html`,
+  `company_sites_accordion_partial`/`customers/_sites_accordion.html`,
+  `company_site_detail_partial`/`customers/site_detail.html`, and the
+  `#cdm-workspace` `selectedSiteId` state. The `GET .../{company_id}/sites/{id}`
+  path now resolves only to the surviving POST/DELETE site-contact CRUD routes (a
+  GET → 405).
+- **Breadcrumb** `Customers › {Account}` (`<nav aria-label="Breadcrumb">`) sits at
+  the top of `detail.html` (reused from the retired `site_detail.html`).
+- **Contacts is the default + primary right-panel surface.** `contacts_tab.html`
+  (the ONLY contact-management surface, full feature set) wraps the
+  `contactsView` Alpine.data component (`htmx_app.js`): a people-search + a site
+  filter (`active_sites|length > 1` only) that filter the rendered rows
+  CLIENT-SIDE (toggle `hidden` by `data-contact-search`/`data-site-id`, re-applied
+  on `htmx:afterSettle` so a CRUD swap of the inner `#contacts-tab-list` keeps the
+  filter). `_contacts_grouped_list.html` renders light per-site section headers
+  (name · city · per-site cadence dot via the `site_cadence_dot` macro · `+ add
+  here` → add-form with `?site_id=`); single-site → one section, no filter chrome.
+  `company_detail_partial` passes `active_sites` (name-sorted) + `roles` so the
+  inlined default tab matches the standalone `/tab/contacts` render.
+- **Cadence/tier/disposition** is surfaced via a VISIBLE labeled "Cadence &
+  settings" header button (`aria-controls` the `#acct-settings-{id}` collapsible) —
+  no longer a kebab-only item; the kebab keeps only "Merge duplicate".
+- The contact card (`_contact_macros.html`) now carries the **site label** on its
+  title line (flagged absent in the company-wide view).
+The in-panel **Sites tab** (`tabs/sites_tab.html` / `site_card.html`) is left intact
+pending its CRUD-only rework (separate stage).
 
 **AI organization (Increment 3, migration 120).** Durable company-dedup foundation +
 review/banner surfaces — the merge engine (`company_merge_service.merge_companies`) and

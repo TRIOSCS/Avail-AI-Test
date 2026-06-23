@@ -1,5 +1,11 @@
-{# contacts_tab.html — Company contacts grouped by site (accordion), with role chips
-   and per-contact cadence clocks.
+{# contacts_tab.html — THE canonical contact-management surface for an account.
+
+   The default + primary right-panel content under the slim account header.
+   Contacts are grouped under light per-site section headers; a people-search and
+   a site filter (shown only when the account has >1 active site) narrow the list
+   client-side. This is the ONLY contact surface and carries the full feature set
+   (role / priority / archive / DNC / cadence / edit / delete / set-primary /
+   suggested-contacts).
 
    Each Call / Email / Teams / WeChat action opens the native handler (tel:,
    mailto:, Teams deep link, weixin:) AND logs an outbound ActivityLog via the
@@ -7,49 +13,83 @@
    /api/activity/outreach-initiated), which bumps both the company AND the
    contact's last_outbound_at via bump_clocks_from_activity → SiteContact clock.
 
-   Receives: company, contact_rows ([{contact, site, legacy}]), now_utc, active_sites,
-             roles (tuple[str] CANONICAL_ROLES).
+   Receives: company, contact_rows ([{contact, site, legacy, cadence}]), now_utc,
+             active_sites (list[CustomerSite], name-sorted), roles (CANONICAL_ROLES).
    Called by: company_tab route (tab=contacts) and detail.html (inline default tab).
    Depends on: htmx_app.js outreach logger, brand palette, Alpine.js.
 
-   Clock honesty rule: NULL last_outbound_at means "not yet logged" (email activity
-   is not yet universally attributed to site_contact_id). Render "—" / "no logged touch"
-   — NEVER "never replied" (which implies the contact was ignored, not that the log
-   is missing).
+   Filtering: client-side via the contactsView Alpine.data component (htmx_app.js).
+   The search box and site <select> live OUTSIDE the #contacts-tab-list swap target
+   (a CRUD re-render replaces only the list, not the controls). contactsView reads
+   data-contact-search / data-site-id off the rendered rows + section wrappers and
+   toggles a `hidden` class — robust across HTMX innerHTML swaps because it re-runs
+   on htmx:afterSettle.
+
+   Clock honesty rule: NULL last_outbound_at means "not yet logged". Render "—" /
+   "no logged touch" — NEVER "never replied".
 #}
 
-{# ── Import shared macros ──────────────────────────────────────────────────── #}
-{% from 'htmx/partials/customers/_contact_macros.html' import contact_card, contact_clocks, outreach_btn %}
+{% set _multi_site = active_sites is defined and active_sites and active_sites|length > 1 %}
 
-{# ── Header bar (mirrors sites_tab.html:10-16) ─────────────────────────────── #}
-<div class="bg-white rounded-lg border border-gray-200 p-4">
-  <div class="flex items-center justify-between">
-    <h3 class="text-sm font-semibold text-gray-900">Contacts ({{ contact_rows|length }})</h3>
-    <div class="flex items-center gap-2">
-      {# "Find contacts" — only shown when a domain/website is available #}
-      {% set company_domain = company.domain or company.website %}
-      {% if company_domain %}
-      <button hx-get='/v2/partials/customers/{{ company.id }}/suggested-contacts?domain={{ company_domain | urlencode }}'
-              hx-target='#suggested-contacts-panel'
-              hx-swap='innerHTML'
-              hx-indicator='#suggested-contacts-spinner'
-              class='px-3 py-1 text-xs font-medium text-gray-600 border border-gray-200 rounded hover:bg-gray-50'>
-        Find contacts
-      </button>
-      {% endif %}
-      <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-              class="px-3 py-1 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
-        + Add Contact
-      </button>
+<div x-data="contactsView"
+     {% if preselect_site_id is defined and preselect_site_id %}data-initial-site="{{ preselect_site_id }}"{% endif %}>
+
+  {# ── Controls bar — people-search · site filter · Find / + Add Contact ──────── #}
+  <div class="bg-white pb-3 border-b border-gray-100">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+        {# People search — client-side filter over the rendered contacts. #}
+        <div class="relative min-w-[180px] flex-1 max-w-xs">
+          <svg class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M11 19a8 8 0 100-16 8 8 0 000 16z"/>
+          </svg>
+          <input type="text" x-model="q" @input="apply()"
+                 aria-label="Search people"
+                 placeholder="Search people"
+                 class="w-full pl-8 pr-2 py-1.5 text-xs border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        {% if _multi_site %}
+        {# Site filter — only when the account has >1 active site. #}
+        <select x-model="siteFilter" @change="apply()"
+                aria-label="Filter contacts by site"
+                class="px-2 py-1.5 text-xs border border-gray-200 rounded-lg text-gray-600 focus:ring-2 focus:ring-brand-500">
+          <option value="">All sites</option>
+          {% for s in active_sites %}
+          <option value="{{ s.id }}">{{ s.site_name }}{% if s.city %} · {{ s.city }}{% endif %}</option>
+          {% endfor %}
+        </select>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        {# "Find contacts" — only shown when a domain/website is available #}
+        {% set company_domain = company.domain or company.website %}
+        {% if company_domain %}
+        <button hx-get='/v2/partials/customers/{{ company.id }}/suggested-contacts?domain={{ company_domain | urlencode }}'
+                hx-target='#suggested-contacts-panel'
+                hx-swap='innerHTML'
+                hx-indicator='#suggested-contacts-spinner'
+                class='px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500'>
+          Find contacts
+        </button>
+        {% endif %}
+        <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
+                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500">
+          + Add Contact
+        </button>
+      </div>
     </div>
+    {# "No matches" hint — shown by filterContacts() when the live filter empties the list. #}
+    <p data-contacts-empty class=”hidden mt-2 text-xs text-gray-600” x-cloak>
+      No people match <span class=”font-medium” x-text=”q ? '&quot;' + q + '&quot;' : 'this site'”></span>. Clear the filter to see all.
+    </p>
   </div>
-</div>
 
-{# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
-<div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-xs text-gray-400 py-2">Finding contacts…</div>
-<div id="suggested-contacts-panel" class="mt-2"></div>
+  {# ── Suggested contacts panel (hidden until "Find contacts" clicked) ─────── #}
+  <div id="suggested-contacts-spinner" class="htmx-indicator mt-2 text-xs text-gray-400 py-2">Finding contacts…</div>
+  <div id="suggested-contacts-panel" class="mt-2"></div>
 
-{# ── Grouped list wrapped in stable swap target ────────────────────────────── #}
-<div id="contacts-tab-list">
-  {% include 'htmx/partials/customers/tabs/_contacts_grouped_list.html' %}
+  {# ── Grouped list wrapped in stable swap target ──────────────────────────── #}
+  <div id="contacts-tab-list" class="mt-3">
+    {% include 'htmx/partials/customers/tabs/_contacts_grouped_list.html' %}
+  </div>
 </div>

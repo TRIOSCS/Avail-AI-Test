@@ -99,7 +99,7 @@ from ..services.prospect_priority import build_priority_snapshot, build_signal_t
 from ..services.sighting_ingest import sighting_from_row
 from ..services.status_machine import require_valid_transition
 from ..services.vendor_unavailability import apply_to_fresh_sightings, maybe_release_on_offer
-from ..template_env import template_response, templates
+from ..template_env import page_response, template_response, templates
 from ..utils.search_builder import SearchBuilder
 from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
@@ -373,7 +373,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     nav_active = _NAV_ID_ALIAS.get(current_view, current_view)
     ctx = _base_ctx(request, user, nav_active)
     ctx["partial_url"] = partial_url
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 # ── Global search ──────────────────────────────────────────────────────
@@ -5103,15 +5103,7 @@ async def set_contact_role(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_role_chip_editor.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-            "roles": CANONICAL_ROLES,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5157,14 +5149,7 @@ async def set_contact_dnc(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_dnc_toggle.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 _VALID_DISPOSITIONS = frozenset({"active", "bucket"})
@@ -5293,10 +5278,7 @@ async def set_contact_priority(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_priority_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5341,157 +5323,7 @@ async def set_contact_archive(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_archive_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
-
-
-# ── Increment 2: left-panel company→site IA partials ──────────────────────────
-# These three routes carry STATIC first segments after /customers/ (header,
-# sites-accordion) or a specific /sites/{site_id} shape, so they MUST be declared
-# ABOVE the GET /v2/partials/customers/{company_id} catch-all below. Each writes
-# the right panel and honors the response-targets contract (hx-target #cdm-detail,
-# hx-target-error #cdm-error) from the caller markup.
-
-
-@router.get("/v2/partials/customers/{company_id}/header", response_class=HTMLResponse)
-async def company_header_partial(
-    request: Request,
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Company-header-only partial — header card + cadence + commercial strip, WITHOUT
-    the per-tab strip.
-
-    Loaded into #cdm-detail when a multi-site account's accordion header is clicked (the
-    site children carry the per-site contacts + open reqs).
-    """
-    company = (
-        db.query(Company)
-        .options(joinedload(Company.account_owner), joinedload(Company.sites))
-        .filter(Company.id == company_id)
-        .first()
-    )
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    from datetime import timezone as _tz
-
-    sites = [s for s in (company.sites or []) if s.is_active]
-    contact_rows = _company_contact_rows(db, company_id, sites=sites)
-    _stats = _company_commercial_stats(db, [company.id]).get(company.id, {})
-
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "cadence_state": _cadence_state(company.tier, company.last_outbound_at),
-            "next_best_touch": _next_best_touch(company.tier, company.last_outbound_at),
-            "contact_count": len(contact_rows),
-            "site_count": len(sites),
-            "win_rate": _stats.get("win_rate"),
-            "revenue_90d": _stats.get("revenue_90d", 0.0),
-            "last_req_date": _stats.get("last_req_date"),
-            "now_utc": datetime.now(_tz.utc),
-        }
-    )
-    return template_response("htmx/partials/customers/header.html", ctx)
-
-
-@router.get("/v2/partials/customers/{company_id}/sites-accordion", response_class=HTMLResponse)
-async def company_sites_accordion_partial(
-    request: Request,
-    company_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Lazy-loaded list of a company's ACTIVE sites — the children rendered under the
-    left-panel account accordion header.
-
-    Each links to the site-detail view.
-    """
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    sites = (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-        .order_by(CustomerSite.site_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update({"company": company, "sites": sites})
-    return template_response("htmx/partials/customers/_sites_accordion.html", ctx)
-
-
-@router.get("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
-async def company_site_detail_partial(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Site-scoped detail (site fields + per-site clocks + Contacts + "Open requisitions
-    at this site").
-
-    IDOR-safe: the site must belong to the
-    company AND be active, else 404 (mirrors site_contacts_list).
-    """
-    site = (
-        db.query(CustomerSite)
-        .options(joinedload(CustomerSite.owner))
-        .filter(
-            CustomerSite.id == site_id,
-            CustomerSite.company_id == company_id,
-            CustomerSite.is_active.is_(True),
-        )
-        .first()
-    )
-    if not site:
-        raise HTTPException(404, "Site not found")
-
-    company = db.query(Company).filter(Company.id == company_id).first()
-    if not company:
-        raise HTTPException(404, "Company not found")
-
-    from datetime import timezone as _tz
-
-    now_utc = datetime.now(_tz.utc)
-    # Site-scoped contacts — pass this single site so the rows are filtered to it
-    # (keeps the is_active + Increment-1 priority/archive sort).
-    contact_rows = _company_contact_rows(db, company_id, sites=[site])
-
-    # Open requisitions AT THIS SITE — FK-scoped, non-terminal only (canonical
-    # TERMINAL set = archived/won/lost/cancelled, so CANCELLED doesn't read as open).
-    open_reqs = (
-        db.query(Requisition)
-        .filter(
-            Requisition.customer_site_id == site_id,
-            Requisition.status.notin_(RequisitionStatus.TERMINAL),
-        )
-        .order_by(Requisition.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
-
-    ctx = _base_ctx(request, user, "customers")
-    ctx.update(
-        {
-            "company": company,
-            "site": site,
-            "contact_rows": contact_rows,
-            "open_reqs": open_reqs,
-            "now_utc": now_utc,
-            # Per-site cadence (tier=None → standard 30d target, like contacts).
-            "site_cadence": _cadence_state(None, site.last_outbound_at, now_utc),
-            "site_next_best_touch": _next_best_touch(None, site.last_outbound_at, now_utc),
-        }
-    )
-    return template_response("htmx/partials/customers/site_detail.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
@@ -5663,6 +5495,9 @@ async def company_detail_partial(
     contact_rows = _company_contact_rows(db, company_id, sites=sites)
     segment_tags = _list_company_segment_tags(company_id=company_id, db=db)
     all_segment_tags = _list_all_segment_tags(db=db)
+    # Active sites (name-sorted) for the inlined Contacts site filter — same source
+    # the /tab/contacts route uses, so the default surface and the tab match.
+    active_sites = sorted(sites, key=lambda s: (s.site_name or "").lower())
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
@@ -5680,8 +5515,11 @@ async def company_detail_partial(
             # Cadence card
             "cadence_state": _cadence,
             "next_best_touch": _nbt,
-            "contact_count": len(contact_rows),
+            "contact_count": sum(1 for r in contact_rows if not (r.get("contact") and r["contact"].is_archived)),
             "site_count": len(sites),
+            # Inlined Contacts surface (default tab) needs the site filter + roles.
+            "active_sites": active_sites,
+            "roles": CANONICAL_ROLES,
             # Commercial strip
             "win_rate": _stats.get("win_rate"),
             "revenue_90d": _stats.get("revenue_90d", 0.0),
@@ -5701,6 +5539,7 @@ async def company_tab(
     request: Request,
     company_id: int,
     tab: str,
+    site_id: int | None = Query(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -5718,7 +5557,7 @@ async def company_tab(
 
         sites = (
             db.query(CustomerSite)
-            .options(joinedload(CustomerSite.owner))
+            .options(joinedload(CustomerSite.owner), joinedload(CustomerSite.site_contacts))
             .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
             .all()
         )
@@ -5736,6 +5575,8 @@ async def company_tab(
             .order_by(CustomerSite.site_name)
             .all()
         )
+        # IDOR-safe: only honor site_id when it belongs to this company's active sites.
+        preselect_site_id = site_id if site_id and any(s.id == site_id for s in active_sites) else None
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
@@ -5744,6 +5585,7 @@ async def company_tab(
                 "now_utc": datetime.now(timezone.utc),
                 "active_sites": active_sites,
                 "roles": CANONICAL_ROLES,
+                "preselect_site_id": preselect_site_id,
             }
         )
         return template_response("htmx/partials/customers/tabs/contacts_tab.html", ctx)
@@ -5901,10 +5743,15 @@ async def company_tab(
 async def contacts_tab_add_form(
     request: Request,
     company_id: int,
+    site_id: int | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return the shared _contact_form.html in add mode for the Contacts tab modal."""
+    """Return the shared _contact_form.html in add mode for the Contacts tab modal.
+
+    Optional site_id pre-selects that site in the form's Site dropdown — set by the "+
+    add here" affordance on a per-site section header (Contacts surface).
+    """
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
@@ -5915,6 +5762,8 @@ async def contacts_tab_add_form(
         .order_by(CustomerSite.site_name)
         .all()
     )
+    # Only honor site_id when it belongs to THIS company's active sites (IDOR-safe).
+    preselect_site_id = site_id if any(s.id == site_id for s in active_sites) else None
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -5924,6 +5773,7 @@ async def contacts_tab_add_form(
             "contact": None,
             "site": None,
             "sites": active_sites,
+            "preselect_site_id": preselect_site_id,
             "roles": CANONICAL_ROLES,
         },
     )
@@ -6103,7 +5953,17 @@ async def contacts_tab_suggested(
     try:
         contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
     except Exception as exc:
-        logger.warning("find_suggested_contacts_with_errors failed for company {}: {}", company_id, exc)
+        import httpx
+
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+            logger.warning("find_suggested_contacts_with_errors connectivity error for company {}: {}", company_id, exc)
+        else:
+            logger.error(
+                "find_suggested_contacts_with_errors unexpected error for company {}: {}",
+                company_id,
+                exc,
+                exc_info=True,
+            )
         contacts = []
         errored = ["all"]
 
@@ -6290,6 +6150,9 @@ async def create_site(
     if site.owner_id:
         _ = site.owner
 
+    # Avoid lazy-load during render: new site has zero contacts by definition.
+    site.site_contacts = []
+
     ctx = _base_ctx(request, user, "customers")
     ctx["company"] = company
     ctx["s"] = site
@@ -6324,23 +6187,19 @@ async def site_contacts_list(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Load contacts for a specific site."""
+    """Redirect site-scoped contact list to the canonical grouped contacts surface.
+
+    site_contacts.html has been retired — all contact management now lives on the
+    canonical #contacts-tab-list surface (contacts_tab.html /
+    _contacts_grouped_list.html).
+    """
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
     if not site:
         raise HTTPException(404, "Site not found")
-
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -6385,8 +6244,14 @@ async def create_site_contact(
             .first()
         )
         if existing:
-            # Already exists — just return the list
-            pass
+            # Deprecated route: dedup silently returns the list; legacy path kept for
+            # backwards-compat only (contacts_tab_create is the canonical add endpoint).
+            logger.info(
+                "Dedup [legacy create_site_contact]: email {} already exists at site {} (company {})",
+                email,
+                site_id,
+                company_id,
+            )
         else:
             contact = SiteContact(
                 customer_site_id=site_id,
@@ -6409,19 +6274,9 @@ async def create_site_contact(
         db.add(contact)
         db.commit()
 
-    # Return refreshed contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
+    # Return canonical grouped contacts list (site_contacts.html is retired).
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.delete(
@@ -6436,11 +6291,10 @@ async def delete_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Delete a site contact.
+    """Delete a site contact and re-render the Contacts tab grouped list.
 
-    Branches on HX-Target header:
-      - 'contacts-tab-list' → re-renders _contacts_grouped_list.html (Contacts tab)
-      - anything else       → returns empty string (site_card outerHTML-remove path)
+    The Sites tab no longer carries a contact editor — the only render target is
+    #contacts-tab-list (the canonical Contacts tab surface).
     """
     # Validate site belongs to company BEFORE mutating — closes IDOR gap and
     # guarantees company is available for the contacts-tab-list render path.
@@ -6460,11 +6314,7 @@ async def delete_site_contact(
     db.commit()
     logger.info("Contact {} deleted by {}", contact_id, user.email)
 
-    hx_target = request.headers.get("HX-Target", "")
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    return HTMLResponse("")
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -6504,22 +6354,9 @@ async def set_primary_contact(
     contact.is_primary = True
     db.commit()
 
-    hx_target = request.headers.get("HX-Target", "")
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    # Sites-tab path (default): re-render the per-site contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    # The Sites tab no longer carries a contact editor — always render the
+    # canonical Contacts tab surface (#contacts-tab-list).
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
@@ -6746,18 +6583,16 @@ async def edit_site(
     if not site_name:
         raise HTTPException(400, "site_name is required")
     site.site_name = site_name
-    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
-    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
-    site.city = form.get("city", "").strip() or site.city
-    site.state = form.get("state", "").strip() or site.state
-    site.zip = form.get("zip", "").strip() or site.zip
-    site.country = form.get("country", "").strip() or site.country
-    site.site_type = form.get("site_type", "").strip() or site.site_type
-    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
-    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        site.notes = notes_val
+    site.address_line1 = form.get("address_line1", "").strip() or None
+    site.address_line2 = form.get("address_line2", "").strip() or None
+    site.city = form.get("city", "").strip() or None
+    site.state = form.get("state", "").strip() or None
+    site.zip = form.get("zip", "").strip() or None
+    site.country = form.get("country", "").strip() or None
+    site.site_type = form.get("site_type", "").strip() or None
+    site.payment_terms = form.get("payment_terms", "").strip() or None
+    site.shipping_terms = form.get("shipping_terms", "").strip() or None
+    site.notes = form.get("notes", "").strip() or None
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
@@ -6766,34 +6601,6 @@ async def edit_site(
     logger.info("Site {} edited by {}", site_id, user.email)
 
     return await company_tab(request=request, company_id=company_id, tab="sites", user=user, db=db)
-
-
-@router.get(
-    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/edit-form",
-    response_class=HTMLResponse,
-)
-async def contact_edit_form(
-    request: Request,
-    company_id: int,
-    site_id: int,
-    contact_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Return modal edit form for a site contact."""
-    contact = (
-        db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
-    )
-    if not contact:
-        raise HTTPException(404, "Contact not found")
-    # Verify site belongs to company
-    site = db.query(CustomerSite).filter(CustomerSite.id == site_id, CustomerSite.company_id == company_id).first()
-    if not site:
-        raise HTTPException(404, "Site not found")
-    return template_response(
-        "htmx/partials/customers/tabs/contact_edit_modal.html",
-        {"request": request, "contact": contact, "site": site, "company_id": company_id},
-    )
 
 
 @router.get(
@@ -6809,15 +6616,11 @@ async def contact_edit_form_company_scoped(
 ):
     """Return the shared _contact_form.html in edit mode for the Contacts tab.
 
-    This company-scoped route (no site_id in path) is called from the Contacts-tab
-    kebab Edit button. Unlike the site-scoped GET
-    /sites/{site_id}/contacts/{contact_id}/edit-form which returns
-    contact_edit_modal.html, this returns _contact_form.html in 'edit' mode so the
-    form posts to /contacts/{contact_id}/edit and targets #contacts-tab-list — the
-    correct swap target for the Contacts tab.
-
-    WARNING: Do NOT call this endpoint via HTMX hx-get with hx-target pointing at
-    a Sites-tab element. Use the site-scoped route for the Sites-tab path.
+    This company-scoped route (no site_id in path) is called from the Contacts-tab kebab
+    Edit button. It returns _contact_form.html in 'edit' mode so the form posts to
+    /contacts/{contact_id}/edit and targets #contacts-tab-list — the canonical swap
+    target for the Contacts tab. The former site-scoped edit-form route and
+    contact_edit_modal.html have been retired.
     """
     # Validate the contact belongs to a site that belongs to this company
     contact = (
@@ -6858,12 +6661,11 @@ async def edit_site_contact(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update editable contact fields and return refreshed contacts panel.
+    """Update editable contact fields and return refreshed Contacts tab grouped list.
 
     Writes contact_role (validated via _validate_role; blank→NULL, unknown→400),
-    is_priority, and linkedin_url.  Branches render target on HX-Target header:
-      - 'contacts-tab-list' → _contacts_grouped_list.html (Contacts tab)
-      - anything else → site_contacts.html (Sites tab path unchanged)
+    is_priority, and linkedin_url. Always renders #contacts-tab-list — the Sites tab no
+    longer carries a contact editor.
     """
     contact = (
         db.query(SiteContact).filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id).first()
@@ -6883,6 +6685,20 @@ async def edit_site_contact(
     if email_val and "@" not in email_val:
         raise HTTPException(400, "Invalid email address")
 
+    # Per-site email uniqueness on edit
+    if email_val:
+        email_dup = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                sqlfunc.lower(SiteContact.email) == email_val.strip().lower(),
+                SiteContact.id != contact_id,
+            )
+            .first()
+        )
+        if email_dup:
+            raise HTTPException(409, f"Another contact at this site already uses {email_val}")
+
     # Write all editable fields with explicit clear semantics (no OR-fallback)
     contact.full_name = full_name
     contact.title = form.get("title", "").strip() or None
@@ -6901,23 +6717,7 @@ async def edit_site_contact(
     logger.info("Contact {} edited by {}", contact_id, user.email)
 
     company = db.query(Company).filter(Company.id == company_id).first()
-    hx_target = request.headers.get("HX-Target", "")
-
-    if hx_target == "contacts-tab-list":
-        return _render_contacts_list(request, user, company, db)
-
-    # Sites-tab path (default): re-render the per-site contacts list
-    contacts = (
-        db.query(SiteContact)
-        .filter(SiteContact.customer_site_id == site_id, SiteContact.is_active.is_(True))
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
-    )
-    ctx = _base_ctx(request, user, "customers")
-    ctx["site"] = site
-    ctx["contacts"] = contacts
-    ctx["company"] = company
-    return template_response("htmx/partials/customers/tabs/site_contacts.html", ctx)
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -7007,7 +6807,14 @@ async def get_site_contact_notes(
 
     return template_response(
         "htmx/partials/customers/contact_notes.html",
-        {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
+        {
+            "request": request,
+            "contact": contact,
+            "notes": notes,
+            "company_id": company_id,
+            "site_id": site_id,
+            "no_email_contact": not contact.email,
+        },
     )
 
 
@@ -8176,7 +7983,7 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/sourcing/leads/{lead_id}", response_class=HTMLResponse)
@@ -8189,7 +7996,7 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/stream")
@@ -8603,7 +8410,7 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
         )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
-    return template_response("htmx/base_page.html", ctx)
+    return page_response(ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/workspace", response_class=HTMLResponse)

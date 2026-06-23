@@ -55,7 +55,7 @@
 
   {# Lead cards grid #}
   {% if leads %}
-  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="lead-cards">
+  <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4" id="lead-cards">
     {% for lead in leads %}
       {% include "htmx/partials/sourcing/lead_card.html" %}
     {% endfor %}

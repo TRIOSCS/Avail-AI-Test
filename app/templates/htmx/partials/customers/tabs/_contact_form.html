@@ -15,12 +15,11 @@
 
    Called by:
      GET /v2/partials/customers/{company_id}/contacts/add-form
-     GET /v2/partials/customers/{company_id}/sites/{sid}/contacts/{cid}/edit-form
-       (when invoked from the Contacts tab)
+     GET /v2/partials/customers/{company_id}/contacts/{contact_id}/edit-form
    Depends on: HTMX, Alpine.js, brand palette.
 #}
 <div class='p-5'>
-  <h3 class='text-sm font-semibold text-gray-900 mb-4'>
+  <h3 id="modal-title" class='text-sm font-semibold text-gray-900 mb-4'>
     {% if mode == 'add' %}Add Contact{% else %}Edit Contact{% endif %}
   </h3>
 
@@ -49,9 +48,10 @@
               @change='newSite = ($el.value === "__new__")'
               class='w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500'>
         {% if sites %}
+          {# preselect_site_id (from "+ add here") wins; else first HQ / first site. #}
           {% for s in sites %}
           <option value='{{ s.id }}'
-            {% if s.site_type == 'hq' or loop.first %}selected{% endif %}>
+            {% if preselect_site_id is defined and preselect_site_id %}{% if s.id == preselect_site_id %}selected{% endif %}{% elif s.site_type == 'hq' or loop.first %}selected{% endif %}>
             {{ s.site_name }}{% if s.site_type == 'hq' %} (HQ){% endif %}
           </option>
           {% endfor %}

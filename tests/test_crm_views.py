@@ -2507,19 +2507,29 @@ class TestEditContact:
         return company, site, contact
 
     def test_get_contact_edit_form_returns_200(self, client: TestClient, db_session: Session, test_user: User):
-        """GET edit-form renders form pre-populated with contact fields."""
+        """GET edit-form renders form pre-populated with contact fields (company-scoped
+        route)."""
         company, site, contact = self._make_company_with_contact(db_session)
-        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        # Company-scoped route (no site_id): replaces the retired site-scoped route.
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/{contact.id}/edit-form")
         assert resp.status_code == 200
         assert "Alice Smith" in resp.text
         assert "alice@editco.com" in resp.text
+
+    def test_get_contact_edit_form_site_scoped_route_retired(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """The site-scoped edit-form GET route is retired → 404."""
+        company, site, contact = self._make_company_with_contact(db_session)
+        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit-form")
+        assert resp.status_code == 404
 
     def test_get_contact_edit_form_404_on_missing_contact(
         self, client: TestClient, db_session: Session, test_user: User
     ):
         """GET edit-form for nonexistent contact returns 404."""
         company, site, _ = self._make_company_with_contact(db_session)
-        resp = client.get(f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/99999/edit-form")
+        resp = client.get(f"/v2/partials/customers/{company.id}/contacts/99999/edit-form")
         assert resp.status_code == 404
 
     def test_post_contact_edit_persists_title_and_phone(self, client: TestClient, db_session: Session, test_user: User):
@@ -3004,15 +3014,16 @@ class TestCRMMacroDedup:
         assert "Last Reply" in html
         assert "Never" in html
 
-    def test_header_partial_uses_canonical_badge_and_clocks(
+    def test_multi_site_unified_detail_has_canonical_badge_and_clocks(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """The multi-site company-header rollup (header.html) renders the canonical
-        account_type_badge + cadence_clocks (the third copy of those, now unified)."""
+        """A MULTI-site account now opens the SAME unified detail (the header-only
+        rollup is retired): the canonical account_type_badge + cadence_clocks render in
+        that one unified surface."""
         from app.models.crm import CustomerSite
 
         co = self._make_company(db_session, account_type="Prospect", last_outbound_at=None)
-        # Two active sites → multi-site accordion → header partial.
+        # Two active sites — previously routed to the header-only fork; now unified.
         db_session.add_all(
             [
                 CustomerSite(company_id=co.id, site_name="HQ", is_active=True),
@@ -3021,13 +3032,15 @@ class TestCRMMacroDedup:
         )
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/customers/{co.id}/header")
+        resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
         html = resp.text
         assert "Prospect" in html
         assert "Last Out" in html
         assert "Last Reply" in html
         assert "Never" in html
+        # The unified detail carries the full tab strip (no header-only fork).
+        assert 'aria-label="Account detail sections"' in html
 
     def test_activity_tab_quote_and_rfq_badges_render(self, client: TestClient, db_session: Session, test_user: User):
         """The unified activity timeline renders quote + RFQ status via the shared
@@ -3181,13 +3194,16 @@ class TestContactsTabHome:
         assert "Add Contact" in resp.text
 
     def test_contacts_tab_shows_contact_count(self, client: TestClient, db_session: Session, test_user: User):
-        """Contacts tab header displays the total contact count."""
+        """The Contacts surface shows the per-site contact count in its section header.
+
+        (The redundant "Contacts (N)" heading was retired in the IA redesign — the
+        breadcrumb + tab strip name the surface; the section header carries the count.)
+        """
         company, _, _ = self._make_company_with_hq(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/contacts")
         assert resp.status_code == 200
-        assert "Contacts" in resp.text
-        # Should show the count somewhere in the header
-        assert "1" in resp.text
+        # The section header reports the count for that site.
+        assert "1 contact" in resp.text
 
     # ── POST create (contacts-tab) ────────────────────────────────────────
 
@@ -3380,18 +3396,21 @@ class TestContactsTabHome:
         # should NOT be the site_contacts inline form (no showAdd Alpine state)
         assert "showAdd" not in resp.text
 
-    def test_edit_hx_target_default_renders_site_contacts(
+    def test_edit_hx_target_default_renders_grouped_list(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit without HX-Target returns site_contacts.html (Sites-tab path)."""
+        """POST edit without HX-Target now always returns grouped list
+        (site_contacts.html path retired — the Sites tab no longer carries a contact
+        editor)."""
         company, site, contact = self._make_company_with_hq(db_session)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
             data={"full_name": "Alice Prime", "email": "alice@tabco.com"},
         )
         assert resp.status_code == 200
-        # site_contacts.html has showAdd Alpine state
-        assert "showAdd" in resp.text
+        # grouped list renders site section header — not the old showAdd site_contacts form
+        assert "HQ" in resp.text
+        assert "showAdd" not in resp.text
 
     def test_edit_writes_linkedin_url(self, client: TestClient, db_session: Session, test_user: User):
         """POST edit with linkedin_url persists it to the DB."""
@@ -3725,11 +3744,11 @@ class TestC3KebabActionsAndCadence:
         # contact gone
         assert "Only One" not in resp.text
 
-    def test_delete_via_tab_without_hx_target_returns_empty_string(
+    def test_delete_without_hx_target_renders_grouped_list(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """DELETE without HX-Target header still deletes and returns empty string
-        (site_card path unchanged)."""
+        """DELETE without HX-Target now always returns grouped list (site_contacts.html
+        path retired — the Sites tab no longer carries a contact editor)."""
         from app.models.crm import SiteContact
 
         company, site, ca, cb = self._make_two_contacts(db_session)
@@ -3739,6 +3758,9 @@ class TestC3KebabActionsAndCadence:
         assert resp.status_code == 200
         db_session.expire_all()
         assert db_session.get(SiteContact, ca.id) is None
+        # Returns the grouped list (remaining contact visible, old inline form gone)
+        assert "Beta Contact" in resp.text
+        assert "showAdd" not in resp.text
 
     # ── Cadence badge and sort ──────────────────────────────────────────
 
@@ -4080,14 +4102,17 @@ class TestFullWidthContactsForwardLayout:
         assert "max-w-3xl" not in resp.text
 
     def test_customer_detail_has_slim_header_actions(self, client: TestClient, db_session: Session, test_user: User):
-        """The slim header carries the primary Add Contact + the Account settings
-        collapsible trigger, and the coverage chip (N contacts · N sites)."""
+        """The slim header carries the primary Add Contact + a VISIBLE labeled "Cadence
+        & settings" trigger (no longer kebab-buried), and the coverage chip (N contacts
+        · N sites)."""
         company, _, _ = self._make_company_with_contact(db_session)
         resp = client.get(f"/v2/partials/customers/{company.id}")
         assert resp.status_code == 200
         html = resp.text
         assert "+ Add Contact" in html
-        assert "Account settings" in html
+        # Visible labeled affordance for cadence/tier/disposition (was "Account settings"
+        # kebab-only); the collapsible state var still drives the block.
+        assert "Cadence &amp; settings" in html
         assert "showAcctSettings" in html
         # Coverage chip and commercial strip survive the collapse into one line.
         assert "1 contact" in html
@@ -4141,3 +4166,124 @@ class TestFullWidthContactsForwardLayout:
         # The 4 stats survive the compression into a slim strip.
         assert "Sightings" in resp.text
         assert "Win Rate" in resp.text
+
+
+class TestNoCache:
+    """Stage C §6: full-page /v2/* responses carry Cache-Control: no-cache.
+
+    Browsers heuristically cache HTML pages with no Cache-Control header.  After
+    a deploy the stale shell would reference old hashed-CSS/JS bundles, forcing
+    users to hard-refresh.  The fix: page_response() sets
+    Cache-Control: no-cache, must-revalidate on every base_page render.
+
+    HTMX partials and /static/assets/* are intentionally unaffected.
+    """
+
+    def _authed_client(self, test_user, db_session):
+        """Return a TestClient that passes authentication for the full-page route.
+
+        The /v2/* full-page routes call get_user(request, db) directly (NOT the
+        require_user FastAPI dependency), so we must also patch that function to return
+        the test user.
+        """
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        overrides = {
+            get_db: lambda: (yield db_session),
+            require_user: lambda: test_user,
+            require_admin: lambda: test_user,
+            require_buyer: lambda: test_user,
+            require_fresh_token: lambda: "mock-token",
+        }
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        with patch("app.routers.htmx_views.get_user", return_value=test_user):
+            with TestClient(app) as c:
+                yield c
+
+        for dep in overrides:
+            app.dependency_overrides.pop(dep, None)
+
+    def test_v2_crm_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/crm (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/crm")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/crm, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_v2_customers_full_page_has_no_cache_header(self, db_session, test_user):
+        """GET /v2/customers (full-page shell) returns Cache-Control: no-cache."""
+        from unittest.mock import patch
+
+        from app.database import get_db
+        from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
+        from app.main import app
+
+        def _override_db():
+            yield db_session
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_admin] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+        app.dependency_overrides[require_fresh_token] = lambda: "mock-token"
+
+        try:
+            with patch("app.routers.htmx_views.get_user", return_value=test_user):
+                with TestClient(app) as c:
+                    resp = c.get("/v2/customers")
+            assert resp.status_code == 200
+            cc = resp.headers.get("cache-control", "")
+            assert "no-cache" in cc, f"Expected Cache-Control: no-cache on /v2/customers, got: {cc!r}"
+        finally:
+            for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
+                app.dependency_overrides.pop(dep, None)
+
+    def test_partial_does_not_carry_no_cache_header(self, client: TestClient, test_user):
+        """HTMX partial /v2/partials/customers does NOT carry Cache-Control: no-cache.
+
+        Only the full-page shell needs the no-cache guard.  Partials are lightweight and
+        already keyed by server state; adding no-cache would break browser back/forward
+        caching of fragments unnecessarily.
+        """
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        cc = resp.headers.get("cache-control", "")
+        # Partials should NOT carry the no-cache directive (either no header at
+        # all, or something like 'no-store' from the framework is acceptable,
+        # but 'no-cache' must not be the explicit page-response injection).
+        # We check that the page_response() wrapper was NOT applied.
+        assert "must-revalidate" not in cc, "HTMX partial should not carry the page-response Cache-Control header"

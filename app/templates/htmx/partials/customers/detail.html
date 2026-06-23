@@ -13,7 +13,17 @@
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
 {# Full panel width — no max-w cap; the slim header + multi-column contacts use it all. #}
-<div class="space-y-4">
+<div class="space-y-4 page-fluid">
+
+  {# ── Breadcrumb — "Customers › {Account}" (you-are-here for the right panel).
+     Reuses the treatment from the retired site_detail.html. "Customers" is the
+     section eyebrow (the left list IS the account picker, so it has no separate
+     destination); the account name is the current node. #}
+  <nav class="flex items-center gap-1.5 text-xs text-gray-600" aria-label="Breadcrumb">
+    <span>Customers</span>
+    <span class="text-gray-300">&rsaquo;</span>
+    <span class="text-gray-700 font-medium truncate">{{ company.name }}</span>
+  </nav>
 
   {# Possible-duplicate banner — lazy (hx-target=this avoids inheriting the
      #main-content hx-target). Renders nothing when there is no near-dup. #}
@@ -94,22 +104,36 @@
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
         {% include "htmx/partials/shared/enrich_button.html" %}
-        {# Primary "+ Add Contact" — dispatches the add-contact modal #}
+        {# Cadence & settings — VISIBLE labeled affordance (no longer kebab-buried).
+           Toggles the collapsible cadence/tier/disposition block below; aria-expanded
+           reflects state for assistive tech. #}
         <button type="button"
-                @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-                class="inline-flex items-center gap-1 rounded-lg bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
-          + Add Contact
+                @click="showAcctSettings = !showAcctSettings"
+                :aria-expanded="showAcctSettings"
+                aria-controls="acct-settings-{{ company.id }}"
+                aria-label="Cadence &amp; settings"
+                title="Cadence &amp; settings"
+                :class="showAcctSettings ? 'bg-brand-50 text-brand-600 border-brand-200' : 'text-gray-600 border-gray-200 hover:bg-gray-50'"
+                class="inline-flex items-center rounded-lg border p-1.5 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
+            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+          </svg>
+          <span class="sr-only">Cadence &amp; settings</span>
         </button>
-        {# Kebab — Merge duplicate / Account settings #}
+        {# Kebab — overflow actions (Merge duplicate) #}
         <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
           <button @click.stop="open = !open" type="button"
                   class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  aria-label="Account actions">
+                  aria-label="More account actions"
+                  :aria-expanded="open ? 'true' : 'false'"
+                  aria-haspopup="menu">
             <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
               <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
             </svg>
           </button>
           <div x-show="open" x-cloak
+               role="menu"
                class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
             {# Merge duplicate — opens modal with search + confirm flow #}
             <button type="button"
@@ -117,18 +141,15 @@
                     hx-target="#modal-content"
                     hx-swap="innerHTML"
                     @click.stop="$dispatch('open-modal'); open = false"
+                    role="menuitem"
                     class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Merge duplicate</button>
-            {# Account settings — reveal the collapsible cadence/disposition block #}
-            <button type="button"
-                    @click.stop="showAcctSettings = !showAcctSettings; open = false"
-                    class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50 border-t border-gray-100">Account settings</button>
           </div>
         </div>
       </div>
     </div>
 
     {# ── Collapsible Account settings — cadence/disposition/clocks + phone/employees ── #}
-    <div x-show="showAcctSettings" x-cloak x-collapse class="mt-3 pt-3 border-t border-gray-100 space-y-3">
+    <div id="acct-settings-{{ company.id }}" x-show="showAcctSettings" x-cloak x-collapse class="mt-3 pt-3 border-t border-gray-100 space-y-3">
       {# Hero row: cadence badge + settable tier + next-best-touch.
          _cadence_hero.html is the HTMX swap target for tier updates. #}
       {% include 'htmx/partials/customers/_cadence_hero.html' %}
@@ -142,7 +163,7 @@
       {# Phone + Employees #}
       <div class="grid grid-cols-2 gap-3">
         <div class="p-3 rounded-lg bg-gray-50">
-          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
+          <p class="text-xs font-medium text-gray-600 uppercase tracking-wider">Phone</p>
           <p class="mt-1 text-sm font-medium">
             {% if company.phone %}
               <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600"
@@ -154,34 +175,51 @@
           </p>
         </div>
         <div class="p-3 rounded-lg bg-gray-50">
-          <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
+          <p class="text-xs font-medium text-gray-600 uppercase tracking-wider">Employees</p>
           <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
         </div>
       </div>
+
+      {# ── Segment Tags — inside account-settings collapsible (less weight on other tabs) #}
+      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+        <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
+        {% include "htmx/partials/customers/_segment_tags.html" %}
+      </div>
+
+      {# ── Notes — inside account-settings collapsible #}
+      {% if company.notes %}
+      <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
+        <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
+        <p class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{{ company.notes }}</p>
+      </div>
+      {% endif %}
     </div>
   </div>
 
   {# ── Tabs — Contacts first + inlined (front-and-center call-list workflow) ── #}
-  <div x-data="{ activeTab: 'contacts' }">
+  <div x-data="{ activeTab: 'contacts' }" @crm-switch-tab.window="activeTab = $event.detail.tab">
     <div class="border-b border-gray-200">
-      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections">
+      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections"
+           @keydown.arrow-right.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i+1)%tabs.length].focus();tabs[(i+1)%tabs.length].click()"
+           @keydown.arrow-left.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i-1+tabs.length)%tabs.length].focus();tabs[(i-1+tabs.length)%tabs.length].click()">
         {% for tab_id, tab_label, tab_count in [
-          ('contacts', 'Contacts', contact_rows|length if contact_rows is defined else none),
+          ('contacts', 'Contacts', contact_count if contact_count is defined else none),
           ('sites', 'Sites', sites|length),
           ('requisitions', 'Requisitions', open_req_count),
           ('activity', 'Activity', none),
           ('quotes', 'Quotes', quote_count if quote_count is defined else none),
           ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none)
         ] %}
-        <button @click="activeTab = '{{ tab_id }}'"
+        <button @click="if (activeTab === '{{ tab_id }}') { $event.preventDefault(); } else { activeTab = '{{ tab_id }}'; }"
+                id="tab-{{ tab_id }}"
                 role="tab"
                 :aria-selected="activeTab === '{{ tab_id }}' ? 'true' : 'false'"
                 aria-controls="company-tab-content"
                 hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
-                hx-trigger="click"
+                hx-trigger="click[!this.matches('[aria-selected=true]')]"
                 hx-swap="innerHTML"
-                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-600 hover:text-gray-700 hover:border-gray-300'"
                 class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           {{ tab_label }}
           {% if tab_count is not none and tab_count > 0 %}
@@ -193,7 +231,7 @@
     </div>
 
     {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
-    <div id="company-tab-content" class="mt-4" role="tabpanel">
+    <div id="company-tab-content" class="mt-4" role="tabpanel" :aria-labelledby="'tab-' + activeTab">
       {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
     </div>
   </div>
@@ -212,19 +250,5 @@
       <svg class="h-5 w-5 text-gray-400 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
     </div>
   </div>
-
-  {# ── Segment Tags ────────────────────────────────────────────────────────── #}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">Segments</h2>
-    {% include "htmx/partials/customers/_segment_tags.html" %}
-  </div>
-
-  {# ── Notes ───────────────────────────────────────────────────────────────── #}
-  {% if company.notes %}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
-    <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
-    <p class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{{ company.notes }}</p>
-  </div>
-  {% endif %}
 
 </div>

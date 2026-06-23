@@ -411,6 +411,18 @@ async def request_id_middleware(request: Request, call_next):
                 response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
             else:
                 response.headers["Cache-Control"] = "public, max-age=3600"
+        # Full-page HTML loads (non-HTMX requests): no-cache so a new deploy's shell + hashed
+        # CSS/JS bundle is fetched fresh instead of a heuristically-cached stale shell. HTMX
+        # partials (HX-Request) and /static (above) are unaffected. Set HERE (outermost
+        # middleware) because header sets on the TemplateResponse itself are dropped by inner
+        # response processing before reaching the client.
+        elif (
+            request.headers.get("HX-Request") is None
+            and not path.startswith("/api")
+            and "/partials/" not in path
+            and "text/html" in (response.headers.get("content-type") or "")
+        ):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
 
         # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
