@@ -280,7 +280,7 @@ class TestTradingSchemas:
             id=1,
             excess_list_id=1,
             submitted_by=1,
-            scope="open",
+            scope="per_line",
             status="open",
         )
         assert resp.id == 1

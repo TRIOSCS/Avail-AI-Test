@@ -53,7 +53,7 @@ def upgrade() -> None:
     )
     op.add_column(
         "excess_line_items",
-        sa.Column("offer_count", sa.Integer(), nullable=True, server_default="0"),
+        sa.Column("offer_count", sa.Integer(), nullable=False, server_default="0"),
     )
 
     # --- excess_lists: lock-on-post version ---

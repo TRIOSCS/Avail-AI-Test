@@ -94,7 +94,7 @@ class ExcessLineItem(Base):
     # FK) to avoid a circular cascade with excess_offers.
     best_offer_unit_price = Column(Numeric(12, 4), nullable=True)
     best_offer_id = Column(Integer, nullable=True)
-    offer_count = Column(Integer, default=0)
+    offer_count = Column(Integer, nullable=False, default=0, server_default="0")
     demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
     notes = Column(Text, nullable=True)

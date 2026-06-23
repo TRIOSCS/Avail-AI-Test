@@ -39,7 +39,9 @@ class ExcessListCreate(BaseModel):
 
 class ExcessListUpdate(BaseModel):
     title: str | None = None
-    status: Literal["draft", "active", "bidding", "closed", "expired"] | None = None
+    status: (
+        Literal["draft", "active", "bidding", "closed", "expired", "open", "collecting", "bid_out", "awarded"] | None
+    ) = None
     notes: str | None = None
 
 
@@ -267,7 +269,7 @@ class ExcessOfferResponse(BaseModel):
     submitted_by: int
     offerer_company_id: int | None = None
     offerer_vendor_card_id: int | None = None
-    scope: str
+    scope: Literal["per_line", "take_all"]
     take_all_total_price: float | None = None
     valid_until: datetime | None = None
     status: str
