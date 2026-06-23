@@ -1,0 +1,212 @@
+{#
+  resell/offer_buyers_modal.html — "Offer to buyers" panel (owner-only).
+  The trader→buyer half of Resell: pick WHO to offer a posted list (or selected
+  lines) to, on which channel, then send (email) or log (phone/teams/marketplace).
+  Mirrors the sightings RFQ vendor modal's shape (ranked rows + add-on-the-fly +
+  no-contact treatment) but is self-contained — the panel state is simple enough
+  not to need a JS factory.
+
+  Receives: list, suggestions [{buyer: RankedBuyer, overlap}], no_contact_buyers
+            [{card}], channels (list), line_ids (list), scope_lines (or None), user.
+  Called by: resell.resell_offer_buyers_form (via the detail "Offer to buyers" action).
+  Depends on: the global modal (#modal-content), $store.toast, /api/autocomplete/names.
+
+  Alpine landmines (CLAUDE.md): the |tojson seed is in a SINGLE-quoted x-data attr
+  (tojson emits double quotes); the per-row :checked / @change pass the id as a JS
+  number literal so no quoting hazard.
+#}
+{% set el = list %}
+
+<div class="p-5"
+     x-data='{
+       selected: [],
+       scope: {{ "per_line" | tojson if line_ids else "whole_list" | tojson }},
+       channel: "email",
+       query: "",
+       results: [],
+       searchOpen: false,
+       addedCompanies: [],
+       toggle(id) { this.selected.includes(id) ? this.selected = this.selected.filter(x => x !== id) : this.selected.push(id); },
+       isSel(id) { return this.selected.includes(id); },
+       async search() {
+         if (this.query.trim().length < 2) { this.results = []; return; }
+         const r = await fetch("/api/autocomplete/names?q=" + encodeURIComponent(this.query));
+         this.results = r.ok ? (await r.json()) : [];
+         this.searchOpen = true;
+       },
+       pick(item) {
+         if (!this.addedCompanies.some(c => c.id === item.id && c.type === item.type)) {
+           this.addedCompanies.push(item);
+         }
+         this.query = ""; this.results = []; this.searchOpen = false;
+       },
+       drop(item) { this.addedCompanies = this.addedCompanies.filter(c => !(c.id === item.id && c.type === item.type)); },
+       get count() { return this.selected.length + this.addedCompanies.length; },
+       get addedVendorIds() { return this.addedCompanies.filter(c => c.type === "vendor").map(c => c.id); },
+       get addedCompanyIds() { return this.addedCompanies.filter(c => c.type === "customer").map(c => c.id); }
+     }'>
+
+  <h2 class="text-lg font-semibold text-gray-900 mb-1">Offer to buyers</h2>
+  <p class="text-sm text-gray-500 mb-4">
+    {% if scope_lines %}{{ scope_lines|length }} selected line{{ 's' if scope_lines|length != 1 }} on
+    {% else %}The whole list
+    {% endif %}<span class="font-medium text-gray-700">{{ el.title }}</span>
+  </p>
+
+  <form hx-post="/api/resell/{{ el.id }}/outreach"
+        hx-target="#tab-outreach-{{ el.id }}"
+        hx-swap="innerHTML"
+        data-loading-disable
+        @htmx:after-request.camel="if(event.detail.successful){ $dispatch('close-modal'); $store.toast.message = (channel === 'email' ? 'Outreach sent' : 'Outreach logged'); $store.toast.type='success'; $store.toast.show=true; }"
+        class="space-y-4">
+
+    {# Hidden fields the Alpine state binds into the POST. A picked vendor result is a
+       canonical card id (→ vendor_card_ids); a picked customer is a company id the
+       service backfills a card for (→ company_ids). #}
+    <input type="hidden" name="vendor_card_ids" :value="selected.concat(addedVendorIds).join(',')">
+    <input type="hidden" name="company_ids" :value="addedCompanyIds.join(',')">
+    <input type="hidden" name="scope" :value="scope">
+    <input type="hidden" name="channel" :value="channel">
+    <input type="hidden" name="line_ids" value="{{ line_ids|join(',') }}">
+
+    {# ── Suggested buyers (ranked) ─────────────────────────────────── #}
+    <div>
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+        Suggested buyers ({{ suggestions|length }})
+      </label>
+
+      {% if not suggestions and not no_contact_buyers %}
+      <div class="rounded-lg border border-dashed border-brand-200 bg-gray-50 px-3 py-4 text-center text-sm text-gray-500">
+        No ranked buyers yet — search to add one below.
+      </div>
+      {% else %}
+      <div class="max-h-56 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+        {% for row in suggestions %}
+        {% set b = row.buyer %}
+        <label class="flex items-start gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+          <input type="checkbox" :checked="isSel({{ b.vendor_card_id }})" @change="toggle({{ b.vendor_card_id }})"
+                 class="mt-0.5 rounded border-gray-300">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="text-sm font-medium text-gray-700">{{ b.display_name }}</span>
+              {# Rank-reason chip — why this buyer surfaced. #}
+              {% set reason = {'bought_this_part': 'bought this part', 'buys_this_commodity': 'buys this commodity', 'engagement': 'engaged'} %}
+              <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">{{ reason.get(b.rank_reason, b.rank_reason) }}</span>
+            </div>
+            {# One-glance scorecard chips: last bid · win-rate · last contacted. #}
+            <div class="mt-0.5 flex items-center gap-3 text-xs text-gray-400 flex-wrap">
+              {% if b.last_bid is not none %}<span>last bid ${{ "{:,.4f}".format(b.last_bid|float) }}</span>{% endif %}
+              {% if b.win_rate is not none %}<span>{{ (b.win_rate * 100)|round|int }}% win</span>{% endif %}
+              {% if b.last_offered_at %}<span>offered {{ b.last_offered_at.strftime('%b %d') }}</span>
+              {% else %}<span>never offered</span>{% endif %}
+            </div>
+            {# Advisory overlap flag — a TEAMMATE already offered this buyer. Never blocks;
+               it informs, the trader decides (HYBRID-assertive). #}
+            {% if row.overlap %}
+            <p class="mt-1 inline-flex items-center gap-1 text-[11px] text-amber-600">
+              <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-3L13.74 4a2 2 0 00-3.48 0L3.33 16a2 2 0 001.74 3z"/></svg>
+              {{ row.overlap.by_user_name or 'A teammate' }} already offered this buyer
+              {% if row.overlap.when %} on {{ row.overlap.when.strftime('%b %d') }}{% endif %}
+            </p>
+            {% endif %}
+          </div>
+        </label>
+        {% endfor %}
+
+        {# No-contact history buyers: dealt-with-before but no resolvable email — manual
+           log only, disabled checkbox, clear badge (mirrors the RFQ modal no-email row). #}
+        {% for nc in no_contact_buyers %}
+        <label class="flex items-center gap-3 px-3 py-2">
+          <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
+          <div class="flex-1 min-w-0">
+            <span class="text-sm font-medium text-gray-500">{{ nc.card.display_name }}</span>
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {# Manual add — debounced autocomplete against the shared names endpoint. #}
+      <div class="mt-2 relative">
+        <input type="text" x-model="query" @input.debounce.300ms="search()"
+               @focus="searchOpen = results.length > 0" @click.away="searchOpen = false"
+               placeholder="Add a buyer by name…" autocomplete="off" aria-label="Add a buyer by name"
+               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+        <div x-show="searchOpen" x-cloak
+             class="absolute z-50 left-0 right-0 mt-1 max-h-40 overflow-y-auto bg-white border border-gray-200 rounded-lg shadow-lg">
+          <template x-for="r in results" :key="r.type + '-' + r.id">
+            <button type="button" @click="pick(r)"
+                    class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-brand-50 hover:text-brand-700 truncate"
+                    x-text="r.name"></button>
+          </template>
+          <div x-show="results.length === 0" x-cloak class="px-3 py-1.5 text-xs text-gray-400 italic">No matches</div>
+        </div>
+      </div>
+      {# Added chips. #}
+      <div class="mt-2 flex flex-wrap gap-1.5" x-show="addedCompanies.length" x-cloak>
+        <template x-for="c in addedCompanies" :key="c.type + '-' + c.id">
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-brand-100 text-brand-700">
+            <span x-text="c.name"></span>
+            <button type="button" @click="drop(c)" class="text-brand-500 hover:text-brand-700">&times;</button>
+          </span>
+        </template>
+      </div>
+    </div>
+
+    {# ── Scope ─────────────────────────────────────────────────────── #}
+    <div>
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Scope</label>
+      <div class="flex rounded-lg border border-brand-200 overflow-hidden text-sm">
+        <button type="button" @click="scope = 'whole_list'"
+                :class="scope === 'whole_list' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+                class="flex-1 py-2 font-medium transition-colors">Whole list</button>
+        <button type="button" @click="scope = 'per_line'"
+                :class="scope === 'per_line' ? 'bg-brand-500 text-white' : 'bg-white text-gray-600 hover:bg-brand-50'"
+                class="flex-1 py-2 font-medium transition-colors border-l border-brand-200">
+          {% if scope_lines %}These {{ scope_lines|length }} line{{ 's' if scope_lines|length != 1 }}{% else %}Per line{% endif %}
+        </button>
+      </div>
+    </div>
+
+    {# ── Channel ───────────────────────────────────────────────────── #}
+    <div>
+      <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Channel</label>
+      <div class="flex flex-wrap gap-2 text-sm">
+        {% for ch in channels %}
+        <button type="button" @click="channel = '{{ ch }}'"
+                :class="channel === '{{ ch }}' ? 'bg-brand-500 text-white border-brand-500' : 'bg-white text-gray-600 border-gray-200 hover:bg-brand-50'"
+                class="px-3 py-1.5 rounded-full border font-medium transition-colors capitalize">{{ ch }}</button>
+        {% endfor %}
+      </div>
+      <p class="mt-1 text-xs text-gray-400" x-show="channel === 'email'" x-cloak>Sends a real email to each buyer with a contact on file.</p>
+      <p class="mt-1 text-xs text-gray-400" x-show="channel !== 'email'" x-cloak>Logs the touch on the timeline — no email is sent.</p>
+    </div>
+
+    {# ── Email compose (email channel only) ────────────────────────── #}
+    <div x-show="channel === 'email'" x-cloak class="space-y-3">
+      <div>
+        <label class="form-label">Subject</label>
+        <input type="text" name="subject" class="input" value="Excess available: {{ el.title }}">
+      </div>
+      <div>
+        <label class="form-label">Message</label>
+        <textarea name="body" rows="4" class="input" placeholder="Write your offer…">We have the following excess available — let us know if you'd like to bid.</textarea>
+      </div>
+    </div>
+
+    {# ── Notes (manual-log channels) ───────────────────────────────── #}
+    <div x-show="channel !== 'email'" x-cloak>
+      <label class="form-label">Notes</label>
+      <textarea name="notes" rows="2" class="input" placeholder="e.g. left a voicemail, marketplace thread link…"></textarea>
+    </div>
+
+    <div class="flex justify-end gap-3 pt-2 border-t border-gray-100">
+      <button type="button" @click="$dispatch('close-modal')" class="btn btn-secondary">Cancel</button>
+      <button type="submit" :disabled="count === 0" class="btn btn-primary disabled:opacity-50">
+        <span x-show="channel === 'email'" x-cloak>Send to <span x-text="count"></span></span>
+        <span x-show="channel !== 'email'" x-cloak>Log <span x-text="count"></span></span>
+      </button>
+    </div>
+  </form>
+</div>
