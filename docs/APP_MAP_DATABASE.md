@@ -470,6 +470,21 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 > `recompute_line_rollup`/`withdraw_offer` (min priced active offer -> best_offer_*), and
 > `material_card_id` resolution on the import path. The old `create_bid`/`accept_bid`
 > functions remain until the cutover chunk.
+>
+> Sighting live-mirror lives in `app/services/excess_mirror.py` (Chunk C, additive):
+> `sync_list_mirror`/`publish_list` are the dual-write owners — every active posted
+> `excess_line_items` row mirrors into a `sightings` row (`source_type='customer_excess'`,
+> `source_company_id=excess_lists.company_id`, synthesized `vendor_name`="Customer Excess",
+> NOT the seller) so the existing matcher sees it for free. `Sighting.requirement_id`
+> (NOT NULL) hangs on a per-list system-owned **virtual requirement** — a single
+> `is_scratch=True` "Customer Excess (list N)" requisition+requirement (found by the
+> deterministic name; hidden from sales views by the existing
+> `Requisition.is_scratch.is_(False)` filter). The mirror upserts by
+> `(source_company_id, material_card_id)` — NOT the connector-aware
+> delete-by-`(requirement_id, source_type)` path — so a re-publish updates the row and
+> never wipes a sibling list's `customer_excess` sightings. `retire_line` deletes the
+> mirror on award / withdraw / qty->0. Lines whose MPN won't resolve to a MaterialCard
+> are skipped (the upsert key needs the card), never raised.
 
 **`excess_lists`** — Customer surplus inventory batches (the posting)
 - company_id -> companies, owner_id -> users
