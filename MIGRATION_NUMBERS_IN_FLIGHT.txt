@@ -59,3 +59,4 @@
 132 feat/crm-editability custom_fields JSONB on companies + site_contacts
 133  feat/crm-steps-3456  Company.primary_contact_id (FK site_contacts) + parent_company_id (self-FK companies)
 134  feat/crm-steps-3456  site_contacts.first_name/last_name (split from full_name, backfilled) + contact_owner_id (FK users)
+135  feat/crm-steps-3456  RequisitionTask.requisition_id nullable + company_id/site_contact_id FKs + CHECK >=1 parent (general account/contact tasks); chains onto 134_contact_fields

@@ -5900,6 +5900,13 @@ async def company_apply_name(
 _VALID_CUSTOMER_TABS = frozenset({"contacts", "sites", "requisitions", "activity", "quotes", "buy_plans", "files"})
 
 
+def _get_next_account_task(db: Session, company_id: int):
+    """Return the soonest open task for an account, or None."""
+    from app.services.task_service import get_next_task_for_company
+
+    return get_next_task_for_company(db, company_id)
+
+
 @router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
@@ -6000,6 +6007,8 @@ async def company_detail_partial(
             "active_tab": active_tab,
             # WS2: known-field grid for the account card.
             "known_account_fields": KNOWN_ACCOUNT_FIELDS,
+            # Next open task for the "Next step" summary line.
+            "next_account_task": _get_next_account_task(db, company_id),
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -14093,3 +14102,205 @@ async def trouble_ticket_detail(
         "htmx/partials/tickets/detail.html",
         {**_base_ctx(request, user, "tickets"), "ticket": ticket},
     )
+
+
+# ── Step 5: Account/Contact Tasks ────────────────────────────────────────────
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def account_tasks_partial(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the open-tasks list for an account."""
+    from app.services.task_service import get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/tasks/add-form", response_class=HTMLResponse)
+async def account_task_add_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for an account."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    return template_response("htmx/partials/customers/_account_task_form.html", ctx)
+
+
+@router.post("/v2/partials/customers/{company_id}/tasks", response_class=HTMLResponse)
+async def create_account_task(
+    request: Request,
+    company_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to an account; return refreshed task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_company_task, get_open_tasks_for_company
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_company_task(
+        db,
+        company_id=company_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_company(db, company_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["company_tasks"] = tasks
+    return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+
+
+@router.get(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks/add-form",
+    response_class=HTMLResponse,
+)
+async def contact_task_add_form(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the inline add-task form for a contact."""
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    ctx = _base_ctx(request, user, "customers")
+    ctx["company_id"] = company_id
+    ctx["contact_id"] = contact_id
+    return template_response("htmx/partials/customers/_contact_task_form.html", ctx)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/contacts/{contact_id}/tasks",
+    response_class=HTMLResponse,
+)
+async def create_contact_task_endpoint(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    title: str = Form(""),
+    due_at: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task scoped to a contact; return refreshed contact task list."""
+    from datetime import date
+    from datetime import timezone as _tz
+
+    from app.services.task_service import create_contact_task, get_open_tasks_for_contact
+
+    # Scoped-join IDOR guard: contact must belong to this company
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+    if not title.strip():
+        return HTMLResponse('<p class="text-xs text-rose-600">Title is required.</p>')
+    due_dt = None
+    if due_at.strip():
+        try:
+            d = date.fromisoformat(due_at.strip())
+            due_dt = datetime.combine(d, datetime.min.time()).replace(tzinfo=_tz.utc)
+        except ValueError:
+            return HTMLResponse('<p class="text-xs text-rose-600">Invalid date.</p>')
+    create_contact_task(
+        db,
+        site_contact_id=contact_id,
+        title=title.strip(),
+        due_at=due_dt,
+        created_by=user.id,
+        assigned_to_id=user.id,
+    )
+    tasks = get_open_tasks_for_contact(db, contact_id)
+    ctx = _base_ctx(request, user, "customers")
+    ctx["contact"] = contact
+    ctx["contact_tasks"] = tasks
+    ctx["company_id"] = company_id
+    ctx["site_id"] = contact.customer_site_id
+    return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+
+
+@router.post("/v2/partials/tasks/{task_id}/complete", response_class=HTMLResponse)
+async def complete_task_endpoint(
+    request: Request,
+    task_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a CRM task done. No activity log is created.
+
+    Returns the refreshed parent task list (account or contact).
+    """
+    from app.services.task_service import (
+        complete_crm_task,
+        get_open_tasks_for_company,
+        get_open_tasks_for_contact,
+    )
+
+    task = db.get(RequisitionTask, task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+    complete_crm_task(db, task_id, user.id)
+    # Re-render the appropriate parent container
+    if task.company_id:
+        tasks = get_open_tasks_for_company(db, task.company_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["company_id"] = task.company_id
+        ctx["company_tasks"] = tasks
+        return template_response("htmx/partials/customers/_account_tasks.html", ctx)
+    if task.site_contact_id:
+        contact = db.get(SiteContact, task.site_contact_id)
+        tasks = get_open_tasks_for_contact(db, task.site_contact_id)
+        ctx = _base_ctx(request, user, "customers")
+        ctx["contact"] = contact
+        ctx["contact_tasks"] = tasks
+        ctx["company_id"] = contact.customer_site.company_id if contact and contact.customer_site else 0
+        ctx["site_id"] = task.site_contact_id
+        return template_response("htmx/partials/customers/_contact_tasks.html", ctx)
+    # Fallback: requisition task — just return empty fragment
+    return HTMLResponse("")

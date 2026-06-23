@@ -184,6 +184,24 @@
       {# Disposition control: Active / Bucket + Send to Prospecting. #}
       {% include 'htmx/partials/customers/_disposition_control.html' %}
 
+      {# ── Next step: soonest open account task #}
+      {% if next_account_task %}
+      <div class="text-xs text-gray-700">
+        <span class="font-medium">Next:</span>
+        {{ next_account_task.title }}
+        {% if next_account_task.due_at %}
+          <span class="text-gray-600">(due {{ next_account_task.due_at.strftime('%b %-d') }})</span>
+        {% endif %}
+      </div>
+      {% endif %}
+
+      {# ── Account tasks ── lazy-loaded #}
+      <div hx-get="/v2/partials/customers/{{ company.id }}/tasks"
+           hx-trigger="load"
+           hx-target="this"
+           hx-swap="outerHTML"
+           class="empty:hidden"></div>
+
       {# Dual clocks: Outbound + Reply — canonical cadence_clocks macro (shared/_macros.html) #}
       {{ cadence_clocks(company, now_utc) }}
 
