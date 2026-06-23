@@ -485,16 +485,12 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     return {"sources": result}
 
 
-@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
-@limiter.limit("5/minute")
-async def test_api_source(
-    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    """Test a specific API source with a known part number."""
-    src = db.get(ApiSource, source_id)
-    if not src:
-        raise HTTPException(404, "API source not found")
+async def run_source_test(src: ApiSource, db: Session) -> dict:
+    """Run a live part-search probe against one source, persisting its health.
 
+    Shared by the per-source Test endpoint and the Connectors "Test all" sweep.
+    Tolerates connector failures (records them as `error`) and never raises.
+    """
     test_mpn = "LM358N"
     start = time.time()
     results = []
@@ -540,6 +536,19 @@ async def test_api_source(
         "error": error,
         "sample": results[:3] if results else [],
     }
+
+
+@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
+@limiter.limit("5/minute")
+async def test_api_source(
+    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Test a specific API source with a known part number."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "API source not found")
+
+    return await run_source_test(src, db)
 
 
 @router.put("/api/sources/{source_id}/toggle", response_model=ToggleResponse)

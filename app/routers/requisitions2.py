@@ -22,7 +22,7 @@ from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..constants import UserRole
+from ..constants import RESTRICTED_ROLES
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_user
 from ..models import Offer, Requisition, User
@@ -471,7 +471,7 @@ async def bulk_action(
         return template_response("requisitions2/_table.html", ctx)
 
     reqs_q = db.query(Requisition).filter(Requisition.id.in_(id_list))
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         reqs_q = reqs_q.filter(Requisition.created_by == user.id)
     reqs = reqs_q.all()
     count = 0

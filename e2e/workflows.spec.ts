@@ -81,13 +81,57 @@ test.describe('Form Submission Workflows', () => {
 
 test.describe('Settings & Admin', () => {
   test('settings page loads all sections', async ({ request }) => {
-    const sections = ['sources', 'system', 'profile', 'data-ops'];
+    // 'sources' and 'api-keys' now redirect to /connectors; 'system', 'profile',
+    // 'data-ops' should render or return auth redirect — not crash.
+    const sections = ['system', 'profile', 'data-ops'];
     for (const section of sections) {
       const res = await request.get(`/v2/partials/settings/${section}`, {
         headers: { 'HX-Request': 'true' },
       });
-      // 200 = success, 401/307 = auth required — both fine, not a dead end
+      // 200 = success, 401/307/403 = auth required or admin-only — both fine, not a dead end
       expect(res.status(), `Settings ${section} crashed`).toBeLessThan(500);
+    }
+  });
+
+  test('/sources redirects to /connectors', async ({ request }) => {
+    const res = await request.get('/v2/partials/settings/sources', {
+      maxRedirects: 0,
+      headers: { 'HX-Request': 'true' },
+    });
+    expect(res.status()).toBe(302);
+    const location = res.headers()['location'] ?? '';
+    expect(location).toContain('/connectors');
+  });
+
+  test('/api-keys redirects to /connectors', async ({ request }) => {
+    const res = await request.get('/v2/partials/settings/api-keys', {
+      maxRedirects: 0,
+      headers: { 'HX-Request': 'true' },
+    });
+    expect(res.status()).toBe(302);
+    const location = res.headers()['location'] ?? '';
+    expect(location).toContain('/connectors');
+  });
+
+  test('/connectors renders the 6 group headings', async ({ request }) => {
+    const res = await request.get('/v2/partials/settings/connectors', {
+      headers: { 'HX-Request': 'true' },
+    });
+    // 200 = authed admin, 401/307/403 = not authed or not admin — not a crash
+    expect(res.status(), '/connectors crashed').toBeLessThan(500);
+    if (res.status() === 200) {
+      const html = await res.text();
+      const expectedLabels = [
+        'Part Sourcing',
+        'Enrichment',
+        'AI',
+        'Communications',
+        'Browser Workers',
+        'Manual',
+      ];
+      for (const label of expectedLabels) {
+        expect(html, `Missing group heading: ${label}`).toContain(label);
+      }
     }
   });
 

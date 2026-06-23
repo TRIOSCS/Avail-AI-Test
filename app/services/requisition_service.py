@@ -15,7 +15,7 @@ from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import ActivityType, RequisitionStatus, UserRole
+from ..constants import RESTRICTED_ROLES, ActivityType, RequisitionStatus
 from ..models import Offer, Requirement, Requisition, User
 from ..utils.normalization import (
     normalize_condition,
@@ -66,7 +66,7 @@ def batch_archive_for_user(db: Session, user: User, ids: list[int]) -> list[int]
         Requisition.id.in_(ids),
         Requisition.status.notin_(RequisitionStatus.TERMINAL),
     ]
-    if user.role == UserRole.SALES:
+    if user.role in RESTRICTED_ROLES:
         conditions.append(Requisition.created_by == user.id)
 
     stmt = (
