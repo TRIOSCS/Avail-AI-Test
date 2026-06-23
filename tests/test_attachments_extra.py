@@ -19,7 +19,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 from fastapi.responses import StreamingResponse
@@ -99,7 +99,12 @@ def _make_material_card(db: Session) -> MaterialCard:
     return card
 
 
-def _make_company_attachment(db: Session, company_id: int, user_id: int) -> CompanyAttachment:
+def _make_company_attachment(
+    db: Session,
+    company_id: int,
+    user_id: int,
+    created_at: datetime | None = None,
+) -> CompanyAttachment:
     att = CompanyAttachment(
         company_id=company_id,
         file_name="spec.pdf",
@@ -109,7 +114,7 @@ def _make_company_attachment(db: Session, company_id: int, user_id: int) -> Comp
         content_type="application/pdf",
         size_bytes=2048,
         uploaded_by_id=user_id,
-        created_at=datetime.now(timezone.utc),
+        created_at=created_at or datetime.now(timezone.utc),
     )
     db.add(att)
     db.commit()
@@ -171,18 +176,17 @@ class TestCompanyAttachments:
         assert resp.json() == []
 
     def test_list_returns_attachments_newest_first(self, client, db_session, test_user):
+        now = datetime.now(timezone.utc)
         co = _make_company(db_session, owner_id=test_user.id)
-        att1 = _make_company_attachment(db_session, co.id, test_user.id)
-        att2 = _make_company_attachment(db_session, co.id, test_user.id)
+        att_older = _make_company_attachment(db_session, co.id, test_user.id, created_at=now - timedelta(hours=1))
+        att_newer = _make_company_attachment(db_session, co.id, test_user.id, created_at=now)
         resp = client.get(f"/api/companies/{co.id}/attachments")
         assert resp.status_code == 200
         items = resp.json()
         assert len(items) == 2
-        # Newest-first: att2 was created after att1 — but since both use datetime.now()
-        # they may be equal; just confirm both appear.
-        ids = [i["id"] for i in items]
-        assert att1.id in ids
-        assert att2.id in ids
+        # Newest first: att_newer must precede att_older.
+        assert items[0]["id"] == att_newer.id
+        assert items[1]["id"] == att_older.id
 
     def test_upload_creates_row(self, client, db_session, test_user):
         co = _make_company(db_session, owner_id=test_user.id)

@@ -22,7 +22,7 @@ Depends on: app/services/attachment_service, all attachment models, app/dependen
 """
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_user
@@ -107,6 +107,8 @@ def _check_serve_access(kind: str, att, user: User, db: Session) -> None:
         # No per-user ownership; any buyer may serve any material attachment.
         if not db.get(MaterialCard, att.material_card_id):
             raise HTTPException(404, "Attachment not found")
+    else:
+        raise RuntimeError(f"BUG: no serve access check for kind={kind!r}")
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +151,7 @@ async def list_company_attachments(
         raise HTTPException(404, "Company not found")
     atts = (
         db.query(CompanyAttachment)
+        .options(selectinload(CompanyAttachment.uploaded_by))
         .filter(CompanyAttachment.company_id == company_id)
         .order_by(CompanyAttachment.created_at.desc())
         .all()
@@ -214,6 +217,7 @@ async def list_contact_attachments(
         raise HTTPException(404, "Contact not found")
     atts = (
         db.query(SiteContactAttachment)
+        .options(selectinload(SiteContactAttachment.uploaded_by))
         .filter(SiteContactAttachment.site_contact_id == contact_id)
         .order_by(SiteContactAttachment.created_at.desc())
         .all()
@@ -284,6 +288,7 @@ async def list_material_card_attachments(
         raise HTTPException(404, "Material card not found")
     atts = (
         db.query(MaterialCardAttachment)
+        .options(selectinload(MaterialCardAttachment.uploaded_by))
         .filter(MaterialCardAttachment.material_card_id == card_id)
         .order_by(MaterialCardAttachment.created_at.desc())
         .all()
