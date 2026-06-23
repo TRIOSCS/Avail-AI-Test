@@ -1,9 +1,9 @@
-"""Pydantic schemas for Excess Inventory & Trading offers.
+"""Pydantic schemas for Excess Inventory & Resell offers.
 
-Request/response models for the Trading workspace: excess lists, line items,
+Request/response models for the Resell workspace: excess lists, line items,
 bulk import, and inbound broker offers (ExcessOffer / ExcessOfferLine).
 
-Called by: routers/trading.py
+Called by: routers/resell.py
 Depends on: pydantic
 """
 
@@ -123,7 +123,7 @@ class ConfirmImportRequest(BaseModel):
 
 
 class ExcessStatsResponse(BaseModel):
-    """Aggregate stats for the Trading workspace (offer counts, not bid counts)."""
+    """Aggregate stats for the Resell workspace (offer counts, not bid counts)."""
 
     total_lists: int = 0
     total_line_items: int = 0
@@ -133,7 +133,7 @@ class ExcessStatsResponse(BaseModel):
     awarded_items: int = 0
 
 
-# ── ExcessOffer (inbound broker offers — Trading module) ─────────────
+# ── ExcessOffer (inbound broker offers — Resell module) ─────────────
 
 
 class ExcessOfferLineCreate(BaseModel):

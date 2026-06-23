@@ -11,7 +11,7 @@ carry ONLY part / mfr / qty / condition / our unit + extended price, and the hea
 carries no seller-company identity. The Quote PDF accidentally hid the vendor by never
 passing the field; the bid back makes that guarantee explicit and testable.
 
-Called by: routers.trading (Build Bid tab), services.document_service (generate_bid_report_pdf).
+Called by: routers.resell (Build Bid tab), services.document_service (generate_bid_report_pdf).
 Depends on: models.excess (CustomerBid/Line, ExcessList, ExcessLineItem), constants,
     a request-scoped Session.
 """
