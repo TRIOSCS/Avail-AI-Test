@@ -64,3 +64,23 @@ def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
         company=company,
         line_items=line_items,
     )
+
+
+def generate_bid_report_pdf(bid_id: int, db: Session) -> bytes:
+    """Generate the CLEAN customer-facing bid-back PDF (Chunk E).
+
+    Cloned from the Quote report path (``quote_report.html`` → WeasyPrint). The template
+    renders ONLY the whitelisted payload from ``bid_back_service.bid_back_export_context``
+    — no Vendor / trader column, no seller-company identity. Cleanliness is enforced at
+    assembly (the context strips every leaky field), so the template cannot accidentally
+    surface one.
+    """
+    from app.models.excess import CustomerBid
+    from app.services.bid_back_service import bid_back_export_context
+
+    bid = db.get(CustomerBid, bid_id)
+    if not bid:
+        raise ValueError(f"CustomerBid {bid_id} not found")
+
+    ctx = bid_back_export_context(bid)
+    return _render_pdf("bid_report.html", **ctx)
