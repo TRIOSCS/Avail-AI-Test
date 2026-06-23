@@ -11,6 +11,28 @@ Depends on: nothing (leaf module)
 
 from enum import StrEnum, nonmember
 
+# ---------------------------------------------------------------------------
+# File attachment limits (applies to ALL entities uniformly)
+# ---------------------------------------------------------------------------
+
+MAX_ATTACHMENT_BYTES: int = 10 * 1024 * 1024  # 10 MB
+
+ALLOWED_ATTACHMENT_EXTENSIONS: frozenset[str] = frozenset(
+    {
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".doc",
+        ".docx",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".txt",
+        ".zip",
+    }
+)
+
 
 class ProactiveMatchStatus(StrEnum):
     """Status lifecycle for ProactiveMatch records."""
