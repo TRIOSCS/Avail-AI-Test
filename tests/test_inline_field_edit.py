@@ -239,3 +239,64 @@ class TestContactFieldEdit:
         resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field/display/title")
         assert resp.status_code == 200
         assert "Add Title" in resp.text
+
+    def test_empty_email_renders_add_placeholder(self, owner_client, test_company, site_and_contact, db_session):
+        _, contact = site_and_contact
+        contact.email = None
+        db_session.commit()
+        resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field/display/email")
+        assert resp.status_code == 200
+        assert "Add Email" in resp.text
+
+    def test_empty_wechat_renders_add_placeholder(self, owner_client, test_company, site_and_contact, db_session):
+        _, contact = site_and_contact
+        contact.wechat_id = None
+        db_session.commit()
+        resp = owner_client.get(
+            f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field/display/wechat_id"
+        )
+        assert resp.status_code == 200
+        assert "Add WeChat ID" in resp.text
+
+    def test_post_linkedin_saves(self, owner_client, test_company, site_and_contact, db_session):
+        _, contact = site_and_contact
+        resp = owner_client.post(
+            f"/v2/partials/customers/{test_company.id}/contacts/{contact.id}/field",
+            data={"field": "linkedin_url", "value": "https://linkedin.com/in/janedoe"},
+        )
+        assert resp.status_code == 200
+        assert "linkedin.com" in resp.text
+        db_session.refresh(contact)
+        assert contact.linkedin_url == "https://linkedin.com/in/janedoe"
+
+
+class TestCompanyKnownFields:
+    """WS2: new fields added to EDITABLE_ACCOUNT_FIELDS (domain, tax_id, source, notes)."""
+
+    def test_known_fields_include_new_fields(self, owner_client, test_company):
+        """GET display endpoint for tax_id returns 200 with a field span."""
+        resp = owner_client.get(f"/v2/partials/customers/{test_company.id}/field/display/tax_id")
+        assert resp.status_code == 200
+        assert "field-company" in resp.text
+
+    def test_post_notes_saves(self, owner_client, test_company, db_session):
+        """POST notes field persists and returns display."""
+        resp = owner_client.post(
+            f"/v2/partials/customers/{test_company.id}/field",
+            data={"field": "notes", "value": "Important client"},
+        )
+        assert resp.status_code == 200
+        assert "Important client" in resp.text
+        db_session.refresh(test_company)
+        assert test_company.notes == "Important client"
+
+    def test_post_domain_saves(self, owner_client, test_company, db_session):
+        """POST domain field persists and returns display."""
+        resp = owner_client.post(
+            f"/v2/partials/customers/{test_company.id}/field",
+            data={"field": "domain", "value": "acme.com"},
+        )
+        assert resp.status_code == 200
+        assert "acme.com" in resp.text
+        db_session.refresh(test_company)
+        assert test_company.domain == "acme.com"

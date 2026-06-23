@@ -4925,3 +4925,61 @@ class TestAccountActivityTab:
         html = resp.text
         assert ">Meetings<" in html
         assert ">Calls<" not in html
+
+
+class TestKnownFieldGrid:
+    """WS2: account detail renders a known-field grid; empty fields show '+ Add <label>'."""
+
+    def test_empty_tax_id_shows_add_affordance(self, client: TestClient, db_session: Session):
+        """Company with no tax_id: account detail shows '+ Add Tax ID'."""
+        co = Company(name="Grid Test Co", is_active=True)
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Add Tax ID" in resp.text
+
+    def test_filled_industry_shows_value(self, client: TestClient, db_session: Session):
+        """Company with industry set: account detail shows the industry value."""
+        co = Company(name="Industry Co", is_active=True, industry="Aerospace")
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Aerospace" in resp.text
+
+    def test_notes_always_rendered(self, client: TestClient, db_session: Session):
+        """Notes grid cell renders even when notes is None (shows '+ Add Notes')."""
+        co = Company(name="No Notes Co", is_active=True)
+        co.notes = None
+        db_session.add(co)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Add Notes" in resp.text
+
+    def test_contact_empty_email_shows_add_affordance(self, client: TestClient, db_session: Session):
+        """Contact card with no email surfaces 'Add Email' in always-visible field
+        list."""
+        from app.models.crm import CustomerSite, SiteContact
+
+        co = Company(name="Contact Grid Co", is_active=True)
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(customer_site_id=site.id, full_name="No Email Contact")
+        db_session.add(contact)
+        db_session.commit()
+        db_session.refresh(co)
+
+        resp = client.get(f"/v2/partials/customers/{co.id}")
+        assert resp.status_code == 200
+        assert "Add Email" in resp.text

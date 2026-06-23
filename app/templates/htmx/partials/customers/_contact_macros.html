@@ -410,16 +410,21 @@
       </div>
     </div>
 
-    {# ── Hover-reveal detail zone: contact info + cadence clocks ───────────────── #}
-    <div class="mt-2 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-      <div class="flex items-center gap-3 text-[11px] text-gray-600 flex-wrap">
-        {% if contact.email %}<span class="truncate">{{ contact.email }}</span>{% endif %}
-        {% if contact.phone %}<span>{{ contact.phone }}</span>{% endif %}
-        {% if contact.wechat_id %}<span>WeChat: {{ contact.wechat_id }}</span>{% endif %}
+    {# ── Always-visible contact fields — email/phone/wechat/linkedin show value or "+ Add" #}
+    <div class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1">
+      {% for fname, flabel, fkind in [('email', 'Email', 'text'), ('phone', 'Phone', 'text'), ('wechat_id', 'WeChat ID', 'text'), ('linkedin_url', 'LinkedIn', 'text')] %}
+      <div class="min-w-0">
+        <p class="text-xs font-medium text-gray-400 uppercase tracking-wide">{{ flabel }}</p>
+        {% with obj=contact, field=fname, entity='contact',
+                meta={'label': flabel, 'kind': fkind},
+                edit_url='/v2/partials/customers/' ~ company.id ~ '/contacts/' ~ contact.id ~ '/field/edit/' ~ fname %}
+          {% include 'htmx/partials/customers/_field_display.html' %}
+        {% endwith %}
       </div>
-      {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
-      {{ contact_clocks(contact, now_utc) }}
+      {% endfor %}
     </div>
+    {# Per-contact cadence clocks — honest empty states for NULL timestamps #}
+    {{ contact_clocks(contact, now_utc) }}
   </div>
 {% endif %}
 {% endmacro %}

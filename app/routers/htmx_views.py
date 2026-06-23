@@ -5286,6 +5286,10 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
         "kind": "select",
         "choices": ["Customer", "Prospect", "Partner", "Competitor"],
     },
+    "domain": {"label": "Domain", "kind": "text"},
+    "tax_id": {"label": "Tax ID", "kind": "text"},
+    "source": {"label": "Source", "kind": "text"},
+    "notes": {"label": "Notes", "kind": "text"},
 }
 
 EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
@@ -5293,12 +5297,44 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
     "title": {"label": "Title", "kind": "text"},
     "email": {"label": "Email", "kind": "text"},
     "phone": {"label": "Phone", "kind": "text"},
+    "wechat_id": {"label": "WeChat ID", "kind": "text"},
+    "linkedin_url": {"label": "LinkedIn", "kind": "text"},
     "contact_role": {
         "label": "Role",
         "kind": "select",
         "choices": list(CANONICAL_ROLES),
     },
 }
+
+# Ordered list: (field, label, kind, choices) — used by the detail template to render the
+# always-visible known-fields grid. Every field here MUST also be in EDITABLE_ACCOUNT_FIELDS
+# so the "Add <field>" affordance has a working edit endpoint behind it.
+KNOWN_ACCOUNT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
+    ("legal_name", "Legal Name", "text", None),
+    ("industry", "Industry", "text", None),
+    ("website", "Website", "text", None),
+    ("domain", "Domain", "text", None),
+    ("phone", "Phone", "text", None),
+    ("employee_size", "Employees", "text", None),
+    ("revenue_range", "Revenue Range", "text", None),
+    ("hq_city", "HQ City", "text", None),
+    ("hq_state", "HQ State", "text", None),
+    ("hq_country", "HQ Country", "text", None),
+    ("credit_terms", "Credit Terms", "text", None),
+    ("tax_id", "Tax ID", "text", None),
+    ("account_type", "Account Type", "select", ["Customer", "Prospect", "Partner", "Competitor"]),
+    ("source", "Source", "text", None),
+    ("notes", "Notes", "text", None),
+]
+
+KNOWN_CONTACT_FIELDS: list[tuple[str, str, str, list[str] | None]] = [
+    ("title", "Title", "text", None),
+    ("email", "Email", "text", None),
+    ("phone", "Phone", "text", None),
+    ("wechat_id", "WeChat ID", "text", None),
+    ("linkedin_url", "LinkedIn", "text", None),
+    ("contact_role", "Role", "select", list(CANONICAL_ROLES)),
+]
 
 
 def apply_company_field(company: Company, field: str, value: str) -> None:
@@ -5926,6 +5962,9 @@ async def company_detail_partial(
             "all_segment_tags": all_segment_tags,
             # Deep-link: which tab to activate on first render (validated above).
             "active_tab": active_tab,
+            # WS2: known-field grids for account + contact cards.
+            "known_account_fields": KNOWN_ACCOUNT_FIELDS,
+            "known_contact_fields": KNOWN_CONTACT_FIELDS,
         }
     )
     return template_response("htmx/partials/customers/detail.html", ctx)
@@ -6834,8 +6873,14 @@ async def edit_company(
     if owner_id and owner_id.isdigit():
         company.account_owner_id = int(owner_id)
 
-    # Registry fields — DRY via apply_company_field
+    # Registry fields — DRY via apply_company_field.
+    # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve
+    # current value" semantics; skip them here so the registry loop's clear-on-blank
+    # behaviour doesn't clobber that (a blank source must keep the existing value).
+    _form_handled = {"notes", "source", "tax_id"}
     for f in EDITABLE_ACCOUNT_FIELDS:
+        if f in _form_handled:
+            continue
         raw = form.get(f)
         if raw is not None:  # field was submitted
             apply_company_field(company, f, raw)
