@@ -178,16 +178,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
-        atts = [
-            {
-                "id": a.id,
-                "file_name": a.file_name,
-                "library_web_url": a.library_web_url,
-                "thumbnail_url": a.thumbnail_url,
-                "content_type": a.content_type,
-            }
-            for a in (o.attachments or [])
-        ]
+        atts = [attachment_service.serialize(a) for a in (o.attachments or [])]
         groups.setdefault(key, []).append(
             {
                 "id": o.id,

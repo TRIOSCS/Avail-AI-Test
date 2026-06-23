@@ -1325,6 +1325,38 @@ class TestOffersAdditional:
             if g.get("historical_offers"):
                 assert len(g["historical_offers"]) >= 1
 
+    def test_list_offers_attachment_uses_web_url_key(self, client, db_session, test_requisition, test_offer, test_user):
+        """Fix C: offer attachment dicts in list_offers use serialize(), emitting
+        'web_url' and 'kind' — not the old 'library_web_url' key."""
+        req_item = test_requisition.requirements[0]
+        test_offer.requirement_id = req_item.id
+        db_session.commit()
+
+        att = OfferAttachment(
+            offer_id=test_offer.id,
+            file_name="spec.pdf",
+            library_web_url="https://onedrive.example.com/spec.pdf",
+            content_type="application/pdf",
+            size_bytes=1024,
+            uploaded_by_id=test_user.id,
+        )
+        db_session.add(att)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{test_requisition.id}/offers")
+        assert resp.status_code == 200
+        data = resp.json()
+        all_atts = []
+        for g in data.get("groups", []):
+            for o in g.get("offers", []):
+                all_atts.extend(o.get("attachments", []))
+
+        assert len(all_atts) >= 1
+        for a in all_atts:
+            assert "web_url" in a, "serialize() key 'web_url' must be present"
+            assert "kind" in a, "serialize() key 'kind' must be present"
+            assert "library_web_url" not in a, "old key 'library_web_url' must NOT be present"
+
 
 # ── Quotes: additional coverage ───────────────────────────────────────
 

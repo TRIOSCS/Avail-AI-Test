@@ -119,6 +119,8 @@ async def delete_requisition_attachment(
     att = db.get(RequisitionAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
+    if not get_req_for_user(db, user, att.requisition_id):
+        raise HTTPException(404, "Attachment not found")
     return await attachment_service.remove_attachment(db, att, user)
 
 
@@ -173,5 +175,8 @@ async def delete_requirement_attachment(
     """Delete a requirement attachment (and remove from cloud storage)."""
     att = db.get(RequirementAttachment, att_id)
     if not att:
+        raise HTTPException(404, "Attachment not found")
+    req_id = att.requirement.requisition_id if att.requirement else None
+    if req_id is None or not get_req_for_user(db, user, req_id):
         raise HTTPException(404, "Attachment not found")
     return await attachment_service.remove_attachment(db, att, user)

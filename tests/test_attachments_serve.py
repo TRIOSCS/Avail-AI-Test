@@ -5,6 +5,7 @@ Covers GET /api/attachments/{kind}/{att_id}/content:
 - 404 for valid kind but missing attachment
 - Library row (library_drive_id set): streams bytes
 - OneDrive row (library_drive_id=None, library_web_url set): redirects
+- IDOR guard: non-owner of requisition gets 404 (Fix A)
 
 Called by: pytest
 Depends on: app/routers/attachments_extra, app/services/attachment_service
@@ -99,3 +100,26 @@ class TestServeAttachment:
                 follow_redirects=False,
             )
         assert resp.status_code in (302, 307)
+
+    def test_serve_non_owner_requisition_gets_404(self, client, db_session, test_requisition, test_user):
+        """Fix A: user without access to a requisition gets 404 from the serve route."""
+        att = _make_library_attachment(db_session, test_requisition.id, test_user.id)
+        # Mock get_req_for_user to simulate a different user with no access to this req.
+        with patch(
+            "app.routers.attachments_extra.get_req_for_user",
+            return_value=None,
+        ):
+            resp = client.get(f"/api/attachments/requisition/{att.id}/content")
+        assert resp.status_code == 404
+
+    def test_serve_owner_requisition_gets_file(self, client, db_session, test_requisition, test_user):
+        """Fix A: owner of the requisition successfully receives the file."""
+        att = _make_library_attachment(db_session, test_requisition.id, test_user.id)
+        fake_bytes = b"owner file content"
+        with patch(
+            "app.services.attachment_service.open_attachment",
+            new_callable=AsyncMock,
+            return_value=StreamingResponse(iter([fake_bytes]), media_type="application/pdf"),
+        ):
+            resp = client.get(f"/api/attachments/requisition/{att.id}/content")
+        assert resp.status_code == 200

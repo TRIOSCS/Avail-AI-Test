@@ -507,3 +507,55 @@ def test_delete_requirement_onedrive_failure(
     resp = att_client.delete(f"/api/requirement-attachments/{att.id}")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Fix B: Delete IDOR — non-owner gets 404 and row is NOT deleted
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_delete_requisition_attachment_non_owner_gets_404(att_client, db_session, test_requisition, test_user):
+    """Fix B: mocked non-owner gets 404 and the requisition attachment row survives."""
+    att = RequisitionAttachment(
+        requisition_id=test_requisition.id,
+        file_name="owner-only.pdf",
+        uploaded_by_id=test_user.id,
+    )
+    db_session.add(att)
+    db_session.commit()
+    db_session.refresh(att)
+    att_id = att.id
+
+    with patch(
+        "app.routers.requisitions.attachments.get_req_for_user",
+        return_value=None,
+    ):
+        resp = att_client.delete(f"/api/requisition-attachments/{att_id}")
+
+    assert resp.status_code == 404
+    # Row must still exist — the delete was blocked.
+    assert db_session.get(RequisitionAttachment, att_id) is not None
+
+
+def test_delete_requirement_attachment_non_owner_gets_404(att_client, db_session, test_requisition, test_user):
+    """Fix B: mocked non-owner gets 404 and the requirement attachment row survives."""
+    req = _first_requirement(db_session, test_requisition)
+    att = RequirementAttachment(
+        requirement_id=req.id,
+        file_name="req-owner-only.pdf",
+        uploaded_by_id=test_user.id,
+    )
+    db_session.add(att)
+    db_session.commit()
+    db_session.refresh(att)
+    att_id = att.id
+
+    with patch(
+        "app.routers.requisitions.attachments.get_req_for_user",
+        return_value=None,
+    ):
+        resp = att_client.delete(f"/api/requirement-attachments/{att_id}")
+
+    assert resp.status_code == 404
+    # Row must still exist — the delete was blocked.
+    assert db_session.get(RequirementAttachment, att_id) is not None
