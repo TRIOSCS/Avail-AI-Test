@@ -50,3 +50,4 @@
 123 feat/sp4-account-reclamation park provenance columns (swept_from_owner_id, swept_at, parked_by_id) on prospect_accounts; chains onto 122_prospect_ai_scores
 124 fix/offer-status-constraint reconcile offers status CHECK with OfferStatus enum: drop drifted chk_offer_status (omitted approved/sold, phantom lost) + drop/recreate validated ck_offers_status; chains onto 123_sp4_park_provenance
 125 worktree-enrichment-blending-explorium-clay companies+vendor_cards: ticker/naics/revenue_range/enrichment_provenance; chains onto 124_offer_status_constraint
+126 feat/attachments-unified unified file attachments: rename onedrive_item_id->library_item_id + onedrive_url->library_web_url + add library_drive_id on requisition/requirement/offer_attachments; create company_attachments + site_contact_attachments + material_card_attachments (unified schema, library_drive_id NULL => user-OneDrive fallback); chains onto 125_enrichment_provenance
