@@ -63,7 +63,16 @@ Outlook email is solid both directions; finish the quality:
   `app/services/activity_quality_service.py`, `app/services/calendar_intelligence.py` +
   `app/jobs/email_jobs.py` (delta + flag guard), `app/utils/graph_client.py` (delta reuse).
 
-## Phase 4 — Near-real-time  *(latency; prerequisite-gated — needs your/IT input)*
+## Phase 4 — Near-real-time  *(latency; prerequisite-gated — needs your/IT input)*  ✅ DONE
+**Shipped:** Graph change-notification webhooks now cover both `/me/messages` (already wired) and
+`/me/events` (new `create_calendar_subscription` + `_handle_calendar_notification`, routed in
+`handle_notification` by `_subscription.resource`, reusing the daily-scan `_log_calendar_activity`
+writer for graph_event_id dedup; cancelled events skipped). The existing-subscription guard is now
+resource-scoped so a user holds independent mail + calendar subs. `ensure_all_users_subscribed`
+provisions both (calendar is not Teams-gated). 8x8 poll interval tightened 30→5 min (CDR-poll only,
+no webhook product). Poll paths retained as the reconcile backstop. No migration (GraphSubscription
+already allows multiple non-unique subs per user).
+
 Today an inbound reply takes ~45 min (30-min poll + 15-min AI pass).
 - **Graph change-notifications (webhooks)** for `/me/messages` + `/me/events` → on notification, fetch
   the one changed item and run the existing inbox/sent/meeting writers; keep the 30-min poll as the

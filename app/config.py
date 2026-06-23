@@ -292,7 +292,7 @@ class Settings(BaseSettings):
     eight_by_eight_pbx_id: str = ""
     eight_by_eight_timezone: str = "America/Los_Angeles"
     eight_by_eight_enabled: bool = False
-    eight_by_eight_poll_interval_minutes: int = 30
+    eight_by_eight_poll_interval_minutes: int = 5
 
     # --- Lusha Enrichment (key via get_credential_cached, NOT a Settings field) ---
     lusha_enrichment_enabled: bool = False  # feature gate; off → chain == today

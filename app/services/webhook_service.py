@@ -1,11 +1,12 @@
-"""Graph webhook service — subscribe to mail events, process notifications.
+"""Graph webhook service — subscribe to mail/calendar events, process notifications.
 
-Microsoft Graph sends push notifications when emails arrive or are sent.
-We validate, fetch the message details, and auto-log activities.
+Microsoft Graph sends push notifications when emails arrive or calendar events change.
+We validate, fetch the item details, and auto-log activities.
 
 Usage:
-    # Create subscription for a user
+    # Create subscriptions for a user
     await create_mail_subscription(user, db)
+    await create_calendar_subscription(user, db)
 
     # Handle incoming webhook POST (called from the FastAPI endpoint)
     await handle_notification(payload, db)
@@ -66,17 +67,18 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     # Serialize subscription creation per-user to avoid duplicate active rows
     db.query(User).filter(User.id == user.id).with_for_update().first()
 
-    # Check for existing active subscription
+    # Check for existing active mail subscription (resource-scoped — calendar subs must not block)
     existing = (
         db.query(GraphSubscription)
         .filter(
             GraphSubscription.user_id == user.id,
+            GraphSubscription.resource == "/me/messages",
             GraphSubscription.expiration_dt > datetime.now(timezone.utc),
         )
         .first()
     )
     if existing:
-        logger.debug(f"Active subscription exists for {user.email}: {existing.subscription_id}")
+        logger.debug(f"Active mail subscription exists for {user.email}: {existing.subscription_id}")
         return existing
 
     client_state = secrets.token_hex(16)
@@ -116,6 +118,78 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     db.commit()
 
     logger.info(f"Created Graph subscription {sub_id} for {user.email}, expires {expiration}")
+    return record
+
+
+async def create_calendar_subscription(user: User, db: Session) -> GraphSubscription | None:
+    """Create a Graph webhook subscription for a user's calendar.
+
+    Subscribes to /me/events with changeType=created,updated so we get notified when
+    meetings are created or rescheduled/cancelled.  Routed to the same
+    /api/webhooks/graph endpoint as mail; branched in handle_notification by resource.
+    """
+    from app.scheduler import get_valid_token
+    from app.utils.graph_client import GraphClient
+
+    token = await get_valid_token(user, db)
+    if not token:
+        logger.warning(f"No valid token for {user.email}, skipping calendar subscription")
+        return None
+
+    # Serialize subscription creation per-user to avoid duplicate active rows
+    db.query(User).filter(User.id == user.id).with_for_update().first()
+
+    # Check for existing active calendar subscription (resource-scoped)
+    existing = (
+        db.query(GraphSubscription)
+        .filter(
+            GraphSubscription.user_id == user.id,
+            GraphSubscription.resource == "/me/events",
+            GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if existing:
+        logger.debug(f"Active calendar subscription exists for {user.email}: {existing.subscription_id}")
+        return existing
+
+    client_state = secrets.token_hex(16)
+    expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+
+    notification_url = f"{settings.app_url}/api/webhooks/graph"
+
+    payload = {
+        "changeType": "created,updated",
+        "notificationUrl": notification_url,
+        "resource": "/me/events",
+        "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
+        "clientState": client_state,
+    }
+
+    gc = GraphClient(token)
+    try:
+        result = await gc.post_json("/subscriptions", payload)
+    except Exception as e:
+        logger.error(f"Failed to create calendar subscription for {user.email}: {e}")
+        return None
+
+    sub_id = result.get("id")
+    if not sub_id:
+        logger.error(f"No subscription ID in calendar response for {user.email}: {result}")
+        return None
+
+    record = GraphSubscription(
+        user_id=user.id,
+        subscription_id=sub_id,
+        resource="/me/events",
+        change_type="created,updated",
+        expiration_dt=expiration,
+        client_state=client_state,
+    )
+    db.add(record)
+    db.commit()
+
+    logger.info(f"Created Graph calendar subscription {sub_id} for {user.email}, expires {expiration}")
     return record
 
 
@@ -263,7 +337,8 @@ async def renew_expiring_subscriptions(db: Session):
 
 
 async def ensure_all_users_subscribed(db: Session):
-    """Create mail and Teams subscriptions for any M365-connected user missing them."""
+    """Create mail, calendar, and Teams subscriptions for any M365-connected user
+    missing them."""
     users = (
         db.query(User)
         .filter(
@@ -286,6 +361,19 @@ async def ensure_all_users_subscribed(db: Session):
         )
         if not mail_sub:
             await create_mail_subscription(user, db)
+
+        # Calendar subscription (not Teams-gated)
+        cal_sub = (
+            db.query(GraphSubscription)
+            .filter(
+                GraphSubscription.user_id == user.id,
+                GraphSubscription.resource == "/me/events",
+                GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+        if not cal_sub:
+            await create_calendar_subscription(user, db)
 
         # Teams subscription (skip in MVP mode)
         if not settings.mvp_mode:
@@ -373,6 +461,71 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+async def _handle_calendar_notification(notif: dict, token: str, user, db: Session) -> None:
+    """Process a single validated calendar notification.
+
+    Fetches the event from Graph, skips cancelled events, then reuses
+    _log_calendar_activity (same writer the daily scan uses) so the graph_event_id dedup
+    prevents double-logging when poll + webhook fire for the same event.
+    """
+    from app.services.calendar_intelligence import _log_calendar_activity, _parse_graph_dt
+    from app.utils.graph_client import GraphClient
+
+    resource = notif.get("resource", "")
+    change_type = notif.get("changeType", "")
+    if change_type not in ("created", "updated"):
+        return
+
+    gc = GraphClient(token)
+    try:
+        event = await gc.get_json(
+            f"/{resource}",
+            params={"$select": "id,subject,start,end,organizer,attendees,isCancelled,location,bodyPreview"},
+        )
+    except Exception as e:
+        logger.error(f"Failed to fetch calendar event for notification: {e}")
+        return
+
+    if event.get("isCancelled"):
+        logger.debug(f"Skipping cancelled event {event.get('id')} for {user.email}")
+        return
+
+    graph_event_id = (event.get("id") or "").strip()
+    if not graph_event_id:
+        return
+
+    subject = (event.get("subject") or "").strip()
+    start_dt = _parse_graph_dt(event.get("start", {}).get("dateTime"))
+    end_dt = _parse_graph_dt(event.get("end", {}).get("dateTime"))
+    if start_dt is None:
+        return
+    if end_dt is None:
+        end_dt = start_dt
+
+    organizer_data = event.get("organizer", {}).get("emailAddress", {})
+    organizer_email = (organizer_data.get("address") or "").strip().lower() or None
+
+    attendee_emails = []
+    for att in event.get("attendees", []):
+        email = (att.get("emailAddress", {}).get("address") or "").strip().lower()
+        if email and "@" in email:
+            attendee_emails.append(email)
+
+    location_name = (event.get("location", {}) or {}).get("displayName") or None
+
+    _log_calendar_activity(
+        db=db,
+        user_id=user.id,
+        graph_event_id=graph_event_id,
+        subject=subject,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        organizer_email=organizer_email,
+        attendee_emails=attendee_emails,
+        location=location_name,
+    )
+
+
 async def handle_notification(payload: dict, db: Session, validated: list[dict] | None = None):
     """Process a Graph webhook notification payload.
 
@@ -380,9 +533,9 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
     the per-notification validation loop and process the pre-validated
     list directly.  Falls back to inline validation for backward compat.
 
-    Graph sends a list of notifications. For each, we fetch the message
-    from Graph, log it as an activity, and trigger inbox poll for RFQ
-    reply matching when inbound messages are detected.
+    Routes each notification by subscription resource:
+    - /me/messages  → mail handler (fetch message, log_email_activity, poll inbox)
+    - /me/events    → calendar handler (_handle_calendar_notification)
     """
     from app.email_service import poll_inbox
     from app.scheduler import get_valid_token
@@ -427,14 +580,21 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
 
     for notif in items:
         user = notif["_user"]
-
-        resource = notif.get("resource", "")
-        change_type = notif.get("changeType")
-        if change_type != "created":
-            continue
+        sub = notif["_subscription"]
 
         token = await get_valid_token(user, db)
         if not token:
+            continue
+
+        # Route by subscription resource
+        if sub.resource == "/me/events":
+            await _handle_calendar_notification(notif, token, user, db)
+            continue
+
+        # Mail path (/me/messages)
+        resource = notif.get("resource", "")
+        change_type = notif.get("changeType")
+        if change_type != "created":
             continue
 
         gc = GraphClient(token)
