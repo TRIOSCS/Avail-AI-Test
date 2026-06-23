@@ -6829,6 +6829,116 @@ async def set_primary_contact(
     return _render_contacts_list(request, user, company, db)
 
 
+@router.post(
+    "/v2/partials/customers/{company_id}/primary-contact/{contact_id}",
+    response_class=HTMLResponse,
+)
+async def set_account_primary_contact(
+    request: Request,
+    company_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.primary_contact_id to contact_id (account-level primary contact).
+
+    IDOR-safe: verifies contact belongs to a site under company_id.
+    Owner-or-admin gate. Returns refreshed company detail partial.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+
+    # IDOR-safe: verify contact belongs to a site under this company.
+    contact = (
+        db.query(SiteContact)
+        .join(CustomerSite)
+        .filter(SiteContact.id == contact_id, CustomerSite.company_id == company_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    company.primary_contact_id = contact_id
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} primary contact set to {} by {}", company_id, contact_id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
+@router.post(
+    "/v2/partials/customers/{company_id}/parent",
+    response_class=HTMLResponse,
+)
+async def set_parent_company(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Set Company.parent_company_id; validates no cycle.
+
+    Accepts parent_company_id= form field (empty → clear).
+    Cycle guard: rejects self-parent and any descendant as parent.
+    Owner-or-admin gate.
+    """
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    is_admin = user.role == UserRole.ADMIN
+    if not is_admin and company.account_owner_id != user.id:
+        raise HTTPException(403, "Only the owner or an admin can edit this account")
+
+    form = await request.form()
+    raw = (form.get("parent_company_id") or "").strip()
+
+    if not raw:
+        company.parent_company_id = None
+        company.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        logger.info("Company {} parent cleared by {}", company_id, user.email)
+        return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+    if not raw.isdigit():
+        raise HTTPException(400, "parent_company_id must be an integer")
+
+    parent_id = int(raw)
+    if parent_id == company_id:
+        raise HTTPException(400, "A company cannot be its own parent (would create a cycle)")
+
+    parent = db.get(Company, parent_id)
+    if not parent:
+        raise HTTPException(404, "Parent company not found")
+
+    # Cycle guard: walk ancestor chain of proposed parent; if we hit company_id, reject.
+    visited: set[int] = set()
+    cursor = parent
+    while cursor.parent_company_id is not None:
+        if cursor.parent_company_id in visited:
+            break  # existing cycle in DB — stop walking
+        visited.add(cursor.id)
+        if cursor.parent_company_id == company_id:
+            raise HTTPException(400, "Setting this parent would create a cycle in the company hierarchy")
+        cursor = db.get(Company, cursor.parent_company_id)
+        if cursor is None:
+            break
+
+    company.parent_company_id = parent_id
+    company.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(company)
+    logger.info("Company {} parent set to {} by {}", company_id, parent_id, user.email)
+
+    return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
+
+
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
 
 
@@ -6846,9 +6956,12 @@ async def company_edit_form(
     users = (
         db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
     )
+    all_companies = (
+        db.query(Company).filter(Company.id != company_id, Company.is_active.is_(True)).order_by(Company.name).all()
+    )
     return template_response(
         "htmx/partials/customers/edit_form.html",
-        {"request": request, "company": company, "users": users},
+        {"request": request, "company": company, "users": users, "all_companies": all_companies},
     )
 
 
@@ -6877,6 +6990,14 @@ async def edit_company(
     owner_id = form.get("owner_id", "")
     if owner_id and owner_id.isdigit():
         company.account_owner_id = int(owner_id)
+
+    parent_company_id_raw = form.get("parent_company_id", "").strip()
+    if parent_company_id_raw == "":
+        company.parent_company_id = None
+    elif parent_company_id_raw.isdigit():
+        pid = int(parent_company_id_raw)
+        if pid != company_id:
+            company.parent_company_id = pid
 
     # Registry fields — DRY via apply_company_field.
     # source/notes/tax_id are handled explicitly above with blank-sentinel "preserve

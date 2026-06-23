@@ -58,6 +58,11 @@ class Company(Base):
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
+    # Step 3: Account-level primary contact (distinct from per-site is_primary)
+    primary_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
+    # Step 3: Parent company (self-referential hierarchy)
+    parent_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
+
     # CRM cadence — two clocks + tier (see docs/superpowers/plans/2026-06-17-crm-data-foundation.md)
     last_outbound_at = Column(UTCDateTime, index=True)
     last_reply_at = Column(UTCDateTime, index=True)
@@ -112,6 +117,13 @@ class Company(Base):
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
     attachments = relationship("CompanyAttachment", back_populates="company", cascade="all, delete-orphan")
+    primary_contact = relationship("SiteContact", foreign_keys=[primary_contact_id])
+    parent_company = relationship(
+        "Company",
+        foreign_keys=[parent_company_id],
+        backref="child_companies",
+        remote_side="Company.id",
+    )
 
     @validates("currency")
     def _validate_currency(self, _key, value):
