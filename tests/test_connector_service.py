@@ -24,7 +24,7 @@ def test_control_type_classification():
     assert cs.control_type(_src(name="icsource")) == "browser_login"
     assert cs.control_type(_src(name="netcomponents")) == "browser_login"
     assert cs.control_type(_src(name="azure_oauth")) == "scopes"
-    assert cs.control_type(_src(name="teams")) == "scopes"
+    assert cs.control_type(_src(name="teams_notifications")) == "scopes"
     assert cs.control_type(_src(name="sam_gov_enrichment", env_vars=[])) == "keyless"
     assert cs.control_type(_src(name="ai_live_web", env_vars=[])) == "keyless"
     assert cs.control_type(_src(name="nexar", env_vars=["NEXAR_CLIENT_ID"])) == "key"
@@ -33,9 +33,9 @@ def test_control_type_classification():
 def test_group_mapping():
     assert cs.connector_group(_src(name="nexar", category="api", source_type="aggregator")) == "part_sourcing"
     assert cs.connector_group(_src(name="lusha_enrichment", category="enrichment")) == "enrichment"
-    assert cs.connector_group(_src(name="anthropic", category="platform")) in ("ai", "communications")  # see impl note
+    assert cs.connector_group(_src(name="anthropic_ai", category="platform")) == "ai"
     assert cs.connector_group(_src(name="icsource")) == "browser_workers"
-    assert cs.connector_group(_src(name="stock_list")) == "manual"
+    assert cs.connector_group(_src(name="stock_list_import")) == "manual"
 
 
 def test_eight_by_eight_in_communications_group():

@@ -19,9 +19,9 @@ GROUP_ORDER: list[tuple[str, str]] = [
 _OAUTH_CLAY = {"clay_enrichment"}
 _MULTI_FIELD = {"eight_by_eight"}
 _BROWSER = {"icsource", "netcomponents"}
-_SCOPES = {"azure_oauth", "teams"}
-_AI = {"anthropic", "ai_live_web"}
-_MANUAL = {"stock_list"}
+_SCOPES = {"azure_oauth", "teams_notifications"}
+_AI = {"anthropic_ai", "ai_live_web"}
+_MANUAL = {"stock_list_import"}
 # Comms providers by name (8x8/VoIP) + by category — voice/email/messaging/auth platform.
 _COMMS_NAMES = {"eight_by_eight", "email_mining"}
 _COMMS_CATEGORIES = {"email", "auth", "platform", "notifications", "voip", "comms"}

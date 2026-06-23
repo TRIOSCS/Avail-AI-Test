@@ -122,7 +122,7 @@ def _seed_sources(db_session) -> list[ApiSource]:
         ),
         # AI
         ApiSource(
-            name="anthropic",
+            name="anthropic_ai",
             display_name="Anthropic / Claude",
             category="api",
             source_type="ai",
@@ -159,7 +159,7 @@ def _seed_sources(db_session) -> list[ApiSource]:
             credentials={},
         ),
         ApiSource(
-            name="teams",
+            name="teams_notifications",
             display_name="Teams",
             category="notifications",
             source_type="aggregator",
@@ -203,8 +203,8 @@ def _seed_sources(db_session) -> list[ApiSource]:
         ),
         # Manual
         ApiSource(
-            name="stock_list",
-            display_name="Stock-List Import",
+            name="stock_list_import",
+            display_name="Vendor Stock List Import",
             category="manual",
             source_type="manual",
             status="pending",
@@ -247,6 +247,10 @@ def test_connectors_tab_renders_groups(admin_client):
     # dead providers must be absent
     assert "rocketreach" not in html.lower()
     assert "clearbit" not in html.lower()
+    # Manual group must include the stock-list card
+    assert "Vendor Stock List Import" in html, "Expected Manual group to contain 'Vendor Stock List Import'"
+    # AI group must include Anthropic
+    assert "Anthropic" in html, "Expected AI group to contain 'Anthropic / Claude'"
 
 
 def test_connectors_tab_key_card_has_field(admin_client):
