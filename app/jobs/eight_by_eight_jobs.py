@@ -171,6 +171,7 @@ async def _process_cdrs(db, settings) -> dict:
             db=db,
             occurred_at=norm["occurred_at"],
             details=cdr_details,
+            match_result=match,
         )
 
         if record is None:  # dedup

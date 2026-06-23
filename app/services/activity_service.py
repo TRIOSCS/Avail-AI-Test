@@ -584,6 +584,10 @@ def _normalize_direction(direction: str | None) -> str | None:
     }.get((direction or "").strip().lower())
 
 
+# Sentinel: distinguishes "caller did not pass a match" from "caller passed None (no match found)".
+_NO_MATCH = object()
+
+
 def log_call_activity(
     user_id: int | None,
     direction: str | None,  # accepts sent/received/inbound/outbound/None
@@ -598,6 +602,7 @@ def log_call_activity(
     force_meaningful: bool | None = None,
     occurred_at: datetime | None = None,
     details: dict | None = None,
+    match_result: object = _NO_MATCH,
 ) -> ActivityLog | None:
     """Log a phone call activity.
 
@@ -612,7 +617,7 @@ def log_call_activity(
         if existing:
             return None
 
-    match = match_phone_to_entity(phone, db)
+    match = match_phone_to_entity(phone, db) if match_result is _NO_MATCH else match_result
 
     activity_type = ActivityType.CALL_LOGGED
 

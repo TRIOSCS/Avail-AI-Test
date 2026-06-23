@@ -316,3 +316,118 @@ class TestMigrationChain:
         rev = scripts.get_revision("130_phone_normalization")
         assert rev is not None
         assert rev.down_revision == "129_drop_bid_tables"
+
+    def test_migration_no_jsonb_path_ops(self):
+        """Migration 130 must not contain jsonb_path_ops (incompatible with JSON
+        column)."""
+        import pathlib
+
+        migration = (
+            pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions" / "130_phone_normalization.py"
+        )
+        content = migration.read_text()
+        assert "jsonb_path_ops" not in content, "jsonb_path_ops found in migration — remove the GIN index"
+
+
+# ---------------------------------------------------------------------------
+# normalize_e164 totality — non-string and edge inputs must never raise
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeE164Totality:
+    """Fix 3: normalize_e164 must be TOTAL — no exception for any input type."""
+
+    def test_int_input_does_not_raise(self):
+        result = normalize_e164(1234567890)  # type: ignore[arg-type]
+        # May or may not produce a valid E.164; must not raise
+        assert result is None or result.startswith("+")
+
+    def test_none_input_returns_none(self):
+        assert normalize_e164(None) is None
+
+    def test_empty_string_returns_none(self):
+        assert normalize_e164("") is None
+
+    def test_garbage_string_returns_none(self):
+        assert normalize_e164("garbage!!") is None
+
+    def test_valid_int_like_us_number(self):
+        # str(14155551234) == "14155551234" — 11-digit US with country code
+        result = normalize_e164(14155551234)  # type: ignore[arg-type]
+        assert result == "+14155551234"
+
+    def test_float_input_does_not_raise(self):
+        result = normalize_e164(3.14)  # type: ignore[arg-type]
+        assert result is None or result.startswith("+")
+
+    def test_list_input_does_not_raise(self):
+        result = normalize_e164(["+14155551234"])  # type: ignore[arg-type]
+        assert result is None or result.startswith("+")
+
+
+# ---------------------------------------------------------------------------
+# Migration backfill — normalized_phones stored as real list, not double-encoded
+# ---------------------------------------------------------------------------
+
+
+class TestMigration130BackfillNoDoubleEncoding:
+    """Fix 2: backfill must write normalized_phones as a Python list, not json.dumps(list)."""
+
+    def test_backfill_logic_writes_list_not_string(self, db_session: Session):
+        """Simulate the migration backfill directly against the ORM to verify the
+        normalized_phones column is read back as a list (not a double-encoded JSON
+        string).
+
+        We insert a VendorCard via ORM (bypassing @validates by writing phones=None then
+        updating the raw column), run the backfill logic, and assert isinstance(list).
+        """
+        import json
+
+        import sqlalchemy as sa
+
+        from app.models.vendors import VendorCard
+        from app.utils.phone import normalize_e164
+
+        # Insert a card with no phones (avoids @validates normalizing it automatically)
+        card = VendorCard(normalized_name="backfill-test-130", display_name="Backfill Test", source="test")
+        db_session.add(card)
+        db_session.flush()
+
+        # Write raw phones via core SQL to bypass ORM @validates
+        vcards = sa.table(
+            "vendor_cards",
+            sa.column("id", sa.Integer),
+            sa.column("phones", sa.JSON),
+            sa.column("normalized_phones", sa.JSON),
+        )
+        db_session.execute(
+            sa.update(vcards).where(vcards.c.id == card.id).values(phones=["(415) 555-7777", "garbage", "+14155558888"])
+        )
+        db_session.flush()
+
+        # Re-read phones via core SQL (same as migration backfill does)
+        row = db_session.execute(sa.select(vcards.c.phones).where(vcards.c.id == card.id)).fetchone()
+        phones_raw = row.phones
+        if isinstance(phones_raw, str):
+            try:
+                phones_raw = json.loads(phones_raw)
+            except (ValueError, TypeError):
+                phones_raw = []
+
+        normalized = [normalize_e164(p) for p in phones_raw if p]
+        normalized = [n for n in normalized if n is not None]
+
+        # Apply backfill — pass list directly (NOT json.dumps)
+        db_session.execute(sa.update(vcards).where(vcards.c.id == card.id).values(normalized_phones=normalized))
+        db_session.flush()
+
+        # Expire and re-read via ORM to confirm stored type
+        db_session.expire(card)
+        db_session.refresh(card)
+
+        assert isinstance(card.normalized_phones, list), (
+            f"normalized_phones should be a list, got {type(card.normalized_phones)!r}: {card.normalized_phones!r}"
+        )
+        assert "+14155557777" in card.normalized_phones
+        assert "+14155558888" in card.normalized_phones
+        assert len(card.normalized_phones) == 2

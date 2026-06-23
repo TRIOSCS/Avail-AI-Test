@@ -55,13 +55,6 @@ def upgrade() -> None:
     # --- vendor_cards: normalized_phones JSON list ---
     op.add_column("vendor_cards", sa.Column("normalized_phones", sa.JSON(), nullable=True))
 
-    # GIN index on vendor_cards.normalized_phones — Postgres-only (SQLite has no JSONB/GIN)
-    if bind.dialect.name == "postgresql":
-        op.execute(
-            "CREATE INDEX ix_vendor_cards_normalized_phones_gin "
-            "ON vendor_cards USING gin (normalized_phones jsonb_path_ops)"
-        )
-
     # --- Backfill ---
     from app.utils.phone import normalize_e164
 
@@ -142,17 +135,10 @@ def upgrade() -> None:
         normalized = [normalize_e164(p) for p in phones_raw if p]
         normalized = [n for n in normalized if n is not None]
         if normalized:
-            bind.execute(
-                sa.update(vcards).where(vcards.c.id == row.id).values(normalized_phones=json.dumps(normalized))
-            )
+            bind.execute(sa.update(vcards).where(vcards.c.id == row.id).values(normalized_phones=normalized))
 
 
 def downgrade() -> None:
-    bind = op.get_bind()
-
-    if bind.dialect.name == "postgresql":
-        op.execute("DROP INDEX IF EXISTS ix_vendor_cards_normalized_phones_gin")
-
     op.drop_column("vendor_cards", "normalized_phones")
 
     op.drop_index("ix_vendor_contacts_normalized_phone", table_name="vendor_contacts")
