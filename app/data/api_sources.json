@@ -228,5 +228,75 @@
         "signup_url": "https://sam.gov",
         "env_vars": [],
         "setup_notes": "No key required. Free public API."
+    },
+    {
+        "name": "findchips",
+        "display_name": "FindChips (Supplyframe)",
+        "category": "api",
+        "source_type": "aggregator",
+        "description": "Supplyframe aggregator — searches distributor inventory and pricing across authorized and independent channels.",
+        "signup_url": "https://www.findchips.com/developers",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. Watch for API access at findchips.com/developers."
+    },
+    {
+        "name": "future",
+        "display_name": "Future Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized global distributor covering semiconductors, passives, and interconnects. Real-time pricing and inventory via their partner API.",
+        "signup_url": "https://www.futureelectronics.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Future Electronics distributor account."
+    },
+    {
+        "name": "heilind",
+        "display_name": "Heilind Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized distributor specializing in connectors, relays, sensors, and wire/cable. Real-time stock and pricing.",
+        "signup_url": "https://www.heilind.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Heilind distributor account."
+    },
+    {
+        "name": "lcsc",
+        "display_name": "LCSC Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "LCSC is a large Asian authorized distributor with 900K+ component SKUs. REST API provides real-time pricing and stock.",
+        "signup_url": "https://lcsc.com/api",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. LCSC offers a public API; register at lcsc.com for credentials."
+    },
+    {
+        "name": "rochester",
+        "display_name": "Rochester Electronics",
+        "category": "api",
+        "source_type": "authorized",
+        "description": "Authorized EOL and obsolete component specialist — 15B+ units of end-of-life semiconductors. Ideal for legacy and sustaining programs.",
+        "signup_url": "https://www.rocelec.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. API access requires a Rochester Electronics account."
+    },
+    {
+        "name": "thebrokersite",
+        "display_name": "The Broker Forum (TBF)",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "Independent broker marketplace with 500M+ line items from global independent distributors. Browser-automated search.",
+        "signup_url": "https://www.thebrokersite.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. Requires TBF membership credentials for authenticated scraping."
+    },
+    {
+        "name": "verical",
+        "display_name": "Verical (Arrow Marketplace)",
+        "category": "scraper",
+        "source_type": "broker",
+        "description": "Arrow-owned excess and obsolete inventory marketplace with 600M+ components from 1,500+ suppliers worldwide.",
+        "signup_url": "https://www.verical.com",
+        "env_vars": [],
+        "setup_notes": "On the roadmap — connector not yet built. Browser-automated or REST API access via Verical/Arrow partner program."
     }
 ]
