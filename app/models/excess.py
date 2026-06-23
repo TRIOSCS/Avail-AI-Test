@@ -1,6 +1,6 @@
-"""Excess Inventory & Trading (resell-brokerage) models.
+"""Excess Inventory & Resell (resell-brokerage) models.
 
-Data models for the Trading workspace: customers post excess/surplus inventory
+Data models for the Resell workspace: customers post excess/surplus inventory
 (ExcessList / ExcessLineItem), brokers submit offers to buy (ExcessOffer /
 ExcessOfferLine), and the trader assembles a clean bid back to the seller
 (CustomerBid / CustomerBidLine). This is the reverse of sourcing: the customer
@@ -12,7 +12,7 @@ Business Rules:
 - ExcessOffers are inbound broker offers to buy (per_line or take_all)
 - CustomerBids are the outbound clean bid back to the seller
 
-Called by: routers/trading.py, services/excess_service.py
+Called by: routers/resell.py, services/excess_service.py
 Depends on: models/base, models with Company, User, VendorCard, CustomerSite
 """
 
@@ -128,7 +128,7 @@ class ExcessLineItem(Base):
 class ExcessOffer(Base):
     """Inbound offer from another broker to BUY a posted excess list.
 
-    The Trading-module replacement for the per-line, money-required ``Bid``. An offer
+    The Resell-module replacement for the per-line, money-required ``Bid``. An offer
     is either ``per_line`` (carries ``ExcessOfferLine`` rows, one per part the broker
     will buy) or ``take_all`` (binds the whole list, no line rows, optional lump
     ``take_all_total_price``). Matching is part-number only; ``unit_price`` is collected

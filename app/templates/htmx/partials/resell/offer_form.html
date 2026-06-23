@@ -1,17 +1,17 @@
 {#
-  trading/offer_form.html — Submit-offer modal (per-line / take-all scope toggle).
+  resell/offer_form.html — Submit-offer modal (per-line / take-all scope toggle).
   Single-line quick-add path this slice; the paste/upload funnel reuses the same
   import_preview grid. Price is OPTIONAL (a broker may bid "take-all, price TBD").
   The service enforces can_offer + the self-offer guard.
   Receives: list (ExcessList).
-  Called by: trading.trading_offer_form.
+  Called by: resell.resell_offer_form.
 #}
 {% set el = list %}
 <div class="p-5" x-data="{ scope: 'per_line' }">
   <h2 class="text-lg font-semibold text-gray-900 mb-1">Submit offer</h2>
   <p class="text-sm text-gray-500 mb-4">On <span class="font-medium text-gray-700">{{ el.title }}</span></p>
 
-  <form hx-post="/api/trading/{{ el.id }}/offers"
+  <form hx-post="/api/resell/{{ el.id }}/offers"
         hx-target="#tab-offers-{{ el.id }}"
         hx-swap="innerHTML"
         data-loading-disable

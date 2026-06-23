@@ -1,12 +1,12 @@
 {#
-  trading/add_line_modal.html — Add-one-line modal (reuses the excess add-line shape).
-  Posts to /api/trading/{id}/lines which re-renders the Lines tab body.
+  resell/add_line_modal.html — Add-one-line modal (reuses the excess add-line shape).
+  Posts to /api/resell/{id}/lines which re-renders the Lines tab body.
   Receives: list_id.
-  Called by: trading.trading_add_line_form.
+  Called by: resell.resell_add_line_form.
 #}
 <div class="p-5">
   <h3 class="text-lg font-semibold text-gray-900 mb-4">Add line</h3>
-  <form hx-post="/api/trading/{{ list_id }}/lines"
+  <form hx-post="/api/resell/{{ list_id }}/lines"
         hx-target="#tab-lines-{{ list_id }}"
         hx-swap="innerHTML"
         data-loading-disable

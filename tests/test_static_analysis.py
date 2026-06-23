@@ -70,9 +70,9 @@ def test_htmx_ajax_calls_have_indicator():
         ("app/templates/htmx/partials/parts/workspace.html", 103),
         ("app/templates/htmx/partials/parts/list.html", 11),
         ("app/templates/htmx/partials/parts/list.html", 12),
-        ("app/templates/htmx/partials/parts/list.html", 138),
-        ("app/templates/htmx/partials/parts/list.html", 277),
-        ("app/templates/htmx/partials/parts/list.html", 324),
+        ("app/templates/htmx/partials/parts/list.html", 140),
+        ("app/templates/htmx/partials/parts/list.html", 279),
+        ("app/templates/htmx/partials/parts/list.html", 326),
         ("app/templates/htmx/partials/parts/tabs/req_details.html", 209),
     }
 
@@ -508,8 +508,8 @@ def test_low_contrast_secondary_text_does_not_grow():
     Ratchet only (decorative icon grays are fine) — caps growth rather than banning
     outright.
     """
-    BASELINE = 413  # +3 for the Trading workspace partials (lists/detail/offers muted
-    # metadata copy — the established trading look; the bid-builder itself uses the
+    BASELINE = 413  # +3 for the Resell workspace partials (lists/detail/offers muted
+    # metadata copy — the established resell look; the bid-builder itself uses the
     # higher-contrast text-gray-600 per this rule).
     count = _tpl_substring_count("text-gray-500")
     assert count <= BASELINE, (
@@ -535,8 +535,8 @@ def test_inline_table_cell_padding_does_not_grow():
 
     Ratchet.
     """
-    BASELINE = 527  # +4 for the Trading workspace email-solicitation / offer tables
-    # (inline-padded cells in the trading partials; the bid-builder + bid PDF use
+    BASELINE = 527  # +4 for the Resell workspace email-solicitation / offer tables
+    # (inline-padded cells in the resell partials; the bid-builder + bid PDF use
     # .compact-table / CSS cell padding, not inline px-/py-).
     count = _tpl_regex_count(r'<t[dh][^>]*class="[^"]*\bp[xy]-[0-9]')
     assert count <= BASELINE, (
@@ -550,8 +550,8 @@ def test_inline_button_sizing_does_not_grow():
 
     Macro files are the canonical source and are excluded. Ratchet.
     """
-    BASELINE = 275  # 272 + 3 for the Trading workspace scope-toggle / lens-pill buttons
-    # (inline-padded pills in the trading partials; the bid-builder buttons use .btn/.btn-sm).
+    BASELINE = 275  # 272 + 3 for the Resell workspace scope-toggle / lens-pill buttons
+    # (inline-padded pills in the resell partials; the bid-builder buttons use .btn/.btn-sm).
     count = _tpl_regex_count(r'<button[^>]*class="[^"]*\bp[xy]-[0-9]', exclude={"_macros.html"})
     assert count <= BASELINE, (
         f"inline-sized <button> rose to {count} (baseline {BASELINE}). Use .btn-sm/md/lg or the btn_* macros."

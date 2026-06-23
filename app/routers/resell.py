@@ -1,12 +1,12 @@
-"""routers/trading.py — Thin HTMX router for the Trading workspace (Chunk F).
+"""routers/resell.py — Thin HTMX router for the Resell workspace (Chunk F).
 
-ADDITIVE vertical slice. Builds the viewable Trading workspace on top of the
+ADDITIVE vertical slice. Builds the viewable Resell workspace on top of the
 already-green backend (Chunk A models, Chunk B excess_service offers, Chunk C
 excess_mirror): a split-panel page, lens-switched lists (My Lists / Open to Me),
 adaptive detail (lines / offers / build-bid / activity), and inbound-offer entry
 (per_line / take_all) reusing the service's submit_offer + import parsers.
 
-Strategy is additive-first: NEW templates under htmx/partials/trading/, NEW
+Strategy is additive-first: NEW templates under htmx/partials/resell/, NEW
 endpoints here, NEW nav item. The OLD excess router/templates stay mounted — a
 later cutover chunk removes them. Logic stays in excess_service / excess_mirror;
 this layer only resolves request → context → template (the fat-service / thin-
@@ -40,7 +40,7 @@ from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer
 from ..services import bid_back_service, excess_mirror, excess_service
 from ..template_env import template_response
 
-router = APIRouter(tags=["trading"])
+router = APIRouter(tags=["resell"])
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
@@ -193,7 +193,7 @@ def _require_owner(el: ExcessList, user: User) -> None:
     """Raise 403 if *user* is not the list owner.
 
     Used by mutation endpoints that only the owner may call (add-line, import-preview,
-    import-confirm). Mirrors the guard in trading_publish.
+    import-confirm). Mirrors the guard in resell_publish.
     """
     if el.owner_id != user.id:
         raise HTTPException(403, "Only the list owner can edit it")
@@ -239,8 +239,8 @@ def _detail_context(request: Request, db: Session, el: ExcessList, user: User) -
 # ── Full workspace page ──────────────────────────────────────────────
 
 
-@router.get("/v2/partials/trading/workspace", response_class=HTMLResponse)
-async def trading_workspace(
+@router.get("/v2/partials/resell/workspace", response_class=HTMLResponse)
+async def resell_workspace(
     request: Request,
     lens: str = Query("mine"),
     stage: str = Query(""),
@@ -248,10 +248,10 @@ async def trading_workspace(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Split-panel Trading workspace shell: lens pills + stat strip + lists."""
+    """Split-panel Resell workspace shell: lens pills + stat strip + lists."""
     lens = lens if lens in ("mine", "open") else "mine"
     return template_response(
-        "htmx/partials/trading/workspace.html",
+        "htmx/partials/resell/workspace.html",
         {
             "request": request,
             "user": user,
@@ -267,8 +267,8 @@ async def trading_workspace(
 # ── Left list partial ────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/trading/lists", response_class=HTMLResponse)
-async def trading_lists(
+@router.get("/v2/partials/resell/lists", response_class=HTMLResponse)
+async def resell_lists(
     request: Request,
     lens: str = Query("mine"),
     stage: str = Query(""),
@@ -305,7 +305,7 @@ async def trading_lists(
     cards = [_list_card(db, el, can_see_customer=can_see_customer) for el in lists]
 
     return template_response(
-        "htmx/partials/trading/_lists.html",
+        "htmx/partials/resell/_lists.html",
         {
             "request": request,
             "user": user,
@@ -321,8 +321,8 @@ async def trading_lists(
 # ── Right detail + lazy tab bodies ───────────────────────────────────
 
 
-@router.get("/v2/partials/trading/{list_id}", response_class=HTMLResponse)
-async def trading_detail(
+@router.get("/v2/partials/resell/{list_id}", response_class=HTMLResponse)
+async def resell_detail(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -330,11 +330,11 @@ async def trading_detail(
 ):
     """Right detail partial — slim header, breadcrumb, chips, lazy tabs."""
     el, _ = _get_list_for_user(db, list_id, user)
-    return template_response("htmx/partials/trading/detail.html", _detail_context(request, db, el, user))
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
-@router.get("/v2/partials/trading/{list_id}/lines", response_class=HTMLResponse)
-async def trading_lines(
+@router.get("/v2/partials/resell/{list_id}/lines", response_class=HTMLResponse)
+async def resell_lines(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -342,11 +342,11 @@ async def trading_lines(
 ):
     """Lazy Lines tab body — adaptive: 1 line → card, ≥2 → compact table."""
     el, _ = _get_list_for_user(db, list_id, user)
-    return template_response("htmx/partials/trading/_lines.html", _detail_context(request, db, el, user))
+    return template_response("htmx/partials/resell/_lines.html", _detail_context(request, db, el, user))
 
 
-@router.get("/v2/partials/trading/{list_id}/offers", response_class=HTMLResponse)
-async def trading_offers(
+@router.get("/v2/partials/resell/{list_id}/offers", response_class=HTMLResponse)
+async def resell_offers(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -365,7 +365,7 @@ async def trading_offers(
     if not is_owner:
         # Non-owner: render an empty offers view — no offer data in the response.
         return template_response(
-            "htmx/partials/trading/_offers.html",
+            "htmx/partials/resell/_offers.html",
             {
                 "request": request,
                 "user": user,
@@ -411,7 +411,7 @@ async def trading_offers(
                 unmatched.append(entry)
 
     return template_response(
-        "htmx/partials/trading/_offers.html",
+        "htmx/partials/resell/_offers.html",
         {
             "request": request,
             "user": user,
@@ -427,8 +427,8 @@ async def trading_offers(
     )
 
 
-@router.get("/v2/partials/trading/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
-async def trading_line_offer_compare(
+@router.get("/v2/partials/resell/{list_id}/lines/{line_id}/offers", response_class=HTMLResponse)
+async def resell_line_offer_compare(
     request: Request,
     list_id: int,
     line_id: int,
@@ -460,7 +460,7 @@ async def trading_line_offer_compare(
 
     priced = [r["line"].unit_price for r in rows if r["line"].unit_price is not None]
     return template_response(
-        "htmx/partials/trading/offer_compare.html",
+        "htmx/partials/resell/offer_compare.html",
         {
             "request": request,
             "list": el,
@@ -504,8 +504,8 @@ def _build_bid_context(request: Request, db: Session, el: ExcessList, user: User
     }
 
 
-@router.get("/v2/partials/trading/{list_id}/build-bid", response_class=HTMLResponse)
-async def trading_build_bid(
+@router.get("/v2/partials/resell/{list_id}/build-bid", response_class=HTMLResponse)
+async def resell_build_bid(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -519,11 +519,11 @@ async def trading_build_bid(
     """
     el = excess_service.get_excess_list(db, list_id)
     _require_owner(el, user)
-    return template_response("htmx/partials/trading/_build_bid.html", _build_bid_context(request, db, el, user))
+    return template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
 
 
-@router.post("/api/trading/{list_id}/bid", response_class=HTMLResponse)
-async def trading_assemble_bid(
+@router.post("/api/resell/{list_id}/bid", response_class=HTMLResponse)
+async def resell_assemble_bid(
     request: Request,
     list_id: int,
     selections_json: str = Form(...),
@@ -556,11 +556,11 @@ async def trading_assemble_bid(
     ]
     bid_back_service.build_bid_back(db, list_id=list_id, owner=user, selections=selections)
     el = excess_service.get_excess_list(db, list_id)
-    return template_response("htmx/partials/trading/_build_bid.html", _build_bid_context(request, db, el, user))
+    return template_response("htmx/partials/resell/_build_bid.html", _build_bid_context(request, db, el, user))
 
 
-@router.get("/api/trading/{list_id}/bid/{bid_id}/pdf")
-async def trading_bid_pdf(
+@router.get("/api/resell/{list_id}/bid/{bid_id}/pdf")
+async def resell_bid_pdf(
     list_id: int,
     bid_id: int,
     user: User = Depends(require_user),
@@ -598,8 +598,8 @@ async def trading_bid_pdf(
 # ── Modal forms ──────────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/trading/create-form", response_class=HTMLResponse)
-async def trading_create_form(
+@router.get("/v2/partials/resell/create-form", response_class=HTMLResponse)
+async def resell_create_form(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -609,13 +609,13 @@ async def trading_create_form(
         raise HTTPException(403, "You do not have permission to post excess lists")
     companies = db.query(Company).order_by(Company.name).all()
     return template_response(
-        "htmx/partials/trading/create_modal.html",
+        "htmx/partials/resell/create_modal.html",
         {"request": request, "companies": companies},
     )
 
 
-@router.get("/v2/partials/trading/{list_id}/add-line-form", response_class=HTMLResponse)
-async def trading_add_line_form(
+@router.get("/v2/partials/resell/{list_id}/add-line-form", response_class=HTMLResponse)
+async def resell_add_line_form(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -627,13 +627,13 @@ async def trading_add_line_form(
     if el.status != ExcessListStatus.DRAFT:
         raise HTTPException(409, "Posted lists are locked; revise as a new version")
     return template_response(
-        "htmx/partials/trading/add_line_modal.html",
+        "htmx/partials/resell/add_line_modal.html",
         {"request": request, "list_id": list_id},
     )
 
 
-@router.get("/v2/partials/trading/{list_id}/offer-form", response_class=HTMLResponse)
-async def trading_offer_form(
+@router.get("/v2/partials/resell/{list_id}/offer-form", response_class=HTMLResponse)
+async def resell_offer_form(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -646,7 +646,7 @@ async def trading_offer_form(
     if el.owner_id == user.id:
         raise HTTPException(403, "You cannot offer on your own excess list")
     return template_response(
-        "htmx/partials/trading/offer_form.html",
+        "htmx/partials/resell/offer_form.html",
         {"request": request, "list": el},
     )
 
@@ -654,8 +654,8 @@ async def trading_offer_form(
 # ── Mutations (thin — delegate to the service) ───────────────────────
 
 
-@router.post("/api/trading/lists", response_class=HTMLResponse)
-async def trading_create_list(
+@router.post("/api/resell/lists", response_class=HTMLResponse)
+async def resell_create_list(
     request: Request,
     title: str = Form(...),
     company_id: int = Form(...),
@@ -673,11 +673,11 @@ async def trading_create_list(
         owner_id=user.id,
         notes=notes or None,
     )
-    return await trading_lists(request, lens="mine", stage="", q="", user=user, db=db)
+    return await resell_lists(request, lens="mine", stage="", q="", user=user, db=db)
 
 
-@router.post("/api/trading/{list_id}/lines", response_class=HTMLResponse)
-async def trading_add_line(
+@router.post("/api/resell/{list_id}/lines", response_class=HTMLResponse)
+async def resell_add_line(
     request: Request,
     list_id: int,
     part_number: str = Form(...),
@@ -712,11 +712,11 @@ async def trading_add_line(
     excess_service._resolve_line_material_card(db, item)
     el.total_line_items = (el.total_line_items or 0) + 1
     db.commit()
-    return await trading_lines(request, list_id=list_id, user=user, db=db)
+    return await resell_lines(request, list_id=list_id, user=user, db=db)
 
 
-@router.post("/api/trading/{list_id}/import-preview", response_class=HTMLResponse)
-async def trading_import_preview(
+@router.post("/api/resell/{list_id}/import-preview", response_class=HTMLResponse)
+async def resell_import_preview(
     request: Request,
     list_id: int,
     file: UploadFile,
@@ -739,7 +739,7 @@ async def trading_import_preview(
         raise HTTPException(400, "No data rows found")
     result = excess_service.preview_import(rows)
     return template_response(
-        "htmx/partials/trading/import_preview.html",
+        "htmx/partials/resell/import_preview.html",
         {
             "request": request,
             "list_id": list_id,
@@ -750,8 +750,8 @@ async def trading_import_preview(
     )
 
 
-@router.post("/api/trading/{list_id}/import-confirm", response_class=HTMLResponse)
-async def trading_import_confirm(
+@router.post("/api/resell/{list_id}/import-confirm", response_class=HTMLResponse)
+async def resell_import_confirm(
     request: Request,
     list_id: int,
     rows_json: str = Form(...),
@@ -770,11 +770,11 @@ async def trading_import_confirm(
     except (json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(400, "Invalid import payload") from exc
     excess_service.confirm_import(db, list_id, rows)
-    return await trading_lines(request, list_id=list_id, user=user, db=db)
+    return await resell_lines(request, list_id=list_id, user=user, db=db)
 
 
-@router.post("/api/trading/{list_id}/publish", response_class=HTMLResponse)
-async def trading_publish(
+@router.post("/api/resell/{list_id}/publish", response_class=HTMLResponse)
+async def resell_publish(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -788,11 +788,11 @@ async def trading_publish(
         raise HTTPException(403, "Only the list owner can publish it")
     excess_mirror.publish_list(db, list_id, user)
     el = excess_service.get_excess_list(db, list_id)
-    return template_response("htmx/partials/trading/detail.html", _detail_context(request, db, el, user))
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
-@router.post("/api/trading/{list_id}/close", response_class=HTMLResponse)
-async def trading_close(
+@router.post("/api/resell/{list_id}/close", response_class=HTMLResponse)
+async def resell_close(
     request: Request,
     list_id: int,
     user: User = Depends(require_user),
@@ -801,11 +801,11 @@ async def trading_close(
     """Close a posted list (owner-only): flip to bid_out + stamp close_at, re-render
     detail."""
     el = excess_service.close_list(db, list_id, user)
-    return template_response("htmx/partials/trading/detail.html", _detail_context(request, db, el, user))
+    return template_response("htmx/partials/resell/detail.html", _detail_context(request, db, el, user))
 
 
-@router.post("/api/trading/{list_id}/offers", response_class=HTMLResponse)
-async def trading_submit_offer(
+@router.post("/api/resell/{list_id}/offers", response_class=HTMLResponse)
+async def resell_submit_offer(
     request: Request,
     list_id: int,
     scope: str = Form(...),
@@ -853,7 +853,7 @@ async def trading_submit_offer(
     )
 
     el = excess_service.get_excess_list(db, list_id)
-    return await trading_offers(request, list_id=el.id, user=user, db=db)
+    return await resell_offers(request, list_id=el.id, user=user, db=db)
 
 
 # ── tiny parse helpers (forms send strings) ──────────────────────────

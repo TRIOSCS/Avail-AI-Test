@@ -1,4 +1,4 @@
-"""test_trading_bid_back.py — Bid-back assembly + clean export + posting window (Chunk
+"""test_resell_bid_back.py — Bid-back assembly + clean export + posting window (Chunk
 E).
 
 Covers the outbound bid-back the owner assembles from collected inbound offers:

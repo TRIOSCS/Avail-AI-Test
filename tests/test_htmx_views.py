@@ -186,7 +186,7 @@ class TestV2FullPages:
             "/v2/vendors",
             "/v2/customers",
             "/v2/buy-plans",
-            "/v2/trading",
+            "/v2/resell",
             "/v2/quotes",
             "/v2/settings",
             "/v2/prospecting",
