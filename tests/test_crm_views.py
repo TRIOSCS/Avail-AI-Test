@@ -2425,6 +2425,8 @@ class TestEditContact:
         contact = SiteContact(
             customer_site_id=site.id,
             full_name="Alice Smith",
+            first_name="Alice",
+            last_name="Smith",
             title="Buyer",
             email="alice@editco.com",
             phone="+16175550001",
@@ -2443,7 +2445,8 @@ class TestEditContact:
         # Company-scoped route (no site_id): replaces the retired site-scoped route.
         resp = client.get(f"/v2/partials/customers/{company.id}/contacts/{contact.id}/edit-form")
         assert resp.status_code == 200
-        assert "Alice Smith" in resp.text
+        # Step 4: form has first_name/last_name fields (not full_name)
+        assert "Alice" in resp.text
         assert "alice@editco.com" in resp.text
 
     def test_get_contact_edit_form_site_scoped_route_retired(
@@ -2530,21 +2533,28 @@ class TestEditContact:
         """POST edit response contains the updated name in the re-rendered contacts
         panel."""
         company, site, contact = self._make_company_with_contact(db_session)
+        # Step 4: use first_name + last_name (full_name is derived)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
-            data={"full_name": "Alice Updated", "title": "VP", "email": "alice@editco.com", "phone": ""},
+            data={
+                "first_name": "Alice",
+                "last_name": "Updated",
+                "title": "VP",
+                "email": "alice@editco.com",
+                "phone": "",
+            },
         )
         assert resp.status_code == 200
         assert "Alice Updated" in resp.text
 
-    def test_post_contact_edit_missing_full_name_returns_400(
+    def test_post_contact_edit_missing_first_and_last_name_returns_400(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """POST edit with empty full_name returns 400."""
+        """POST edit with both first_name and last_name empty returns 400."""
         company, site, contact = self._make_company_with_contact(db_session)
         resp = client.post(
             f"/v2/partials/customers/{company.id}/sites/{site.id}/contacts/{contact.id}/edit",
-            data={"full_name": "", "title": "Buyer", "email": "alice@editco.com"},
+            data={"first_name": "", "last_name": "", "title": "Buyer", "email": "alice@editco.com"},
         )
         assert resp.status_code == 400
 
@@ -3401,8 +3411,8 @@ class TestContactsTabHome:
         html = resp.text
         # Form must target #contacts-tab-list (not any site-specific id)
         assert "contacts-tab-list" in html
-        # Contact's name must appear
-        assert test_contact.full_name in html
+        # Contact's email must appear (Step 4: form uses first_name/last_name, not full_name input)
+        assert test_contact.email in html
         # Role options must be present
         assert "buyer_po" in html
 

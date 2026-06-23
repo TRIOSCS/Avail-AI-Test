@@ -339,7 +339,10 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 |--------|------|-------|
 | id | Integer PK | |
 | customer_site_id | FK -> customer_sites (CASCADE) | |
-| full_name | String 255 | |
+| full_name | String 255 | Derived field — recomposed from first_name + last_name on every form/inline-edit write (migration 134 seeded via backfill). |
+| first_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| last_name | String 120, nullable | Migration 134. Editable source of truth; recomposed into full_name on write. |
+| contact_owner_id | FK -> users (SET NULL), indexed | Migration 134. Override contact owner; falls back to company.account_owner when NULL. |
 | email | String 255 | Unique per site |
 | phone | String 100 | |
 | wechat_id | String 100, nullable | WeChat handle for click-to-message outreach (migration 095_wechat_id). Written by the site-contact create form; rendered in `tabs/contacts_tab.html` as a `weixin://` deep link with `data-outreach-log`. |
@@ -349,7 +352,7 @@ Managed via Settings > Ops Group (admin only); seeded from `ADMIN_EMAILS` on sta
 | is_archived | Boolean NOT NULL (server_default false) | Migration 118. Sorts the contact to the BOTTOM of the roster but keeps it visible (NOT `is_active`, which would hide it). Toggled via `POST .../contacts/{id}/archive` (`_archive_toggle.html`). |
 | email_verified | Boolean | |
 | enrichment_source | String 50 | lusha|clay|hunter|explorium|manual |
-| **Relationships** | customer_site, attachments (`SiteContactAttachment`) | Migration 126 adds `attachments`. |
+| **Relationships** | customer_site, attachments (`SiteContactAttachment`), contact_owner (`User`) | Migration 126 adds `attachments`. Migration 134 adds `contact_owner`. |
 
 **`company_attachments`** — Files attached to a CRM company (Migration 126, new table)
 | Column | Type | Notes |

@@ -58,3 +58,4 @@
 131 feat/tbf-browser-worker tbf_search_queue + tbf_search_log + tbf_worker_status (singleton id=1 seeded); RE-NUMBERED 130->131 (feat/crm-phone-matching took 130, landed on main first); RE-CHAINED onto 130_phone_normalization; single head verified via `alembic heads`
 132 feat/crm-editability custom_fields JSONB on companies + site_contacts
 133  feat/crm-steps-3456  Company.primary_contact_id (FK site_contacts) + parent_company_id (self-FK companies)
+134  feat/crm-steps-3456  site_contacts.first_name/last_name (split from full_name, backfilled) + contact_owner_id (FK users)

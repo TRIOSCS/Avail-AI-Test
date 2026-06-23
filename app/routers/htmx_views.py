@@ -5294,7 +5294,10 @@ EDITABLE_ACCOUNT_FIELDS: dict[str, dict] = {
 }
 
 EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
-    "full_name": {"label": "Name", "kind": "text"},
+    # first_name + last_name replace the old single full_name inline editor.
+    # apply_contact_field recomposes full_name when either is saved.
+    "first_name": {"label": "First Name", "kind": "text"},
+    "last_name": {"label": "Last Name", "kind": "text"},
     "title": {"label": "Title", "kind": "text"},
     "email": {"label": "Email", "kind": "text"},
     "phone": {"label": "Phone", "kind": "text"},
@@ -5305,6 +5308,7 @@ EDITABLE_CONTACT_FIELDS: dict[str, dict] = {
         "kind": "select",
         "choices": list(CANONICAL_ROLES),
     },
+    "contact_owner_id": {"label": "Contact Owner", "kind": "select", "choices": []},
 }
 
 # Ordered list: (field, label, kind, choices) — used by the detail template to render the
@@ -5357,6 +5361,16 @@ def apply_company_field(company: Company, field: str, value: str) -> None:
     company.updated_at = datetime.now(timezone.utc)
 
 
+def _recompose_full_name(contact: SiteContact) -> None:
+    """Recompose contact.full_name from first_name + last_name (in-place).
+
+    Rule: full_name is always derived from first_name/last_name when either is written
+    via the form or inline-edit path. Direct full_name writers (legacy) leave first/last
+    unchanged; this function is NOT called for those paths.
+    """
+    contact.full_name = f"{contact.first_name or ''} {contact.last_name or ''}".strip() or (contact.full_name or "")
+
+
 def apply_contact_field(
     contact: SiteContact,
     field: str,
@@ -5366,16 +5380,20 @@ def apply_contact_field(
 ) -> None:
     """Apply a single inline-edited contact field to *contact* (does NOT commit).
 
-    Validates same as edit_site_contact. Raises HTTPException for invalid values. Called
-    by both the inline-edit POST endpoint and edit_site_contact (DRY).
+    first_name / last_name edits recompose full_name automatically. At least one of
+    first_name / last_name must be non-empty (enforced here). Raises HTTPException for
+    invalid values. Called by both the inline-edit POST endpoint and edit_site_contact
+    (DRY).
     """
     if field not in EDITABLE_CONTACT_FIELDS:
         raise HTTPException(404, f"Unknown editable contact field: {field!r}")
     v = value.strip()
-    if field == "full_name":
-        if not v:
-            raise HTTPException(400, "full_name is required")
-        contact.full_name = v
+    if field in ("first_name", "last_name"):
+        setattr(contact, field, v or None)
+        # After updating, verify at least one name part remains.
+        if not contact.first_name and not contact.last_name:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        _recompose_full_name(contact)
     elif field == "email":
         if v and "@" not in v:
             raise HTTPException(400, "Invalid email address")
@@ -5396,6 +5414,18 @@ def apply_contact_field(
         contact.phone = v or None
     elif field == "contact_role":
         contact.contact_role = _validate_role(v)
+    elif field == "contact_owner_id":
+        if v:
+            try:
+                owner_id = int(v)
+            except ValueError:
+                raise HTTPException(400, "Invalid contact_owner_id")
+            owner = db.get(User, owner_id)
+            if not owner:
+                raise HTTPException(404, f"User {owner_id} not found")
+            contact.contact_owner_id = owner_id
+        else:
+            contact.contact_owner_id = None
     else:
         setattr(contact, field, v or None)
     contact.updated_at = datetime.now(timezone.utc)
@@ -6234,6 +6264,7 @@ async def contacts_tab_add_form(
     )
     # Only honor site_id when it belongs to THIS company's active sites (IDOR-safe).
     preselect_site_id = site_id if any(s.id == site_id for s in active_sites) else None
+    users = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -6245,6 +6276,7 @@ async def contacts_tab_add_form(
             "sites": active_sites,
             "preselect_site_id": preselect_site_id,
             "roles": CANONICAL_ROLES,
+            "users": users,
         },
     )
 
@@ -6279,8 +6311,23 @@ async def contacts_tab_create(
         raise HTTPException(404, "Company not found")
 
     form = await request.form()
-    full_name = (form.get("full_name") or "").strip()
-    if not full_name:
+    # Step 4: accept first_name + last_name (new form) or full_name (legacy fallback).
+    first_name_val = (form.get("first_name") or "").strip() or None
+    last_name_val = (form.get("last_name") or "").strip() or None
+    full_name_legacy = (form.get("full_name") or "").strip()
+
+    if first_name_val or last_name_val:
+        # New form: compose full_name from parts
+        if not first_name_val and not last_name_val:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        full_name = f"{first_name_val or ''} {last_name_val or ''}".strip()
+    elif full_name_legacy:
+        # Legacy: full_name submitted directly; split into parts
+        full_name = full_name_legacy
+        parts = full_name.split(" ", 1)
+        first_name_val = parts[0] or None
+        last_name_val = parts[1].strip() if len(parts) > 1 else None
+    else:
         raise HTTPException(400, "full_name is required")
 
     email_val = (form.get("email") or "").strip().lower() or None
@@ -6355,9 +6402,22 @@ async def contacts_tab_create(
     is_priority = bool((form.get("is_priority") or "").strip())
 
     # ── Create contact ──────────────────────────────────────────────────
+    # contact_owner_id from form
+    contact_owner_raw = (form.get("contact_owner_id") or "").strip()
+    contact_owner_id_val: int | None = None
+    if contact_owner_raw:
+        try:
+            contact_owner_id_val = int(contact_owner_raw)
+        except ValueError:
+            raise HTTPException(400, "Invalid contact_owner_id")
+        if not db.get(User, contact_owner_id_val):
+            raise HTTPException(404, f"User {contact_owner_id_val} not found")
+
     contact = SiteContact(
         customer_site_id=site.id,
         full_name=full_name,
+        first_name=first_name_val,
+        last_name=last_name_val,
         email=email_val,
         title=(form.get("title") or "").strip() or None,
         phone=(form.get("phone") or "").strip() or None,
@@ -6366,6 +6426,7 @@ async def contacts_tab_create(
         linkedin_url=(form.get("linkedin_url") or "").strip() or None,
         contact_role=role,
         is_priority=is_priority,
+        contact_owner_id=contact_owner_id_val,
     )
     db.add(contact)
     db.commit()
@@ -7150,6 +7211,9 @@ async def contact_field_edit_form(
     if not contact:
         raise HTTPException(404, "Contact not found")
     meta = EDITABLE_CONTACT_FIELDS[field]
+    extra: dict = {}
+    if field == "contact_owner_id":
+        extra["users"] = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/_field_edit.html",
         {
@@ -7160,6 +7224,7 @@ async def contact_field_edit_form(
             "meta": meta,
             "post_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field",
             "display_url": f"/v2/partials/customers/{company_id}/contacts/{contact_id}/field/display/{field}",
+            **extra,
         },
     )
 
@@ -7630,6 +7695,7 @@ async def contact_edit_form_company_scoped(
     company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
+    users = db.query(User).order_by(User.name).all()
     return template_response(
         "htmx/partials/customers/tabs/_contact_form.html",
         {
@@ -7640,6 +7706,7 @@ async def contact_edit_form_company_scoped(
             "site": site,
             "sites": [],
             "roles": CANONICAL_ROLES,
+            "users": users,
         },
     )
 
@@ -7697,13 +7764,28 @@ async def edit_site_contact(
 
     form = await request.form()
 
-    # Inline-registry fields — DRY via apply_contact_field
+    # Name fields — apply atomically so the "at least one required" check
+    # sees both values together rather than one-at-a-time.
+    first_name_raw = form.get("first_name")
+    last_name_raw = form.get("last_name")
+    if first_name_raw is not None or last_name_raw is not None:
+        new_first = (first_name_raw or "").strip() or None
+        new_last = (last_name_raw or "").strip() or None
+        if not new_first and not new_last:
+            raise HTTPException(400, "At least one of first_name or last_name is required")
+        contact.first_name = new_first
+        contact.last_name = new_last
+        _recompose_full_name(contact)
+
+    # Remaining registry fields (skip first_name/last_name — handled above)
     for f in EDITABLE_CONTACT_FIELDS:
+        if f in ("first_name", "last_name"):
+            continue
         raw = form.get(f)
         if raw is not None:  # field was submitted
             apply_contact_field(contact, f, raw, site_id, db)
 
-    # Non-registry fields (wechat_id + linkedin_url are written by the loop above)
+    # Non-registry fields
     contact.notes = (form.get("notes", "") or "").strip() or None
     contact.is_priority = bool((form.get("is_priority", "") or "").strip())
     contact.updated_at = datetime.now(timezone.utc)
