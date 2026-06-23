@@ -4837,10 +4837,17 @@ class TestAccountActivityTab:
     ):
         """(c) Date headers (Today / Yesterday / date string) appear in section
         bodies."""
+        from datetime import datetime, timedelta, timezone
+
         resp = client.get(f"/v2/partials/customers/{_activity_company.id}/tab/activity")
         html = resp.text
         # Today's activities exist (call_logged + email_sent + rfq_sent)
         assert "Today" in html
+        # status_changed is 1 day ago → "Yesterday" appears in the Other section
+        assert "Yesterday" in html
+        # The 3-day-old note renders as a %b %d, %Y date string (day_delta >= 2)
+        three_days_ago = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%b %d, %Y")
+        assert three_days_ago in html
 
     def test_other_section_hidden_by_default(self, client: TestClient, _activity_company: Company, _mixed_activities):
         """(d) Other section exists but is toggled via Alpine hideOther (x-show not

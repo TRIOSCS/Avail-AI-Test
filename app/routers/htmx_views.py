@@ -5029,7 +5029,7 @@ def build_account_timeline(contacts, quotes, activities, *, req_map):
     Events are sorted descending by ``ts`` (newest first).
     ``raw`` carries the original ORM object for template use.
 
-    Called by: company_tab (activity branch) in htmx_views.py.
+    Called by: unit tests (TestUnifiedTimelineHelper) only; no longer called by the activity route.
     """
     from datetime import datetime, timezone
 
@@ -5972,10 +5972,10 @@ async def company_tab(
         activities_truncated = len(activities) >= 50
 
         # Bucket activities into type-sections (template renders by section)
-        _CALLS = frozenset({"call_logged"})
-        _EMAILS = frozenset({"email_sent", "email_received", "rfq_sent"})
-        _MEETINGS = frozenset({"teams_message", "wechat_message", "meeting"})
-        _NOTES = frozenset({"note", "sales_note", "contact_note"})
+        _CALLS = frozenset({ActivityType.CALL_LOGGED})
+        _EMAILS = frozenset({ActivityType.EMAIL_SENT, ActivityType.EMAIL_RECEIVED, ActivityType.RFQ_SENT})
+        _MEETINGS = frozenset({ActivityType.TEAMS_MESSAGE, ActivityType.WECHAT_MESSAGE, ActivityType.MEETING})
+        _NOTES = frozenset({ActivityType.NOTE, ActivityType.SALES_NOTE, ActivityType.CONTACT_NOTE})
 
         sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
         for a in activities:
