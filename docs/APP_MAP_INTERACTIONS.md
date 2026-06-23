@@ -1147,6 +1147,36 @@ Build-Quote tab (no schema change):
   `quote_report.html` from this context, so the customer PDF cannot leak a
   vendor name.
 
+**Build-Quote tab (in-workspace single-stage assembly — Chunk B).** The sales
+quote-builder modal is reshaped into a **Build Quote** tab on the requisition
+detail (`requisitions/detail.html` tab strip, sibling to the Quotes list tab),
+mirroring the resell **Build Bid** tab. The tab is lazy (`hx-trigger="click"`,
+explicit `hx-target="#tab-content"`) and owner/buyer-gated.
+
+```
+Browser (Build Quote tab) ──click──> GET /v2/partials/requisitions/{id}/build-quote
+    |                                      (require_requisition_access; quote_builder.py)
+    v
+build_quote_tab_data(db, id) ──> per line: best_costs_for ref + ACTIVE offers
+    |                            + sell seed (last-quoted -> else best-cost x 20% markup)
+    v
+requisitions/tabs/build_quote.html  (quoteBuilderTab Alpine: live margin + guardrail,
+    |                                 blended total, markup-% reseed; single-quoted x-data
+    |                                 + |tojson seed blob)
+    +-- check line -> sell-price field seeds -> live margin chip + guardrail
+    +-- "Assemble" --POST--> /v2/partials/requisitions/{id}/build-quote/assemble
+              |                  (parses QuoteBuilderLine[]; delegates to
+              v                   save_quote_from_builder -> revision lifecycle preserved)
+        re-render tab with inline clean summary (quote_export_context) +
+        Download PDF (existing /export/pdf) / Send (existing /quotes/{id}/send)
+```
+
+`quoteBuilderTab` (in `htmx_app.js`) is the single-stage simplification of the
+modal's `quoteBuilder` (same `(sell-cost)/sell` margin math + blended rollup, no
+two-panel decision flow). The list-toolbar "Build Quote" action re-points a SINGLE
+selected requisition to this tab via `?tab=build_quote` (the detail partial deep-links
++ auto-opens it); 2+ selections keep the cross-req bulk modal (`/quote-builder/multi`).
+
 ## 6. Buy Plan Workflow
 
 ```
