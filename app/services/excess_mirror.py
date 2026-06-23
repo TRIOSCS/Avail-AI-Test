@@ -273,16 +273,18 @@ def sync_list_mirror(db: Session, excess_list: ExcessList) -> dict:
 def publish_list(db: Session, list_id: int, user) -> ExcessList:
     """Publish an excess list: flip to ``open`` then live-mirror every active line.
 
-    The testable entry point for posting (the router wiring lands in a later chunk). Sets
-    ``status=open`` and stamps ``updated_at`` (the list has no dedicated ``open_at``
-    column in v1 — ``updated_at`` records the transition), then runs ``sync_list_mirror``
-    so the posted lines surface to the matcher. Commits. Returns the refreshed list.
+    The testable entry point for posting. Sets ``status=open``, stamps both ``open_at``
+    (the posting-window start, Chunk E) and ``updated_at``, then runs
+    ``sync_list_mirror`` so the posted lines surface to the matcher. Commits. Returns the
+    refreshed list.
     """
     from .excess_service import get_excess_list
 
     excess_list = get_excess_list(db, list_id)
+    now = datetime.now(timezone.utc)
     excess_list.status = ExcessListStatus.OPEN
-    excess_list.updated_at = datetime.now(timezone.utc)
+    excess_list.open_at = now
+    excess_list.updated_at = now
     db.flush()
 
     sync_list_mirror(db, excess_list)

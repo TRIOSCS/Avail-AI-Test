@@ -22,6 +22,7 @@ from ..constants import (
     BidSolicitationStatus,
     BidStatus,
     ExcessLineItemStatus,
+    ExcessListStatus,
     ExcessOfferScope,
     ExcessOfferStatus,
     OfferLineMatchStatus,
@@ -816,6 +817,27 @@ def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
     db.refresh(offer)
     logger.info("Withdrew ExcessOffer id={} ({} lines recomputed)", offer_id, len(affected))
     return offer
+
+
+def close_list(db: Session, list_id: int, owner: User) -> ExcessList:
+    """Close a posted list — owner-only — flip status to ``bid_out`` + stamp
+    ``close_at``.
+
+    The posting-window counterpart to ``excess_mirror.publish_list`` (which stamps
+    ``open_at``): once the trader has assembled and sent the bid back, closing the list
+    flips it to ``bid_out`` and records ``close_at`` (Chunk E). Guards: the list must
+    exist (404) and *owner* must own it (403). Commits. Returns the refreshed list.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.owner_id != owner.id:
+        raise HTTPException(403, "Only the list owner can close it")
+
+    excess_list.status = ExcessListStatus.BID_OUT
+    excess_list.close_at = datetime.now(timezone.utc)
+    _safe_commit(db, entity="excess list close")
+    db.refresh(excess_list)
+    logger.info("Closed ExcessList id={} (status=bid_out) by owner={}", list_id, owner.id)
+    return excess_list
 
 
 # ---------------------------------------------------------------------------
