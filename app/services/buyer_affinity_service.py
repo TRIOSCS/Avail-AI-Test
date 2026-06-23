@@ -41,6 +41,7 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from loguru import logger
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from ..constants import ExcessOfferStatus, ExcessOutreachStatus
@@ -248,10 +249,17 @@ def rank_buyers_for(
         )
         commodity_offer_buyers = {cid for (cid,) in rows}
 
-    # ── Candidate universe: every non-blacklisted buyer card that could be ranked. ──
-    # Tier-1/2 buyers (by offer history) + buyers tagged for the target commodities +
-    # (cold tier) any card with an engagement score. We resolve to reachable cards next.
-    candidates = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False)).all()
+    # ── Candidate universe: non-blacklisted buyer cards that could PLAUSIBLY rank. ──
+    # A card only survives the ranking loop below if it is a Tier-1/2 history buyer, is
+    # commodity-tagged, OR carries an engagement score — so we bound the query to exactly
+    # that set instead of loading every VendorCard into Python (Item-0). The commodity-tag
+    # JSON column is matched in Python (cross-DB safe), but the SQL pre-filter keeps only
+    # cards that have *some* tags / score / history, capping the working set.
+    history_ids = bought_part_buyers | commodity_offer_buyers
+    candidate_filters = [VendorCard.engagement_score.isnot(None), VendorCard.commodity_tags.isnot(None)]
+    if history_ids:
+        candidate_filters.append(VendorCard.id.in_(list(history_ids)))
+    candidates = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False), or_(*candidate_filters)).all()
 
     reachable = _reachable_card_ids(db, [c.id for c in candidates])
     if not reachable:
@@ -287,10 +295,11 @@ def rank_buyers_for(
                 win_rate = round((score.wins or 0) / score.offers_received, 3)
             last_offered_at = score.last_offered_at
 
+        # last_bid is filled AFTER the limit slice in one batched lookup (avoid N+1).
         rb = RankedBuyer(
             vendor_card_id=card.id,
             display_name=card.display_name,
-            last_bid=_last_bid_for(db, card.id),
+            last_bid=None,
             win_rate=win_rate,
             last_offered_at=last_offered_at,
             rank_reason=_TIER_REASON[tier],
@@ -301,22 +310,38 @@ def rank_buyers_for(
         ranked.append((tier, not rb.has_contact, -engagement, (0, card.id), rb))
 
     ranked.sort(key=lambda t: (t[0], t[1], t[2], t[3]))
-    return [t[4] for t in ranked[: max(0, limit)]]
+    top = [t[4] for t in ranked[: max(0, limit)]]
+
+    # Batch the most-recent-bid lookup for ONLY the returned buyers (no per-card N+1).
+    last_bids = _last_bids_for(db, [rb.vendor_card_id for rb in top])
+    return [rb._replace(last_bid=last_bids.get(rb.vendor_card_id)) for rb in top]
 
 
-def _last_bid_for(db: Session, vendor_card_id: int) -> Decimal | None:
-    """The buyer's most recent priced ExcessOfferLine unit_price (None if none)."""
-    row = (
-        db.query(ExcessOfferLine.unit_price)
-        .join(ExcessOffer, ExcessOffer.id == ExcessOfferLine.offer_id)
+def _last_bids_for(db: Session, vendor_card_ids: list[int]) -> dict[int, Decimal]:
+    """Each buyer's most recent priced ExcessOfferLine unit_price, batched.
+
+    One query for the whole set (replaces the per-card ``_last_bid_for`` N+1): we walk
+    the priced offer lines newest-first and keep the FIRST one seen per buyer — the same
+    "most recent priced bid" each per-card lookup returned. Buyers with no priced line
+    are simply absent from the dict (the caller maps a miss to None).
+    """
+    if not vendor_card_ids:
+        return {}
+    rows = (
+        db.query(ExcessOffer.offerer_vendor_card_id, ExcessOfferLine.unit_price)
+        .join(ExcessOfferLine, ExcessOfferLine.offer_id == ExcessOffer.id)
         .filter(
-            ExcessOffer.offerer_vendor_card_id == vendor_card_id,
+            ExcessOffer.offerer_vendor_card_id.in_(vendor_card_ids),
             ExcessOfferLine.unit_price.isnot(None),
         )
         .order_by(ExcessOffer.created_at.desc(), ExcessOfferLine.id.desc())
-        .first()
+        .all()
     )
-    return row[0] if row else None
+    out: dict[int, Decimal] = {}
+    for card_id, unit_price in rows:
+        if card_id is not None and card_id not in out:
+            out[card_id] = unit_price
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -480,7 +505,12 @@ def overlap_warning(
         )
         .all()
     )
-    recent = [t for t in touches if _aware(t.sent_at or t.created_at) >= cutoff]
+    # Defensive: a row whose sent_at AND created_at are both NULL has no usable timestamp
+    # to compare — skip it rather than let _aware(None) raise (the warning is advisory and
+    # must never blow up the offer panel).
+    recent = [
+        t for t in touches if (t.sent_at or t.created_at) is not None and _aware(t.sent_at or t.created_at) >= cutoff
+    ]
     if not recent:
         return None
 

@@ -497,3 +497,72 @@ class TestNotYetOfferedStrip:
         ids = {r.vendor_card_id for r in strip}
         assert historical.id in ids
         assert already.id not in ids
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Item-0 bounds (Chunk D carry-over)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestItem0Bounds:
+    def test_overlap_warning_tolerates_null_timestamps(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User, teammate: User
+    ):
+        """A teammate touch with BOTH sent_at and created_at NULL is skipped, not
+        raised.
+
+        The advisory overlap check must never blow up the offer panel on a degenerate
+        row (Item-0 defensive guard).
+        """
+        buyer = _reachable_card(db_session, "Null Stamp Buyer")
+        row = ExcessOutreach(
+            excess_list_id=excess_list.id,
+            target_vendor_card_id=buyer.id,
+            submitted_by=teammate.id,
+            channel="phone",
+            status=ExcessOutreachStatus.SENT,
+        )
+        db_session.add(row)
+        db_session.flush()
+        # Force both timestamps NULL (server_default would otherwise stamp created_at).
+        row.created_at = None
+        row.sent_at = None
+        db_session.flush()
+
+        # Must return None (no usable recent touch) rather than raise.
+        result = svc.overlap_warning(
+            db_session, excess_list_id=excess_list.id, target_vendor_card_id=buyer.id, owner_id=trader.id
+        )
+        assert result is None
+
+    def test_last_bid_populated_via_batch(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """rank_buyers_for still fills last_bid (the batched lookup replaces the
+        N+1)."""
+        buyer = _reachable_card(db_session, "Bid Buyer", engagement=10.0)
+        _won_offer_for(
+            db_session,
+            excess_list=excess_list,
+            buyer=buyer,
+            owner=trader,
+            line=cap_line,
+            unit_price=Decimal("0.77"),
+        )
+        db_session.commit()
+
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id)
+        by_id = {r.vendor_card_id: r for r in ranked}
+        assert by_id[buyer.id].last_bid == Decimal("0.77")
+
+    def test_limit_bounds_returned_rows(
+        self, db_session: Session, excess_list: ExcessList, cap_line: ExcessLineItem, trader: User
+    ):
+        """The limit caps the returned set (query-level candidate bounding kept
+        identical)."""
+        for i in range(5):
+            b = _reachable_card(db_session, f"Cap Buyer {i}", engagement=float(i))
+            b.commodity_tags = [_CAP]
+        db_session.commit()
+        ranked = svc.rank_buyers_for(db_session, excess_list_id=excess_list.id, limit=2)
+        assert len(ranked) == 2
