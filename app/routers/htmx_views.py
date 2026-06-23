@@ -5943,7 +5943,6 @@ async def company_tab(
         from sqlalchemy import or_ as or_clause
 
         from ..models.intelligence import ActivityLog
-        from ..models.offers import Contact as RfqContact
 
         # Find all requisition IDs linked to this company (via FK or name match)
         req_ids = [
@@ -5958,29 +5957,7 @@ async def company_tab(
             .all()
         ]
 
-        # RFQ contacts across company's requisitions
-        contacts = []
-        if req_ids:
-            contacts = (
-                db.query(RfqContact)
-                .filter(RfqContact.requisition_id.in_(req_ids))
-                .order_by(RfqContact.created_at.desc())
-                .limit(30)
-                .all()
-            )
-        # Build req_map for backlinks
-        req_map = {}
-        if contacts:
-            linked_req_ids = {c.requisition_id for c in contacts}
-            for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
-                req_map[r.id] = r
-
-        # Quotes for this account — union of site-linked and requisition-linked
-        # (matches the Quotes tab; site link alone misses NULL-site quotes).
-        cq = _company_quotes_query(db, company)
-        quotes = cq.order_by(Quote.created_at.desc().nullslast()).limit(20).all() if cq is not None else []
-
-        # Direct activity logs on this company + its requisitions
+        # Direct activity logs on this company + its requisitions (newest-first)
         activity_filters = [ActivityLog.company_id == company.id]
         if req_ids:
             activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
@@ -5988,38 +5965,39 @@ async def company_tab(
             db.query(ActivityLog)
             .filter(or_clause(*activity_filters))
             .order_by(ActivityLog.created_at.desc())
-            .limit(30)
+            .limit(50)
             .all()
         )
 
-        # Merge all three sources into a single chronological timeline
-        timeline = build_account_timeline(contacts, quotes, activities, req_map=req_map)
+        activities_truncated = len(activities) >= 50
 
-        # Compute truncation flag: True if ANY source hit its limit
-        # (RFQ .limit(30), quotes .limit(20), activities .limit(30))
-        timeline_truncated = len(contacts) >= 30 or len(quotes) >= 20 or len(activities) >= 30
+        # Bucket activities into type-sections (template renders by section)
+        _CALLS = frozenset({"call_logged"})
+        _EMAILS = frozenset({"email_sent", "email_received", "rfq_sent"})
+        _MEETINGS = frozenset({"teams_message", "wechat_message", "meeting"})
+        _NOTES = frozenset({"note", "sales_note", "contact_note"})
 
-        # Load email intelligence for email activities (retained for potential future use)
-        email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
-        email_intel_map: dict = {}
-        if email_external_ids:
-            from ..models.email_intelligence import EmailIntelligence
-
-            ei_records = db.query(EmailIntelligence).filter(EmailIntelligence.message_id.in_(email_external_ids)).all()
-            email_intel_map = {ei.message_id: ei for ei in ei_records}
+        sections: dict[str, list] = {"Calls": [], "Emails": [], "Meetings": [], "Notes": [], "Other": []}
+        for a in activities:
+            at = a.activity_type
+            if at in _CALLS:
+                sections["Calls"].append(a)
+            elif at in _EMAILS:
+                sections["Emails"].append(a)
+            elif at in _MEETINGS:
+                sections["Meetings"].append(a)
+            elif at in _NOTES:
+                sections["Notes"].append(a)
+            else:
+                sections["Other"].append(a)
 
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
                 "company": company,
-                "timeline": timeline,
-                "timeline_truncated": timeline_truncated,
-                # Keep raw lists available for summary counts
-                "contacts": contacts,
-                "quotes": quotes,
                 "activities": activities,
-                "req_map": req_map,
-                "email_intel_map": email_intel_map,
+                "sections": sections,
+                "activities_truncated": activities_truncated,
             }
         )
         return template_response("htmx/partials/customers/tabs/activity_tab.html", ctx)
