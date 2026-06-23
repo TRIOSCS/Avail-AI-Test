@@ -91,7 +91,7 @@
               <span class="text-sm font-medium text-gray-700">{{ b.display_name }}</span>
               {# Rank-reason chip — why this buyer surfaced. #}
               {% set reason = {'bought_this_part': 'bought this part', 'buys_this_commodity': 'buys this commodity', 'engagement': 'engaged'} %}
-              <span class="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">{{ reason.get(b.rank_reason, b.rank_reason) }}</span>
+              <span class="inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full bg-indigo-50 text-indigo-700">{{ reason.get(b.rank_reason, b.rank_reason) }}</span>
             </div>
             {# One-glance scorecard chips: last bid · win-rate · last contacted. #}
             <div class="mt-0.5 flex items-center gap-3 text-xs text-gray-400 flex-wrap">
@@ -120,7 +120,7 @@
           <input type="checkbox" disabled class="rounded border-gray-300 cursor-not-allowed">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-500">{{ nc.card.display_name }}</span>
-            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
+            <span class="ml-2 inline-flex items-center px-1.5 py-0.5 text-[11px] font-medium rounded-full bg-gray-100 text-gray-500">no contact on file</span>
           </div>
         </label>
         {% endfor %}
