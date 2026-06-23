@@ -22,10 +22,13 @@ from ..constants import (
     BidSolicitationStatus,
     BidStatus,
     ExcessLineItemStatus,
+    ExcessOfferScope,
+    ExcessOfferStatus,
+    OfferLineMatchStatus,
     UserRole,
 )
 from ..models import Company, CustomerSite, User
-from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
+from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList, ExcessOffer, ExcessOfferLine
 from ..models.intelligence import ProactiveMatch
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition
@@ -58,6 +61,23 @@ def can_post(user: User | None) -> bool:
 def can_offer(user: User | None) -> bool:
     """True when *user* may submit an offer on a posting (buyers + traders)."""
     return user is not None and user.role in _CAN_OFFER_ROLES
+
+
+def _resolve_line_material_card(db: Session, item: ExcessLineItem) -> None:
+    """Resolve (find-or-create) the MaterialCard for *item* and set material_card_id.
+
+    Mirrors what Requirements/Offers/Sightings do (integrity_service heals the same
+    way) — the Sighting live-mirror needs the card link (spec §Data-model). Reuses the
+    canonical resolver; leaves material_card_id null if the MPN won't resolve. Additive
+    and safe: never raises on an unresolvable part, never overwrites an existing link.
+    """
+    from ..search_service import resolve_material_card
+
+    if item.material_card_id is not None:
+        return
+    card = resolve_material_card(item.part_number, db, manufacturer=item.manufacturer or "")
+    if card:
+        item.material_card_id = card.id
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +321,7 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
             asking_price=fields["asking_price"],
         )
         db.add(item)
+        _resolve_line_material_card(db, item)
         imported += 1
 
     # Update total_line_items counter
@@ -379,6 +400,7 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
             asking_price=row.get("asking_price"),
         )
         db.add(item)
+        _resolve_line_material_card(db, item)
         imported += 1
     if imported > 0:
         excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
@@ -604,6 +626,196 @@ def accept_bid(db: Session, bid_id: int, line_item_id: int, list_id: int) -> Bid
     db.refresh(bid)
     logger.info("Accepted Bid id={} on line_item={} list={}", bid_id, line_item_id, list_id)
     return bid
+
+
+# ---------------------------------------------------------------------------
+# Trading: inbound offers (ExcessOffer / ExcessOfferLine) + best-price rollup
+# ---------------------------------------------------------------------------
+#
+# The additive Trading replacement for the per-line, money-required Bid. An offer is
+# either ``take_all`` (binds the whole list, no line rows, optional lump price) or
+# ``per_line`` (one ExcessOfferLine per part the broker will buy). Matching is part
+# number only via normalize_mpn_key — price NEVER affects matching, unit_price is
+# nullable, and unmatched/ambiguous rows are QUEUED (kept with mpn_raw), never dropped
+# (spec §"Offer collection"). The OLD create_bid/accept_bid path stays — a later
+# cutover chunk removes it.
+
+# Offer statuses whose lines count toward a line's best-price rollup (active states).
+_ACTIVE_OFFER_STATUSES = (ExcessOfferStatus.OPEN, ExcessOfferStatus.WON)
+
+
+def submit_offer(
+    db: Session,
+    *,
+    list_id: int,
+    user: User,
+    scope: str,
+    notes: str | None = None,
+    valid_until: datetime | None = None,
+    lines: list[dict] | None = None,
+    take_all_total_price: Decimal | None = None,
+) -> ExcessOffer:
+    """Submit an inbound offer (a broker's offer to BUY) on a posted excess list.
+
+    ``scope='take_all'`` → one ExcessOffer (status open), optional lump
+    ``take_all_total_price``, NO lines. ``scope='per_line'`` → the offer plus one
+    ExcessOfferLine per input row in *lines*; each row's ``mpn_raw`` is normalized and
+    matched against the list's line items by part number only (exactly one →
+    ``matched`` + ``excess_line_item_id``; none → ``unmatched``; multiple →
+    ``ambiguous``). Unmatched/ambiguous rows keep ``mpn_raw`` and are QUEUED for manual
+    resolution — never dropped. Affected matched lines get their best-price rollup
+    recomputed.
+
+    Guards (raise HTTPException, never silent): the list must exist (404); *user* must
+    have ``can_offer`` (403); and *user* must not own the list — self-offer blocked
+    (403). Returns the persisted ExcessOffer.
+
+    Row dict keys: ``mpn_raw`` (required), ``quantity`` (required), ``unit_price``,
+    ``lead_time_days``, ``terms_text`` (all optional).
+    """
+    excess_list = get_excess_list(db, list_id)
+
+    if not can_offer(user):
+        raise HTTPException(403, "You do not have permission to submit offers")
+    if user.id == excess_list.owner_id:
+        raise HTTPException(403, "You cannot offer on your own excess list")
+
+    scope_value = ExcessOfferScope(scope).value  # raises ValueError on a bad scope
+
+    offer = ExcessOffer(
+        excess_list_id=list_id,
+        submitted_by=user.id,
+        scope=scope_value,
+        notes=notes,
+        valid_until=valid_until,
+        status=ExcessOfferStatus.OPEN,
+        take_all_total_price=take_all_total_price if scope_value == ExcessOfferScope.TAKE_ALL else None,
+    )
+    db.add(offer)
+    db.flush()  # need offer.id before attaching lines
+
+    affected_line_item_ids: set[int] = set()
+    if scope_value == ExcessOfferScope.PER_LINE:
+        # Index the posting's lines by normalized part number to classify each row.
+        posted = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
+        by_norm: dict[str, list[ExcessLineItem]] = {}
+        for li in posted:
+            key = li.normalized_part_number or normalize_mpn_key(li.part_number)
+            if key:
+                by_norm.setdefault(key, []).append(li)
+
+        for row in lines or []:
+            mpn_raw = (row.get("mpn_raw") or "").strip()
+            norm_key = normalize_mpn_key(mpn_raw)
+            candidates = by_norm.get(norm_key, []) if norm_key else []
+            if len(candidates) == 1:
+                match_status = OfferLineMatchStatus.MATCHED
+                matched_id = candidates[0].id
+                affected_line_item_ids.add(matched_id)
+            elif len(candidates) > 1:
+                match_status = OfferLineMatchStatus.AMBIGUOUS  # queued, never dropped
+                matched_id = None
+            else:
+                match_status = OfferLineMatchStatus.UNMATCHED  # queued, never dropped
+                matched_id = None
+
+            db.add(
+                ExcessOfferLine(
+                    offer_id=offer.id,
+                    excess_line_item_id=matched_id,
+                    mpn_raw=mpn_raw,
+                    quantity=row["quantity"],
+                    unit_price=row.get("unit_price"),
+                    lead_time_days=row.get("lead_time_days"),
+                    terms_text=row.get("terms_text"),
+                    match_status=match_status,
+                )
+            )
+
+    db.flush()  # persist lines so the rollup query sees them
+    for line_item_id in affected_line_item_ids:
+        recompute_line_rollup(db, line_item_id)
+
+    _safe_commit(db, entity="excess offer")
+    db.refresh(offer)
+    logger.info(
+        "Submitted ExcessOffer id={} scope={} on list={} by user={} ({} matched lines)",
+        offer.id,
+        scope_value,
+        list_id,
+        user.id,
+        len(affected_line_item_ids),
+    )
+    return offer
+
+
+def recompute_line_rollup(db: Session, excess_line_item_id: int) -> None:
+    """Recompute the best-price rollup for one ExcessLineItem from its offers.
+
+    Sets ``best_offer_unit_price`` to the min ``unit_price`` across the line's
+    ExcessOfferLines whose parent offer is in an active state (open/won) and whose
+    ``unit_price`` is not null (None when no priced active offers); ``best_offer_id`` to
+    the ExcessOffer providing that min; ``offer_count`` to the number of DISTINCT offers
+    touching the line (priced or not). Mirrors the spirit of
+    sighting_aggregation.rebuild_vendor_summaries (best = min price) but offer-based and
+    keyed on the line. Idempotent — safe to call after a land or a withdraw.
+    """
+    item = db.get(ExcessLineItem, excess_line_item_id)
+    if not item:
+        return
+
+    rows = (
+        db.query(ExcessOfferLine)
+        .join(ExcessOffer, ExcessOfferLine.offer_id == ExcessOffer.id)
+        .filter(
+            ExcessOfferLine.excess_line_item_id == excess_line_item_id,
+            ExcessOffer.status.in_([s.value for s in _ACTIVE_OFFER_STATUSES]),
+        )
+        .all()
+    )
+
+    item.offer_count = len({r.offer_id for r in rows})
+
+    priced = [r for r in rows if r.unit_price is not None]
+    if priced:
+        best = min(priced, key=lambda r: r.unit_price)
+        item.best_offer_unit_price = best.unit_price
+        item.best_offer_id = best.offer_id
+    else:
+        item.best_offer_unit_price = None
+        item.best_offer_id = None
+
+    logger.debug(
+        "Recomputed rollup for line_item={}: count={} best_price={} best_offer={}",
+        excess_line_item_id,
+        item.offer_count,
+        item.best_offer_unit_price,
+        item.best_offer_id,
+    )
+
+
+def withdraw_offer(db: Session, offer_id: int) -> ExcessOffer:
+    """Withdraw an inbound offer and recompute the rollup of every line it touched.
+
+    Marks the offer ``withdrawn`` so its lines drop out of the active-state rollup, then
+    recomputes ``best_offer_unit_price`` / ``best_offer_id`` / ``offer_count`` for each
+    line item the offer referenced. Raises 404 if the offer does not exist.
+    """
+    offer = db.get(ExcessOffer, offer_id)
+    if not offer:
+        raise HTTPException(404, f"ExcessOffer {offer_id} not found")
+
+    affected = {line.excess_line_item_id for line in offer.lines if line.excess_line_item_id is not None}
+    offer.status = ExcessOfferStatus.WITHDRAWN
+    db.flush()
+
+    for line_item_id in affected:
+        recompute_line_rollup(db, line_item_id)
+
+    _safe_commit(db, entity="excess offer withdrawal")
+    db.refresh(offer)
+    logger.info("Withdrew ExcessOffer id={} ({} lines recomputed)", offer_id, len(affected))
+    return offer
 
 
 # ---------------------------------------------------------------------------
