@@ -168,19 +168,27 @@ async def _process_cdrs(db, settings) -> dict:
         optimistic = _find_optimistic_row(db, user_id_val, direction, external_phone, norm["occurred_at"])
 
         if optimistic is not None:
-            # Enrich the existing click row instead of creating a second one
+            # Enrich the existing click row instead of creating a second one.
+            # Always merge additive slots; only adopt CDR call_outcome + recompute
+            # is_meaningful when the optimistic row has no existing outcome
+            # (preserves rep-stamped LEFT_MESSAGE against an un-answered CDR).
             optimistic.external_id = norm["external_id"]
             optimistic.occurred_at = norm["occurred_at"]
             optimistic.duration_seconds = norm["duration_seconds"]
             merged = dict(optimistic.details or {})
-            merged.update({"call_outcome": cdr_outcome.value, "source": "8x8_cdr"})
+            merged["source"] = "8x8_cdr"
             if norm["department"]:
                 merged["department"] = norm["department"]
             if norm.get("recording_url"):
                 merged["recording_url"] = norm["recording_url"]
+            if not merged.get("call_outcome"):
+                merged["call_outcome"] = cdr_outcome.value
+                optimistic.is_meaningful = cdr_outcome.value in MEANINGFUL_CALL_OUTCOMES
             optimistic.details = merged
-            optimistic.is_meaningful = cdr_outcome.value in MEANINGFUL_CALL_OUTCOMES
             db.flush()
+            from ..services.cadence_service import bump_clocks_from_activity
+
+            bump_clocks_from_activity(db, optimistic)
             record = optimistic
             logger.info(f"CDR reconciled: enriched optimistic row id={optimistic.id} with callId={norm['external_id']}")
         else:
@@ -280,6 +288,7 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
         .all()
     )
 
+    matches: list[tuple] = []
     for row in candidates:
         # Phone match: normalize both sides
         row_e164 = normalize_e164(row.contact_phone or "")
@@ -293,9 +302,13 @@ def _find_optimistic_row(db, user_id, direction, external_phone, cdr_occurred_at
         if row_time.tzinfo is None:
             row_time = row_time.replace(tzinfo=timezone.utc)
         if window_start <= row_time <= window_end:
-            return row
+            matches.append((abs((row_time - cdr_occurred_at).total_seconds()), row.id, row))
 
-    return None
+    if not matches:
+        return None
+    # Return nearest-in-time row (ties broken by lowest id)
+    matches.sort(key=lambda t: (t[0], t[1]))
+    return matches[0][2]
 
 
 def _update_watermark(db, watermark_row, until: datetime):

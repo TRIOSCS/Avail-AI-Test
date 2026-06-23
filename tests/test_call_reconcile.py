@@ -161,11 +161,12 @@ class TestReconcileOptimisticRow:
     @patch("app.services.activity_service.log_call_activity")
     @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
     @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
-    async def test_cadence_not_bumped_twice_on_reconcile(self, mock_auth, mock_fetch, mock_log, mock_match):
-        """When reconciling, bump_clocks_from_activity is NOT called a second time.
+    async def test_cadence_bumped_once_on_reconcile(self, mock_auth, mock_fetch, mock_log, mock_match):
+        """When reconciling, bump_clocks_from_activity is called exactly once.
 
-        The click-to-call path already bumped cadence. Reconcile only enriches the row;
-        it does not re-bump.
+        The enrich path always calls bump (forward-only/idempotent) to correct vendor
+        'Log Call' rows that skipped the click-to-call bump path.  For rows already
+        bumped at click, the forward-only guard is a no-op.
         """
         from app.jobs.eight_by_eight_jobs import _process_cdrs
         from app.services import cadence_service
@@ -178,8 +179,8 @@ class TestReconcileOptimisticRow:
 
         with patch.object(cadence_service, "bump_clocks_from_activity") as mock_bump:
             await _process_cdrs(db, FAKE_SETTINGS)
-            # bump should NOT be called during reconcile
-            mock_bump.assert_not_called()
+            # bump is called exactly once during reconcile (forward-only, idempotent)
+            mock_bump.assert_called_once_with(db, optimistic)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

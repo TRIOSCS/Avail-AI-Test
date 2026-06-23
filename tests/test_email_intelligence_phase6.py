@@ -370,13 +370,15 @@ class TestJobCalendarScan:
             mock_scan.assert_not_called()
 
     def test_registered_in_scheduler(self):
-        """calendar_scan job is registered in configure_scheduler."""
+        """calendar_scan job is registered when activity_tracking_enabled=True."""
         from app.scheduler import configure_scheduler
 
+        settings = _scheduler_settings()
+        settings.activity_tracking_enabled = True
         mock_scheduler = MagicMock()
         with (
             patch("app.scheduler.scheduler", mock_scheduler),
-            patch("app.config.settings", _scheduler_settings()),
+            patch("app.config.settings", settings),
         ):
             configure_scheduler()
 

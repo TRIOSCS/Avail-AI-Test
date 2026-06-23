@@ -113,12 +113,18 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
 
     # 1. Exact SiteContact.email match — resolves directly to company without
     #    needing an intermediate CustomerSite lookup.
+    # Order: verified first, then primary, then lowest id — mirrors _resolve_site_contact.
     sc_exact = (
         db.query(SiteContact)
         .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
         .filter(
             func.lower(SiteContact.email) == email_lower,
             CustomerSite.is_active.is_(True),
+        )
+        .order_by(
+            SiteContact.email_verified.desc(),
+            SiteContact.is_primary.desc(),
+            SiteContact.id.asc(),
         )
         .first()
     )
