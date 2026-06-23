@@ -481,7 +481,8 @@ async def test_screen_prospect_empty_llm_response_returns_error(db_session, monk
 
 
 async def test_screen_prospect_llm_insufficient_data_sets_flag(db_session, monkeypatch):
-    """When LLM returns insufficient_data for a grounded prospect → sets needs_more_enrichment."""
+    """When LLM returns insufficient_data for a grounded prospect → sets
+    needs_more_enrichment."""
     from app.services import prospect_screening as ps
 
     monkeypatch.setattr(ps.settings, "ai_screen_enabled", True)
