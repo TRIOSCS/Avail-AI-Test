@@ -2252,6 +2252,42 @@ class TestCrossRequisitionTracking:
         # The exact subject the send will produce — both tokens, ascending req id.
         assert f"RFQ — 2 parts [ref:{lo}] [ref:{hi}]" in resp.text
 
+    def test_cross_req_preview_groups_parts_by_requisition(self, client, db_session):
+        """Item 3: a cross-requisition preview groups the parts body under a REQ-{id}
+        subhead per requisition (ascending), so the buyer sees which parts belong to
+        which requisition."""
+        (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": [str(r_a.id), str(r_b.id)],
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        # Both requisition subheads are present, with each requisition's own part.
+        assert f"REQ-{req_a.id}" in resp.text
+        assert f"REQ-{req_b.id}" in resp.text
+        assert "CROSS-MPN-A (100 pcs)" in resp.text
+        assert "CROSS-MPN-B (200 pcs)" in resp.text
+
+    def test_single_req_preview_has_no_req_subhead(self, client, db_session):
+        """Item 3 regression: a single-requisition preview keeps the flat inline parts
+        list — no REQ-{id} subhead noise."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.post(
+            "/v2/partials/sightings/preview-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme"],
+                "email_body": "Please quote.",
+            },
+        )
+        assert resp.status_code == 200
+        assert "TEST-MPN-001 (100 pcs)" in resp.text
+        assert "REQ-" not in resp.text
+
     def test_send_passes_per_requisition_parts_map(self, client, db_session, monkeypatch):
         (req_a, r_a), (req_b, r_b) = _seed_two_requisitions(db_session)
         captured = {}

@@ -2173,6 +2173,18 @@ async def sightings_preview_inquiry(
     avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
+    # Per-requisition grouped parts for the preview body — when the basket spans more
+    # than one requisition the preview shows a REQ-{id} subhead per group so the buyer
+    # can see which parts belong to which requisition. requisition_ids is already sorted
+    # ascending (lockstep with the subject tokens). The flat parts_list stays for the
+    # single-requisition case (is_cross_req False).
+    requisition_parts_grouped: list[dict] = []
+    for rid in requisition_ids:
+        req_parts = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements if r.requisition_id == rid]
+        if req_parts:
+            requisition_parts_grouped.append({"req_id": rid, "parts": req_parts})
+    is_cross_req = len(requisition_ids) > 1
+
     # Advisory DNC set — look up which resolved emails are flagged do_not_contact.
     # This mirrors the send-time check in email_service.py so preview ≈ what sends.
     preview_dnc_emails: set[str] = _dnc_emails_for_cards(db, card_ids) if card_ids else set()
@@ -2240,6 +2252,8 @@ async def sightings_preview_inquiry(
         "email_body": email_body,
         "unavailable_vendors": unavailable_vendors,
         "preview_attachments": preview_attachments,
+        "requisition_parts_grouped": requisition_parts_grouped,
+        "is_cross_req": is_cross_req,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
