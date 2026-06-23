@@ -58,9 +58,9 @@
             {% endif %}
           </div>
           {% if v.engagement_score %}
-          <span class="text-xs text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
+          <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness (engagement score = reply rate × recency). This number is their engagement score.">Score: {{ v.engagement_score|round|int }}</span>
           {% elif v.vendor_score is not none %}
-          <span class="text-xs text-gray-400">Score: {{ v.vendor_score|round|int }}</span>
+          <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness. This is the overall vendor quality score (no engagement data yet).">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
         </label>
         {% elif v.has_contact and is_dnc %}

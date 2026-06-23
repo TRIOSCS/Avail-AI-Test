@@ -2576,6 +2576,25 @@ class TestSightingsVendorModal:
         assert resp.status_code == 200
         assert f"RFQ — 1 part [ref:{req.id}]" in resp.text
 
+    def test_score_span_has_ranking_tooltip(self, client, db_session):
+        """Item 4: the score span carries a title attribute explaining vendors are
+        ranked by responsiveness, so the number isn't ambiguous."""
+        _, r, s = _seed_data(db_session)
+        card = VendorCard(
+            normalized_name="good vendor",
+            display_name="Good Vendor",
+            is_blacklisted=False,
+            engagement_score=50.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@good.com", source="email"))
+        s.vendor_card_id = card.id
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "ranked by responsiveness" in resp.text
+
     def test_xdata_not_truncated_with_vendors(self, client, db_session):
         """Regression for the broken "Send RFQ" modal.
 
