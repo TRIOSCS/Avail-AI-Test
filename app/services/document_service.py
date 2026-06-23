@@ -45,8 +45,17 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
 
 
 def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
-    """Generate a PDF report for a quote."""
+    """Generate the customer-facing quote PDF from the clean export whitelist.
+
+    Renders ``quote_report.html`` from ``quote_builder_service.quote_export_context`` —
+    a pure whitelist that strips every vendor / offer / source identity field at
+    assembly (mirrors the bid-back path). Cleanliness is guaranteed by the context, not
+    by the template happening to omit a column. The header still carries the company /
+    site identity (these are the customer's own details, not seller-internal), so they
+    are looked up here and passed alongside the whitelisted payload.
+    """
     from app.models import Company, CustomerSite, Quote
+    from app.services.quote_builder_service import quote_export_context
 
     quote = db.get(Quote, quote_id)
     if not quote:
@@ -55,14 +64,15 @@ def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
     customer_site = db.get(CustomerSite, quote.customer_site_id) if quote.customer_site_id else None
     company = db.get(Company, customer_site.company_id) if customer_site else None
 
-    line_items = quote.line_items or []
+    ctx = quote_export_context(quote)
 
     return _render_pdf(
         "quote_report.html",
         quote=quote,
         customer_site=customer_site,
         company=company,
-        line_items=line_items,
+        export=ctx,
+        line_items=ctx["lines"],
     )
 
 

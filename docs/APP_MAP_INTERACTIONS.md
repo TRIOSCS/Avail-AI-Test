@@ -1128,6 +1128,25 @@ crm/quotes.py + quote_builder_service.py
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+**Build-Quote service layer (in-workspace tab — Chunk A).** Three additive,
+compute-on-read helpers in `quote_builder_service.py` back the reshaped
+Build-Quote tab (no schema change):
+
+- `best_cost_for(db, requirement_id)` / `best_costs_for(db, requirement_ids)`
+  — the MIN `unit_price` across a requirement's ACTIVE offers plus the offer
+  that provided it (`{"unit_cost", "offer_id"}`). Buyer-side mirror of the
+  resell `ExcessLineItem.best_offer_unit_price` rollup, computed at read time.
+- `margin_guardrail(cost, sell, *, min_margin_pct=10.0)` — pure helper
+  returning a short warning when a line sells below cost or under the margin
+  floor (matches `proactive_min_margin_pct` / `buyplan_min_margin_pct`).
+- `quote_export_context(quote)` — the CLEAN customer-facing whitelist
+  (`lines` of part_number/manufacturer/quantity/condition/cost/sell/margin/
+  extended + header). Mirrors `bid_back_service.bid_back_export_context`:
+  vendor / offer / source identity is stripped at ASSEMBLY, never by template
+  omission. `document_service.generate_quote_report_pdf` now renders
+  `quote_report.html` from this context, so the customer PDF cannot leak a
+  vendor name.
+
 ## 6. Buy Plan Workflow
 
 ```
