@@ -1,7 +1,7 @@
 """Resell-outreach tracking schema (ADDITIVE).
 
-Revision ID: 132_resell_outreach_schema
-Revises: 131_tbf_search_tables
+Revision ID: 133_resell_outreach_schema
+Revises: 132_crm_custom_fields
 Create Date: 2026-06-23
 
 The outbound trader->buyer half of Resell: who the trader offered excess to and how
