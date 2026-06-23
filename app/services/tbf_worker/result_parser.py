@@ -14,9 +14,12 @@ TBF is a Vue SPA. The results table is the first ``<table>`` whose rows include
 - td[4]: price ``<span>`` — either ``"CALL"`` (no numeric) or a currency-symboled
   number like ``"€ 114"`` / ``"$ 99"`` / ``"£ 50"``
 - td[5]: member-tier badge (Gold/Diamond) — not parsed
-- td[6]: company / vendor — currently always anonymized to ``"TBS Member"``; the
-  real vendor identity is behind a row click (documented future enhancement, so
-  vendor_email / vendor_phone / vendor_company_id stay empty)
+- td[6]: company / vendor. When the session is authenticated, this carries the
+  real seller: the company name (the cell's ``title`` attr — full/untruncated —
+  and the first inner ``<div>``) plus a phone number in a second ``<div>``. When
+  the session is logged OUT, TBF anonymizes it to a single ``"TBS Member"`` div
+  with no phone. We pull the name from the title (falling back to the first div)
+  and the phone from the second div.
 - td[7]: country ISO (e.g. "GR", "US")
 
 Called by: worker loop (after search_engine)
@@ -52,6 +55,22 @@ class TbfSighting:
     is_authorized: bool = False  # authorized distributor flag
     uploaded_date: str = ""  # listing upload/refresh date
     supplier_product_url: str = ""  # deep link to the listing/profile
+
+
+def _is_phone_like(text: str) -> bool:
+    """True if ``text`` looks like a phone number rather than a company name.
+
+    TBF contact lines are like ``"+30 2492024777"`` / ``"+1 6087814030"``. A
+    nameless seller renders only such a string in the company cell; we must not
+    treat it as a vendor name. Heuristic: it has digits and, once ``+``, spaces,
+    ``-``, ``/``, ``(`` and ``)`` are stripped, what remains is all digits (i.e.
+    no letters — a real company name always carries letters).
+    """
+    text = (text or "").strip()
+    if not text or not any(ch.isdigit() for ch in text):
+        return False
+    stripped = text.translate(str.maketrans("", "", "+-/() "))
+    return stripped.isdigit()
 
 
 def parse_quantity(text: str) -> int | None:
@@ -144,10 +163,33 @@ def parse_results_html(html: str) -> list[TbfSighting]:
             price_text = price_span.get_text(strip=True) if price_span else cells[4].get_text(strip=True)
             price, currency = _parse_price(price_text)
 
-            # td[6]: company/vendor (anonymized "TBS Member"). The real vendor
-            # is behind a row click — vendor_email/phone/company_id left empty
-            # (documented future enhancement).
-            vendor_name = cells[6].get_text(strip=True)
+            # td[6]: company/vendor. Authenticated → real name (cell `title`
+            # attr / first div) + phone (second div). Logged out → a single
+            # "TBS Member" div, no phone. Never `get_text()` the whole cell —
+            # that would mash the name and phone together.
+            company_td = cells[6]
+            company_divs = company_td.find_all("div")
+            vendor_name = (company_td.get("title") or "").strip()
+            if not vendor_name and company_divs:
+                first_div_text = company_divs[0].get_text(strip=True)
+                # A nameless seller (no company set) renders only a phone in the
+                # cell. Never let that phone become the vendor identity — that
+                # would corrupt vendor matching/dedup downstream. Treat a
+                # phone-shaped first div as "no name" (row then skipped by
+                # sighting_writer's no-vendor guard).
+                vendor_name = "" if _is_phone_like(first_div_text) else first_div_text
+            vendor_phone = ""
+            if len(company_divs) > 1:
+                phone_text = company_divs[1].get_text(strip=True)
+                # The second div is the contact line; guard that it is phone-like.
+                if _is_phone_like(phone_text):
+                    vendor_phone = phone_text
+            # Either the name's own div was the phone, or a phone-only cell with
+            # no name div at all — recover the phone so we don't drop the contact.
+            if not vendor_phone and company_divs:
+                lone_text = company_divs[0].get_text(strip=True)
+                if not vendor_name and _is_phone_like(lone_text):
+                    vendor_phone = lone_text
 
             # td[7]: country ISO. No region mapping available — store country
             # and use the country code as region (sighting_writer tolerates it).
@@ -162,6 +204,7 @@ def parse_results_html(html: str) -> list[TbfSighting]:
                     price=price,
                     currency=currency,
                     vendor_name=vendor_name,
+                    vendor_phone=vendor_phone,
                     country=country,
                     region=country,
                     in_stock=True,  # an active listing

@@ -4,24 +4,20 @@ Thin subclass of CircuitBreakerBase that adds the TBF-specific
 check_page_health() method for browser DOM inspection.
 
 TBF is a Vue SPA. The only site-specific signal verified live is the
-session-expired state: the "TBS Member" member badge is absent AND a Sign-In
-modal / login form is present. No captcha / maintenance / rate-limit markers
-were observed, so we do not invent them — the base empty-streak / error trips
-cover the rest.
+session-expired state: the "Sign out" control (the logged-in marker) is absent.
+We share the single positive marker with session_manager (LOGGED_IN_MARKER) so
+the two can never disagree about how "logged in" is detected. No captcha /
+maintenance / rate-limit markers were observed, so we do not invent them — the
+base empty-streak / error trips cover the rest.
 
 Called by: worker loop (after each search)
-Depends on: search_worker_base.circuit_breaker.CircuitBreakerBase
+Depends on: search_worker_base.circuit_breaker.CircuitBreakerBase, session_manager
 """
 
 from loguru import logger
 
 from ..search_worker_base.circuit_breaker import CircuitBreakerBase
-
-# Logged-in marker text (lowercased for innerText comparison).
-_MEMBER_MARKER = "tbs member"
-
-# Sign-In modal / login-form signals (lowercased).
-_LOGIN_SIGNALS = ("sign in",)
+from .session_manager import LOGGED_IN_MARKER
 
 
 class CircuitBreaker(CircuitBreakerBase):
@@ -32,13 +28,15 @@ class CircuitBreaker(CircuitBreakerBase):
 
         Returns a status string:
         - "HEALTHY" — all good
-        - "SESSION_EXPIRED" — logged-out: "TBS Member" marker absent AND a
-          Sign-In modal/login form present (normal, handled by session_manager)
+        - "SESSION_EXPIRED" — logged-out: the "Sign out" marker is absent
+          (normal, handled by session_manager)
         - Other values trip or accumulate toward tripping the breaker.
         """
         try:
             url = page.url
-            content = await page.evaluate("() => document.body.innerText.toLowerCase().substring(0, 3000)")
+            # Liveness probe: a responsive page returns body text; a hung/broken
+            # page raises and accumulates toward a trip.
+            await page.evaluate("() => document.body.innerText")
         except Exception as e:
             self.consecutive_failures += 1
             if self.consecutive_failures >= 3:
@@ -50,12 +48,14 @@ class CircuitBreaker(CircuitBreakerBase):
             self._trip(f"Unexpected redirect to: {url}")
             return "UNEXPECTED_REDIRECT"
 
-        # Session expired: the authenticated "TBS Member" badge is gone AND a
-        # Sign-In modal / login form is on the page. The session_manager will
-        # re-log-in and the worker re-queues the item.
-        member_present = _MEMBER_MARKER in content
-        login_present = any(signal in content for signal in _LOGIN_SIGNALS)
-        if not member_present and login_present:
+        # Session expired: the "Sign out" marker is absent (logged out). The
+        # session_manager re-authenticates and the worker re-queues. Fail-safe:
+        # a locator error reads as expired (re-login) rather than HEALTHY.
+        try:
+            logged_in = await page.locator(LOGGED_IN_MARKER).count() > 0
+        except Exception:
+            logged_in = False
+        if not logged_in:
             return "SESSION_EXPIRED"
 
         # No captcha / rate-limit / maintenance markers were observed on TBF, so

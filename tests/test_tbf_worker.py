@@ -20,7 +20,9 @@ import inspect
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.models import Sighting, TbfSearchQueue, TbfWorkerStatus
 from app.services.tbf_worker.config import TbfConfig
@@ -429,7 +431,9 @@ class TestResultParser:
         assert first.manufacturer == "Major Brand"
         assert first.quantity == 18
         assert isinstance(first.quantity, int)
+        # Logged-OUT fixture: vendor anonymized, no phone line.
         assert first.vendor_name == "TBS Member"
+        assert first.vendor_phone == ""
         assert first.country == "GR"
         # No region mapping available — region falls back to the country code.
         assert first.region == "GR"
@@ -472,15 +476,73 @@ class TestResultParser:
         assert "GR" in countries
         assert "US" in countries
 
-    def test_vendor_identity_is_anonymized(self):
-        """Vendor is the anonymized 'TBS Member'; real identity (behind a row click) is
-        a documented future enhancement, so contact fields stay empty."""
+    def test_logged_out_fixture_anonymizes_vendor(self):
+        """Logged OUT, TBF anonymizes every seller to 'TBS Member' with no phone — the
+        parser captures that faithfully (the worker's session check / circuit breaker
+        are what keep it logged in so this is the exception, not the norm)."""
         sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
         for s in sightings:
             assert s.vendor_name == "TBS Member"
             assert s.vendor_email == ""
             assert s.vendor_phone == ""
             assert s.vendor_company_id == ""
+
+    def test_logged_in_fixture_reveals_real_vendor_and_phone(self):
+        """Logged IN, td[6] carries the real company name (cell title / first div) plus
+        a phone number (second div) — the parser splits them into vendor_name +
+        vendor_phone instead of mashing them together."""
+        sightings = parse_results_html(_read_fixture("tbf_results_loggedin_ddr4.html"))
+        assert len(sightings) == 10
+        # No row is the anonymized placeholder, and every seller has a real name.
+        assert all(s.vendor_name and s.vendor_name != "TBS Member" for s in sightings)
+        first = sightings[0]
+        assert first.vendor_name == "D. Gerasis - K. Karpouzas G.P. Rename"
+        assert first.vendor_phone == "+30 2492024777"
+        # The name must not have the phone digits mashed onto it.
+        assert "+" not in first.vendor_name
+        # A US seller's name + phone are also split cleanly.
+        dynamic = next(s for s in sightings if s.vendor_name == "Dynamic Lifecycle Innovations LLC")
+        assert dynamic.vendor_phone == "+1 6087814030"
+        # Contract: even authenticated, td[6] yields only name+phone — email and
+        # company_id stay empty (those identities are still behind a row click).
+        for s in sightings:
+            assert s.vendor_email == ""
+            assert s.vendor_company_id == ""
+
+    def test_title_absent_falls_back_to_first_div_name(self):
+        """If TBF drops the cell `title` attr, vendor_name must still come from the
+        first <div> (a real company name), with the phone from the second div."""
+        html = (
+            "<table><tr class='hover-higlight-anchor'>"
+            "<td><div class='text-red-600'>17P9905</div><div title='d'>d</div></td>"
+            "<td>IBM</td><td>5</td><td>NEW</td><td><span>CALL</span></td><td>Gold</td>"
+            "<td><div>Acme Components Ltd</div><div> +44 2071234567 </div></td><td>GB</td>"
+            "</tr></table>"
+        )
+        s = parse_results_html(html)[0]
+        assert s.vendor_name == "Acme Components Ltd"  # first div, no title attr
+        assert s.vendor_phone == "+44 2071234567"
+
+    def test_phone_only_company_cell_does_not_leak_phone_as_vendor_name(self):
+        """A nameless seller (no company set) renders only a phone in td[6].
+
+        That phone must NOT become the vendor identity — it would corrupt vendor
+        matching/dedup downstream (sighting_writer normalizes vendor_name into the dedup
+        key). The parser leaves vendor_name empty (so sighting_writer's no-vendor guard
+        skips the row) and recovers the phone into vendor_phone.
+        """
+        html = (
+            "<table><tr class='hover-higlight-anchor'>"
+            "<td><div class='text-red-600'>17P9905</div><div title='d'>d</div></td>"
+            "<td>IBM</td><td>50</td><td>NEW</td><td><span>CALL</span></td><td>Gold</td>"
+            "<td><div> +44 2071234567 </div></td><td>GB</td>"
+            "</tr></table>"
+        )
+        sightings = parse_results_html(html)
+        assert len(sightings) == 1
+        s = sightings[0]
+        assert s.vendor_name == "", "a phone must never be used as the vendor name"
+        assert s.vendor_phone == "+44 2071234567", "the phone should be recovered, not dropped"
 
     def test_no_results_fixture_returns_empty(self):
         assert parse_results_html(_read_fixture("tbf_results_none.html")) == []
@@ -522,3 +584,210 @@ class TestBrowserModuleContracts:
         from app.services.tbf_worker.circuit_breaker import CircuitBreaker
 
         assert inspect.iscoroutinefunction(CircuitBreaker().check_page_health)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# SESSION / BREAKER LOGIN-STATE DETECTION
+#
+# Regression guard for the original bug: the code keyed on "TBS Member" (the
+# logged-OUT company label) as a logged-IN marker, so both the session-health
+# check and the circuit breaker were inverted. The fix uses a POSITIVE,
+# fail-safe marker: logged-in == the "Sign out" control is present.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _mock_page(marker_count: int, url: str = "https://www.thebrokersite.com/parts?query=x"):
+    """Mock Patchright page whose ``locator(...).count()`` returns marker_count (the
+    LOGGED_IN_MARKER 'Sign out' control count) and whose evaluate() succeeds."""
+    page = MagicMock()
+    page.url = url
+    page.evaluate = AsyncMock(return_value="body text")
+    locator = MagicMock()
+    locator.count = AsyncMock(return_value=marker_count)
+    page.locator = MagicMock(return_value=locator)
+    return page
+
+
+class TestSessionHealthMarker:
+    def _session(self, marker_count: int):
+        from app.services.tbf_worker.session_manager import TbfSessionManager
+
+        session = TbfSessionManager(TbfConfig())
+        session._page = _mock_page(marker_count)
+        return session
+
+    async def test_logged_in_when_signout_marker_present(self):
+        """'Sign out' control present == authenticated."""
+        assert await self._session(1).check_session_health() is True
+
+    async def test_logged_out_when_signout_marker_absent(self):
+        """No 'Sign out' control == logged out (fail-safe; old code returned True)."""
+        assert await self._session(0).check_session_health() is False
+
+    async def test_locator_error_reads_as_logged_out(self):
+        """A locator exception must fail SAFE (logged out → re-login), not raise."""
+        from app.services.tbf_worker.session_manager import TbfSessionManager
+
+        session = TbfSessionManager(TbfConfig())
+        page = MagicMock()
+        loc = MagicMock()
+        loc.count = AsyncMock(side_effect=RuntimeError("boom"))
+        page.locator = MagicMock(return_value=loc)
+        session._page = page
+        assert await session.check_session_health() is False
+
+
+class TestCircuitBreakerSessionDetection:
+    async def test_session_expired_when_marker_absent(self):
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        assert await CircuitBreaker().check_page_health(_mock_page(0)) == "SESSION_EXPIRED"
+
+    async def test_healthy_when_marker_present(self):
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        assert await CircuitBreaker().check_page_health(_mock_page(1)) == "HEALTHY"
+
+    async def test_unexpected_redirect_off_domain_trips(self):
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        page = _mock_page(1, url="https://evil.example.com/phish")
+        assert await CircuitBreaker().check_page_health(page) == "UNEXPECTED_REDIRECT"
+
+    async def test_check_failed_when_evaluate_raises_and_trips_after_three(self):
+        """A hung/broken page (evaluate raises) → CHECK_FAILED, tripping after 3."""
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        cb = CircuitBreaker()
+        page = MagicMock()
+        page.url = "https://www.thebrokersite.com/parts?query=x"
+        page.evaluate = AsyncMock(side_effect=RuntimeError("hung"))
+        assert await cb.check_page_health(page) == "CHECK_FAILED"
+        assert cb.consecutive_failures == 1
+        await cb.check_page_health(page)
+        await cb.check_page_health(page)
+        assert cb.should_stop() is True
+
+    async def test_locator_error_reads_as_session_expired(self):
+        """A locator exception must fail SAFE (re-login), never HEALTHY."""
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        page = MagicMock()
+        page.url = "https://www.thebrokersite.com/parts?query=x"
+        page.evaluate = AsyncMock(return_value="body")
+        loc = MagicMock()
+        loc.count = AsyncMock(side_effect=RuntimeError("boom"))
+        page.locator = MagicMock(return_value=loc)
+        assert await CircuitBreaker().check_page_health(page) == "SESSION_EXPIRED"
+
+
+class TestLoginMarkerAgainstRealDom:
+    """Pin LOGGED_IN_MARKER's text against real captured DOM so a label/scope drift on
+    the Vue SPA fails CI instead of silently regressing to anonymized results."""
+
+    @staticmethod
+    def _signout_controls(fixture: str) -> int:
+        # Mirror LOGGED_IN_MARKER = "a:has-text('Sign out'), button:has-text('Sign out')".
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(_read_fixture(fixture), "html.parser")
+        return sum(1 for el in soup.find_all(["a", "button"]) if "sign out" in el.get_text(strip=True).lower())
+
+    def test_marker_present_on_real_logged_in_page(self):
+        assert self._signout_controls("tbf_results_loggedin_ddr4.html") > 0
+
+    def test_marker_absent_on_real_logged_out_page(self):
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(_read_fixture("tbf_page_loggedout.html"), "html.parser")
+        signin = sum(1 for el in soup.find_all(["a", "button"]) if "sign in" in el.get_text(strip=True).lower())
+        assert signin > 0, "logged-out fixture must carry a Sign In control (sanity)"
+        assert self._signout_controls("tbf_page_loggedout.html") == 0
+
+    def test_marker_constant_targets_signout_not_tbs_member(self):
+        from app.services.tbf_worker.session_manager import LOGGED_IN_MARKER
+
+        assert "Sign out" in LOGGED_IN_MARKER
+        assert "TBS Member" not in LOGGED_IN_MARKER
+
+
+def _login_mock_page(logged_in: bool, code_present: bool = False):
+    """Mock page that routes locator(selector) by what login()/check_session_health
+    query: the 'Sign out' marker and the 2FA code field get scripted counts; all
+    other selectors return a chainable, clickable/fillable locator. Every selector
+    (top-level and nested form.locator) is recorded on ``page._selectors``."""
+    page = MagicMock()
+    page._selectors = []
+    page.url = "https://www.thebrokersite.com/"
+    page.goto = AsyncMock()
+    page.wait_for_timeout = AsyncMock()
+    # No consent banner.
+    consent = MagicMock()
+    consent.count = AsyncMock(return_value=0)
+    consent.first = MagicMock()
+    consent.first.is_visible = AsyncMock(return_value=False)
+    page.get_by_role = MagicMock(return_value=consent)
+
+    def _locator(selector):
+        page._selectors.append(selector)
+        loc = MagicMock()
+        loc.first = MagicMock()
+        loc.first.click = AsyncMock()
+        loc.click = AsyncMock()
+        loc.fill = AsyncMock()
+        loc.wait_for = AsyncMock()
+        loc.locator = MagicMock(side_effect=_locator)
+        if "Sign out" in selector:
+            loc.count = AsyncMock(return_value=1 if logged_in else 0)
+        elif "code" in selector:
+            loc.count = AsyncMock(return_value=1 if code_present else 0)
+        else:
+            loc.count = AsyncMock(return_value=1)
+        return loc
+
+    page.locator = MagicMock(side_effect=_locator)
+    return page
+
+
+class TestLoginFlow:
+    @pytest.fixture(autouse=True)
+    def _no_real_sleep(self):
+        """Login() has fixed asyncio.sleep settles — stub them so tests stay fast."""
+        with patch("app.services.tbf_worker.session_manager.asyncio.sleep", new=AsyncMock()):
+            yield
+
+    def _session(self, page, username="member@trio.com", password="pw"):
+        from app.services.tbf_worker.session_manager import TbfSessionManager
+
+        cfg = TbfConfig()
+        cfg.TBF_USERNAME = username
+        cfg.TBF_PASSWORD = password
+        s = TbfSessionManager(cfg)
+        s._page = page
+        return s
+
+    async def test_returns_false_when_creds_unset_without_touching_page(self):
+        page = _login_mock_page(logged_in=True)
+        s = self._session(page, username="", password="")
+        assert await s.login() is False
+        page.goto.assert_not_called()
+
+    async def test_success_when_marker_present_after_submit(self):
+        page = _login_mock_page(logged_in=True)
+        s = self._session(page)
+        assert await s.login() is True
+        assert s.is_logged_in is True
+        # The form's submit control was used (not the nav 'Sign In' toggle).
+        assert any("button[type=submit]" in sel for sel in page._selectors)
+
+    async def test_failure_when_marker_absent_and_no_2fa(self):
+        page = _login_mock_page(logged_in=False, code_present=False)
+        s = self._session(page)
+        assert await s.login() is False
+        assert s.is_logged_in is False
+
+    async def test_detects_2fa_block(self):
+        page = _login_mock_page(logged_in=False, code_present=True)
+        s = self._session(page)
+        assert await s.login() is False
+        assert any("code" in sel for sel in page._selectors)

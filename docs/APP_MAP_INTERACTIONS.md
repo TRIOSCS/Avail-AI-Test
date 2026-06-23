@@ -777,7 +777,7 @@ policy behavior for free — in its OWN session, right where the rows are create
    follows the connector-aware delete (inside search's separate write session).
 2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
 3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
-   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ships dormant until Phase-2 selectors land).
+   `app/services/tbf_worker/sighting_writer.py` — same, The Broker Forum worker (ACTIVE: logs in with member creds and captures the real seller `vendor_name` + `vendor_phone` from the authenticated listing — logged-out, TBF anonymizes the seller to "TBS Member"). The session/circuit-breaker key on a POSITIVE, fail-safe logged-in marker (the "Sign out" control present, `session_manager.LOGGED_IN_MARKER`); never on "TBS Member" text, which is the logged-OUT anonymized company label.
 4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
    release path: a buyer-routed attachment with qty > 0 releases instead of
    stamping). A RE-SENT attachment that hits the dedup key refreshes the
@@ -1204,18 +1204,28 @@ GET /v2/partials/resell/workspace?lens=mine|open   (shell: pills + stats + split
     |        lens=mine  → lists OWNED by user (seller name VISIBLE)
     |        lens=open  → posted lists owned by OTHERS, customer-ANONYMIZED (pure whitelist)
     +-- GET /v2/partials/resell/{id}                    (right detail: breadcrumb + chips +
-    |        lazy tabs Lines · Offers · Build Bid · Activity; customer chip owner-only)
+    |        lazy tabs Lines · Offers · Build Bid · Outreach(owner) · Activity; customer chip owner-only)
     |        +-- GET .../{id}/lines    (adaptive: 1 line → .card, ≥2 → compact-table)
     |        +-- GET .../{id}/offers   (owner-only stack: pinned take-all banner +
     |        |     per-line offer tables + unmatched queue; non-owner sees nothing)
     |        +-- GET .../{id}/lines/{line_id}/offers  (per-line comparison: best emerald +
-    |              price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
+    |        |     price-spread bar, cloned from quote_builder/modal.html, NO auto-select)
+    |        +-- GET .../{id}/offer-buyers-form  (owner-only buyer panel: ranked suggestions
+    |        |     [buyer_affinity_service.rank_buyers_for] + advisory overlap flag
+    |        |     [overlap_warning] + no-contact history rows + scope + channel)
+    |        +-- GET .../{id}/outreach           (owner-only Outreach tab: tracker rows +
+    |        |     'offered N · M responded · K bid' summary; lazy, explicit hx-target)
+    |        +-- GET .../{id}/not-yet-strip      (owner-only nudge: not_yet_offered_strip;
+    |              # TODO(crm-phase2) My-Day Task seam lives in resell_not_yet_strip)
     +-- POST /api/resell/lists                          (create → excess_service.create_excess_list)
     +-- POST /api/resell/{id}/lines                     (add line; resolves MaterialCard)
     +-- POST /api/resell/{id}/import-preview|import-confirm  (reuse excess parsers + preview grid)
     +-- POST /api/resell/{id}/publish                   (excess_mirror.publish_list → Sighting mirror)
     +-- POST /api/resell/{id}/offers                    (excess_service.submit_offer; scope
-          per_line|take_all; service enforces can_offer + the self-offer guard)
+    |     per_line|take_all; service enforces can_offer + the self-offer guard)
+    +-- POST /api/resell/{id}/outreach                  (owner-only; channel=email →
+          resell_outreach_service.submit_outreach_email [RFQ send engine], else
+          submit_outreach [manual log]; re-renders the Outreach tracker)
 ```
 
 Adaptive-detail rule (spec "density scales to line count, placement follows offer scope"):

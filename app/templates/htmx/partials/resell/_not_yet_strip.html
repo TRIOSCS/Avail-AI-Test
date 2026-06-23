@@ -1,0 +1,42 @@
+{#
+  resell/_not_yet_strip.html — "Usually offered, not yet this round" nudge strip.
+  The active don't-forget: buyers historically active in this list's commodities who
+  have NO outreach on THIS list yet. Wired into the EXISTING detail nudge surface (the
+  Outreach tab header) — NOT a new My-Day. Each chip pre-fills the offer-to-buyers
+  panel with that buyer so the nudge is one click from action.
+  Receives: list, buyers (RankedBuyer[]), user.
+  Called by: resell.resell_not_yet_strip (lazy, inside the Outreach tab).
+  Depends on: the global modal (offer-buyers panel).
+
+  ── My-Day seam (DO NOT build a new My-Day here) ──────────────────────────────────
+  The generalized follow-up Task hook lands in CRM Phase 2. When that ships, a buyer
+  surfaced here should also create a My-Day follow-up Task for the owner so the nudge
+  survives a page close. The router endpoint resell_not_yet_strip is the place to call
+  the Task service; this template only renders the in-page strip today.
+  # TODO(crm-phase2): create My-Day follow-up Task here (in resell_not_yet_strip) for
+  #                   each surfaced buyer, via the generalized Task service.
+#}
+{% set el = list %}
+
+{% if buyers %}
+<div class="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5">
+  <div class="flex items-start gap-2">
+    <svg class="h-4 w-4 mt-0.5 text-amber-500 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+    <div class="min-w-0">
+      <p class="text-xs font-medium text-amber-800">You usually offer this to these buyers — not yet this round</p>
+      <div class="mt-1.5 flex flex-wrap gap-1.5">
+        {% for b in buyers %}
+        {# Each chip opens the offer panel — no scope means the whole list. #}
+        <button type="button"
+                @click="$dispatch('open-modal')"
+                hx-get="/v2/partials/resell/{{ el.id }}/offer-buyers-form"
+                hx-target="#modal-content"
+                class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-white border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors">
+          {{ b.display_name }}
+        </button>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}

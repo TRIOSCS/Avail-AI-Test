@@ -6,11 +6,20 @@ ExcessOfferLine), and the trader assembles a clean bid back to the seller
 (CustomerBid / CustomerBidLine). This is the reverse of sourcing: the customer
 has parts to sell, Trio finds buyers.
 
+The OUTBOUND tracking layer (resell-outreach) records the OTHER direction: who the
+trader proactively offered excess to and how each buyer responded — ExcessOutreach
+(one row per buyer x line, the tracking spine) and BuyerScore (the inverse of the
+vendor scorecard — a per-buyer engagement rollup that feeds who-to-offer ranking).
+
 Business Rules:
 - ExcessList belongs to a Company (the seller) and is owned by a User (salesperson/trader)
 - ExcessLineItems cascade-delete with their parent ExcessList
 - ExcessOffers are inbound broker offers to buy (per_line or take_all)
 - CustomerBids are the outbound clean bid back to the seller
+- ExcessOutreach rows cascade-delete with their parent ExcessList (the list-scoped
+  outreach campaign); the per-line FK is nullable + SET NULL (list-wide outreach,
+  or a line edited away, never drops the tracking row)
+- BuyerScore is a passive rollup keyed 1:1 to a VendorCard (the canonical "who")
 
 Called by: routers/resell.py, services/excess_service.py
 Depends on: models/base, models with Company, User, VendorCard, CustomerSite
@@ -19,6 +28,7 @@ Depends on: models/base, models with Company, User, VendorCard, CustomerSite
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Column,
     ForeignKey,
     Index,
@@ -302,3 +312,90 @@ class CustomerBidLine(Base):
         Index("ix_customer_bid_lines_bid", "customer_bid_id"),
         Index("ix_customer_bid_lines_line_item", "excess_line_item_id"),
     )
+
+
+class ExcessOutreach(Base):
+    """A single trader→buyer outreach touch — the outbound tracking spine.
+
+    One row per buyer x line (compose is per-list, tracking is per-(buyer,line)): the
+    trader offered an excess list (or one line of it) to a buyer and this records the
+    medium and how the buyer responded. A parallel to the sales Contact/RFQ record,
+    NOT bolted onto it (spec §Open-decisions #1). ``excess_line_item_id`` is nullable
+    (SET NULL) for list-wide outreach and so a line edited away never drops the touch;
+    ``target_vendor_card_id`` is the canonical "who" to score/dedup against (SET NULL —
+    the touch survives a card merge). ``parts_included`` (JSON) carries the offered
+    lines/quantities snapshot; ``graph_*`` ids are stamped on the email path only.
+    """
+
+    __tablename__ = "excess_outreach"
+    id = Column(Integer, primary_key=True)
+    excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="CASCADE"), nullable=False)
+    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"), nullable=True)
+    target_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
+    submitted_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    channel = Column(String(20), default="email")  # email, phone, teams, marketplace, other
+    status = Column(String(20), default="sent")  # sent, opened, responded, bid, declined, no_response
+    graph_message_id = Column(String(255), nullable=True)
+    graph_conversation_id = Column(String(255), nullable=True)
+    parts_included = Column(JSON, nullable=True)
+    sent_at = Column(UTCDateTime, nullable=True)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+    excess_list = relationship("ExcessList", foreign_keys=[excess_list_id])
+    excess_line_item = relationship("ExcessLineItem", foreign_keys=[excess_line_item_id])
+    target_vendor_card = relationship("VendorCard", foreign_keys=[target_vendor_card_id])
+    submitted_by_user = relationship("User", foreign_keys=[submitted_by])
+
+    # --- Validators ---
+    @validates("channel")
+    def _validate_channel(self, _key, value):
+        from ..constants import ExcessOutreachChannel
+
+        valid = {e.value for e in ExcessOutreachChannel}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ExcessOutreach channel: {value!r}")
+        return value
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import ExcessOutreachStatus
+
+        valid = {e.value for e in ExcessOutreachStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ExcessOutreach status: {value!r}")
+        return value
+
+    __table_args__ = (
+        Index("ix_excess_outreach_list", "excess_list_id"),
+        Index("ix_excess_outreach_vendor_card", "target_vendor_card_id"),
+        Index("ix_excess_outreach_status", "status"),
+        Index("ix_excess_outreach_conversation", "graph_conversation_id"),
+    )
+
+
+class BuyerScore(Base):
+    """Per-buyer engagement rollup — the inverse of the vendor scorecard.
+
+    One row per ``vendor_card_id`` (the canonical buyer "who"): a passive rollup fed
+    from ExcessOffer + ExcessOutreach history, recomputed on offer-win + a nightly
+    backstop (spec §Open-decisions #6). Surfaces as the who-to-offer suggestion chips
+    and the buyer profile panel. ``commodity_affinity`` (JSON) holds the per-commodity
+    bought-before signal that seeds the MPN→commodity→engagement ranking.
+    """
+
+    __tablename__ = "buyer_scores"
+    id = Column(Integer, primary_key=True)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
+    offers_received = Column(Integer, nullable=False, default=0, server_default="0")
+    wins = Column(Integer, nullable=False, default=0, server_default="0")
+    avg_bid_pct_of_ask = Column(Numeric(6, 2), nullable=True)
+    response_rate = Column(Numeric(5, 2), nullable=True)
+    median_response_hours = Column(Numeric(8, 2), nullable=True)
+    last_offered_at = Column(UTCDateTime, nullable=True)
+    commodity_affinity = Column(JSON, nullable=True)
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+
+    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
+
+    __table_args__ = (Index("ix_buyer_scores_vendor_card", "vendor_card_id", unique=True),)
