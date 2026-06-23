@@ -339,3 +339,42 @@ def test_company_attachment_cascade_delete(db_session: Session, test_company: Co
     db_session.commit()
 
     assert db_session.get(CompanyAttachment, att_id) is None
+
+
+def test_site_contact_attachment_cascade_delete(db_session: Session, test_company: Company):
+    """Deleting a SiteContact also deletes its attachments (CASCADE)."""
+    site = _make_customer_site(db_session, test_company)
+    contact = _make_site_contact(db_session, site)
+    att = SiteContactAttachment(
+        site_contact_id=contact.id,
+        file_name="cascade_contact.pdf",
+        library_drive_id=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(att)
+    db_session.commit()
+    att_id = att.id
+
+    db_session.delete(contact)
+    db_session.commit()
+
+    assert db_session.get(SiteContactAttachment, att_id) is None
+
+
+def test_material_card_attachment_cascade_delete(db_session: Session):
+    """Deleting a MaterialCard also deletes its attachments (CASCADE)."""
+    card = _make_material_card(db_session)
+    att = MaterialCardAttachment(
+        material_card_id=card.id,
+        file_name="cascade_card.pdf",
+        library_drive_id=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(att)
+    db_session.commit()
+    att_id = att.id
+
+    db_session.delete(card)
+    db_session.commit()
+
+    assert db_session.get(MaterialCardAttachment, att_id) is None
