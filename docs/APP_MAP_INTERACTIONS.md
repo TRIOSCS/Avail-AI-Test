@@ -1250,6 +1250,31 @@ proactive matches surface on the Proactive tab without waiting for the daily cro
 Bounded to 5 offers per card (per_card_limit); the engine's own dedup prevents
 duplicate matches.
 
+### Unified AI Email Drafting (RFQ rephrase · vendor reply · follow-up)
+
+```
+app/services/email_drafting.py :: draft_email(kind, context)
+    kind="rfq_rephrase" --> ai_service.rephrase_rfq (Haiku) ; fallback = original body
+    kind="follow_up"    --> claude_text (Haiku)            ; fallback = template string
+    kind="vendor_reply" --> claude_json (Haiku)            ; fallback = None (blank box)
+
+Surfaces (all human-edit-before-send; nothing auto-sends):
+  RFQ compose  "AI Rephrase" button
+    POST /v2/partials/requisitions/{req_id}/ai-rephrase-email
+      --> draft_email("rfq_rephrase") --> <script> sets #rfq-body-textarea
+  Vendor response card  "AI Draft Reply" button
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/ai-draft-reply
+      --> draft_email("vendor_reply") --> reply_compose.html into #reply-area-{id}
+    POST /v2/partials/requisitions/{req_id}/responses/{response_id}/send-reply
+      --> Graph /me/sendMail (as user; TESTING bypass) ; marks response reviewed
+  Follow-up compose  "AI Draft" button
+    POST /v2/partials/follow-ups/{contact_id}/ai-draft
+      --> draft_email("follow_up") --> <script> sets #follow-up-body-{id}
+```
+
+Gives `rephrase_rfq` and `VendorResponse.classification` their first live consumers.
+All paths degrade gracefully when Claude is unavailable (cost_bucket="email_drafting").
+
 ## 8. Activity Digest (AI Timeline Summary)
 
 ```
