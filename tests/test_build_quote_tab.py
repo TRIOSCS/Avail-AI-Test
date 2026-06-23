@@ -25,7 +25,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Offer, Quote, Requirement, Requisition, User
+from app.models import Offer, Quote, QuoteLine, Requirement, Requisition, User
 from tests.conftest import engine
 
 _ = engine
@@ -138,8 +138,11 @@ class TestBuildQuoteAssemble:
         # Inline summary card renders with the clean quote number + a Download PDF link.
         assert quotes[0].quote_number in resp.text
         assert "Download PDF" in resp.text
-        # Customer-clean: no vendor name leaks into the owner's summary preview.
-        assert "Arrow" not in resp.text and "Avnet" not in resp.text
+        # Customer-clean: no vendor name leaks into the owner's summary preview. (The internal
+        # builder above the summary legitimately lists vendor offers in its per-line picker —
+        # the export whitelist strips them; only the summary/export must be vendor-free.)
+        summary_html = resp.text.split("Quote total")[0].rsplit("Download PDF", 1)[-1]
+        assert "Arrow" not in summary_html and "Avnet" not in summary_html
 
     def test_assemble_revision_preserves_lifecycle(
         self, client: TestClient, db_session: Session, quoteable_req: Requisition
@@ -196,6 +199,70 @@ class TestBuildQuoteAssemble:
         assert "below cost" in js
         assert "thin margin" in js
         assert "below the" in js  # blended-margin floor warning
+
+    def _offer_ids(self, db_session: Session, req: Requisition) -> dict[str, int]:
+        """{'best': <Avnet $0.40 offer id>, 'other': <Arrow $0.55 offer id>}."""
+        offers = db_session.query(Offer).filter(Offer.requirement_id == req.requirement_id).all()
+        best = min(offers, key=lambda o: float(o.unit_price))
+        other = max(offers, key=lambda o: float(o.unit_price))
+        return {"best": best.id, "other": other.id}
+
+    def test_assemble_persists_chosen_best_offer_on_quote_line(
+        self, client: TestClient, db_session: Session, quoteable_req: Requisition
+    ):
+        """Assembling with the auto-best offer writes QuoteLine.offer_id = best
+        offer."""
+        ids = self._offer_ids(db_session, quoteable_req)
+        sel = self._selection(quoteable_req, 0.60)
+        sel[0]["offer_id"] = ids["best"]
+        resp = client.post(
+            f"/v2/partials/requisitions/{quoteable_req.id}/build-quote/assemble",
+            data={"selections_json": json.dumps(sel)},
+        )
+        assert resp.status_code == 200
+        quote = db_session.query(Quote).filter(Quote.requisition_id == quoteable_req.id).one()
+        line = db_session.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).one()
+        assert line.offer_id == ids["best"]
+
+    def test_assemble_persists_overridden_non_best_offer_on_quote_line(
+        self, client: TestClient, db_session: Session, quoteable_req: Requisition
+    ):
+        """Overriding to a non-cheapest offer persists THAT offer on the quote line —
+        the salesperson is quoting the offer they are actually USING, not just the auto-
+        best."""
+        ids = self._offer_ids(db_session, quoteable_req)
+        sel = self._selection(quoteable_req, 0.70)
+        sel[0]["offer_id"] = ids["other"]
+        sel[0]["cost_price"] = 0.55
+        resp = client.post(
+            f"/v2/partials/requisitions/{quoteable_req.id}/build-quote/assemble",
+            data={"selections_json": json.dumps(sel)},
+        )
+        assert resp.status_code == 200
+        quote = db_session.query(Quote).filter(Quote.requisition_id == quoteable_req.id).one()
+        line = db_session.query(QuoteLine).filter(QuoteLine.quote_id == quote.id).one()
+        assert line.offer_id == ids["other"]
+        assert line.offer_id != ids["best"]
+
+    def test_tab_renders_per_line_offer_selector(self, client: TestClient, quoteable_req: Requisition):
+        """A line with 2+ ACTIVE offers exposes a per-line offer picker wired to the
+        Alpine offerId, so the salesperson can choose WHICH offer is used (default =
+        best)."""
+        resp = client.get(f"/v2/partials/requisitions/{quoteable_req.id}/build-quote")
+        assert resp.status_code == 200
+        html = resp.text
+        # The selector binds the chosen offer into the reactive line's offerId.
+        assert "offerId" in html
+        # Both vendor offers are listed as choices (internal-only; never exported to the customer doc).
+        assert "Arrow" in html and "Avnet" in html
+
+    def test_alpine_payload_sends_chosen_offer_id(self):
+        """The quoteBuilderTab payload carries the per-line chosen offerId as
+        offer_id."""
+        from pathlib import Path
+
+        js = Path("app/static/htmx_app.js").read_text()
+        assert "offer_id: l.offerId" in js
 
     def test_assemble_rejects_empty_selection(self, client: TestClient, quoteable_req: Requisition):
         resp = client.post(
@@ -255,6 +322,40 @@ class TestBuildQuoteGating:
             app.dependency_overrides.pop(get_db, None)
             app.dependency_overrides.pop(require_user, None)
         assert resp.status_code == 404
+
+    def test_non_owner_sales_assemble_post_blocked(
+        self, db_session: Session, sales_user: User, quoteable_req: Requisition
+    ):
+        """A SALES user who does not own the requisition cannot assemble via POST either
+        — gating parallels the GET-tab test (carry-over from the Chunk B review)."""
+        from app.database import get_db
+        from app.dependencies import require_user
+        from app.main import app
+
+        sel = json.dumps(
+            [
+                {
+                    "requirement_id": quoteable_req.requirement_id,
+                    "mpn": "LM317T",
+                    "qty": 100,
+                    "cost_price": 0.40,
+                    "sell_price": 0.60,
+                    "margin_pct": 33.33,
+                }
+            ]
+        )
+        app.dependency_overrides[get_db] = lambda: db_session
+        app.dependency_overrides[require_user] = lambda: sales_user
+        try:
+            with TestClient(app) as c:
+                resp = c.post(
+                    f"/v2/partials/requisitions/{quoteable_req.id}/build-quote/assemble",
+                    data={"selections_json": sel},
+                )
+        finally:
+            app.dependency_overrides.pop(get_db, None)
+            app.dependency_overrides.pop(require_user, None)
+        assert resp.status_code in (403, 404)
 
 
 class TestRepointedLaunch:

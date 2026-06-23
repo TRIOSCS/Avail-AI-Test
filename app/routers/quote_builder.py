@@ -314,6 +314,11 @@ def _build_quote_tab_context(request: Request, db: Session, req, quote=None) -> 
             "qty": li["qty"],
             "cost": li["best_cost"],
             "offerId": li["best_offer_id"],
+            # Per-line offer choices (internal only — vendor identity never crosses into the
+            # customer doc; quote_export_context strips it). Lets the salesperson pick WHICH
+            # offer is used; the chosen offerId + its cost drive the persisted QuoteLine and
+            # the live margin. id->cost keeps the @change handler a pure client-side lookup.
+            "offers": [{"id": o["id"], "cost": o["unit_price"]} for o in li["offers"]],
             "seed": li["sell_seed"],
             "mpn": li["mpn"],
             "mfr": li["manufacturer"],

@@ -82,7 +82,23 @@
             <td>
               <span class="font-mono font-medium text-gray-900">{{ l.mpn or '—' }}</span>
               {% if l.manufacturer %}<span class="block text-xs text-gray-400">{{ l.manufacturer }}</span>{% endif %}
-              {% if l.offer_count %}<span class="block text-xs text-gray-400">{{ l.offer_count }} offer{{ 's' if l.offer_count != 1 }}</span>{% endif %}
+              {# Per-line offer picker — internal only (vendor identity never crosses into the
+                 customer doc; quote_export_context strips it). Shown only when there is a real
+                 choice (2+ active offers); the chosen offer is what gets quoted and becomes the
+                 buy-plan default. Defaults to the best (cheapest) offer. #}
+              {% if l.offer_count > 1 %}
+              <select x-model.number="data[{{ rid }}].offerId"
+                      @change="selectOffer({{ rid }}, $event.target.value)"
+                      :disabled="!data[{{ rid }}].sel"
+                      class="input input-sm mt-1 max-w-xs text-xs"
+                      aria-label="Offer used for {{ l.mpn }}">
+                {% for o in l.offers %}
+                <option value="{{ o.id }}">{{ o.vendor_name }} · ${{ "{:,.4f}".format(o.unit_price) }}{{ ' · best' if o.is_best }}</option>
+                {% endfor %}
+              </select>
+              {% elif l.offer_count == 1 %}
+              <span class="block text-xs text-gray-400">{{ l.offers[0].vendor_name }} · ${{ "{:,.4f}".format(l.offers[0].unit_price) }}</span>
+              {% endif %}
             </td>
             <td class="text-right tabular-nums">{{ "{:,}".format(l.qty or 0) }}</td>
             <td>{{ l.condition or '—' }}</td>

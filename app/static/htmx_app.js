@@ -1956,6 +1956,19 @@ Alpine.data('quoteBuilderTab', (reqId, hasCustomerSite, minMarginPct, quoteExist
     });
   },
 
+  // Pick WHICH offer this line uses (default = best). Sets the chosen offerId (persisted on
+  // the QuoteLine, and the buy-plan default at build time) and re-points cost to that
+  // offer's price so the live margin reflects the offer actually being quoted. Vendor
+  // identity never leaves the builder — the customer doc strips it (quote_export_context).
+  selectOffer(id, offerId) {
+    const l = this.data[id];
+    if (!l) return;
+    const oid = parseInt(offerId, 10);
+    l.offerId = Number.isFinite(oid) ? oid : null;
+    const chosen = (l.offers || []).find(o => o.id === l.offerId);
+    if (chosen) l.cost = chosen.cost;
+  },
+
   payload() {
     return JSON.stringify(
       Object.entries(this.data)
