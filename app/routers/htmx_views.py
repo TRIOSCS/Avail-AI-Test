@@ -5103,15 +5103,7 @@ async def set_contact_role(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_role_chip_editor.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-            "roles": CANONICAL_ROLES,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5157,14 +5149,7 @@ async def set_contact_dnc(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_dnc_toggle.html",
-        {
-            "request": request,
-            "company": company,
-            "contact": contact,
-        },
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 _VALID_DISPOSITIONS = frozenset({"active", "bucket"})
@@ -5293,10 +5278,7 @@ async def set_contact_priority(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_priority_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 @router.post(
@@ -5341,10 +5323,7 @@ async def set_contact_archive(
         user.email,
         company_id,
     )
-    return template_response(
-        "htmx/partials/customers/_archive_toggle.html",
-        {"request": request, "company": company, "contact": contact},
-    )
+    return _render_contacts_list(request, user, company, db)
 
 
 # ── Increment 3: AI-organization surfaces (per-account) ───────────────────────
@@ -5974,7 +5953,17 @@ async def contacts_tab_suggested(
     try:
         contacts, errored = await find_suggested_contacts_with_errors(domain, company.name or "")
     except Exception as exc:
-        logger.warning("find_suggested_contacts_with_errors failed for company {}: {}", company_id, exc)
+        import httpx
+
+        if isinstance(exc, (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError)):
+            logger.warning("find_suggested_contacts_with_errors connectivity error for company {}: {}", company_id, exc)
+        else:
+            logger.error(
+                "find_suggested_contacts_with_errors unexpected error for company {}: {}",
+                company_id,
+                exc,
+                exc_info=True,
+            )
         contacts = []
         errored = ["all"]
 
@@ -6161,6 +6150,9 @@ async def create_site(
     if site.owner_id:
         _ = site.owner
 
+    # Avoid lazy-load during render: new site has zero contacts by definition.
+    site.site_contacts = []
+
     ctx = _base_ctx(request, user, "customers")
     ctx["company"] = company
     ctx["s"] = site
@@ -6252,8 +6244,14 @@ async def create_site_contact(
             .first()
         )
         if existing:
-            # Already exists — just return the list
-            pass
+            # Deprecated route: dedup silently returns the list; legacy path kept for
+            # backwards-compat only (contacts_tab_create is the canonical add endpoint).
+            logger.info(
+                "Dedup [legacy create_site_contact]: email {} already exists at site {} (company {})",
+                email,
+                site_id,
+                company_id,
+            )
         else:
             contact = SiteContact(
                 customer_site_id=site_id,
@@ -6585,18 +6583,16 @@ async def edit_site(
     if not site_name:
         raise HTTPException(400, "site_name is required")
     site.site_name = site_name
-    site.address_line1 = form.get("address_line1", "").strip() or site.address_line1
-    site.address_line2 = form.get("address_line2", "").strip() or site.address_line2
-    site.city = form.get("city", "").strip() or site.city
-    site.state = form.get("state", "").strip() or site.state
-    site.zip = form.get("zip", "").strip() or site.zip
-    site.country = form.get("country", "").strip() or site.country
-    site.site_type = form.get("site_type", "").strip() or site.site_type
-    site.payment_terms = form.get("payment_terms", "").strip() or site.payment_terms
-    site.shipping_terms = form.get("shipping_terms", "").strip() or site.shipping_terms
-    notes_val = form.get("notes", "").strip()
-    if notes_val:
-        site.notes = notes_val
+    site.address_line1 = form.get("address_line1", "").strip() or None
+    site.address_line2 = form.get("address_line2", "").strip() or None
+    site.city = form.get("city", "").strip() or None
+    site.state = form.get("state", "").strip() or None
+    site.zip = form.get("zip", "").strip() or None
+    site.country = form.get("country", "").strip() or None
+    site.site_type = form.get("site_type", "").strip() or None
+    site.payment_terms = form.get("payment_terms", "").strip() or None
+    site.shipping_terms = form.get("shipping_terms", "").strip() or None
+    site.notes = form.get("notes", "").strip() or None
     owner_id = form.get("owner_id", "")
     if owner_id and str(owner_id).isdigit():
         site.owner_id = int(owner_id)
@@ -6688,6 +6684,20 @@ async def edit_site_contact(
     email_val = form.get("email", "").strip()
     if email_val and "@" not in email_val:
         raise HTTPException(400, "Invalid email address")
+
+    # Per-site email uniqueness on edit
+    if email_val:
+        email_dup = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                sqlfunc.lower(SiteContact.email) == email_val.strip().lower(),
+                SiteContact.id != contact_id,
+            )
+            .first()
+        )
+        if email_dup:
+            raise HTTPException(409, f"Another contact at this site already uses {email_val}")
 
     # Write all editable fields with explicit clear semantics (no OR-fallback)
     contact.full_name = full_name
@@ -6797,7 +6807,14 @@ async def get_site_contact_notes(
 
     return template_response(
         "htmx/partials/customers/contact_notes.html",
-        {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
+        {
+            "request": request,
+            "contact": contact,
+            "notes": notes,
+            "company_id": company_id,
+            "site_id": site_id,
+            "no_email_contact": not contact.email,
+        },
     )
 
 

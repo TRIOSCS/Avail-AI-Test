@@ -65,7 +65,7 @@
            role="dialog" aria-modal="true" aria-labelledby="modal-title"
            :class="wide ? 'max-w-[calc(100vw-2rem)]' : 'max-w-lg'"
            x-trap.noscroll="open">
-        <h2 id="modal-title" class="sr-only">Dialog</h2>
+        {# modal-title id is set on the heading inside each loaded modal partial #}
         {# Persistent close affordance — every modal can be dismissed even if the
            loaded content template provides no close control of its own. #}
         <button type="button" @click="$dispatch('close-modal')" aria-label="Close"

@@ -121,22 +121,19 @@
           </svg>
           <span class="sr-only">Cadence &amp; settings</span>
         </button>
-        {# Secondary "+ Add Contact" in the header — demoted so the Contacts-tab CTA is primary #}
-        <button type="button"
-                @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-                class="inline-flex items-center gap-1 rounded-lg border border-brand-300 bg-white px-3 py-1.5 text-sm font-medium text-brand-500 hover:bg-brand-50 transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500">
-          + Add Contact
-        </button>
         {# Kebab — overflow actions (Merge duplicate) #}
         <div class="relative inline-block" x-data="{ open: false }" @click.outside="open = false">
           <button @click.stop="open = !open" type="button"
                   class="p-1.5 text-gray-400 hover:text-gray-600 rounded transition-colors focus:outline-none focus:ring-2 focus:ring-brand-500"
-                  aria-label="More account actions">
+                  aria-label="More account actions"
+                  :aria-expanded="open ? 'true' : 'false'"
+                  aria-haspopup="menu">
             <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
               <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
             </svg>
           </button>
           <div x-show="open" x-cloak
+               role="menu"
                class="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-20 py-1 text-xs text-left">
             {# Merge duplicate — opens modal with search + confirm flow #}
             <button type="button"
@@ -144,6 +141,7 @@
                     hx-target="#modal-content"
                     hx-swap="innerHTML"
                     @click.stop="$dispatch('open-modal'); open = false"
+                    role="menuitem"
                     class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Merge duplicate</button>
           </div>
         </div>
@@ -201,7 +199,9 @@
   {# ── Tabs — Contacts first + inlined (front-and-center call-list workflow) ── #}
   <div x-data="{ activeTab: 'contacts' }" @crm-switch-tab.window="activeTab = $event.detail.tab">
     <div class="border-b border-gray-200">
-      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections">
+      <nav class="flex gap-6 -mb-px" role="tablist" aria-label="Account detail sections"
+           @keydown.arrow-right.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i+1)%tabs.length].focus();tabs[(i+1)%tabs.length].click()"
+           @keydown.arrow-left.prevent="const tabs=$el.querySelectorAll('[role=tab]');const i=[...tabs].indexOf(document.activeElement);tabs[(i-1+tabs.length)%tabs.length].focus();tabs[(i-1+tabs.length)%tabs.length].click()">
         {% for tab_id, tab_label, tab_count in [
           ('contacts', 'Contacts', contact_count if contact_count is defined else none),
           ('sites', 'Sites', sites|length),
@@ -211,6 +211,7 @@
           ('buy_plans', 'Buy Plans', buy_plan_count if buy_plan_count is defined else none)
         ] %}
         <button @click="if (activeTab === '{{ tab_id }}') { $event.preventDefault(); } else { activeTab = '{{ tab_id }}'; }"
+                id="tab-{{ tab_id }}"
                 role="tab"
                 :aria-selected="activeTab === '{{ tab_id }}' ? 'true' : 'false'"
                 aria-controls="company-tab-content"
@@ -230,7 +231,7 @@
     </div>
 
     {# Tab content — contacts loaded inline on first load (click-to-contact panel) #}
-    <div id="company-tab-content" class="mt-4" role="tabpanel">
+    <div id="company-tab-content" class="mt-4" role="tabpanel" :aria-labelledby="'tab-' + activeTab">
       {% include "htmx/partials/customers/tabs/contacts_tab.html" %}
     </div>
   </div>

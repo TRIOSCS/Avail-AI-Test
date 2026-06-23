@@ -35,7 +35,7 @@
      {% if preselect_site_id is defined and preselect_site_id %}data-initial-site="{{ preselect_site_id }}"{% endif %}>
 
   {# ── Controls bar — people-search · site filter · Find / + Add Contact ──────── #}
-  <div class="bg-white rounded-lg border border-gray-200 p-3">
+  <div class="bg-white pb-3 border-b border-gray-100">
     <div class="flex flex-wrap items-center justify-between gap-2">
       <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1">
         {# People search — client-side filter over the rendered contacts. #}
@@ -68,12 +68,12 @@
                 hx-target='#suggested-contacts-panel'
                 hx-swap='innerHTML'
                 hx-indicator='#suggested-contacts-spinner'
-                class='px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50'>
+                class='px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-brand-500'>
           Find contacts
         </button>
         {% endif %}
         <button @click="$dispatch('open-modal', {url: '/v2/partials/customers/{{ company.id }}/contacts/add-form'})"
-                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
+                class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-500">
           + Add Contact
         </button>
       </div>
