@@ -45,6 +45,51 @@ numbers are from 2026-06-23 and may have drifted. Confirm `ExcessListStatus` and
 
 ---
 
+## Existing-code inventory addendum (reshape is surgical, not greenfield)
+
+The excess subsystem is **functional and tested** (255 tests / 12 files). Reshape must rewrite/retire it.
+
+**Constants (`app/constants.py`):** exist — `ExcessListStatus` (DRAFT, ACTIVE, BIDDING, CLOSED, EXPIRED),
+`ExcessLineItemStatus` (AVAILABLE, BIDDING, AWARDED, WITHDRAWN), `BidStatus`, `BidSolicitationStatus`.
+→ extend list/item statuses per Task 1; **drop** `BidStatus`/`BidSolicitationStatus`; **add**
+`ExcessOfferStatus`, `ExcessOfferScope`, `OfferLineMatchStatus`.
+
+**Schemas (`app/schemas/excess.py`):** KEEP list/line/import; **DROP** `Bid*`, `BidSolicitation*`,
+`ParseBidResponse*`, `SendBidSolicitation*`, `PolishEmail*`; **ADD** `ExcessOffer*`; **RESHAPE**
+`ExcessStatsResponse` (drop bid counts → offer counts).
+
+**Service (`excess_service.py`):** KEEP list/line CRUD + import/preview/confirm + `backfill_normalized_part_numbers`;
+RESHAPE `match_excess_demand`/`get_excess_stats`; **DROP** `create_bid`/`list_bids`/`accept_bid`,
+`send_bid_solicitation`+`_build_*solicitation_html`+`_find_sent_message`, `parse_bid_response`,
+`list_solicitations`, `_call_claude_bid_parse`, `parse_bid_from_email`, `create_proactive_matches_for_excess`.
+
+**Cross-module callers to remove (BREAKS otherwise):**
+- `app/email_service.py` → `_handle_excess_bid_reply()` (calls `parse_bid_response`) — delete.
+- `app/jobs/email_jobs.py` → `_scan_excess_bid_responses()` (calls `parse_bid_from_email`) — delete + unschedule.
+
+**Test triage (a test change ships with its code change):**
+- **DELETE whole file:** `test_excess_phase4.py`, `test_excess_phase4_email.py`, `test_excess_phase4_inbox.py`,
+  `test_excess_solicitations.py` (pure email-RFQ/solicitation/archive — retired behavior).
+- **REWRITE:** `test_excess_crud.py`, `test_excess_coverage.py`, `test_excess_service_comprehensive.py`,
+  `test_excess_service_coverage.py`, `test_excess_service_nightly.py`, `test_excess_nightly.py`,
+  `test_models_excess.py` (drop Bid/solicitation tests; keep+adapt list/line/import; add ExcessOffer tests).
+- **KEEP:** `test_excess_lists.py` (concept-neutral).
+
+## Execution chunking (subagent-sized; review between each)
+
+- **A — Schema foundation:** Tasks 1-3 + schemas reshape + `test_models_excess.py` rewrite. One migration.
+- **B — Service core:** Tasks 4-8 (capabilities, CRUD+resolve, intake, offers+scope+unmatched+self-offer,
+  rollup) + rewrite the service test files.
+- **C — Sighting mirror:** Task 9 (+ virtual requirement) + tests; PG-verify.
+- **D — Router + nav + cross-module cleanup + dead-test deletion:** Task 11 + email_service/email_jobs removal +
+  delete the 4 retired test files + rewrite router test files.
+- **E — Bid-back + PDF:** Task 10 + Task 16.
+- **F — Workspace UI:** Tasks 12-15, 18.
+- **G — Customer hiding:** Task 17.
+- **H — Docs + full xdist suite + live-verify on PG:** Tasks 19-20.
+
+---
+
 ## Phase 1 — Schema & constants
 
 ### Task 1: Status enums
