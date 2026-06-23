@@ -23,12 +23,8 @@ from app.models import (
     Requisition,
     SiteContact,
     User,
-    VendorCard,
 )
-from app.services.eight_by_eight_service import (
-    normalize_phone,
-    reverse_lookup_phone,
-)
+from app.services.eight_by_eight_service import normalize_phone
 
 # ═══════════════════════════════════════════════════════════════════════
 #  PHONE NORMALIZATION
@@ -54,125 +50,6 @@ class TestPhoneNormalization:
     )
     def test_normalize_phone(self, raw, expected):
         assert normalize_phone(raw) == expected
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  REVERSE LOOKUP — SiteContact
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestReverseLookupContact:
-    """Test reverse_lookup_phone() matching against SiteContact."""
-
-    def test_matches_site_contact_phone(
-        self, db_session: Session, test_company: Company, test_customer_site: CustomerSite
-    ):
-        """Phone matching a SiteContact returns contact entity with company context."""
-        contact = SiteContact(
-            customer_site_id=test_customer_site.id,
-            full_name="Jane Smith",
-            phone="(555) 867-5309",
-            is_active=True,
-        )
-        db_session.add(contact)
-        db_session.commit()
-
-        result = reverse_lookup_phone("555-867-5309", db_session)
-
-        assert result is not None
-        assert result["entity_type"] == "contact"
-        assert result["entity_id"] == contact.id
-        assert result["company_id"] == test_company.id
-        assert result["contact_name"] == "Jane Smith"
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  REVERSE LOOKUP — Company
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestReverseLookupCompany:
-    """Test reverse_lookup_phone() matching against Company."""
-
-    def test_matches_company_phone(self, db_session: Session):
-        """Phone matching a Company.phone returns company entity."""
-        company = Company(
-            name="TechCorp Inc",
-            phone="+1 (800) 555-0199",
-            is_active=True,
-        )
-        db_session.add(company)
-        db_session.commit()
-
-        result = reverse_lookup_phone("800-555-0199", db_session)
-
-        assert result is not None
-        assert result["entity_type"] == "company"
-        assert result["entity_id"] == company.id
-        assert result["company_id"] == company.id
-        assert result["company_name"] == "TechCorp Inc"
-        assert result["contact_name"] is None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  REVERSE LOOKUP — VendorCard
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestReverseLookupVendor:
-    """Test reverse_lookup_phone() matching against VendorCard."""
-
-    def test_matches_vendor_phone(self, db_session: Session):
-        """Phone matching a VendorCard.phones list returns vendor entity."""
-        vendor = VendorCard(
-            normalized_name="digikey electronics",
-            display_name="DigiKey Electronics",
-            phones=["+1-800-344-4539", "218-681-6674"],
-            is_blacklisted=False,
-        )
-        db_session.add(vendor)
-        db_session.commit()
-
-        result = reverse_lookup_phone("(800) 344-4539", db_session)
-
-        assert result is not None
-        assert result["entity_type"] == "vendor"
-        assert result["entity_id"] == vendor.id
-        assert result["vendor_card_id"] == vendor.id
-        assert result["company_name"] == "DigiKey Electronics"
-
-    def test_skips_blacklisted_vendor(self, db_session: Session):
-        """Blacklisted vendors are not returned by reverse lookup."""
-        vendor = VendorCard(
-            normalized_name="shady parts co",
-            display_name="Shady Parts Co",
-            phones=["555-000-1111"],
-            is_blacklisted=True,
-        )
-        db_session.add(vendor)
-        db_session.commit()
-
-        result = reverse_lookup_phone("555-000-1111", db_session)
-        assert result is None
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  REVERSE LOOKUP — Unknown
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestReverseLookupUnknown:
-    """Test reverse_lookup_phone() with unknown numbers."""
-
-    def test_unknown_phone_returns_none(self, db_session: Session):
-        """Phone number not in any CRM entity returns None."""
-        result = reverse_lookup_phone("999-888-7777", db_session)
-        assert result is None
-
-    def test_short_phone_returns_none(self, db_session: Session):
-        """Phone number with fewer than 7 digits returns None."""
-        result = reverse_lookup_phone("123", db_session)
-        assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -24,6 +24,7 @@ from app.constants import (
     OutreachChannel,
 )
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from app.utils.phone import normalize_e164
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
@@ -156,65 +157,200 @@ def _phone_digits(phone: str | None) -> str:
 
 
 def match_phone_to_entity(phone: str, db: Session) -> dict | None:
-    """Match a phone number to a company or vendor card.
+    """Unified E.164 phone matcher — queries normalized columns in priority order.
 
-    Uses SQL suffix match on PostgreSQL (regexp_replace), Python fallback on SQLite.
-    Batch-loads VendorCards to avoid N+1.
+    Collects ALL distinct entity matches (company_id XOR vendor_card_id) across
+    five priority tiers and returns the highest-priority match dict. Sets
+    ambiguous=True when more than one distinct entity matched.
+
+    Priority order:
+      1. SiteContact.normalized_phone
+      2. Company.normalized_phone
+      3. CustomerSite.normalized_phone / normalized_phone_2
+      4. VendorContact.normalized_phone
+      5. VendorCard.normalized_phones (JSON list, Python filter)
+
+    Returns None if the number is unparseable or no match found.
     """
-    if not phone:
+    e164 = normalize_e164(phone)
+    if e164 is None:
         return None
-    digits = _phone_digits(phone)
-    if len(digits) < 7:
-        return None
-    suffix = digits[-10:]  # last 10 digits for matching
 
-    # Check customer_sites — try PostgreSQL regex, fall back to basic LIKE
-    try:
-        sites = (
-            db.query(CustomerSite)
-            .filter(
-                CustomerSite.contact_phone.isnot(None),
-                CustomerSite.is_active.is_(True),
-                func.regexp_replace(CustomerSite.contact_phone, r"\D", "", "g").like(f"%{suffix}"),
+    seen: set[tuple] = set()
+    candidates: list[dict] = []
+
+    # ── Priority 1: SiteContact ──────────────────────────────────────────
+    contacts = db.query(SiteContact).filter(SiteContact.normalized_phone == e164, SiteContact.is_active.is_(True)).all()
+    for contact in contacts:
+        site = db.get(CustomerSite, contact.customer_site_id)
+        company_id = site.company_id if site else None
+        if company_id is None:
+            continue
+        company = db.get(Company, company_id)
+        key = ("company", company_id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": company_id,
+                    "name": company.name if company else None,
+                    "source": "site_contact",
+                    "company_id": company_id,
+                    "vendor_card_id": None,
+                    "_site_id": site.id if site else None,
+                    "_site_contact_id": contact.id,
+                    "_contact_name": contact.full_name,
+                    "_vendor_contact_id": None,
+                }
             )
-            .all()
+
+    # ── Priority 2: Company ──────────────────────────────────────────────
+    companies = db.query(Company).filter(Company.normalized_phone == e164, Company.is_active.is_(True)).all()
+    for company in companies:
+        key = ("company", company.id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": company.id,
+                    "name": company.name,
+                    "source": "company",
+                    "company_id": company.id,
+                    "vendor_card_id": None,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
+            )
+
+    # ── Priority 3: CustomerSite ─────────────────────────────────────────
+    sites = (
+        db.query(CustomerSite)
+        .filter(
+            (CustomerSite.normalized_phone == e164) | (CustomerSite.normalized_phone_2 == e164),
+            CustomerSite.is_active.is_(True),
         )
-    except Exception:
-        db.rollback()
-        sites = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.contact_phone.isnot(None), CustomerSite.is_active.is_(True))
-            .all()
-        )
+        .all()
+    )
     for site in sites:
-        site_digits = _phone_digits(site.contact_phone)
-        if site_digits and site_digits[-10:] == suffix:
-            return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
-
-    # Check vendor_contacts — batch VendorCard lookup to avoid N+1
-    try:
-        vcs = (
-            db.query(VendorContact)
-            .filter(
-                VendorContact.phone.isnot(None),
-                func.regexp_replace(VendorContact.phone, r"\D", "", "g").like(f"%{suffix}"),
+        key = ("company", site.company_id)
+        if key not in seen:
+            seen.add(key)
+            company = db.get(Company, site.company_id)
+            candidates.append(
+                {
+                    "type": "company",
+                    "id": site.company_id,
+                    "name": company.name if company else site.site_name,
+                    "source": "customer_site",
+                    "company_id": site.company_id,
+                    "vendor_card_id": None,
+                    "_site_id": site.id,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
             )
-            .all()
-        )
-    except Exception:
-        db.rollback()
-        vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).limit(1000).all()  # Safety limit
-    if vcs:
-        card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
-        card_map = {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()} if card_ids else {}
-        for vc in vcs:
-            vc_digits = _phone_digits(vc.phone)
-            if vc_digits and vc_digits[-10:] == suffix:
-                card = card_map.get(vc.vendor_card_id)
-                if card:
-                    return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
-    return None
+    # ── Priority 4: VendorContact ────────────────────────────────────────
+    vcs = db.query(VendorContact).filter(VendorContact.normalized_phone == e164).all()
+    for vc in vcs:
+        card = db.get(VendorCard, vc.vendor_card_id) if vc.vendor_card_id else None
+        if card is None:
+            continue
+        key = ("vendor", card.id)
+        if key not in seen:
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "vendor",
+                    "id": card.id,
+                    "name": card.display_name,
+                    "source": "vendor_contact",
+                    "company_id": None,
+                    "vendor_card_id": card.id,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": vc.id,
+                }
+            )
+
+    # ── Priority 5: VendorCard phones JSON ──────────────────────────────
+    vendor_cards = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False)).all()
+    for card in vendor_cards:
+        key = ("vendor", card.id)
+        if key in seen:
+            continue
+        if e164 in (card.normalized_phones or []):
+            seen.add(key)
+            candidates.append(
+                {
+                    "type": "vendor",
+                    "id": card.id,
+                    "name": card.display_name,
+                    "source": "vendor_card",
+                    "company_id": None,
+                    "vendor_card_id": card.id,
+                    "_site_id": None,
+                    "_site_contact_id": None,
+                    "_contact_name": None,
+                    "_vendor_contact_id": None,
+                }
+            )
+
+    if not candidates:
+        return None
+
+    best = candidates[0]
+    ambiguous = len(candidates) > 1
+
+    # Build public candidate list (no internal _ fields)
+    public_candidates = [
+        {
+            "type": c["type"],
+            "id": c["id"],
+            "name": c["name"],
+            "source": c["source"],
+            "company_id": c["company_id"],
+            "vendor_card_id": c["vendor_card_id"],
+        }
+        for c in candidates
+    ]
+
+    if best["type"] == "company":
+        return {
+            "type": "company",
+            "id": best["company_id"],
+            "name": best["name"],
+            "company_id": best["company_id"],
+            "site_id": best["_site_id"],  # backward compat for _match_entity_links
+            "customer_site_id": best["_site_id"],
+            "site_contact_id": best["_site_contact_id"],
+            "contact_name": best.get("_contact_name"),
+            "vendor_card_id": None,
+            "vendor_contact_id": None,
+            "ambiguous": ambiguous,
+            "candidates": public_candidates,
+        }
+    # vendor
+    return {
+        "type": "vendor",
+        "id": best["vendor_card_id"],
+        "name": best["name"],
+        "company_id": None,
+        "site_id": None,
+        "customer_site_id": None,
+        "site_contact_id": None,
+        "contact_name": None,
+        "vendor_card_id": best["vendor_card_id"],
+        "vendor_contact_id": best["_vendor_contact_id"],
+        "ambiguous": ambiguous,
+        "candidates": public_candidates,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -449,7 +585,7 @@ def _normalize_direction(direction: str | None) -> str | None:
 
 
 def log_call_activity(
-    user_id: int,
+    user_id: int | None,
     direction: str | None,  # accepts sent/received/inbound/outbound/None
     phone: str,
     duration_seconds: int | None,
