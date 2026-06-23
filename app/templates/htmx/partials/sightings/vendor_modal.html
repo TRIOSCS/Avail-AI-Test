@@ -62,6 +62,16 @@
           {% elif v.vendor_score is not none %}
           <span class="text-xs text-gray-400" title="Vendors ranked by responsiveness. This is the overall vendor quality score (no engagement data yet).">Score: {{ v.vendor_score|round|int }}</span>
           {% endif %}
+          {# Commodity signal chip — only when current commodity is known and vendor has history #}
+          {% if current_commodity and v.card and commodity_signals.get(v.id) %}
+          {% set sig = commodity_signals.get(v.id) %}
+          {% if sig.outbound > 0 %}
+          <span class="ml-2 text-xs text-gray-400"
+                title="For {{ current_commodity }}: {{ sig.inbound }} reply{{ 's' if sig.inbound != 1 }} / {{ sig.outbound }} sent">
+            {{ sig.inbound }}/{{ sig.outbound }} {{ current_commodity }}
+          </span>
+          {% endif %}
+          {% endif %}
         </label>
         {% elif v.has_contact and is_dnc %}
         {# DNC row — has an email but it is do-not-contact flagged. Disabled checkbox +

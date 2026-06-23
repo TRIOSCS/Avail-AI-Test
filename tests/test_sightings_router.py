@@ -2682,6 +2682,113 @@ class TestVendorRowLeadTime:
         assert "14d lead" in resp.text
 
 
+class TestCommoditySignalChip:
+    """Item 5: a read-only commodity-segmented engagement chip on the contactable
+    non-DNC vendor row. ONE bounded query over ActivityLog → Requirement → MaterialCard
+    counts the vendor's inbound/outbound activity FILTERED to the basket's commodity.
+    No schema change, no ranking change.
+    """
+
+    def _seed(self, db_session, category="capacitors", outbound=2, inbound=1):
+        """Requirement on a MaterialCard of the given commodity + a contactable carded
+        vendor with `outbound`/`inbound` ActivityLog rows scoped to that requirement."""
+        mc = MaterialCard(normalized_mpn="cs-mpn-1", display_mpn="CS-MPN-1", category=category)
+        db_session.add(mc)
+        db_session.flush()
+        req = Requisition(name="Commodity RFQ", status="active", customer_name="CS Co")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="CS-MPN-1",
+            target_qty=10,
+            sourcing_status="open",
+            material_card_id=mc.id,
+        )
+        db_session.add(r)
+        db_session.flush()
+        card = VendorCard(
+            normalized_name="signal vendor",
+            display_name="Signal Vendor",
+            is_blacklisted=False,
+            engagement_score=42.0,
+        )
+        db_session.add(card)
+        db_session.flush()
+        db_session.add(VendorContact(vendor_card_id=card.id, email="rfq@signal.com", source="email"))
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="Signal Vendor",
+                listing_count=1,
+                score=50.0,
+                vendor_card_id=card.id,
+            )
+        )
+        for _ in range(outbound):
+            db_session.add(
+                ActivityLog(
+                    activity_type="rfq_sent",
+                    channel="email",
+                    direction="outbound",
+                    vendor_card_id=card.id,
+                    requirement_id=r.id,
+                )
+            )
+        for _ in range(inbound):
+            db_session.add(
+                ActivityLog(
+                    activity_type="email",
+                    channel="email",
+                    direction="inbound",
+                    vendor_card_id=card.id,
+                    requirement_id=r.id,
+                )
+            )
+        db_session.commit()
+        return r, card
+
+    def test_chip_rendered_with_commodity_counts(self, client, db_session):
+        """A vendor with prior outbound+inbound activity for the basket commodity shows
+        an "N/M {commodity}" chip with a reply/sent tooltip."""
+        r, _ = self._seed(db_session, category="capacitors", outbound=2, inbound=1)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Signal Vendor" in resp.text
+        assert "1/2 capacitors" in resp.text
+        assert "For capacitors: 1 reply / 2 sent" in resp.text
+
+    def test_no_chip_when_no_outbound(self, client, db_session):
+        """No chip when the vendor has no outbound activity for the commodity (the chip
+        is suppressed at sig.outbound == 0)."""
+        r, _ = self._seed(db_session, category="capacitors", outbound=0, inbound=0)
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        assert "Signal Vendor" in resp.text
+        assert "capacitors" not in resp.text  # commodity chip absent
+
+    def test_no_chip_when_commodity_mixed(self, client, db_session):
+        """current_commodity is None when the basket spans >1 commodity, so the chip is
+        not rendered for any row even if activity exists."""
+        r, card = self._seed(db_session, category="capacitors", outbound=2, inbound=1)
+        # A second requirement on a DIFFERENT commodity → mixed basket → no chip.
+        mc2 = MaterialCard(normalized_mpn="cs-mpn-2", display_mpn="CS-MPN-2", category="connectors")
+        db_session.add(mc2)
+        db_session.flush()
+        r2 = Requirement(
+            requisition_id=r.requisition_id,
+            primary_mpn="CS-MPN-2",
+            target_qty=10,
+            sourcing_status="open",
+            material_card_id=mc2.id,
+        )
+        db_session.add(r2)
+        db_session.commit()
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id},{r2.id}")
+        assert resp.status_code == 200
+        assert "1/2 capacitors" not in resp.text
+
+
 class TestSightingsBatchLimit:
     def test_batch_refresh_over_limit_returns_400(self, client, db_session):
         ids = list(range(1, 52))  # 51 items, over the 50 limit
