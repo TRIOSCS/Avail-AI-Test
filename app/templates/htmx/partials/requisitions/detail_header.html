@@ -7,7 +7,9 @@
 {% from "htmx/partials/shared/_macros.html" import req_status_badge, urgency_badge %}
 
 <div id="req-header" class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-  <div class="flex items-start justify-between">
+  {# flex-wrap: the right-side action block wraps below the title on narrow screens
+     instead of overflowing the page. #}
+  <div class="flex flex-wrap items-start justify-between gap-2">
     <div class="flex-1 min-w-0">
       {# Inline-editable name #}
       <h1 id="req-name-{{ req.id }}"
@@ -42,7 +44,9 @@
         <span>Created: <span class="text-gray-900">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "—" }}</span></span>
       </div>
     </div>
-    <div class="flex items-center gap-3 flex-shrink-0">
+    {# flex-wrap (no flex-shrink-0): the action buttons wrap within the viewport on
+       narrow screens instead of forcing a wide fixed block that overflows the page. #}
+    <div class="flex flex-wrap items-center gap-3">
       {# Action buttons #}
       <button hx-post="/v2/partials/requisitions/{{ req.id }}/search-all"
               hx-target="#tab-content" hx-swap="innerHTML"

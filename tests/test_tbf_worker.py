@@ -1,25 +1,26 @@
-"""Phase 1 tests for the tbf_worker package (The Broker Forum browser worker).
+"""Tests for the tbf_worker package (The Broker Forum browser worker).
 
-Covers the scope that needs no thebrokersite HTML knowledge:
+Covers:
 - TbfConfig env defaults + overrides
 - queue_manager: enqueue, compound (requirement_id, normalized_mpn) dedup, claim atomicity
 - save_tbf_sightings: synthetic TbfSighting list -> Sighting rows (source_type='thebrokersite'),
   dedup, apply_to_fresh_sightings gating
 - tbf_worker_status singleton seed (startup) + worker.update_worker_status
+- result_parser: real captured thebrokersite.com results HTML (Phase-2 fixtures) ->
+  TbfSighting rows, including price/currency parsing, CALL rows, and malformed-row skip
 
-Parser/search/login selector tests are Phase 2 (against real captured HTML fixtures).
 Patchright/network are never touched here — the worker package imports cleanly and the
-site-specific files raise NotImplementedError for selector-dependent calls.
+browser-only modules (session_manager, search_engine) are asserted by import + signature.
 
 Called by: pytest
-Depends on: conftest.py, tbf_worker modules
+Depends on: conftest.py, tbf_worker modules, tests/fixtures/tbf_results_*.html
 """
 
+import inspect
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from app.models import Sighting, TbfSearchQueue, TbfWorkerStatus
 from app.services.tbf_worker.config import TbfConfig
@@ -34,6 +35,13 @@ from app.services.tbf_worker.queue_manager import (
 )
 from app.services.tbf_worker.result_parser import TbfSighting, parse_results_html
 from app.services.tbf_worker.sighting_writer import save_tbf_sightings
+
+_FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def _read_fixture(name: str) -> str:
+    return (_FIXTURES / name).read_text()
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # IMPORTABILITY — the whole worker package must import without a browser/net
@@ -63,11 +71,14 @@ class TestImportability:
         # Defaults to base self-healing behavior; no markers needed to construct.
         assert CircuitBreaker().should_stop() is False
 
-    def test_parser_stub_returns_empty(self):
-        """Phase-1 parser returns [] regardless of input (selectors are Phase 2)."""
+    def test_parser_empty_inputs_return_empty(self):
+        """Parser returns [] for empty/None and tables without data rows."""
+        # A table whose rows are NOT tr.hover-higlight-anchor -> no data rows.
         assert parse_results_html("<table><tr><td>x</td></tr></table>") == []
         assert parse_results_html("") == []
         assert parse_results_html(None) == []
+        # HTML with content but no results table at all.
+        assert parse_results_html("<html><body><div>No results</div></body></html>") == []
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -399,22 +410,115 @@ class TestWorkerStatusSingleton:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# PHASE-2 STUB CONTRACTS — selector-dependent calls raise, don't silently no-op
+# RESULT PARSER — real thebrokersite.com results HTML (captured fixtures)
 # ═══════════════════════════════════════════════════════════════════════
 
 
-class TestPhase2Stubs:
-    @pytest.mark.asyncio
-    async def test_search_part_raises_until_phase2(self):
+class TestResultParser:
+    def test_parses_ddr4_fixture_into_ten_sightings(self):
+        """The captured DDR4 results <table> yields exactly 10 TbfSighting."""
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        assert len(sightings) == 10
+        assert all(isinstance(s, TbfSighting) for s in sightings)
+
+    def test_first_row_fields(self):
+        """First DDR4 row: part#, manufacturer, quantity, vendor, country."""
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        first = sightings[0]
+        assert first.part_number == "4GBDDR4"
+        assert first.manufacturer == "Major Brand"
+        assert first.quantity == 18
+        assert isinstance(first.quantity, int)
+        assert first.vendor_name == "TBS Member"
+        assert first.country == "GR"
+        # No region mapping available — region falls back to the country code.
+        assert first.region == "GR"
+        # Active broker-marketplace listing.
+        assert first.in_stock is True
+        assert first.is_authorized is False
+
+    def test_first_row_condition_is_ref(self):
+        """The first row's condition cell (td[3]) is 'REF' — verified against the raw
+        table since TbfSighting has no condition field (dropped per contract)."""
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(_read_fixture("tbf_results_ddr4.html"), "html.parser")
+        first_row = soup.select_one("table.table-fixed tr.hover-higlight-anchor")
+        condition = first_row.find_all("td")[3].get_text(strip=True)
+        assert condition == "REF"
+
+    def test_priced_row_has_currency_and_numeric_price(self):
+        """A '€ 114'-style row yields currency 'EUR' + a numeric price string."""
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        priced = [s for s in sightings if s.currency]
+        assert priced, "expected at least one priced (non-CALL) row"
+        for s in priced:
+            assert s.currency == "EUR"
+            assert s.price  # non-empty numeric string
+            assert float(s.price) > 0
+
+    def test_call_row_has_no_numeric_price(self):
+        """A 'CALL' price row yields no numeric price and no currency."""
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        call_rows = [s for s in sightings if not s.currency]
+        assert call_rows, "expected at least one CALL row"
+        for s in call_rows:
+            assert s.price == ""
+            assert s.currency == ""
+
+    def test_countries_are_iso_codes(self):
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        countries = {s.country for s in sightings}
+        assert "GR" in countries
+        assert "US" in countries
+
+    def test_vendor_identity_is_anonymized(self):
+        """Vendor is the anonymized 'TBS Member'; real identity (behind a row click) is
+        a documented future enhancement, so contact fields stay empty."""
+        sightings = parse_results_html(_read_fixture("tbf_results_ddr4.html"))
+        for s in sightings:
+            assert s.vendor_name == "TBS Member"
+            assert s.vendor_email == ""
+            assert s.vendor_phone == ""
+            assert s.vendor_company_id == ""
+
+    def test_no_results_fixture_returns_empty(self):
+        assert parse_results_html(_read_fixture("tbf_results_none.html")) == []
+
+    def test_malformed_row_is_skipped_not_raised(self):
+        """A data row missing cells is skipped defensively — never raises."""
+        html = (
+            "<table class='table-fixed'><tbody>"
+            "<tr class='hover-higlight-anchor'><td>only one cell</td></tr>"
+            "</tbody></table>"
+        )
+        assert parse_results_html(html) == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# INTEGRATION-ONLY MODULES — assert import + signature (no browser / no net)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBrowserModuleContracts:
+    def test_search_part_signature(self):
+        """search_part(page, part_number) -> coroutine — browser-only at runtime."""
         from app.services.tbf_worker.search_engine import search_part
 
-        with pytest.raises(NotImplementedError, match="phase2: selectors"):
-            await search_part(MagicMock(), "LM317T")
+        assert inspect.iscoroutinefunction(search_part)
+        params = list(inspect.signature(search_part).parameters)
+        assert params == ["page", "part_number"]
 
-    @pytest.mark.asyncio
-    async def test_session_health_raises_until_phase2(self):
+    def test_session_manager_signature(self):
+        """TbfSessionManager exposes the browser lifecycle the worker loop calls."""
         from app.services.tbf_worker.session_manager import TbfSessionManager
 
         session = TbfSessionManager(TbfConfig())
-        with pytest.raises(NotImplementedError, match="phase2: selectors"):
-            await session.check_session_health()
+        assert session.is_logged_in is False
+        for name in ("start", "login", "check_session_health", "ensure_session", "stop"):
+            assert inspect.iscoroutinefunction(getattr(session, name))
+
+    def test_circuit_breaker_check_page_health_is_coroutine(self):
+        from app.services.tbf_worker.circuit_breaker import CircuitBreaker
+
+        assert inspect.iscoroutinefunction(CircuitBreaker().check_page_health)

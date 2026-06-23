@@ -1,17 +1,22 @@
-"""The Broker Forum (TBF) browser session manager — PHASE 1 STUB.
+"""The Broker Forum (TBF) browser session manager.
 
 Manages a persistent Chrome browser session via Patchright (undetected
 Playwright fork) running inside an Xvfb virtual display. Handles login,
 session health checks, and automatic re-authentication.
 
-The login flow, the auth/session marker, and the member-area URL require a
-logged-in capture, so ``login`` and ``check_session_health`` are stubbed
-(raise ``NotImplementedError``) until Phase 2. The browser lifecycle
-(``start``/``stop``) and the DISPLAY guard are real so the module imports and
-the worker is importable.
+TBF is a Vue SPA:
+- ``networkidle`` TIMES OUT on the chatty SPA — use ``domcontentloaded`` + a
+  fixed settle, never networkidle.
+- The ``--window-size`` launch arg is MANDATORY: without it the no-WM Xvfb
+  window is 0x0 and nothing lays out / is clickable.
+- The logged-in marker is the "TBS Member" badge text, which only renders when
+  authenticated.
+- The login form is ``form:has(input[name='password'])`` — there is also a
+  password-RESET form (email only) and a ``fakeEmail`` honeypot; we never touch
+  those.
 
 Called by: worker loop
-Depends on: patchright, human_behavior, config
+Depends on: patchright, config
 """
 
 from __future__ import annotations
@@ -26,10 +31,14 @@ if TYPE_CHECKING:
 from loguru import logger
 
 from .config import TbfConfig
-from .human_behavior import HumanBehavior  # noqa: F401  (used once selectors land in Phase 2)
 
-# TODO(phase2): real selector from logged-in capture — the TBF home/login URL.
 HOME_URL = "https://www.thebrokersite.com/"
+
+# Logged-in marker: a member badge that only renders when authenticated.
+MEMBER_MARKER = "text=TBS Member"
+
+# Cookie/consent banner buttons to try-dismiss (best effort, never fatal).
+_CONSENT_BUTTON_NAMES = ("^Accept$", "^Dismiss$", "^Close$", "^I agree$")
 
 
 class TbfSessionManager:
@@ -63,10 +72,13 @@ class TbfSessionManager:
             channel="chrome",
             headless=False,
             no_viewport=True,
+            # MANDATORY: without --window-size the no-WM Xvfb window is 0x0 and
+            # nothing lays out / is clickable.
+            args=["--window-size=1920,1080", "--window-position=0,0"],
         )
         self._page = self._context.pages[0]
-        await self._page.goto(HOME_URL)
-        await asyncio.sleep(2)
+        await self._page.goto(HOME_URL, wait_until="domcontentloaded")
+        await asyncio.sleep(4)
 
         self.is_logged_in = await self.check_session_health()
         if self.is_logged_in:
@@ -74,31 +86,80 @@ class TbfSessionManager:
         else:
             logger.info("TBF session: not logged in, will need to authenticate")
 
+    async def _dismiss_consent_banner(self):
+        """Best-effort dismiss of a cookie/consent banner.
+
+        Never raises.
+        """
+        for name in _CONSENT_BUTTON_NAMES:
+            try:
+                btn = self._page.get_by_role("button", name=name)
+                if await btn.count() > 0 and await btn.first.is_visible():
+                    await btn.first.click()
+                    await asyncio.sleep(0.5)
+            except Exception:
+                continue
+
     async def check_session_health(self) -> bool:
         """Check if the TBF session is still valid.
 
-        PHASE 1: raises ``NotImplementedError`` — the authenticated member-area
-        URL and the logged-in marker are unknown until a capture exists.
+        Logged-in marker = the "TBS Member" member badge text appears on the page.
+        Logged-out = that marker is absent.
         """
-        # TODO(phase2): real selector from logged-in capture.
-        # Navigate to a member-only page and assert we are not bounced to login;
-        # check for an authenticated marker (e.g. a logout link / account menu).
-        raise NotImplementedError("phase2: selectors")
+        try:
+            return await self._page.locator(MEMBER_MARKER).count() > 0
+        except Exception as e:
+            logger.warning("TBF session health check failed: {}", e)
+            return False
 
     async def login(self) -> bool:
         """Log in to The Broker Forum with member credentials.
 
-        PHASE 1: raises ``NotImplementedError`` — the login form field/submit
-        selectors are unknown until a capture exists.
+        Flow (verified live against the Vue SPA):
+        1. Navigate to the home page (domcontentloaded + settle; networkidle
+           times out on this chatty SPA).
+        2. Dismiss any cookie/consent banner.
+        3. Open the login modal via the "Sign In" button.
+        4. Within ``form:has(input[name='password'])`` (NOT the reset form / the
+           ``fakeEmail`` honeypot), fill email + password and submit.
+        5. Settle, then verify via check_session_health().
         """
         if not self.config.TBF_USERNAME or not self.config.TBF_PASSWORD:
             logger.error("TBF login: TBF_USERNAME or TBF_PASSWORD not configured")
             return False
 
-        # TODO(phase2): real selector from logged-in capture.
-        # Navigate to the login form, fill username + password via
-        # HumanBehavior, submit, then verify via check_session_health().
-        raise NotImplementedError("phase2: selectors")
+        try:
+            await self._page.goto(HOME_URL, wait_until="domcontentloaded")
+            await asyncio.sleep(4)
+
+            await self._dismiss_consent_banner()
+
+            # Open the login modal.
+            await self._page.locator("button:has-text('Sign In')").first.click()
+            await self._page.locator("input[name='password']:visible").wait_for(timeout=10000)
+
+            # The real login form is the one that has a password field (the
+            # password-RESET form has only an email field; there is also a
+            # `fakeEmail` honeypot input — never fill those).
+            form = self._page.locator("form:has(input[name='password'])")
+            await form.locator("input[name='email']").fill(self.config.TBF_USERNAME)
+            await asyncio.sleep(0.5)
+            await form.locator("input[name='password']").fill(self.config.TBF_PASSWORD)
+            await asyncio.sleep(0.5)
+            await form.locator("button:has-text('Sign')").click()
+            await asyncio.sleep(7)
+
+            self.is_logged_in = await self.check_session_health()
+            if self.is_logged_in:
+                logger.info("TBF login: success")
+            else:
+                logger.error("TBF login: failed — 'TBS Member' marker absent after submit")
+            return self.is_logged_in
+
+        except Exception as e:
+            logger.error("TBF login: exception during login: {}", e)
+            self.is_logged_in = False
+            return False
 
     async def ensure_session(self) -> bool:
         """Ensure we have a valid session, re-logging in if needed."""

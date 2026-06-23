@@ -1805,6 +1805,51 @@ async def sightings_vendor_modal(
                 {"id": ds.id, "file_name": ds.file_name, "size_bytes": ds.size_bytes} for ds in ds_rows
             ]
 
+    # Build the tagged subject shown read-only in the compose step — LOCKSTEP with the
+    # preview/send path (sightings_preview_inquiry / send_batch_rfq): one [ref:{id}] token
+    # per involved requisition, ascending requisition id, prefixed by the part count. So
+    # the buyer sees exactly what will be sent before previewing, even after a modal refresh.
+    requisition_ids_sorted = sorted({r.requisition_id for r in requirements}) if requirements else []
+    num_parts = len(parts)
+    avail_token_display = " ".join(f"[ref:{rid}]" for rid in requisition_ids_sorted)
+    raw_subject_display = f"RFQ — {num_parts} part{'s' if num_parts != 1 else ''}"
+    compose_subject = f"{raw_subject_display} {avail_token_display}" if avail_token_display else raw_subject_display
+
+    # Commodity-segmented engagement signal — read-only, NO schema change, NO ranking
+    # change. ONE bounded query over ActivityLog → Requirement → MaterialCard counts
+    # this vendor's outbound/inbound activity FILTERED to the current commodity, so the
+    # compose chip can say "have they replied to us about THIS kind of part?".
+    # Only runs when (a) all selected requirements share one commodity and (b) at least
+    # one suggested vendor is carded — otherwise it is skipped entirely (empty dicts).
+    commodity_signals: dict[int, dict] = {}  # card_id → {"outbound": N, "inbound": N}
+    current_commodity: str | None = None
+    if requirements:
+        cats = {r.material_card.category for r in requirements if r.material_card_id and r.material_card}
+        current_commodity = cats.pop() if len(cats) == 1 else None  # only when all reqs share one commodity
+
+    carded_signal_ids = [sv.id for sv in suggested_vendors if sv.card is not None]
+    if carded_signal_ids and current_commodity:
+        signal_rows = (
+            db.query(
+                ActivityLog.vendor_card_id,
+                ActivityLog.direction,
+                sqlfunc.count().label("cnt"),
+            )
+            .join(Requirement, ActivityLog.requirement_id == Requirement.id)
+            .join(MaterialCard, Requirement.material_card_id == MaterialCard.id)
+            .filter(
+                ActivityLog.vendor_card_id.in_(carded_signal_ids),
+                ActivityLog.direction.in_(["outbound", "inbound"]),
+                ActivityLog.requirement_id.isnot(None),
+                MaterialCard.category == current_commodity,
+            )
+            .group_by(ActivityLog.vendor_card_id, ActivityLog.direction)
+            .all()
+        )
+        for card_id, direction, cnt in signal_rows:
+            sig = commodity_signals.setdefault(card_id, {"outbound": 0, "inbound": 0})
+            sig[direction] = cnt
+
     ctx = {
         "request": request,
         "suggested_vendors": suggested_vendors,
@@ -1815,6 +1860,9 @@ async def sightings_vendor_modal(
         "dnc_norms": dnc_norms,
         "contactable_non_dnc": contactable_non_dnc,
         "available_datasheets": available_datasheets,
+        "compose_subject": compose_subject,
+        "commodity_signals": commodity_signals,
+        "current_commodity": current_commodity,
     }
     return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
@@ -2162,6 +2210,18 @@ async def sightings_preview_inquiry(
     avail_token = " ".join(f"[ref:{rid}]" for rid in requisition_ids)
     parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
 
+    # Per-requisition grouped parts for the preview body — when the basket spans more
+    # than one requisition the preview shows a REQ-{id} subhead per group so the buyer
+    # can see which parts belong to which requisition. requisition_ids is already sorted
+    # ascending (lockstep with the subject tokens). The flat parts_list stays for the
+    # single-requisition case (is_cross_req False).
+    requisition_parts_grouped: list[dict] = []
+    for rid in requisition_ids:
+        req_parts = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements if r.requisition_id == rid]
+        if req_parts:
+            requisition_parts_grouped.append({"req_id": rid, "parts": req_parts})
+    is_cross_req = len(requisition_ids) > 1
+
     # Advisory DNC set — look up which resolved emails are flagged do_not_contact.
     # This mirrors the send-time check in email_service.py so preview ≈ what sends.
     preview_dnc_emails: set[str] = _dnc_emails_for_cards(db, card_ids) if card_ids else set()
@@ -2229,6 +2289,8 @@ async def sightings_preview_inquiry(
         "email_body": email_body,
         "unavailable_vendors": unavailable_vendors,
         "preview_attachments": preview_attachments,
+        "requisition_parts_grouped": requisition_parts_grouped,
+        "is_cross_req": is_cross_req,
     }
     return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 

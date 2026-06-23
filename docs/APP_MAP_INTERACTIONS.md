@@ -883,6 +883,13 @@ was not touched.
 **Preview/send lockstep.** `sightings_preview_inquiry` renders the exact
 multi-token subject the send will produce — one `[ref:{id}]` per involved
 requisition, ascending requisition id — so preview and send can never diverge.
+The **compose step** also displays this tagged subject read-only
+(`compose_subject` in the modal context, built with the same token logic) so the
+buyer sees exactly what sends before previewing, even after a modal refresh. The
+preview **parts body** groups by requisition when the basket is cross-req:
+`requisition_parts_grouped` ({req_id, parts}, ascending) + `is_cross_req`
+(`len(requisition_ids) > 1`) drive a `REQ-{id}` subhead per requisition; single-req
+keeps the flat inline list (`parts_list` retained for that path).
 
 **Subject-token single source of truth.** `shared_constants.RFQ_SUBJECT_TAG_RE`
 (`[ref:{id}]` current, `[AVAIL-{id}]` legacy) is the ONE pattern; the duplicate
@@ -954,8 +961,27 @@ the `rfqVendorModal` section below) is fed from four sources:
      "Add new vendor" form (source 4 below) with the vendor's display name and focuses
      the email input — the buyer types the known email and the existing `composer-vendor`
      POST creates the card + `VendorContact`. **No new endpoint, no schema change, no
-     bulk CRM writes.** Contactable rows are unchanged (enabled checkbox + engagement/
-     response badges).
+     bulk CRM writes.** Contactable rows carry an enabled checkbox + engagement/
+     response badges.
+   - **Lead time on EVERY row.** `SuggestedVendor.lead_time_days` (min of
+     `VendorSightingSummary.best_lead_time_days` across the group, computed in
+     `_coverage_ranked_vendor_rows`) now renders a `{N}d lead` span on **all three**
+     row variants — contactable non-DNC, DNC, and no-contact — not just the
+     contactable one (`{% if v.lead_time_days is not none %}`). Template-only on the
+     DNC/no-contact branches (the data already flowed through).
+   - **Score tooltip.** The contactable-row `Score:` span carries a `title=`
+     explaining vendors are **ranked by responsiveness** (engagement score = reply
+     rate × recency when present, else the overall vendor quality score) — native
+     HTML attribute, no new Tailwind class.
+   - **Commodity-segmented engagement chip.** When all selected requirements share
+     ONE `material_card.category` (`current_commodity`), `sightings_vendor_modal`
+     runs **one bounded query** `ActivityLog → Requirement → MaterialCard` grouped by
+     `(vendor_card_id, direction)` filtered to that commodity, producing
+     `commodity_signals` ({card_id: {outbound, inbound}}). The contactable row then
+     shows an `{inbound}/{outbound} {commodity}` chip (rendered only when
+     `outbound > 0`) with a "For {commodity}: N reply / M sent" tooltip. Read-only —
+     **no schema change, no ranking change**; the query is skipped entirely when no
+     vendor is carded or the basket spans >1 commodity.
    - **Deferred follow-up (tracked, not built):** `vendor_email` is 100% NULL on
      sightings — contact emails live only on cards. Capturing vendor contact emails at
      **scrape/enrich time** is the real long-tail lever that would make most cardless

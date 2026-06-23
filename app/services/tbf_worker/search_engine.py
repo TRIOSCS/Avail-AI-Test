@@ -1,54 +1,66 @@
-"""The Broker Forum (TBF) search engine — PHASE 1 STUB.
+"""The Broker Forum (TBF) search engine — executes part searches via browser.
 
-Executes a part search via the logged-in browser page: navigates to the
-search route, fills the part-number field, submits, waits for results, and
-captures the results ``outerHTML``. The search route + field/submit/results
-selectors require a logged-in capture, so they are stubbed: ``search_part``
-raises ``NotImplementedError`` until Phase 2 encodes them. The module imports
-cleanly so the worker package is importable.
+TBF is a Vue SPA. The parts search is a plain GET route — no form fill needed:
+navigate to ``/parts?query=<urlencoded mpn>`` and wait for EITHER the results
+table (``table.table-fixed`` containing ``tr.hover-higlight-anchor``) OR a short
+settle timeout for the no-results case. Then capture ``page.content()``.
 
 Called by: worker loop
-Depends on: session_manager (page), human_behavior
+Depends on: session_manager (page)
 """
 
+import asyncio
 import time
+from urllib.parse import quote_plus
 
 from loguru import logger
 
-from .human_behavior import HumanBehavior  # noqa: F401  (used once selectors land in Phase 2)
+# TBF parts search is a plain GET route (Vue SPA, no form submit).
+SEARCH_BASE_URL = "https://www.thebrokersite.com/parts"
 
-# TODO(phase2): real selector from logged-in capture — the authenticated
-# member search URL on thebrokersite.com.
-SEARCH_URL = ""
+# Results table selector — a results table contains data rows.
+RESULTS_SELECTOR = "table.table-fixed tr.hover-higlight-anchor"
+
+# Seconds to settle for the no-results case when the results table never renders.
+_NO_RESULTS_SETTLE_SECONDS = 6
 
 
 async def search_part(page, part_number: str) -> dict:
     """Search for a part on TBF and capture the results HTML.
 
-    Returns ``{"html": str, "url": str, "duration_ms": int, "status_code": int}``.
+    Navigates directly to the GET search route, waits for the results table (or a
+    short settle timeout for the no-results case), and captures the page HTML.
 
-    PHASE 1: raises ``NotImplementedError`` — the search route, part-number
-    field, submit control, and results-wait selectors are unknown until a
-    logged-in capture exists. The timing/return scaffold below is the Phase-2
-    shape the worker loop already consumes.
+    Returns ``{"html": str, "url": str, "duration_ms": int, "status_code": int}``.
     """
     start = time.monotonic()
-    logger.info("TBF search: (phase-1 stub) requested search for '{}'", part_number)
 
-    # TODO(phase2): real selector from logged-in capture.
-    #   1. await page.goto(SEARCH_URL, wait_until="load", timeout=30000)
-    #   2. fill the part-number field via HumanBehavior.human_type(...)
-    #   3. submit (click the search control)
-    #   4. await page.wait_for_selector(<results-container>, timeout=20000)
-    #   5. html = await page.evaluate("() => <results-container>.outerHTML")
-    #   6. status_code from the navigation response
-    raise NotImplementedError("phase2: selectors")
+    url = f"{SEARCH_BASE_URL}?query={quote_plus(part_number)}"
+    logger.info("TBF search: navigating to '{}'", url)
 
-    # Unreachable in Phase 1 — documents the return contract for Phase 2.
-    duration_ms = int((time.monotonic() - start) * 1000)  # pragma: no cover
-    return {  # pragma: no cover
-        "html": "",
+    status_code = 200
+    response = await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    if response is not None:
+        try:
+            status_code = response.status
+        except Exception:
+            status_code = 200
+
+    # Wait for EITHER a results table OR the no-results settle timeout.
+    try:
+        await page.wait_for_selector(RESULTS_SELECTOR, timeout=_NO_RESULTS_SETTLE_SECONDS * 1000)
+    except Exception:
+        logger.debug("TBF search: no results table within {}s — treating as no-results", _NO_RESULTS_SETTLE_SECONDS)
+        await asyncio.sleep(1)
+
+    html = await page.content()
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    logger.info("TBF search: '{}' completed in {}ms (status={})", part_number, duration_ms, status_code)
+
+    return {
+        "html": html or "",
         "url": page.url,
         "duration_ms": duration_ms,
-        "status_code": 200,
+        "status_code": status_code,
     }

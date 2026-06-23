@@ -1,10 +1,13 @@
 """Circuit breaker — stops searches on signs of blocking or errors.
 
 Thin subclass of CircuitBreakerBase that adds the TBF-specific
-check_page_health() method for browser DOM inspection. The session-expired
-and anti-scrape markers are site-specific and require a logged-in capture, so
-they are stubbed: until Phase 2 encodes them, check_page_health defaults to
-the base empty-streak/error trip behavior and never invents markers.
+check_page_health() method for browser DOM inspection.
+
+TBF is a Vue SPA. The only site-specific signal verified live is the
+session-expired state: the "TBS Member" member badge is absent AND a Sign-In
+modal / login form is present. No captcha / maintenance / rate-limit markers
+were observed, so we do not invent them — the base empty-streak / error trips
+cover the rest.
 
 Called by: worker loop (after each search)
 Depends on: search_worker_base.circuit_breaker.CircuitBreakerBase
@@ -13,6 +16,12 @@ Depends on: search_worker_base.circuit_breaker.CircuitBreakerBase
 from loguru import logger
 
 from ..search_worker_base.circuit_breaker import CircuitBreakerBase
+
+# Logged-in marker text (lowercased for innerText comparison).
+_MEMBER_MARKER = "tbs member"
+
+# Sign-In modal / login-form signals (lowercased).
+_LOGIN_SIGNALS = ("sign in",)
 
 
 class CircuitBreaker(CircuitBreakerBase):
@@ -23,18 +32,13 @@ class CircuitBreaker(CircuitBreakerBase):
 
         Returns a status string:
         - "HEALTHY" — all good
-        - "SESSION_EXPIRED" — login page detected (normal, not an error)
+        - "SESSION_EXPIRED" — logged-out: "TBS Member" marker absent AND a
+          Sign-In modal/login form present (normal, handled by session_manager)
         - Other values trip or accumulate toward tripping the breaker.
-
-        PHASE 1: the TBF-specific session-expired marker and anti-scrape
-        signals are not yet known (need a logged-in capture). We keep only the
-        transport-level safe defaults (page-read failure streak, off-domain
-        redirect) so the breaker still self-heals; site-specific markers are
-        encoded in Phase 2.
         """
         try:
             url = page.url
-            await page.evaluate("() => document.body.innerText.toLowerCase().substring(0, 3000)")
+            content = await page.evaluate("() => document.body.innerText.toLowerCase().substring(0, 3000)")
         except Exception as e:
             self.consecutive_failures += 1
             if self.consecutive_failures >= 3:
@@ -46,13 +50,17 @@ class CircuitBreaker(CircuitBreakerBase):
             self._trip(f"Unexpected redirect to: {url}")
             return "UNEXPECTED_REDIRECT"
 
-        # TODO(phase2): real selector from logged-in capture — detect the
-        # login/session-expired page (return "SESSION_EXPIRED") and the
-        # captcha / rate-limit / access-denied anti-scrape markers (trip the
-        # breaker) from the authenticated page content captured on the host.
+        # Session expired: the authenticated "TBS Member" badge is gone AND a
+        # Sign-In modal / login form is on the page. The session_manager will
+        # re-log-in and the worker re-queues the item.
+        member_present = _MEMBER_MARKER in content
+        login_present = any(signal in content for signal in _LOGIN_SIGNALS)
+        if not member_present and login_present:
+            return "SESSION_EXPIRED"
 
-        # All clear — reset failure counters. Empty-result shadow-block trips
-        # are still driven by the base record_empty_results() from the loop.
+        # No captcha / rate-limit / maintenance markers were observed on TBF, so
+        # we don't invent them — the base empty-streak / error trips cover the
+        # rest. All clear — reset the failure counter.
         self.consecutive_failures = 0
-        logger.debug("TBF circuit breaker: phase-1 health check — site markers not yet encoded")
+        logger.debug("TBF circuit breaker: health check OK")
         return "HEALTHY"
