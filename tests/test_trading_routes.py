@@ -8,6 +8,7 @@ The old excess routes/tests are untouched.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -391,8 +392,6 @@ def test_non_owner_add_line_403(client, posted_list, test_user):
 
 def test_non_owner_import_confirm_403(client, posted_list, test_user):
     """Non-owner POST import-confirm → 403."""
-    import json
-
     resp = client.post(
         f"/api/trading/{posted_list.id}/import-confirm",
         data={"rows_json": json.dumps([{"part_number": "HACK-002", "quantity": 1}])},
@@ -449,5 +448,134 @@ def test_owner_offers_tab_full_data(client, db_session, posted_list, trader_user
         assert "offers are private" not in body.lower()
         # The submitted part number should appear in the per-line offer table.
         assert line.part_number in body
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+# ── Build Bid tab + bid-back endpoints (Chunk E) ─────────────────────
+
+
+def _seed_best_price(db_session, posted_list, price="100.0000"):
+    """Stamp a best-offer rollup price onto the list's first line (planning seed)."""
+    from decimal import Decimal as _D
+
+    line = db_session.query(ExcessLineItem).filter_by(excess_list_id=posted_list.id).first()
+    line.best_offer_unit_price = _D(price)
+    line.offer_count = 1
+    db_session.commit()
+    db_session.refresh(line)
+    return line
+
+
+def test_build_bid_tab_owner_only(client, db_session, trader_user, posted_list, test_user):
+    """Non-owner GET on the Build-Bid tab → 403; owner → 200."""
+    # Default client user (buyer) is NOT the owner.
+    resp = client.get(f"/v2/partials/trading/{posted_list.id}/build-bid")
+    assert resp.status_code == 403
+
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/v2/partials/trading/{posted_list.id}/build-bid")
+        assert resp.status_code == 200
+        assert "Assemble bid" in resp.text
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_assemble_bid_creates_customer_bid(client, db_session, trader_user, posted_list):
+    """Owner POST assembles a CustomerBid seeded from best price + renders the
+    summary."""
+    from app.dependencies import require_user
+    from app.main import app
+    from app.models.excess import CustomerBid
+
+    line = _seed_best_price(db_session, posted_list, "100.0000")
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(
+            f"/api/trading/{posted_list.id}/bid",
+            data={
+                "selections_json": json.dumps([{"excess_line_item_id": line.id, "customer_unit_price": ""}]),
+            },
+        )
+        assert resp.status_code == 200
+        assert "Download PDF" in resp.text
+        bids = db_session.query(CustomerBid).filter_by(excess_list_id=posted_list.id).all()
+        assert len(bids) == 1
+        assert bids[0].lines[0].customer_unit_price == Decimal("100.0000")
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_assemble_bid_non_owner_403(client, posted_list, test_user):
+    """Non-owner POST on the bid endpoint → 403."""
+    resp = client.post(
+        f"/api/trading/{posted_list.id}/bid",
+        data={"selections_json": json.dumps([{"excess_line_item_id": 1}])},
+    )
+    assert resp.status_code == 403
+
+
+def test_bid_pdf_download_owner_only(client, db_session, trader_user, posted_list, test_user, monkeypatch):
+    """The bid PDF download is owner-only and returns a PDF; non-owner → 403.
+
+    WeasyPrint is stubbed so the assertion is deterministic regardless of renderer/ co-
+    runner state — the test verifies the owner-only gate + PDF response wiring.
+    """
+    from app.dependencies import require_user
+    from app.main import app
+    from app.services import bid_back_service
+
+    class _FakeHTML:
+        def __init__(self, *, string):
+            self._string = string
+
+        def write_pdf(self):
+            return b"%PDF-1.4 stub"
+
+    import weasyprint
+
+    monkeypatch.setattr(weasyprint, "HTML", _FakeHTML)
+
+    line = _seed_best_price(db_session, posted_list, "55.0000")
+    bid = bid_back_service.build_bid_back(
+        db_session, list_id=posted_list.id, owner=trader_user, selections=[{"excess_line_item_id": line.id}]
+    )
+
+    # Non-owner blocked.
+    resp = client.get(f"/api/trading/{posted_list.id}/bid/{bid.id}/pdf")
+    assert resp.status_code == 403
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.get(f"/api/trading/{posted_list.id}/bid/{bid.id}/pdf")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/pdf"
+        assert resp.content[:4] == b"%PDF"
+    finally:
+        app.dependency_overrides.pop(require_user, None)
+
+
+def test_close_endpoint_owner_only(client, db_session, trader_user, posted_list, test_user):
+    """The close endpoint is owner-only; owner close stamps close_at + bid_out
+    status."""
+    # Non-owner blocked.
+    resp = client.post(f"/api/trading/{posted_list.id}/close")
+    assert resp.status_code == 403
+
+    from app.dependencies import require_user
+    from app.main import app
+
+    app.dependency_overrides[require_user] = lambda: trader_user
+    try:
+        resp = client.post(f"/api/trading/{posted_list.id}/close")
+        assert resp.status_code == 200
+        db_session.refresh(posted_list)
+        assert posted_list.status == ExcessListStatus.BID_OUT
+        assert posted_list.close_at is not None
     finally:
         app.dependency_overrides.pop(require_user, None)

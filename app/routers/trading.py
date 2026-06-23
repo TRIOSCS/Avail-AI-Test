@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -36,8 +36,8 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..file_utils import parse_tabular_file
 from ..models import Company, User
-from ..models.excess import ExcessLineItem, ExcessList, ExcessOffer
-from ..services import excess_mirror, excess_service
+from ..models.excess import CustomerBid, ExcessLineItem, ExcessList, ExcessOffer
+from ..services import bid_back_service, excess_mirror, excess_service
 from ..template_env import template_response
 
 router = APIRouter(tags=["trading"])
@@ -473,6 +473,128 @@ async def trading_line_offer_compare(
     )
 
 
+# ── Build Bid tab (owner-only bid-back assembly) ─────────────────────
+
+
+def _latest_bid(db: Session, list_id: int) -> CustomerBid | None:
+    """The most recent CustomerBid for a list (the one the Build-Bid tab shows)."""
+    return db.query(CustomerBid).filter(CustomerBid.excess_list_id == list_id).order_by(CustomerBid.id.desc()).first()
+
+
+def _build_bid_context(request: Request, db: Session, el: ExcessList, user: User) -> dict:
+    """Context for the Build-Bid tab: each line + its best-offer planning reference,
+    plus the most recent assembled bid (its clean export summary) if one exists.
+
+    Owner-only — the caller must gate access (the tab reveals planning prices). Each line
+    surfaces ``best_offer_unit_price`` as the pre-fill reference for the editable "our
+    offer" input; the summary renders the clean ``bid_back_export_context`` so the owner
+    sees exactly what the customer doc will carry (no broker names).
+    """
+    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    bid = _latest_bid(db, el.id)
+    summary = bid_back_service.bid_back_export_context(bid) if bid else None
+    return {
+        "request": request,
+        "user": user,
+        "list": el,
+        "line_items": items,
+        "line_count": len(items),
+        "bid": bid,
+        "summary": summary,
+    }
+
+
+@router.get("/v2/partials/trading/{list_id}/build-bid", response_class=HTMLResponse)
+async def trading_build_bid(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lazy Build-Bid tab body — owner-only bid-back builder.
+
+    Reveals each line's best-offer planning price + an editable "our offer" input, an
+    "Assemble bid" action, and (once assembled) the clean bid summary + a Download-PDF
+    link. Non-owners get 403 (the planning prices are the owner's private view).
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    return template_response("htmx/partials/trading/_build_bid.html", _build_bid_context(request, db, el, user))
+
+
+@router.post("/api/trading/{list_id}/bid", response_class=HTMLResponse)
+async def trading_assemble_bid(
+    request: Request,
+    list_id: int,
+    selections_json: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Assemble a bid-back from the selected lines (owner-only), then re-render the tab.
+
+    ``selections_json`` is a JSON array of ``{excess_line_item_id, customer_unit_price?}``
+    (price blank → seeded from best_offer_unit_price). The service enforces owner-only +
+    foreign-line rejection; this layer only parses the form and delegates.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    try:
+        raw = json.loads(selections_json)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(400, "Invalid bid payload") from exc
+    if not isinstance(raw, list) or not raw:
+        raise HTTPException(400, "Select at least one line to assemble a bid")
+
+    selections = [
+        {
+            "excess_line_item_id": _to_int(str(s.get("excess_line_item_id"))),
+            "customer_unit_price": _to_decimal(str(s.get("customer_unit_price")))
+            if s.get("customer_unit_price") not in (None, "")
+            else None,
+        }
+        for s in raw
+    ]
+    bid_back_service.build_bid_back(db, list_id=list_id, owner=user, selections=selections)
+    el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/trading/_build_bid.html", _build_bid_context(request, db, el, user))
+
+
+@router.get("/api/trading/{list_id}/bid/{bid_id}/pdf")
+async def trading_bid_pdf(
+    list_id: int,
+    bid_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Download the clean bid-back PDF (owner-only).
+
+    The bid must belong to *list_id* and the requester must own the list. The PDF
+    renders only the whitelisted bid_back_export_context — no broker / trader / seller
+    identity.
+    """
+    el = excess_service.get_excess_list(db, list_id)
+    _require_owner(el, user)
+    bid = db.get(CustomerBid, bid_id)
+    if not bid or bid.excess_list_id != list_id:
+        raise HTTPException(404, f"Bid {bid_id} not found on list {list_id}")
+
+    import asyncio
+
+    from ..services.document_service import generate_bid_report_pdf
+
+    loop = asyncio.get_running_loop()
+    try:
+        pdf_bytes = await loop.run_in_executor(None, generate_bid_report_pdf, bid.id, db)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=bid-{bid_id}.pdf"},
+    )
+
+
 # ── Modal forms ──────────────────────────────────────────────────────
 
 
@@ -659,6 +781,19 @@ async def trading_publish(
         raise HTTPException(403, "Only the list owner can publish it")
     excess_mirror.publish_list(db, list_id, user)
     el = excess_service.get_excess_list(db, list_id)
+    return template_response("htmx/partials/trading/detail.html", _detail_context(request, db, el, user))
+
+
+@router.post("/api/trading/{list_id}/close", response_class=HTMLResponse)
+async def trading_close(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Close a posted list (owner-only): flip to bid_out + stamp close_at, re-render
+    detail."""
+    el = excess_service.close_list(db, list_id, user)
     return template_response("htmx/partials/trading/detail.html", _detail_context(request, db, el, user))
 
 

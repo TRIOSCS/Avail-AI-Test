@@ -68,6 +68,16 @@
           Post
         </button>
         {% endif %}
+        {% if can_see_customer and el.status in ['open', 'collecting'] %}
+        <button hx-post="/api/trading/{{ el.id }}/close"
+                hx-target="#split-right-trading"
+                hx-swap="innerHTML"
+                hx-confirm="Close this list? The posting window ends and the bid goes out."
+                data-loading-disable
+                class="btn-secondary btn-sm">
+          Close
+        </button>
+        {% endif %}
         {% if can_offer %}
         <button @click="$dispatch('open-modal')"
                 hx-get="/v2/partials/trading/{{ el.id }}/offer-form"
@@ -114,15 +124,24 @@
       </div>
     </div>
 
-    {# Build Bid — lightweight placeholder this slice (bid-back is a later chunk). #}
+    {# Build Bid — owner-only bid-back builder, lazy-loaded. Non-owners never see
+       the planning prices; the endpoint 403s and the tab shows the private notice.
+       LANDMINE: the lazy loader MUST carry an explicit hx-target. #}
     <div x-show="tab === 'build'" x-cloak>
-      <div class="mx-auto max-w-md text-center py-10">
-        <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-        </svg>
-        <p class="text-sm font-medium text-gray-600">Bid-back assembly is coming soon</p>
-        <p class="text-xs text-gray-400 mt-1">It will pre-fill each line from the best collected unit price, then export a clean customer PDF (no broker names).</p>
+      {% if can_see_customer %}
+      <div id="tab-build-{{ el.id }}"
+           hx-get="/v2/partials/trading/{{ el.id }}/build-bid"
+           hx-trigger="intersect once"
+           hx-target="#tab-build-{{ el.id }}"
+           hx-swap="innerHTML">
+        <div class="p-6 text-center text-gray-400 text-sm">Loading bid builder…</div>
       </div>
+      {% else %}
+      <div class="mx-auto max-w-sm text-center py-10">
+        <svg class="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        <p class="text-sm font-medium text-gray-600">The bid builder is private to the list owner</p>
+      </div>
+      {% endif %}
     </div>
 
     {# Activity — lightweight placeholder this slice. #}
